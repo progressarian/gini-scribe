@@ -7,5 +7,10 @@ export default defineConfig({
     host: '0.0.0.0',
     port: parseInt(process.env.PORT) || 3000,
     allowedHosts: 'all'
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: parseInt(process.env.PORT) || 3000,
+    allowedHosts: 'all'
   }
 })
