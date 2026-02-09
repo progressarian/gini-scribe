@@ -3,7 +3,6 @@ import { useState, useRef, useEffect } from "react";
 // ============ DEEPGRAM ============
 async function transcribeDeepgram(audioBlob, apiKey, language) {
   const lang = language === "multi" ? "en" : language;
-  // Medical keywords boost accuracy for Indian clinical terms
   const keywords = "HbA1c:2,eGFR:2,creatinine:2,TSH:2,LDL:2,HDL:2,triglycerides:2,metformin:2,insulin:2,dianorm:1,thyronorm:1,glimepiride:1,telmisartan:1,amlodipine:1,rosuvastatin:1,atorvastatin:1,dapagliflozin:1,empagliflozin:1,canagliflozin:1,sitagliptin:1,vildagliptin:1,proteinuria:1,nephropathy:1,retinopathy:1,neuropathy:1,CABG:1,dyslipidemia:1,hypothyroidism:1";
   const kw = keywords.split(",").map(k => `keywords=${encodeURIComponent(k)}`).join("&");
   const url = `https://api.deepgram.com/v1/listen?model=nova-2&language=${lang}&smart_format=true&punctuate=true&paragraphs=true&${kw}`;
@@ -15,6 +14,24 @@ async function transcribeDeepgram(audioBlob, apiKey, language) {
   if (!r.ok) throw new Error(`Transcription error ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}`);
   const d = await r.json();
   return d.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+}
+
+// ============ WHISPER ============
+async function transcribeWhisper(audioBlob, apiKey, language) {
+  const lang = language === "hi" ? "hi" : "en";
+  const formData = new FormData();
+  formData.append("file", audioBlob, "audio.webm");
+  formData.append("model", "whisper-1");
+  formData.append("language", lang);
+  formData.append("prompt", "Medical consultation in India. Terms: HbA1c, eGFR, creatinine, TSH, LDL, HDL, metformin, insulin, telmisartan, amlodipine, rosuvastatin, dapagliflozin, empagliflozin, thyronorm, dianorm, glimepiride, canagliflozin, proteinuria, nephropathy, retinopathy, CABG, dyslipidemia, hypothyroidism. Patient names in Hindi may be spoken.");
+  const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}` },
+    body: formData
+  });
+  if (!r.ok) throw new Error(`Whisper error ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}`);
+  const d = await r.json();
+  return d.text || "";
 }
 
 // ============ PROMPTS ============
@@ -137,13 +154,26 @@ async function extractLab(base64, mediaType) {
 }
 
 // ============ AUDIO INPUT ============
-function AudioInput({ onTranscript, apiKey, label, color, compact }) {
+function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) {
   const [mode, setMode] = useState(null);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
   const [audioUrl, setAudioUrl] = useState(null);
   const [duration, setDuration] = useState(0);
   const [lang, setLang] = useState("hi");
+  const [engine, setEngine] = useState(whisperKey ? "whisper" : "deepgram");
+  const mediaRec = useRef(null);
+  const chunks = useRef([]);
+  const audioBlob = useRef(null);
+  const tmr = useRef(null);
+  const fileRef = useRef(null);
+
+  const doTranscribe = async (blob) => {
+    if (engine === "whisper" && whisperKey) {
+      return await transcribeWhisper(blob, whisperKey, lang);
+    }
+    return await transcribeDeepgram(blob, dgKey, lang);
+  };
   const mediaRec = useRef(null);
   const chunks = useRef([]);
   const audioBlob = useRef(null);
@@ -166,7 +196,7 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
         // Auto-transcribe immediately
         setMode("transcribing");
         try {
-          const text = await transcribeDeepgram(blob, apiKey, lang);
+          const text = await doTranscribe(blob);
           if (!text) throw new Error("Empty — try again or speak louder");
           setTranscript(text); setMode("done");
         } catch (err) { setError(err.message); setMode("recorded"); }
@@ -181,7 +211,7 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
     if (!audioBlob.current) return;
     setMode("transcribing"); setError("");
     try {
-      const text = await transcribeDeepgram(audioBlob.current, apiKey, lang);
+      const text = await doTranscribe(audioBlob.current);
       if (!text) throw new Error("Empty — try again or paste manually");
       setTranscript(text); setMode("done");
     } catch (err) { setError(err.message); setMode("recorded"); }
@@ -193,10 +223,17 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
     <div style={{ border:`2px solid ${mode==="recording"?"#ef4444":"#e2e8f0"}`, borderRadius:8, padding:compact?8:12, background:mode==="recording"?"#fef2f2":"white", marginBottom:8 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
         <div style={{ fontSize:compact?11:13, fontWeight:700, color:"#1e293b" }}>🎤 {label}</div>
-        <div style={{ display:"flex", gap:2 }}>
-          {[{v:"en",l:"ENG"},{v:"hi",l:"HIN"}].map(x => (
-            <button key={x.v} onClick={()=>setLang(x.v)} style={{ padding:"1px 5px", fontSize:9, fontWeight:700, borderRadius:3, cursor:"pointer", background:lang===x.v?color:"white", color:lang===x.v?"white":"#94a3b8", border:`1px solid ${lang===x.v?color:"#e2e8f0"}` }}>{x.l}</button>
-          ))}
+        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+          {whisperKey && dgKey && <div style={{ display:"flex", gap:1, background:"#f1f5f9", borderRadius:4, padding:1 }}>
+            {[{v:"deepgram",l:"DG"},{v:"whisper",l:"W"}].map(x => (
+              <button key={x.v} onClick={()=>setEngine(x.v)} style={{ padding:"1px 5px", fontSize:8, fontWeight:700, borderRadius:3, cursor:"pointer", background:engine===x.v?"#1e293b":"transparent", color:engine===x.v?"white":"#94a3b8", border:"none" }}>{x.l}</button>
+            ))}
+          </div>}
+          <div style={{ display:"flex", gap:1 }}>
+            {[{v:"en",l:"EN"},{v:"hi",l:"HI"}].map(x => (
+              <button key={x.v} onClick={()=>setLang(x.v)} style={{ padding:"1px 5px", fontSize:9, fontWeight:700, borderRadius:3, cursor:"pointer", background:lang===x.v?color:"white", color:lang===x.v?"white":"#94a3b8", border:`1px solid ${lang===x.v?color:"#e2e8f0"}` }}>{x.l}</button>
+            ))}
+          </div>
         </div>
       </div>
       {!mode && (
@@ -255,6 +292,7 @@ const sa = (obj, key) => (obj && Array.isArray(obj[key])) ? obj[key] : [];
 export default function GiniScribe() {
   const [tab, setTab] = useState("setup");
   const [dgKey, setDgKey] = useState("");
+  const [whisperKey, setWhisperKey] = useState("");
   const [keySet, setKeySet] = useState(false);
   const [moName, setMoName] = useState("Dr. Beant");
   const [conName, setConName] = useState("Dr. Bhansali");
@@ -283,11 +321,14 @@ export default function GiniScribe() {
     setTab("patient");
   };
 
-  // Auto-detect Deepgram key from env var
+  // Auto-detect keys from env vars
   useEffect(() => {
     try {
-      const envKey = import.meta.env?.VITE_DEEPGRAM_KEY;
-      if (envKey && envKey.length > 10) { setDgKey(envKey); setKeySet(true); setTab("patient"); }
+      const dg = import.meta.env?.VITE_DEEPGRAM_KEY;
+      const wh = import.meta.env?.VITE_OPENAI_KEY;
+      if (dg && dg.length > 10) setDgKey(dg);
+      if (wh && wh.length > 10) setWhisperKey(wh);
+      if ((dg && dg.length > 10) || (wh && wh.length > 10)) { setKeySet(true); setTab("patient"); }
     } catch {}
   }, []);
 
@@ -426,12 +467,20 @@ export default function GiniScribe() {
           <div style={{ textAlign:"center", marginBottom:14 }}>
             <div style={{ fontSize:32 }}>🔑</div>
             <div style={{ fontSize:15, fontWeight:800 }}>Voice Transcription Setup</div>
-            <div style={{ fontSize:11, color:"#94a3b8" }}>Enter voice API key to enable speech-to-text</div>
+            <div style={{ fontSize:11, color:"#94a3b8" }}>Enter at least one key. Both enables A/B testing.</div>
           </div>
-          <input type="password" value={dgKey} onChange={e=>setDgKey(e.target.value)} placeholder="Paste voice API key..."
-            style={{ width:"100%", padding:"10px 12px", border:"1px solid #e2e8f0", borderRadius:8, fontSize:14, fontFamily:"monospace", boxSizing:"border-box", marginBottom:8 }} />
-          <button onClick={()=>{if(dgKey.length>10){setKeySet(true);setTab("patient");}}} style={{ width:"100%", background:dgKey.length>10?"#059669":"#94a3b8", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:700, cursor:dgKey.length>10?"pointer":"not-allowed" }}>
-            {dgKey.length>10?"✅ Connect":"Enter Key"}
+          <div style={{ marginBottom:10 }}>
+            <label style={{ fontSize:11, fontWeight:600, color:"#475569" }}>Deepgram Key <span style={{ color:"#94a3b8", fontWeight:400 }}>(faster, ₹0.35/min)</span></label>
+            <input type="password" value={dgKey} onChange={e=>setDgKey(e.target.value)} placeholder="Paste Deepgram API key..."
+              style={{ width:"100%", padding:"8px 12px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:13, fontFamily:"monospace", boxSizing:"border-box", marginTop:3 }} />
+          </div>
+          <div style={{ marginBottom:10 }}>
+            <label style={{ fontSize:11, fontWeight:600, color:"#475569" }}>OpenAI Key <span style={{ color:"#94a3b8", fontWeight:400 }}>(Whisper — better Hindi, ₹0.50/min)</span></label>
+            <input type="password" value={whisperKey} onChange={e=>setWhisperKey(e.target.value)} placeholder="Paste OpenAI API key..."
+              style={{ width:"100%", padding:"8px 12px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:13, fontFamily:"monospace", boxSizing:"border-box", marginTop:3 }} />
+          </div>
+          <button onClick={()=>{if(dgKey.length>10||whisperKey.length>10){setKeySet(true);setTab("patient");}}} style={{ width:"100%", background:(dgKey.length>10||whisperKey.length>10)?"#059669":"#94a3b8", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:700, cursor:(dgKey.length>10||whisperKey.length>10)?"pointer":"not-allowed" }}>
+            {dgKey.length>10||whisperKey.length>10?"✅ Start":"Enter at least one key"}
           </button>
         </div>
       )}
@@ -439,7 +488,7 @@ export default function GiniScribe() {
       {/* ===== PATIENT ===== */}
       {tab==="patient" && (
         <div style={{ maxWidth:560, margin:"0 auto" }}>
-          <AudioInput label="Say patient details" apiKey={dgKey} color="#1e40af" compact onTranscript={voiceFillPatient} />
+          <AudioInput label="Say patient details" dgKey={dgKey} whisperKey={whisperKey} color="#1e40af" compact onTranscript={voiceFillPatient} />
           {loading.pv && <div style={{ textAlign:"center", padding:4, fontSize:11, color:"#1e40af", fontWeight:600 }}>🔬 Filling fields...</div>}
           <Err msg={errors.pv} onDismiss={()=>clearErr("pv")} />
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:6 }}>
@@ -477,7 +526,7 @@ export default function GiniScribe() {
           <div style={{ display:"flex", gap:14, alignItems:"flex-start" }}>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>📊 Vitals</div>
-              <AudioInput label="Say vitals: BP 140 over 90, weight 80kg" apiKey={dgKey} color="#ea580c" compact onTranscript={voiceFillVitals} />
+              <AudioInput label="Say vitals: BP 140 over 90, weight 80kg" dgKey={dgKey} whisperKey={whisperKey} color="#ea580c" compact onTranscript={voiceFillVitals} />
               {loading.vv && <div style={{ textAlign:"center", padding:3, fontSize:10, color:"#ea580c" }}>🔬 Filling...</div>}
               <Err msg={errors.vv} onDismiss={()=>clearErr("vv")} />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:5, marginTop:6 }}>
@@ -528,7 +577,7 @@ export default function GiniScribe() {
             <input value={moName} onChange={e=>setMoName(e.target.value)} placeholder="Dr. Name"
               style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
           </div>
-          <AudioInput label="MO — Patient History" apiKey={dgKey} color="#1e40af" onTranscript={t=>{setMoTranscript(t);setMoData(null);clearErr("mo");}} />
+          <AudioInput label="MO — Patient History" dgKey={dgKey} whisperKey={whisperKey} color="#1e40af" onTranscript={t=>{setMoTranscript(t);setMoData(null);clearErr("mo");}} />
           {moTranscript && <button onClick={processMO} disabled={loading.mo} style={{ marginTop:6, width:"100%", background:loading.mo?"#6b7280":moData?"#059669":"#1e40af", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.mo?"wait":"pointer" }}>
             {loading.mo?"🔬 Structuring...":moData?"✅ Done — Re-process":"🔬 Structure MO Summary"}
           </button>}
@@ -640,7 +689,7 @@ export default function GiniScribe() {
             <input value={conName} onChange={e=>setConName(e.target.value)} placeholder="Dr. Name"
               style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
           </div>
-          <AudioInput label="Consultant — Treatment Decisions" apiKey={dgKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
+          <AudioInput label="Consultant — Treatment Decisions" dgKey={dgKey} whisperKey={whisperKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
           {conTranscript && <button onClick={processConsultant} disabled={loading.con} style={{ marginTop:6, width:"100%", background:loading.con?"#6b7280":conData?"#059669":"#7c2d12", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
             {loading.con?"🔬 Extracting...":conData?"✅ Done — Re-process":"🔬 Extract Treatment Plan"}
           </button>}
