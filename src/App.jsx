@@ -9,7 +9,7 @@ async function transcribeDeepgram(audioBlob, apiKey, language) {
     headers: { "Authorization": `Token ${apiKey}`, "Content-Type": audioBlob.type || "audio/webm" },
     body: audioBlob
   });
-  if (!r.ok) throw new Error(`Deepgram ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}`);
+  if (!r.ok) throw new Error(`Transcription error ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}`);
   const d = await r.json();
   return d.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
 }
@@ -47,7 +47,10 @@ CRITICAL MEDICATION RULES:
 2. If timing not mentioned explicitly, INFER from drug class. NEVER leave timing empty.
 3. If dose range given ("500mg to 1g"), put full range in dose field
 4. For needs_clarification items, ALWAYS include default_timing and default_dose based on drug class
-5. Extract ALL medications including those to continue from previous`;
+5. Extract ALL medications including those to continue from previous
+6. If INSULIN is prescribed, ALWAYS add an "insulin_education" section:
+   {"insulin_education":{"type":"Basal/Premix/Bolus","device":"Pen/Syringe","injection_sites":["Abdomen","Thigh"],"storage":"Keep in fridge, room temp vial valid 28 days","titration":"Increase by 2 units every 3 days if fasting >130","hypo_management":"If sugar <70: 3 glucose tablets, recheck 15 min","needle_disposal":"Use sharps container, never reuse needles"}}
+   Fill titration based on consultant's instructions. If not specified, use standard protocols.`;
 
 const LAB_PROMPT = `Extract ALL test results. Return ONLY valid JSON, no backticks.
 {"patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null}]}]}
@@ -55,7 +58,8 @@ flag: "H" high, "L" low, null normal.`;
 
 const PATIENT_VOICE_PROMPT = `Extract patient info. ONLY valid JSON, no backticks.
 {"name":"string or null","age":"number or null","sex":"Male/Female or null","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"}
-Parse dates: "1949 august 1"="1949-08-01", "dob 15 march 1960"="1960-03-15". "file p_100"->fileNo:"P_100". Calculate age from DOB.`;
+IMPORTANT: Always return name in ENGLISH/ROMAN script, never Hindi/Devanagari. Transliterate if needed: "हिम्मत सिंह"→"Himmat Singh", "कमला देवी"→"Kamla Devi".
+Parse dates: "1949 august 1"="1949-08-01". "file p_100"→fileNo:"P_100". Calculate age from DOB.`;
 
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 {"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","temp":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"}
@@ -201,7 +205,7 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
             <audio src={audioUrl} controls style={{ flex:1, height:30 }} />
             <button onClick={reset} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"3px 6px", borderRadius:3, fontSize:10, cursor:"pointer" }}>✕</button>
           </div>
-          <button onClick={transcribe} style={{ width:"100%", background:color, color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>🔊 Transcribe with Deepgram</button>
+          <button onClick={transcribe} style={{ width:"100%", background:color, color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>🔊 Transcribe</button>
         </div>
       )}
       {mode==="transcribing" && <div style={{ textAlign:"center", padding:10 }}><div style={{ fontSize:18, animation:"pulse 1s infinite" }}>🔊</div><div style={{ fontSize:11, color:"#475569" }}>Transcribing...</div></div>}
@@ -212,7 +216,7 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
             <button onClick={reset} style={{ marginLeft:"auto", background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"1px 5px", borderRadius:3, fontSize:9, cursor:"pointer" }}>Redo</button>
           </div>
           <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
-            style={{ width:"100%", minHeight:compact?32:50, padding:6, border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontFamily:"inherit", resize:"vertical", lineHeight:1.5, boxSizing:"border-box" }} />
+            style={{ width:"100%", minHeight:100, padding:8, border:"1px solid #e2e8f0", borderRadius:4, fontSize:13, fontFamily:"inherit", resize:"vertical", lineHeight:1.6, boxSizing:"border-box" }} />
           <button onClick={() => { if (transcript) onTranscript(transcript); }} style={{ marginTop:3, width:"100%", background:"#059669", color:"white", border:"none", padding:"7px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Use This</button>
         </div>
       )}
@@ -222,7 +226,7 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
 }
 
 // ============ HELPERS ============
-const DC = { dm2:"#dc2626", htn:"#ea580c", cad:"#d97706", ckd:"#7c3aed", hypo:"#2563eb", obesity:"#059669", dyslipidemia:"#0891b2" };
+const DC = { dm2:"#dc2626", htn:"#ea580c", cad:"#d97706", ckd:"#7c3aed", hypo:"#2563eb", obesity:"#92400e", dyslipidemia:"#0891b2" };
 const FRIENDLY = { dm2:"Type 2 Diabetes", htn:"High Blood Pressure", cad:"Heart Disease", ckd:"Kidney Disease", hypo:"Thyroid (Low)", obesity:"Weight Management", dyslipidemia:"High Cholesterol" };
 const Badge = ({ id, friendly }) => <span style={{ display:"inline-block", fontSize:9, fontWeight:700, background:(DC[id]||"#64748b")+"18", color:DC[id]||"#64748b", border:`1px solid ${(DC[id]||"#64748b")}35`, borderRadius:10, padding:"1px 5px", marginRight:2 }}>{friendly?(FRIENDLY[id]||id):id?.toUpperCase()}</span>;
 const Err = ({ msg, onDismiss }) => msg ? <div style={{ marginTop:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"6px 10px", fontSize:12, color:"#dc2626" }}>❌ {msg} <button onClick={onDismiss} style={{ marginLeft:6, background:"#dc2626", color:"white", border:"none", padding:"2px 8px", borderRadius:4, fontSize:11, cursor:"pointer" }}>Dismiss</button></div> : null;
@@ -235,6 +239,8 @@ export default function GiniScribe() {
   const [tab, setTab] = useState("setup");
   const [dgKey, setDgKey] = useState("");
   const [keySet, setKeySet] = useState(false);
+  const [moName, setMoName] = useState("Dr. Beant");
+  const [conName, setConName] = useState("Dr. Bhansali");
   const [patient, setPatient] = useState({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male" });
   const [vitals, setVitals] = useState({ bp_sys:"", bp_dia:"", pulse:"", temp:"", spo2:"", weight:"", height:"", bmi:"" });
   const [labData, setLabData] = useState(null);
@@ -249,6 +255,16 @@ export default function GiniScribe() {
   const [errors, setErrors] = useState({});
   const labRef = useRef(null);
   const clearErr = id => setErrors(p => ({ ...p, [id]: null }));
+  
+  const newPatient = () => {
+    setPatient({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male" });
+    setVitals({ bp_sys:"", bp_dia:"", pulse:"", temp:"", spo2:"", weight:"", height:"", bmi:"" });
+    setLabData(null); setLabImageData(null); setLabMismatch(null);
+    setMoTranscript(""); setConTranscript("");
+    setMoData(null); setConData(null);
+    setClarifications({}); setErrors({});
+    setTab("patient");
+  };
 
   // Auto-detect Deepgram key from env var
   useEffect(() => {
@@ -376,6 +392,7 @@ export default function GiniScribe() {
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, paddingBottom:6, borderBottom:"2px solid #1e293b" }}>
         <div style={{ width:28, height:28, background:"#1e293b", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12 }}>G</div>
         <div style={{ flex:1, fontSize:14, fontWeight:800, color:"#1e293b" }}>Gini Clinical Scribe</div>
+        {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New Patient</button>}
         {patient.name && <div style={{ fontSize:10, fontWeight:600, background:"#f1f5f9", padding:"2px 6px", borderRadius:4 }}>👤 {patient.name} {patient.age&&`(${patient.age}Y/${patient.sex?.charAt(0)})`}</div>}
       </div>
 
@@ -391,10 +408,10 @@ export default function GiniScribe() {
         <div style={{ maxWidth:420, margin:"0 auto", padding:"14px 0" }}>
           <div style={{ textAlign:"center", marginBottom:14 }}>
             <div style={{ fontSize:32 }}>🔑</div>
-            <div style={{ fontSize:15, fontWeight:800 }}>Connect Deepgram</div>
-            <div style={{ fontSize:11, color:"#94a3b8" }}>On Railway: set VITE_DEEPGRAM_KEY env var to skip this</div>
+            <div style={{ fontSize:15, fontWeight:800 }}>Voice Transcription Setup</div>
+            <div style={{ fontSize:11, color:"#94a3b8" }}>Enter voice API key to enable speech-to-text</div>
           </div>
-          <input type="password" value={dgKey} onChange={e=>setDgKey(e.target.value)} placeholder="Paste Deepgram API key..."
+          <input type="password" value={dgKey} onChange={e=>setDgKey(e.target.value)} placeholder="Paste voice API key..."
             style={{ width:"100%", padding:"10px 12px", border:"1px solid #e2e8f0", borderRadius:8, fontSize:14, fontFamily:"monospace", boxSizing:"border-box", marginBottom:8 }} />
           <button onClick={()=>{if(dgKey.length>10){setKeySet(true);setTab("patient");}}} style={{ width:"100%", background:dgKey.length>10?"#059669":"#94a3b8", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:700, cursor:dgKey.length>10?"pointer":"not-allowed" }}>
             {dgKey.length>10?"✅ Connect":"Enter Key"}
@@ -489,9 +506,14 @@ export default function GiniScribe() {
       {/* ===== MO SUMMARY — RICH DISPLAY ===== */}
       {tab==="mo" && (
         <div>
+          <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
+            <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>MO:</label>
+            <input value={moName} onChange={e=>setMoName(e.target.value)} placeholder="Dr. Name"
+              style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
+          </div>
           <AudioInput label="MO — Patient History" apiKey={dgKey} color="#1e40af" onTranscript={t=>{setMoTranscript(t);setMoData(null);clearErr("mo");}} />
           {moTranscript && <button onClick={processMO} disabled={loading.mo} style={{ marginTop:6, width:"100%", background:loading.mo?"#6b7280":moData?"#059669":"#1e40af", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.mo?"wait":"pointer" }}>
-            {loading.mo?"🔬 Structuring with Claude...":moData?"✅ Done — Re-process":"🔬 Structure MO Summary"}
+            {loading.mo?"🔬 Structuring...":moData?"✅ Done — Re-process":"🔬 Structure MO Summary"}
           </button>}
           <Err msg={errors.mo} onDismiss={()=>clearErr("mo")} />
 
@@ -499,7 +521,7 @@ export default function GiniScribe() {
             <div style={{ marginTop:8 }}>
               {/* Header */}
               <div style={{ background:"#1e40af", color:"white", padding:"8px 12px", borderRadius:"8px 8px 0 0", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span style={{ fontWeight:700, fontSize:13 }}>📋 MO Summary — {patient.name||"Patient"}</span>
+                <span style={{ fontWeight:700, fontSize:13 }}>📋 MO Summary — {patient.name||"Patient"} <span style={{ fontSize:10, opacity:.7 }}>by {moName}</span></span>
                 <button onClick={()=>setTab("consultant")} style={{ background:"rgba(255,255,255,0.2)", border:"none", color:"white", padding:"3px 10px", borderRadius:4, fontSize:11, fontWeight:700, cursor:"pointer" }}>Next: Consultant →</button>
               </div>
               <div style={{ border:"1px solid #bfdbfe", borderTop:"none", borderRadius:"0 0 8px 8px", padding:12 }}>
@@ -596,6 +618,11 @@ export default function GiniScribe() {
       {/* ===== CONSULTANT ===== */}
       {tab==="consultant" && (
         <div>
+          <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
+            <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Consultant:</label>
+            <input value={conName} onChange={e=>setConName(e.target.value)} placeholder="Dr. Name"
+              style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
+          </div>
           <AudioInput label="Consultant — Treatment Decisions" apiKey={dgKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
           {conTranscript && <button onClick={processConsultant} disabled={loading.con} style={{ marginTop:6, width:"100%", background:loading.con?"#6b7280":conData?"#059669":"#7c2d12", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
             {loading.con?"🔬 Extracting...":conData?"✅ Done — Re-process":"🔬 Extract Treatment Plan"}
@@ -665,7 +692,7 @@ export default function GiniScribe() {
                     <div style={{ width:26, height:26, background:"white", borderRadius:5, display:"flex", alignItems:"center", justifyContent:"center", color:"#1e293b", fontWeight:900, fontSize:11 }}>G</div>
                     <div><div style={{ fontSize:13, fontWeight:800 }}>GINI ADVANCED CARE HOSPITAL</div><div style={{ fontSize:9, opacity:.7 }}>Sector 69, Mohali | 0172-4120100</div></div>
                   </div>
-                  <div style={{ textAlign:"right", fontSize:10 }}><div style={{ fontWeight:700 }}>Dr. Anil Bhansali</div><div style={{ opacity:.8 }}>DM Endocrinology</div></div>
+                  <div style={{ textAlign:"right", fontSize:10 }}><div style={{ fontWeight:700 }}>{conName}</div><div style={{ opacity:.8 }}>Consultant</div></div>
                 </div>
                 <div style={{ borderTop:"1px solid rgba(255,255,255,.12)", marginTop:6, paddingTop:5, fontSize:12 }}>
                   <strong>{patient.name}</strong> | {patient.age}Y / {patient.sex} {patient.phone&&`| ${patient.phone}`} {patient.fileNo&&`| ${patient.fileNo}`}
@@ -736,6 +763,21 @@ export default function GiniScribe() {
                   ))}
                 </Section>}
 
+                {/* Insulin Education */}
+                {conData?.insulin_education && <Section title="💉 Insulin Guide" color="#dc2626">
+                  <div style={{ border:"1px solid #fecaca", borderRadius:6, padding:10, background:"#fef2f2" }}>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, fontSize:11, lineHeight:1.6 }}>
+                      <div><strong>Type:</strong> {conData.insulin_education.type}</div>
+                      <div><strong>Device:</strong> {conData.insulin_education.device}</div>
+                      <div><strong>Injection Sites:</strong> {(conData.insulin_education.injection_sites||[]).join(", ")}</div>
+                      <div><strong>Storage:</strong> {conData.insulin_education.storage}</div>
+                    </div>
+                    {conData.insulin_education.titration && <div style={{ marginTop:6, background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"4px 8px", fontSize:11 }}>📈 <strong>Dose Adjustment:</strong> {conData.insulin_education.titration}</div>}
+                    {conData.insulin_education.hypo_management && <div style={{ marginTop:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:4, padding:"4px 8px", fontSize:11, fontWeight:600, color:"#dc2626" }}>🚨 <strong>Low Sugar Emergency:</strong> {conData.insulin_education.hypo_management}</div>}
+                    {conData.insulin_education.needle_disposal && <div style={{ marginTop:4, fontSize:10, color:"#64748b" }}>🗑️ {conData.insulin_education.needle_disposal}</div>}
+                  </div>
+                </Section>}
+
                 {/* Follow Up */}
                 {conData?.follow_up && <div style={{ marginBottom:12, display:"flex", gap:10, alignItems:"center" }}>
                   <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
@@ -752,8 +794,8 @@ export default function GiniScribe() {
 
                 {/* Footer */}
                 <div style={{ borderTop:"2px solid #1e293b", paddingTop:6, display:"flex", justifyContent:"space-between", fontSize:10, color:"#94a3b8" }}>
-                  <div>Dr. Anil Bhansali, DM Endocrinology | 📞 0172-4120100</div>
-                  <div>AI-assisted by Gini Clinical Scribe</div>
+                  <div>{conName} | MO: {moName} | 📞 0172-4120100</div>
+                  <div>Gini Clinical Scribe v1</div>
                 </div>
               </div>
             </div>
