@@ -3,7 +3,10 @@ import { useState, useRef, useEffect } from "react";
 // ============ DEEPGRAM ============
 async function transcribeDeepgram(audioBlob, apiKey, language) {
   const lang = language === "multi" ? "en" : language;
-  const url = `https://api.deepgram.com/v1/listen?model=nova-2&language=${lang}&smart_format=true&punctuate=true&paragraphs=true`;
+  // Medical keywords boost accuracy for Indian clinical terms
+  const keywords = "HbA1c:2,eGFR:2,creatinine:2,TSH:2,LDL:2,HDL:2,triglycerides:2,metformin:2,insulin:2,dianorm:1,thyronorm:1,glimepiride:1,telmisartan:1,amlodipine:1,rosuvastatin:1,atorvastatin:1,dapagliflozin:1,empagliflozin:1,canagliflozin:1,sitagliptin:1,vildagliptin:1,proteinuria:1,nephropathy:1,retinopathy:1,neuropathy:1,CABG:1,dyslipidemia:1,hypothyroidism:1";
+  const kw = keywords.split(",").map(k => `keywords=${encodeURIComponent(k)}`).join("&");
+  const url = `https://api.deepgram.com/v1/listen?model=nova-2&language=${lang}&smart_format=true&punctuate=true&paragraphs=true&${kw}`;
   const r = await fetch(url, {
     method: "POST",
     headers: { "Authorization": `Token ${apiKey}`, "Content-Type": audioBlob.type || "audio/webm" },
@@ -22,6 +25,8 @@ Structure the MO's verbal summary into JSON. Output ONLY valid JSON. No backtick
 
 RULES:
 - IDs: dm2,htn,cad,ckd,hypo,obesity,dyslipidemia
+- Status MUST be exactly one of: "Controlled", "Uncontrolled", "New". NO other values like "Active", "Present", "Suboptimal". If newly diagnosed use "New". If on treatment but not at target use "Uncontrolled". If stable/at target use "Controlled".
+- If BMI>=25 or weight concern mentioned, ALWAYS add obesity diagnosis with id:"obesity"
 - flag: "HIGH"/"LOW"/null. critical:true ONLY if dangerous (HbA1c>10, eGFR<30, Cr>2)
 - Include ALL investigations mentioned with values, units, flags
 - Include vital signs as investigations if mentioned (BP, Pulse, Weight, BMI)
@@ -148,12 +153,24 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
   const startRec = async () => {
     setError("");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
       const mt = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-      const rec = new MediaRecorder(stream, { mimeType: mt });
+      const rec = new MediaRecorder(stream, { mimeType: mt, audioBitsPerSecond: 32000 });
       chunks.current = [];
       rec.ondataavailable = e => { if (e.data.size > 0) chunks.current.push(e.data); };
-      rec.onstop = () => { const blob = new Blob(chunks.current, { type: mt }); audioBlob.current = blob; setAudioUrl(URL.createObjectURL(blob)); setMode("recorded"); stream.getTracks().forEach(t => t.stop()); };
+      rec.onstop = async () => {
+        const blob = new Blob(chunks.current, { type: mt });
+        audioBlob.current = blob;
+        setAudioUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach(t => t.stop());
+        // Auto-transcribe immediately
+        setMode("transcribing");
+        try {
+          const text = await transcribeDeepgram(blob, apiKey, lang);
+          if (!text) throw new Error("Empty — try again or speak louder");
+          setTranscript(text); setMode("done");
+        } catch (err) { setError(err.message); setMode("recorded"); }
+      };
       mediaRec.current = rec; rec.start(1000); setMode("recording"); setDuration(0);
       tmr.current = setInterval(() => setDuration(d => d + 1), 1000);
     } catch { setError("Mic access denied. Use Upload or paste text."); }
@@ -215,8 +232,8 @@ function AudioInput({ onTranscript, apiKey, label, color, compact }) {
             <span style={{ color:"#059669", fontWeight:700, fontSize:11 }}>✅ Ready</span>
             <button onClick={reset} style={{ marginLeft:"auto", background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"1px 5px", borderRadius:3, fontSize:9, cursor:"pointer" }}>Redo</button>
           </div>
-          <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
-            style={{ width:"100%", minHeight:100, padding:8, border:"1px solid #e2e8f0", borderRadius:4, fontSize:13, fontFamily:"inherit", resize:"vertical", lineHeight:1.6, boxSizing:"border-box" }} />
+          <textarea value={transcript} onChange={e => setTranscript(e.target.value)} ref={el => { if (el) { el.style.height = "auto"; el.style.height = Math.max(100, el.scrollHeight) + "px"; }}}
+            style={{ width:"100%", minHeight:100, padding:8, border:"1px solid #e2e8f0", borderRadius:4, fontSize:13, fontFamily:"inherit", resize:"vertical", lineHeight:1.6, boxSizing:"border-box", overflow:"hidden" }} />
           <button onClick={() => { if (transcript) onTranscript(transcript); }} style={{ marginTop:3, width:"100%", background:"#059669", color:"white", border:"none", padding:"7px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>✅ Use This</button>
         </div>
       )}
@@ -765,16 +782,59 @@ export default function GiniScribe() {
 
                 {/* Insulin Education */}
                 {conData?.insulin_education && <Section title="💉 Insulin Guide" color="#dc2626">
-                  <div style={{ border:"1px solid #fecaca", borderRadius:6, padding:10, background:"#fef2f2" }}>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, fontSize:11, lineHeight:1.6 }}>
-                      <div><strong>Type:</strong> {conData.insulin_education.type}</div>
-                      <div><strong>Device:</strong> {conData.insulin_education.device}</div>
-                      <div><strong>Injection Sites:</strong> {(conData.insulin_education.injection_sites||[]).join(", ")}</div>
-                      <div><strong>Storage:</strong> {conData.insulin_education.storage}</div>
+                  <div style={{ border:"1px solid #fecaca", borderRadius:8, overflow:"hidden" }}>
+                    <div style={{ background:"#dc2626", color:"white", padding:"6px 10px", fontSize:12, fontWeight:700 }}>
+                      {conData.insulin_education.type} Insulin — {conData.insulin_education.device}
                     </div>
-                    {conData.insulin_education.titration && <div style={{ marginTop:6, background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"4px 8px", fontSize:11 }}>📈 <strong>Dose Adjustment:</strong> {conData.insulin_education.titration}</div>}
-                    {conData.insulin_education.hypo_management && <div style={{ marginTop:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:4, padding:"4px 8px", fontSize:11, fontWeight:600, color:"#dc2626" }}>🚨 <strong>Low Sugar Emergency:</strong> {conData.insulin_education.hypo_management}</div>}
-                    {conData.insulin_education.needle_disposal && <div style={{ marginTop:4, fontSize:10, color:"#64748b" }}>🗑️ {conData.insulin_education.needle_disposal}</div>}
+                    <div style={{ padding:10 }}>
+                      {/* How to Inject */}
+                      <div style={{ marginBottom:8, background:"#f8fafc", borderRadius:6, padding:8, border:"1px solid #e2e8f0" }}>
+                        <div style={{ fontSize:11, fontWeight:700, color:"#1e293b", marginBottom:4 }}>📋 How to Inject</div>
+                        <div style={{ fontSize:11, lineHeight:1.8 }}>
+                          {["Wash hands with soap", "Choose injection site: " + (conData.insulin_education.injection_sites||["Abdomen","Thigh"]).join(" or "), "Clean area with alcohol swab", "Pinch skin gently, insert needle at 90°", "Push plunger slowly, hold 10 seconds", "Release skin, remove needle", "Rotate injection site each time"].map((step,i) => (
+                            <div key={i} style={{ display:"flex", gap:6, alignItems:"flex-start" }}>
+                              <span style={{ background:"#dc2626", color:"white", borderRadius:"50%", width:18, height:18, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:800, flexShrink:0 }}>{i+1}</span>
+                              <span>{step}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Dose Titration */}
+                      {conData.insulin_education.titration && (
+                        <div style={{ marginBottom:8, background:"#fff7ed", borderRadius:6, padding:8, border:"1px solid #fed7aa" }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:"#9a3412", marginBottom:3 }}>📈 Dose Adjustment (Titration)</div>
+                          <div style={{ fontSize:12, fontWeight:600 }}>{conData.insulin_education.titration}</div>
+                          <table style={{ width:"100%", marginTop:6, borderCollapse:"collapse", fontSize:10, border:"1px solid #fed7aa" }}>
+                            <thead><tr style={{ background:"#ea580c", color:"white" }}><th style={{ padding:"3px 6px" }}>Fasting Sugar</th><th style={{ padding:"3px 6px" }}>Action</th></tr></thead>
+                            <tbody>
+                              <tr><td style={{ padding:"2px 6px", border:"1px solid #fed7aa" }}>Above 130 mg/dL</td><td style={{ padding:"2px 6px", border:"1px solid #fed7aa", fontWeight:600, color:"#ea580c" }}>↑ Increase by 2 units</td></tr>
+                              <tr><td style={{ padding:"2px 6px", border:"1px solid #fed7aa" }}>90-130 mg/dL</td><td style={{ padding:"2px 6px", border:"1px solid #fed7aa", fontWeight:600, color:"#059669" }}>✅ No change (at target)</td></tr>
+                              <tr><td style={{ padding:"2px 6px", border:"1px solid #fed7aa" }}>Below 90 mg/dL</td><td style={{ padding:"2px 6px", border:"1px solid #fed7aa", fontWeight:600, color:"#dc2626" }}>↓ Decrease by 2 units</td></tr>
+                              <tr style={{ background:"#fef2f2" }}><td style={{ padding:"2px 6px", border:"1px solid #fed7aa" }}>Below 70 mg/dL</td><td style={{ padding:"2px 6px", border:"1px solid #fed7aa", fontWeight:700, color:"#dc2626" }}>🚨 STOP — call doctor</td></tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Emergency */}
+                      <div style={{ background:"#fef2f2", borderRadius:6, padding:8, border:"2px solid #dc2626", marginBottom:6 }}>
+                        <div style={{ fontSize:11, fontWeight:800, color:"#dc2626", marginBottom:3 }}>🚨 LOW SUGAR EMERGENCY (Below 70 mg/dL)</div>
+                        <div style={{ fontSize:11, lineHeight:1.8 }}>
+                          <div>1️⃣ <strong>Eat 3 glucose tablets</strong> or 1 tablespoon sugar in water</div>
+                          <div>2️⃣ <strong>Wait 15 minutes</strong>, recheck sugar</div>
+                          <div>3️⃣ If still below 70 → <strong>repeat step 1</strong></div>
+                          <div>4️⃣ Once above 70 → <strong>eat a snack</strong> (biscuits + milk)</div>
+                          <div style={{ marginTop:4, fontWeight:700, color:"#dc2626" }}>⚠️ Always carry glucose tablets with you!</div>
+                        </div>
+                      </div>
+
+                      {/* Storage */}
+                      <div style={{ display:"flex", gap:8, fontSize:10, color:"#64748b" }}>
+                        <span>🧊 <strong>Storage:</strong> {conData.insulin_education.storage || "Keep in fridge, room temp vial valid 28 days"}</span>
+                        <span>🗑️ <strong>Needles:</strong> {conData.insulin_education.needle_disposal || "Use sharps container, never reuse"}</span>
+                      </div>
+                    </div>
                   </div>
                 </Section>}
 
