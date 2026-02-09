@@ -65,7 +65,7 @@ const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 async function callClaude(prompt, content) {
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 6000, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
     });
     if (!r.ok) return { data: null, error: `API ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}` };
@@ -108,7 +108,7 @@ async function extractLab(base64, mediaType) {
       ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:base64} }
       : { type:"image", source:{type:"base64",media_type:mediaType,data:base64} };
     const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method:"POST", headers:{"Content-Type":"application/json"},
+      method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:LAB_PROMPT}]}]})
     });
     if (!r.ok) return { data:null, error:`API ${r.status}` };
