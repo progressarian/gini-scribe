@@ -154,19 +154,49 @@ async function extractLab(base64, mediaType) {
 }
 
 // ============ AUDIO INPUT ============
+const CLEANUP_PROMPT = `Fix medical transcription errors in this text. Return ONLY the corrected text, nothing else.
+Common fixes needed:
+- Drug names: "thyro norm"→"Thyronorm", "die a norm"→"Dianorm", "gluco"→"Gluco", "telma"→"Telma", "rosuvastatin"/"rosu"→"Rosuvastatin"
+- Lab tests: "H B A one C"/"hba1c"→"HbA1c", "e GFR"→"eGFR", "T S H"→"TSH", "LDL"/"HDL" keep as-is
+- Medical: "die a betis"→"diabetes", "hyper tension"→"hypertension", "thyroid ism"→"thyroidism"
+- Numbers: Keep all numbers exactly as spoken
+- Hindi words: Keep as-is (don't translate)
+- Names: Convert Hindi script to English/Roman: "हिम्मत सिंह"→"Himmat Singh"
+Do NOT add, remove, or rearrange content. Only fix spelling of medical terms.`;
+
+async function cleanupTranscript(text) {
+  if (!text || text.length < 10) return text;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, messages: [{ role: "user", content: `${CLEANUP_PROMPT}\n\nTEXT:\n${text}` }] })
+    });
+    if (!r.ok) return text; // Fail silently, return original
+    const d = await r.json();
+    const cleaned = (d.content || []).map(c => c.text || "").join("").trim();
+    return cleaned || text;
+  } catch { return text; }
+}
+
 function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) {
-  const [mode, setMode] = useState(null);
+  const [mode, setMode] = useState(null); // null, recording, cleaning, recorded, transcribing, done
   const [transcript, setTranscript] = useState("");
+  const [liveText, setLiveText] = useState("");
   const [error, setError] = useState("");
   const [audioUrl, setAudioUrl] = useState(null);
   const [duration, setDuration] = useState(0);
   const [lang, setLang] = useState("hi");
   const [engine, setEngine] = useState(whisperKey ? "whisper" : "deepgram");
+  const [useCleanup, setUseCleanup] = useState(true);
   const mediaRec = useRef(null);
   const chunks = useRef([]);
   const audioBlob = useRef(null);
   const tmr = useRef(null);
   const fileRef = useRef(null);
+  const wsRef = useRef(null);
+  const finalsRef = useRef([]);
+  const interimRef = useRef("");
 
   const doTranscribe = async (blob) => {
     if (engine === "whisper" && whisperKey) {
@@ -175,11 +205,102 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
     return await transcribeDeepgram(blob, dgKey, lang);
   };
 
-  const startRec = async () => {
-    setError("");
+  // Streaming recording with Deepgram WebSocket
+  const startStreamingRec = async () => {
+    setError(""); setLiveText(""); setTranscript("");
+    finalsRef.current = []; interimRef.current = "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
       const mt = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+
+      // Open Deepgram WebSocket
+      const wsLang = lang === "hi" ? "hi" : "en";
+      const wsUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=${wsLang}&smart_format=true&punctuate=true&interim_results=true&vad_events=true&encoding=linear16&sample_rate=16000`;
+      const ws = new WebSocket(wsUrl, ["token", dgKey]);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        // Start MediaRecorder — send chunks to WebSocket
+        const rec = new MediaRecorder(stream, { mimeType: mt, audioBitsPerSecond: 32000 });
+        chunks.current = [];
+        rec.ondataavailable = async (e) => {
+          if (e.data.size > 0) {
+            chunks.current.push(e.data);
+            if (ws.readyState === WebSocket.OPEN) {
+              const buffer = await e.data.arrayBuffer();
+              ws.send(buffer);
+            }
+          }
+        };
+        rec.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "CloseStream" }));
+          }
+        };
+        mediaRec.current = rec;
+        rec.start(250); // Send chunks every 250ms for low latency
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "Results" && msg.channel?.alternatives?.[0]) {
+            const alt = msg.channel.alternatives[0];
+            const text = alt.transcript || "";
+            if (msg.is_final) {
+              if (text) finalsRef.current.push(text);
+              interimRef.current = "";
+            } else {
+              interimRef.current = text;
+            }
+            const fullText = [...finalsRef.current, interimRef.current].filter(Boolean).join(" ");
+            setLiveText(fullText);
+          }
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        setError("Streaming connection failed — falling back to upload mode");
+        // Fall back to non-streaming
+        ws.close();
+        startNonStreamingRec(stream, mt);
+      };
+
+      ws.onclose = async () => {
+        const finalText = finalsRef.current.filter(Boolean).join(" ");
+        if (finalText) {
+          const blob = new Blob(chunks.current, { type: mt });
+          audioBlob.current = blob;
+          setAudioUrl(URL.createObjectURL(blob));
+          // Run cleanup
+          if (useCleanup) {
+            setMode("cleaning");
+            const cleaned = await cleanupTranscript(finalText);
+            setTranscript(cleaned);
+          } else {
+            setTranscript(finalText);
+          }
+          setMode("done");
+        } else if (mode === "recording") {
+          setError("No speech detected — try again");
+          setMode(null);
+        }
+      };
+
+      setMode("recording"); setDuration(0);
+      tmr.current = setInterval(() => setDuration(d => d + 1), 1000);
+
+    } catch (err) {
+      setError("Mic access denied. Use Upload or paste text.");
+    }
+  };
+
+  // Non-streaming fallback (also used for Whisper engine and file uploads)
+  const startNonStreamingRec = async (existingStream, mt) => {
+    try {
+      const stream = existingStream || await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+      if (!mt) mt = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
       const rec = new MediaRecorder(stream, { mimeType: mt, audioBitsPerSecond: 32000 });
       chunks.current = [];
       rec.ondataavailable = e => { if (e.data.size > 0) chunks.current.push(e.data); };
@@ -188,34 +309,57 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
         audioBlob.current = blob;
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach(t => t.stop());
-        // Auto-transcribe immediately
         setMode("transcribing");
         try {
-          const text = await doTranscribe(blob);
+          let text = await doTranscribe(blob);
           if (!text) throw new Error("Empty — try again or speak louder");
+          if (useCleanup) { setMode("cleaning"); text = await cleanupTranscript(text); }
           setTranscript(text); setMode("done");
         } catch (err) { setError(err.message); setMode("recorded"); }
       };
-      mediaRec.current = rec; rec.start(1000); setMode("recording"); setDuration(0);
-      tmr.current = setInterval(() => setDuration(d => d + 1), 1000);
+      mediaRec.current = rec; rec.start(1000);
+      if (!existingStream) {
+        setMode("recording"); setDuration(0);
+        tmr.current = setInterval(() => setDuration(d => d + 1), 1000);
+      }
     } catch { setError("Mic access denied. Use Upload or paste text."); }
   };
-  const stopRec = () => { mediaRec.current?.state !== "inactive" && mediaRec.current?.stop(); clearInterval(tmr.current); };
+
+  const startRec = () => {
+    // Use streaming for Deepgram, non-streaming for Whisper
+    if (engine === "deepgram" || (!whisperKey && dgKey)) {
+      startStreamingRec();
+    } else {
+      startNonStreamingRec();
+    }
+  };
+
+  const stopRec = () => {
+    clearInterval(tmr.current);
+    if (mediaRec.current?.state !== "inactive") mediaRec.current?.stop();
+  };
+
   const handleFile = e => { const f=e.target.files[0]; if(!f) return; audioBlob.current=f; setAudioUrl(URL.createObjectURL(f)); setMode("recorded"); setError(""); };
   const transcribe = async () => {
     if (!audioBlob.current) return;
     setMode("transcribing"); setError("");
     try {
-      const text = await doTranscribe(audioBlob.current);
+      let text = await doTranscribe(audioBlob.current);
       if (!text) throw new Error("Empty — try again or paste manually");
+      if (useCleanup) { setMode("cleaning"); text = await cleanupTranscript(text); }
       setTranscript(text); setMode("done");
     } catch (err) { setError(err.message); setMode("recorded"); }
   };
-  const reset = () => { setMode(null); setTranscript(""); setAudioUrl(null); audioBlob.current=null; setError(""); setDuration(0); };
+  const reset = () => {
+    setMode(null); setTranscript(""); setLiveText(""); setAudioUrl(null);
+    audioBlob.current=null; setError(""); setDuration(0);
+    finalsRef.current=[]; interimRef.current="";
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close();
+  };
   const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
 
   return (
-    <div style={{ border:`2px solid ${mode==="recording"?"#ef4444":"#e2e8f0"}`, borderRadius:8, padding:compact?8:12, background:mode==="recording"?"#fef2f2":"white", marginBottom:8 }}>
+    <div style={{ border:`2px solid ${mode==="recording"?"#ef4444":mode==="cleaning"?"#f59e0b":"#e2e8f0"}`, borderRadius:8, padding:compact?8:12, background:mode==="recording"?"#fef2f2":mode==="cleaning"?"#fffbeb":"white", marginBottom:8 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
         <div style={{ fontSize:compact?11:13, fontWeight:700, color:"#1e293b" }}>🎤 {label}</div>
         <div style={{ display:"flex", gap:4, alignItems:"center" }}>
@@ -224,6 +368,7 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
               <button key={x.v} onClick={()=>setEngine(x.v)} style={{ padding:"1px 5px", fontSize:8, fontWeight:700, borderRadius:3, cursor:"pointer", background:engine===x.v?"#1e293b":"transparent", color:engine===x.v?"white":"#94a3b8", border:"none" }}>{x.l}</button>
             ))}
           </div>}
+          <button onClick={()=>setUseCleanup(c=>!c)} style={{ padding:"1px 5px", fontSize:8, fontWeight:700, borderRadius:3, cursor:"pointer", background:useCleanup?"#059669":"#f1f5f9", color:useCleanup?"white":"#94a3b8", border:"none" }} title="AI cleanup of medical terms">AI✓</button>
           <div style={{ display:"flex", gap:1 }}>
             {[{v:"en",l:"EN"},{v:"hi",l:"HI"}].map(x => (
               <button key={x.v} onClick={()=>setLang(x.v)} style={{ padding:"1px 5px", fontSize:9, fontWeight:700, borderRadius:3, cursor:"pointer", background:lang===x.v?color:"white", color:lang===x.v?"white":"#94a3b8", border:`1px solid ${lang===x.v?color:"#e2e8f0"}` }}>{x.l}</button>
@@ -243,9 +388,22 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
         </>
       )}
       {mode==="recording" && (
-        <div style={{ textAlign:"center", padding:6 }}>
-          <div style={{ fontSize:22, fontWeight:800, color:"#dc2626", marginBottom:4 }}><span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:"#dc2626", marginRight:6, animation:"pulse 1s infinite" }} />{fmt(duration)}</div>
-          <button onClick={stopRec} style={{ background:"#1e293b", color:"white", border:"none", padding:"6px 20px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>⏹ Stop</button>
+        <div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
+            <div style={{ fontSize:18, fontWeight:800, color:"#dc2626" }}><span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:"#dc2626", marginRight:6, animation:"pulse 1s infinite" }} />{fmt(duration)}</div>
+            <button onClick={stopRec} style={{ background:"#1e293b", color:"white", border:"none", padding:"6px 20px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>⏹ Stop</button>
+          </div>
+          {/* Live transcript */}
+          {liveText && <div style={{ background:"#fff", border:"1px solid #fecaca", borderRadius:4, padding:8, fontSize:13, lineHeight:1.6, color:"#374151", minHeight:40, maxHeight:150, overflow:"auto" }}>
+            {liveText}<span style={{ display:"inline-block", width:2, height:14, background:"#dc2626", marginLeft:2, animation:"pulse 0.5s infinite" }} />
+          </div>}
+          {!liveText && <div style={{ fontSize:11, color:"#94a3b8", textAlign:"center", padding:6 }}>🎙️ Listening... speak now</div>}
+        </div>
+      )}
+      {mode==="cleaning" && (
+        <div style={{ textAlign:"center", padding:10 }}>
+          <div style={{ fontSize:14, animation:"pulse 1s infinite" }}>✨</div>
+          <div style={{ fontSize:11, color:"#92400e", fontWeight:600 }}>Fixing medical terms...</div>
         </div>
       )}
       {mode==="recorded" && (
