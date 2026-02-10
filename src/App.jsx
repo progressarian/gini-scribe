@@ -471,6 +471,38 @@ const FRIENDLY = { dm2:"Type 2 Diabetes", htn:"High Blood Pressure", cad:"Heart 
 const Badge = ({ id, friendly }) => <span style={{ display:"inline-block", fontSize:9, fontWeight:700, background:(DC[id]||"#64748b")+"18", color:DC[id]||"#64748b", border:`1px solid ${(DC[id]||"#64748b")}35`, borderRadius:10, padding:"1px 5px", marginRight:2 }}>{friendly?(FRIENDLY[id]||id):id?.toUpperCase()}</span>;
 const Err = ({ msg, onDismiss }) => msg ? <div style={{ marginTop:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"6px 10px", fontSize:12, color:"#dc2626" }}>❌ {msg} <button onClick={onDismiss} style={{ marginLeft:6, background:"#dc2626", color:"white", border:"none", padding:"2px 8px", borderRadius:4, fontSize:11, cursor:"pointer" }}>Dismiss</button></div> : null;
 const Section = ({ title, color, children }) => <div style={{ marginBottom:14 }}><div style={{ fontSize:12, fontWeight:800, color, borderBottom:`2px solid ${color}`, paddingBottom:3, marginBottom:6 }}>{title}</div>{children}</div>;
+
+// Plan block with hide/show toggle (buttons hidden on print)
+const PlanBlock = ({ id, title, color, hidden, onToggle, children }) => {
+  if (hidden) return (
+    <div className="no-print" style={{ marginBottom:4, opacity:.4, display:"flex", alignItems:"center", gap:4, cursor:"pointer" }} onClick={onToggle}>
+      <span style={{ fontSize:9, color:"#94a3b8" }}>➕</span>
+      <span style={{ fontSize:10, color:"#94a3b8", textDecoration:"line-through" }}>{title}</span>
+    </div>
+  );
+  return (
+    <div style={{ marginBottom:14, position:"relative" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:4, borderBottom:`2px solid ${color}`, paddingBottom:3, marginBottom:6 }}>
+        <div style={{ fontSize:12, fontWeight:800, color, flex:1 }}>{title}</div>
+        <button className="no-print" onClick={onToggle} title="Hide this section" style={{ background:"#fee2e2", border:"none", borderRadius:3, padding:"1px 5px", fontSize:9, cursor:"pointer", color:"#dc2626", fontWeight:700 }}>✕</button>
+      </div>
+      {children}
+    </div>
+  );
+};
+
+// Editable text span (click to edit, hidden controls on print)
+const EditText = ({ value, onChange, style: s }) => {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(value);
+  useEffect(() => setVal(value), [value]);
+  if (editing) return <input value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>{onChange(val);setEditing(false);}} onKeyDown={e=>{if(e.key==="Enter"){onChange(val);setEditing(false);}}} autoFocus
+    style={{ ...s, border:"1px solid #3b82f6", borderRadius:3, padding:"1px 4px", outline:"none", background:"#eff6ff", width:"100%", boxSizing:"border-box" }} />;
+  return <span onClick={()=>setEditing(true)} style={{ ...s, cursor:"pointer", borderBottom:"1px dashed transparent" }} className="editable-hover">{value}</span>;
+};
+
+// Remove button for list items
+const RemoveBtn = ({ onClick }) => <button className="no-print" onClick={onClick} title="Remove" style={{ background:"#fee2e2", border:"none", borderRadius:3, padding:"0 4px", fontSize:9, cursor:"pointer", color:"#dc2626", fontWeight:700, lineHeight:"16px" }}>✕</button>;
 // Safe array accessor
 const sa = (obj, key) => (obj && Array.isArray(obj[key])) ? obj[key] : [];
 
@@ -491,6 +523,8 @@ export default function GiniScribe() {
   const [conTranscript, setConTranscript] = useState("");
   const [moData, setMoData] = useState(null);
   const [conData, setConData] = useState(null);
+  const [planHidden, setPlanHidden] = useState(new Set()); // hidden block IDs
+  const [planEdits, setPlanEdits] = useState({}); // text overrides: { "summary": "edited text", ... }
   const [clarifications, setClarifications] = useState({});
   const [loading, setLoading] = useState({});
   const [errors, setErrors] = useState({});
@@ -504,6 +538,7 @@ export default function GiniScribe() {
     setMoTranscript(""); setConTranscript("");
     setMoData(null); setConData(null);
     setClarifications({}); setErrors({});
+    setPlanHidden(new Set()); setPlanEdits({});
     setTab("patient");
   };
 
@@ -620,6 +655,26 @@ export default function GiniScribe() {
       return c.resolved_name ? {...m, name:c.resolved_name, dose:c.resolved_dose||m.default_dose||"", frequency:c.resolved_freq||"OD", timing:c.resolved_timing||m.default_timing||"", resolved:true, isNew:true} : null;
     }).filter(Boolean)
   ];
+
+  // Plan editing helpers
+  const toggleBlock = (id) => setPlanHidden(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const editPlan = (key, val) => setPlanEdits(p => ({ ...p, [key]: val }));
+  const getPlan = (key, fallback) => planEdits[key] !== undefined ? planEdits[key] : fallback;
+  const removeMed = (idx) => setPlanEdits(p => ({ ...p, _removedMeds: [...(p._removedMeds||[]), idx] }));
+  const removeDiag = (idx) => setPlanEdits(p => ({ ...p, _removedDiags: [...(p._removedDiags||[]), idx] }));
+  const removeLifestyle = (idx) => setPlanEdits(p => ({ ...p, _removedLifestyle: [...(p._removedLifestyle||[]), idx] }));
+  const removeGoal = (idx) => setPlanEdits(p => ({ ...p, _removedGoals: [...(p._removedGoals||[]), idx] }));
+  const removeMonitor = (idx) => setPlanEdits(p => ({ ...p, _removedMonitors: [...(p._removedMonitors||[]), idx] }));
+  const removeFuture = (idx) => setPlanEdits(p => ({ ...p, _removedFuture: [...(p._removedFuture||[]), idx] }));
+  const resetPlanEdits = () => { setPlanHidden(new Set()); setPlanEdits({}); };
+
+  // Filtered data for plan
+  const planDiags = sa(moData,"diagnoses").filter((_,i) => !(planEdits._removedDiags||[]).includes(i));
+  const planMeds = allMeds.filter((_,i) => !(planEdits._removedMeds||[]).includes(i));
+  const planLifestyle = sa(conData,"diet_lifestyle").filter((_,i) => !(planEdits._removedLifestyle||[]).includes(i));
+  const planGoals = sa(conData,"goals").filter((_,i) => !(planEdits._removedGoals||[]).includes(i));
+  const planMonitors = sa(conData,"self_monitoring").filter((_,i) => !(planEdits._removedMonitors||[]).includes(i));
+  const planFuture = sa(conData,"future_plan").filter((_,i) => !(planEdits._removedFuture||[]).includes(i));
 
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
@@ -931,6 +986,7 @@ export default function GiniScribe() {
             <button onClick={()=>setTab("vitals")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
             <button onClick={()=>setTab("mo")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ MO</button>
             <button onClick={()=>setTab("consultant")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ Consultant</button>
+            <button className="no-print" onClick={resetPlanEdits} style={{ background:"#fef3c7", border:"1px solid #fcd34d", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600, color:"#92400e" }}>↩ Reset</button>
             <div style={{ flex:1 }} />
             <button onClick={()=>window.print()} style={{ background:"#1e293b", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🖨️ Print</button>
           </div>
@@ -954,75 +1010,105 @@ export default function GiniScribe() {
 
               <div style={{ border:"1px solid #e2e8f0", borderTop:"none", borderRadius:"0 0 10px 10px", padding:14 }}>
                 {/* Summary */}
-                {conData?.assessment_summary && <div style={{ background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"1px solid #bfdbfe", borderRadius:8, padding:10, marginBottom:12, fontSize:12, color:"#334155", lineHeight:1.6 }}>
-                  <strong style={{ color:"#1e40af" }}>📋 Dear {patient.name?patient.name.split(" ")[0]:"Patient"}:</strong> {conData.assessment_summary}
+                {!planHidden.has("summary") && conData?.assessment_summary && <div style={{ background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"1px solid #bfdbfe", borderRadius:8, padding:10, marginBottom:12, fontSize:12, color:"#334155", lineHeight:1.6, position:"relative" }}>
+                  <button className="no-print" onClick={()=>toggleBlock("summary")} style={{ position:"absolute", top:4, right:4, background:"#fee2e2", border:"none", borderRadius:3, padding:"1px 5px", fontSize:9, cursor:"pointer", color:"#dc2626", fontWeight:700 }}>✕</button>
+                  <strong style={{ color:"#1e40af" }}>📋 Dear {patient.name?patient.name.split(" ")[0]:"Patient"}:</strong>{" "}
+                  <EditText value={getPlan("summary", conData.assessment_summary)} onChange={v=>editPlan("summary",v)} style={{ fontSize:12 }} />
                 </div>}
+                {planHidden.has("summary") && <div className="no-print" style={{ marginBottom:4, opacity:.4, cursor:"pointer", fontSize:10, color:"#94a3b8" }} onClick={()=>toggleBlock("summary")}>➕ Summary</div>}
 
                 {/* Diagnoses */}
-                {sa(moData,"diagnoses").length>0 && <Section title="🏥 Your Conditions" color="#1e293b">
+                {planDiags.length>0 && <PlanBlock id="diagnoses" title="🏥 Your Conditions" color="#1e293b" hidden={planHidden.has("diagnoses")} onToggle={()=>toggleBlock("diagnoses")}>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:3 }}>
-                    {sa(moData,"diagnoses").map((d,i) => (
+                    {planDiags.map((d,i) => {
+                      const origIdx = sa(moData,"diagnoses").indexOf(d);
+                      return (
                       <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"4px 8px", background:(DC[d.id]||"#64748b")+"08", border:`1px solid ${(DC[d.id]||"#64748b")}22`, borderRadius:5, fontSize:11 }}>
                         <div style={{ width:6, height:6, borderRadius:"50%", background:DC[d.id]||"#64748b" }} />
                         <strong style={{ flex:1 }}>{FRIENDLY[d.id]||d.label}</strong>
-                        <span style={{ fontSize:9, fontWeight:600, padding:"0 4px", borderRadius:6, background:d.status==="Uncontrolled"||d.status==="Active"||d.status==="Suboptimal"?"#fef2f2":"#f0fdf4", color:d.status==="Uncontrolled"||d.status==="Active"||d.status==="Suboptimal"?"#dc2626":"#059669" }}>{d.status}</span>
+                        <span style={{ fontSize:9, fontWeight:600, padding:"0 4px", borderRadius:6, background:d.status==="Uncontrolled"?"#fef2f2":"#f0fdf4", color:d.status==="Uncontrolled"?"#dc2626":"#059669" }}>{d.status}</span>
+                        <RemoveBtn onClick={()=>removeDiag(origIdx)} />
                       </div>
-                    ))}
+                    );})}
                   </div>
-                </Section>}
+                </PlanBlock>}
 
                 {/* Vitals */}
-                {vitals.bp_sys && <Section title="📊 Vitals" color="#ea580c"><div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                  {[{l:"BP",v:`${vitals.bp_sys}/${vitals.bp_dia}`},{l:"Pulse",v:vitals.pulse},{l:"SpO2",v:vitals.spo2&&`${vitals.spo2}%`},{l:"Weight",v:vitals.weight&&`${vitals.weight}kg`},{l:"BMI",v:vitals.bmi}].filter(x=>x.v&&x.v!=="/").map((x,i) => <span key={i} style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"2px 6px", fontSize:11 }}><strong style={{ color:"#9a3412" }}>{x.l}:</strong> {x.v}</span>)}
-                </div></Section>}
+                {vitals.bp_sys && <PlanBlock id="vitals" title="📊 Vitals" color="#ea580c" hidden={planHidden.has("vitals")} onToggle={()=>toggleBlock("vitals")}>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {[{l:"BP",v:`${vitals.bp_sys}/${vitals.bp_dia}`},{l:"Pulse",v:vitals.pulse},{l:"SpO2",v:vitals.spo2&&`${vitals.spo2}%`},{l:"Weight",v:vitals.weight&&`${vitals.weight}kg`},{l:"BMI",v:vitals.bmi}].filter(x=>x.v&&x.v!=="/").map((x,i) => <span key={i} style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"2px 6px", fontSize:11 }}><strong style={{ color:"#9a3412" }}>{x.l}:</strong> {x.v}</span>)}
+                  </div>
+                </PlanBlock>}
 
                 {/* Goals */}
-                {sa(conData,"goals").length>0 && <Section title="🎯 Your Health Goals" color="#059669"><table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #bbf7d0" }}>
-                  <thead><tr style={{ background:"#059669", color:"white" }}><th style={{padding:"4px 8px",textAlign:"left"}}>Marker</th><th style={{padding:"4px 8px"}}>Current</th><th style={{padding:"4px 8px"}}>Target</th><th style={{padding:"4px 8px"}}>By</th></tr></thead>
-                  <tbody>{sa(conData,"goals").map((g,i) => <tr key={i} style={{ background:g.priority==="critical"?"#fef2f2":i%2?"#f0fdf4":"white" }}><td style={{padding:"3px 8px",fontWeight:600}}>{g.marker}</td><td style={{padding:"3px 8px",textAlign:"center",fontWeight:700,color:"#dc2626"}}>{g.current}</td><td style={{padding:"3px 8px",textAlign:"center",fontWeight:700,color:"#059669"}}>{g.target}</td><td style={{padding:"3px 8px",textAlign:"center",color:"#64748b"}}>{g.timeline}</td></tr>)}</tbody>
-                </table></Section>}
+                {planGoals.length>0 && <PlanBlock id="goals" title="🎯 Your Health Goals" color="#059669" hidden={planHidden.has("goals")} onToggle={()=>toggleBlock("goals")}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #bbf7d0" }}>
+                    <thead><tr style={{ background:"#059669", color:"white" }}><th style={{padding:"4px 8px",textAlign:"left"}}>Marker</th><th style={{padding:"4px 8px"}}>Current</th><th style={{padding:"4px 8px"}}>Target</th><th style={{padding:"4px 8px"}}>By</th><th className="no-print" style={{padding:"4px 8px",width:20}}></th></tr></thead>
+                    <tbody>{planGoals.map((g,i) => {
+                      const origIdx = sa(conData,"goals").indexOf(g);
+                      return <tr key={i} style={{ background:g.priority==="critical"?"#fef2f2":i%2?"#f0fdf4":"white" }}>
+                        <td style={{padding:"3px 8px",fontWeight:600}}>{g.marker}</td>
+                        <td style={{padding:"3px 8px",textAlign:"center",fontWeight:700,color:"#dc2626"}}>{g.current}</td>
+                        <td style={{padding:"3px 8px",textAlign:"center",fontWeight:700,color:"#059669"}}>{g.target}</td>
+                        <td style={{padding:"3px 8px",textAlign:"center",color:"#64748b"}}>{g.timeline}</td>
+                        <td className="no-print" style={{padding:"3px 4px"}}><RemoveBtn onClick={()=>removeGoal(origIdx)} /></td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </PlanBlock>}
 
                 {/* Medications */}
-                {allMeds.length>0 && <Section title="💊 Your Medications" color="#dc2626"><table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #e2e8f0" }}>
-                  <thead><tr style={{ background:"#1e293b", color:"white" }}><th style={{padding:"5px 8px",textAlign:"left"}}>Medicine</th><th style={{padding:"5px 8px"}}>Dose</th><th style={{padding:"5px 8px"}}>When to Take</th><th style={{padding:"5px 8px",textAlign:"left"}}>For</th></tr></thead>
-                  <tbody>{allMeds.map((m,i) => <tr key={i} style={{ background:(m.isNew||m.resolved)?"#eff6ff":i%2?"#fafafa":"white" }}>
-                    <td style={{padding:"4px 8px"}}><strong>{m.name}</strong>{(m.isNew||m.resolved)&&<span style={{background:"#1e40af",color:"white",padding:"0 3px",borderRadius:3,fontSize:8,marginLeft:3}}>NEW</span>}{m.composition&&<div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
-                    <td style={{padding:"4px 8px",textAlign:"center",fontWeight:600}}>{m.dose}</td>
-                    <td style={{padding:"4px 8px",textAlign:"center",fontSize:10,fontWeight:600,color:"#1e40af"}}>{m.timing || m.frequency}</td>
-                    <td style={{padding:"4px 8px"}}>{(m.forDiagnosis||[]).map(d=><Badge key={d} id={d} friendly />)}</td>
-                  </tr>)}</tbody>
-                </table></Section>}
+                {planMeds.length>0 && <PlanBlock id="meds" title="💊 Your Medications" color="#dc2626" hidden={planHidden.has("meds")} onToggle={()=>toggleBlock("meds")}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #e2e8f0" }}>
+                    <thead><tr style={{ background:"#1e293b", color:"white" }}><th style={{padding:"5px 8px",textAlign:"left"}}>Medicine</th><th style={{padding:"5px 8px"}}>Dose</th><th style={{padding:"5px 8px"}}>When to Take</th><th style={{padding:"5px 8px",textAlign:"left"}}>For</th><th className="no-print" style={{padding:"5px 8px",width:20}}></th></tr></thead>
+                    <tbody>{planMeds.map((m,i) => {
+                      const origIdx = allMeds.indexOf(m);
+                      return <tr key={i} style={{ background:(m.isNew||m.resolved)?"#eff6ff":i%2?"#fafafa":"white" }}>
+                        <td style={{padding:"4px 8px"}}><strong>{m.name}</strong>{(m.isNew||m.resolved)&&<span style={{background:"#1e40af",color:"white",padding:"0 3px",borderRadius:3,fontSize:8,marginLeft:3}}>NEW</span>}{m.composition&&<div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
+                        <td style={{padding:"4px 8px",textAlign:"center",fontWeight:600}}>{m.dose}</td>
+                        <td style={{padding:"4px 8px",textAlign:"center",fontSize:10,fontWeight:600,color:"#1e40af"}}>{m.timing || m.frequency}</td>
+                        <td style={{padding:"4px 8px"}}>{(m.forDiagnosis||[]).map(d=><Badge key={d} id={d} friendly />)}</td>
+                        <td className="no-print" style={{padding:"4px 4px"}}><RemoveBtn onClick={()=>removeMed(origIdx)} /></td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </PlanBlock>}
 
                 {/* Lifestyle */}
-                {sa(conData,"diet_lifestyle").length>0 && <Section title="🥗 Lifestyle Changes" color="#059669">
-                  {sa(conData,"diet_lifestyle").map((l,i) => (
-                    <div key={i} style={{ display:"flex", gap:5, padding:"3px 0", borderBottom:"1px solid #f1f5f9", fontSize:11 }}>
+                {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
+                  {planLifestyle.map((l,i) => {
+                    const origIdx = sa(conData,"diet_lifestyle").indexOf(l);
+                    return (
+                    <div key={i} style={{ display:"flex", gap:5, padding:"3px 0", borderBottom:"1px solid #f1f5f9", fontSize:11, alignItems:"center" }}>
                       <span style={{ fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:4, color:"white", background:l.category==="Critical"?"#dc2626":l.category==="Diet"?"#059669":"#2563eb", alignSelf:"flex-start", marginTop:2 }}>{l.category}</span>
-                      <div><strong>{l.advice}</strong> — {l.detail} {(l.helps||[]).map(d=><Badge key={d} id={d} friendly />)}</div>
+                      <div style={{ flex:1 }}><strong>{l.advice}</strong> — {l.detail} {(l.helps||[]).map(d=><Badge key={d} id={d} friendly />)}</div>
+                      <RemoveBtn onClick={()=>removeLifestyle(origIdx)} />
                     </div>
-                  ))}
-                </Section>}
+                  );})}
+                </PlanBlock>}
 
                 {/* Self Monitoring */}
-                {sa(conData,"self_monitoring").length>0 && <Section title="📊 What to Monitor at Home" color="#2563eb">
-                  {sa(conData,"self_monitoring").map((sm,i) => (
-                    <div key={i} style={{ border:"1px solid #bfdbfe", borderRadius:6, padding:8, marginBottom:4, background:"#f8fafc" }}>
+                {planMonitors.length>0 && <PlanBlock id="monitoring" title="📊 What to Monitor at Home" color="#2563eb" hidden={planHidden.has("monitoring")} onToggle={()=>toggleBlock("monitoring")}>
+                  {planMonitors.map((sm,i) => {
+                    const origIdx = sa(conData,"self_monitoring").indexOf(sm);
+                    return (
+                    <div key={i} style={{ border:"1px solid #bfdbfe", borderRadius:6, padding:8, marginBottom:4, background:"#f8fafc", position:"relative" }}>
+                      <RemoveBtn onClick={()=>removeMonitor(origIdx)} />
                       <div style={{ fontWeight:700, color:"#1e40af", fontSize:11 }}>{sm.title}</div>
                       {(sm.instructions||[]).map((x,j) => <div key={j} style={{ fontSize:11 }}>• {x}</div>)}
                       {sm.targets && <div style={{ marginTop:2, background:"#f0fdf4", borderRadius:3, padding:"2px 6px", fontSize:10, color:"#059669", fontWeight:600, display:"inline-block" }}>🎯 {sm.targets}</div>}
                       {sm.alert && <div style={{ marginTop:2, background:"#fef2f2", borderRadius:3, padding:"2px 6px", fontSize:10, color:"#dc2626", fontWeight:700 }}>🚨 {sm.alert}</div>}
                     </div>
-                  ))}
-                </Section>}
+                  );})}
+                </PlanBlock>}
 
                 {/* Insulin Education */}
-                {conData?.insulin_education && <Section title="💉 Insulin Guide" color="#dc2626">
+                {conData?.insulin_education && <PlanBlock id="insulin" title="💉 Insulin Guide" color="#dc2626" hidden={planHidden.has("insulin")} onToggle={()=>toggleBlock("insulin")}>
                   <div style={{ border:"1px solid #fecaca", borderRadius:8, overflow:"hidden" }}>
                     <div style={{ background:"#dc2626", color:"white", padding:"6px 10px", fontSize:12, fontWeight:700 }}>
                       {conData.insulin_education.type} Insulin — {conData.insulin_education.device}
                     </div>
                     <div style={{ padding:10 }}>
-                      {/* How to Inject */}
                       <div style={{ marginBottom:8, background:"#f8fafc", borderRadius:6, padding:8, border:"1px solid #e2e8f0" }}>
                         <div style={{ fontSize:11, fontWeight:700, color:"#1e293b", marginBottom:4 }}>📋 How to Inject</div>
                         <div style={{ fontSize:11, lineHeight:1.8 }}>
@@ -1034,8 +1120,6 @@ export default function GiniScribe() {
                           ))}
                         </div>
                       </div>
-
-                      {/* Dose Titration */}
                       {conData.insulin_education.titration && (
                         <div style={{ marginBottom:8, background:"#fff7ed", borderRadius:6, padding:8, border:"1px solid #fed7aa" }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#9a3412", marginBottom:3 }}>📈 Dose Adjustment (Titration)</div>
@@ -1051,8 +1135,6 @@ export default function GiniScribe() {
                           </table>
                         </div>
                       )}
-
-                      {/* Emergency */}
                       <div style={{ background:"#fef2f2", borderRadius:6, padding:8, border:"2px solid #dc2626", marginBottom:6 }}>
                         <div style={{ fontSize:11, fontWeight:800, color:"#dc2626", marginBottom:3 }}>🚨 LOW SUGAR EMERGENCY (Below 70 mg/dL)</div>
                         <div style={{ fontSize:11, lineHeight:1.8 }}>
@@ -1063,29 +1145,35 @@ export default function GiniScribe() {
                           <div style={{ marginTop:4, fontWeight:700, color:"#dc2626" }}>⚠️ Always carry glucose tablets with you!</div>
                         </div>
                       </div>
-
-                      {/* Storage */}
                       <div style={{ display:"flex", gap:8, fontSize:10, color:"#64748b" }}>
                         <span>🧊 <strong>Storage:</strong> {conData.insulin_education.storage || "Keep in fridge, room temp vial valid 28 days"}</span>
                         <span>🗑️ <strong>Needles:</strong> {conData.insulin_education.needle_disposal || "Use sharps container, never reuse"}</span>
                       </div>
                     </div>
                   </div>
-                </Section>}
+                </PlanBlock>}
 
                 {/* Follow Up */}
-                {conData?.follow_up && <div style={{ marginBottom:12, display:"flex", gap:10, alignItems:"center" }}>
-                  <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
-                    <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
-                    <div style={{ fontSize:18, fontWeight:800 }}>{conData.follow_up.duration?.toUpperCase()}</div>
+                {conData?.follow_up && <PlanBlock id="followup" title="📅 Follow Up" color="#1e293b" hidden={planHidden.has("followup")} onToggle={()=>toggleBlock("followup")}>
+                  <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                    <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
+                      <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
+                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
+                    </div>
+                    <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
                   </div>
-                  <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
-                </div>}
+                </PlanBlock>}
 
                 {/* Future Plan */}
-                {sa(conData,"future_plan").length>0 && <Section title="📋 Future Plan" color="#7c3aed">
-                  {sa(conData,"future_plan").map((fp,i) => <div key={i} style={{ fontSize:11, padding:"2px 0" }}><strong>If</strong> {fp.condition} → {fp.action}</div>)}
-                </Section>}
+                {planFuture.length>0 && <PlanBlock id="future" title="📋 Future Plan" color="#7c3aed" hidden={planHidden.has("future")} onToggle={()=>toggleBlock("future")}>
+                  {planFuture.map((fp,i) => {
+                    const origIdx = sa(conData,"future_plan").indexOf(fp);
+                    return <div key={i} style={{ fontSize:11, padding:"2px 0", display:"flex", alignItems:"center", gap:4 }}>
+                      <div style={{ flex:1 }}><strong>If</strong> {fp.condition} → {fp.action}</div>
+                      <RemoveBtn onClick={()=>removeFuture(origIdx)} />
+                    </div>;
+                  })}
+                </PlanBlock>}
 
                 {/* Footer */}
                 <div style={{ borderTop:"2px solid #1e293b", paddingTop:6, display:"flex", justifyContent:"space-between", fontSize:10, color:"#94a3b8" }}>
@@ -1097,7 +1185,7 @@ export default function GiniScribe() {
           )}
         </div>
       )}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button{display:none!important}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
     </div>
   );
 }
