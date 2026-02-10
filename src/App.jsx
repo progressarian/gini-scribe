@@ -1,4 +1,8 @@
 import { useState, useRef, useEffect } from "react";
+import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
+
+// API base URL — set via env or default to Railway
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 // ============ DEEPGRAM ============
 async function transcribeDeepgram(audioBlob, apiKey, language) {
@@ -567,9 +571,10 @@ export default function GiniScribe() {
     } catch {}
   }, []);
 
-  // Save current consultation to localStorage
-  const saveConsultation = () => {
+  // Save current consultation to database + localStorage
+  const saveConsultation = async () => {
     if (!patient.name) return;
+    setSaveStatus("💾 Saving...");
     const record = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
@@ -579,12 +584,37 @@ export default function GiniScribe() {
       moTranscript, conTranscript, quickTranscript,
       moName, conName
     };
+    // Save to localStorage as fallback
     const existing = JSON.parse(localStorage.getItem("gini_patients") || "[]");
     existing.unshift(record);
     localStorage.setItem("gini_patients", JSON.stringify(existing.slice(0, 500)));
     setSavedPatients(existing);
-    setSaveStatus("✅ Saved");
-    setTimeout(() => setSaveStatus(""), 2000);
+
+    // Save to database if API is configured
+    if (API_URL) {
+      try {
+        const resp = await fetch(`${API_URL}/api/consultations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patient, vitals, moData, conData,
+            moTranscript, conTranscript, quickTranscript,
+            moName, conName, planEdits
+          })
+        });
+        const result = await resp.json();
+        if (result.success) {
+          setSaveStatus(`✅ Saved (DB #${result.consultation_id})`);
+        } else {
+          setSaveStatus("⚠️ Local only — DB: " + (result.error || "failed").slice(0, 40));
+        }
+      } catch (e) {
+        setSaveStatus("⚠️ Local only — " + e.message.slice(0, 30));
+      }
+    } else {
+      setSaveStatus("✅ Saved locally");
+    }
+    setTimeout(() => setSaveStatus(""), 4000);
   };
 
   // Load a previous patient record
@@ -599,7 +629,54 @@ export default function GiniScribe() {
     setTab("patient");
   };
 
-  // Search patients
+  // Search patients — DB first, localStorage fallback
+  const [dbPatients, setDbPatients] = useState([]);
+  const searchPatientsDB = async (q) => {
+    if (!API_URL || !q || q.length < 2) { setDbPatients([]); return; }
+    try {
+      const resp = await fetch(`${API_URL}/api/patients?q=${encodeURIComponent(q)}`);
+      const data = await resp.json();
+      setDbPatients(Array.isArray(data) ? data : []);
+    } catch { setDbPatients([]); }
+  };
+
+  // Load patient from DB with full history
+  const loadPatientDB = async (dbRecord) => {
+    setPatient({
+      name: dbRecord.name || "", phone: dbRecord.phone || "", age: dbRecord.age || "",
+      sex: dbRecord.sex || "Male", fileNo: dbRecord.file_no || "", dob: dbRecord.dob || "",
+      abhaId: dbRecord.abha_id || "", healthId: dbRecord.health_id || "",
+      aadhaar: dbRecord.aadhaar || "", govtId: dbRecord.govt_id || "", govtIdType: dbRecord.govt_id_type || ""
+    });
+    // Load latest consultation if available
+    if (API_URL && dbRecord.id) {
+      try {
+        const resp = await fetch(`${API_URL}/api/patients/${dbRecord.id}`);
+        const full = await resp.json();
+        if (full.consultations?.length > 0) {
+          const latest = full.consultations[0];
+          const conResp = await fetch(`${API_URL}/api/consultations/${latest.id}`);
+          const conDetail = await conResp.json();
+          if (conDetail.mo_data) setMoData(conDetail.mo_data);
+          if (conDetail.con_data) setConData(conDetail.con_data);
+          if (conDetail.mo_transcript) setMoTranscript(conDetail.mo_transcript);
+          if (conDetail.con_transcript) setConTranscript(conDetail.con_transcript);
+        }
+        // Load latest vitals
+        if (full.vitals?.length > 0) {
+          const v = full.vitals[0];
+          setVitals(prev => ({
+            ...prev,
+            bp_sys: v.bp_sys || "", bp_dia: v.bp_dia || "", pulse: v.pulse || "",
+            spo2: v.spo2 || "", weight: v.weight || "", height: v.height || "", bmi: v.bmi || ""
+          }));
+        }
+      } catch {}
+    }
+    setShowSearch(false);
+    setTab("patient");
+  };
+
   const filteredPatients = savedPatients.filter(r => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -702,7 +779,7 @@ export default function GiniScribe() {
     if(vitals.bp_sys) extra+=`\nVITALS: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}%, Wt ${vitals.weight}kg, BMI ${vitals.bmi}`;
     const {data,error} = await callClaude(MO_PROMPT, moTranscript+extra);
     if(error) setErrors(p=>({...p,mo:error}));
-    else if(data) setMoData(data);
+    else if(data) setMoData(fixMoMedicines(data));
     else setErrors(p=>({...p,mo:"No data returned"}));
     setLoading(p=>({...p,mo:false}));
   };
@@ -721,7 +798,7 @@ export default function GiniScribe() {
     }
     const {data,error} = await callClaude(CONSULTANT_PROMPT, context);
     if(error) setErrors(p=>({...p,con:error}));
-    else if(data) setConData(data);
+    else if(data) setConData(fixConMedicines(data));
     else setErrors(p=>({...p,con:"No data returned"}));
     setLoading(p=>({...p,con:false}));
   };
@@ -801,8 +878,8 @@ export default function GiniScribe() {
           if (h > 0) setVitals(prev => ({ ...prev, bmi: (parseFloat(v.weight) / (h * h)).toFixed(1) }));
         }
       }
-      if (data.mo) setMoData(data.mo);
-      if (data.consultant) setConData(data.consultant);
+      if (data.mo) setMoData(fixMoMedicines(data.mo));
+      if (data.consultant) setConData(fixConMedicines(data.consultant));
       setTab("plan");
     } catch (err) {
       setErrors(e => ({ ...e, quick: err.message }));
@@ -828,24 +905,48 @@ export default function GiniScribe() {
       {/* Patient Search Panel */}
       {showSearch && (
         <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:8 }}>
-          <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search by name, phone, file #, ABHA ID..."
+          <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);searchPatientsDB(e.target.value);}} placeholder="Search by name, phone, file #, ABHA ID..."
             style={{ width:"100%", padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box", marginBottom:6 }} autoFocus />
-          <div style={{ maxHeight:200, overflow:"auto" }}>
-            {filteredPatients.length === 0 && <div style={{ fontSize:11, color:"#94a3b8", textAlign:"center", padding:10 }}>No patients found</div>}
-            {filteredPatients.slice(0, 20).map(r => (
-              <div key={r.id} onClick={()=>loadPatient(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f1f5f9" }}
-                onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <div style={{ flex:1 }}>
-                  <strong>{r.patient?.name || "Unknown"}</strong>
-                  <span style={{ color:"#94a3b8", marginLeft:6 }}>{r.patient?.age}Y/{r.patient?.sex?.charAt(0)} {r.patient?.phone&&`| ${r.patient.phone}`} {r.patient?.fileNo&&`| ${r.patient.fileNo}`}</span>
-                </div>
-                <div style={{ fontSize:9, color:"#94a3b8" }}>{new Date(r.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>
-                <div style={{ display:"flex", gap:2 }}>
-                  {r.moData && <span style={{ background:"#dbeafe", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>MO</span>}
-                  {r.conData && <span style={{ background:"#dcfce7", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>CON</span>}
-                </div>
+          <div style={{ maxHeight:250, overflow:"auto" }}>
+            {/* DB Results */}
+            {dbPatients.length > 0 && (
+              <div>
+                <div style={{ fontSize:9, fontWeight:700, color:"#2563eb", padding:"2px 4px", background:"#eff6ff", borderRadius:3, marginBottom:3 }}>📊 DATABASE</div>
+                {dbPatients.slice(0, 10).map(r => (
+                  <div key={`db-${r.id}`} onClick={()=>loadPatientDB(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f1f5f9" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <div style={{ flex:1 }}>
+                      <strong>{r.name}</strong>
+                      <span style={{ color:"#94a3b8", marginLeft:6 }}>{r.age}Y/{r.sex?.charAt(0)} {r.phone&&`| ${r.phone}`} {r.file_no&&`| ${r.file_no}`}</span>
+                    </div>
+                    <div style={{ fontSize:9, color:"#2563eb", fontWeight:600 }}>{r.visit_count || 0} visits</div>
+                    {r.last_visit && <div style={{ fontSize:9, color:"#94a3b8" }}>{new Date(r.last_visit).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>}
+                    {r.active_diagnoses && <div style={{ fontSize:8, color:"#f59e0b", fontWeight:600 }}>{r.active_diagnoses}</div>}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+            {/* Local Results */}
+            {filteredPatients.length > 0 && (
+              <div>
+                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", padding:"2px 4px", background:"#f1f5f9", borderRadius:3, marginBottom:3, marginTop:dbPatients.length>0?6:0 }}>💾 LOCAL</div>
+                {filteredPatients.slice(0, 10).map(r => (
+                  <div key={r.id} onClick={()=>loadPatient(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f1f5f9" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <div style={{ flex:1 }}>
+                      <strong>{r.patient?.name || "Unknown"}</strong>
+                      <span style={{ color:"#94a3b8", marginLeft:6 }}>{r.patient?.age}Y/{r.patient?.sex?.charAt(0)} {r.patient?.phone&&`| ${r.patient.phone}`} {r.patient?.fileNo&&`| ${r.patient.fileNo}`}</span>
+                    </div>
+                    <div style={{ fontSize:9, color:"#94a3b8" }}>{new Date(r.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>
+                    <div style={{ display:"flex", gap:2 }}>
+                      {r.moData && <span style={{ background:"#dbeafe", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>MO</span>}
+                      {r.conData && <span style={{ background:"#dcfce7", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>CON</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {dbPatients.length === 0 && filteredPatients.length === 0 && <div style={{ fontSize:11, color:"#94a3b8", textAlign:"center", padding:10 }}>No patients found</div>}
           </div>
         </div>
       )}
@@ -1302,7 +1403,7 @@ export default function GiniScribe() {
                     <tbody>{planMeds.map((m,i) => {
                       const origIdx = allMeds.indexOf(m);
                       return <tr key={i} style={{ background:(m.isNew||m.resolved)?"#eff6ff":i%2?"#fafafa":"white" }}>
-                        <td style={{padding:"4px 8px"}}><strong>{m.name}</strong>{(m.isNew||m.resolved)&&<span style={{background:"#1e40af",color:"white",padding:"0 3px",borderRadius:3,fontSize:8,marginLeft:3}}>NEW</span>}{m.composition&&<div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
+                        <td style={{padding:"4px 8px"}}><strong>{m.name}</strong>{m._matched&&<span title={`Pharmacy match: ${m._matched} (${m._confidence}%)`} style={{color:"#059669",fontSize:9,marginLeft:3}}>✓</span>}{(m.isNew||m.resolved)&&<span style={{background:"#1e40af",color:"white",padding:"0 3px",borderRadius:3,fontSize:8,marginLeft:3}}>NEW</span>}{m.composition&&<div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
                         <td style={{padding:"4px 8px",textAlign:"center",fontWeight:600}}>{m.dose}</td>
                         <td style={{padding:"4px 8px",textAlign:"center",fontSize:10,fontWeight:600,color:"#1e40af"}}>{m.timing || m.frequency}</td>
                         <td style={{padding:"4px 8px"}}>{(m.forDiagnosis||[]).map(d=><Badge key={d} id={d} friendly />)}</td>
