@@ -174,11 +174,6 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
     }
     return await transcribeDeepgram(blob, dgKey, lang);
   };
-  const mediaRec = useRef(null);
-  const chunks = useRef([]);
-  const audioBlob = useRef(null);
-  const tmr = useRef(null);
-  const fileRef = useRef(null);
 
   const startRec = async () => {
     setError("");
