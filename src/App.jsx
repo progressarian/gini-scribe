@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 // ============ DEEPGRAM ============
 async function transcribeDeepgram(audioBlob, apiKey, language) {
   const lang = language === "multi" ? "en" : language;
-  const keywords = "HbA1c:2,eGFR:2,creatinine:2,TSH:2,LDL:2,HDL:2,triglycerides:2,metformin:2,insulin:2,dianorm:1,thyronorm:1,glimepiride:1,telmisartan:1,amlodipine:1,rosuvastatin:1,atorvastatin:1,dapagliflozin:1,empagliflozin:1,canagliflozin:1,sitagliptin:1,vildagliptin:1,proteinuria:1,nephropathy:1,retinopathy:1,neuropathy:1,CABG:1,dyslipidemia:1,hypothyroidism:1";
+  const keywords = "HbA1c:2,eGFR:2,creatinine:2,TSH:2,LDL:2,HDL:2,triglycerides:2,metformin:2,insulin:2,thyronorm:2,dianorm:1,glimepiride:1,telmisartan:1,amlodipine:1,rosuvastatin:1,atorvastatin:1,dapagliflozin:1,empagliflozin:1,sitagliptin:1,vildagliptin:1,proteinuria:1,nephropathy:1,retinopathy:1,neuropathy:1,CABG:1,dyslipidemia:1,hypothyroidism:1,ecosprin:1,concor:1,dytor:1,atchol:1,telma:1,amlong:1,cetanil:1,ciplar:1,lantus:1,tresiba:1,novorapid:1,humalog:1,jardiance:1,forxiga:1,shelcal:1,euthrox:1,glimy:1,mixtard:1";
   const kw = keywords.split(",").map(k => `keywords=${encodeURIComponent(k)}`).join("&");
   const url = `https://api.deepgram.com/v1/listen?model=nova-2&language=${lang}&smart_format=true&punctuate=true&paragraphs=true&${kw}`;
   const r = await fetch(url, {
@@ -35,6 +35,9 @@ async function transcribeWhisper(audioBlob, apiKey, language) {
 }
 
 // ============ PROMPTS ============
+// Gini Pharmacy brand names for exact matching
+const GINI_BRANDS = "Thyronorm,Euthrox,Euthyrox,Telma,Telma AM,Telma H,Telma CT,Telma Beta,Concor,Concor AM,Concor T,Ecosprin AV,Ecosprin Gold,Atchol,Atchol F,Dytor,Dytor Plus,Amlong,Cetanil,Cetanil M,Ciplar LA,Glimy,Rosuvas CV,Dolo,Mixtard,Huminsulin,Lantus,Tresiba,Novorapid,Humalog,Clopitab,Dianorm,Glycomet,Amaryl,Jalra,Galvus,Forxiga,Jardiance,Pan D,Razo D,Shelcal,Calnex,Uprise D3,Stamlo,Cardivas,Atorva,Rozavel,Arkamin,Prazopress,Minipress,Lasix,Aldactone,Eltroxin,Thyrox,Cilacar,Amlokind,Telmikind,Metapure,Obimet,Gluconorm";
+
 const MO_PROMPT = `You are a clinical documentation assistant for Gini Advanced Care Hospital, Mohali.
 Structure the MO's verbal summary into JSON. Output ONLY valid JSON. No backticks.
 
@@ -48,6 +51,7 @@ RULES:
 - Include ALL investigations mentioned with values, units, flags
 - Include vital signs as investigations if mentioned (BP, Pulse, Weight, BMI)
 - Indian brand names: identify composition
+- MEDICINE NAME MATCHING: Use EXACT brand names from Gini pharmacy: ${GINI_BRANDS}. When doctor says a medicine name, match to the closest brand. E.g. "thyro norm 88"→"THYRONORM 88MCG", "telma 40"→"TELMA 40", "ecosprin gold"→"ECOSPRIN GOLD", "atchol 10"→"ATCHOL 10", "concor am"→"CONCOR AM", "dytor 10"→"DYTOR 10"
 - Keep label SHORT (max 8 words)
 - complications severity: "high" if active/dangerous, "low" if stable`;
 
@@ -70,7 +74,8 @@ CRITICAL MEDICATION RULES:
 3. If dose range given ("500mg to 1g"), put full range in dose field
 4. For needs_clarification items, ALWAYS include default_timing and default_dose based on drug class
 5. Extract ALL medications including those to continue from previous
-6. If INSULIN is prescribed, ALWAYS add an "insulin_education" section:
+6. MEDICINE NAME MATCHING: Use EXACT brand names from Gini pharmacy: ${GINI_BRANDS}. Match spoken names: "thyro norm"→"THYRONORM", "telma am"→"TELMA AM", "ecosprin"→"ECOSPRIN AV", "atchol"→"ATCHOL", "concor"→"CONCOR", "dytor"→"DYTOR"
+7. If INSULIN is prescribed, ALWAYS add an "insulin_education" section:
    {"insulin_education":{"type":"Basal/Premix/Bolus","device":"Pen/Syringe","injection_sites":["Abdomen","Thigh"],"storage":"Keep in fridge, room temp vial valid 28 days","titration":"Increase by 2 units every 3 days if fasting >130","hypo_management":"If sugar <70: 3 glucose tablets, recheck 15 min","needle_disposal":"Use sharps container, never reuse needles"}}
    Fill titration based on consultant's instructions. If not specified, use standard protocols.`;
 
@@ -79,9 +84,27 @@ const LAB_PROMPT = `Extract ALL test results. Return ONLY valid JSON, no backtic
 flag: "H" high, "L" low, null normal.`;
 
 const PATIENT_VOICE_PROMPT = `Extract patient info. ONLY valid JSON, no backticks.
-{"name":"string or null","age":"number or null","sex":"Male/Female or null","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"}
+{"name":"string or null","age":"number or null","sex":"Male/Female or null","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null","abhaId":"string or null","aadhaar":"string or null","healthId":"string or null","govtId":"string or null","govtIdType":"Aadhaar/Passport/DrivingLicense or null"}
 IMPORTANT: Always return name in ENGLISH/ROMAN script, never Hindi/Devanagari. Transliterate if needed: "हिम्मत सिंह"→"Himmat Singh", "कमला देवी"→"Kamla Devi".
-Parse dates: "1949 august 1"="1949-08-01". "file p_100"→fileNo:"P_100". Calculate age from DOB.`;
+Parse dates: "1949 august 1"="1949-08-01". "file p_100"→fileNo:"P_100". Calculate age from DOB.
+ABHA ID format: XX-XXXX-XXXX-XXXX. Aadhaar: 12-digit number.`;
+
+const QUICK_MODE_PROMPT = `You are a clinical documentation assistant for Gini Advanced Care Hospital.
+The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sections.
+Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
+Output ONLY valid JSON, no backticks.
+
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"THYRONORM 88MCG","composition":"Levothyroxine 88mcg","dose":"88mcg","frequency":"OD","timing":"Empty stomach morning"}],"investigations":[{"test":"HbA1c","value":8.2,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}]},"consultant":{"assessment_summary":"Patient-friendly summary","key_issues":[],"diet_lifestyle":[],"medications_confirmed":[{"name":"TELMA AM 40","composition":"Telmisartan 40mg + Amlodipine 5mg","dose":"40/5mg","frequency":"OD","timing":"Morning","route":"Oral","forDiagnosis":["htn"],"isNew":false}],"medications_needs_clarification":[],"goals":[],"follow_up":{"duration":"6 weeks","tests_to_bring":[]},"self_monitoring":[],"future_plan":[]}}
+
+RULES:
+- Split dictation intelligently: patient info at start, then history/meds, then plan/changes
+- Diagnosis IDs: dm2,htn,cad,ckd,hypo,obesity,dyslipidemia
+- Status: "Controlled", "Uncontrolled", or "New" ONLY
+- MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
+- If BMI>=25 or weight concern: add obesity diagnosis
+- ALWAYS fill medication timing (infer from drug class if not stated)
+- Include assessment_summary (patient-friendly, 1-2 lines)
+- Name MUST be in English/Roman script, never Hindi/Devanagari`;
 
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 {"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","temp":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"}
@@ -156,7 +179,8 @@ async function extractLab(base64, mediaType) {
 // ============ AUDIO INPUT ============
 const CLEANUP_PROMPT = `Fix medical transcription errors in this text. Return ONLY the corrected text, nothing else.
 Common fixes needed:
-- Drug names: "thyro norm"→"Thyronorm", "die a norm"→"Dianorm", "gluco"→"Gluco", "telma"→"Telma", "rosuvastatin"/"rosu"→"Rosuvastatin"
+- Drug names: "thyro norm"→"Thyronorm", "die a norm"→"Dianorm", "telma"→"Telma", "ecosprin"→"Ecosprin", "atchol"→"Atchol", "concor"→"Concor", "dytor"→"Dytor", "gluco"→"Gluco", "rosu"→"Rosuvastatin"
+- Gini pharmacy brands: Thyronorm,Euthrox,Euthyrox,Telma,Concor,Ecosprin,Atchol,Dytor,Amlong,Cetanil,Ciplar,Glimy,Dolo,Lantus,Tresiba,Novorapid,Humalog,Mixtard,Jardiance,Forxiga,Pan D,Shelcal,Stamlo,Atorva,Rozavel
 - Lab tests: "H B A one C"/"hba1c"→"HbA1c", "e GFR"→"eGFR", "T S H"→"TSH", "LDL"/"HDL" keep as-is
 - Medical: "die a betis"→"diabetes", "hyper tension"→"hypertension", "thyroid ism"→"thyroidism"
 - Numbers: Keep all numbers exactly as spoken
@@ -514,7 +538,7 @@ export default function GiniScribe() {
   const [keySet, setKeySet] = useState(false);
   const [moName, setMoName] = useState("Dr. Beant");
   const [conName, setConName] = useState("Dr. Bhansali");
-  const [patient, setPatient] = useState({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male" });
+  const [patient, setPatient] = useState({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male", abhaId:"", aadhaar:"", healthId:"", govtId:"", govtIdType:"" });
   const [vitals, setVitals] = useState({ bp_sys:"", bp_dia:"", pulse:"", temp:"", spo2:"", weight:"", height:"", bmi:"" });
   const [labData, setLabData] = useState(null);
   const [labImageData, setLabImageData] = useState(null);
@@ -523,19 +547,75 @@ export default function GiniScribe() {
   const [conTranscript, setConTranscript] = useState("");
   const [moData, setMoData] = useState(null);
   const [conData, setConData] = useState(null);
-  const [planHidden, setPlanHidden] = useState(new Set()); // hidden block IDs
-  const [planEdits, setPlanEdits] = useState({}); // text overrides: { "summary": "edited text", ... }
+  const [planHidden, setPlanHidden] = useState(new Set());
+  const [planEdits, setPlanEdits] = useState({});
   const [clarifications, setClarifications] = useState({});
   const [loading, setLoading] = useState({});
   const [errors, setErrors] = useState({});
+  const [quickTranscript, setQuickTranscript] = useState("");
+  const [quickMode, setQuickMode] = useState(false);
+  const [savedPatients, setSavedPatients] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+
+  // localStorage: load saved patients
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("gini_patients") || "[]");
+      setSavedPatients(saved);
+    } catch {}
+  }, []);
+
+  // Save current consultation to localStorage
+  const saveConsultation = () => {
+    if (!patient.name) return;
+    const record = {
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
+      patient: { ...patient },
+      vitals: { ...vitals },
+      labData, moData, conData,
+      moTranscript, conTranscript, quickTranscript,
+      moName, conName
+    };
+    const existing = JSON.parse(localStorage.getItem("gini_patients") || "[]");
+    existing.unshift(record);
+    localStorage.setItem("gini_patients", JSON.stringify(existing.slice(0, 500)));
+    setSavedPatients(existing);
+    setSaveStatus("✅ Saved");
+    setTimeout(() => setSaveStatus(""), 2000);
+  };
+
+  // Load a previous patient record
+  const loadPatient = (record) => {
+    setPatient(record.patient || {});
+    setVitals(record.vitals || {});
+    if (record.moData) setMoData(record.moData);
+    if (record.conData) setConData(record.conData);
+    if (record.moTranscript) setMoTranscript(record.moTranscript);
+    if (record.conTranscript) setConTranscript(record.conTranscript);
+    setShowSearch(false);
+    setTab("patient");
+  };
+
+  // Search patients
+  const filteredPatients = savedPatients.filter(r => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (r.patient?.name||"").toLowerCase().includes(q) ||
+           (r.patient?.phone||"").includes(q) ||
+           (r.patient?.fileNo||"").toLowerCase().includes(q) ||
+           (r.patient?.abhaId||"").includes(q);
+  });
   const labRef = useRef(null);
   const clearErr = id => setErrors(p => ({ ...p, [id]: null }));
   
   const newPatient = () => {
-    setPatient({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male" });
+    setPatient({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male", abhaId:"", aadhaar:"", healthId:"", govtId:"", govtIdType:"" });
     setVitals({ bp_sys:"", bp_dia:"", pulse:"", temp:"", spo2:"", weight:"", height:"", bmi:"" });
     setLabData(null); setLabImageData(null); setLabMismatch(null);
-    setMoTranscript(""); setConTranscript("");
+    setMoTranscript(""); setConTranscript(""); setQuickTranscript("");
     setMoData(null); setConData(null);
     setClarifications({}); setErrors({});
     setPlanHidden(new Set()); setPlanEdits({});
@@ -678,27 +758,102 @@ export default function GiniScribe() {
 
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
-    { id:"patient", label:"👤 Patient", show:keySet },
-    { id:"vitals", label:"📋 Vitals", show:keySet },
+    { id:"quick", label:"⚡ Quick", show:keySet },
+    { id:"patient", label:"👤", show:keySet },
+    { id:"vitals", label:"📋", show:keySet },
     { id:"mo", label:"🎤 MO", show:keySet },
-    { id:"consultant", label:"👨‍⚕️ Consultant", show:keySet },
+    { id:"consultant", label:"👨‍⚕️ Con", show:keySet },
     { id:"plan", label:"📄 Plan", show:keySet }
   ];
+
+  // Quick Mode: process single dictation into all sections
+  const processQuickMode = async (transcript) => {
+    setQuickTranscript(transcript);
+    setLoading(l => ({ ...l, quick: true }));
+    setErrors(e => ({ ...e, quick: null }));
+    try {
+      const { data, error } = await callClaude(QUICK_MODE_PROMPT, transcript);
+      if (error) throw new Error(error);
+      if (data.patient) {
+        const p = data.patient;
+        setPatient(prev => ({
+          ...prev,
+          name: p.name || prev.name,
+          age: p.age || prev.age,
+          sex: p.sex || prev.sex,
+          phone: p.phone || prev.phone,
+          fileNo: p.fileNo || prev.fileNo,
+        }));
+      }
+      if (data.vitals) {
+        const v = data.vitals;
+        setVitals(prev => ({
+          ...prev,
+          bp_sys: v.bp_sys || prev.bp_sys,
+          bp_dia: v.bp_dia || prev.bp_dia,
+          pulse: v.pulse || prev.pulse,
+          spo2: v.spo2 || prev.spo2,
+          weight: v.weight || prev.weight,
+          height: v.height || prev.height,
+        }));
+        if (v.weight && v.height) {
+          const h = parseFloat(v.height) / 100;
+          if (h > 0) setVitals(prev => ({ ...prev, bmi: (parseFloat(v.weight) / (h * h)).toFixed(1) }));
+        }
+      }
+      if (data.mo) setMoData(data.mo);
+      if (data.consultant) setConData(data.consultant);
+      setTab("plan");
+    } catch (err) {
+      setErrors(e => ({ ...e, quick: err.message }));
+    } finally {
+      setLoading(l => ({ ...l, quick: false }));
+    }
+  };
 
   return (
     <div style={{ fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", maxWidth:1100, margin:"0 auto", padding:"8px 12px", background:"#fff", minHeight:"100vh" }}>
       {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, paddingBottom:6, borderBottom:"2px solid #1e293b" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8, paddingBottom:6, borderBottom:"2px solid #1e293b" }}>
         <div style={{ width:28, height:28, background:"#1e293b", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12 }}>G</div>
-        <div style={{ flex:1, fontSize:14, fontWeight:800, color:"#1e293b" }}>Gini Clinical Scribe</div>
-        {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New Patient</button>}
-        {patient.name && <div style={{ fontSize:10, fontWeight:600, background:"#f1f5f9", padding:"2px 6px", borderRadius:4 }}>👤 {patient.name} {patient.age&&`(${patient.age}Y/${patient.sex?.charAt(0)})`}</div>}
+        <div style={{ fontSize:13, fontWeight:800, color:"#1e293b" }}>Gini Scribe</div>
+        <div style={{ flex:1 }} />
+        {keySet && <button onClick={()=>setShowSearch(!showSearch)} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
+        {patient.name && <button onClick={saveConsultation} style={{ background:"#2563eb", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>💾 Save</button>}
+        {saveStatus && <span style={{ fontSize:10, color:"#059669", fontWeight:600 }}>{saveStatus}</span>}
+        {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New</button>}
+        {patient.name && <div style={{ fontSize:10, fontWeight:600, background:"#f1f5f9", padding:"2px 6px", borderRadius:4, maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>👤 {patient.name}</div>}
       </div>
+
+      {/* Patient Search Panel */}
+      {showSearch && (
+        <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:8 }}>
+          <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search by name, phone, file #, ABHA ID..."
+            style={{ width:"100%", padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box", marginBottom:6 }} autoFocus />
+          <div style={{ maxHeight:200, overflow:"auto" }}>
+            {filteredPatients.length === 0 && <div style={{ fontSize:11, color:"#94a3b8", textAlign:"center", padding:10 }}>No patients found</div>}
+            {filteredPatients.slice(0, 20).map(r => (
+              <div key={r.id} onClick={()=>loadPatient(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f1f5f9" }}
+                onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <div style={{ flex:1 }}>
+                  <strong>{r.patient?.name || "Unknown"}</strong>
+                  <span style={{ color:"#94a3b8", marginLeft:6 }}>{r.patient?.age}Y/{r.patient?.sex?.charAt(0)} {r.patient?.phone&&`| ${r.patient.phone}`} {r.patient?.fileNo&&`| ${r.patient.fileNo}`}</span>
+                </div>
+                <div style={{ fontSize:9, color:"#94a3b8" }}>{new Date(r.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>
+                <div style={{ display:"flex", gap:2 }}>
+                  {r.moData && <span style={{ background:"#dbeafe", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>MO</span>}
+                  {r.conData && <span style={{ background:"#dcfce7", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>CON</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
         {TABS.filter(t=>t.show!==false).map(t => (
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"7px 4px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none", background:tab===t.id?"#1e293b":"white", color:tab===t.id?"white":"#64748b" }}>{t.label}</button>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"7px 4px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b" }}>{t.label}</button>
         ))}
       </div>
 
@@ -723,6 +878,53 @@ export default function GiniScribe() {
           <button onClick={()=>{if(dgKey.length>10||whisperKey.length>10){setKeySet(true);setTab("patient");}}} style={{ width:"100%", background:(dgKey.length>10||whisperKey.length>10)?"#059669":"#94a3b8", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:700, cursor:(dgKey.length>10||whisperKey.length>10)?"pointer":"not-allowed" }}>
             {dgKey.length>10||whisperKey.length>10?"✅ Start":"Enter at least one key"}
           </button>
+        </div>
+      )}
+
+      {/* ===== QUICK MODE ===== */}
+      {tab==="quick" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#dc2626,#b91c1c)", borderRadius:10, padding:14, marginBottom:10, color:"white" }}>
+            <div style={{ fontSize:15, fontWeight:800, marginBottom:3 }}>⚡ Quick Dictation</div>
+            <div style={{ fontSize:11, opacity:.85 }}>Dictate everything in one go — patient, history, vitals, meds, plan. AI splits it into all sections automatically.</div>
+          </div>
+
+          <AudioInput
+            onTranscript={processQuickMode}
+            dgKey={dgKey} whisperKey={whisperKey}
+            label="🎙️ Full Consultation — dictate everything at once"
+            color="#dc2626"
+          />
+
+          {loading.quick && (
+            <div style={{ textAlign:"center", padding:20 }}>
+              <div style={{ fontSize:28, animation:"pulse 1s infinite" }}>🧠</div>
+              <div style={{ fontSize:12, fontWeight:600, color:"#475569" }}>Parsing consultation into sections...</div>
+              <div style={{ fontSize:10, color:"#94a3b8", marginTop:4 }}>Patient • Vitals • Diagnoses • Meds • Plan</div>
+            </div>
+          )}
+
+          {errors.quick && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:10, marginTop:8 }}>
+            <div style={{ fontSize:11, color:"#dc2626", fontWeight:600 }}>⚠️ {errors.quick}</div>
+          </div>}
+
+          {quickTranscript && !loading.quick && (
+            <div style={{ marginTop:8, background:"#f8fafc", borderRadius:8, padding:10, border:"1px solid #e2e8f0" }}>
+              <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>RAW TRANSCRIPT</div>
+              <div style={{ fontSize:11, color:"#475569", lineHeight:1.6 }}>{quickTranscript}</div>
+            </div>
+          )}
+
+          <div style={{ marginTop:12, padding:10, background:"#fefce8", borderRadius:8, border:"1px solid #fef08a" }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#854d0e", marginBottom:3 }}>💡 Tips for best results:</div>
+            <div style={{ fontSize:10, color:"#92400e", lineHeight:1.6 }}>
+              Start with patient name and demographics, then history and current medications, then today's vitals and lab results, then the plan — new medicines, lifestyle advice, follow-up.
+            </div>
+          </div>
+
+          <div style={{ marginTop:8, fontSize:10, color:"#94a3b8", textAlign:"center" }}>
+            Or use individual tabs → for step-by-step entry
+          </div>
         </div>
       )}
 
@@ -755,6 +957,42 @@ export default function GiniScribe() {
               </div>
             </div>
           </div>
+
+          {/* IDs Section */}
+          <details style={{ marginTop:10, border:"1px solid #e2e8f0", borderRadius:8, overflow:"hidden" }}>
+            <summary style={{ padding:"6px 10px", fontSize:11, fontWeight:600, color:"#475569", cursor:"pointer", background:"#f8fafc" }}>🆔 Health & Government IDs (optional)</summary>
+            <div style={{ padding:10, display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <div>
+                <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>ABHA ID</label>
+                <input value={patient.abhaId||""} onChange={e=>updatePatient("abhaId",e.target.value)} placeholder="XX-XXXX-XXXX-XXXX"
+                  style={{ width:"100%", padding:"6px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Health ID</label>
+                <input value={patient.healthId||""} onChange={e=>updatePatient("healthId",e.target.value)} placeholder="MyHealth Genie ID"
+                  style={{ width:"100%", padding:"6px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Aadhaar</label>
+                <input value={patient.aadhaar||""} onChange={e=>updatePatient("aadhaar",e.target.value)} placeholder="XXXX XXXX XXXX"
+                  style={{ width:"100%", padding:"6px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>
+                  <select value={patient.govtIdType||""} onChange={e=>updatePatient("govtIdType",e.target.value)} style={{ fontSize:10, border:"none", background:"transparent", fontWeight:600, color:"#475569" }}>
+                    <option value="">Other ID</option>
+                    <option value="Passport">Passport</option>
+                    <option value="DrivingLicense">Driving License</option>
+                    <option value="VoterID">Voter ID</option>
+                    <option value="PAN">PAN</option>
+                  </select>
+                </label>
+                <input value={patient.govtId||""} onChange={e=>updatePatient("govtId",e.target.value)} placeholder="ID number"
+                  style={{ width:"100%", padding:"6px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+              </div>
+            </div>
+          </details>
+
           <button onClick={()=>{if(patient.name) setTab("vitals");}} style={{ marginTop:10, width:"100%", background:patient.name?"#1e293b":"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:patient.name?"pointer":"not-allowed" }}>
             {patient.name?"Next: Vitals →":"Enter name first"}
           </button>
