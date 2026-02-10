@@ -197,6 +197,13 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
   const wsRef = useRef(null);
   const finalsRef = useRef([]);
   const interimRef = useRef("");
+  const audioCtxRef = useRef(null);
+  const streamRef = useRef(null);
+  const modeRef = useRef(null); // track mode without stale closures
+  const processorRef = useRef(null);
+
+  // Keep modeRef in sync
+  useEffect(() => { modeRef.current = mode; }, [mode]);
 
   const doTranscribe = async (blob) => {
     if (engine === "whisper" && whisperKey) {
@@ -205,41 +212,49 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
     return await transcribeDeepgram(blob, dgKey, lang);
   };
 
-  // Streaming recording with Deepgram WebSocket
+  // Streaming recording with Deepgram WebSocket + raw PCM via AudioContext
   const startStreamingRec = async () => {
     setError(""); setLiveText(""); setTranscript("");
     finalsRef.current = []; interimRef.current = "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+      streamRef.current = stream;
+
+      // Also start MediaRecorder to save audio for playback
       const mt = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const rec = new MediaRecorder(stream, { mimeType: mt, audioBitsPerSecond: 32000 });
+      chunks.current = [];
+      rec.ondataavailable = e => { if (e.data.size > 0) chunks.current.push(e.data); };
+      mediaRec.current = rec;
+      rec.start(1000);
+
+      // AudioContext to get raw PCM for WebSocket
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
 
       // Open Deepgram WebSocket
       const wsLang = lang === "hi" ? "hi" : "en";
-      const wsUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=${wsLang}&smart_format=true&punctuate=true&interim_results=true&vad_events=true&encoding=linear16&sample_rate=16000`;
+      const wsUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=${wsLang}&smart_format=true&punctuate=true&interim_results=true&encoding=linear16&sample_rate=16000&channels=1`;
       const ws = new WebSocket(wsUrl, ["token", dgKey]);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        // Start MediaRecorder — send chunks to WebSocket
-        const rec = new MediaRecorder(stream, { mimeType: mt, audioBitsPerSecond: 32000 });
-        chunks.current = [];
-        rec.ondataavailable = async (e) => {
-          if (e.data.size > 0) {
-            chunks.current.push(e.data);
-            if (ws.readyState === WebSocket.OPEN) {
-              const buffer = await e.data.arrayBuffer();
-              ws.send(buffer);
-            }
-          }
-        };
-        rec.onstop = () => {
-          stream.getTracks().forEach(t => t.stop());
+        // Send raw PCM via processor
+        processor.onaudioprocess = (e) => {
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "CloseStream" }));
+            const float32 = e.inputBuffer.getChannelData(0);
+            const int16 = new Int16Array(float32.length);
+            for (let i = 0; i < float32.length; i++) {
+              int16[i] = Math.max(-32768, Math.min(32767, Math.floor(float32[i] * 32768)));
+            }
+            ws.send(int16.buffer);
           }
         };
-        mediaRec.current = rec;
-        rec.start(250); // Send chunks every 250ms for low latency
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
       };
 
       ws.onmessage = (event) => {
@@ -261,19 +276,21 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
       };
 
       ws.onerror = () => {
-        setError("Streaming connection failed — falling back to upload mode");
-        // Fall back to non-streaming
-        ws.close();
-        startNonStreamingRec(stream, mt);
+        setError("Streaming failed — try Upload instead");
+        cleanupStreaming();
+        setMode("recorded");
       };
 
       ws.onclose = async () => {
         const finalText = finalsRef.current.filter(Boolean).join(" ");
         if (finalText) {
+          // Save recording blob for playback
+          if (mediaRec.current?.state !== "inactive") mediaRec.current?.stop();
+          await new Promise(r => setTimeout(r, 200)); // Wait for MediaRecorder to flush
           const blob = new Blob(chunks.current, { type: mt });
           audioBlob.current = blob;
           setAudioUrl(URL.createObjectURL(blob));
-          // Run cleanup
+          // Run AI cleanup
           if (useCleanup) {
             setMode("cleaning");
             const cleaned = await cleanupTranscript(finalText);
@@ -282,8 +299,8 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
             setTranscript(finalText);
           }
           setMode("done");
-        } else if (mode === "recording") {
-          setError("No speech detected — try again");
+        } else if (modeRef.current === "recording") {
+          setError("No speech detected — try again or speak louder");
           setMode(null);
         }
       };
@@ -294,6 +311,12 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
     } catch (err) {
       setError("Mic access denied. Use Upload or paste text.");
     }
+  };
+
+  const cleanupStreaming = () => {
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
   };
 
   // Non-streaming fallback (also used for Whisper engine and file uploads)
@@ -336,7 +359,16 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
 
   const stopRec = () => {
     clearInterval(tmr.current);
+    // Stop processor and close AudioContext
+    cleanupStreaming();
+    // Stop MediaRecorder
     if (mediaRec.current?.state !== "inactive") mediaRec.current?.stop();
+    // Close WebSocket (triggers onclose which processes the transcript)
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "CloseStream" }));
+      // Give Deepgram a moment to send final results before closing
+      setTimeout(() => { if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close(); }, 500);
+    }
   };
 
   const handleFile = e => { const f=e.target.files[0]; if(!f) return; audioBlob.current=f; setAudioUrl(URL.createObjectURL(f)); setMode("recorded"); setError(""); };
@@ -354,6 +386,7 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
     setMode(null); setTranscript(""); setLiveText(""); setAudioUrl(null);
     audioBlob.current=null; setError(""); setDuration(0);
     finalsRef.current=[]; interimRef.current="";
+    cleanupStreaming();
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close();
   };
   const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
