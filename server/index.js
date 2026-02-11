@@ -13,15 +13,16 @@ app.use(express.json({ limit: "10mb" }));
 
 const dbUrl = process.env.DATABASE_URL || "";
 const isInternal = dbUrl.includes(".railway.internal");
-const needsSsl = dbUrl.includes("rlwy.net") || dbUrl.includes("railway.app") || (dbUrl.includes("railway") && !isInternal);
+const needsSsl = !!dbUrl && !isInternal;
 const pool = new pg.Pool({
-  connectionString: dbUrl,
+  connectionString: dbUrl || undefined,
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
 });
 
 console.log("📦 DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
+if (dbUrl) { try { const u = new URL(dbUrl); console.log("📦 Host:", u.hostname, "Port:", u.port); } catch(e) { console.log("📦 URL parse error:", e.message); } }
 
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
@@ -29,11 +30,19 @@ const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 
 app.get("/api/health", async (_, res) => {
+  const info = {
+    status: "ok",
+    service: "gini-scribe-api",
+    hasDbUrl: !!dbUrl,
+    dbHost: dbUrl ? new URL(dbUrl).hostname : null,
+    dbPort: dbUrl ? new URL(dbUrl).port : null,
+    sslEnabled: needsSsl,
+  };
   try {
     const r = await pool.query("SELECT NOW()");
-    res.json({ status: "ok", service: "gini-scribe-api", db: "connected", time: r.rows[0].now });
+    res.json({ ...info, db: "connected", time: r.rows[0].now });
   } catch (e) {
-    res.json({ status: "ok", service: "gini-scribe-api", db: "error", error: e.message, hasDbUrl: !!process.env.DATABASE_URL });
+    res.json({ ...info, db: "error", error: e.message, code: e.code });
   }
 });
 
