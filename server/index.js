@@ -11,14 +11,16 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+const dbUrl = process.env.DATABASE_URL || "";
+const isInternal = dbUrl.includes(".railway.internal");
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false,
+  connectionString: dbUrl,
+  ssl: (!isInternal && dbUrl.includes("railway")) ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
 });
 
-console.log("📦 DATABASE_URL set:", !!process.env.DATABASE_URL);
+console.log("📦 DATABASE_URL set:", !!dbUrl, "internal:", isInternal);
 
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
