@@ -13,15 +13,26 @@ app.use(express.json({ limit: "10mb" }));
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
 });
+
+console.log("📦 DATABASE_URL set:", !!process.env.DATABASE_URL);
 
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
 const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 
-app.get("/api/health", (_, res) => res.json({ status: "ok", service: "gini-scribe-api" }));
+app.get("/api/health", async (_, res) => {
+  try {
+    const r = await pool.query("SELECT NOW()");
+    res.json({ status: "ok", service: "gini-scribe-api", db: "connected", time: r.rows[0].now });
+  } catch (e) {
+    res.json({ status: "ok", service: "gini-scribe-api", db: "error", error: e.message, hasDbUrl: !!process.env.DATABASE_URL });
+  }
+});
 
 // ============ PATIENTS ============
 
