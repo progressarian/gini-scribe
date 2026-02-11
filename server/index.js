@@ -343,7 +343,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
        ORDER BY test_name, test_date DESC`, [id]);
 
     const diagJourney = await pool.query(
-      `SELECT d.diagnosis_id, d.label, d.status, c.visit_date
+      `SELECT d.diagnosis_id, d.label, d.status, c.visit_date, c.con_name, c.mo_name
        FROM diagnoses d JOIN consultations c ON c.id = d.consultation_id
        WHERE d.patient_id=$1 ORDER BY d.diagnosis_id, c.visit_date`, [id]);
 
@@ -351,6 +351,12 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       `SELECT m.name, m.dose, m.frequency, m.timing, m.is_active, m.is_new, m.started_date, c.visit_date, m.pharmacy_match
        FROM medications m JOIN consultations c ON c.id = m.consultation_id
        WHERE m.patient_id=$1 ORDER BY UPPER(m.name), c.visit_date`, [id]);
+
+    // Consultations with mo_data history for timeline
+    const visits = await pool.query(
+      `SELECT id, visit_date, visit_type, mo_name, con_name, status,
+       mo_data->'history' as history, mo_data->'complications' as complications
+       FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC`, [id]);
 
     res.json({
       hba1c: hba1c.rows, fpg: fpg.rows, ldl: ldl.rows, triglycerides: tg.rows,
@@ -360,6 +366,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       screenings: screenings.rows,
       diagnosis_journey: diagJourney.rows,
       med_timeline: medTimeline.rows,
+      visits: visits.rows,
     });
   } catch (e) { console.error("Outcomes error:", e.message); res.status(500).json({ error: e.message }); }
 });

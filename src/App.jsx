@@ -1192,8 +1192,6 @@ export default function GiniScribe() {
     if (!outcomesData || !patientFullData) return;
     setSummaryLoading(true);
     try {
-      const key = localStorage.getItem("gini_anthropic_key") || localStorage.getItem("gini_openai_key");
-      const isAnthropic = !!localStorage.getItem("gini_anthropic_key");
       const summaryData = {
         patient: { name: patient.name, age: patient.age, sex: patient.sex },
         diagnoses: patientFullData.diagnoses?.map(d => `${d.label}: ${d.status}`) || [],
@@ -1209,33 +1207,21 @@ export default function GiniScribe() {
 
       const prompt = `You are a caring doctor writing a health journey summary for the patient.
 Based on this data, write a 4-6 sentence plain English summary of the patient's health journey.
-Include: 1) What conditions they have and how long 2) What's improving and what's not 3) What the biggest concerns are 4) An encouraging note.
+Include: 1) What conditions they have and how long 2) What's improving and what's not 3) What the biggest concerns are 4) An encouraging note about what's working.
 Use simple language a patient can understand. Be specific with numbers. Use the patient's name.
 
 Patient Data: ${JSON.stringify(summaryData)}
 
 Write ONLY the summary paragraph, no headers or formatting.`;
 
-      let text = "";
-      if (isAnthropic) {
-        const r = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-          body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: prompt }] })
-        });
-        const d = await r.json();
-        text = d.content?.[0]?.text || "Could not generate summary.";
-      } else {
-        const r = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-          body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 500, messages: [{ role: "user", content: prompt }] })
-        });
-        const d = await r.json();
-        text = d.choices?.[0]?.message?.content || "Could not generate summary.";
-      }
-      setHealthSummary(text);
-    } catch (e) { setHealthSummary("Error generating summary: " + e.message); }
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: prompt }] })
+      });
+      const d = await r.json();
+      setHealthSummary(d.content?.[0]?.text || "Could not generate summary.");
+    } catch (e) { setHealthSummary("Error: " + e.message); }
     setSummaryLoading(false);
   };
 
@@ -2185,84 +2171,96 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         </div>
       )}
 
+
       {/* ===== OUTCOMES ===== */}
       {tab==="outcomes" && (
         <div style={{ maxWidth:900, margin:"0 auto" }}>
           {!dbPatientId ? (
-            <div style={{ textAlign:"center", padding:40, color:"#94a3b8" }}>
-              <div style={{ fontSize:36, marginBottom:10 }}>📊</div>
-              <div style={{ fontSize:14, fontWeight:600 }}>Load a patient from the database first</div>
-              <div style={{ fontSize:11, color:"#cbd5e1", marginTop:4 }}>Use 🔍 Find to search existing patients</div>
+            <div style={{ textAlign:"center", padding:50, color:"#94a3b8" }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>📊</div>
+              <div style={{ fontSize:15, fontWeight:600, color:"#64748b" }}>Load a patient first</div>
+              <div style={{ fontSize:12, color:"#cbd5e1", marginTop:6 }}>Use 🔍 Find to search existing patients</div>
             </div>
           ) : outcomesLoading ? (
-            <div style={{ textAlign:"center", padding:40 }}>
-              <div style={{ fontSize:24, marginBottom:8 }}>📊</div>
-              <div style={{ fontSize:12, color:"#94a3b8" }}>Loading outcomes...</div>
+            <div style={{ textAlign:"center", padding:50 }}>
+              <div style={{ fontSize:28, marginBottom:10 }}>⏳</div>
+              <div style={{ fontSize:13, color:"#94a3b8" }}>Loading health data...</div>
             </div>
           ) : (
             <div>
-              {/* ── Header ── */}
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+              {/* ── HEADER ── */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div>
-                  <div style={{ fontSize:18, fontWeight:800, color:"#0f172a", letterSpacing:"-0.3px" }}>Health Dashboard</div>
-                  <div style={{ fontSize:11, color:"#64748b" }}>{patient.name} • {patient.age}y {patient.sex}</div>
+                  <div style={{ fontSize:20, fontWeight:800, color:"#0f172a", letterSpacing:"-0.5px" }}>Health Dashboard</div>
+                  <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>{patient.name}{patient.age ? ` • ${patient.age}y` : ""}{patient.sex ? ` • ${patient.sex}` : ""}</div>
                 </div>
-                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                   <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
                     {[["3m","3M"],["6m","6M"],["1y","1Y"],["all","All"]].map(([v,l]) => (
-                      <button key={v} onClick={()=>{setOutcomePeriod(v);fetchOutcomes(dbPatientId,v);}} style={{ padding:"4px 10px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer", transition:"all 0.15s",
-                        background:outcomePeriod===v?"#0f172a":"white", color:outcomePeriod===v?"white":"#64748b" }}>{l}</button>
+                      <button key={v} onClick={()=>{setOutcomePeriod(v);fetchOutcomes(dbPatientId,v);}}
+                        style={{ padding:"5px 12px", fontSize:11, fontWeight:700, border:"none", cursor:"pointer",
+                          background:outcomePeriod===v?"#0f172a":"white", color:outcomePeriod===v?"white":"#64748b", transition:"all 0.15s" }}>{l}</button>
                     ))}
                   </div>
-                  <button onClick={()=>fetchOutcomes(dbPatientId)} style={{ fontSize:10, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:8, cursor:"pointer", background:"white", color:"#64748b" }}>↻</button>
+                  <button onClick={()=>fetchOutcomes(dbPatientId)} title="Refresh"
+                    style={{ fontSize:14, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:8, cursor:"pointer", background:"white", color:"#64748b" }}>↻</button>
                 </div>
               </div>
 
-              {/* ── Summary Cards ── */}
+              {/* ── SUMMARY CARDS ── */}
               {patientFullData && (
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginBottom:16 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10, marginBottom:20 }}>
                   {[
                     { label:"Visits", value:patientFullData.consultations?.length||0, icon:"📋", bg:"linear-gradient(135deg,#eff6ff,#dbeafe)", color:"#1d4ed8" },
-                    { label:"Active Meds", value:(()=>{const seen=new Set(); return (patientFullData.medications||[]).filter(m=>{if(!m.is_active)return false;const k=(m.name||"").toUpperCase();if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"💊", bg:"linear-gradient(135deg,#f0fdf4,#dcfce7)", color:"#059669" },
-                    { label:"Diagnoses", value:(()=>{const seen=new Set(); return (patientFullData.diagnoses||[]).filter(d=>{const k=d.diagnosis_id||d.label;if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"🏥", bg:"linear-gradient(135deg,#fffbeb,#fef3c7)", color:"#d97706" },
-                    { label:"Lab Tests", value:patientFullData.lab_results?.length||0, icon:"🔬", bg:"linear-gradient(135deg,#fdf2f8,#fce7f3)", color:"#db2777" },
+                    { label:"Active Meds", value:(()=>{const seen=new Set();return(patientFullData.medications||[]).filter(m=>{if(!m.is_active)return false;const k=(m.name||"").toUpperCase();if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"💊", bg:"linear-gradient(135deg,#f0fdf4,#dcfce7)", color:"#059669" },
+                    { label:"Diagnoses", value:(()=>{const seen=new Set();return(patientFullData.diagnoses||[]).filter(d=>{const k=d.diagnosis_id||d.label;if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"🩺", bg:"linear-gradient(135deg,#fffbeb,#fef3c7)", color:"#d97706" },
+                    { label:"Lab Tests", value:patientFullData.lab_results?.length||0, icon:"🧪", bg:"linear-gradient(135deg,#fdf2f8,#fce7f3)", color:"#db2777" },
                   ].map((c,i) => (
-                    <div key={i} style={{ background:c.bg, borderRadius:12, padding:"10px 12px", textAlign:"center" }}>
-                      <div style={{ fontSize:8, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px" }}>{c.icon} {c.label}</div>
-                      <div style={{ fontSize:22, fontWeight:900, color:c.color, marginTop:2 }}>{c.value}</div>
+                    <div key={i} style={{ background:c.bg, borderRadius:14, padding:"12px 14px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.6px" }}>{c.icon} {c.label}</div>
+                      <div style={{ fontSize:24, fontWeight:900, color:c.color, marginTop:3 }}>{c.value}</div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* ── AI Health Summary ── */}
-              <div style={{ background:"linear-gradient(135deg,#f8fafc,#f1f5f9)", borderRadius:14, padding:14, marginBottom:16, border:"1px solid #e2e8f0" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:healthSummary?8:0 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:"#334155" }}>🤖 AI Health Summary</div>
+              {/* ── AI HEALTH SUMMARY ── */}
+              <div style={{ background:"linear-gradient(135deg,#f0f9ff,#e0f2fe)", borderRadius:16, padding:16, marginBottom:20, border:"1px solid #bae6fd" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:healthSummary?10:0 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <span style={{ fontSize:16 }}>🤖</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:"#0c4a6e" }}>AI Health Summary</span>
+                  </div>
                   <button onClick={generateHealthSummary} disabled={summaryLoading}
-                    style={{ fontSize:10, padding:"4px 12px", border:"none", borderRadius:8, cursor:summaryLoading?"wait":"pointer",
-                      background:summaryLoading?"#94a3b8":"#0f172a", color:"white", fontWeight:700 }}>
-                    {summaryLoading ? "⏳ Generating..." : healthSummary ? "↻ Refresh" : "✨ Generate Summary"}
+                    style={{ fontSize:11, padding:"5px 14px", border:"none", borderRadius:8, cursor:summaryLoading?"wait":"pointer",
+                      background:summaryLoading?"#94a3b8":"#0369a1", color:"white", fontWeight:700, transition:"all 0.15s" }}>
+                    {summaryLoading ? "⏳ Analyzing..." : healthSummary ? "↻ Regenerate" : "✨ Generate Summary"}
                   </button>
                 </div>
                 {healthSummary && (
-                  <div style={{ fontSize:12, lineHeight:"1.6", color:"#334155", marginTop:4 }}>{healthSummary}</div>
+                  <div style={{ fontSize:13, lineHeight:"1.7", color:"#0c4a6e", marginTop:6, background:"white", borderRadius:10, padding:12 }}>{healthSummary}</div>
                 )}
               </div>
 
-              {/* ── Biomarker Charts ── */}
+              {/* ── BIOMARKER CHARTS ── */}
               {outcomesData && (
                 <>
-                <div style={{ fontSize:11, fontWeight:800, color:"#dc2626", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.5px" }}>🩸 Diabetes & Metabolic</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                  <span style={{ fontSize:14 }}>🩸</span>
+                  <span style={{ fontSize:13, fontWeight:800, color:"#b91c1c", textTransform:"uppercase", letterSpacing:"0.5px" }}>Diabetes & Metabolic</span>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
                   <Sparkline data={outcomesData.hba1c} label="HbA1c" unit="%" color="#dc2626" target={6.5} />
                   <Sparkline data={outcomesData.fpg} label="Fasting Glucose" unit=" mg/dl" color="#ea580c" target={100} />
                   <Sparkline data={outcomesData.bp} label="BP (Systolic)" unit=" mmHg" color="#7c3aed" target={130} valueKey="bp_sys" />
                   <Sparkline data={outcomesData.weight} label="Weight" unit=" kg" color="#2563eb" valueKey="weight" />
                 </div>
 
-                <div style={{ fontSize:11, fontWeight:800, color:"#2563eb", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.5px" }}>💧 Lipids & Kidney</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                  <span style={{ fontSize:14 }}>💧</span>
+                  <span style={{ fontSize:13, fontWeight:800, color:"#1d4ed8", textTransform:"uppercase", letterSpacing:"0.5px" }}>Lipids & Kidney</span>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
                   <Sparkline data={outcomesData.ldl} label="LDL" unit=" mg/dl" color="#d97706" target={100} />
                   <Sparkline data={outcomesData.triglycerides} label="Triglycerides" unit=" mg/dl" color="#b45309" target={150} />
                   <Sparkline data={outcomesData.hdl} label="HDL" unit=" mg/dl" color="#059669" target={40} lowerBetter={false} />
@@ -2275,8 +2273,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {/* Body Composition */}
                 {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) && (
                   <>
-                  <div style={{ fontSize:11, fontWeight:800, color:"#059669", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.5px" }}>🏋️ Body Composition</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                    <span style={{ fontSize:14 }}>🏋️</span>
+                    <span style={{ fontSize:13, fontWeight:800, color:"#059669", textTransform:"uppercase", letterSpacing:"0.5px" }}>Body Composition</span>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
                     <Sparkline data={outcomesData.waist} label="Waist" unit=" cm" color="#059669" valueKey="waist" />
                     <Sparkline data={outcomesData.body_fat} label="Body Fat" unit="%" color="#d97706" valueKey="body_fat" />
                     <Sparkline data={outcomesData.muscle_mass} label="Muscle Mass" unit=" kg" color="#2563eb" lowerBetter={false} valueKey="muscle_mass" />
@@ -2284,7 +2285,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   </>
                 )}
 
-                {/* Missing biomarkers alert */}
+                {/* Missing data alert */}
                 {(() => {
                   const missing = [];
                   if (!outcomesData.hba1c?.length) missing.push("HbA1c");
@@ -2294,23 +2295,23 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   if (!outcomesData.egfr?.length) missing.push("eGFR");
                   if (!outcomesData.uacr?.length) missing.push("UACR");
                   return missing.length > 0 ? (
-                    <div style={{ background:"#fffbeb", borderRadius:10, padding:"8px 12px", border:"1px solid #fde68a", marginBottom:16 }}>
-                      <div style={{ fontSize:10, fontWeight:700, color:"#92400e" }}>⚠️ Missing: {missing.join(", ")}</div>
-                      <div style={{ fontSize:9, color:"#a16207", marginTop:2 }}>Add via 📜 Hx tab → Reports</div>
+                    <div style={{ background:"#fffbeb", borderRadius:12, padding:"10px 14px", border:"1px solid #fde68a", marginBottom:20 }}>
+                      <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>⚠️ Missing: {missing.join(", ")}</div>
+                      <div style={{ fontSize:10, color:"#b45309", marginTop:3 }}>Add via 📜 Hx tab → Reports to complete the picture</div>
                     </div>
                   ) : null;
                 })()}
 
                 {/* Screenings */}
                 {outcomesData.screenings?.length > 0 && (
-                  <div style={{ background:"white", borderRadius:12, padding:12, border:"1px solid #f1f5f9", marginBottom:16, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                    <div style={{ fontSize:11, fontWeight:800, color:"#475569", marginBottom:6 }}>🔬 Screening Tests</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+                  <div style={{ background:"white", borderRadius:14, padding:14, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+                    <div style={{ fontSize:12, fontWeight:800, color:"#475569", marginBottom:8 }}>🔬 Screening Tests</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
                       {outcomesData.screenings.map((s,i) => (
-                        <div key={i} style={{ background:"#f8fafc", borderRadius:8, padding:"6px 10px", border:"1px solid #f1f5f9" }}>
-                          <div style={{ fontSize:8, color:"#94a3b8", fontWeight:600 }}>{s.test_name}</div>
-                          <div style={{ fontSize:12, fontWeight:700, color:s.flag==="HIGH"?"#dc2626":s.flag==="LOW"?"#2563eb":"#374151" }}>{s.result} {s.unit}</div>
-                          <div style={{ fontSize:8, color:"#cbd5e1" }}>{fmtDate(s.test_date)}</div>
+                        <div key={i} style={{ background:"#f8fafc", borderRadius:10, padding:"8px 12px" }}>
+                          <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600 }}>{s.test_name}</div>
+                          <div style={{ fontSize:13, fontWeight:700, color:s.flag==="HIGH"?"#dc2626":s.flag==="LOW"?"#2563eb":"#374151" }}>{s.result} {s.unit}</div>
+                          <div style={{ fontSize:9, color:"#cbd5e1" }}>{fmtDate(s.test_date)}</div>
                         </div>
                       ))}
                     </div>
@@ -2319,58 +2320,214 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </>
               )}
 
-              {/* ── Health Timeline / Story ── */}
-              {outcomesData?.diagnosis_journey?.length > 0 && (() => {
+              {/* ═══════════════════════════════════════════════════ */}
+              {/* ── HEALTH STORY TIMELINE (Vertical) ──            */}
+              {/* ═══════════════════════════════════════════════════ */}
+              {outcomesData && (() => {
+                // Build comprehensive timeline events
                 const events = [];
+
+                // 1. Birth / DOB
+                if (patient.dob) {
+                  events.push({ date: patient.dob, type:"life", icon:"👶", label:"Born", detail: fmtDate(patient.dob), color:"#6366f1", bg:"#eef2ff" });
+                } else if (patient.age) {
+                  const birthYear = new Date().getFullYear() - parseInt(patient.age);
+                  events.push({ date: `${birthYear}-01-01`, type:"life", icon:"👶", label:"Born", detail:`~${birthYear} (age ${patient.age})`, color:"#6366f1", bg:"#eef2ff" });
+                }
+
+                // 2. Estimated diagnosis onset from labels like "Type 2 DM (10 years)"
                 const diagGrouped = {};
-                outcomesData.diagnosis_journey.forEach(d => {
-                  if (!diagGrouped[d.diagnosis_id]) diagGrouped[d.diagnosis_id] = { label: d.label, history: [] };
-                  diagGrouped[d.diagnosis_id].history.push({ status: d.status, date: d.visit_date });
+                (outcomesData.diagnosis_journey || []).forEach(d => {
+                  if (!diagGrouped[d.diagnosis_id]) diagGrouped[d.diagnosis_id] = { label: d.label, history: [], doctor: d.con_name || d.mo_name };
+                  diagGrouped[d.diagnosis_id].history.push({ status: d.status, date: d.visit_date, doctor: d.con_name || d.mo_name });
                   diagGrouped[d.diagnosis_id].label = d.label;
                 });
+
+                // Parse "since X years" or "X years" from diagnosis labels to estimate onset
                 Object.entries(diagGrouped).forEach(([id, info]) => {
-                  info.history.forEach((h, i) => {
-                    if (i === 0 || h.status !== info.history[i-1]?.status) {
-                      events.push({ date: h.date, type: "diagnosis", label: info.label, detail: h.status, icon: h.status === "Controlled" ? "✅" : h.status === "New" ? "🆕" : "⚠️" });
+                  const match = info.label.match(/\((?:since\s+)?(\d+)\s*(?:years?|yrs?)\)/i);
+                  if (match) {
+                    const yearsAgo = parseInt(match[1]);
+                    const onsetYear = new Date().getFullYear() - yearsAgo;
+                    events.push({ date:`${onsetYear}-06-01`, type:"diagnosis_onset", icon:"🩺", label:info.label.replace(/\s*\(.*?\)/, ""), detail:`Estimated onset ~${onsetYear}`, color:"#dc2626", bg:"#fef2f2" });
+                  }
+                });
+
+                // 3. Past medical/surgical from MO data (current session)
+                if (moData?.history?.past_medical_surgical) {
+                  const pms = moData.history.past_medical_surgical;
+                  if (pms && pms !== "NIL" && pms.length > 3) {
+                    // Try to parse items
+                    const items = pms.split(/[,;]/);
+                    items.forEach(item => {
+                      const trimmed = item.trim();
+                      if (trimmed.length > 2) {
+                        const yearMatch = trimmed.match(/(19|20)\d{2}/);
+                        events.push({ date: yearMatch ? `${yearMatch[0]}-06-01` : null, type:"medical_history", icon:"🏥", label:trimmed, detail:"Past medical/surgical", color:"#7c3aed", bg:"#faf5ff" });
+                      }
+                    });
+                  }
+                }
+
+                // 4. Complication events from MO data
+                if (moData?.complications?.length > 0) {
+                  moData.complications.forEach(c => {
+                    if (c?.name) {
+                      events.push({ date: null, type:"complication", icon:"⚠️", label:c.name, detail:`${c.status}${c.detail ? ` — ${c.detail}` : ""}`, color:"#dc2626", bg:"#fef2f2" });
                     }
                   });
+                }
+
+                // 5. Visit events with diagnosis changes and new meds
+                const visitDates = {};
+                (outcomesData.visits || []).forEach(v => {
+                  if (!v.visit_date) return;
+                  const key = v.visit_date.split("T")[0];
+                  if (!visitDates[key]) visitDates[key] = { date:key, doctors:[], type:v.visit_type, status:v.status };
+                  if (v.con_name && !visitDates[key].doctors.includes(v.con_name)) visitDates[key].doctors.push(v.con_name);
+                  if (v.mo_name && !visitDates[key].doctors.includes(v.mo_name)) visitDates[key].doctors.push(v.mo_name);
                 });
-                const medGrouped = {};
+
+                // Collect per-visit diagnosis changes
+                const visitDiagChanges = {};
+                (outcomesData.diagnosis_journey || []).forEach(d => {
+                  const key = (d.visit_date || "").split("T")[0];
+                  if (!visitDiagChanges[key]) visitDiagChanges[key] = [];
+                  visitDiagChanges[key].push({ label: d.label, status: d.status });
+                });
+
+                // Collect per-visit new meds
+                const visitNewMeds = {};
                 (outcomesData.med_timeline || []).forEach(m => {
-                  const key = (m.pharmacy_match || m.name).toUpperCase();
-                  if (!medGrouped[key]) medGrouped[key] = { name: m.pharmacy_match || m.name, entries: [] };
-                  medGrouped[key].entries.push(m);
+                  if (!m.is_new) return;
+                  const key = (m.visit_date || "").split("T")[0];
+                  if (!visitNewMeds[key]) visitNewMeds[key] = [];
+                  visitNewMeds[key].push(m.pharmacy_match || m.name);
                 });
-                Object.values(medGrouped).forEach(med => {
-                  if (med.entries[0]) events.push({ date: med.entries[0].started_date || med.entries[0].visit_date, type: "medication", label: med.name, detail: med.entries.length > 1 ? "started → dose changes" : "started", icon: "💊" });
+
+                Object.entries(visitDates).forEach(([date, v]) => {
+                  const diagChanges = visitDiagChanges[date] || [];
+                  const newMeds = visitNewMeds[date] || [];
+                  const newDiags = diagChanges.filter(d => d.status === "New").map(d => d.label);
+                  const worsened = diagChanges.filter(d => d.status === "Uncontrolled").map(d => d.label);
+                  const improved = diagChanges.filter(d => d.status === "Controlled").map(d => d.label);
+
+                  let detail = [];
+                  if (v.doctors.length) detail.push(`Dr. ${v.doctors.join(", Dr. ")}`);
+                  if (newDiags.length) detail.push(`New: ${newDiags.join(", ")}`);
+                  if (improved.length) detail.push(`✅ Controlled: ${improved.join(", ")}`);
+                  if (worsened.length) detail.push(`⚠️ Uncontrolled: ${worsened.join(", ")}`);
+                  if (newMeds.length) detail.push(`Started: ${newMeds.slice(0,4).join(", ")}${newMeds.length > 4 ? ` +${newMeds.length-4} more` : ""}`);
+
+                  events.push({
+                    date, type:"visit", icon:"📋",
+                    label: `${v.status === "historical" ? "Historical " : ""}${v.type || "OPD"} Visit`,
+                    detail: detail.join(" · ") || "Consultation",
+                    color:"#0369a1", bg:"#f0f9ff",
+                    diagChanges, newMeds: newMeds.slice(0, 6)
+                  });
                 });
-                events.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                // Sort: most recent first, nulls at bottom
+                events.sort((a, b) => {
+                  if (!a.date && !b.date) return 0;
+                  if (!a.date) return 1;
+                  if (!b.date) return -1;
+                  return new Date(b.date) - new Date(a.date);
+                });
+
+                // Deduplicate by label+date
+                const seen = new Set();
+                const unique = events.filter(e => {
+                  const k = `${e.label}|${(e.date||"").split("T")[0]}`;
+                  if (seen.has(k)) return false;
+                  seen.add(k);
+                  return true;
+                });
+
+                if (unique.length === 0) return null;
+
                 return (
-                  <div style={{ background:"white", borderRadius:14, padding:14, border:"1px solid #f1f5f9", marginBottom:16, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                    <div style={{ fontSize:12, fontWeight:800, color:"#334155", marginBottom:10 }}>📖 Health Story Timeline</div>
-                    <div style={{ position:"relative", paddingLeft:24 }}>
-                      <div style={{ position:"absolute", left:8, top:4, bottom:4, width:2, background:"linear-gradient(to bottom, #e2e8f0, #cbd5e1)", borderRadius:1 }} />
-                      {events.slice(0, 20).map((ev, i) => (
-                        <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:10, position:"relative" }}>
-                          <div style={{ position:"absolute", left:-20, top:2, width:18, height:18, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10,
-                            background: ev.type === "diagnosis" ? (ev.detail === "Controlled" ? "#dcfce7" : ev.detail === "New" ? "#dbeafe" : "#fef2f2") : "#faf5ff",
-                            border: `2px solid ${ev.type === "diagnosis" ? (ev.detail === "Controlled" ? "#86efac" : ev.detail === "New" ? "#93c5fd" : "#fca5a5") : "#c4b5fd"}`,
-                            zIndex:1 }}>{ev.icon}</div>
-                          <div style={{ flex:1 }}>
-                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                              <span style={{ fontSize:11, fontWeight:700, color:"#1e293b" }}>{ev.label}</span>
-                              <span style={{ fontSize:9, color:"#94a3b8" }}>{fmtDate(ev.date)}</span>
+                  <div style={{ background:"white", borderRadius:16, padding:18, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+                      <span style={{ fontSize:18 }}>📖</span>
+                      <span style={{ fontSize:15, fontWeight:800, color:"#0f172a" }}>Health Story</span>
+                      <span style={{ fontSize:10, color:"#94a3b8", fontWeight:500, marginLeft:"auto" }}>Most recent first</span>
+                    </div>
+
+                    <div style={{ position:"relative", paddingLeft:32 }}>
+                      {/* Vertical line */}
+                      <div style={{ position:"absolute", left:12, top:8, bottom:8, width:2, background:"linear-gradient(to bottom, #0ea5e9, #e2e8f0, #c4b5fd)", borderRadius:2 }} />
+
+                      {unique.map((ev, i) => {
+                        const isVisit = ev.type === "visit";
+                        return (
+                          <div key={i} style={{ position:"relative", marginBottom: i < unique.length - 1 ? 16 : 0 }}>
+                            {/* Node dot */}
+                            <div style={{ position:"absolute", left:-26, top:3, width:22, height:22, borderRadius:"50%",
+                              display:"flex", alignItems:"center", justifyContent:"center", fontSize:11,
+                              background: ev.bg || "#f8fafc", border:`2px solid ${ev.color || "#94a3b8"}`,
+                              boxShadow:"0 1px 3px rgba(0,0,0,0.08)", zIndex:1 }}>
+                              {ev.icon}
                             </div>
-                            <div style={{ fontSize:10, color: ev.type === "diagnosis" ? (ev.detail === "Controlled" ? "#059669" : ev.detail === "New" ? "#2563eb" : "#dc2626") : "#7c3aed", fontWeight:600 }}>{ev.detail}</div>
+
+                            {/* Content card */}
+                            <div style={{ background: isVisit ? "#f8fafc" : "transparent", borderRadius:12,
+                              padding: isVisit ? "10px 14px" : "4px 0", marginLeft:6,
+                              border: isVisit ? "1px solid #f1f5f9" : "none" }}>
+
+                              {/* Date + Label row */}
+                              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                                <div style={{ flex:1 }}>
+                                  <div style={{ fontSize:13, fontWeight:700, color:"#0f172a" }}>{ev.label}</div>
+                                </div>
+                                <div style={{ fontSize:11, color:"#64748b", fontWeight:600, whiteSpace:"nowrap", flexShrink:0 }}>
+                                  {ev.date ? (() => {
+                                    const d = new Date(ev.date);
+                                    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                                    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+                                  })() : "—"}
+                                </div>
+                              </div>
+
+                              {/* Detail text */}
+                              {ev.detail && (
+                                <div style={{ fontSize:11, color:"#475569", marginTop:3, lineHeight:"1.5" }}>{ev.detail}</div>
+                              )}
+
+                              {/* Visit: diagnosis chips */}
+                              {isVisit && ev.diagChanges?.length > 0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
+                                  {ev.diagChanges.map((d, di) => (
+                                    <span key={di} style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:20,
+                                      background: d.status === "Controlled" ? "#dcfce7" : d.status === "Uncontrolled" ? "#fef2f2" : "#dbeafe",
+                                      color: d.status === "Controlled" ? "#059669" : d.status === "Uncontrolled" ? "#dc2626" : "#2563eb" }}>
+                                      {d.label.replace(/\s*\(.*?\)/, "")} — {d.status}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Visit: new meds */}
+                              {isVisit && ev.newMeds?.length > 0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:4 }}>
+                                  {ev.newMeds.map((m, mi) => (
+                                    <span key={mi} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8, background:"#faf5ff", color:"#7c3aed", border:"1px solid #e9d5ff" }}>
+                                      💊 {m}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
               })()}
 
-              {/* ── Diagnosis Journey (Compact) ── */}
+              {/* ── DIAGNOSIS JOURNEY ── */}
               {outcomesData?.diagnosis_journey?.length > 0 && (() => {
                 const grouped = {};
                 outcomesData.diagnosis_journey.forEach(d => {
@@ -2379,32 +2536,40 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   grouped[d.diagnosis_id].label = d.label;
                 });
                 return (
-                  <div style={{ background:"white", borderRadius:14, padding:14, border:"1px solid #f1f5f9", marginBottom:16, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                    <div style={{ fontSize:12, fontWeight:800, color:"#334155", marginBottom:8 }}>📈 Diagnosis Journey</div>
+                  <div style={{ background:"white", borderRadius:16, padding:16, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                      <span style={{ fontSize:16 }}>📈</span>
+                      <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Diagnosis Journey</span>
+                    </div>
                     {Object.entries(grouped).map(([id, info], gi) => {
                       const latest = info.history[info.history.length - 1];
-                      const statusColor = latest.status === "Controlled" ? "#059669" : latest.status === "Uncontrolled" ? "#dc2626" : "#d97706";
-                      const statusBg = latest.status === "Controlled" ? "#f0fdf4" : latest.status === "Uncontrolled" ? "#fef2f2" : "#fffbeb";
+                      const sc = latest.status === "Controlled" ? "#059669" : latest.status === "Uncontrolled" ? "#dc2626" : "#d97706";
+                      const sb = latest.status === "Controlled" ? "#f0fdf4" : latest.status === "Uncontrolled" ? "#fef2f2" : "#fffbeb";
                       return (
-                        <div key={id} style={{ padding:"8px 0", borderBottom: gi < Object.keys(grouped).length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                        <div key={id} style={{ padding:"10px 0", borderBottom: gi < Object.keys(grouped).length - 1 ? "1px solid #f8fafc" : "none" }}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                            <span style={{ fontSize:12, fontWeight:700, color:"#1e293b" }}>{info.label}</span>
-                            <span style={{ fontSize:10, fontWeight:700, color:statusColor, background:statusBg, padding:"2px 10px", borderRadius:20 }}>{latest.status}</span>
+                            <span style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{info.label}</span>
+                            <span style={{ fontSize:11, fontWeight:700, color:sc, background:sb, padding:"3px 12px", borderRadius:20 }}>{latest.status}</span>
                           </div>
-                          <div style={{ display:"flex", gap:3, marginTop:5, flexWrap:"wrap", alignItems:"center" }}>
-                            {info.history.map((h, i) => (
-                              <div key={i} style={{ display:"flex", alignItems:"center", gap:2 }}>
-                                <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                                  <span style={{ fontSize:8, fontWeight:700, padding:"1px 6px", borderRadius:10,
-                                    background:h.status==="Controlled"?"#dcfce7":h.status==="Uncontrolled"?"#fef2f2":"#fef3c7",
-                                    color:h.status==="Controlled"?"#059669":h.status==="Uncontrolled"?"#dc2626":"#d97706" }}>
-                                    {h.status==="Controlled"?"C":h.status==="Uncontrolled"?"U":"N"}
-                                  </span>
-                                  <span style={{ fontSize:7, color:"#94a3b8", marginTop:1 }}>{fmtDate(h.date)}</span>
+                          <div style={{ display:"flex", gap:4, marginTop:6, flexWrap:"wrap", alignItems:"center" }}>
+                            {info.history.map((h, i) => {
+                              const hd = new Date(h.date);
+                              const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                              const dateStr = `${hd.getDate()} ${months[hd.getMonth()]} ${String(hd.getFullYear()).slice(2)}`;
+                              return (
+                                <div key={i} style={{ display:"flex", alignItems:"center", gap:3 }}>
+                                  <div style={{ textAlign:"center" }}>
+                                    <div style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:12,
+                                      background:h.status==="Controlled"?"#dcfce7":h.status==="Uncontrolled"?"#fef2f2":"#fef3c7",
+                                      color:h.status==="Controlled"?"#059669":h.status==="Uncontrolled"?"#dc2626":"#d97706" }}>
+                                      {h.status==="Controlled"?"C":h.status==="Uncontrolled"?"U":"N"}
+                                    </div>
+                                    <div style={{ fontSize:8, color:"#94a3b8", marginTop:2, fontWeight:500 }}>{dateStr}</div>
+                                  </div>
+                                  {i < info.history.length - 1 && <span style={{ fontSize:12, color:"#d1d5db", margin:"0 2px" }}>→</span>}
                                 </div>
-                                {i < info.history.length - 1 && <span style={{ fontSize:10, color:"#d1d5db", margin:"0 1px" }}>→</span>}
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -2413,7 +2578,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 );
               })()}
 
-              {/* ── Medication Timeline ── */}
+              {/* ── MEDICATION TIMELINE ── */}
               {outcomesData?.med_timeline?.length > 0 && (() => {
                 const grouped = {};
                 outcomesData.med_timeline.forEach(m => {
@@ -2428,26 +2593,43 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 const activeMeds = Object.values(grouped).filter(m => m.entries[m.entries.length-1]?.is_active);
                 const stoppedMeds = Object.values(grouped).filter(m => !m.entries[m.entries.length-1]?.is_active);
                 return (
-                  <div style={{ background:"white", borderRadius:14, padding:14, border:"1px solid #f1f5f9", marginBottom:16, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                    <div style={{ fontSize:12, fontWeight:800, color:"#334155", marginBottom:8 }}>💊 Medication Timeline</div>
+                  <div style={{ background:"white", borderRadius:16, padding:16, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                      <span style={{ fontSize:16 }}>💊</span>
+                      <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Medications</span>
+                      <span style={{ fontSize:10, color:"#94a3b8", marginLeft:"auto" }}>{activeMeds.length} active{stoppedMeds.length > 0 ? ` · ${stoppedMeds.length} stopped` : ""}</span>
+                    </div>
                     {activeMeds.map((med, mi) => {
                       const latest = med.entries[med.entries.length - 1];
                       const first = med.entries[0];
                       const doseChanged = latest.dose !== first.dose && med.entries.length > 1;
+                      const startDate = first.started_date || first.visit_date;
+                      const sd = new Date(startDate);
+                      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                      const dateStr = startDate ? `${sd.getDate()} ${months[sd.getMonth()]} ${sd.getFullYear()}` : "";
                       return (
-                        <div key={mi} style={{ display:"flex", gap:8, padding:"6px 0", fontSize:11, borderBottom:"1px solid #f8fafc", alignItems:"center" }}>
-                          <span style={{ fontWeight:700, color:"#1e293b", minWidth:140 }}>{med.name}</span>
-                          <span style={{ color:"#475569", fontSize:10, background:"#f8fafc", padding:"2px 8px", borderRadius:6 }}>{latest.dose} {latest.frequency}</span>
-                          <span style={{ color:"#94a3b8", fontSize:9 }}>since {fmtDate(first.started_date || first.visit_date)}</span>
-                          {doseChanged && <span style={{ fontSize:8, padding:"1px 6px", background:"#fef3c7", color:"#d97706", borderRadius:10, fontWeight:700 }}>dose ↕</span>}
+                        <div key={mi} style={{ display:"flex", gap:10, padding:"8px 0", borderBottom: mi < activeMeds.length - 1 ? "1px solid #f8fafc" : "none", alignItems:"center" }}>
+                          <div style={{ width:4, height:28, borderRadius:2, background:"#059669", flexShrink:0 }} />
+                          <div style={{ flex:1 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                              <span style={{ fontSize:12, fontWeight:700, color:"#1e293b" }}>{med.name}</span>
+                              {doseChanged && <span style={{ fontSize:8, padding:"1px 6px", background:"#fef3c7", color:"#d97706", borderRadius:10, fontWeight:700 }}>dose changed</span>}
+                            </div>
+                            <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>
+                              {latest.dose} · {latest.frequency}{latest.timing ? ` · ${latest.timing}` : ""} · <span style={{ color:"#94a3b8" }}>since {dateStr}</span>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
                     {stoppedMeds.length > 0 && (
-                      <div style={{ marginTop:6, paddingTop:6, borderTop:"1px dashed #e2e8f0" }}>
-                        <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600, marginBottom:4 }}>STOPPED</div>
+                      <div style={{ marginTop:8, paddingTop:8, borderTop:"1px dashed #e2e8f0" }}>
+                        <div style={{ fontSize:10, color:"#94a3b8", fontWeight:700, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.5px" }}>Stopped</div>
                         {stoppedMeds.map((med, mi) => (
-                          <div key={mi} style={{ fontSize:10, color:"#94a3b8", padding:"2px 0", textDecoration:"line-through" }}>{med.name}</div>
+                          <div key={mi} style={{ display:"flex", gap:10, padding:"4px 0", alignItems:"center" }}>
+                            <div style={{ width:4, height:20, borderRadius:2, background:"#e2e8f0", flexShrink:0 }} />
+                            <span style={{ fontSize:11, color:"#94a3b8", textDecoration:"line-through" }}>{med.name}</span>
+                          </div>
                         ))}
                       </div>
                     )}
@@ -2455,29 +2637,37 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 );
               })()}
 
-              {/* ── Recent Labs ── */}
+              {/* ── RECENT LABS ── */}
               {patientFullData?.lab_results?.length > 0 && (
-                <div style={{ background:"white", borderRadius:14, padding:14, border:"1px solid #f1f5f9", boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                  <div style={{ fontSize:12, fontWeight:800, color:"#334155", marginBottom:8 }}>🧪 Recent Lab Results</div>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                <div style={{ background:"white", borderRadius:16, padding:16, border:"1px solid #f1f5f9", boxShadow:"0 1px 3px rgba(0,0,0,0.04)", marginBottom:20 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                    <span style={{ fontSize:16 }}>🧪</span>
+                    <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Recent Lab Results</span>
+                  </div>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                     <thead><tr style={{ borderBottom:"2px solid #f1f5f9" }}>
-                      <th style={{ textAlign:"left", padding:"4px 8px", fontSize:9, color:"#94a3b8", fontWeight:700 }}>Test</th>
-                      <th style={{ padding:"4px 8px", fontSize:9, color:"#94a3b8", fontWeight:700 }}>Result</th>
-                      <th style={{ padding:"4px 8px", fontSize:9, color:"#94a3b8", fontWeight:700 }}>Ref</th>
-                      <th style={{ padding:"4px 8px", fontSize:9, color:"#94a3b8", fontWeight:700 }}>Date</th>
+                      <th style={{ textAlign:"left", padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Test</th>
+                      <th style={{ padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Result</th>
+                      <th style={{ padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Ref</th>
+                      <th style={{ padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Date</th>
                     </tr></thead>
                     <tbody>
-                      {patientFullData.lab_results.slice(0, 20).map((l, i) => (
-                        <tr key={i} style={{ borderBottom:"1px solid #f8fafc", background: i%2 ? "#fafafa" : "white" }}>
-                          <td style={{ padding:"5px 8px", fontWeight:600, color:"#334155" }}>{l.test_name}</td>
-                          <td style={{ padding:"5px 8px", textAlign:"center", fontWeight:700,
-                            color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#2563eb":"#374151" }}>
-                            {l.result} <span style={{ fontSize:9, fontWeight:400, color:"#94a3b8" }}>{l.unit}</span>
-                          </td>
-                          <td style={{ padding:"5px 8px", textAlign:"center", fontSize:10, color:"#94a3b8" }}>{l.ref_range}</td>
-                          <td style={{ padding:"5px 8px", textAlign:"center", fontSize:10, color:"#94a3b8" }}>{fmtDate(l.test_date)}</td>
-                        </tr>
-                      ))}
+                      {patientFullData.lab_results.slice(0, 20).map((l, i) => {
+                        const d = new Date(l.test_date);
+                        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                        const dateStr = l.test_date ? `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}` : "";
+                        return (
+                          <tr key={i} style={{ borderBottom:"1px solid #f8fafc", background: i%2 ? "#fafbfc" : "white" }}>
+                            <td style={{ padding:"6px 10px", fontWeight:600, color:"#334155" }}>{l.test_name}</td>
+                            <td style={{ padding:"6px 10px", textAlign:"center", fontWeight:700,
+                              color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#2563eb":"#374151" }}>
+                              {l.result} <span style={{ fontSize:10, fontWeight:400, color:"#94a3b8" }}>{l.unit}</span>
+                            </td>
+                            <td style={{ padding:"6px 10px", textAlign:"center", fontSize:10, color:"#94a3b8" }}>{l.ref_range}</td>
+                            <td style={{ padding:"6px 10px", textAlign:"center", fontSize:11, color:"#64748b", fontWeight:500 }}>{dateStr}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
