@@ -11,6 +11,11 @@ const pool = new pg.Pool({
   ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false
 });
 
+// Convert empty strings to null for Postgres
+const n = v => (v === "" || v === undefined || v === null) ? null : v;
+const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
+
 // Health check
 app.get("/", (_, res) => res.json({ status: "ok", service: "gini-scribe-api" }));
 
@@ -84,7 +89,7 @@ app.post("/api/patients", async (req, res) => {
          govt_id=COALESCE($10,govt_id), govt_id_type=COALESCE($11,govt_id_type),
          email=COALESCE($12,email), phone=COALESCE($13,phone)
          WHERE id=$1 RETURNING *`,
-        [existing.id, p.name, p.dob, p.age, p.sex, p.file_no, p.abha_id, p.health_id, p.aadhaar, p.govt_id, p.govt_id_type, p.email, p.phone]
+        [existing.id, n(p.name), n(p.dob)||null, int(p.age), n(p.sex), n(p.file_no), n(p.abha_id), n(p.health_id), n(p.aadhaar), n(p.govt_id), n(p.govt_id_type), n(p.email), n(p.phone)]
       );
       res.json({ ...result.rows[0], _isNew: false });
     } else {
@@ -92,7 +97,7 @@ app.post("/api/patients", async (req, res) => {
       const result = await pool.query(
         `INSERT INTO patients (name, phone, dob, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, email)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-        [p.name, p.phone, p.dob, p.age, p.sex, p.file_no, p.abha_id, p.health_id, p.aadhaar, p.govt_id, p.govt_id_type, p.email]
+        [n(p.name), n(p.phone), n(p.dob)||null, int(p.age), n(p.sex), n(p.file_no), n(p.abha_id), n(p.health_id), n(p.aadhaar), n(p.govt_id), n(p.govt_id_type), n(p.email)]
       );
       res.json({ ...result.rows[0], _isNew: true });
     }
@@ -111,36 +116,37 @@ app.post("/api/consultations", async (req, res) => {
     // 1. Upsert patient
     let patientId;
     let existing = null;
-    if (patient.phone) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
-    if (!existing && patient.fileNo) existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo])).rows[0];
+    if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
+    if (!existing && n(patient.fileNo)) existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo])).rows[0];
 
     if (existing) {
       patientId = existing.id;
       await client.query(
         "UPDATE patients SET name=COALESCE($2,name), age=COALESCE($3,age), sex=COALESCE($4,sex), dob=COALESCE($5,dob), file_no=COALESCE($6,file_no), abha_id=COALESCE($7,abha_id), health_id=COALESCE($8,health_id), aadhaar=COALESCE($9,aadhaar), govt_id=COALESCE($10,govt_id), govt_id_type=COALESCE($11,govt_id_type) WHERE id=$1",
-        [patientId, patient.name, patient.age, patient.sex, patient.dob, patient.fileNo, patient.abhaId, patient.healthId, patient.aadhaar, patient.govtId, patient.govtIdType]
+        [patientId, n(patient.name), int(patient.age), n(patient.sex), n(patient.dob)||null, n(patient.fileNo), n(patient.abhaId), n(patient.healthId), n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
       );
     } else {
       const r = await client.query(
         "INSERT INTO patients (name, phone, age, sex, dob, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
-        [patient.name, patient.phone, patient.age, patient.sex, patient.dob, patient.fileNo, patient.abhaId, patient.healthId, patient.aadhaar, patient.govtId, patient.govtIdType]
+        [n(patient.name), n(patient.phone), int(patient.age), n(patient.sex), n(patient.dob)||null, n(patient.fileNo), n(patient.abhaId), n(patient.healthId), n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
       );
       patientId = r.rows[0].id;
     }
 
     // 2. Create consultation
+    const safeJson = v => { try { return JSON.stringify(v || null); } catch { return null; } };
     const con = await client.query(
       `INSERT INTO consultations (patient_id, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed') RETURNING id`,
-      [patientId, moName, conName, moTranscript, conTranscript, quickTranscript, JSON.stringify(moData), JSON.stringify(conData), JSON.stringify(planEdits)]
+      [patientId, n(moName), n(conName), n(moTranscript), n(conTranscript), n(quickTranscript), safeJson(moData), safeJson(conData), safeJson(planEdits)]
     );
     const consultationId = con.rows[0].id;
 
     // 3. Save vitals
-    if (vitals && (vitals.bp_sys || vitals.weight)) {
+    if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
       await client.query(
         "INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-        [patientId, consultationId, vitals.bp_sys, vitals.bp_dia, vitals.pulse, vitals.temp, vitals.spo2, vitals.weight, vitals.height, vitals.bmi]
+        [patientId, consultationId, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse), num(vitals.temp), num(vitals.spo2), num(vitals.weight), num(vitals.height), num(vitals.bmi)]
       );
     }
 
@@ -172,10 +178,10 @@ app.post("/api/consultations", async (req, res) => {
     // 6. Save lab results
     const investigations = moData?.investigations || [];
     for (const inv of investigations) {
-      if (inv.value !== undefined && inv.value !== null) {
+      if (num(inv.value) !== null) {
         await client.query(
           "INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe')",
-          [patientId, consultationId, inv.test, inv.value, inv.unit, inv.flag, inv.critical || false, inv.ref]
+          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical || false, n(inv.ref)]
         );
       }
     }
@@ -202,6 +208,7 @@ app.post("/api/consultations", async (req, res) => {
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
   } catch (e) {
     await client.query("ROLLBACK");
+    console.error("❌ Save error:", e.message, e.detail || "", e.where || "");
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
