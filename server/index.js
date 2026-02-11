@@ -15,6 +15,7 @@ const pool = new pg.Pool({
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
 const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
+const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 
 // Health check
 app.get("/", (_, res) => res.json({ status: "ok", service: "gini-scribe-api" }));
@@ -37,7 +38,7 @@ app.get("/api/patients", async (req, res) => {
       result = await pool.query("SELECT * FROM v_patient_summary ORDER BY last_visit DESC NULLS LAST LIMIT $1", [limit]);
     }
     res.json(result.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error("Search error:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 // Get single patient with full history
@@ -67,21 +68,19 @@ app.get("/api/patients/:id", async (req, res) => {
       documents: docs.rows,
       goals: goals.rows,
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error("Patient detail error:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 // Create or find patient (upsert by phone or file_no)
 app.post("/api/patients", async (req, res) => {
   try {
     const p = req.body;
-    // Try to find existing
     let existing = null;
-    if (p.phone) existing = (await pool.query("SELECT id FROM patients WHERE phone=$1", [p.phone])).rows[0];
-    if (!existing && p.file_no) existing = (await pool.query("SELECT id FROM patients WHERE file_no=$1", [p.file_no])).rows[0];
-    if (!existing && p.abha_id) existing = (await pool.query("SELECT id FROM patients WHERE abha_id=$1", [p.abha_id])).rows[0];
+    if (n(p.phone)) existing = (await pool.query("SELECT id FROM patients WHERE phone=$1", [p.phone])).rows[0];
+    if (!existing && n(p.file_no)) existing = (await pool.query("SELECT id FROM patients WHERE file_no=$1", [p.file_no])).rows[0];
+    if (!existing && n(p.abha_id)) existing = (await pool.query("SELECT id FROM patients WHERE abha_id=$1", [p.abha_id])).rows[0];
 
     if (existing) {
-      // Update existing
       const result = await pool.query(
         `UPDATE patients SET name=COALESCE($2,name), dob=COALESCE($3,dob), age=COALESCE($4,age),
          sex=COALESCE($5,sex), file_no=COALESCE($6,file_no), abha_id=COALESCE($7,abha_id),
@@ -93,7 +92,6 @@ app.post("/api/patients", async (req, res) => {
       );
       res.json({ ...result.rows[0], _isNew: false });
     } else {
-      // Create new
       const result = await pool.query(
         `INSERT INTO patients (name, phone, dob, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, email)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
@@ -101,12 +99,12 @@ app.post("/api/patients", async (req, res) => {
       );
       res.json({ ...result.rows[0], _isNew: true });
     }
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error("Patient create error:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 // ============ CONSULTATIONS ============
 
-// Save full consultation (creates patient if needed, saves everything)
+// Save full consultation
 app.post("/api/consultations", async (req, res) => {
   const client = await pool.connect();
   try {
@@ -122,19 +120,26 @@ app.post("/api/consultations", async (req, res) => {
     if (existing) {
       patientId = existing.id;
       await client.query(
-        "UPDATE patients SET name=COALESCE($2,name), age=COALESCE($3,age), sex=COALESCE($4,sex), dob=COALESCE($5,dob), file_no=COALESCE($6,file_no), abha_id=COALESCE($7,abha_id), health_id=COALESCE($8,health_id), aadhaar=COALESCE($9,aadhaar), govt_id=COALESCE($10,govt_id), govt_id_type=COALESCE($11,govt_id_type) WHERE id=$1",
-        [patientId, n(patient.name), int(patient.age), n(patient.sex), n(patient.dob)||null, n(patient.fileNo), n(patient.abhaId), n(patient.healthId), n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
+        `UPDATE patients SET name=COALESCE($2,name), age=COALESCE($3,age), sex=COALESCE($4,sex),
+         file_no=COALESCE($5,file_no), abha_id=COALESCE($6,abha_id),
+         health_id=COALESCE($7,health_id), aadhaar=COALESCE($8,aadhaar),
+         govt_id=COALESCE($9,govt_id), govt_id_type=COALESCE($10,govt_id_type) WHERE id=$1`,
+        [patientId, n(patient.name), int(patient.age), n(patient.sex),
+         n(patient.fileNo), n(patient.abhaId), n(patient.healthId),
+         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
       );
     } else {
       const r = await client.query(
-        "INSERT INTO patients (name, phone, age, sex, dob, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
-        [n(patient.name), n(patient.phone), int(patient.age), n(patient.sex), n(patient.dob)||null, n(patient.fileNo), n(patient.abhaId), n(patient.healthId), n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
+        `INSERT INTO patients (name, phone, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [n(patient.name)||'Unknown', n(patient.phone), int(patient.age), n(patient.sex),
+         n(patient.fileNo), n(patient.abhaId), n(patient.healthId),
+         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
       );
       patientId = r.rows[0].id;
     }
 
     // 2. Create consultation
-    const safeJson = v => { try { return JSON.stringify(v || null); } catch { return null; } };
     const con = await client.query(
       `INSERT INTO consultations (patient_id, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed') RETURNING id`,
@@ -145,43 +150,55 @@ app.post("/api/consultations", async (req, res) => {
     // 3. Save vitals
     if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
       await client.query(
-        "INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-        [patientId, consultationId, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse), num(vitals.temp), num(vitals.spo2), num(vitals.weight), num(vitals.height), num(vitals.bmi)]
+        `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [patientId, consultationId, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse),
+         num(vitals.temp), num(vitals.spo2), num(vitals.weight), num(vitals.height), num(vitals.bmi)]
       );
     }
 
     // 4. Save diagnoses
     const diagnoses = moData?.diagnoses || [];
     for (const d of diagnoses) {
-      await client.query(
-        "INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-        [patientId, consultationId, d.id, d.label, d.status]
-      );
+      if (d && d.id && d.label) {
+        await client.query(
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [patientId, consultationId, d.id, d.label, n(d.status) || 'New']
+        );
+      }
     }
 
     // 5. Save medications (previous + confirmed)
     const prevMeds = moData?.previous_medications || [];
     for (const m of prevMeds) {
-      await client.query(
-        "INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_new, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)",
-        [patientId, consultationId, m.name, m._matched || null, m.composition, m.dose, m.frequency, m.timing]
-      );
+      if (m && m.name) {
+        await client.query(
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_new, is_active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)`,
+          [patientId, consultationId, m.name, n(m._matched), n(m.composition), n(m.dose), n(m.frequency), n(m.timing)]
+        );
+      }
     }
     const newMeds = conData?.medications_confirmed || [];
     for (const m of newMeds) {
-      await client.query(
-        "INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_new, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)",
-        [patientId, consultationId, m.name, m._matched || null, m.composition, m.dose, m.frequency, m.timing, m.route, m.forDiagnosis || []]
-      );
+      if (m && m.name) {
+        await client.query(
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)`,
+          [patientId, consultationId, m.name, n(m._matched), n(m.composition), n(m.dose), n(m.frequency), n(m.timing), n(m.route) || 'Oral', m.isNew === true]
+        );
+      }
     }
 
     // 6. Save lab results
     const investigations = moData?.investigations || [];
     for (const inv of investigations) {
-      if (num(inv.value) !== null) {
+      if (inv && inv.test && num(inv.value) !== null) {
         await client.query(
-          "INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe')",
-          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical || false, n(inv.ref)]
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe')`,
+          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical === true, n(inv.ref)]
         );
       }
     }
@@ -189,26 +206,33 @@ app.post("/api/consultations", async (req, res) => {
     // 7. Save goals
     const goals = conData?.goals || [];
     for (const g of goals) {
-      await client.query(
-        "INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-        [patientId, consultationId, g.marker, g.current, g.target, g.timeline, g.priority]
-      );
+      if (g && g.marker) {
+        await client.query(
+          `INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [patientId, consultationId, g.marker, n(g.current), n(g.target), n(g.timeline), n(g.priority)]
+        );
+      }
     }
 
     // 8. Save complications
     const complications = moData?.complications || [];
     for (const c of complications) {
-      await client.query(
-        "INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity) VALUES ($1,$2,$3,$4,$5,$6)",
-        [patientId, consultationId, c.name, c.status, c.detail, c.severity]
-      );
+      if (c && c.name) {
+        await client.query(
+          `INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [patientId, consultationId, c.name, n(c.status), n(c.detail), n(c.severity)]
+        );
+      }
     }
 
     await client.query("COMMIT");
+    console.log(`✅ Saved: patient=${patientId} consultation=${consultationId}`);
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
   } catch (e) {
     await client.query("ROLLBACK");
-    console.error("❌ Save error:", e.message, e.detail || "", e.where || "");
+    console.error("❌ Save error:", e.message, e.detail || "");
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
@@ -267,15 +291,13 @@ app.post("/api/patients/:id/documents", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO documents (patient_id, consultation_id, doc_type, title, file_name, file_url, extracted_text, extracted_data, doc_date, source, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [req.params.id, consultation_id, doc_type, title, file_name, file_url, extracted_text, JSON.stringify(extracted_data), doc_date, source, notes]
+      [req.params.id, n(consultation_id), n(doc_type), n(title), n(file_name), n(file_url), n(extracted_text), safeJson(extracted_data), n(doc_date)||null, n(source), n(notes)]
     );
     res.json(result.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============ OUTCOMES / ANALYTICS ============
-
-// Patient outcome: biomarker trends
 app.get("/api/patients/:id/outcomes", async (req, res) => {
   try {
     const id = req.params.id;
@@ -285,94 +307,63 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       pool.query("SELECT weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ORDER BY recorded_at", [id]),
       pool.query("SELECT result, test_date FROM lab_results WHERE patient_id=$1 AND test_name='eGFR' ORDER BY test_date", [id]),
     ]);
-    res.json({
-      hba1c: hba1c.rows,
-      bp: bp.rows,
-      weight: weight.rows,
-      egfr: egfr.rows,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Doctor analytics: aggregate outcomes across patients
-app.get("/api/analytics/outcomes", async (req, res) => {
-  try {
-    const { doctor, period = "6m" } = req.query;
-    const interval = period === "1y" ? "1 year" : period === "3m" ? "3 months" : "6 months";
-
-    // Patients with improving HbA1c
-    const hba1c = await pool.query(`
-      WITH ranked AS (
-        SELECT patient_id, result, test_date,
-          ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY test_date DESC) as rn,
-          FIRST_VALUE(result) OVER (PARTITION BY patient_id ORDER BY test_date DESC) as latest,
-          FIRST_VALUE(result) OVER (PARTITION BY patient_id ORDER BY test_date ASC) as earliest
-        FROM lab_results WHERE test_name='HbA1c' AND test_date > NOW() - $1::interval
-      )
-      SELECT
-        COUNT(DISTINCT patient_id) as total_patients,
-        COUNT(DISTINCT CASE WHEN latest < earliest THEN patient_id END) as improved,
-        COUNT(DISTINCT CASE WHEN latest <= 7.0 THEN patient_id END) as at_target,
-        ROUND(AVG(latest)::numeric, 1) as avg_latest
-      FROM ranked WHERE rn=1
-    `, [interval]);
-
-    res.json({ hba1c: hba1c.rows[0] });
+    res.json({ hba1c: hba1c.rows, bp: bp.rows, weight: weight.rows, egfr: egfr.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============ PREVIOUS CONSULTATION IMPORT ============
-// For entering historical data
 app.post("/api/patients/:id/history", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const patientId = req.params.id;
-    const { visit_date, visit_type, doctor_name, vitals, diagnoses, medications, labs, notes } = req.body;
+    const { visit_date, visit_type, doctor_name, vitals, diagnoses, medications, labs } = req.body;
 
-    // Create historical consultation
     const con = await client.query(
       "INSERT INTO consultations (patient_id, visit_date, visit_type, con_name, status) VALUES ($1,$2,$3,$4,'historical') RETURNING id",
-      [patientId, visit_date, visit_type || "OPD", doctor_name]
+      [patientId, visit_date, n(visit_type) || "OPD", n(doctor_name)]
     );
     const cid = con.rows[0].id;
 
-    // Save vitals if provided
     if (vitals && Object.keys(vitals).length > 0) {
       await client.query(
         "INSERT INTO vitals (patient_id, consultation_id, recorded_at, bp_sys, bp_dia, pulse, weight, height, bmi) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        [patientId, cid, visit_date, vitals.bp_sys, vitals.bp_dia, vitals.pulse, vitals.weight, vitals.height, vitals.bmi]
+        [patientId, cid, visit_date, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse), num(vitals.weight), num(vitals.height), num(vitals.bmi)]
       );
     }
 
-    // Save diagnoses
     for (const d of (diagnoses || [])) {
-      await client.query(
-        "INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)",
-        [patientId, cid, d.id, d.label, d.status]
-      );
+      if (d && d.id) {
+        await client.query(
+          "INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)",
+          [patientId, cid, d.id, d.label, n(d.status) || 'New']
+        );
+      }
     }
 
-    // Save medications
     for (const m of (medications || [])) {
-      await client.query(
-        "INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        [patientId, cid, m.name, m.composition, m.dose, m.frequency, m.timing, m.is_active !== false, m.started_date || visit_date]
-      );
+      if (m && m.name) {
+        await client.query(
+          "INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [patientId, cid, m.name, n(m.composition), n(m.dose), n(m.frequency), n(m.timing), m.is_active !== false, n(m.started_date) || visit_date]
+        );
+      }
     }
 
-    // Save labs
     for (const l of (labs || [])) {
-      await client.query(
-        "INSERT INTO lab_results (patient_id, consultation_id, test_date, test_name, result, unit, flag, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual')",
-        [patientId, cid, visit_date, l.test_name, l.result, l.unit, l.flag, l.ref_range]
-      );
+      if (l && l.test_name) {
+        await client.query(
+          "INSERT INTO lab_results (patient_id, consultation_id, test_date, test_name, result, unit, flag, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual')",
+          [patientId, cid, visit_date, l.test_name, num(l.result), n(l.unit), n(l.flag), n(l.ref_range)]
+        );
+      }
     }
 
     await client.query("COMMIT");
     res.json({ success: true, consultation_id: cid });
   } catch (e) {
     await client.query("ROLLBACK");
+    console.error("❌ History save error:", e.message);
     res.status(500).json({ error: e.message });
   } finally {
     client.release();
