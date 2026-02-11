@@ -21,7 +21,7 @@ const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
 const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 
-app.get("/", (_, res) => res.json({ status: "ok", service: "gini-scribe-api" }));
+app.get("/api/health", (_, res) => res.json({ status: "ok", service: "gini-scribe-api" }));
 
 // ============ PATIENTS ============
 
