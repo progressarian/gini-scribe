@@ -1,6 +1,11 @@
 import express from "express";
 import cors from "cors";
 import pg from "pg";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
@@ -130,6 +135,8 @@ app.post("/api/consultations", async (req, res) => {
     let patientId, existing = null;
     if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
     if (!existing && n(patient.fileNo)) existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo])).rows[0];
+    // Fallback: match by name (for Quick mode without phone/fileNo)
+    if (!existing && n(patient.name)) existing = (await client.query("SELECT id FROM patients WHERE LOWER(name)=LOWER($1) LIMIT 1", [patient.name])).rows[0];
 
     if (existing) {
       patientId = existing.id;
@@ -137,18 +144,19 @@ app.post("/api/consultations", async (req, res) => {
         `UPDATE patients SET name=COALESCE($2,name), age=COALESCE($3,age), sex=COALESCE($4,sex),
          file_no=COALESCE($5,file_no), abha_id=COALESCE($6,abha_id),
          health_id=COALESCE($7,health_id), aadhaar=COALESCE($8,aadhaar),
-         govt_id=COALESCE($9,govt_id), govt_id_type=COALESCE($10,govt_id_type) WHERE id=$1`,
+         govt_id=COALESCE($9,govt_id), govt_id_type=COALESCE($10,govt_id_type),
+         dob=COALESCE($11,dob) WHERE id=$1`,
         [patientId, n(patient.name), int(patient.age), n(patient.sex),
          n(patient.fileNo), n(patient.abhaId), n(patient.healthId),
-         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
+         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType), n(patient.dob)||null]
       );
     } else {
       const r = await client.query(
-        `INSERT INTO patients (name, phone, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        `INSERT INTO patients (name, phone, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, dob)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
         [n(patient.name)||'Unknown', n(patient.phone), int(patient.age), n(patient.sex),
          n(patient.fileNo), n(patient.abhaId), n(patient.healthId),
-         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType)]
+         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType), n(patient.dob)||null]
       );
       patientId = r.rows[0].id;
     }
@@ -375,5 +383,14 @@ app.post("/api/patients/:id/history", async (req, res) => {
   } finally { client.release(); }
 });
 
+// ============ SERVE FRONTEND ============
+const distPath = path.join(__dirname, "..", "dist");
+app.use(express.static(distPath));
+app.get("*", (req, res) => {
+  // Don't catch API routes
+  if (req.path.startsWith("/api/")) return res.status(404).json({ error: "Not found" });
+  res.sendFile(path.join(distPath, "index.html"));
+});
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Gini Scribe API running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`));

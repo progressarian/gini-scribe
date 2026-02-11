@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
 
-// API base URL — set via env or default to Railway
-const API_URL = import.meta.env.VITE_API_URL || "https://worthy-commitment-production.up.railway.app";
+// API base URL — same origin in production (API + frontend on same server)
+const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
 // ============ DEEPGRAM ============
 async function transcribeDeepgram(audioBlob, apiKey, language) {
