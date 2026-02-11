@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
 
 // API base URL — set via env or default to Railway
-const API_URL = import.meta.env.VITE_API_URL || "";
+const API_URL = import.meta.env.VITE_API_URL || "https://worthy-commitment-production.up.railway.app";
 
 // ============ DEEPGRAM ============
 async function transcribeDeepgram(audioBlob, apiKey, language) {
@@ -135,16 +135,24 @@ The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sec
 Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
 Output ONLY valid JSON, no backticks.
 
-{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"THYRONORM 88MCG","composition":"Levothyroxine 88mcg","dose":"88mcg","frequency":"OD","timing":"Empty stomach morning"}],"investigations":[{"test":"HbA1c","value":8.2,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}]},"consultant":{"assessment_summary":"Patient-friendly summary","key_issues":[],"diet_lifestyle":[],"medications_confirmed":[{"name":"TELMA AM 40","composition":"Telmisartan 40mg + Amlodipine 5mg","dose":"40/5mg","frequency":"OD","timing":"Morning","route":"Oral","forDiagnosis":["htn"],"isNew":false}],"medications_needs_clarification":[],"goals":[],"follow_up":{"duration":"6 weeks","tests_to_bring":[]},"self_monitoring":[],"future_plan":[]}}
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}]},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":["Walk 10,000 steps daily","1500 calories/day","0.8g/kg protein"],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":["Check fasting blood glucose daily","Monitor BP twice weekly"],"future_plan":["Doppler evaluation","Review insulin dose at follow-up"]}}
 
-RULES:
-- Split dictation intelligently: patient info at start, then history/meds, then plan/changes
-- Diagnosis IDs: dm2,htn,cad,ckd,hypo,obesity,dyslipidemia
+CRITICAL RULES — EVERY FIELD MUST BE FILLED:
+- Split dictation: patient info → history/meds → plan/changes
+- Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,dfu,masld,nephropathy
 - Status: "Controlled", "Uncontrolled", or "New" ONLY
 - MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
-- If BMI>=25 or weight concern: add obesity diagnosis
+- If BMI>=25 or weight concern: add obesity/weight management diagnosis
 - ALWAYS fill medication timing (infer from drug class if not stated)
-- Include assessment_summary (patient-friendly, 1-2 lines)
+- Include ALL medications: both existing (isNew:false) AND newly prescribed (isNew:true)
+- assessment_summary: MUST be patient-friendly, address by first name, cover ALL findings
+- diet_lifestyle: MUST have 3-5 specific items. If doctor mentioned any diet/exercise/lifestyle advice, include. If not mentioned, add sensible defaults for the conditions.
+- goals: MUST have 2-4 items with marker, current value, target, and timeline. Use lab values and vitals as current values.
+- self_monitoring: MUST have 2-4 specific home monitoring instructions relevant to the diagnoses.
+- future_plan: MUST list all planned investigations, follow-ups, and next steps mentioned.
+- Calculate age from DOB (e.g., born 1957 → ~67-68 years)
+- Extract ALL lab values as investigations with proper flags (HIGH/LOW/null)
+- Include complications (e.g., diabetic foot ulcer, retinopathy, neuropathy)
 - Name MUST be in English/Roman script, never Hindi/Devanagari`;
 
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
@@ -156,7 +164,7 @@ async function callClaude(prompt, content) {
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 6000, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
+      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 8000, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
     });
     if (!r.ok) return { data: null, error: `API ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}` };
     const d = await r.json();
@@ -648,6 +656,9 @@ export default function GiniScribe() {
     // Save to database if API is configured
     if (API_URL) {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        setSaveStatus("💾 Saving to DB...");
         const resp = await fetch(`${API_URL}/api/consultations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -655,17 +666,26 @@ export default function GiniScribe() {
             patient, vitals, moData, conData,
             moTranscript, conTranscript, quickTranscript,
             moName, conName, planEdits
-          })
+          }),
+          signal: controller.signal
         });
-        const result = await resp.json();
-        if (result.success) {
-          setSaveStatus(`✅ Saved (DB #${result.consultation_id})`);
-          setDbPatientId(result.patient_id);
+        clearTimeout(timeout);
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => "");
+          console.error("DB save HTTP error:", resp.status, errText);
+          setSaveStatus("⚠️ Local only — Server " + resp.status);
         } else {
-          setSaveStatus("⚠️ Local only — DB: " + (result.error || "failed").slice(0, 40));
+          const result = await resp.json();
+          if (result.success) {
+            setSaveStatus(`✅ Saved (DB #${result.consultation_id})`);
+            setDbPatientId(result.patient_id);
+          } else {
+            setSaveStatus("⚠️ Local only — " + (result.error || "failed").slice(0, 40));
+          }
         }
       } catch (e) {
-        setSaveStatus("⚠️ Local only — " + e.message.slice(0, 30));
+        console.error("DB save error:", e);
+        setSaveStatus(e.name === "AbortError" ? "⚠️ Local only — timeout" : "⚠️ Local only — " + e.message.slice(0, 30));
       }
     } else {
       setSaveStatus("✅ Saved locally");
@@ -1146,13 +1166,20 @@ export default function GiniScribe() {
       if (error) throw new Error(error);
       if (data.patient) {
         const p = data.patient;
+        // Calculate age from DOB if provided
+        let age = p.age;
+        if (p.dob && !age) {
+          const dob = new Date(p.dob);
+          if (!isNaN(dob)) age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        }
         setPatient(prev => ({
           ...prev,
           name: p.name || prev.name,
-          age: p.age || prev.age,
+          age: age || prev.age,
           sex: p.sex || prev.sex,
           phone: p.phone || prev.phone,
           fileNo: p.fileNo || prev.fileNo,
+          dob: p.dob || prev.dob,
         }));
       }
       if (data.vitals) {
