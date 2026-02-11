@@ -93,6 +93,43 @@ IMPORTANT: Always return name in ENGLISH/ROMAN script, never Hindi/Devanagari. T
 Parse dates: "1949 august 1"="1949-08-01". "file p_100"→fileNo:"P_100". Calculate age from DOB.
 ABHA ID format: XX-XXXX-XXXX-XXXX. Aadhaar: 12-digit number.`;
 
+const RX_EXTRACT_PROMPT = `You are a medical record parser. Extract structured data from this old prescription/consultation note.
+Return ONLY valid JSON, no backticks.
+{
+  "visit_date":"YYYY-MM-DD or null",
+  "doctor_name":"string or null",
+  "specialty":"string or null",
+  "diagnoses":[{"id":"dm2","label":"Type 2 DM (since 2015)","status":"Controlled"}],
+  "medications":[{"name":"MEDICINE NAME","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night"}],
+  "vitals":{"bp_sys":null,"bp_dia":null,"weight":null,"height":null,"pulse":null},
+  "advice":["string"],
+  "follow_up":"string or null"
+}
+RULES:
+- Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,asthma,copd,pcos,oa,ra,liver,stroke,epilepsy,depression,anxiety,gerd,ibs
+- Status: "Controlled","Uncontrolled","New" based on context
+- MEDICINE: Use EXACT brand names from prescription, capitalize properly
+- Extract ALL medicines even if partially readable
+- Parse Hindi/Punjabi terms: "sugar ki dawai"=diabetes medication, "BP ki goli"=antihypertensive
+- If date not found, return null
+- Name must be in English/Roman script`;
+
+const REPORT_EXTRACT_PROMPT = `Extract ALL test results from this medical report. Return ONLY valid JSON, no backticks.
+{
+  "report_type":"Blood Test|Thyroid Panel|Lipid Profile|Kidney Function|Liver Function|HbA1c|CBC|Urine|Other",
+  "lab_name":"string or null",
+  "report_date":"YYYY-MM-DD or null",
+  "patient_on_report":{"name":"","age":"","sex":""},
+  "tests":[{"test_name":"HbA1c","result":8.2,"unit":"%","flag":"HIGH","ref_range":"4.0-6.5","critical":false}]
+}
+RULES:
+- flag: "HIGH" if above range, "LOW" if below, null if normal
+- critical: true if dangerously out of range (e.g., K+ >6, glucose >400, creatinine >5)
+- Include ALL tests found, even basic ones
+- Normalize test names: "Glycosylated Haemoglobin"→"HbA1c", "Serum Creatinine"→"Creatinine", "TSH (Ultrasensitive)"→"TSH"
+- result must be numeric where possible
+- If text result like "Positive"/"Negative", put in result_text field and set result to null`;
+
 const QUICK_MODE_PROMPT = `You are a clinical documentation assistant for Gini Advanced Care Hospital.
 The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sections.
 Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
@@ -564,12 +601,17 @@ export default function GiniScribe() {
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
   // History entry form
-  const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
+  const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", specialty:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
     diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}],
     labs:[{test_name:"",result:"",unit:"",flag:"",ref_range:""}] };
   const [historyForm, setHistoryForm] = useState({...emptyHistory});
   const [historyList, setHistoryList] = useState([]);
   const [historySaving, setHistorySaving] = useState(false);
+  const [rxText, setRxText] = useState("");
+  const [rxExtracting, setRxExtracting] = useState(false);
+  const [rxExtracted, setRxExtracted] = useState(false);
+  const [reports, setReports] = useState([]); // {type, file, base64, mediaType, extracted, extracting}
+  const [hxMode, setHxMode] = useState("rx"); // "rx" | "report" | "manual"
   // Outcomes data
   const [outcomesData, setOutcomesData] = useState(null);
   const [outcomesLoading, setOutcomesLoading] = useState(false);
@@ -631,8 +673,9 @@ export default function GiniScribe() {
   };
 
   // Load a previous patient record
-  const loadPatient = (record) => {
-    setPatient(record.patient || {});
+  const loadPatient = async (record) => {
+    const p = record.patient || {};
+    setPatient(p);
     setVitals(record.vitals || {});
     if (record.moData) setMoData(record.moData);
     if (record.conData) setConData(record.conData);
@@ -640,12 +683,39 @@ export default function GiniScribe() {
     if (record.conTranscript) setConTranscript(record.conTranscript);
     setShowSearch(false);
     setTab("patient");
+    // Try to find this patient in the DB by name or phone
+    if (API_URL && (p.name || p.phone)) {
+      try {
+        const q = p.phone || p.name;
+        const resp = await fetch(`${API_URL}/api/patients?q=${encodeURIComponent(q)}`);
+        const results = await resp.json();
+        if (results.length > 0) {
+          const match = results.find(r => r.name === p.name || r.phone === p.phone) || results[0];
+          setDbPatientId(match.id);
+          // Load full data for outcomes
+          const fullResp = await fetch(`${API_URL}/api/patients/${match.id}`);
+          const full = await fullResp.json();
+          setPatientFullData(full);
+          setHistoryList(full.consultations || []);
+          fetchOutcomes(match.id);
+        }
+      } catch {}
+    }
   };
 
   // Search patients — DB first, localStorage fallback
   const [dbPatients, setDbPatients] = useState([]);
   const searchPatientsDB = async (q) => {
-    if (!API_URL || !q || q.length < 2) { setDbPatients([]); return; }
+    if (!API_URL) { setDbPatients([]); return; }
+    if (!q || q.length < 2) {
+      // Show recent patients when no query
+      try {
+        const resp = await fetch(`${API_URL}/api/patients?limit=10`);
+        const data = await resp.json();
+        setDbPatients(Array.isArray(data) ? data : []);
+      } catch { setDbPatients([]); }
+      return;
+    }
     try {
       const resp = await fetch(`${API_URL}/api/patients?q=${encodeURIComponent(q)}`);
       const data = await resp.json();
@@ -884,6 +954,84 @@ export default function GiniScribe() {
     });
   };
 
+  // Extract prescription text with Claude
+  const extractPrescription = async () => {
+    if (!rxText.trim()) return;
+    setRxExtracting(true);
+    try {
+      const { data, error } = await callClaude(RX_EXTRACT_PROMPT, rxText);
+      if (data && !error) {
+        setHistoryForm(prev => ({
+          ...prev,
+          visit_date: data.visit_date || prev.visit_date,
+          doctor_name: data.doctor_name || prev.doctor_name,
+          specialty: data.specialty || prev.specialty,
+          vitals: { ...prev.vitals, ...(data.vitals || {}) },
+          diagnoses: (data.diagnoses?.length > 0) ? data.diagnoses : prev.diagnoses,
+          medications: (data.medications?.length > 0) ? data.medications : prev.medications,
+        }));
+        setRxExtracted(true);
+      }
+    } catch (e) { console.error("Rx extract error:", e); }
+    setRxExtracting(false);
+  };
+
+  // Handle report file upload
+  const handleReportFile = (e, reportType) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      const mediaType = file.type || "image/jpeg";
+      setReports(prev => [...prev, { type: reportType, fileName: file.name, base64, mediaType, extracted: null, extracting: false, error: null }]);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  // Extract report with Claude
+  const extractReport = async (index) => {
+    const report = reports[index];
+    if (!report) return;
+    setReports(prev => prev.map((r,i) => i===index ? {...r, extracting:true, error:null} : r));
+    try {
+      const block = report.mediaType === "application/pdf"
+        ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:report.base64} }
+        : { type:"image", source:{type:"base64",media_type:report.mediaType,data:report.base64} };
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
+        body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:REPORT_EXTRACT_PROMPT}]}]})
+      });
+      const d = await r.json();
+      const t = (d.content||[]).map(c=>c.text||"").join("");
+      let clean = t.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim();
+      const parsed = JSON.parse(clean);
+      // Add extracted labs to history form
+      if (parsed.tests?.length > 0) {
+        const newLabs = parsed.tests.map(t => ({
+          test_name: t.test_name, result: t.result?.toString() || t.result_text || "",
+          unit: t.unit || "", flag: t.flag || "", ref_range: t.ref_range || ""
+        }));
+        setHistoryForm(prev => ({
+          ...prev,
+          labs: [...prev.labs.filter(l => l.test_name), ...newLabs]
+        }));
+        if (parsed.report_date && !historyForm.visit_date) {
+          setHistoryForm(prev => ({...prev, visit_date: parsed.report_date}));
+        }
+      }
+      setReports(prev => prev.map((r,i) => i===index ? {...r, extracting:false, extracted:parsed} : r));
+    } catch (e) {
+      console.error("Report extract error:", e);
+      setReports(prev => prev.map((r,i) => i===index ? {...r, extracting:false, error:e.message} : r));
+    }
+  };
+
+  const removeReport = (index) => {
+    setReports(prev => prev.filter((_,i) => i !== index));
+  };
+
   const saveHistoryEntry = async () => {
     if (!dbPatientId || !historyForm.visit_date) return;
     setHistorySaving(true);
@@ -892,6 +1040,7 @@ export default function GiniScribe() {
         visit_date: historyForm.visit_date,
         visit_type: historyForm.visit_type,
         doctor_name: historyForm.doctor_name,
+        specialty: historyForm.specialty,
         vitals: historyForm.vitals,
         diagnoses: historyForm.diagnoses.filter(d => d.label),
         medications: historyForm.medications.filter(m => m.name),
@@ -904,6 +1053,7 @@ export default function GiniScribe() {
       const result = await resp.json();
       if (result.success) {
         setHistoryForm({...emptyHistory, diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}], labs:[{test_name:"",result:"",unit:"",flag:"",ref_range:""}]});
+        setRxText(""); setRxExtracted(false); setReports([]);
         // Refresh history list
         const pResp = await fetch(`${API_URL}/api/patients/${dbPatientId}`);
         const full = await pResp.json();
@@ -1028,7 +1178,7 @@ export default function GiniScribe() {
         <div style={{ width:28, height:28, background:"#1e293b", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12 }}>G</div>
         <div style={{ fontSize:13, fontWeight:800, color:"#1e293b" }}>Gini Scribe</div>
         <div style={{ flex:1 }} />
-        {keySet && <button onClick={()=>setShowSearch(!showSearch)} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
+        {keySet && <button onClick={()=>{const next=!showSearch;setShowSearch(next);if(next)searchPatientsDB("");}} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
         {patient.name && <button onClick={saveConsultation} style={{ background:"#2563eb", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>💾 Save</button>}
         {saveStatus && <span style={{ fontSize:10, color:"#059669", fontWeight:600 }}>{saveStatus}</span>}
         {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New</button>}
@@ -1670,125 +1820,231 @@ export default function GiniScribe() {
             </div>
           ) : (
             <div>
-              <div style={{ fontSize:14, fontWeight:700, marginBottom:8, color:"#1e293b" }}>📜 Add Previous Consultation — {patient.name}</div>
+              <div style={{ fontSize:14, fontWeight:700, marginBottom:8, color:"#1e293b" }}>📜 Add Past Record — {patient.name}</div>
 
               {/* Past consultations list */}
               {historyList.length > 0 && (
-                <div style={{ marginBottom:12, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                <div style={{ marginBottom:10, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>VISIT HISTORY ({historyList.length})</div>
-                  {historyList.slice(0,10).map((c,i) => (
-                    <div key={i} style={{ display:"flex", gap:8, padding:"3px 0", fontSize:10, borderBottom:i<historyList.length-1?"1px solid #f1f5f9":"none" }}>
+                  {historyList.slice(0,8).map((c,i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"3px 0", fontSize:10, borderBottom:i<Math.min(historyList.length,8)-1?"1px solid #f1f5f9":"none" }}>
                       <span style={{ fontWeight:600, color:"#2563eb", minWidth:70 }}>{new Date(c.visit_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span>
                       <span style={{ color:"#64748b" }}>{c.visit_type||"OPD"}</span>
                       <span style={{ color:"#374151" }}>{c.con_name||c.mo_name||""}</span>
-                      <span style={{ marginLeft:"auto", fontSize:8, color:c.status==="completed"?"#059669":"#f59e0b", fontWeight:600 }}>{c.status}</span>
+                      <span style={{ marginLeft:"auto", fontSize:8, color:c.status==="completed"?"#059669":c.status==="historical"?"#64748b":"#f59e0b", fontWeight:600 }}>{c.status}</span>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* New history entry form */}
-              <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#2563eb", marginBottom:8 }}>➕ ADD PAST VISIT</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:10 }}>
-                  <div>
-                    <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>Date *</label>
-                    <input type="date" value={historyForm.visit_date} onChange={e=>setHistoryForm(p=>({...p,visit_date:e.target.value}))}
-                      style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }} />
+              {/* Mode tabs */}
+              <div style={{ display:"flex", gap:0, marginBottom:8, borderRadius:6, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+                {[["rx","📝 Prescription"],["report","🧪 Reports"],["manual","📋 Manual"]].map(([id,label]) => (
+                  <button key={id} onClick={()=>setHxMode(id)} style={{ flex:1, padding:"6px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer",
+                    background:hxMode===id?"#2563eb":"white", color:hxMode===id?"white":"#64748b" }}>{label}</button>
+                ))}
+              </div>
+
+              {/* Visit Info — always visible */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:4, marginBottom:8 }}>
+                <div>
+                  <label style={{ fontSize:8, fontWeight:600, color:"#64748b" }}>Date *</label>
+                  <input type="date" value={historyForm.visit_date} onChange={e=>setHistoryForm(p=>({...p,visit_date:e.target.value}))}
+                    style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:8, fontWeight:600, color:"#64748b" }}>Type</label>
+                  <select value={historyForm.visit_type} onChange={e=>setHistoryForm(p=>({...p,visit_type:e.target.value}))}
+                    style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box" }}>
+                    <option>OPD</option><option>IPD</option><option>Follow-up</option><option>Emergency</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize:8, fontWeight:600, color:"#64748b" }}>Specialty</label>
+                  <select value={historyForm.specialty} onChange={e=>setHistoryForm(p=>({...p,specialty:e.target.value}))}
+                    style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box" }}>
+                    <option value="">Select...</option>
+                    <option>Endocrinology</option><option>Cardiology</option><option>Nephrology</option><option>Neurology</option>
+                    <option>General Medicine</option><option>Orthopedics</option><option>Ophthalmology</option><option>Pulmonology</option>
+                    <option>Gastroenterology</option><option>Dermatology</option><option>Psychiatry</option><option>Gynecology</option>
+                    <option>Urology</option><option>ENT</option><option>Surgery</option><option>Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize:8, fontWeight:600, color:"#64748b" }}>Doctor</label>
+                  <input value={historyForm.doctor_name} onChange={e=>setHistoryForm(p=>({...p,doctor_name:e.target.value}))} placeholder="Dr. Name"
+                    style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box" }} />
+                </div>
+              </div>
+
+              {/* ===== PRESCRIPTION MODE ===== */}
+              {hxMode==="rx" && (
+                <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#2563eb", marginBottom:4 }}>📝 PASTE OR DICTATE OLD PRESCRIPTION</div>
+                  <div style={{ fontSize:9, color:"#94a3b8", marginBottom:6 }}>Paste prescription text, type from the slip, or use voice recording. Claude will auto-extract diagnoses, medications, vitals.</div>
+                  <AudioInput label="Dictate prescription" dgKey={dgKey} whisperKey={whisperKey} color="#2563eb" compact
+                    onTranscript={t=>setRxText(prev => prev ? prev + "\n" + t : t)} />
+                  <textarea value={rxText} onChange={e=>setRxText(e.target.value)} placeholder={"Paste prescription here...\n\nExample:\nDr. Sharma - Endocrinology\nDx: Type 2 DM (uncontrolled), HTN\nBP: 150/90, Wt: 78kg\nRx:\n1. Tab Metformin 500mg BD\n2. Tab Glimepiride 2mg OD before breakfast\n3. Tab Telmisartan 40mg OD morning\nAdv: HbA1c after 3 months\nF/U: 6 weeks"}
+                    style={{ width:"100%", minHeight:120, padding:8, border:"1px solid #e2e8f0", borderRadius:6, fontSize:11, fontFamily:"monospace", resize:"vertical", marginTop:6, boxSizing:"border-box" }} />
+                  <button onClick={extractPrescription} disabled={rxExtracting || !rxText.trim()}
+                    style={{ marginTop:6, width:"100%", padding:"8px", background:rxExtracting?"#6b7280":rxExtracted?"#059669":"#2563eb", color:"white", border:"none", borderRadius:6, fontWeight:700, fontSize:12, cursor:rxExtracting?"wait":"pointer" }}>
+                    {rxExtracting ? "🔬 Extracting..." : rxExtracted ? "✅ Extracted — Re-extract" : "🔬 Extract from Prescription"}
+                  </button>
+
+                  {/* Show extracted data */}
+                  {rxExtracted && (
+                    <div style={{ marginTop:8, background:"#f0fdf4", borderRadius:6, padding:8, border:"1px solid #bbf7d0" }}>
+                      <div style={{ fontSize:9, fontWeight:700, color:"#059669", marginBottom:4 }}>✅ EXTRACTED — Review & edit below, then Save</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ===== REPORT MODE ===== */}
+              {hxMode==="report" && (
+                <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#7c3aed", marginBottom:4 }}>🧪 UPLOAD TEST REPORTS</div>
+                  <div style={{ fontSize:9, color:"#94a3b8", marginBottom:8 }}>Upload photos or PDFs of test reports. Claude will extract values automatically.</div>
+
+                  {/* Upload area */}
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, marginBottom:8 }}>
+                    {[["Blood Test","🩸"],["Thyroid","🦋"],["Lipid Profile","💧"],["Kidney Function","🫘"],["Liver Function","🫀"],["HbA1c","📊"],["CBC","🔬"],["Urine","💛"],["X-Ray","☢️"],["Ultrasound","📡"],["MRI","🧲"],["DEXA","🦴"],["ABI","🦵"],["VPT","⚡"],["Other","📄"]].map(([type,icon]) => (
+                      <label key={type} style={{ display:"flex", alignItems:"center", gap:4, padding:"5px 8px", border:"1px solid #e2e8f0", borderRadius:4, cursor:"pointer", fontSize:10, fontWeight:600, background:"#fafafa" }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="#fafafa"}>
+                        <span>{icon}</span> {type}
+                        <input type="file" accept="image/*,.pdf" style={{ display:"none" }} onChange={e=>handleReportFile(e,type)} />
+                      </label>
+                    ))}
                   </div>
-                  <div>
-                    <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>Type</label>
-                    <select value={historyForm.visit_type} onChange={e=>setHistoryForm(p=>({...p,visit_type:e.target.value}))}
-                      style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }}>
-                      <option>OPD</option><option>IPD</option><option>Follow-up</option><option>Emergency</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>Doctor</label>
-                    <input value={historyForm.doctor_name} onChange={e=>setHistoryForm(p=>({...p,doctor_name:e.target.value}))} placeholder="Dr. Name"
-                      style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }} />
-                  </div>
+
+                  {/* Uploaded reports */}
+                  {reports.map((r,i) => (
+                    <div key={i} style={{ marginBottom:8, background:r.extracted?"#f0fdf4":"#f8fafc", borderRadius:6, padding:8, border:`1px solid ${r.extracted?"#bbf7d0":r.error?"#fecaca":"#e2e8f0"}` }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                        <div style={{ fontSize:11, fontWeight:700 }}>
+                          <span style={{ background:"#7c3aed", color:"white", padding:"1px 6px", borderRadius:3, fontSize:9, marginRight:6 }}>{r.type}</span>
+                          {r.fileName}
+                        </div>
+                        <div style={{ display:"flex", gap:4 }}>
+                          {!r.extracted && !r.extracting && (
+                            <button onClick={()=>extractReport(i)} style={{ fontSize:9, padding:"2px 8px", background:"#7c3aed", color:"white", border:"none", borderRadius:4, fontWeight:700, cursor:"pointer" }}>
+                              🔬 Extract
+                            </button>
+                          )}
+                          <button onClick={()=>removeReport(i)} style={{ fontSize:10, padding:"2px 6px", background:"none", border:"1px solid #fecaca", borderRadius:3, cursor:"pointer", color:"#dc2626" }}>×</button>
+                        </div>
+                      </div>
+                      {r.extracting && <div style={{ fontSize:10, color:"#7c3aed", fontWeight:600 }}>🔬 Extracting values...</div>}
+                      {r.error && <div style={{ fontSize:10, color:"#dc2626" }}>❌ {r.error}</div>}
+                      {r.extracted && (
+                        <div>
+                          <div style={{ fontSize:9, color:"#059669", fontWeight:600, marginBottom:2 }}>
+                            ✅ {r.extracted.tests?.length || 0} tests extracted
+                            {r.extracted.report_date && ` • ${r.extracted.report_date}`}
+                            {r.extracted.lab_name && ` • ${r.extracted.lab_name}`}
+                          </div>
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                            {(r.extracted.tests||[]).slice(0,12).map((t,ti) => (
+                              <span key={ti} style={{ fontSize:8, padding:"1px 5px", borderRadius:3, fontWeight:600,
+                                background:t.flag==="HIGH"?"#fef2f2":t.flag==="LOW"?"#eff6ff":"#f0fdf4",
+                                color:t.flag==="HIGH"?"#dc2626":t.flag==="LOW"?"#2563eb":"#059669",
+                                border:`1px solid ${t.flag==="HIGH"?"#fecaca":t.flag==="LOW"?"#bfdbfe":"#bbf7d0"}` }}>
+                                {t.test_name}: {t.result}{t.unit} {t.flag||"✓"}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ===== EXTRACTED / MANUAL DATA ===== */}
+              <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0", marginTop:8 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:6 }}>
+                  {hxMode==="manual" ? "📋 MANUAL ENTRY" : "📋 REVIEW EXTRACTED DATA"}
                 </div>
 
                 {/* Vitals */}
-                <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>VITALS</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:4, marginBottom:10 }}>
-                  {[["bp_sys","BP Sys"],["bp_dia","BP Dia"],["weight","Weight (kg)"],["height","Height (cm)"]].map(([k,l]) => (
+                <div style={{ fontSize:9, fontWeight:700, color:"#94a3b8", marginBottom:3 }}>VITALS</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr", gap:3, marginBottom:8 }}>
+                  {[["bp_sys","BP Sys"],["bp_dia","BP Dia"],["pulse","Pulse"],["weight","Wt (kg)"],["height","Ht (cm)"]].map(([k,l]) => (
                     <div key={k}>
-                      <label style={{ fontSize:8, color:"#94a3b8" }}>{l}</label>
+                      <label style={{ fontSize:7, color:"#94a3b8" }}>{l}</label>
                       <input value={historyForm.vitals[k]||""} onChange={e=>setHistoryForm(p=>({...p,vitals:{...p.vitals,[k]:e.target.value}}))}
-                        style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:10, boxSizing:"border-box" }} />
+                        style={{ width:"100%", padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:10, boxSizing:"border-box" }} />
                     </div>
                   ))}
                 </div>
 
                 {/* Diagnoses */}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b" }}>DIAGNOSES</div>
-                  <button onClick={()=>addHistoryRow("diagnoses")} style={{ fontSize:9, padding:"1px 6px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+ Add</button>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3 }}>
+                  <div style={{ fontSize:9, fontWeight:700, color:"#94a3b8" }}>DIAGNOSES</div>
+                  <button onClick={()=>addHistoryRow("diagnoses")} style={{ fontSize:8, padding:"1px 5px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+</button>
                 </div>
                 {historyForm.diagnoses.map((d,i) => (
-                  <div key={i} style={{ display:"grid", gridTemplateColumns:"80px 1fr 100px 24px", gap:4, marginBottom:3 }}>
-                    <input value={d.id} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],id:v};return n;});}} placeholder="dm2,htn..."
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                  <div key={i} style={{ display:"grid", gridTemplateColumns:"70px 1fr 85px 20px", gap:3, marginBottom:2 }}>
+                    <input value={d.id} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],id:v};return n;});}} placeholder="dm2"
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <input value={d.label} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],label:v};return n;});}} placeholder="Type 2 DM (since 2015)"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <select value={d.status} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],status:v};return n;});}}
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }}>
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:8, boxSizing:"border-box" }}>
                       <option>New</option><option>Controlled</option><option>Uncontrolled</option>
                     </select>
-                    <button onClick={()=>removeHistoryRow("diagnoses",i)} style={{ fontSize:12, cursor:"pointer", border:"none", background:"none", color:"#dc2626" }}>×</button>
+                    <button onClick={()=>removeHistoryRow("diagnoses",i)} style={{ fontSize:11, cursor:"pointer", border:"none", background:"none", color:"#dc2626", padding:0 }}>×</button>
                   </div>
                 ))}
 
                 {/* Medications */}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4, marginTop:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b" }}>MEDICATIONS</div>
-                  <button onClick={()=>addHistoryRow("medications")} style={{ fontSize:9, padding:"1px 6px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+ Add</button>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3, marginTop:6 }}>
+                  <div style={{ fontSize:9, fontWeight:700, color:"#94a3b8" }}>MEDICATIONS</div>
+                  <button onClick={()=>addHistoryRow("medications")} style={{ fontSize:8, padding:"1px 5px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+</button>
                 </div>
                 {historyForm.medications.map((m,i) => (
-                  <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px 60px 80px 24px", gap:4, marginBottom:3 }}>
+                  <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 60px 50px 70px 20px", gap:3, marginBottom:2 }}>
                     <input value={m.name} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],name:v};return n;});}} placeholder="THYRONORM 88MCG"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <input value={m.dose} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],dose:v};return n;});}} placeholder="88mcg"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <input value={m.frequency} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],frequency:v};return n;});}} placeholder="OD"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <input value={m.timing} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],timing:v};return n;});}} placeholder="Morning"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
-                    <button onClick={()=>removeHistoryRow("medications",i)} style={{ fontSize:12, cursor:"pointer", border:"none", background:"none", color:"#dc2626" }}>×</button>
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <button onClick={()=>removeHistoryRow("medications",i)} style={{ fontSize:11, cursor:"pointer", border:"none", background:"none", color:"#dc2626", padding:0 }}>×</button>
                   </div>
                 ))}
 
                 {/* Lab Results */}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4, marginTop:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b" }}>LAB RESULTS</div>
-                  <button onClick={()=>addHistoryRow("labs")} style={{ fontSize:9, padding:"1px 6px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+ Add</button>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3, marginTop:6 }}>
+                  <div style={{ fontSize:9, fontWeight:700, color:"#94a3b8" }}>LAB RESULTS</div>
+                  <button onClick={()=>addHistoryRow("labs")} style={{ fontSize:8, padding:"1px 5px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+</button>
                 </div>
                 {historyForm.labs.map((l,i) => (
-                  <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px 50px 50px 80px 24px", gap:4, marginBottom:3 }}>
+                  <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 55px 40px 45px 70px 20px", gap:3, marginBottom:2 }}>
                     <input value={l.test_name} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],test_name:v};return n;});}} placeholder="HbA1c"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <input value={l.result} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],result:v};return n;});}} placeholder="8.2"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <input value={l.unit} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],unit:v};return n;});}} placeholder="%"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
                     <select value={l.flag} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],flag:v};return n;});}}
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }}>
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:8, boxSizing:"border-box" }}>
                       <option value="">OK</option><option>HIGH</option><option>LOW</option>
                     </select>
                     <input value={l.ref_range} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],ref_range:v};return n;});}} placeholder="<6.5"
-                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
-                    <button onClick={()=>removeHistoryRow("labs",i)} style={{ fontSize:12, cursor:"pointer", border:"none", background:"none", color:"#dc2626" }}>×</button>
+                      style={{ padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <button onClick={()=>removeHistoryRow("labs",i)} style={{ fontSize:11, cursor:"pointer", border:"none", background:"none", color:"#dc2626", padding:0 }}>×</button>
                   </div>
                 ))}
-
-                {/* Save button */}
-                <button onClick={saveHistoryEntry} disabled={historySaving || !historyForm.visit_date}
-                  style={{ marginTop:10, width:"100%", padding:"8px", background:historyForm.visit_date?"#2563eb":"#e2e8f0", color:historyForm.visit_date?"white":"#94a3b8", border:"none", borderRadius:6, fontWeight:700, fontSize:12, cursor:historyForm.visit_date?"pointer":"default" }}>
-                  {historySaving ? "Saving..." : "💾 Save Historical Visit"}
-                </button>
               </div>
+
+              {/* Save button */}
+              <button onClick={saveHistoryEntry} disabled={historySaving || !historyForm.visit_date}
+                style={{ marginTop:8, width:"100%", padding:"10px", background:historyForm.visit_date?"#2563eb":"#e2e8f0", color:historyForm.visit_date?"white":"#94a3b8", border:"none", borderRadius:6, fontWeight:700, fontSize:13, cursor:historyForm.visit_date?"pointer":"default" }}>
+                {historySaving ? "💾 Saving..." : "💾 Save Historical Visit"}
+              </button>
             </div>
           )}
         </div>
