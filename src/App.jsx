@@ -214,8 +214,8 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
   const [error, setError] = useState("");
   const [audioUrl, setAudioUrl] = useState(null);
   const [duration, setDuration] = useState(0);
-  const [lang, setLang] = useState("hi");
-  const [engine, setEngine] = useState(whisperKey ? "whisper" : "deepgram");
+  const [lang, setLang] = useState("en");
+  const [engine, setEngine] = useState(dgKey ? "deepgram" : "whisper");
   const [useCleanup, setUseCleanup] = useState(true);
   const mediaRec = useRef(null);
   const chunks = useRef([]);
@@ -562,6 +562,18 @@ export default function GiniScribe() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
+  const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
+  // History entry form
+  const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
+    diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}],
+    labs:[{test_name:"",result:"",unit:"",flag:"",ref_range:""}] };
+  const [historyForm, setHistoryForm] = useState({...emptyHistory});
+  const [historyList, setHistoryList] = useState([]);
+  const [historySaving, setHistorySaving] = useState(false);
+  // Outcomes data
+  const [outcomesData, setOutcomesData] = useState(null);
+  const [outcomesLoading, setOutcomesLoading] = useState(false);
+  const [patientFullData, setPatientFullData] = useState(null);
 
   // localStorage: load saved patients
   useEffect(() => {
@@ -605,6 +617,7 @@ export default function GiniScribe() {
         const result = await resp.json();
         if (result.success) {
           setSaveStatus(`✅ Saved (DB #${result.consultation_id})`);
+          setDbPatientId(result.patient_id);
         } else {
           setSaveStatus("⚠️ Local only — DB: " + (result.error || "failed").slice(0, 40));
         }
@@ -648,11 +661,14 @@ export default function GiniScribe() {
       abhaId: dbRecord.abha_id || "", healthId: dbRecord.health_id || "",
       aadhaar: dbRecord.aadhaar || "", govtId: dbRecord.govt_id || "", govtIdType: dbRecord.govt_id_type || ""
     });
-    // Load latest consultation if available
+    setDbPatientId(dbRecord.id);
+    // Load full patient record
     if (API_URL && dbRecord.id) {
       try {
         const resp = await fetch(`${API_URL}/api/patients/${dbRecord.id}`);
         const full = await resp.json();
+        setPatientFullData(full);
+        setHistoryList(full.consultations || []);
         if (full.consultations?.length > 0) {
           const latest = full.consultations[0];
           const conResp = await fetch(`${API_URL}/api/consultations/${latest.id}`);
@@ -662,7 +678,6 @@ export default function GiniScribe() {
           if (conDetail.mo_transcript) setMoTranscript(conDetail.mo_transcript);
           if (conDetail.con_transcript) setConTranscript(conDetail.con_transcript);
         }
-        // Load latest vitals
         if (full.vitals?.length > 0) {
           const v = full.vitals[0];
           setVitals(prev => ({
@@ -671,6 +686,8 @@ export default function GiniScribe() {
             spo2: v.spo2 || "", weight: v.weight || "", height: v.height || "", bmi: v.bmi || ""
           }));
         }
+        // Load outcomes
+        fetchOutcomes(dbRecord.id);
       } catch {}
     }
     setShowSearch(false);
@@ -833,6 +850,120 @@ export default function GiniScribe() {
   const planMonitors = sa(conData,"self_monitoring").filter((_,i) => !(planEdits._removedMonitors||[]).includes(i));
   const planFuture = sa(conData,"future_plan").filter((_,i) => !(planEdits._removedFuture||[]).includes(i));
 
+  // ============ HISTORY ENTRY ============
+  const updateHistoryField = (path, value) => {
+    setHistoryForm(prev => {
+      const next = JSON.parse(JSON.stringify(prev));
+      const keys = path.split(".");
+      let obj = next;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!isNaN(keys[i+1])) { obj = obj[keys[i]]; }
+        else if (!isNaN(keys[i])) { obj = obj[parseInt(keys[i])]; }
+        else { obj = obj[keys[i]]; }
+      }
+      const lastKey = keys[keys.length-1];
+      if (!isNaN(lastKey)) obj[parseInt(lastKey)] = value;
+      else obj[lastKey] = value;
+      return next;
+    });
+  };
+  const addHistoryRow = (section) => {
+    setHistoryForm(prev => {
+      const next = {...prev};
+      if (section === "diagnoses") next.diagnoses = [...next.diagnoses, {id:"",label:"",status:"New"}];
+      if (section === "medications") next.medications = [...next.medications, {name:"",dose:"",frequency:"",timing:""}];
+      if (section === "labs") next.labs = [...next.labs, {test_name:"",result:"",unit:"",flag:"",ref_range:""}];
+      return next;
+    });
+  };
+  const removeHistoryRow = (section, idx) => {
+    setHistoryForm(prev => {
+      const next = {...prev};
+      next[section] = next[section].filter((_,i) => i !== idx);
+      return next;
+    });
+  };
+
+  const saveHistoryEntry = async () => {
+    if (!dbPatientId || !historyForm.visit_date) return;
+    setHistorySaving(true);
+    try {
+      const payload = {
+        visit_date: historyForm.visit_date,
+        visit_type: historyForm.visit_type,
+        doctor_name: historyForm.doctor_name,
+        vitals: historyForm.vitals,
+        diagnoses: historyForm.diagnoses.filter(d => d.label),
+        medications: historyForm.medications.filter(m => m.name),
+        labs: historyForm.labs.filter(l => l.test_name && l.result)
+      };
+      const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}/history`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await resp.json();
+      if (result.success) {
+        setHistoryForm({...emptyHistory, diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}], labs:[{test_name:"",result:"",unit:"",flag:"",ref_range:""}]});
+        // Refresh history list
+        const pResp = await fetch(`${API_URL}/api/patients/${dbPatientId}`);
+        const full = await pResp.json();
+        setHistoryList(full.consultations || []);
+        setPatientFullData(full);
+        fetchOutcomes(dbPatientId);
+      }
+    } catch (e) { console.error("History save error:", e); }
+    setHistorySaving(false);
+  };
+
+  // ============ OUTCOMES ============
+  const fetchOutcomes = async (pid) => {
+    if (!API_URL || !pid) return;
+    setOutcomesLoading(true);
+    try {
+      const resp = await fetch(`${API_URL}/api/patients/${pid}/outcomes`);
+      const data = await resp.json();
+      setOutcomesData(data);
+    } catch {}
+    setOutcomesLoading(false);
+  };
+
+  // Simple sparkline SVG
+  const Sparkline = ({ data, width=200, height=50, color="#2563eb", label, unit, target }) => {
+    if (!data || data.length === 0) return null;
+    const values = data.map(d => d.result || d.bp_sys || d.weight || 0);
+    const dates = data.map(d => d.test_date || d.date);
+    const min = Math.min(...values) * 0.9;
+    const max = Math.max(...values) * 1.1;
+    const range = max - min || 1;
+    const points = values.map((v, i) => `${(i / Math.max(values.length - 1, 1)) * width},${height - ((v - min) / range) * height}`).join(" ");
+    const latest = values[values.length - 1];
+    const first = values[0];
+    const trend = latest < first ? "↓" : latest > first ? "↑" : "→";
+    const trendColor = label === "Weight" || label === "HbA1c" || label === "BP"
+      ? (latest <= first ? "#059669" : "#dc2626")
+      : (latest >= first ? "#059669" : "#dc2626");
+    return (
+      <div style={{ background:"#f8fafc", borderRadius:8, padding:"8px 12px", border:"1px solid #e2e8f0" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#374151" }}>{label}</div>
+          <div style={{ fontSize:13, fontWeight:800, color:trendColor }}>{latest}{unit} {trend}</div>
+        </div>
+        <svg viewBox={`0 0 ${width} ${height}`} style={{ width:"100%", height:height }}>
+          {target && <line x1="0" y1={height - ((target - min) / range) * height} x2={width} y2={height - ((target - min) / range) * height} stroke="#059669" strokeDasharray="4,4" strokeWidth="1" />}
+          <polyline points={points} fill="none" stroke={color} strokeWidth="2" />
+          {values.map((v, i) => (
+            <circle key={i} cx={(i / Math.max(values.length - 1, 1)) * width} cy={height - ((v - min) / range) * height} r="3" fill={color} />
+          ))}
+        </svg>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:8, color:"#94a3b8", marginTop:2 }}>
+          <span>{dates[0]}</span>
+          <span>{values.length} readings</span>
+          <span>{dates[dates.length-1]}</span>
+        </div>
+      </div>
+    );
+  };
+
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
     { id:"quick", label:"⚡ Quick", show:keySet },
@@ -840,7 +971,9 @@ export default function GiniScribe() {
     { id:"vitals", label:"📋", show:keySet },
     { id:"mo", label:"🎤 MO", show:keySet },
     { id:"consultant", label:"👨‍⚕️ Con", show:keySet },
-    { id:"plan", label:"📄 Plan", show:keySet }
+    { id:"plan", label:"📄 Plan", show:keySet },
+    { id:"history", label:"📜 Hx", show:keySet && !!API_URL },
+    { id:"outcomes", label:"📊", show:keySet && !!API_URL }
   ];
 
   // Quick Mode: process single dictation into all sections
@@ -1525,6 +1658,248 @@ export default function GiniScribe() {
         </div>
       )}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
+
+      {/* ===== HISTORY ENTRY ===== */}
+      {tab==="history" && (
+        <div>
+          {!dbPatientId ? (
+            <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>📜</div>
+              <div style={{ fontSize:13, fontWeight:600 }}>Load a patient from the database first</div>
+              <div style={{ fontSize:11, marginTop:4 }}>Use 🔍 Find to search and select a patient, or save a consultation first</div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize:14, fontWeight:700, marginBottom:8, color:"#1e293b" }}>📜 Add Previous Consultation — {patient.name}</div>
+
+              {/* Past consultations list */}
+              {historyList.length > 0 && (
+                <div style={{ marginBottom:12, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>VISIT HISTORY ({historyList.length})</div>
+                  {historyList.slice(0,10).map((c,i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"3px 0", fontSize:10, borderBottom:i<historyList.length-1?"1px solid #f1f5f9":"none" }}>
+                      <span style={{ fontWeight:600, color:"#2563eb", minWidth:70 }}>{new Date(c.visit_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span>
+                      <span style={{ color:"#64748b" }}>{c.visit_type||"OPD"}</span>
+                      <span style={{ color:"#374151" }}>{c.con_name||c.mo_name||""}</span>
+                      <span style={{ marginLeft:"auto", fontSize:8, color:c.status==="completed"?"#059669":"#f59e0b", fontWeight:600 }}>{c.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* New history entry form */}
+              <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#2563eb", marginBottom:8 }}>➕ ADD PAST VISIT</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:10 }}>
+                  <div>
+                    <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>Date *</label>
+                    <input type="date" value={historyForm.visit_date} onChange={e=>setHistoryForm(p=>({...p,visit_date:e.target.value}))}
+                      style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>Type</label>
+                    <select value={historyForm.visit_type} onChange={e=>setHistoryForm(p=>({...p,visit_type:e.target.value}))}
+                      style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }}>
+                      <option>OPD</option><option>IPD</option><option>Follow-up</option><option>Emergency</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>Doctor</label>
+                    <input value={historyForm.doctor_name} onChange={e=>setHistoryForm(p=>({...p,doctor_name:e.target.value}))} placeholder="Dr. Name"
+                      style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }} />
+                  </div>
+                </div>
+
+                {/* Vitals */}
+                <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>VITALS</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:4, marginBottom:10 }}>
+                  {[["bp_sys","BP Sys"],["bp_dia","BP Dia"],["weight","Weight (kg)"],["height","Height (cm)"]].map(([k,l]) => (
+                    <div key={k}>
+                      <label style={{ fontSize:8, color:"#94a3b8" }}>{l}</label>
+                      <input value={historyForm.vitals[k]||""} onChange={e=>setHistoryForm(p=>({...p,vitals:{...p.vitals,[k]:e.target.value}}))}
+                        style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:10, boxSizing:"border-box" }} />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Diagnoses */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b" }}>DIAGNOSES</div>
+                  <button onClick={()=>addHistoryRow("diagnoses")} style={{ fontSize:9, padding:"1px 6px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+ Add</button>
+                </div>
+                {historyForm.diagnoses.map((d,i) => (
+                  <div key={i} style={{ display:"grid", gridTemplateColumns:"80px 1fr 100px 24px", gap:4, marginBottom:3 }}>
+                    <input value={d.id} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],id:v};return n;});}} placeholder="dm2,htn..."
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <input value={d.label} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],label:v};return n;});}} placeholder="Type 2 DM (since 2015)"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <select value={d.status} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.diagnoses=[...n.diagnoses];n.diagnoses[i]={...n.diagnoses[i],status:v};return n;});}}
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }}>
+                      <option>New</option><option>Controlled</option><option>Uncontrolled</option>
+                    </select>
+                    <button onClick={()=>removeHistoryRow("diagnoses",i)} style={{ fontSize:12, cursor:"pointer", border:"none", background:"none", color:"#dc2626" }}>×</button>
+                  </div>
+                ))}
+
+                {/* Medications */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4, marginTop:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b" }}>MEDICATIONS</div>
+                  <button onClick={()=>addHistoryRow("medications")} style={{ fontSize:9, padding:"1px 6px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+ Add</button>
+                </div>
+                {historyForm.medications.map((m,i) => (
+                  <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px 60px 80px 24px", gap:4, marginBottom:3 }}>
+                    <input value={m.name} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],name:v};return n;});}} placeholder="THYRONORM 88MCG"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <input value={m.dose} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],dose:v};return n;});}} placeholder="88mcg"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <input value={m.frequency} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],frequency:v};return n;});}} placeholder="OD"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <input value={m.timing} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.medications=[...n.medications];n.medications[i]={...n.medications[i],timing:v};return n;});}} placeholder="Morning"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <button onClick={()=>removeHistoryRow("medications",i)} style={{ fontSize:12, cursor:"pointer", border:"none", background:"none", color:"#dc2626" }}>×</button>
+                  </div>
+                ))}
+
+                {/* Lab Results */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4, marginTop:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b" }}>LAB RESULTS</div>
+                  <button onClick={()=>addHistoryRow("labs")} style={{ fontSize:9, padding:"1px 6px", border:"1px solid #e2e8f0", borderRadius:3, cursor:"pointer", background:"white" }}>+ Add</button>
+                </div>
+                {historyForm.labs.map((l,i) => (
+                  <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px 50px 50px 80px 24px", gap:4, marginBottom:3 }}>
+                    <input value={l.test_name} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],test_name:v};return n;});}} placeholder="HbA1c"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <input value={l.result} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],result:v};return n;});}} placeholder="8.2"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <input value={l.unit} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],unit:v};return n;});}} placeholder="%"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <select value={l.flag} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],flag:v};return n;});}}
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }}>
+                      <option value="">OK</option><option>HIGH</option><option>LOW</option>
+                    </select>
+                    <input value={l.ref_range} onChange={e=>{const v=e.target.value;setHistoryForm(p=>{const n={...p};n.labs=[...n.labs];n.labs[i]={...n.labs[i],ref_range:v};return n;});}} placeholder="<6.5"
+                      style={{ padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9, boxSizing:"border-box" }} />
+                    <button onClick={()=>removeHistoryRow("labs",i)} style={{ fontSize:12, cursor:"pointer", border:"none", background:"none", color:"#dc2626" }}>×</button>
+                  </div>
+                ))}
+
+                {/* Save button */}
+                <button onClick={saveHistoryEntry} disabled={historySaving || !historyForm.visit_date}
+                  style={{ marginTop:10, width:"100%", padding:"8px", background:historyForm.visit_date?"#2563eb":"#e2e8f0", color:historyForm.visit_date?"white":"#94a3b8", border:"none", borderRadius:6, fontWeight:700, fontSize:12, cursor:historyForm.visit_date?"pointer":"default" }}>
+                  {historySaving ? "Saving..." : "💾 Save Historical Visit"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== OUTCOMES ===== */}
+      {tab==="outcomes" && (
+        <div>
+          {!dbPatientId ? (
+            <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>📊</div>
+              <div style={{ fontSize:13, fontWeight:600 }}>Load a patient from the database first</div>
+              <div style={{ fontSize:11, marginTop:4 }}>Use 🔍 Find to search and select a patient</div>
+            </div>
+          ) : outcomesLoading ? (
+            <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>Loading outcomes...</div>
+          ) : (
+            <div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontSize:14, fontWeight:700, color:"#1e293b" }}>📊 Outcomes — {patient.name}</div>
+                <button onClick={()=>fetchOutcomes(dbPatientId)} style={{ fontSize:10, padding:"3px 8px", border:"1px solid #e2e8f0", borderRadius:4, cursor:"pointer", background:"white" }}>🔄 Refresh</button>
+              </div>
+
+              {/* Summary cards */}
+              {patientFullData && (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:6, marginBottom:12 }}>
+                  <div style={{ background:"#eff6ff", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
+                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>VISITS</div>
+                    <div style={{ fontSize:18, fontWeight:800, color:"#2563eb" }}>{patientFullData.consultations?.length || 0}</div>
+                  </div>
+                  <div style={{ background:"#f0fdf4", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
+                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>ACTIVE MEDS</div>
+                    <div style={{ fontSize:18, fontWeight:800, color:"#059669" }}>{patientFullData.medications?.filter(m=>m.is_active).length || 0}</div>
+                  </div>
+                  <div style={{ background:"#fef3c7", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
+                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>DIAGNOSES</div>
+                    <div style={{ fontSize:18, fontWeight:800, color:"#d97706" }}>{patientFullData.diagnoses?.filter(d=>d.is_active).length || 0}</div>
+                  </div>
+                  <div style={{ background:"#fce7f3", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
+                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>LAB TESTS</div>
+                    <div style={{ fontSize:18, fontWeight:800, color:"#db2777" }}>{patientFullData.lab_results?.length || 0}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Trend Charts */}
+              {outcomesData && (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  <Sparkline data={outcomesData.hba1c} label="HbA1c" unit="%" color="#dc2626" target={6.5} />
+                  <Sparkline data={outcomesData.bp} label="BP" unit=" mmHg" color="#7c3aed" target={130} />
+                  <Sparkline data={outcomesData.weight} label="Weight" unit=" kg" color="#2563eb" />
+                  <Sparkline data={outcomesData.egfr} label="eGFR" unit=" ml/min" color="#059669" target={60} />
+                </div>
+              )}
+
+              {(!outcomesData || (outcomesData.hba1c?.length === 0 && outcomesData.bp?.length === 0 && outcomesData.weight?.length === 0)) && (
+                <div style={{ textAlign:"center", padding:20, color:"#94a3b8", background:"#f8fafc", borderRadius:8, marginTop:8 }}>
+                  <div style={{ fontSize:11 }}>No trend data yet. Add historical visits in the 📜 Hx tab or save more consultations to build trends.</div>
+                </div>
+              )}
+
+              {/* Active Diagnoses */}
+              {patientFullData?.diagnoses?.length > 0 && (
+                <div style={{ marginTop:12, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>ACTIVE DIAGNOSES</div>
+                  {patientFullData.diagnoses.filter(d=>d.is_active).map((d,i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"2px 0", fontSize:10 }}>
+                      <span style={{ fontWeight:700, color:"#1e293b" }}>{d.label}</span>
+                      <span style={{ color:d.status==="Controlled"?"#059669":d.status==="Uncontrolled"?"#dc2626":"#f59e0b", fontWeight:600 }}>{d.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Active Medications */}
+              {patientFullData?.medications?.length > 0 && (
+                <div style={{ marginTop:8, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>ACTIVE MEDICATIONS</div>
+                  {patientFullData.medications.filter(m=>m.is_active).map((m,i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"2px 0", fontSize:10 }}>
+                      <span style={{ fontWeight:700, color:"#1e293b", minWidth:140 }}>{m.pharmacy_match || m.name}</span>
+                      <span style={{ color:"#64748b" }}>{m.dose}</span>
+                      <span style={{ color:"#2563eb", fontWeight:600 }}>{m.frequency} {m.timing}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Recent Labs */}
+              {patientFullData?.lab_results?.length > 0 && (
+                <div style={{ marginTop:8, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>RECENT LAB RESULTS</div>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10 }}>
+                    <thead><tr style={{ borderBottom:"1px solid #e2e8f0" }}><th style={{textAlign:"left",padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Test</th><th style={{padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Result</th><th style={{padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Ref</th><th style={{padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Date</th></tr></thead>
+                    <tbody>
+                      {patientFullData.lab_results.slice(0,15).map((l,i) => (
+                        <tr key={i} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                          <td style={{padding:"2px 4px",fontWeight:600}}>{l.test_name}</td>
+                          <td style={{padding:"2px 4px",textAlign:"center",fontWeight:700,color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#2563eb":"#374151"}}>{l.result} {l.unit}</td>
+                          <td style={{padding:"2px 4px",textAlign:"center",fontSize:9,color:"#94a3b8"}}>{l.ref_range}</td>
+                          <td style={{padding:"2px 4px",textAlign:"center",fontSize:9,color:"#94a3b8"}}>{l.test_date ? new Date(l.test_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) : ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
