@@ -13,14 +13,15 @@ app.use(express.json({ limit: "10mb" }));
 
 const dbUrl = process.env.DATABASE_URL || "";
 const isInternal = dbUrl.includes(".railway.internal");
+const needsSsl = dbUrl.includes("rlwy.net") || dbUrl.includes("railway.app") || (dbUrl.includes("railway") && !isInternal);
 const pool = new pg.Pool({
   connectionString: dbUrl,
-  ssl: (!isInternal && dbUrl.includes("railway")) ? { rejectUnauthorized: false } : false,
+  ssl: needsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
 });
 
-console.log("📦 DATABASE_URL set:", !!dbUrl, "internal:", isInternal);
+console.log("📦 DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
 
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
