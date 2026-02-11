@@ -11,37 +11,40 @@ const pool = new pg.Pool({
   ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false
 });
 
-// Convert empty strings to null for Postgres
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
 const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 
-// Health check
 app.get("/", (_, res) => res.json({ status: "ok", service: "gini-scribe-api" }));
 
 // ============ PATIENTS ============
 
-// Search patients
 app.get("/api/patients", async (req, res) => {
   try {
     const { q, limit = 20 } = req.query;
     let result;
+    const baseQ = `SELECT p.*, 
+      (SELECT COUNT(*) FROM consultations c WHERE c.patient_id=p.id) as visit_count,
+      (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) as last_visit,
+      (SELECT COUNT(*) FROM diagnoses d WHERE d.patient_id=p.id AND d.is_active=true) as active_diagnoses
+      FROM patients p`;
     if (q) {
       result = await pool.query(
-        `SELECT * FROM v_patient_summary WHERE
-         name ILIKE $1 OR phone LIKE $2 OR file_no ILIKE $1 OR abha_id LIKE $2 OR health_id LIKE $2
-         ORDER BY last_visit DESC NULLS LAST LIMIT $3`,
+        `${baseQ} WHERE p.name ILIKE $1 OR p.phone LIKE $2 OR p.file_no ILIKE $1
+         ORDER BY (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) DESC NULLS LAST LIMIT $3`,
         [`%${q}%`, `%${q}%`, limit]
       );
     } else {
-      result = await pool.query("SELECT * FROM v_patient_summary ORDER BY last_visit DESC NULLS LAST LIMIT $1", [limit]);
+      result = await pool.query(
+        `${baseQ} ORDER BY (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) DESC NULLS LAST LIMIT $1`, [limit]
+      );
     }
     res.json(result.rows);
-  } catch (e) { console.error("Search error:", e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get single patient with full history
+// Get single patient — DEDUPLICATED
 app.get("/api/patients/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -51,16 +54,31 @@ app.get("/api/patients/:id", async (req, res) => {
     const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
       pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
-      pool.query("SELECT * FROM medications WHERE patient_id=$1 ORDER BY is_active DESC, created_at DESC", [id]),
-      pool.query("SELECT * FROM lab_results WHERE patient_id=$1 ORDER BY test_date DESC", [id]),
-      pool.query("SELECT * FROM diagnoses WHERE patient_id=$1 ORDER BY is_active DESC, created_at DESC", [id]),
+      // Deduplicate meds: latest entry per med name
+      pool.query(`SELECT DISTINCT ON (UPPER(name)) * FROM medications
+        WHERE patient_id=$1 ORDER BY UPPER(name), created_at DESC`, [id]),
+      // Deduplicate labs: distinct by test+date
+      pool.query(`SELECT DISTINCT ON (test_name, test_date) * FROM lab_results
+        WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`, [id]),
+      // Deduplicate diagnoses: latest status per diagnosis_id
+      pool.query(`SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
+        WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`, [id]),
       pool.query("SELECT id, doc_type, title, file_name, doc_date, source, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC", [id]),
       pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [id]),
     ]);
 
+    // Deduplicate consultations by visit_date+status
+    const seenVisits = new Set();
+    const uniqueConsultations = consultations.rows.filter(c => {
+      const key = `${c.visit_date}|${c.status}`;
+      if (seenVisits.has(key)) return false;
+      seenVisits.add(key);
+      return true;
+    });
+
     res.json({
       ...patient.rows[0],
-      consultations: consultations.rows,
+      consultations: uniqueConsultations,
       vitals: vitals.rows,
       medications: meds.rows,
       lab_results: labs.rows,
@@ -71,7 +89,6 @@ app.get("/api/patients/:id", async (req, res) => {
   } catch (e) { console.error("Patient detail error:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// Create or find patient (upsert by phone or file_no)
 app.post("/api/patients", async (req, res) => {
   try {
     const p = req.body;
@@ -99,21 +116,18 @@ app.post("/api/patients", async (req, res) => {
       );
       res.json({ ...result.rows[0], _isNew: true });
     }
-  } catch (e) { console.error("Patient create error:", e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============ CONSULTATIONS ============
 
-// Save full consultation
 app.post("/api/consultations", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, planEdits } = req.body;
 
-    // 1. Upsert patient
-    let patientId;
-    let existing = null;
+    let patientId, existing = null;
     if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
     if (!existing && n(patient.fileNo)) existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo])).rows[0];
 
@@ -139,7 +153,6 @@ app.post("/api/consultations", async (req, res) => {
       patientId = r.rows[0].id;
     }
 
-    // 2. Create consultation
     const con = await client.query(
       `INSERT INTO consultations (patient_id, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed') RETURNING id`,
@@ -147,7 +160,6 @@ app.post("/api/consultations", async (req, res) => {
     );
     const consultationId = con.rows[0].id;
 
-    // 3. Save vitals
     if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
       await client.query(
         `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi)
@@ -157,22 +169,16 @@ app.post("/api/consultations", async (req, res) => {
       );
     }
 
-    // 4. Save diagnoses
-    const diagnoses = moData?.diagnoses || [];
-    for (const d of diagnoses) {
-      if (d && d.id && d.label) {
+    for (const d of (moData?.diagnoses || [])) {
+      if (d?.id && d?.label) {
         await client.query(
-          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
-           VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
           [patientId, consultationId, d.id, d.label, n(d.status) || 'New']
         );
       }
     }
-
-    // 5. Save medications (previous + confirmed)
-    const prevMeds = moData?.previous_medications || [];
-    for (const m of prevMeds) {
-      if (m && m.name) {
+    for (const m of (moData?.previous_medications || [])) {
+      if (m?.name) {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_new, is_active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)`,
@@ -180,50 +186,33 @@ app.post("/api/consultations", async (req, res) => {
         );
       }
     }
-    const newMeds = conData?.medications_confirmed || [];
-    for (const m of newMeds) {
-      if (m && m.name) {
+    for (const m of (conData?.medications_confirmed || [])) {
+      if (m?.name) {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)`,
-          [patientId, consultationId, m.name, n(m._matched), n(m.composition), n(m.dose), n(m.frequency), n(m.timing), n(m.route) || 'Oral', m.isNew === true]
+          [patientId, consultationId, m.name, n(m._matched), n(m.composition), n(m.dose), n(m.frequency), n(m.timing), n(m.route)||'Oral', m.isNew===true]
         );
       }
     }
-
-    // 6. Save lab results
-    const investigations = moData?.investigations || [];
-    for (const inv of investigations) {
-      if (inv && inv.test && num(inv.value) !== null) {
+    for (const inv of (moData?.investigations || [])) {
+      if (inv?.test && num(inv.value) !== null) {
         await client.query(
-          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe')`,
-          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical === true, n(inv.ref)]
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe')`,
+          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical===true, n(inv.ref)]
         );
       }
     }
-
-    // 7. Save goals
-    const goals = conData?.goals || [];
-    for (const g of goals) {
-      if (g && g.marker) {
-        await client.query(
-          `INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [patientId, consultationId, g.marker, n(g.current), n(g.target), n(g.timeline), n(g.priority)]
-        );
+    for (const g of (conData?.goals || [])) {
+      if (g?.marker) {
+        await client.query(`INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [patientId, consultationId, g.marker, n(g.current), n(g.target), n(g.timeline), n(g.priority)]);
       }
     }
-
-    // 8. Save complications
-    const complications = moData?.complications || [];
-    for (const c of complications) {
-      if (c && c.name) {
-        await client.query(
-          `INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
-          [patientId, consultationId, c.name, n(c.status), n(c.detail), n(c.severity)]
-        );
+    for (const c of (moData?.complications || [])) {
+      if (c?.name) {
+        await client.query(`INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [patientId, consultationId, c.name, n(c.status), n(c.detail), n(c.severity)]);
       }
     }
 
@@ -234,57 +223,44 @@ app.post("/api/consultations", async (req, res) => {
     await client.query("ROLLBACK");
     console.error("❌ Save error:", e.message, e.detail || "");
     res.status(500).json({ error: e.message });
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 });
 
-// Get consultation detail
 app.get("/api/consultations/:id", async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT c.*, p.name as patient_name, p.age, p.sex, p.phone, p.file_no
-       FROM consultations c JOIN patients p ON p.id = c.patient_id WHERE c.id=$1`,
-      [req.params.id]
-    );
+       FROM consultations c JOIN patients p ON p.id = c.patient_id WHERE c.id=$1`, [req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
     res.json(result.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ VITALS HISTORY ============
+// ============ VITALS / LABS / MEDS ============
 app.get("/api/patients/:id/vitals", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [req.params.id]);
-    res.json(result.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json((await pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [req.params.id])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ LAB TRENDS ============
 app.get("/api/patients/:id/labs", async (req, res) => {
   try {
     const { test } = req.query;
-    let result;
-    if (test) {
-      result = await pool.query("SELECT * FROM lab_results WHERE patient_id=$1 AND test_name=$2 ORDER BY test_date", [req.params.id, test]);
-    } else {
-      result = await pool.query("SELECT * FROM lab_results WHERE patient_id=$1 ORDER BY test_date DESC", [req.params.id]);
-    }
-    res.json(result.rows);
+    const q = test
+      ? `SELECT DISTINCT ON (test_name, test_date) * FROM lab_results WHERE patient_id=$1 AND test_name=$2 ORDER BY test_name, test_date, created_at DESC`
+      : `SELECT DISTINCT ON (test_name, test_date) * FROM lab_results WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`;
+    const params = test ? [req.params.id, test] : [req.params.id];
+    res.json((await pool.query(q, params)).rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ MEDICATIONS ============
 app.get("/api/patients/:id/medications", async (req, res) => {
   try {
     const { active } = req.query;
     const where = active === "true" ? "AND is_active=TRUE" : "";
-    const result = await pool.query(`SELECT * FROM medications WHERE patient_id=$1 ${where} ORDER BY created_at DESC`, [req.params.id]);
-    res.json(result.rows);
+    res.json((await pool.query(`SELECT DISTINCT ON (UPPER(name)) * FROM medications WHERE patient_id=$1 ${where} ORDER BY UPPER(name), created_at DESC`, [req.params.id])).rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ DOCUMENTS ============
 app.post("/api/patients/:id/documents", async (req, res) => {
   try {
     const { doc_type, title, file_name, file_url, extracted_text, extracted_data, doc_date, source, notes, consultation_id } = req.body;
@@ -297,31 +273,69 @@ app.post("/api/patients/:id/documents", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ OUTCOMES / ANALYTICS ============
+// ============ OUTCOMES — EXPANDED ============
 app.get("/api/patients/:id/outcomes", async (req, res) => {
   try {
     const id = req.params.id;
-    const [hba1c, bp, weight, egfr] = await Promise.all([
-      pool.query("SELECT result, test_date FROM lab_results WHERE patient_id=$1 AND test_name='HbA1c' ORDER BY test_date", [id]),
-      pool.query("SELECT bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ORDER BY recorded_at", [id]),
-      pool.query("SELECT weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ORDER BY recorded_at", [id]),
-      pool.query("SELECT result, test_date FROM lab_results WHERE patient_id=$1 AND test_name='eGFR' ORDER BY test_date", [id]),
+    const { period } = req.query;
+    let df = "", vf = "";
+    if (period === "3m") { df = "AND test_date > NOW() - INTERVAL '3 months'"; vf = "AND recorded_at > NOW() - INTERVAL '3 months'"; }
+    else if (period === "6m") { df = "AND test_date > NOW() - INTERVAL '6 months'"; vf = "AND recorded_at > NOW() - INTERVAL '6 months'"; }
+    else if (period === "1y") { df = "AND test_date > NOW() - INTERVAL '1 year'"; vf = "AND recorded_at > NOW() - INTERVAL '1 year'"; }
+
+    const labQ = (names) => `SELECT DISTINCT ON (test_date) result, test_date FROM lab_results WHERE patient_id=$1 AND test_name IN (${names.map((_,i)=>`$${i+2}`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
+
+    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, bp, weight] = await Promise.all([
+      pool.query(labQ(['HbA1c']), [id, 'HbA1c']),
+      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS']),
+      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C']), [id, 'LDL','LDL Cholesterol','LDL-C']),
+      pool.query(labQ(['Triglycerides','TG','Triglyceride']), [id, 'Triglycerides','TG','Triglyceride']),
+      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C']), [id, 'HDL','HDL Cholesterol','HDL-C']),
+      pool.query(labQ(['Creatinine','Serum Creatinine']), [id, 'Creatinine','Serum Creatinine']),
+      pool.query(labQ(['eGFR']), [id, 'eGFR']),
+      pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin']),
+      pool.query(labQ(['TSH']), [id, 'TSH']),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
     ]);
-    res.json({ hba1c: hba1c.rows, bp: bp.rows, weight: weight.rows, egfr: egfr.rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+
+    const screenings = await pool.query(
+      `SELECT DISTINCT ON (test_name) test_name, result, unit, test_date, flag
+       FROM lab_results WHERE patient_id=$1 AND test_name IN ('VPT','ABI','Retinopathy','ECG','Doppler','DEXA','Ultrasound','X-Ray','MRI')
+       ORDER BY test_name, test_date DESC`, [id]);
+
+    const diagJourney = await pool.query(
+      `SELECT d.diagnosis_id, d.label, d.status, c.visit_date
+       FROM diagnoses d JOIN consultations c ON c.id = d.consultation_id
+       WHERE d.patient_id=$1 ORDER BY d.diagnosis_id, c.visit_date`, [id]);
+
+    const medTimeline = await pool.query(
+      `SELECT m.name, m.dose, m.frequency, m.timing, m.is_active, m.is_new, m.started_date, c.visit_date, m.pharmacy_match
+       FROM medications m JOIN consultations c ON c.id = m.consultation_id
+       WHERE m.patient_id=$1 ORDER BY UPPER(m.name), c.visit_date`, [id]);
+
+    res.json({
+      hba1c: hba1c.rows, fpg: fpg.rows, ldl: ldl.rows, triglycerides: tg.rows,
+      hdl: hdl.rows, creatinine: creat.rows, egfr: egfr.rows, uacr: uacr.rows, tsh: tsh.rows,
+      bp: bp.rows, weight: weight.rows,
+      screenings: screenings.rows,
+      diagnosis_journey: diagJourney.rows,
+      med_timeline: medTimeline.rows,
+    });
+  } catch (e) { console.error("Outcomes error:", e.message); res.status(500).json({ error: e.message }); }
 });
 
-// ============ PREVIOUS CONSULTATION IMPORT ============
+// ============ HISTORY IMPORT ============
 app.post("/api/patients/:id/history", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const patientId = req.params.id;
-    const { visit_date, visit_type, doctor_name, vitals, diagnoses, medications, labs } = req.body;
+    const { visit_date, visit_type, doctor_name, specialty, vitals, diagnoses, medications, labs } = req.body;
 
     const con = await client.query(
       "INSERT INTO consultations (patient_id, visit_date, visit_type, con_name, status) VALUES ($1,$2,$3,$4,'historical') RETURNING id",
-      [patientId, visit_date, n(visit_type) || "OPD", n(doctor_name)]
+      [patientId, visit_date, n(visit_type)||"OPD", n(doctor_name)]
     );
     const cid = con.rows[0].id;
 
@@ -333,41 +347,32 @@ app.post("/api/patients/:id/history", async (req, res) => {
     }
 
     for (const d of (diagnoses || [])) {
-      if (d && d.id) {
-        await client.query(
-          "INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)",
-          [patientId, cid, d.id, d.label, n(d.status) || 'New']
-        );
+      if (d && (d.id || d.label)) {
+        await client.query("INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)",
+          [patientId, cid, d.id || d.label.toLowerCase().replace(/\s+/g,'_'), d.label, n(d.status)||'New']);
       }
     }
-
     for (const m of (medications || [])) {
-      if (m && m.name) {
-        await client.query(
-          "INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-          [patientId, cid, m.name, n(m.composition), n(m.dose), n(m.frequency), n(m.timing), m.is_active !== false, n(m.started_date) || visit_date]
-        );
+      if (m?.name) {
+        await client.query("INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [patientId, cid, m.name, n(m.composition), n(m.dose), n(m.frequency), n(m.timing), m.is_active!==false, n(m.started_date)||visit_date]);
       }
     }
-
     for (const l of (labs || [])) {
-      if (l && l.test_name) {
-        await client.query(
-          "INSERT INTO lab_results (patient_id, consultation_id, test_date, test_name, result, unit, flag, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual')",
-          [patientId, cid, visit_date, l.test_name, num(l.result), n(l.unit), n(l.flag), n(l.ref_range)]
-        );
+      if (l?.test_name) {
+        await client.query("INSERT INTO lab_results (patient_id, consultation_id, test_date, test_name, result, unit, flag, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual')",
+          [patientId, cid, visit_date, l.test_name, num(l.result), n(l.unit), n(l.flag), n(l.ref_range)]);
       }
     }
 
     await client.query("COMMIT");
+    console.log(`✅ History saved: patient=${patientId} consultation=${cid}`);
     res.json({ success: true, consultation_id: cid });
   } catch (e) {
     await client.query("ROLLBACK");
     console.error("❌ History save error:", e.message);
     res.status(500).json({ error: e.message });
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 });
 
 const PORT = process.env.PORT || 3001;

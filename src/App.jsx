@@ -615,6 +615,7 @@ export default function GiniScribe() {
   // Outcomes data
   const [outcomesData, setOutcomesData] = useState(null);
   const [outcomesLoading, setOutcomesLoading] = useState(false);
+  const [outcomePeriod, setOutcomePeriod] = useState("all");
   const [patientFullData, setPatientFullData] = useState(null);
 
   // localStorage: load saved patients
@@ -1066,21 +1067,32 @@ export default function GiniScribe() {
   };
 
   // ============ OUTCOMES ============
-  const fetchOutcomes = async (pid) => {
+  const fetchOutcomes = async (pid, period) => {
     if (!API_URL || !pid) return;
     setOutcomesLoading(true);
     try {
-      const resp = await fetch(`${API_URL}/api/patients/${pid}/outcomes`);
+      const p = period || outcomePeriod;
+      const url = p && p !== "all" ? `${API_URL}/api/patients/${pid}/outcomes?period=${p}` : `${API_URL}/api/patients/${pid}/outcomes`;
+      const resp = await fetch(url);
       const data = await resp.json();
       setOutcomesData(data);
     } catch {}
     setOutcomesLoading(false);
   };
 
-  // Simple sparkline SVG
-  const Sparkline = ({ data, width=200, height=50, color="#2563eb", label, unit, target }) => {
-    if (!data || data.length === 0) return null;
-    const values = data.map(d => d.result || d.bp_sys || d.weight || 0);
+  const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}); } catch { return ""; } };
+
+  // Sparkline with proper date formatting
+  const Sparkline = ({ data, width=200, height=50, color="#2563eb", label, unit, target, lowerBetter }) => {
+    if (!data || data.length === 0) return (
+      <div style={{ background:"#f8fafc", borderRadius:8, padding:"8px 12px", border:"1px solid #e2e8f0", opacity:0.5 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8" }}>{label}</div>
+          <div style={{ fontSize:10, color:"#94a3b8" }}>No data</div>
+        </div>
+      </div>
+    );
+    const values = data.map(d => parseFloat(d.result || d.bp_sys || d.weight || 0));
     const dates = data.map(d => d.test_date || d.date);
     const min = Math.min(...values) * 0.9;
     const max = Math.max(...values) * 1.1;
@@ -1089,26 +1101,24 @@ export default function GiniScribe() {
     const latest = values[values.length - 1];
     const first = values[0];
     const trend = latest < first ? "↓" : latest > first ? "↑" : "→";
-    const trendColor = label === "Weight" || label === "HbA1c" || label === "BP"
-      ? (latest <= first ? "#059669" : "#dc2626")
-      : (latest >= first ? "#059669" : "#dc2626");
+    const improving = lowerBetter !== false ? (latest <= first) : (latest >= first);
     return (
       <div style={{ background:"#f8fafc", borderRadius:8, padding:"8px 12px", border:"1px solid #e2e8f0" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"#374151" }}>{label}</div>
-          <div style={{ fontSize:13, fontWeight:800, color:trendColor }}>{latest}{unit} {trend}</div>
+          <div style={{ fontSize:13, fontWeight:800, color:improving?"#059669":"#dc2626" }}>{latest}{unit} {trend}</div>
         </div>
         <svg viewBox={`0 0 ${width} ${height}`} style={{ width:"100%", height:height }}>
-          {target && <line x1="0" y1={height - ((target - min) / range) * height} x2={width} y2={height - ((target - min) / range) * height} stroke="#059669" strokeDasharray="4,4" strokeWidth="1" />}
+          {target && <line x1="0" y1={height-((target-min)/range)*height} x2={width} y2={height-((target-min)/range)*height} stroke="#059669" strokeDasharray="4,4" strokeWidth="1" />}
           <polyline points={points} fill="none" stroke={color} strokeWidth="2" />
           {values.map((v, i) => (
-            <circle key={i} cx={(i / Math.max(values.length - 1, 1)) * width} cy={height - ((v - min) / range) * height} r="3" fill={color} />
+            <circle key={i} cx={(i/Math.max(values.length-1,1))*width} cy={height-((v-min)/range)*height} r="3" fill={color} />
           ))}
         </svg>
         <div style={{ display:"flex", justifyContent:"space-between", fontSize:8, color:"#94a3b8", marginTop:2 }}>
-          <span>{dates[0]}</span>
+          <span>{fmtDate(dates[0])}</span>
           <span>{values.length} readings</span>
-          <span>{dates[dates.length-1]}</span>
+          <span>{fmtDate(dates[dates.length-1])}</span>
         </div>
       </div>
     );
@@ -1907,14 +1917,17 @@ export default function GiniScribe() {
                   <div style={{ fontSize:9, color:"#94a3b8", marginBottom:8 }}>Upload photos or PDFs of test reports. Claude will extract values automatically.</div>
 
                   {/* Upload area */}
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, marginBottom:8 }}>
-                    {[["Blood Test","🩸"],["Thyroid","🦋"],["Lipid Profile","💧"],["Kidney Function","🫘"],["Liver Function","🫀"],["HbA1c","📊"],["CBC","🔬"],["Urine","💛"],["X-Ray","☢️"],["Ultrasound","📡"],["MRI","🧲"],["DEXA","🦴"],["ABI","🦵"],["VPT","⚡"],["Other","📄"]].map(([type,icon]) => (
-                      <label key={type} style={{ display:"flex", alignItems:"center", gap:4, padding:"5px 8px", border:"1px solid #e2e8f0", borderRadius:4, cursor:"pointer", fontSize:10, fontWeight:600, background:"#fafafa" }}
-                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="#fafafa"}>
-                        <span>{icon}</span> {type}
-                        <input type="file" accept="image/*,.pdf" style={{ display:"none" }} onChange={e=>handleReportFile(e,type)} />
-                      </label>
-                    ))}
+                  <div style={{ display:"flex", gap:4, marginBottom:8, alignItems:"center" }}>
+                    <select id="reportType" defaultValue="Blood Test" style={{ flex:1, padding:"6px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:11, fontWeight:600 }}>
+                      <option>Blood Test</option><option>HbA1c</option><option>Thyroid Panel</option><option>Lipid Profile</option>
+                      <option>Kidney Function</option><option>Liver Function</option><option>CBC</option><option>Urine</option>
+                      <option>X-Ray</option><option>Ultrasound</option><option>MRI</option><option>DEXA</option>
+                      <option>ABI</option><option>VPT</option><option>ECG</option><option>Doppler</option><option>Retinopathy</option><option>Other</option>
+                    </select>
+                    <label style={{ display:"flex", alignItems:"center", gap:4, padding:"6px 12px", background:"#7c3aed", color:"white", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
+                      📷 Upload
+                      <input type="file" accept="image/*,.pdf" style={{ display:"none" }} onChange={e=>handleReportFile(e, document.getElementById("reportType").value)} />
+                    </label>
                   </div>
 
                   {/* Uploaded reports */}
@@ -2057,60 +2070,195 @@ export default function GiniScribe() {
             <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
               <div style={{ fontSize:28, marginBottom:8 }}>📊</div>
               <div style={{ fontSize:13, fontWeight:600 }}>Load a patient from the database first</div>
-              <div style={{ fontSize:11, marginTop:4 }}>Use 🔍 Find to search and select a patient</div>
             </div>
           ) : outcomesLoading ? (
             <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>Loading outcomes...</div>
           ) : (
             <div>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              {/* Header + Period + Refresh */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
                 <div style={{ fontSize:14, fontWeight:700, color:"#1e293b" }}>📊 Outcomes — {patient.name}</div>
-                <button onClick={()=>fetchOutcomes(dbPatientId)} style={{ fontSize:10, padding:"3px 8px", border:"1px solid #e2e8f0", borderRadius:4, cursor:"pointer", background:"white" }}>🔄 Refresh</button>
+                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                  <div style={{ display:"flex", gap:0, borderRadius:4, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+                    {[["3m","3M"],["6m","6M"],["1y","1Y"],["all","All"]].map(([v,l]) => (
+                      <button key={v} onClick={()=>{setOutcomePeriod(v);fetchOutcomes(dbPatientId,v);}} style={{ padding:"2px 6px", fontSize:9, fontWeight:700, border:"none", cursor:"pointer",
+                        background:outcomePeriod===v?"#2563eb":"white", color:outcomePeriod===v?"white":"#64748b" }}>{l}</button>
+                    ))}
+                  </div>
+                  <button onClick={()=>fetchOutcomes(dbPatientId)} style={{ fontSize:9, padding:"2px 6px", border:"1px solid #e2e8f0", borderRadius:4, cursor:"pointer", background:"white" }}>🔄</button>
+                </div>
               </div>
 
               {/* Summary cards */}
               {patientFullData && (
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:6, marginBottom:12 }}>
-                  <div style={{ background:"#eff6ff", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
-                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>VISITS</div>
-                    <div style={{ fontSize:18, fontWeight:800, color:"#2563eb" }}>{patientFullData.consultations?.length || 0}</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:4, marginBottom:8 }}>
+                  <div style={{ background:"#eff6ff", borderRadius:6, padding:"4px 8px", textAlign:"center" }}>
+                    <div style={{ fontSize:8, color:"#64748b", fontWeight:600 }}>VISITS</div>
+                    <div style={{ fontSize:16, fontWeight:800, color:"#2563eb" }}>{patientFullData.consultations?.length || 0}</div>
                   </div>
-                  <div style={{ background:"#f0fdf4", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
-                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>ACTIVE MEDS</div>
-                    <div style={{ fontSize:18, fontWeight:800, color:"#059669" }}>{patientFullData.medications?.filter(m=>m.is_active).length || 0}</div>
+                  <div style={{ background:"#f0fdf4", borderRadius:6, padding:"4px 8px", textAlign:"center" }}>
+                    <div style={{ fontSize:8, color:"#64748b", fontWeight:600 }}>ACTIVE MEDS</div>
+                    <div style={{ fontSize:16, fontWeight:800, color:"#059669" }}>{patientFullData.medications?.filter(m=>m.is_active).length || 0}</div>
                   </div>
-                  <div style={{ background:"#fef3c7", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
-                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>DIAGNOSES</div>
-                    <div style={{ fontSize:18, fontWeight:800, color:"#d97706" }}>{patientFullData.diagnoses?.filter(d=>d.is_active).length || 0}</div>
+                  <div style={{ background:"#fef3c7", borderRadius:6, padding:"4px 8px", textAlign:"center" }}>
+                    <div style={{ fontSize:8, color:"#64748b", fontWeight:600 }}>DIAGNOSES</div>
+                    <div style={{ fontSize:16, fontWeight:800, color:"#d97706" }}>{patientFullData.diagnoses?.length || 0}</div>
                   </div>
-                  <div style={{ background:"#fce7f3", borderRadius:6, padding:"6px 10px", textAlign:"center" }}>
-                    <div style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>LAB TESTS</div>
-                    <div style={{ fontSize:18, fontWeight:800, color:"#db2777" }}>{patientFullData.lab_results?.length || 0}</div>
+                  <div style={{ background:"#fce7f3", borderRadius:6, padding:"4px 8px", textAlign:"center" }}>
+                    <div style={{ fontSize:8, color:"#64748b", fontWeight:600 }}>LAB TESTS</div>
+                    <div style={{ fontSize:16, fontWeight:800, color:"#db2777" }}>{patientFullData.lab_results?.length || 0}</div>
                   </div>
                 </div>
               )}
 
-              {/* Trend Charts */}
+              {/* Diabetes Panel */}
               {outcomesData && (
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                <>
+                <div style={{ fontSize:10, fontWeight:700, color:"#dc2626", marginBottom:4, marginTop:4 }}>🩸 DIABETES & METABOLIC</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
                   <Sparkline data={outcomesData.hba1c} label="HbA1c" unit="%" color="#dc2626" target={6.5} />
-                  <Sparkline data={outcomesData.bp} label="BP" unit=" mmHg" color="#7c3aed" target={130} />
+                  <Sparkline data={outcomesData.fpg} label="Fasting Glucose" unit=" mg/dl" color="#ea580c" target={100} />
+                  <Sparkline data={outcomesData.bp} label="BP (Systolic)" unit=" mmHg" color="#7c3aed" target={130} />
                   <Sparkline data={outcomesData.weight} label="Weight" unit=" kg" color="#2563eb" />
-                  <Sparkline data={outcomesData.egfr} label="eGFR" unit=" ml/min" color="#059669" target={60} />
                 </div>
+
+                <div style={{ fontSize:10, fontWeight:700, color:"#2563eb", marginBottom:4 }}>💧 LIPIDS & KIDNEY</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
+                  <Sparkline data={outcomesData.ldl} label="LDL" unit=" mg/dl" color="#d97706" target={100} />
+                  <Sparkline data={outcomesData.triglycerides} label="Triglycerides" unit=" mg/dl" color="#b45309" target={150} />
+                  <Sparkline data={outcomesData.hdl} label="HDL" unit=" mg/dl" color="#059669" target={40} lowerBetter={false} />
+                  <Sparkline data={outcomesData.egfr} label="eGFR" unit=" ml/min" color="#0d9488" target={60} lowerBetter={false} />
+                  <Sparkline data={outcomesData.creatinine} label="Creatinine" unit=" mg/dl" color="#6366f1" target={1.2} />
+                  <Sparkline data={outcomesData.uacr} label="UACR" unit=" mg/g" color="#be185d" target={30} />
+                  <Sparkline data={outcomesData.tsh} label="TSH" unit=" mIU/L" color="#0891b2" />
+                </div>
+
+                {/* Missing biomarkers alert */}
+                {(() => {
+                  const missing = [];
+                  if (!outcomesData.hba1c?.length) missing.push("HbA1c");
+                  if (!outcomesData.fpg?.length) missing.push("Fasting Glucose");
+                  if (!outcomesData.ldl?.length) missing.push("LDL");
+                  if (!outcomesData.triglycerides?.length) missing.push("Triglycerides");
+                  if (!outcomesData.egfr?.length) missing.push("eGFR");
+                  if (!outcomesData.uacr?.length) missing.push("UACR");
+                  return missing.length > 0 ? (
+                    <div style={{ background:"#fffbeb", borderRadius:6, padding:"6px 10px", border:"1px solid #fcd34d", marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:700, color:"#92400e" }}>⚠️ MISSING DATA: {missing.join(", ")}</div>
+                      <div style={{ fontSize:8, color:"#a16207" }}>Add via 📜 Hx tab → Reports</div>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Screenings */}
+                {outcomesData.screenings?.length > 0 && (
+                  <div style={{ background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0", marginBottom:8 }}>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>🔬 SCREENING TESTS</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4 }}>
+                      {outcomesData.screenings.map((s,i) => (
+                        <div key={i} style={{ background:"white", borderRadius:4, padding:"4px 8px", border:"1px solid #e2e8f0" }}>
+                          <div style={{ fontSize:8, color:"#94a3b8", fontWeight:600 }}>{s.test_name}</div>
+                          <div style={{ fontSize:11, fontWeight:700, color:s.flag==="HIGH"?"#dc2626":s.flag==="LOW"?"#2563eb":"#374151" }}>{s.result} {s.unit}</div>
+                          <div style={{ fontSize:8, color:"#94a3b8" }}>{fmtDate(s.test_date)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                </>
               )}
 
-              {(!outcomesData || (outcomesData.hba1c?.length === 0 && outcomesData.bp?.length === 0 && outcomesData.weight?.length === 0)) && (
-                <div style={{ textAlign:"center", padding:20, color:"#94a3b8", background:"#f8fafc", borderRadius:8, marginTop:8 }}>
-                  <div style={{ fontSize:11 }}>No trend data yet. Add historical visits in the 📜 Hx tab or save more consultations to build trends.</div>
-                </div>
-              )}
+              {/* Diagnosis Journey */}
+              {outcomesData?.diagnosis_journey?.length > 0 && (() => {
+                // Group by diagnosis_id, show status changes over time
+                const grouped = {};
+                outcomesData.diagnosis_journey.forEach(d => {
+                  if (!grouped[d.diagnosis_id]) grouped[d.diagnosis_id] = { label: d.label, history: [] };
+                  grouped[d.diagnosis_id].history.push({ status: d.status, date: d.visit_date });
+                  grouped[d.diagnosis_id].label = d.label; // use latest label
+                });
+                return (
+                  <div style={{ background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0", marginBottom:8 }}>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:6 }}>📈 DIAGNOSIS JOURNEY</div>
+                    {Object.entries(grouped).map(([id, info]) => {
+                      const latest = info.history[info.history.length - 1];
+                      const first = info.history[0];
+                      const improved = (latest.status === "Controlled" && first.status === "Uncontrolled") || latest.status === "Resolved";
+                      const worsened = latest.status === "Uncontrolled" && first.status === "Controlled";
+                      return (
+                        <div key={id} style={{ marginBottom:6, padding:"4px 8px", background:"white", borderRadius:4, border:"1px solid #e2e8f0" }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                            <span style={{ fontSize:10, fontWeight:700, color:"#1e293b" }}>{info.label}</span>
+                            <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:3,
+                              background:latest.status==="Controlled"?"#dcfce7":latest.status==="Resolved"?"#dbeafe":"#fef2f2",
+                              color:latest.status==="Controlled"?"#059669":latest.status==="Resolved"?"#2563eb":"#dc2626" }}>
+                              {latest.status} {improved?"✓":worsened?"⚠":""}
+                            </span>
+                          </div>
+                          <div style={{ display:"flex", gap:2, marginTop:3, flexWrap:"wrap" }}>
+                            {info.history.map((h,i) => (
+                              <div key={i} style={{ display:"flex", alignItems:"center", gap:2 }}>
+                                <span style={{ fontSize:7, color:"#94a3b8" }}>{fmtDate(h.date)}</span>
+                                <span style={{ fontSize:8, fontWeight:600, padding:"0 3px", borderRadius:2,
+                                  background:h.status==="Controlled"?"#dcfce7":h.status==="Uncontrolled"?"#fef2f2":"#fef3c7",
+                                  color:h.status==="Controlled"?"#059669":h.status==="Uncontrolled"?"#dc2626":"#d97706" }}>
+                                  {h.status==="Controlled"?"C":h.status==="Uncontrolled"?"U":"N"}
+                                </span>
+                                {i < info.history.length - 1 && <span style={{ fontSize:8, color:"#d1d5db" }}>→</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
-              {/* Active Diagnoses */}
+              {/* Medication Timeline */}
+              {outcomesData?.med_timeline?.length > 0 && (() => {
+                // Group by medicine name, show when started/dose changes
+                const grouped = {};
+                outcomesData.med_timeline.forEach(m => {
+                  const key = (m.pharmacy_match || m.name).toUpperCase();
+                  if (!grouped[key]) grouped[key] = { name: m.pharmacy_match || m.name, entries: [] };
+                  grouped[key].entries.push(m);
+                });
+                // Deduplicate entries with same dose
+                Object.values(grouped).forEach(g => {
+                  const seen = new Set();
+                  g.entries = g.entries.filter(e => {
+                    const k = `${e.dose}|${e.frequency}|${e.visit_date}`;
+                    if (seen.has(k)) return false;
+                    seen.add(k);
+                    return true;
+                  });
+                });
+                return (
+                  <div style={{ background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0", marginBottom:8 }}>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>💊 MEDICATION TIMELINE</div>
+                    {Object.values(grouped).map((med,mi) => {
+                      const latest = med.entries[med.entries.length - 1];
+                      const first = med.entries[0];
+                      const doseChanged = latest.dose !== first.dose && med.entries.length > 1;
+                      return (
+                        <div key={mi} style={{ display:"flex", gap:6, padding:"3px 0", fontSize:10, borderBottom:mi<Object.keys(grouped).length-1?"1px solid #f1f5f9":"none", alignItems:"center" }}>
+                          <span style={{ fontWeight:700, color:latest.is_active?"#1e293b":"#94a3b8", minWidth:130, textDecoration:latest.is_active?"none":"line-through" }}>{med.name}</span>
+                          <span style={{ color:"#64748b", fontSize:9 }}>{latest.dose} {latest.frequency}</span>
+                          <span style={{ color:"#94a3b8", fontSize:8 }}>since {fmtDate(first.started_date || first.visit_date)}</span>
+                          {doseChanged && <span style={{ fontSize:7, padding:"0 3px", background:"#fef3c7", color:"#d97706", borderRadius:2, fontWeight:700 }}>dose changed</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* Active Diagnoses - deduplicated */}
               {patientFullData?.diagnoses?.length > 0 && (
-                <div style={{ marginTop:12, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                <div style={{ background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0", marginBottom:8 }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>ACTIVE DIAGNOSES</div>
-                  {patientFullData.diagnoses.filter(d=>d.is_active).map((d,i) => (
+                  {patientFullData.diagnoses.map((d,i) => (
                     <div key={i} style={{ display:"flex", gap:8, padding:"2px 0", fontSize:10 }}>
                       <span style={{ fontWeight:700, color:"#1e293b" }}>{d.label}</span>
                       <span style={{ color:d.status==="Controlled"?"#059669":d.status==="Uncontrolled"?"#dc2626":"#f59e0b", fontWeight:600 }}>{d.status}</span>
@@ -2119,13 +2267,13 @@ export default function GiniScribe() {
                 </div>
               )}
 
-              {/* Active Medications */}
+              {/* Active Medications - deduplicated */}
               {patientFullData?.medications?.length > 0 && (
-                <div style={{ marginTop:8, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>ACTIVE MEDICATIONS</div>
+                <div style={{ background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0", marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>CURRENT MEDICATIONS</div>
                   {patientFullData.medications.filter(m=>m.is_active).map((m,i) => (
-                    <div key={i} style={{ display:"flex", gap:8, padding:"2px 0", fontSize:10 }}>
-                      <span style={{ fontWeight:700, color:"#1e293b", minWidth:140 }}>{m.pharmacy_match || m.name}</span>
+                    <div key={i} style={{ display:"flex", gap:6, padding:"2px 0", fontSize:10 }}>
+                      <span style={{ fontWeight:700, color:"#1e293b", minWidth:130 }}>{m.pharmacy_match || m.name}</span>
                       <span style={{ color:"#64748b" }}>{m.dose}</span>
                       <span style={{ color:"#2563eb", fontWeight:600 }}>{m.frequency} {m.timing}</span>
                     </div>
@@ -2133,19 +2281,24 @@ export default function GiniScribe() {
                 </div>
               )}
 
-              {/* Recent Labs */}
+              {/* Recent Labs - table */}
               {patientFullData?.lab_results?.length > 0 && (
-                <div style={{ marginTop:8, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
+                <div style={{ background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>RECENT LAB RESULTS</div>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10 }}>
-                    <thead><tr style={{ borderBottom:"1px solid #e2e8f0" }}><th style={{textAlign:"left",padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Test</th><th style={{padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Result</th><th style={{padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Ref</th><th style={{padding:"2px 4px",fontSize:9,color:"#94a3b8"}}>Date</th></tr></thead>
+                    <thead><tr style={{ borderBottom:"1px solid #e2e8f0" }}>
+                      <th style={{textAlign:"left",padding:"2px 4px",fontSize:8,color:"#94a3b8"}}>Test</th>
+                      <th style={{padding:"2px 4px",fontSize:8,color:"#94a3b8"}}>Result</th>
+                      <th style={{padding:"2px 4px",fontSize:8,color:"#94a3b8"}}>Ref</th>
+                      <th style={{padding:"2px 4px",fontSize:8,color:"#94a3b8"}}>Date</th>
+                    </tr></thead>
                     <tbody>
-                      {patientFullData.lab_results.slice(0,15).map((l,i) => (
+                      {patientFullData.lab_results.slice(0,20).map((l,i) => (
                         <tr key={i} style={{ borderBottom:"1px solid #f1f5f9" }}>
                           <td style={{padding:"2px 4px",fontWeight:600}}>{l.test_name}</td>
                           <td style={{padding:"2px 4px",textAlign:"center",fontWeight:700,color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#2563eb":"#374151"}}>{l.result} {l.unit}</td>
                           <td style={{padding:"2px 4px",textAlign:"center",fontSize:9,color:"#94a3b8"}}>{l.ref_range}</td>
-                          <td style={{padding:"2px 4px",textAlign:"center",fontSize:9,color:"#94a3b8"}}>{l.test_date ? new Date(l.test_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) : ""}</td>
+                          <td style={{padding:"2px 4px",textAlign:"center",fontSize:9,color:"#94a3b8"}}>{fmtDate(l.test_date)}</td>
                         </tr>
                       ))}
                     </tbody>
