@@ -14,15 +14,18 @@ app.use(express.json({ limit: "10mb" }));
 const dbUrl = process.env.DATABASE_URL || "";
 const isInternal = dbUrl.includes(".railway.internal");
 const needsSsl = !!dbUrl && !isInternal;
+
+// Append sslmode if not already in URL
+const finalDbUrl = (needsSsl && !dbUrl.includes("sslmode")) ? dbUrl + "?sslmode=require" : dbUrl;
+
 const pool = new pg.Pool({
-  connectionString: dbUrl || undefined,
+  connectionString: finalDbUrl || undefined,
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
 });
 
 console.log("📦 DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
-if (dbUrl) { try { const u = new URL(dbUrl); console.log("📦 Host:", u.hostname, "Port:", u.port); } catch(e) { console.log("📦 URL parse error:", e.message); } }
 
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
@@ -193,10 +196,11 @@ app.post("/api/consultations", async (req, res) => {
 
     if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
       await client.query(
-        `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, waist, body_fat, muscle_mass)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [patientId, consultationId, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse),
-         num(vitals.temp), num(vitals.spo2), num(vitals.weight), num(vitals.height), num(vitals.bmi)]
+         num(vitals.temp), num(vitals.spo2), num(vitals.weight), num(vitals.height), num(vitals.bmi),
+         num(vitals.waist), num(vitals.body_fat), num(vitals.muscle_mass)]
       );
     }
 
@@ -316,7 +320,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
 
     const labQ = (names) => `SELECT DISTINCT ON (test_date) result, test_date FROM lab_results WHERE patient_id=$1 AND test_name IN (${names.map((_,i)=>`$${i+2}`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
 
-    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, bp, weight] = await Promise.all([
+    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
       pool.query(labQ(['HbA1c']), [id, 'HbA1c']),
       pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS']),
       pool.query(labQ(['LDL','LDL Cholesterol','LDL-C']), [id, 'LDL','LDL Cholesterol','LDL-C']),
@@ -328,6 +332,9 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       pool.query(labQ(['TSH']), [id, 'TSH']),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) waist, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND waist IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) body_fat, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND body_fat IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) muscle_mass, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND muscle_mass IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
     ]);
 
     const screenings = await pool.query(
@@ -349,6 +356,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       hba1c: hba1c.rows, fpg: fpg.rows, ldl: ldl.rows, triglycerides: tg.rows,
       hdl: hdl.rows, creatinine: creat.rows, egfr: egfr.rows, uacr: uacr.rows, tsh: tsh.rows,
       bp: bp.rows, weight: weight.rows,
+      waist: waist.rows, body_fat: bodyFat.rows, muscle_mass: muscleMass.rows,
       screenings: screenings.rows,
       diagnosis_journey: diagJourney.rows,
       med_timeline: medTimeline.rows,
@@ -372,8 +380,8 @@ app.post("/api/patients/:id/history", async (req, res) => {
 
     if (vitals && Object.keys(vitals).length > 0) {
       await client.query(
-        "INSERT INTO vitals (patient_id, consultation_id, recorded_at, bp_sys, bp_dia, pulse, weight, height, bmi) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        [patientId, cid, visit_date, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse), num(vitals.weight), num(vitals.height), num(vitals.bmi)]
+        "INSERT INTO vitals (patient_id, consultation_id, recorded_at, bp_sys, bp_dia, pulse, weight, height, bmi, waist, body_fat, muscle_mass) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+        [patientId, cid, visit_date, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse), num(vitals.weight), num(vitals.height), num(vitals.bmi), num(vitals.waist), num(vitals.body_fat), num(vitals.muscle_mass)]
       );
     }
 
