@@ -163,7 +163,7 @@ app.get("/api/patients/:id", async (req, res) => {
       // Deduplicate diagnoses: latest status per diagnosis_id
       pool.query(`SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
         WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`, [id]),
-      pool.query("SELECT id, doc_type, title, file_name, doc_date, source, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC", [id]),
+      pool.query("SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, consultation_id, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC", [id]),
       pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [id]),
     ]);
 
@@ -383,6 +383,63 @@ app.post("/api/patients/:id/documents", async (req, res) => {
       [req.params.id, n(consultation_id), n(doc_type), n(title), n(file_name), n(file_url), n(extracted_text), safeJson(extracted_data), n(doc_date)||null, n(source), n(notes)]
     );
     res.json(result.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get specific document with full data
+app.get("/api/documents/:id", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM documents WHERE id=$1", [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(result.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get prescription for a consultation (for reprinting)
+app.get("/api/consultations/:id/prescription", async (req, res) => {
+  try {
+    const doc = await pool.query(
+      "SELECT * FROM documents WHERE consultation_id=$1 AND doc_type='prescription' ORDER BY created_at DESC LIMIT 1",
+      [req.params.id]
+    );
+    if (doc.rows[0]) return res.json(doc.rows[0]);
+    // Fallback: reconstruct from consultation data
+    const con = await pool.query(
+      `SELECT c.*, p.name as patient_name, p.age, p.sex, p.phone, p.file_no, p.dob
+       FROM consultations c JOIN patients p ON p.id=c.patient_id WHERE c.id=$1`, [req.params.id]);
+    if (!con.rows[0]) return res.status(404).json({ error: "Not found" });
+    const c = con.rows[0];
+    res.json({
+      doc_type: "prescription",
+      title: `Prescription — ${c.con_name} — ${new Date(c.visit_date||c.created_at).toLocaleDateString("en-IN")}`,
+      extracted_data: {
+        patient: { name: c.patient_name, age: c.age, sex: c.sex, phone: c.phone, fileNo: c.file_no },
+        doctor: c.con_name, mo: c.mo_name,
+        date: c.visit_date || c.created_at,
+        diagnoses: c.mo_data?.diagnoses || [],
+        medications: c.con_data?.medications_confirmed || [],
+        diet_lifestyle: c.con_data?.diet_lifestyle || [],
+        follow_up: c.con_data?.follow_up || {},
+        assessment_summary: c.con_data?.assessment_summary || "",
+        chief_complaints: c.mo_data?.chief_complaints || [],
+        plan_edits: c.plan_edits
+      },
+      source: "scribe",
+      doc_date: c.visit_date || c.created_at
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get all imaging documents for a patient
+app.get("/api/patients/:id/imaging", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, created_at
+       FROM documents WHERE patient_id=$1 AND doc_type NOT IN ('prescription','lab_report')
+       ORDER BY doc_date DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -118,6 +118,45 @@ const LAB_PROMPT = `Extract ALL test results. Return ONLY valid JSON, no backtic
 {"patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null}]}]}
 flag: "H" high, "L" low, null normal.`;
 
+const IMAGING_PROMPT = `Extract findings from this medical imaging/diagnostic report. Return ONLY valid JSON, no backticks.
+{
+  "report_type":"DEXA|X-Ray|MRI|Ultrasound|ABI|VPT|Fundus|ECG|Echo|CT|PFT|NCS",
+  "patient_on_report":{"name":"","age":"","sex":""},
+  "date":"YYYY-MM-DD or null",
+  "findings":[{"parameter":"","value":"","unit":"","interpretation":"Normal|Abnormal|Borderline","detail":""}],
+  "impression":"overall summary string",
+  "recommendations":"string or null"
+}
+EXTRACTION RULES BY TYPE:
+- DEXA: T-score (spine, hip, femoral neck), BMD values, Z-score → flag osteoporosis/osteopenia
+- X-Ray: findings, fractures, alignment, soft tissue, joint space
+- MRI: disc bulge/herniation levels, spinal canal stenosis, ligament tears, signal changes
+- Ultrasound: organ dimensions, echogenicity, lesions, free fluid, Doppler findings
+- ABI (Ankle-Brachial Index): ABI ratio per limb (>0.9 normal, 0.7-0.9 mild, <0.7 severe PAD)
+- VPT (Vibration Perception Threshold): voltage readings per site, grade (normal <15V, mild 15-25V, severe >25V)
+- Fundus: retinopathy grade (none/mild NPDR/moderate NPDR/severe NPDR/PDR), macular edema, disc changes
+- ECG: rate, rhythm, axis, intervals (PR, QRS, QTc), ST changes, conduction blocks
+- Echo: EF%, chamber dimensions, valve function, wall motion, diastolic function
+- PFT: FEV1, FVC, FEV1/FVC ratio, DLCO
+- NCS (Nerve Conduction): nerve velocities, amplitudes, latencies per nerve
+Extract ALL numeric values. If value is a range or description, put in "detail" field.`;
+
+const AI_CHAT_SYSTEM = `You are Gini AI, a clinical decision support assistant for doctors at Gini Advanced Care Hospital, Mohali.
+You have access to the patient's data (provided below). Answer questions about:
+- This patient's history, medications, labs, trends
+- Drug interactions, dosing guidelines, side effects
+- Clinical guidelines (ADA, ESC, KDIGO, NICE, ATS) relevant to this patient
+- Differential diagnoses based on patient presentation
+- Suggested investigations or referrals
+RULES:
+- Always reference specific patient data when answering
+- Cite guideline sources (e.g., "Per ADA 2024 Standards of Care...")
+- Flag drug interactions or contraindications proactively
+- Use Indian brand names alongside generics
+- Be concise but clinically thorough
+- If unsure, say so — never fabricate clinical data
+- Language: English with Hindi/Punjabi medical terms OK`;
+
 const PATIENT_VOICE_PROMPT = `Extract patient info. ONLY valid JSON, no backticks.
 {"name":"string or null","age":"number or null","sex":"Male/Female or null","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null","abhaId":"string or null","aadhaar":"string or null","healthId":"string or null","govtId":"string or null","govtIdType":"Aadhaar/Passport/DrivingLicense or null"}
 IMPORTANT: Always return name in ENGLISH/ROMAN script, never Hindi/Devanagari. Transliterate if needed: "हिम्मत सिंह"→"Himmat Singh", "कमला देवी"→"Kamla Devi".
@@ -256,6 +295,45 @@ async function extractLab(base64, mediaType) {
       catch { return { data:null, error:"Parse failed" }; }
     }
   } catch(e) { return { data:null, error:e.message }; }
+}
+
+async function extractImaging(base64, mediaType) {
+  try {
+    const block = mediaType==="application/pdf"
+      ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:base64} }
+      : { type:"image", source:{type:"base64",media_type:mediaType,data:base64} };
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
+      body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:IMAGING_PROMPT}]}]})
+    });
+    if (!r.ok) return { data:null, error:`API ${r.status}` };
+    const d = await r.json();
+    if (d.error) return { data:null, error:d.error.message };
+    const t = (d.content||[]).map(c=>c.text||"").join("");
+    let clean = t.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim();
+    try { return { data:JSON.parse(clean), error:null }; }
+    catch {
+      clean = clean.replace(/,\s*([}\]])/g,"$1");
+      const ob=(clean.match(/{/g)||[]).length, cb=(clean.match(/}/g)||[]).length;
+      for(let i=0;i<ob-cb;i++) clean+="}";
+      try { return { data:JSON.parse(clean), error:null }; }
+      catch { return { data:null, error:"Parse failed" }; }
+    }
+  } catch(e) { return { data:null, error:e.message }; }
+}
+
+async function aiChat(messages, patientContext) {
+  try {
+    const systemPrompt = AI_CHAT_SYSTEM + (patientContext ? `\n\nPATIENT DATA:\n${patientContext}` : "\n\nNo patient loaded.");
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
+      body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,system:systemPrompt,messages})
+    });
+    if (!r.ok) return { text:null, error:`API ${r.status}` };
+    const d = await r.json();
+    if (d.error) return { text:null, error:d.error.message };
+    return { text:(d.content||[]).map(c=>c.text||"").join(""), error:null };
+  } catch(e) { return { text:null, error:e.message }; }
 }
 
 // ============ AUDIO INPUT ============
@@ -662,6 +740,14 @@ export default function GiniScribe() {
   const [timelineDoctor, setTimelineDoctor] = useState("");
   const [expandedDiagnosis, setExpandedDiagnosis] = useState(null);
   const [patientFullData, setPatientFullData] = useState(null);
+  // Imaging uploads
+  const [imagingFiles, setImagingFiles] = useState([]); // [{type, base64, mediaType, fileName, data, extracting, error}]
+  const imagingRef = useRef(null);
+  // AI Chat
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const aiChatRef = useRef(null);
   // Auth
   const [authToken, setAuthToken] = useState(() => localStorage.getItem("gini_auth_token") || "");
   const [currentDoctor, setCurrentDoctor] = useState(() => { try { return JSON.parse(localStorage.getItem("gini_doctor")||"null"); } catch { return null; }});
@@ -807,6 +893,55 @@ export default function GiniScribe() {
           if (result.success) {
             setSaveStatus(`✅ Saved (DB #${result.consultation_id})`);
             setDbPatientId(result.patient_id);
+            // Auto-save prescription as retrievable document
+            if (conData && result.patient_id) {
+              const rxDoc = {
+                doc_type: "prescription",
+                title: `Prescription — ${conName} — ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}`,
+                file_name: `rx_${result.consultation_id}.json`,
+                extracted_data: {
+                  patient: { name: patient.name, age: patient.age, sex: patient.sex, phone: patient.phone, fileNo: patient.fileNo },
+                  doctor: conName, mo: moName,
+                  date: new Date().toISOString(),
+                  diagnoses: moData?.diagnoses || [],
+                  medications: conData.medications_confirmed || [],
+                  diet_lifestyle: conData.diet_lifestyle || [],
+                  investigations_ordered: conData.investigations_ordered || [],
+                  follow_up: conData.follow_up || {},
+                  vitals: { ...vitals },
+                  chief_complaints: moData?.chief_complaints || [],
+                  assessment_summary: conData.assessment_summary || "",
+                  goals: conData.goals || [],
+                  plan_edits: planEdits
+                },
+                doc_date: new Date().toISOString().split("T")[0],
+                source: "scribe",
+                notes: `Consultation by ${conName}`,
+                consultation_id: result.consultation_id
+              };
+              fetch(`${API_URL}/api/patients/${result.patient_id}/documents`, {
+                method: "POST", headers: authHeaders(),
+                body: JSON.stringify(rxDoc)
+              }).catch(e => console.log("Rx doc save:", e.message));
+            }
+            // Save any imaging reports that were uploaded
+            for (const img of imagingFiles.filter(f => f.data)) {
+              if (result.patient_id) {
+                fetch(`${API_URL}/api/patients/${result.patient_id}/documents`, {
+                  method: "POST", headers: authHeaders(),
+                  body: JSON.stringify({
+                    doc_type: img.data.report_type || img.type,
+                    title: `${img.data.report_type || img.type} — ${img.fileName}`,
+                    file_name: img.fileName,
+                    extracted_data: img.data,
+                    doc_date: img.data.date || new Date().toISOString().split("T")[0],
+                    source: "upload",
+                    notes: img.data.impression,
+                    consultation_id: result.consultation_id
+                  })
+                }).catch(e => console.log("Imaging doc save:", e.message));
+              }
+            }
           } else {
             setSaveStatus("⚠️ Local only — " + (result.error || "failed").slice(0, 40));
           }
@@ -1004,6 +1139,87 @@ export default function GiniScribe() {
     setLoading(p=>({...p,lab:false}));
   };
 
+  // Imaging upload handler
+  const handleImagingUpload = (e, reportType) => {
+    const f = e.target.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const newFile = {
+        id: Date.now(),
+        type: reportType || "Unknown",
+        base64: ev.target.result.split(",")[1],
+        mediaType: f.type.startsWith("image/") ? f.type : "application/pdf",
+        fileName: f.name,
+        data: null,
+        extracting: false,
+        error: null
+      };
+      setImagingFiles(prev => [...prev, newFile]);
+    };
+    reader.readAsDataURL(f);
+  };
+
+  // Extract imaging findings
+  const processImaging = async (fileId) => {
+    setImagingFiles(prev => prev.map(f => f.id === fileId ? { ...f, extracting: true, error: null } : f));
+    const file = imagingFiles.find(f => f.id === fileId);
+    if (!file) return;
+    const { data, error } = await extractImaging(file.base64, file.mediaType);
+    setImagingFiles(prev => prev.map(f => f.id === fileId ? { ...f, extracting: false, data, error } : f));
+    // Auto-save to DB if patient loaded
+    if (data && dbPatientId && API_URL) {
+      try {
+        await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+          method: "POST", headers: authHeaders(),
+          body: JSON.stringify({
+            doc_type: data.report_type || file.type,
+            title: `${data.report_type || file.type} — ${file.fileName}`,
+            file_name: file.fileName,
+            extracted_data: data,
+            doc_date: data.date || new Date().toISOString().split("T")[0],
+            source: "upload",
+            notes: data.impression
+          })
+        });
+      } catch (e) { console.log("Doc save failed:", e.message); }
+    }
+  };
+
+  // Remove imaging file
+  const removeImaging = (fileId) => setImagingFiles(prev => prev.filter(f => f.id !== fileId));
+
+  // AI Chat send message
+  const sendAiMessage = async () => {
+    if (!aiInput.trim() || aiLoading) return;
+    const userMsg = aiInput.trim();
+    setAiInput("");
+    const newMessages = [...aiMessages, { role: "user", content: userMsg }];
+    setAiMessages(newMessages);
+    setAiLoading(true);
+    // Build patient context
+    let ctx = "";
+    if (patient.name) ctx += `Patient: ${patient.name}, ${patient.age}Y/${patient.sex}\n`;
+    if (moData?.diagnoses?.length) ctx += `Diagnoses: ${moData.diagnoses.map(d=>`${d.label} (${d.status})`).join(", ")}\n`;
+    if (conData?.medications_confirmed?.length) ctx += `Current Meds: ${conData.medications_confirmed.map(m=>`${m.name} ${m.dose} ${m.frequency}`).join(", ")}\n`;
+    if (moData?.investigations?.length) ctx += `Recent Labs: ${moData.investigations.map(i=>`${i.test}: ${i.value} ${i.unit||""} ${i.flag||""}`).join(", ")}\n`;
+    if (vitals.bp_sys) ctx += `Vitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}%, Wt ${vitals.weight}kg, BMI ${vitals.bmi}\n`;
+    if (moData?.chief_complaints?.length) ctx += `Chief Complaints: ${moData.chief_complaints.join(", ")}\n`;
+    if (moData?.complications?.length) ctx += `Complications: ${moData.complications.map(c=>`${c.name}: ${c.status}`).join(", ")}\n`;
+    if (moData?.history?.medical?.length) ctx += `Medical History: ${moData.history.medical.join(", ")}\n`;
+    if (imagingFiles.filter(f=>f.data).length) ctx += `Imaging: ${imagingFiles.filter(f=>f.data).map(f=>`${f.data.report_type}: ${f.data.impression}`).join("; ")}\n`;
+    // Include outcomes data if available
+    if (patientFullData) {
+      if (patientFullData.diagnoses?.length) ctx += `All Diagnoses: ${patientFullData.diagnoses.map(d=>`${d.label}:${d.status}`).join(", ")}\n`;
+      if (patientFullData.medications?.length) ctx += `All Meds (active): ${patientFullData.medications.filter(m=>m.is_active).map(m=>`${m.name} ${m.dose||""}`).join(", ")}\n`;
+    }
+    const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
+    const { text, error } = await aiChat(apiMessages, ctx);
+    if (error) setAiMessages(prev => [...prev, { role: "assistant", content: `❌ Error: ${error}` }]);
+    else setAiMessages(prev => [...prev, { role: "assistant", content: text }]);
+    setAiLoading(false);
+    setTimeout(() => aiChatRef.current?.scrollTo(0, aiChatRef.current.scrollHeight), 100);
+  };
+
   const processMO = async () => {
     if(!moTranscript) return;
     setLoading(p=>({...p,mo:true})); clearErr("mo");
@@ -1013,6 +1229,11 @@ export default function GiniScribe() {
       extra=`\n\nLAB RESULTS:\n${tests.join("\n")}`;
     }
     if(vitals.bp_sys) extra+=`\nVITALS: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}%, Wt ${vitals.weight}kg, BMI ${vitals.bmi}`;
+    // Add imaging findings context
+    const extractedImaging = imagingFiles.filter(f=>f.data);
+    if (extractedImaging.length > 0) {
+      extra += `\n\nIMAGING REPORTS:\n${extractedImaging.map(f=>`${f.data.report_type}: ${f.data.impression || ""} ${(f.data.findings||[]).map(fi=>`${fi.parameter}=${fi.value}${fi.unit||""} (${fi.interpretation})`).join(", ")}`).join("\n")}`;
+    }
     const {data,error} = await callClaude(MO_PROMPT, moTranscript+extra);
     if(error) setErrors(p=>({...p,mo:error}));
     else if(data) setMoData(fixMoMedicines(data));
@@ -1031,6 +1252,11 @@ export default function GiniScribe() {
       const invList = sa(moData,"investigations").map(i=>`${i.test}: ${i.value}${i.unit}`).join(", ");
       context += `\n\nPATIENT CONTEXT FROM MO:\nDiagnoses: ${diagList}\nPrevious Meds: ${medList}\nInvestigations: ${invList}`;
       if(vitals.bp_sys) context += `\nVitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Wt ${vitals.weight}kg, BMI ${vitals.bmi}`;
+      // Add imaging findings
+      const extractedImaging = imagingFiles.filter(f=>f.data);
+      if (extractedImaging.length > 0) {
+        context += `\nImaging: ${extractedImaging.map(f=>`${f.data.report_type}: ${f.data.impression || (f.data.findings||[]).map(fi=>`${fi.parameter}=${fi.value}`).join(", ")}`).join("; ")}`;
+      }
     }
     const {data,error} = await callClaude(CONSULTANT_PROMPT, context);
     if(error) setErrors(p=>({...p,con:error}));
@@ -1362,7 +1588,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"consultant", label:"👨‍⚕️ Con", show:keySet },
     { id:"plan", label:"📄 Plan", show:keySet },
     { id:"history", label:"📜 Hx", show:keySet && !!API_URL },
-    { id:"outcomes", label:"📊", show:keySet && !!API_URL }
+    { id:"outcomes", label:"📊", show:keySet && !!API_URL },
+    { id:"ai", label:"🤖 AI", show:keySet }
   ];
 
   // Quick Mode: process single dictation into all sections
@@ -1721,6 +1948,67 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </tbody></table>
             </div>
           ))}
+
+          {/* ═══ IMAGING / DIAGNOSTIC REPORTS ═══ */}
+          <div style={{ marginTop:14, borderTop:"2px solid #e2e8f0", paddingTop:10 }}>
+            <div style={{ fontSize:13, fontWeight:800, color:"#0369a1", marginBottom:8 }}>🩻 Imaging & Diagnostic Reports</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+              {["X-Ray","MRI","Ultrasound","DEXA","ECG","Echo","CT","ABI","VPT","Fundus","PFT","NCS"].map(type => (
+                <label key={type} style={{ padding:"5px 10px", background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, fontSize:10, fontWeight:600, color:"#0369a1", cursor:"pointer", display:"inline-block" }}>
+                  📎 {type}
+                  <input type="file" accept="image/*,.pdf" onChange={e=>handleImagingUpload(e, type)} style={{ display:"none" }} />
+                </label>
+              ))}
+            </div>
+
+            {imagingFiles.map(file => (
+              <div key={file.id} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:8, background:file.data?"#f0fdf4":"#fafafa" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:file.data?6:0 }}>
+                  <span style={{ fontSize:11, fontWeight:700, color:"#0369a1" }}>🩻 {file.type}</span>
+                  <span style={{ fontSize:10, color:"#94a3b8" }}>{file.fileName}</span>
+                  <div style={{ flex:1 }} />
+                  {!file.data && !file.extracting && (
+                    <button onClick={()=>processImaging(file.id)} style={{ background:"#0369a1", color:"white", border:"none", padding:"3px 10px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🔬 Extract</button>
+                  )}
+                  {file.extracting && <span style={{ fontSize:10, color:"#0369a1", fontWeight:600 }}>⏳ Analyzing...</span>}
+                  {file.data && <span style={{ fontSize:10, color:"#059669", fontWeight:700 }}>✅ Extracted</span>}
+                  <button onClick={()=>removeImaging(file.id)} style={{ background:"#fef2f2", color:"#dc2626", border:"none", padding:"2px 6px", borderRadius:4, fontSize:9, cursor:"pointer" }}>✕</button>
+                </div>
+                {file.error && <div style={{ fontSize:10, color:"#dc2626", marginTop:3 }}>❌ {file.error}</div>}
+                {file.data && (
+                  <div>
+                    {file.data.impression && <div style={{ fontSize:11, color:"#1e293b", fontWeight:600, padding:"4px 8px", background:"#f0f9ff", borderRadius:4, marginBottom:4 }}>💡 {file.data.impression}</div>}
+                    {(file.data.findings||[]).length > 0 && (
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10, border:"1px solid #e2e8f0", borderRadius:4 }}>
+                        <thead><tr style={{ background:"#0369a1", color:"white" }}>
+                          <th style={{ padding:"3px 6px", textAlign:"left" }}>Parameter</th>
+                          <th style={{ padding:"3px 6px", textAlign:"right" }}>Value</th>
+                          <th style={{ padding:"3px 6px", textAlign:"center" }}>Status</th>
+                          <th style={{ padding:"3px 6px", textAlign:"left" }}>Detail</th>
+                        </tr></thead>
+                        <tbody>
+                          {file.data.findings.map((f,i) => (
+                            <tr key={i} style={{ background:f.interpretation==="Abnormal"?"#fef2f2":f.interpretation==="Borderline"?"#fefce8":i%2?"#fafafa":"white" }}>
+                              <td style={{ padding:"2px 6px", fontWeight:600 }}>{f.parameter}</td>
+                              <td style={{ padding:"2px 6px", textAlign:"right", fontWeight:700, color:f.interpretation==="Abnormal"?"#dc2626":"#1e293b" }}>{f.value} {f.unit||""}</td>
+                              <td style={{ padding:"2px 6px", textAlign:"center" }}>
+                                <span style={{ fontSize:8, padding:"1px 4px", borderRadius:3, fontWeight:700,
+                                  background:f.interpretation==="Abnormal"?"#dc2626":f.interpretation==="Borderline"?"#f59e0b":"#059669",
+                                  color:"white" }}>{f.interpretation}</span>
+                              </td>
+                              <td style={{ padding:"2px 6px", fontSize:9, color:"#64748b" }}>{f.detail||""}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {file.data.recommendations && <div style={{ fontSize:10, color:"#7c3aed", marginTop:3, fontStyle:"italic" }}>📋 {file.data.recommendations}</div>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
           <button onClick={()=>setTab("mo")} style={{ marginTop:8, width:"100%", background:"#1e293b", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Next: MO Recording →</button>
         </div>
       )}
@@ -3174,6 +3462,73 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ AI CHAT TAB ═══ */}
+      {tab==="ai" && (
+        <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 120px)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+            <div style={{ fontSize:15, fontWeight:800, color:"#7c2d12" }}>🤖 Gini AI — Clinical Assistant</div>
+            <div style={{ flex:1 }} />
+            {patient.name && <span style={{ fontSize:10, background:"#f0fdf4", color:"#059669", padding:"2px 8px", borderRadius:10, fontWeight:600 }}>Context: {patient.name}</span>}
+            <button onClick={()=>setAiMessages([])} style={{ fontSize:10, background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, cursor:"pointer", color:"#64748b" }}>Clear Chat</button>
+          </div>
+
+          {aiMessages.length === 0 && (
+            <div style={{ textAlign:"center", padding:"30px 20px", background:"#faf5ff", borderRadius:12, marginBottom:10 }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>🤖</div>
+              <div style={{ fontSize:13, fontWeight:700, color:"#6b21a8", marginBottom:6 }}>Ask me anything about this patient</div>
+              <div style={{ fontSize:11, color:"#7c3aed", lineHeight:1.8 }}>
+                Try: "What are the latest ADA guidelines for this HbA1c level?"<br/>
+                "Any drug interactions between current medications?"<br/>
+                "Suggest investigations for diabetic foot assessment"<br/>
+                "What's the target eGFR for this patient's CKD stage?"<br/>
+                "Draft a referral note for ophthalmology"
+              </div>
+              <div style={{ marginTop:12, display:"flex", flexWrap:"wrap", gap:6, justifyContent:"center" }}>
+                {["Drug interactions check","ADA guidelines for this patient","Suggest next investigations","Diabetic foot protocol","Explain latest lab trends","Referral letter for specialist"].map(q => (
+                  <button key={q} onClick={()=>{setAiInput(q);}} style={{ fontSize:10, background:"white", border:"1px solid #d8b4fe", padding:"4px 10px", borderRadius:20, cursor:"pointer", color:"#7c3aed", fontWeight:600 }}>{q}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chat messages */}
+          <div ref={aiChatRef} style={{ flex:1, overflow:"auto", marginBottom:8, display:"flex", flexDirection:"column", gap:8 }}>
+            {aiMessages.map((msg, i) => (
+              <div key={i} style={{ display:"flex", justifyContent:msg.role==="user"?"flex-end":"flex-start" }}>
+                <div style={{
+                  maxWidth:"85%", padding:"10px 14px", borderRadius:msg.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
+                  background:msg.role==="user"?"#1e293b":"#f8fafc",
+                  color:msg.role==="user"?"white":"#1e293b",
+                  border:msg.role==="user"?"none":"1px solid #e2e8f0",
+                  fontSize:12, lineHeight:1.7, whiteSpace:"pre-wrap"
+                }}>
+                  {msg.role==="assistant" && <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed", marginBottom:4 }}>🤖 GINI AI</div>}
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {aiLoading && (
+              <div style={{ display:"flex", justifyContent:"flex-start" }}>
+                <div style={{ padding:"10px 14px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"14px 14px 14px 4px" }}>
+                  <div style={{ fontSize:12, color:"#94a3b8" }}>⏳ Thinking...</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div style={{ display:"flex", gap:6, padding:"8px 0", borderTop:"2px solid #e2e8f0" }}>
+            <input value={aiInput} onChange={e=>setAiInput(e.target.value)} placeholder="Ask about patient, medications, guidelines, protocols..."
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendAiMessage()}
+              style={{ flex:1, padding:"10px 14px", border:"1px solid #e2e8f0", borderRadius:10, fontSize:13, outline:"none" }} />
+            <button onClick={sendAiMessage} disabled={aiLoading||!aiInput.trim()}
+              style={{ padding:"10px 20px", background:aiLoading?"#94a3b8":"#7c2d12", color:"white", border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:aiLoading?"wait":"pointer" }}>
+              {aiLoading?"⏳":"Send →"}
+            </button>
+          </div>
         </div>
       )}
     </div>
