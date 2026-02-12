@@ -352,10 +352,13 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
        FROM medications m JOIN consultations c ON c.id = m.consultation_id
        WHERE m.patient_id=$1 ORDER BY UPPER(m.name), c.visit_date`, [id]);
 
-    // Consultations with mo_data history for timeline
+    // Consultations with full context for timeline
     const visits = await pool.query(
       `SELECT id, visit_date, visit_type, mo_name, con_name, status,
-       mo_data->'history' as history, mo_data->'complications' as complications
+       mo_data->'history' as history, mo_data->'complications' as complications,
+       mo_data->'symptoms' as symptoms, mo_data->'compliance' as compliance,
+       con_data->'diet_lifestyle' as lifestyle, con_data->'self_monitoring' as monitoring,
+       con_data->'assessment_summary' as summary
        FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC`, [id]);
 
     res.json({

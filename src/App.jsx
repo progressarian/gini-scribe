@@ -135,7 +135,7 @@ The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sec
 Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
 Output ONLY valid JSON, no backticks.
 
-{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}]},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":["Walk 10,000 steps daily","1500 calories/day","0.8g/kg protein"],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":["Check fasting blood glucose daily","Monitor BP twice weekly"],"future_plan":["Doppler evaluation","Review insulin dose at follow-up"]}}
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"symptoms":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
 
 CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - Split dictation: patient info → history/meds → plan/changes
@@ -146,10 +146,12 @@ CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - ALWAYS fill medication timing (infer from drug class if not stated)
 - Include ALL medications: both existing (isNew:false) AND newly prescribed (isNew:true)
 - assessment_summary: MUST be patient-friendly, address by first name, cover ALL findings
-- diet_lifestyle: MUST have 3-5 specific items. If doctor mentioned any diet/exercise/lifestyle advice, include. If not mentioned, add sensible defaults for the conditions.
+- diet_lifestyle: MUST have 3-5 items as OBJECTS with {advice, detail, category, helps}. category: "Diet"/"Exercise"/"Critical"/"Sleep"/"Stress". helps: array of diagnosis IDs this helps
 - goals: MUST have 2-4 items with marker, current value, target, and timeline. Use lab values and vitals as current values.
-- self_monitoring: MUST have 2-4 specific home monitoring instructions relevant to the diagnoses.
-- future_plan: MUST list all planned investigations, follow-ups, and next steps mentioned.
+- self_monitoring: MUST have 2-4 OBJECTS with {title, instructions[], targets, alert}. Group by what to monitor (Blood Sugar, BP, Weight etc)
+- future_plan: MUST be OBJECTS with {condition, action}. "If X → Y" format
+- symptoms: Extract ALL symptoms patient reports (tingling, fatigue, breathlessness, chest pain, etc). Empty array if none
+- compliance: "Good"/"Partial"/"Poor" + brief note. Infer from context (taking medicines regularly=Good, missed doses/not walking=Partial)
 - Calculate age from DOB (e.g., born 1957 → ~67-68 years)
 - Extract ALL lab values as investigations with proper flags (HIGH/LOW/null)
 - Include complications (e.g., diabetic foot ulcer, retinopathy, neuropathy)
@@ -624,6 +626,8 @@ export default function GiniScribe() {
   const [outcomesData, setOutcomesData] = useState(null);
   const [outcomesLoading, setOutcomesLoading] = useState(false);
   const [outcomePeriod, setOutcomePeriod] = useState("all");
+  const [expandedBiomarker, setExpandedBiomarker] = useState(null);
+  const [timelineFilter, setTimelineFilter] = useState("All");
   const [patientFullData, setPatientFullData] = useState(null);
 
   // localStorage: load saved patients
@@ -2174,7 +2178,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
       {/* ===== OUTCOMES ===== */}
       {tab==="outcomes" && (
-        <div style={{ maxWidth:900, margin:"0 auto" }}>
+        <div style={{ maxWidth:920, margin:"0 auto" }}>
           {!dbPatientId ? (
             <div style={{ textAlign:"center", padding:50, color:"#94a3b8" }}>
               <div style={{ fontSize:40, marginBottom:12 }}>📊</div>
@@ -2192,7 +2196,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                 <div>
                   <div style={{ fontSize:20, fontWeight:800, color:"#0f172a", letterSpacing:"-0.5px" }}>Health Dashboard</div>
-                  <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>{patient.name}{patient.age ? ` • ${patient.age}y` : ""}{patient.sex ? ` • ${patient.sex}` : ""}</div>
+                  <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>{patient.name}{patient.age ? ` · ${patient.age}y` : ""}{patient.sex ? ` · ${patient.sex}` : ""}</div>
                 </div>
                 <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                   <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
@@ -2242,161 +2246,170 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 )}
               </div>
 
-              {/* ── BIOMARKER CHARTS ── */}
-              {outcomesData && (
-                <>
-                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
-                  <span style={{ fontSize:14 }}>🩸</span>
-                  <span style={{ fontSize:13, fontWeight:800, color:"#b91c1c", textTransform:"uppercase", letterSpacing:"0.5px" }}>Diabetes & Metabolic</span>
-                </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
-                  <Sparkline data={outcomesData.hba1c} label="HbA1c" unit="%" color="#dc2626" target={6.5} />
-                  <Sparkline data={outcomesData.fpg} label="Fasting Glucose" unit=" mg/dl" color="#ea580c" target={100} />
-                  <Sparkline data={outcomesData.bp} label="BP (Systolic)" unit=" mmHg" color="#7c3aed" target={130} valueKey="bp_sys" />
-                  <Sparkline data={outcomesData.weight} label="Weight" unit=" kg" color="#2563eb" valueKey="weight" />
-                </div>
+              {/* ── BIOMARKER CHARTS (Clickable) ── */}
+              {outcomesData && (() => {
+                // Build medication context per date for biomarker drill-down
+                const medsByDate = {};
+                (outcomesData.med_timeline || []).forEach(m => {
+                  const d = (m.visit_date||"").split("T")[0];
+                  if (!medsByDate[d]) medsByDate[d] = [];
+                  medsByDate[d].push(`${m.pharmacy_match||m.name} ${m.dose||""} ${m.frequency||""}`);
+                });
+                const lifestyleByDate = {};
+                (outcomesData.visits || []).forEach(v => {
+                  const d = (v.visit_date||"").split("T")[0];
+                  lifestyleByDate[d] = {
+                    lifestyle: v.lifestyle || [],
+                    compliance: v.compliance || "",
+                    symptoms: v.symptoms || [],
+                    summary: v.summary || "",
+                    doctor: v.con_name || v.mo_name || ""
+                  };
+                });
 
-                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
-                  <span style={{ fontSize:14 }}>💧</span>
-                  <span style={{ fontSize:13, fontWeight:800, color:"#1d4ed8", textTransform:"uppercase", letterSpacing:"0.5px" }}>Lipids & Kidney</span>
-                </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
-                  <Sparkline data={outcomesData.ldl} label="LDL" unit=" mg/dl" color="#d97706" target={100} />
-                  <Sparkline data={outcomesData.triglycerides} label="Triglycerides" unit=" mg/dl" color="#b45309" target={150} />
-                  <Sparkline data={outcomesData.hdl} label="HDL" unit=" mg/dl" color="#059669" target={40} lowerBetter={false} />
-                  <Sparkline data={outcomesData.egfr} label="eGFR" unit=" ml/min" color="#0d9488" target={60} lowerBetter={false} />
-                  <Sparkline data={outcomesData.creatinine} label="Creatinine" unit=" mg/dl" color="#6366f1" target={1.2} />
-                  <Sparkline data={outcomesData.uacr} label="UACR" unit=" mg/g" color="#be185d" target={30} />
-                  <Sparkline data={outcomesData.tsh} label="TSH" unit=" mIU/L" color="#0891b2" />
-                </div>
+                const renderSection = (title, icon, color, charts) => {
+                  const hasData = charts.some(c => c.data?.length > 0);
+                  if (!hasData) return null;
+                  return (
+                    <div key={title} style={{ marginBottom:20 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                        <span style={{ fontSize:14 }}>{icon}</span>
+                        <span style={{ fontSize:12, fontWeight:800, color, textTransform:"uppercase", letterSpacing:"0.5px" }}>{title}</span>
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                        {charts.map((c, ci) => {
+                          if (!c.data?.length) return null;
+                          const isExpanded = expandedBiomarker === `${title}-${ci}`;
+                          return (
+                            <div key={ci} style={{ gridColumn: isExpanded ? "1 / -1" : "auto",
+                              background:"white", borderRadius:14, border: isExpanded ? "2px solid "+c.color : "1px solid #f1f5f9",
+                              boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.08)" : "0 1px 3px rgba(0,0,0,0.04)",
+                              overflow:"hidden", cursor:"pointer", transition:"all 0.2s" }}
+                              onClick={()=>setExpandedBiomarker(isExpanded ? null : `${title}-${ci}`)}>
+                              <div style={{ padding: isExpanded ? 14 : 0 }}>
+                                <Sparkline data={c.data} label={c.label} unit={c.unit} color={c.color} target={c.target} valueKey={c.valueKey} lowerBetter={c.lowerBetter} />
+                              </div>
+                              {/* Expanded: show medication + lifestyle context */}
+                              {isExpanded && (
+                                <div style={{ borderTop:"1px solid #f1f5f9", padding:14, background:"#fafbfc" }}
+                                  onClick={e => e.stopPropagation()}>
+                                  <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:8 }}>📋 What was happening at each reading:</div>
+                                  {c.data.slice().reverse().map((dp, di) => {
+                                    const dateKey = (dp.test_date || dp.date || "").split("T")[0];
+                                    const meds = medsByDate[dateKey];
+                                    const ctx = lifestyleByDate[dateKey];
+                                    const val = dp[c.valueKey||"result"];
+                                    const fd = new Date(dateKey);
+                                    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                                    const dateStr = dateKey ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "";
+                                    return (
+                                      <div key={di} style={{ padding:"8px 0", borderBottom: di < c.data.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                                          <span style={{ fontSize:16, fontWeight:800, color: c.color }}>{val}{c.unit}</span>
+                                          <span style={{ fontSize:11, color:"#64748b", fontWeight:600 }}>{dateStr}</span>
+                                        </div>
+                                        {ctx?.doctor && <div style={{ fontSize:10, color:"#94a3b8", marginBottom:3 }}>👨‍⚕️ Dr. {ctx.doctor}</div>}
+                                        {ctx?.compliance && <div style={{ fontSize:10, marginBottom:3 }}>
+                                          <span style={{ padding:"1px 6px", borderRadius:10, fontWeight:600, fontSize:9,
+                                            background: (ctx.compliance+"").startsWith("Good") ? "#dcfce7" : (ctx.compliance+"").startsWith("Poor") ? "#fef2f2" : "#fef3c7",
+                                            color: (ctx.compliance+"").startsWith("Good") ? "#059669" : (ctx.compliance+"").startsWith("Poor") ? "#dc2626" : "#d97706" }}>
+                                            {ctx.compliance}
+                                          </span>
+                                        </div>}
+                                        {meds && meds.length > 0 && (
+                                          <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:3 }}>
+                                            {meds.slice(0,6).map((m,mi) => (
+                                              <span key={mi} style={{ fontSize:8, padding:"1px 5px", borderRadius:8, background:"#f0fdf4", color:"#059669", border:"1px solid #bbf7d0", fontWeight:600 }}>💊 {m}</span>
+                                            ))}
+                                            {meds.length > 6 && <span style={{ fontSize:8, color:"#94a3b8" }}>+{meds.length-6} more</span>}
+                                          </div>
+                                        )}
+                                        {ctx?.lifestyle && ctx.lifestyle.length > 0 && (
+                                          <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:3 }}>
+                                            {(Array.isArray(ctx.lifestyle) ? ctx.lifestyle : []).slice(0,4).map((l,li) => (
+                                              <span key={li} style={{ fontSize:8, padding:"1px 5px", borderRadius:8, background:"#eff6ff", color:"#2563eb", fontWeight:600 }}>
+                                                {typeof l === "object" ? `${l.category||""}:${l.advice||""}` : l}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {ctx?.symptoms && ctx.symptoms.length > 0 && (
+                                          <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                                            {ctx.symptoms.map((s,si) => (
+                                              <span key={si} style={{ fontSize:8, padding:"1px 5px", borderRadius:8, background:"#fef2f2", color:"#dc2626", fontWeight:600 }}>⚠️ {s}</span>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                };
 
-                {/* Body Composition */}
-                {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) && (
+                return (
                   <>
-                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
-                    <span style={{ fontSize:14 }}>🏋️</span>
-                    <span style={{ fontSize:13, fontWeight:800, color:"#059669", textTransform:"uppercase", letterSpacing:"0.5px" }}>Body Composition</span>
-                  </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
-                    <Sparkline data={outcomesData.waist} label="Waist" unit=" cm" color="#059669" valueKey="waist" />
-                    <Sparkline data={outcomesData.body_fat} label="Body Fat" unit="%" color="#d97706" valueKey="body_fat" />
-                    <Sparkline data={outcomesData.muscle_mass} label="Muscle Mass" unit=" kg" color="#2563eb" lowerBetter={false} valueKey="muscle_mass" />
-                  </div>
-                  </>
-                )}
+                    {renderSection("Diabetes & Metabolic", "🩸", "#b91c1c", [
+                      { data:outcomesData.hba1c, label:"HbA1c", unit:"%", color:"#dc2626", target:6.5 },
+                      { data:outcomesData.fpg, label:"Fasting Glucose", unit:" mg/dl", color:"#ea580c", target:100 },
+                      { data:outcomesData.bp, label:"BP (Systolic)", unit:" mmHg", color:"#7c3aed", target:130, valueKey:"bp_sys" },
+                      { data:outcomesData.weight, label:"Weight", unit:" kg", color:"#2563eb", valueKey:"weight" },
+                    ])}
+                    {renderSection("Lipids & Kidney", "💧", "#1d4ed8", [
+                      { data:outcomesData.ldl, label:"LDL", unit:" mg/dl", color:"#d97706", target:100 },
+                      { data:outcomesData.triglycerides, label:"Triglycerides", unit:" mg/dl", color:"#b45309", target:150 },
+                      { data:outcomesData.hdl, label:"HDL", unit:" mg/dl", color:"#059669", target:40, lowerBetter:false },
+                      { data:outcomesData.egfr, label:"eGFR", unit:" ml/min", color:"#0d9488", target:60, lowerBetter:false },
+                      { data:outcomesData.creatinine, label:"Creatinine", unit:" mg/dl", color:"#6366f1", target:1.2 },
+                      { data:outcomesData.uacr, label:"UACR", unit:" mg/g", color:"#be185d", target:30 },
+                      { data:outcomesData.tsh, label:"TSH", unit:" mIU/L", color:"#0891b2" },
+                    ])}
+                    {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) &&
+                      renderSection("Body Composition", "🏋️", "#059669", [
+                        { data:outcomesData.waist, label:"Waist", unit:" cm", color:"#059669", valueKey:"waist" },
+                        { data:outcomesData.body_fat, label:"Body Fat", unit:"%", color:"#d97706", valueKey:"body_fat" },
+                        { data:outcomesData.muscle_mass, label:"Muscle Mass", unit:" kg", color:"#2563eb", lowerBetter:false, valueKey:"muscle_mass" },
+                      ])
+                    }
 
-                {/* Missing data alert */}
-                {(() => {
-                  const missing = [];
-                  if (!outcomesData.hba1c?.length) missing.push("HbA1c");
-                  if (!outcomesData.fpg?.length) missing.push("Fasting Glucose");
-                  if (!outcomesData.ldl?.length) missing.push("LDL");
-                  if (!outcomesData.triglycerides?.length) missing.push("Triglycerides");
-                  if (!outcomesData.egfr?.length) missing.push("eGFR");
-                  if (!outcomesData.uacr?.length) missing.push("UACR");
-                  return missing.length > 0 ? (
-                    <div style={{ background:"#fffbeb", borderRadius:12, padding:"10px 14px", border:"1px solid #fde68a", marginBottom:20 }}>
-                      <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>⚠️ Missing: {missing.join(", ")}</div>
-                      <div style={{ fontSize:10, color:"#b45309", marginTop:3 }}>Add via 📜 Hx tab → Reports to complete the picture</div>
-                    </div>
-                  ) : null;
-                })()}
-
-                {/* Screenings */}
-                {outcomesData.screenings?.length > 0 && (
-                  <div style={{ background:"white", borderRadius:14, padding:14, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
-                    <div style={{ fontSize:12, fontWeight:800, color:"#475569", marginBottom:8 }}>🔬 Screening Tests</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
-                      {outcomesData.screenings.map((s,i) => (
-                        <div key={i} style={{ background:"#f8fafc", borderRadius:10, padding:"8px 12px" }}>
-                          <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600 }}>{s.test_name}</div>
-                          <div style={{ fontSize:13, fontWeight:700, color:s.flag==="HIGH"?"#dc2626":s.flag==="LOW"?"#2563eb":"#374151" }}>{s.result} {s.unit}</div>
-                          <div style={{ fontSize:9, color:"#cbd5e1" }}>{fmtDate(s.test_date)}</div>
+                    {/* Missing data */}
+                    {(() => {
+                      const missing = [];
+                      if (!outcomesData.hba1c?.length) missing.push("HbA1c");
+                      if (!outcomesData.fpg?.length) missing.push("Fasting Glucose");
+                      if (!outcomesData.ldl?.length) missing.push("LDL");
+                      if (!outcomesData.egfr?.length) missing.push("eGFR");
+                      return missing.length > 0 ? (
+                        <div style={{ background:"#fffbeb", borderRadius:12, padding:"10px 14px", border:"1px solid #fde68a", marginBottom:20 }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>⚠️ Missing: {missing.join(", ")}</div>
+                          <div style={{ fontSize:10, color:"#b45309", marginTop:3 }}>Add via 📜 Hx tab → Reports to see trends</div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                </>
-              )}
+                      ) : null;
+                    })()}
+                  </>
+                );
+              })()}
 
               {/* ═══════════════════════════════════════════════════ */}
-              {/* ── HEALTH STORY TIMELINE (Vertical) ──            */}
+              {/* ── HEALTH STORY TIMELINE with Filters ──          */}
               {/* ═══════════════════════════════════════════════════ */}
               {outcomesData && (() => {
                 // Build comprehensive timeline events
                 const events = [];
 
-                // 1. Birth / DOB
-                if (patient.dob) {
-                  events.push({ date: patient.dob, type:"life", icon:"👶", label:"Born", detail: fmtDate(patient.dob), color:"#6366f1", bg:"#eef2ff" });
-                } else if (patient.age) {
-                  const birthYear = new Date().getFullYear() - parseInt(patient.age);
-                  events.push({ date: `${birthYear}-01-01`, type:"life", icon:"👶", label:"Born", detail:`~${birthYear} (age ${patient.age})`, color:"#6366f1", bg:"#eef2ff" });
-                }
-
-                // 2. Estimated diagnosis onset from labels like "Type 2 DM (10 years)"
-                const diagGrouped = {};
-                (outcomesData.diagnosis_journey || []).forEach(d => {
-                  if (!diagGrouped[d.diagnosis_id]) diagGrouped[d.diagnosis_id] = { label: d.label, history: [], doctor: d.con_name || d.mo_name };
-                  diagGrouped[d.diagnosis_id].history.push({ status: d.status, date: d.visit_date, doctor: d.con_name || d.mo_name });
-                  diagGrouped[d.diagnosis_id].label = d.label;
-                });
-
-                // Parse "since X years" or "X years" from diagnosis labels to estimate onset
-                Object.entries(diagGrouped).forEach(([id, info]) => {
-                  const match = info.label.match(/\((?:since\s+)?(\d+)\s*(?:years?|yrs?)\)/i);
-                  if (match) {
-                    const yearsAgo = parseInt(match[1]);
-                    const onsetYear = new Date().getFullYear() - yearsAgo;
-                    events.push({ date:`${onsetYear}-06-01`, type:"diagnosis_onset", icon:"🩺", label:info.label.replace(/\s*\(.*?\)/, ""), detail:`Estimated onset ~${onsetYear}`, color:"#dc2626", bg:"#fef2f2" });
-                  }
-                });
-
-                // 3. Past medical/surgical from MO data (current session)
-                if (moData?.history?.past_medical_surgical) {
-                  const pms = moData.history.past_medical_surgical;
-                  if (pms && pms !== "NIL" && pms.length > 3) {
-                    // Try to parse items
-                    const items = pms.split(/[,;]/);
-                    items.forEach(item => {
-                      const trimmed = item.trim();
-                      if (trimmed.length > 2) {
-                        const yearMatch = trimmed.match(/(19|20)\d{2}/);
-                        events.push({ date: yearMatch ? `${yearMatch[0]}-06-01` : null, type:"medical_history", icon:"🏥", label:trimmed, detail:"Past medical/surgical", color:"#7c3aed", bg:"#faf5ff" });
-                      }
-                    });
-                  }
-                }
-
-                // 4. Complication events from MO data
-                if (moData?.complications?.length > 0) {
-                  moData.complications.forEach(c => {
-                    if (c?.name) {
-                      events.push({ date: null, type:"complication", icon:"⚠️", label:c.name, detail:`${c.status}${c.detail ? ` — ${c.detail}` : ""}`, color:"#dc2626", bg:"#fef2f2" });
-                    }
-                  });
-                }
-
-                // 5. Visit events with diagnosis changes and new meds
-                const visitDates = {};
-                (outcomesData.visits || []).forEach(v => {
-                  if (!v.visit_date) return;
-                  const key = v.visit_date.split("T")[0];
-                  if (!visitDates[key]) visitDates[key] = { date:key, doctors:[], type:v.visit_type, status:v.status };
-                  if (v.con_name && !visitDates[key].doctors.includes(v.con_name)) visitDates[key].doctors.push(v.con_name);
-                  if (v.mo_name && !visitDates[key].doctors.includes(v.mo_name)) visitDates[key].doctors.push(v.mo_name);
-                });
-
-                // Collect per-visit diagnosis changes
+                // --- VISIT EVENTS (primary timeline items) ---
                 const visitDiagChanges = {};
                 (outcomesData.diagnosis_journey || []).forEach(d => {
                   const key = (d.visit_date || "").split("T")[0];
                   if (!visitDiagChanges[key]) visitDiagChanges[key] = [];
                   visitDiagChanges[key].push({ label: d.label, status: d.status });
                 });
-
-                // Collect per-visit new meds
                 const visitNewMeds = {};
                 (outcomesData.med_timeline || []).forEach(m => {
                   if (!m.is_new) return;
@@ -2405,34 +2418,86 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   visitNewMeds[key].push(m.pharmacy_match || m.name);
                 });
 
-                Object.entries(visitDates).forEach(([date, v]) => {
-                  const diagChanges = visitDiagChanges[date] || [];
-                  const newMeds = visitNewMeds[date] || [];
-                  const newDiags = diagChanges.filter(d => d.status === "New").map(d => d.label);
-                  const worsened = diagChanges.filter(d => d.status === "Uncontrolled").map(d => d.label);
-                  const improved = diagChanges.filter(d => d.status === "Controlled").map(d => d.label);
-
-                  let detail = [];
-                  if (v.doctors.length) detail.push(`Dr. ${v.doctors.join(", Dr. ")}`);
-                  if (newDiags.length) detail.push(`New: ${newDiags.join(", ")}`);
-                  if (improved.length) detail.push(`✅ Controlled: ${improved.join(", ")}`);
-                  if (worsened.length) detail.push(`⚠️ Uncontrolled: ${worsened.join(", ")}`);
-                  if (newMeds.length) detail.push(`Started: ${newMeds.slice(0,4).join(", ")}${newMeds.length > 4 ? ` +${newMeds.length-4} more` : ""}`);
+                (outcomesData.visits || []).forEach(v => {
+                  if (!v.visit_date) return;
+                  const dateKey = v.visit_date.split("T")[0];
+                  const diagChanges = visitDiagChanges[dateKey] || [];
+                  const newMeds = visitNewMeds[dateKey] || [];
 
                   events.push({
-                    date, type:"visit", icon:"📋",
-                    label: `${v.status === "historical" ? "Historical " : ""}${v.type || "OPD"} Visit`,
-                    detail: detail.join(" · ") || "Consultation",
-                    color:"#0369a1", bg:"#f0f9ff",
-                    diagChanges, newMeds: newMeds.slice(0, 6)
+                    date: dateKey, type:"visit", icon:"📋",
+                    label: `${v.status === "historical" ? "Historical " : ""}${v.visit_type || "OPD"} Visit`,
+                    doctor: v.con_name || v.mo_name || "",
+                    summary: v.summary || "",
+                    diagChanges, newMeds: newMeds.slice(0,6),
+                    lifestyle: v.lifestyle || [],
+                    compliance: v.compliance || "",
+                    symptoms: v.symptoms || [],
+                    color:"#0369a1", bg:"#f0f9ff"
                   });
                 });
 
-                // Sort: most recent first, nulls at bottom
+                // --- DIAGNOSIS ONSET (from labels) ---
+                const diagGrouped = {};
+                (outcomesData.diagnosis_journey || []).forEach(d => {
+                  if (!diagGrouped[d.diagnosis_id]) diagGrouped[d.diagnosis_id] = { label: d.label };
+                  diagGrouped[d.diagnosis_id].label = d.label;
+                });
+                Object.entries(diagGrouped).forEach(([id, info]) => {
+                  const match = info.label.match(/\((?:since\s+)?(\d+)\s*(?:years?|yrs?)\)/i);
+                  if (match) {
+                    const yearsAgo = parseInt(match[1]);
+                    const onsetYear = new Date().getFullYear() - yearsAgo;
+                    events.push({ date:`${onsetYear}-06-01`, type:"diagnosis", icon:"🩺",
+                      label:info.label.replace(/\s*\(.*?\)/, ""),
+                      detail:`Estimated onset ~${onsetYear}`, color:"#dc2626", bg:"#fef2f2" });
+                  }
+                });
+
+                // --- COMPLICATIONS ---
+                if (moData?.complications?.length > 0) {
+                  moData.complications.forEach(c => {
+                    if (c?.name) {
+                      events.push({ date: null, type:"complication", icon:"⚠️", label:c.name,
+                        detail:`${c.status}${c.detail ? ` — ${c.detail}` : ""}`, color:"#dc2626", bg:"#fef2f2" });
+                    }
+                  });
+                }
+
+                // --- PAST MEDICAL/SURGICAL ---
+                if (moData?.history?.past_medical_surgical) {
+                  const pms = moData.history.past_medical_surgical;
+                  if (pms && pms !== "NIL" && pms.length > 3) {
+                    pms.split(/[,;]/).forEach(item => {
+                      const trimmed = item.trim();
+                      if (trimmed.length > 2) {
+                        const yearMatch = trimmed.match(/(19|20)\d{2}/);
+                        events.push({ date: yearMatch ? `${yearMatch[0]}-06-01` : null,
+                          type:"history", icon:"🏥", label:trimmed, detail:"Past medical/surgical",
+                          color:"#7c3aed", bg:"#faf5ff" });
+                      }
+                    });
+                  }
+                }
+
+                // --- BIRTH ---
+                if (patient.dob) {
+                  events.push({ date: patient.dob, type:"life", icon:"👶", label:"Born",
+                    detail: fmtDate(patient.dob), color:"#6366f1", bg:"#eef2ff" });
+                } else if (patient.age) {
+                  const birthYear = new Date().getFullYear() - parseInt(patient.age);
+                  events.push({ date:`${birthYear}-01-01`, type:"life", icon:"👶", label:"Born",
+                    detail:`~${birthYear} (age ${patient.age})`, color:"#6366f1", bg:"#eef2ff" });
+                }
+
+                // Sort chronologically: most recent first, null-date items just above birth
                 events.sort((a, b) => {
                   if (!a.date && !b.date) return 0;
                   if (!a.date) return 1;
-                  if (!b.date) return -1;
+                  if (!b.date) return 1;
+                  // Birth always last
+                  if (a.type === "life") return 1;
+                  if (b.type === "life") return -1;
                   return new Date(b.date) - new Date(a.date);
                 });
 
@@ -2447,55 +2512,105 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                 if (unique.length === 0) return null;
 
+                // Filter tabs
+                const filters = ["All","Visits","Diagnosis","Meds","Symptoms","History"];
+                const filtered = unique.filter(e => {
+                  if (timelineFilter === "All") return true;
+                  if (timelineFilter === "Visits") return e.type === "visit";
+                  if (timelineFilter === "Diagnosis") return e.type === "diagnosis" || (e.type === "visit" && e.diagChanges?.length > 0);
+                  if (timelineFilter === "Meds") return e.type === "visit" && e.newMeds?.length > 0;
+                  if (timelineFilter === "Symptoms") return e.type === "visit" && e.symptoms?.length > 0;
+                  if (timelineFilter === "History") return e.type === "history" || e.type === "complication" || e.type === "life";
+                  return true;
+                });
+
                 return (
                   <div style={{ background:"white", borderRadius:16, padding:18, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+                    {/* Header + Filter tabs */}
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
                       <span style={{ fontSize:18 }}>📖</span>
                       <span style={{ fontSize:15, fontWeight:800, color:"#0f172a" }}>Health Story</span>
-                      <span style={{ fontSize:10, color:"#94a3b8", fontWeight:500, marginLeft:"auto" }}>Most recent first</span>
+                    </div>
+                    <div style={{ display:"flex", gap:4, marginBottom:14, flexWrap:"wrap" }}>
+                      {filters.map(f => (
+                        <button key={f} onClick={()=>setTimelineFilter(f)}
+                          style={{ padding:"4px 12px", fontSize:10, fontWeight:700, borderRadius:20, cursor:"pointer",
+                            border: timelineFilter===f ? "none" : "1px solid #e2e8f0",
+                            background: timelineFilter===f ? "#0f172a" : "white",
+                            color: timelineFilter===f ? "white" : "#64748b",
+                            transition:"all 0.15s" }}>
+                          {f} {f!=="All" ? `(${unique.filter(e => {
+                            if (f === "Visits") return e.type === "visit";
+                            if (f === "Diagnosis") return e.type === "diagnosis" || (e.type === "visit" && e.diagChanges?.length > 0);
+                            if (f === "Meds") return e.type === "visit" && e.newMeds?.length > 0;
+                            if (f === "Symptoms") return e.type === "visit" && e.symptoms?.length > 0;
+                            if (f === "History") return e.type === "history" || e.type === "complication" || e.type === "life";
+                            return true;
+                          }).length})` : ""}
+                        </button>
+                      ))}
                     </div>
 
-                    <div style={{ position:"relative", paddingLeft:32 }}>
+                    {/* Timeline */}
+                    <div style={{ position:"relative", paddingLeft:34 }}>
                       {/* Vertical line */}
-                      <div style={{ position:"absolute", left:12, top:8, bottom:8, width:2, background:"linear-gradient(to bottom, #0ea5e9, #e2e8f0, #c4b5fd)", borderRadius:2 }} />
+                      <div style={{ position:"absolute", left:13, top:8, bottom:8, width:2,
+                        background:"linear-gradient(to bottom, #0ea5e9, #e2e8f0, #c4b5fd)", borderRadius:2 }} />
 
-                      {unique.map((ev, i) => {
+                      {filtered.map((ev, i) => {
                         const isVisit = ev.type === "visit";
+                        const fd = ev.date ? new Date(ev.date) : null;
+                        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                        const dateStr = fd ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "—";
+
                         return (
-                          <div key={i} style={{ position:"relative", marginBottom: i < unique.length - 1 ? 16 : 0 }}>
+                          <div key={i} style={{ position:"relative", marginBottom: i < filtered.length - 1 ? (isVisit ? 18 : 14) : 0 }}>
                             {/* Node dot */}
-                            <div style={{ position:"absolute", left:-26, top:3, width:22, height:22, borderRadius:"50%",
-                              display:"flex", alignItems:"center", justifyContent:"center", fontSize:11,
+                            <div style={{ position:"absolute", left:-28, top:3, width:24, height:24, borderRadius:"50%",
+                              display:"flex", alignItems:"center", justifyContent:"center", fontSize:12,
                               background: ev.bg || "#f8fafc", border:`2px solid ${ev.color || "#94a3b8"}`,
                               boxShadow:"0 1px 3px rgba(0,0,0,0.08)", zIndex:1 }}>
                               {ev.icon}
                             </div>
 
-                            {/* Content card */}
+                            {/* Content */}
                             <div style={{ background: isVisit ? "#f8fafc" : "transparent", borderRadius:12,
-                              padding: isVisit ? "10px 14px" : "4px 0", marginLeft:6,
-                              border: isVisit ? "1px solid #f1f5f9" : "none" }}>
+                              padding: isVisit ? "12px 14px" : "4px 0", marginLeft:6,
+                              border: isVisit ? "1px solid #e2e8f0" : "none" }}>
 
-                              {/* Date + Label row */}
+                              {/* Date + Label */}
                               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                                 <div style={{ flex:1 }}>
                                   <div style={{ fontSize:13, fontWeight:700, color:"#0f172a" }}>{ev.label}</div>
+                                  {ev.doctor && <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>👨‍⚕️ Dr. {ev.doctor}</div>}
                                 </div>
-                                <div style={{ fontSize:11, color:"#64748b", fontWeight:600, whiteSpace:"nowrap", flexShrink:0 }}>
-                                  {ev.date ? (() => {
-                                    const d = new Date(ev.date);
-                                    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                                    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-                                  })() : "—"}
-                                </div>
+                                <div style={{ fontSize:11, color:"#475569", fontWeight:600, whiteSpace:"nowrap", flexShrink:0,
+                                  background:"#f1f5f9", padding:"2px 8px", borderRadius:8 }}>{dateStr}</div>
                               </div>
 
-                              {/* Detail text */}
-                              {ev.detail && (
+                              {/* Detail / Summary */}
+                              {ev.detail && !isVisit && (
                                 <div style={{ fontSize:11, color:"#475569", marginTop:3, lineHeight:"1.5" }}>{ev.detail}</div>
                               )}
+                              {isVisit && ev.summary && (
+                                <div style={{ fontSize:11, color:"#475569", marginTop:4, lineHeight:"1.5", fontStyle:"italic",
+                                  background:"white", borderRadius:8, padding:"6px 10px", border:"1px solid #f1f5f9" }}>
+                                  {typeof ev.summary === "string" ? ev.summary.slice(0,200) + (ev.summary.length > 200 ? "..." : "") : ""}
+                                </div>
+                              )}
 
-                              {/* Visit: diagnosis chips */}
+                              {/* Compliance badge */}
+                              {isVisit && ev.compliance && (
+                                <div style={{ marginTop:6 }}>
+                                  <span style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:10,
+                                    background: (ev.compliance+"").startsWith("Good") ? "#dcfce7" : (ev.compliance+"").startsWith("Poor") ? "#fef2f2" : "#fef3c7",
+                                    color: (ev.compliance+"").startsWith("Good") ? "#059669" : (ev.compliance+"").startsWith("Poor") ? "#dc2626" : "#d97706" }}>
+                                    {ev.compliance}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Diagnosis chips */}
                               {isVisit && ev.diagChanges?.length > 0 && (
                                 <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
                                   {ev.diagChanges.map((d, di) => (
@@ -2508,13 +2623,34 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 </div>
                               )}
 
-                              {/* Visit: new meds */}
-                              {isVisit && ev.newMeds?.length > 0 && (
-                                <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:4 }}>
-                                  {ev.newMeds.map((m, mi) => (
-                                    <span key={mi} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8, background:"#faf5ff", color:"#7c3aed", border:"1px solid #e9d5ff" }}>
-                                      💊 {m}
+                              {/* Symptoms */}
+                              {isVisit && ev.symptoms?.length > 0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginTop:4 }}>
+                                  {ev.symptoms.map((s, si) => (
+                                    <span key={si} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8,
+                                      background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca" }}>⚠️ {s}</span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Lifestyle at visit */}
+                              {isVisit && ev.lifestyle?.length > 0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginTop:4 }}>
+                                  {(Array.isArray(ev.lifestyle) ? ev.lifestyle : []).slice(0,5).map((l, li) => (
+                                    <span key={li} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8,
+                                      background:"#f0fdf4", color:"#059669", border:"1px solid #bbf7d0" }}>
+                                      {typeof l === "object" ? `${l.category}: ${l.advice}` : l}
                                     </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* New meds */}
+                              {isVisit && ev.newMeds?.length > 0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginTop:4 }}>
+                                  {ev.newMeds.map((m, mi) => (
+                                    <span key={mi} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8,
+                                      background:"#faf5ff", color:"#7c3aed", border:"1px solid #e9d5ff" }}>💊 {m}</span>
                                   ))}
                                 </div>
                               )}
@@ -2578,7 +2714,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 );
               })()}
 
-              {/* ── MEDICATION TIMELINE ── */}
+              {/* ── MEDICATIONS ── */}
               {outcomesData?.med_timeline?.length > 0 && (() => {
                 const grouped = {};
                 outcomesData.med_timeline.forEach(m => {
