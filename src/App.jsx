@@ -42,13 +42,42 @@ async function transcribeWhisper(audioBlob, apiKey, language) {
 // Gini Pharmacy brand names for exact matching
 const GINI_BRANDS = "Thyronorm,Euthrox,Euthyrox,Telma,Telma AM,Telma H,Telma CT,Telma Beta,Concor,Concor AM,Concor T,Ecosprin AV,Ecosprin Gold,Atchol,Atchol F,Dytor,Dytor Plus,Amlong,Cetanil,Cetanil M,Ciplar LA,Glimy,Rosuvas CV,Dolo,Mixtard,Huminsulin,Lantus,Tresiba,Novorapid,Humalog,Clopitab,Dianorm,Glycomet,Amaryl,Jalra,Galvus,Forxiga,Jardiance,Pan D,Razo D,Shelcal,Calnex,Uprise D3,Stamlo,Cardivas,Atorva,Rozavel,Arkamin,Prazopress,Minipress,Lasix,Aldactone,Eltroxin,Thyrox,Cilacar,Amlokind,Telmikind,Metapure,Obimet,Gluconorm";
 
+// Drug class → biomarker relevance mapping for intelligent filtering
+const DRUG_BIOMARKER_MAP = {
+  // Antidiabetics → HbA1c, Fasting Glucose, Weight
+  diabetes: { patterns: /glycomet|metformin|glizid|gliclazide|glimepiride|glimy|amaryl|galvus|vildagliptin|jalra|sitagliptin|forxiga|dapagliflozin|jardiance|empagliflozin|dianorm|gluconorm|cetanil|mixtard|huminsulin|lantus|tresiba|novorapid|humalog|insulin|ozempic|rybelsus|semaglutide|liraglutide|reclimet|istavel/i, biomarkers: ["hba1c","fpg","weight"] },
+  // Antihypertensives → BP
+  bp: { patterns: /telma|telmisartan|amlong|amlodipine|concor|bisoprolol|stamlo|cilacar|cilnidipine|arkamin|clonidine|prazopress|minipress|dytor|torsemide|lasix|furosemide|aldactone|metoprolol|atenolol|ramipril|enalapril|losartan|cardivas|carvedilol|ciplar|propranolol|metosartan/i, biomarkers: ["bp"] },
+  // Statins/Lipid → LDL, Triglycerides, HDL
+  lipid: { patterns: /atchol|atorva|atorvastatin|rosuvas|rosuvastatin|rozavel|ecosprin|clopitab|fenofibrate|torglip/i, biomarkers: ["ldl","triglycerides","hdl"] },
+  // Thyroid → TSH
+  thyroid: { patterns: /thyronorm|eltroxin|thyrox|euthrox|levothyroxine/i, biomarkers: ["tsh"] },
+  // Nephroprotective → eGFR, Creatinine, UACR
+  kidney: { patterns: /forxiga|dapagliflozin|jardiance|empagliflozin|telma|telmisartan|ramipril|enalapril|losartan/i, biomarkers: ["egfr","creatinine","uacr"] },
+};
+
+function getMedsForBiomarker(biomarkerKey, meds) {
+  const relevant = [];
+  for (const [cls, info] of Object.entries(DRUG_BIOMARKER_MAP)) {
+    if (info.biomarkers.includes(biomarkerKey)) {
+      meds.forEach(m => {
+        const name = (m.pharmacy_match || m.name || m || "").toString();
+        if (info.patterns.test(name)) relevant.push(name);
+      });
+    }
+  }
+  // Deduplicate
+  return [...new Set(relevant)];
+}
+
 const MO_PROMPT = `You are a clinical documentation assistant for Gini Advanced Care Hospital, Mohali.
 Structure the MO's verbal summary into JSON. Output ONLY valid JSON. No backticks.
 
-{"diagnoses":[{"id":"hypo","label":"Hypothyroidism (Since 2000)","status":"Controlled"}],"complications":[{"name":"Nephropathy","status":"+","detail":"eGFR 29, CKD Stage 4","severity":"high"}],"history":{"family":"Father CAD post-CABG, Mother DM","past_medical_surgical":"NIL","personal":"Non-smoker, no alcohol","covid":"No exposure","vaccination":"Completed"},"previous_medications":[{"name":"THYRONORM 88","composition":"Levothyroxine 88mcg","dose":"88mcg","frequency":"OD","timing":"Empty stomach morning"}],"investigations":[{"test":"TSH","value":7.2,"unit":"mIU/L","flag":"HIGH","critical":false,"ref":"0.4-4.0"},{"test":"HbA1c","value":6.0,"unit":"%","flag":null,"critical":false,"ref":"<6.5"}],"missing_investigations":["HDL","Total Cholesterol"]}
+{"diagnoses":[{"id":"hypo","label":"Hypothyroidism (Since 2000)","status":"Controlled"}],"chief_complaints":["Tingling in feet for 3 months","Fatigue","Increased thirst"],"complications":[{"name":"Nephropathy","status":"+","detail":"eGFR 29, CKD Stage 4","severity":"high"}],"history":{"family":"Father CAD post-CABG, Mother DM","past_medical_surgical":"NIL","personal":"Non-smoker, no alcohol","covid":"No exposure","vaccination":"Completed"},"previous_medications":[{"name":"THYRONORM 88","composition":"Levothyroxine 88mcg","dose":"88mcg","frequency":"OD","timing":"Empty stomach morning"}],"investigations":[{"test":"TSH","value":7.2,"unit":"mIU/L","flag":"HIGH","critical":false,"ref":"0.4-4.0"},{"test":"HbA1c","value":6.0,"unit":"%","flag":null,"critical":false,"ref":"<6.5"}],"missing_investigations":["HDL","Total Cholesterol"]}
 
 RULES:
 - IDs: dm2,htn,cad,ckd,hypo,obesity,dyslipidemia
+- chief_complaints: Extract ALL symptoms patient reports (tingling, fatigue, breathlessness, chest pain, frequent urination, blurry vision, weight gain, etc). Array of strings. MUST be filled — at least 1 complaint.
 - Status MUST be exactly one of: "Controlled", "Uncontrolled", "New". NO other values like "Active", "Present", "Suboptimal". If newly diagnosed use "New". If on treatment but not at target use "Uncontrolled". If stable/at target use "Controlled".
 - If BMI>=25 or weight concern mentioned, ALWAYS add obesity diagnosis with id:"obesity"
 - flag: "HIGH"/"LOW"/null. critical:true ONLY if dangerous (HbA1c>10, eGFR<30, Cr>2)
@@ -135,7 +164,7 @@ The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sec
 Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
 Output ONLY valid JSON, no backticks.
 
-{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"symptoms":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"chief_complaints":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
 
 CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - Split dictation: patient info → history/meds → plan/changes
@@ -150,7 +179,7 @@ CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - goals: MUST have 2-4 items with marker, current value, target, and timeline. Use lab values and vitals as current values.
 - self_monitoring: MUST have 2-4 OBJECTS with {title, instructions[], targets, alert}. Group by what to monitor (Blood Sugar, BP, Weight etc)
 - future_plan: MUST be OBJECTS with {condition, action}. "If X → Y" format
-- symptoms: Extract ALL symptoms patient reports (tingling, fatigue, breathlessness, chest pain, etc). Empty array if none
+- chief_complaints: Extract ALL symptoms patient reports (tingling, fatigue, breathlessness, chest pain, etc). Empty array if none
 - compliance: "Good"/"Partial"/"Poor" + brief note. Infer from context (taking medicines regularly=Good, missed doses/not walking=Partial)
 - Calculate age from DOB (e.g., born 1957 → ~67-68 years)
 - Extract ALL lab values as investigations with proper flags (HIGH/LOW/null)
@@ -628,6 +657,8 @@ export default function GiniScribe() {
   const [outcomePeriod, setOutcomePeriod] = useState("all");
   const [expandedBiomarker, setExpandedBiomarker] = useState(null);
   const [timelineFilter, setTimelineFilter] = useState("All");
+  const [timelineDoctor, setTimelineDoctor] = useState("");
+  const [expandedDiagnosis, setExpandedDiagnosis] = useState(null);
   const [patientFullData, setPatientFullData] = useState(null);
 
   // localStorage: load saved patients
@@ -1761,6 +1792,15 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>}
                 {planHidden.has("summary") && <div className="no-print" style={{ marginBottom:4, opacity:.4, cursor:"pointer", fontSize:10, color:"#94a3b8" }} onClick={()=>toggleBlock("summary")}>➕ Summary</div>}
 
+                {/* Chief Complaints */}
+                {(moData?.chief_complaints||[]).length > 0 && <PlanBlock id="complaints" title="🗣️ Chief Complaints" color="#dc2626" hidden={planHidden.has("complaints")} onToggle={()=>toggleBlock("complaints")}>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {moData.chief_complaints.map((c,i) => (
+                      <span key={i} style={{ fontSize:11, padding:"3px 8px", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, color:"#dc2626", fontWeight:600 }}>⚠️ {c}</span>
+                    ))}
+                  </div>
+                </PlanBlock>}
+
                 {/* Diagnoses */}
                 {planDiags.length>0 && <PlanBlock id="diagnoses" title="🏥 Your Conditions" color="#1e293b" hidden={planHidden.has("diagnoses")} onToggle={()=>toggleBlock("diagnoses")}>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:3 }}>
@@ -2176,6 +2216,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       )}
 
 
+
       {/* ===== OUTCOMES ===== */}
       {tab==="outcomes" && (
         <div style={{ maxWidth:920, margin:"0 auto" }}>
@@ -2237,7 +2278,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   </div>
                   <button onClick={generateHealthSummary} disabled={summaryLoading}
                     style={{ fontSize:11, padding:"5px 14px", border:"none", borderRadius:8, cursor:summaryLoading?"wait":"pointer",
-                      background:summaryLoading?"#94a3b8":"#0369a1", color:"white", fontWeight:700, transition:"all 0.15s" }}>
+                      background:summaryLoading?"#94a3b8":"#0369a1", color:"white", fontWeight:700 }}>
                     {summaryLoading ? "⏳ Analyzing..." : healthSummary ? "↻ Regenerate" : "✨ Generate Summary"}
                   </button>
                 </div>
@@ -2246,25 +2287,29 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 )}
               </div>
 
-              {/* ── BIOMARKER CHARTS (Clickable) ── */}
+              {/* ═══════════════════════════════════════════════ */}
+              {/* ── BIOMARKER CHARTS (Clickable, Filtered Meds) */}
+              {/* ═══════════════════════════════════════════════ */}
               {outcomesData && (() => {
-                // Build medication context per date for biomarker drill-down
-                const medsByDate = {};
-                (outcomesData.med_timeline || []).forEach(m => {
-                  const d = (m.visit_date||"").split("T")[0];
-                  if (!medsByDate[d]) medsByDate[d] = [];
-                  medsByDate[d].push(`${m.pharmacy_match||m.name} ${m.dose||""} ${m.frequency||""}`);
-                });
-                const lifestyleByDate = {};
+                // Build per-visit context for drill-down
+                const visitCtxByDate = {};
                 (outcomesData.visits || []).forEach(v => {
                   const d = (v.visit_date||"").split("T")[0];
-                  lifestyleByDate[d] = {
+                  visitCtxByDate[d] = {
                     lifestyle: v.lifestyle || [],
                     compliance: v.compliance || "",
-                    symptoms: v.symptoms || [],
+                    symptoms: v.symptoms || v.chief_complaints || [],
                     summary: v.summary || "",
-                    doctor: v.con_name || v.mo_name || ""
+                    doctor: v.con_name || v.mo_name || "",
+                    meds_confirmed: v.medications_confirmed || []
                   };
+                });
+                // Per-visit all meds (from med_timeline)
+                const allMedsByDate = {};
+                (outcomesData.med_timeline || []).forEach(m => {
+                  const d = (m.visit_date||"").split("T")[0];
+                  if (!allMedsByDate[d]) allMedsByDate[d] = [];
+                  allMedsByDate[d].push(m);
                 });
 
                 const renderSection = (title, icon, color, charts) => {
@@ -2279,6 +2324,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                         {charts.map((c, ci) => {
                           if (!c.data?.length) return null;
+                          const bioKey = c.biomarkerKey || c.label.toLowerCase().replace(/[^a-z]/g,"");
                           const isExpanded = expandedBiomarker === `${title}-${ci}`;
                           return (
                             <div key={ci} style={{ gridColumn: isExpanded ? "1 / -1" : "auto",
@@ -2289,54 +2335,72 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                               <div style={{ padding: isExpanded ? 14 : 0 }}>
                                 <Sparkline data={c.data} label={c.label} unit={c.unit} color={c.color} target={c.target} valueKey={c.valueKey} lowerBetter={c.lowerBetter} />
                               </div>
-                              {/* Expanded: show medication + lifestyle context */}
+                              {/* Expanded: filtered context per reading */}
                               {isExpanded && (
                                 <div style={{ borderTop:"1px solid #f1f5f9", padding:14, background:"#fafbfc" }}
                                   onClick={e => e.stopPropagation()}>
-                                  <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:8 }}>📋 What was happening at each reading:</div>
+                                  <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:10 }}>📋 What was happening at each reading:</div>
                                   {c.data.slice().reverse().map((dp, di) => {
                                     const dateKey = (dp.test_date || dp.date || "").split("T")[0];
-                                    const meds = medsByDate[dateKey];
-                                    const ctx = lifestyleByDate[dateKey];
+                                    const ctx = visitCtxByDate[dateKey] || {};
+                                    const allMeds = allMedsByDate[dateKey] || [];
+                                    // Filter to RELEVANT meds only
+                                    const relevantMeds = getMedsForBiomarker(bioKey, allMeds.map(m=>m.pharmacy_match||m.name));
+                                    // Filter lifestyle by helps array matching biomarker
+                                    const relevantLifestyle = (Array.isArray(ctx.lifestyle) ? ctx.lifestyle : []).filter(l => {
+                                      if (typeof l === "object" && l.helps) {
+                                        const helpSet = (l.helps||[]).join(",").toLowerCase();
+                                        if (bioKey === "hba1c" || bioKey === "fpg") return helpSet.includes("dm");
+                                        if (bioKey === "bp") return helpSet.includes("htn");
+                                        if (bioKey === "ldl" || bioKey === "triglycerides" || bioKey === "hdl") return helpSet.includes("dyslipidemia") || helpSet.includes("lipid");
+                                        if (bioKey === "weight") return helpSet.includes("obesity") || helpSet.includes("dm");
+                                        if (bioKey === "tsh") return helpSet.includes("hypo");
+                                      }
+                                      return true; // show string-type lifestyle items
+                                    });
                                     const val = dp[c.valueKey||"result"];
                                     const fd = new Date(dateKey);
                                     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                                     const dateStr = dateKey ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "";
                                     return (
-                                      <div key={di} style={{ padding:"8px 0", borderBottom: di < c.data.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                                          <span style={{ fontSize:16, fontWeight:800, color: c.color }}>{val}{c.unit}</span>
-                                          <span style={{ fontSize:11, color:"#64748b", fontWeight:600 }}>{dateStr}</span>
+                                      <div key={di} style={{ padding:"10px 0", borderBottom: di < c.data.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                                          <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+                                            <span style={{ fontSize:18, fontWeight:800, color:c.color }}>{val}{c.unit}</span>
+                                            {ctx.doctor && <span style={{ fontSize:10, color:"#94a3b8" }}>👨‍⚕️ Dr. {ctx.doctor}</span>}
+                                          </div>
+                                          <span style={{ fontSize:12, color:"#475569", fontWeight:700, background:"#f1f5f9", padding:"3px 10px", borderRadius:8 }}>{dateStr}</span>
                                         </div>
-                                        {ctx?.doctor && <div style={{ fontSize:10, color:"#94a3b8", marginBottom:3 }}>👨‍⚕️ Dr. {ctx.doctor}</div>}
-                                        {ctx?.compliance && <div style={{ fontSize:10, marginBottom:3 }}>
-                                          <span style={{ padding:"1px 6px", borderRadius:10, fontWeight:600, fontSize:9,
-                                            background: (ctx.compliance+"").startsWith("Good") ? "#dcfce7" : (ctx.compliance+"").startsWith("Poor") ? "#fef2f2" : "#fef3c7",
-                                            color: (ctx.compliance+"").startsWith("Good") ? "#059669" : (ctx.compliance+"").startsWith("Poor") ? "#dc2626" : "#d97706" }}>
+                                        {ctx.compliance && <div style={{ marginBottom:4 }}>
+                                          <span style={{ padding:"2px 8px", borderRadius:10, fontWeight:700, fontSize:9,
+                                            background:(ctx.compliance+"").startsWith("Good")?"#dcfce7":(ctx.compliance+"").startsWith("Poor")?"#fef2f2":"#fef3c7",
+                                            color:(ctx.compliance+"").startsWith("Good")?"#059669":(ctx.compliance+"").startsWith("Poor")?"#dc2626":"#d97706" }}>
                                             {ctx.compliance}
                                           </span>
                                         </div>}
-                                        {meds && meds.length > 0 && (
-                                          <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:3 }}>
-                                            {meds.slice(0,6).map((m,mi) => (
-                                              <span key={mi} style={{ fontSize:8, padding:"1px 5px", borderRadius:8, background:"#f0fdf4", color:"#059669", border:"1px solid #bbf7d0", fontWeight:600 }}>💊 {m}</span>
-                                            ))}
-                                            {meds.length > 6 && <span style={{ fontSize:8, color:"#94a3b8" }}>+{meds.length-6} more</span>}
+                                        {relevantMeds.length > 0 && (
+                                          <div style={{ marginBottom:4 }}>
+                                            <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600, marginBottom:2 }}>PROTOCOL:</div>
+                                            <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                                              {relevantMeds.map((m,mi) => (
+                                                <span key={mi} style={{ fontSize:9, padding:"2px 6px", borderRadius:8, background:"#f0fdf4", color:"#059669", border:"1px solid #bbf7d0", fontWeight:600 }}>💊 {m}</span>
+                                              ))}
+                                            </div>
                                           </div>
                                         )}
-                                        {ctx?.lifestyle && ctx.lifestyle.length > 0 && (
+                                        {relevantLifestyle.length > 0 && (
                                           <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:3 }}>
-                                            {(Array.isArray(ctx.lifestyle) ? ctx.lifestyle : []).slice(0,4).map((l,li) => (
-                                              <span key={li} style={{ fontSize:8, padding:"1px 5px", borderRadius:8, background:"#eff6ff", color:"#2563eb", fontWeight:600 }}>
-                                                {typeof l === "object" ? `${l.category||""}:${l.advice||""}` : l}
+                                            {relevantLifestyle.map((l,li) => (
+                                              <span key={li} style={{ fontSize:9, padding:"2px 6px", borderRadius:8, background:"#eff6ff", color:"#2563eb", fontWeight:600 }}>
+                                                {typeof l === "object" ? l.advice : l}
                                               </span>
                                             ))}
                                           </div>
                                         )}
-                                        {ctx?.symptoms && ctx.symptoms.length > 0 && (
+                                        {(ctx.symptoms||[]).length > 0 && (
                                           <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                                             {ctx.symptoms.map((s,si) => (
-                                              <span key={si} style={{ fontSize:8, padding:"1px 5px", borderRadius:8, background:"#fef2f2", color:"#dc2626", fontWeight:600 }}>⚠️ {s}</span>
+                                              <span key={si} style={{ fontSize:9, padding:"2px 6px", borderRadius:8, background:"#fef2f2", color:"#dc2626", fontWeight:600 }}>⚠️ {s}</span>
                                             ))}
                                           </div>
                                         )}
@@ -2356,29 +2420,27 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 return (
                   <>
                     {renderSection("Diabetes & Metabolic", "🩸", "#b91c1c", [
-                      { data:outcomesData.hba1c, label:"HbA1c", unit:"%", color:"#dc2626", target:6.5 },
-                      { data:outcomesData.fpg, label:"Fasting Glucose", unit:" mg/dl", color:"#ea580c", target:100 },
-                      { data:outcomesData.bp, label:"BP (Systolic)", unit:" mmHg", color:"#7c3aed", target:130, valueKey:"bp_sys" },
-                      { data:outcomesData.weight, label:"Weight", unit:" kg", color:"#2563eb", valueKey:"weight" },
+                      { data:outcomesData.hba1c, label:"HbA1c", unit:"%", color:"#dc2626", target:6.5, biomarkerKey:"hba1c" },
+                      { data:outcomesData.fpg, label:"Fasting Glucose", unit:" mg/dl", color:"#ea580c", target:100, biomarkerKey:"fpg" },
+                      { data:outcomesData.bp, label:"BP (Systolic)", unit:" mmHg", color:"#7c3aed", target:130, valueKey:"bp_sys", biomarkerKey:"bp" },
+                      { data:outcomesData.weight, label:"Weight", unit:" kg", color:"#2563eb", valueKey:"weight", biomarkerKey:"weight" },
                     ])}
                     {renderSection("Lipids & Kidney", "💧", "#1d4ed8", [
-                      { data:outcomesData.ldl, label:"LDL", unit:" mg/dl", color:"#d97706", target:100 },
-                      { data:outcomesData.triglycerides, label:"Triglycerides", unit:" mg/dl", color:"#b45309", target:150 },
-                      { data:outcomesData.hdl, label:"HDL", unit:" mg/dl", color:"#059669", target:40, lowerBetter:false },
-                      { data:outcomesData.egfr, label:"eGFR", unit:" ml/min", color:"#0d9488", target:60, lowerBetter:false },
-                      { data:outcomesData.creatinine, label:"Creatinine", unit:" mg/dl", color:"#6366f1", target:1.2 },
-                      { data:outcomesData.uacr, label:"UACR", unit:" mg/g", color:"#be185d", target:30 },
-                      { data:outcomesData.tsh, label:"TSH", unit:" mIU/L", color:"#0891b2" },
+                      { data:outcomesData.ldl, label:"LDL", unit:" mg/dl", color:"#d97706", target:100, biomarkerKey:"ldl" },
+                      { data:outcomesData.triglycerides, label:"Triglycerides", unit:" mg/dl", color:"#b45309", target:150, biomarkerKey:"triglycerides" },
+                      { data:outcomesData.hdl, label:"HDL", unit:" mg/dl", color:"#059669", target:40, lowerBetter:false, biomarkerKey:"hdl" },
+                      { data:outcomesData.egfr, label:"eGFR", unit:" ml/min", color:"#0d9488", target:60, lowerBetter:false, biomarkerKey:"egfr" },
+                      { data:outcomesData.creatinine, label:"Creatinine", unit:" mg/dl", color:"#6366f1", target:1.2, biomarkerKey:"creatinine" },
+                      { data:outcomesData.uacr, label:"UACR", unit:" mg/g", color:"#be185d", target:30, biomarkerKey:"uacr" },
+                      { data:outcomesData.tsh, label:"TSH", unit:" mIU/L", color:"#0891b2", biomarkerKey:"tsh" },
                     ])}
                     {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) &&
                       renderSection("Body Composition", "🏋️", "#059669", [
-                        { data:outcomesData.waist, label:"Waist", unit:" cm", color:"#059669", valueKey:"waist" },
-                        { data:outcomesData.body_fat, label:"Body Fat", unit:"%", color:"#d97706", valueKey:"body_fat" },
-                        { data:outcomesData.muscle_mass, label:"Muscle Mass", unit:" kg", color:"#2563eb", lowerBetter:false, valueKey:"muscle_mass" },
+                        { data:outcomesData.waist, label:"Waist", unit:" cm", color:"#059669", valueKey:"waist", biomarkerKey:"waist" },
+                        { data:outcomesData.body_fat, label:"Body Fat", unit:"%", color:"#d97706", valueKey:"body_fat", biomarkerKey:"body_fat" },
+                        { data:outcomesData.muscle_mass, label:"Muscle Mass", unit:" kg", color:"#2563eb", lowerBetter:false, valueKey:"muscle_mass", biomarkerKey:"muscle_mass" },
                       ])
                     }
-
-                    {/* Missing data */}
                     {(() => {
                       const missing = [];
                       if (!outcomesData.hba1c?.length) missing.push("HbA1c");
@@ -2396,48 +2458,52 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 );
               })()}
 
-              {/* ═══════════════════════════════════════════════════ */}
-              {/* ── HEALTH STORY TIMELINE with Filters ──          */}
-              {/* ═══════════════════════════════════════════════════ */}
+              {/* ═══════════════════════════════════════════════ */}
+              {/* ── HEALTH STORY (Date on TOP, filters, doctor) */}
+              {/* ═══════════════════════════════════════════════ */}
               {outcomesData && (() => {
-                // Build comprehensive timeline events
                 const events = [];
-
-                // --- VISIT EVENTS (primary timeline items) ---
+                // Visit events
                 const visitDiagChanges = {};
                 (outcomesData.diagnosis_journey || []).forEach(d => {
                   const key = (d.visit_date || "").split("T")[0];
                   if (!visitDiagChanges[key]) visitDiagChanges[key] = [];
-                  visitDiagChanges[key].push({ label: d.label, status: d.status });
+                  // Deduplicate by label+status
+                  const exists = visitDiagChanges[key].find(x => x.label === d.label && x.status === d.status);
+                  if (!exists) visitDiagChanges[key].push({ label: d.label, status: d.status });
                 });
                 const visitNewMeds = {};
                 (outcomesData.med_timeline || []).forEach(m => {
                   if (!m.is_new) return;
                   const key = (m.visit_date || "").split("T")[0];
                   if (!visitNewMeds[key]) visitNewMeds[key] = [];
-                  visitNewMeds[key].push(m.pharmacy_match || m.name);
+                  const name = m.pharmacy_match || m.name;
+                  if (!visitNewMeds[key].includes(name)) visitNewMeds[key].push(name);
                 });
 
+                // Collect all doctors for filter
+                const allDoctors = new Set();
                 (outcomesData.visits || []).forEach(v => {
+                  if (v.con_name) allDoctors.add(v.con_name);
+                  if (v.mo_name) allDoctors.add(v.mo_name);
+
                   if (!v.visit_date) return;
                   const dateKey = v.visit_date.split("T")[0];
-                  const diagChanges = visitDiagChanges[dateKey] || [];
-                  const newMeds = visitNewMeds[dateKey] || [];
-
                   events.push({
                     date: dateKey, type:"visit", icon:"📋",
                     label: `${v.status === "historical" ? "Historical " : ""}${v.visit_type || "OPD"} Visit`,
                     doctor: v.con_name || v.mo_name || "",
                     summary: v.summary || "",
-                    diagChanges, newMeds: newMeds.slice(0,6),
+                    diagChanges: visitDiagChanges[dateKey] || [],
+                    newMeds: (visitNewMeds[dateKey] || []).slice(0,6),
                     lifestyle: v.lifestyle || [],
                     compliance: v.compliance || "",
-                    symptoms: v.symptoms || [],
+                    symptoms: v.symptoms || v.chief_complaints || [],
                     color:"#0369a1", bg:"#f0f9ff"
                   });
                 });
 
-                // --- DIAGNOSIS ONSET (from labels) ---
+                // Diagnosis onset
                 const diagGrouped = {};
                 (outcomesData.diagnosis_journey || []).forEach(d => {
                   if (!diagGrouped[d.diagnosis_id]) diagGrouped[d.diagnosis_id] = { label: d.label };
@@ -2446,25 +2512,18 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 Object.entries(diagGrouped).forEach(([id, info]) => {
                   const match = info.label.match(/\((?:since\s+)?(\d+)\s*(?:years?|yrs?)\)/i);
                   if (match) {
-                    const yearsAgo = parseInt(match[1]);
-                    const onsetYear = new Date().getFullYear() - yearsAgo;
+                    const onsetYear = new Date().getFullYear() - parseInt(match[1]);
                     events.push({ date:`${onsetYear}-06-01`, type:"diagnosis", icon:"🩺",
-                      label:info.label.replace(/\s*\(.*?\)/, ""),
-                      detail:`Estimated onset ~${onsetYear}`, color:"#dc2626", bg:"#fef2f2" });
+                      label:info.label.replace(/\s*\(.*?\)/, ""), detail:`Estimated onset ~${onsetYear}`,
+                      color:"#dc2626", bg:"#fef2f2" });
                   }
                 });
 
-                // --- COMPLICATIONS ---
-                if (moData?.complications?.length > 0) {
-                  moData.complications.forEach(c => {
-                    if (c?.name) {
-                      events.push({ date: null, type:"complication", icon:"⚠️", label:c.name,
-                        detail:`${c.status}${c.detail ? ` — ${c.detail}` : ""}`, color:"#dc2626", bg:"#fef2f2" });
-                    }
-                  });
-                }
-
-                // --- PAST MEDICAL/SURGICAL ---
+                // Complications + Past medical from current session MO data
+                (moData?.complications || []).forEach(c => {
+                  if (c?.name) events.push({ date:null, type:"complication", icon:"⚠️", label:c.name,
+                    detail:`${c.status}${c.detail ? ` — ${c.detail}` : ""}`, color:"#dc2626", bg:"#fef2f2" });
+                });
                 if (moData?.history?.past_medical_surgical) {
                   const pms = moData.history.past_medical_surgical;
                   if (pms && pms !== "NIL" && pms.length > 3) {
@@ -2479,8 +2538,33 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     });
                   }
                 }
+                // Also pull history from stored visits (not just current session)
+                (outcomesData.visits || []).forEach(v => {
+                  if (v.complications && Array.isArray(v.complications)) {
+                    v.complications.forEach(c => {
+                      if (c?.name && !events.find(e => e.label === c.name && e.type === "complication")) {
+                        events.push({ date:null, type:"complication", icon:"⚠️", label:c.name,
+                          detail:`${c.status||""}${c.detail ? ` — ${c.detail}` : ""}`, color:"#dc2626", bg:"#fef2f2" });
+                      }
+                    });
+                  }
+                  if (v.history?.past_medical_surgical) {
+                    const pms = v.history.past_medical_surgical;
+                    if (pms && pms !== "NIL" && pms.length > 3) {
+                      pms.split(/[,;]/).forEach(item => {
+                        const trimmed = item.trim();
+                        if (trimmed.length > 2 && !events.find(e => e.label === trimmed && e.type === "history")) {
+                          const yearMatch = trimmed.match(/(19|20)\d{2}/);
+                          events.push({ date: yearMatch ? `${yearMatch[0]}-06-01` : null,
+                            type:"history", icon:"🏥", label:trimmed, detail:"Past medical/surgical",
+                            color:"#7c3aed", bg:"#faf5ff" });
+                        }
+                      });
+                    }
+                  }
+                });
 
-                // --- BIRTH ---
+                // Birth
                 if (patient.dob) {
                   events.push({ date: patient.dob, type:"life", icon:"👶", label:"Born",
                     detail: fmtDate(patient.dob), color:"#6366f1", bg:"#eef2ff" });
@@ -2490,18 +2574,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     detail:`~${birthYear} (age ${patient.age})`, color:"#6366f1", bg:"#eef2ff" });
                 }
 
-                // Sort chronologically: most recent first, null-date items just above birth
+                // Sort: most recent first, nulls above birth, birth always last
                 events.sort((a, b) => {
-                  if (!a.date && !b.date) return 0;
-                  if (!a.date) return 1;
-                  if (!b.date) return 1;
-                  // Birth always last
                   if (a.type === "life") return 1;
                   if (b.type === "life") return -1;
+                  if (!a.date && !b.date) return 0;
+                  if (!a.date) return 1;
+                  if (!b.date) return -1;
                   return new Date(b.date) - new Date(a.date);
                 });
 
-                // Deduplicate by label+date
+                // Deduplicate
                 const seen = new Set();
                 const unique = events.filter(e => {
                   const k = `${e.label}|${(e.date||"").split("T")[0]}`;
@@ -2512,60 +2595,82 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                 if (unique.length === 0) return null;
 
-                // Filter tabs
+                // Filter tabs + doctor filter
                 const filters = ["All","Visits","Diagnosis","Meds","Symptoms","History"];
+                const doctorList = [...allDoctors];
+                const applyTypeFilter = (e, f) => {
+                  if (f === "All") return true;
+                  if (f === "Visits") return e.type === "visit";
+                  if (f === "Diagnosis") return e.type === "diagnosis" || (e.type === "visit" && e.diagChanges?.length > 0);
+                  if (f === "Meds") return e.type === "visit" && e.newMeds?.length > 0;
+                  if (f === "Symptoms") return (e.type === "visit" && e.symptoms?.length > 0) || e.type === "complication";
+                  if (f === "History") return e.type === "history" || e.type === "complication" || e.type === "life";
+                  return true;
+                };
                 const filtered = unique.filter(e => {
-                  if (timelineFilter === "All") return true;
-                  if (timelineFilter === "Visits") return e.type === "visit";
-                  if (timelineFilter === "Diagnosis") return e.type === "diagnosis" || (e.type === "visit" && e.diagChanges?.length > 0);
-                  if (timelineFilter === "Meds") return e.type === "visit" && e.newMeds?.length > 0;
-                  if (timelineFilter === "Symptoms") return e.type === "visit" && e.symptoms?.length > 0;
-                  if (timelineFilter === "History") return e.type === "history" || e.type === "complication" || e.type === "life";
+                  if (!applyTypeFilter(e, timelineFilter)) return false;
+                  if (timelineDoctor && e.doctor && e.doctor !== timelineDoctor) return false;
                   return true;
                 });
 
+                const fmtDateNice = (dateStr) => {
+                  if (!dateStr) return "—";
+                  const d = new Date(dateStr);
+                  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+                };
+
                 return (
                   <div style={{ background:"white", borderRadius:16, padding:18, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-                    {/* Header + Filter tabs */}
-                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
                       <span style={{ fontSize:18 }}>📖</span>
                       <span style={{ fontSize:15, fontWeight:800, color:"#0f172a" }}>Health Story</span>
                     </div>
-                    <div style={{ display:"flex", gap:4, marginBottom:14, flexWrap:"wrap" }}>
-                      {filters.map(f => (
-                        <button key={f} onClick={()=>setTimelineFilter(f)}
-                          style={{ padding:"4px 12px", fontSize:10, fontWeight:700, borderRadius:20, cursor:"pointer",
-                            border: timelineFilter===f ? "none" : "1px solid #e2e8f0",
-                            background: timelineFilter===f ? "#0f172a" : "white",
-                            color: timelineFilter===f ? "white" : "#64748b",
-                            transition:"all 0.15s" }}>
-                          {f} {f!=="All" ? `(${unique.filter(e => {
-                            if (f === "Visits") return e.type === "visit";
-                            if (f === "Diagnosis") return e.type === "diagnosis" || (e.type === "visit" && e.diagChanges?.length > 0);
-                            if (f === "Meds") return e.type === "visit" && e.newMeds?.length > 0;
-                            if (f === "Symptoms") return e.type === "visit" && e.symptoms?.length > 0;
-                            if (f === "History") return e.type === "history" || e.type === "complication" || e.type === "life";
-                            return true;
-                          }).length})` : ""}
-                        </button>
-                      ))}
+
+                    {/* Filter row */}
+                    <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap", alignItems:"center" }}>
+                      {filters.map(f => {
+                        const count = unique.filter(e => applyTypeFilter(e, f)).length;
+                        return (
+                          <button key={f} onClick={()=>setTimelineFilter(f)}
+                            style={{ padding:"4px 10px", fontSize:10, fontWeight:700, borderRadius:20, cursor:"pointer",
+                              border: timelineFilter===f ? "none" : "1px solid #e2e8f0",
+                              background: timelineFilter===f ? "#0f172a" : "white",
+                              color: timelineFilter===f ? "white" : "#64748b" }}>
+                            {f}{f!=="All" ? ` (${count})` : ""}
+                          </button>
+                        );
+                      })}
                     </div>
+                    {/* Doctor filter */}
+                    {doctorList.length > 0 && (
+                      <div style={{ display:"flex", gap:3, marginBottom:12, alignItems:"center" }}>
+                        <span style={{ fontSize:9, color:"#94a3b8", fontWeight:600 }}>Doctor:</span>
+                        <button onClick={()=>setTimelineDoctor("")}
+                          style={{ padding:"2px 8px", fontSize:9, fontWeight:600, borderRadius:12, cursor:"pointer",
+                            border: !timelineDoctor ? "none" : "1px solid #e2e8f0",
+                            background: !timelineDoctor ? "#475569" : "white",
+                            color: !timelineDoctor ? "white" : "#64748b" }}>All</button>
+                        {doctorList.map(d => (
+                          <button key={d} onClick={()=>setTimelineDoctor(timelineDoctor===d?"":d)}
+                            style={{ padding:"2px 8px", fontSize:9, fontWeight:600, borderRadius:12, cursor:"pointer",
+                              border: timelineDoctor===d ? "none" : "1px solid #e2e8f0",
+                              background: timelineDoctor===d ? "#475569" : "white",
+                              color: timelineDoctor===d ? "white" : "#64748b" }}>Dr. {d}</button>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Timeline */}
                     <div style={{ position:"relative", paddingLeft:34 }}>
-                      {/* Vertical line */}
                       <div style={{ position:"absolute", left:13, top:8, bottom:8, width:2,
                         background:"linear-gradient(to bottom, #0ea5e9, #e2e8f0, #c4b5fd)", borderRadius:2 }} />
 
                       {filtered.map((ev, i) => {
                         const isVisit = ev.type === "visit";
-                        const fd = ev.date ? new Date(ev.date) : null;
-                        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                        const dateStr = fd ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "—";
-
                         return (
-                          <div key={i} style={{ position:"relative", marginBottom: i < filtered.length - 1 ? (isVisit ? 18 : 14) : 0 }}>
-                            {/* Node dot */}
+                          <div key={i} style={{ position:"relative", marginBottom: i < filtered.length - 1 ? (isVisit ? 18 : 12) : 0 }}>
+                            {/* Node */}
                             <div style={{ position:"absolute", left:-28, top:3, width:24, height:24, borderRadius:"50%",
                               display:"flex", alignItems:"center", justifyContent:"center", fontSize:12,
                               background: ev.bg || "#f8fafc", border:`2px solid ${ev.color || "#94a3b8"}`,
@@ -2573,50 +2678,53 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                               {ev.icon}
                             </div>
 
-                            {/* Content */}
+                            {/* Content card */}
                             <div style={{ background: isVisit ? "#f8fafc" : "transparent", borderRadius:12,
                               padding: isVisit ? "12px 14px" : "4px 0", marginLeft:6,
                               border: isVisit ? "1px solid #e2e8f0" : "none" }}>
 
-                              {/* Date + Label */}
-                              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-                                <div style={{ flex:1 }}>
-                                  <div style={{ fontSize:13, fontWeight:700, color:"#0f172a" }}>{ev.label}</div>
-                                  {ev.doctor && <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>👨‍⚕️ Dr. {ev.doctor}</div>}
-                                </div>
-                                <div style={{ fontSize:11, color:"#475569", fontWeight:600, whiteSpace:"nowrap", flexShrink:0,
-                                  background:"#f1f5f9", padding:"2px 8px", borderRadius:8 }}>{dateStr}</div>
+                              {/* DATE ON TOP */}
+                              <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:4,
+                                background: isVisit ? "#e2e8f0" : "#f1f5f9", display:"inline-block",
+                                padding:"2px 10px", borderRadius:8 }}>
+                                {fmtDateNice(ev.date)}
                               </div>
 
-                              {/* Detail / Summary */}
-                              {ev.detail && !isVisit && (
-                                <div style={{ fontSize:11, color:"#475569", marginTop:3, lineHeight:"1.5" }}>{ev.detail}</div>
-                              )}
+                              {/* Title + Doctor */}
+                              <div style={{ fontSize:14, fontWeight:700, color:"#0f172a" }}>{ev.label}</div>
+                              {ev.doctor && <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>👨‍⚕️ Dr. {ev.doctor}</div>}
+
+                              {/* Summary */}
                               {isVisit && ev.summary && (
-                                <div style={{ fontSize:11, color:"#475569", marginTop:4, lineHeight:"1.5", fontStyle:"italic",
+                                <div style={{ fontSize:11, color:"#475569", marginTop:6, lineHeight:"1.5", fontStyle:"italic",
                                   background:"white", borderRadius:8, padding:"6px 10px", border:"1px solid #f1f5f9" }}>
                                   {typeof ev.summary === "string" ? ev.summary.slice(0,200) + (ev.summary.length > 200 ? "..." : "") : ""}
                                 </div>
                               )}
 
-                              {/* Compliance badge */}
+                              {/* Detail for non-visit */}
+                              {!isVisit && ev.detail && (
+                                <div style={{ fontSize:11, color:"#475569", marginTop:3 }}>{ev.detail}</div>
+                              )}
+
+                              {/* Compliance */}
                               {isVisit && ev.compliance && (
                                 <div style={{ marginTop:6 }}>
                                   <span style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:10,
-                                    background: (ev.compliance+"").startsWith("Good") ? "#dcfce7" : (ev.compliance+"").startsWith("Poor") ? "#fef2f2" : "#fef3c7",
-                                    color: (ev.compliance+"").startsWith("Good") ? "#059669" : (ev.compliance+"").startsWith("Poor") ? "#dc2626" : "#d97706" }}>
+                                    background:(ev.compliance+"").startsWith("Good")?"#dcfce7":(ev.compliance+"").startsWith("Poor")?"#fef2f2":"#fef3c7",
+                                    color:(ev.compliance+"").startsWith("Good")?"#059669":(ev.compliance+"").startsWith("Poor")?"#dc2626":"#d97706" }}>
                                     {ev.compliance}
                                   </span>
                                 </div>
                               )}
 
-                              {/* Diagnosis chips */}
+                              {/* Diagnosis chips - DEDUPLICATED */}
                               {isVisit && ev.diagChanges?.length > 0 && (
                                 <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
                                   {ev.diagChanges.map((d, di) => (
                                     <span key={di} style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:20,
-                                      background: d.status === "Controlled" ? "#dcfce7" : d.status === "Uncontrolled" ? "#fef2f2" : "#dbeafe",
-                                      color: d.status === "Controlled" ? "#059669" : d.status === "Uncontrolled" ? "#dc2626" : "#2563eb" }}>
+                                      background:d.status==="Controlled"?"#dcfce7":d.status==="Uncontrolled"?"#fef2f2":"#dbeafe",
+                                      color:d.status==="Controlled"?"#059669":d.status==="Uncontrolled"?"#dc2626":"#2563eb" }}>
                                       {d.label.replace(/\s*\(.*?\)/, "")} — {d.status}
                                     </span>
                                   ))}
@@ -2633,13 +2741,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 </div>
                               )}
 
-                              {/* Lifestyle at visit */}
+                              {/* Lifestyle */}
                               {isVisit && ev.lifestyle?.length > 0 && (
                                 <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginTop:4 }}>
-                                  {(Array.isArray(ev.lifestyle) ? ev.lifestyle : []).slice(0,5).map((l, li) => (
+                                  {(Array.isArray(ev.lifestyle)?ev.lifestyle:[]).slice(0,5).map((l, li) => (
                                     <span key={li} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8,
                                       background:"#f0fdf4", color:"#059669", border:"1px solid #bbf7d0" }}>
-                                      {typeof l === "object" ? `${l.category}: ${l.advice}` : l}
+                                      {typeof l === "object" ? l.advice : l}
                                     </span>
                                   ))}
                                 </div>
@@ -2663,50 +2771,144 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 );
               })()}
 
-              {/* ── DIAGNOSIS JOURNEY ── */}
+              {/* ═══════════════════════════════════════════════ */}
+              {/* ── DIAGNOSIS JOURNEY (Clickable, bigger dates) */}
+              {/* ═══════════════════════════════════════════════ */}
               {outcomesData?.diagnosis_journey?.length > 0 && (() => {
                 const grouped = {};
                 outcomesData.diagnosis_journey.forEach(d => {
                   if (!grouped[d.diagnosis_id]) grouped[d.diagnosis_id] = { label: d.label, history: [] };
-                  grouped[d.diagnosis_id].history.push({ status: d.status, date: d.visit_date });
+                  // Deduplicate by date+status
+                  const dateKey = (d.visit_date||"").split("T")[0];
+                  if (!grouped[d.diagnosis_id].history.find(h => h.date.split("T")[0] === dateKey && h.status === d.status)) {
+                    grouped[d.diagnosis_id].history.push({ status: d.status, date: d.visit_date, doctor: d.con_name || d.mo_name });
+                  }
                   grouped[d.diagnosis_id].label = d.label;
                 });
+
                 return (
                   <div style={{ background:"white", borderRadius:16, padding:16, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
                       <span style={{ fontSize:16 }}>📈</span>
                       <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Diagnosis Journey</span>
+                      <span style={{ fontSize:10, color:"#94a3b8", marginLeft:"auto" }}>Click to expand</span>
                     </div>
                     {Object.entries(grouped).map(([id, info], gi) => {
                       const latest = info.history[info.history.length - 1];
                       const sc = latest.status === "Controlled" ? "#059669" : latest.status === "Uncontrolled" ? "#dc2626" : "#d97706";
                       const sb = latest.status === "Controlled" ? "#f0fdf4" : latest.status === "Uncontrolled" ? "#fef2f2" : "#fffbeb";
+                      const isExpanded = expandedDiagnosis === id;
+
+                      // Map diagnosis to relevant biomarkers
+                      const diagBiomarkers = {
+                        dm2:["hba1c","fpg"], dm1:["hba1c","fpg"], htn:["bp"], hypo:["tsh"],
+                        dyslipidemia:["ldl","triglycerides","hdl"], ckd:["egfr","creatinine","uacr"],
+                        nephropathy:["egfr","creatinine","uacr"], obesity:["weight"],
+                      };
+                      const relevantKeys = diagBiomarkers[id] || [];
+                      const relevantData = relevantKeys.map(k => {
+                        const d = outcomesData[k];
+                        if (!d || !d.length) return null;
+                        const latest = d[d.length - 1];
+                        const first = d[0];
+                        const val = latest.result || latest.bp_sys || latest.weight || latest[k];
+                        const firstVal = first.result || first.bp_sys || first.weight || first[k];
+                        return { key:k, label: k.toUpperCase().replace("_"," "), latest:val, first:firstVal, count:d.length };
+                      }).filter(Boolean);
+
                       return (
-                        <div key={id} style={{ padding:"10px 0", borderBottom: gi < Object.keys(grouped).length - 1 ? "1px solid #f8fafc" : "none" }}>
+                        <div key={id} style={{ padding:"10px 0", borderBottom: gi < Object.keys(grouped).length - 1 ? "1px solid #f1f5f9" : "none",
+                          cursor:"pointer" }} onClick={()=>setExpandedDiagnosis(isExpanded ? null : id)}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                            <span style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{info.label}</span>
+                            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                              <span style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{info.label}</span>
+                              <span style={{ fontSize:10, color:"#94a3b8" }}>{isExpanded ? "▼" : "▶"}</span>
+                            </div>
                             <span style={{ fontSize:11, fontWeight:700, color:sc, background:sb, padding:"3px 12px", borderRadius:20 }}>{latest.status}</span>
                           </div>
-                          <div style={{ display:"flex", gap:4, marginTop:6, flexWrap:"wrap", alignItems:"center" }}>
+                          {/* Status timeline with BIGGER dates */}
+                          <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap", alignItems:"center" }}>
                             {info.history.map((h, i) => {
                               const hd = new Date(h.date);
                               const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                              const dateStr = `${hd.getDate()} ${months[hd.getMonth()]} ${String(hd.getFullYear()).slice(2)}`;
                               return (
-                                <div key={i} style={{ display:"flex", alignItems:"center", gap:3 }}>
+                                <div key={i} style={{ display:"flex", alignItems:"center", gap:4 }}>
                                   <div style={{ textAlign:"center" }}>
-                                    <div style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:12,
+                                    <div style={{ fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:14,
                                       background:h.status==="Controlled"?"#dcfce7":h.status==="Uncontrolled"?"#fef2f2":"#fef3c7",
                                       color:h.status==="Controlled"?"#059669":h.status==="Uncontrolled"?"#dc2626":"#d97706" }}>
                                       {h.status==="Controlled"?"C":h.status==="Uncontrolled"?"U":"N"}
                                     </div>
-                                    <div style={{ fontSize:8, color:"#94a3b8", marginTop:2, fontWeight:500 }}>{dateStr}</div>
+                                    <div style={{ fontSize:10, color:"#64748b", marginTop:2, fontWeight:600 }}>
+                                      {hd.getDate()} {months[hd.getMonth()]} {String(hd.getFullYear()).slice(2)}
+                                    </div>
                                   </div>
-                                  {i < info.history.length - 1 && <span style={{ fontSize:12, color:"#d1d5db", margin:"0 2px" }}>→</span>}
+                                  {i < info.history.length - 1 && <span style={{ fontSize:14, color:"#cbd5e1" }}>→</span>}
                                 </div>
                               );
                             })}
                           </div>
+
+                          {/* EXPANDED: relevant biomarkers + meds */}
+                          {isExpanded && (
+                            <div style={{ marginTop:10, padding:12, background:"#fafbfc", borderRadius:10, border:"1px solid #f1f5f9" }}
+                              onClick={e => e.stopPropagation()}>
+                              {/* Biomarker trends */}
+                              {relevantData.length > 0 && (
+                                <div style={{ marginBottom:8 }}>
+                                  <div style={{ fontSize:10, fontWeight:700, color:"#475569", marginBottom:6 }}>📊 Key Biomarkers:</div>
+                                  <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                                    {relevantData.map((rd, ri) => {
+                                      const improving = rd.key === "egfr" || rd.key === "hdl" ? rd.latest > rd.first : rd.latest < rd.first;
+                                      return (
+                                        <div key={ri} style={{ background:"white", borderRadius:10, padding:"8px 12px", border:"1px solid #f1f5f9", minWidth:110 }}>
+                                          <div style={{ fontSize:9, color:"#94a3b8", fontWeight:600 }}>{rd.label}</div>
+                                          <div style={{ fontSize:16, fontWeight:800, color: improving ? "#059669" : "#dc2626" }}>{rd.latest}</div>
+                                          {rd.count > 1 && <div style={{ fontSize:9, color: improving ? "#059669" : "#dc2626" }}>
+                                            {improving ? "↓" : "↑"} from {rd.first} ({rd.count} readings)
+                                          </div>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                              {/* Relevant meds */}
+                              {(() => {
+                                const diagMeds = (outcomesData.med_timeline || []).filter(m => {
+                                  const name = (m.pharmacy_match || m.name || "").toString();
+                                  for (const [cls, info] of Object.entries(DRUG_BIOMARKER_MAP)) {
+                                    if (relevantKeys.some(k => info.biomarkers.includes(k)) && info.patterns.test(name)) return true;
+                                  }
+                                  return false;
+                                });
+                                const uniqueMeds = {};
+                                diagMeds.forEach(m => {
+                                  const k = (m.pharmacy_match||m.name).toUpperCase();
+                                  if (!uniqueMeds[k]) uniqueMeds[k] = m;
+                                  else if (m.is_active) uniqueMeds[k] = m;
+                                });
+                                const medList = Object.values(uniqueMeds);
+                                if (medList.length === 0) return null;
+                                return (
+                                  <div>
+                                    <div style={{ fontSize:10, fontWeight:700, color:"#475569", marginBottom:4 }}>💊 Current Protocol:</div>
+                                    <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                                      {medList.map((m,mi) => (
+                                        <span key={mi} style={{ fontSize:9, padding:"2px 8px", borderRadius:8,
+                                          background: m.is_active ? "#f0fdf4" : "#f8fafc",
+                                          color: m.is_active ? "#059669" : "#94a3b8",
+                                          border: `1px solid ${m.is_active ? "#bbf7d0" : "#e2e8f0"}`,
+                                          fontWeight:600, textDecoration: m.is_active ? "none" : "line-through" }}>
+                                          {m.pharmacy_match||m.name} {m.dose} {m.frequency}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2728,21 +2930,18 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 });
                 const activeMeds = Object.values(grouped).filter(m => m.entries[m.entries.length-1]?.is_active);
                 const stoppedMeds = Object.values(grouped).filter(m => !m.entries[m.entries.length-1]?.is_active);
+                const fmtD = (d) => { if(!d)return""; const x=new Date(d); const m=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return `${x.getDate()} ${m[x.getMonth()]} ${x.getFullYear()}`; };
                 return (
                   <div style={{ background:"white", borderRadius:16, padding:16, border:"1px solid #f1f5f9", marginBottom:20, boxShadow:"0 1px 3px rgba(0,0,0,0.04)" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
                       <span style={{ fontSize:16 }}>💊</span>
                       <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Medications</span>
-                      <span style={{ fontSize:10, color:"#94a3b8", marginLeft:"auto" }}>{activeMeds.length} active{stoppedMeds.length > 0 ? ` · ${stoppedMeds.length} stopped` : ""}</span>
+                      <span style={{ fontSize:10, color:"#94a3b8", marginLeft:"auto" }}>{activeMeds.length} active{stoppedMeds.length>0?` · ${stoppedMeds.length} stopped`:""}</span>
                     </div>
                     {activeMeds.map((med, mi) => {
                       const latest = med.entries[med.entries.length - 1];
                       const first = med.entries[0];
                       const doseChanged = latest.dose !== first.dose && med.entries.length > 1;
-                      const startDate = first.started_date || first.visit_date;
-                      const sd = new Date(startDate);
-                      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                      const dateStr = startDate ? `${sd.getDate()} ${months[sd.getMonth()]} ${sd.getFullYear()}` : "";
                       return (
                         <div key={mi} style={{ display:"flex", gap:10, padding:"8px 0", borderBottom: mi < activeMeds.length - 1 ? "1px solid #f8fafc" : "none", alignItems:"center" }}>
                           <div style={{ width:4, height:28, borderRadius:2, background:"#059669", flexShrink:0 }} />
@@ -2752,7 +2951,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                               {doseChanged && <span style={{ fontSize:8, padding:"1px 6px", background:"#fef3c7", color:"#d97706", borderRadius:10, fontWeight:700 }}>dose changed</span>}
                             </div>
                             <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>
-                              {latest.dose} · {latest.frequency}{latest.timing ? ` · ${latest.timing}` : ""} · <span style={{ color:"#94a3b8" }}>since {dateStr}</span>
+                              {latest.dose} · {latest.frequency}{latest.timing ? ` · ${latest.timing}` : ""} · <span style={{ color:"#94a3b8" }}>since {fmtD(first.started_date||first.visit_date)}</span>
                             </div>
                           </div>
                         </div>
