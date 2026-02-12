@@ -1661,6 +1661,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <select value={loginDoctorId} onChange={e=>setLoginDoctorId(e.target.value)}
                 style={{ width:"100%", padding:"10px 12px", border:"1px solid #e2e8f0", borderRadius:10, fontSize:13, background:"#f8fafc", cursor:"pointer" }}>
                 <option value="">Choose your name...</option>
+                {doctorsList.filter(d=>d.role==="admin").length > 0 && <optgroup label="Admin">
+                  {doctorsList.filter(d=>d.role==="admin").map(d => <option key={d.id} value={d.id}>{d.name} — {d.specialty}</option>)}
+                </optgroup>}
                 {doctorsList.filter(d=>d.role==="consultant").length > 0 && <optgroup label="Consultants">
                   {doctorsList.filter(d=>d.role==="consultant").map(d => <option key={d.id} value={d.id}>{d.name} — {d.specialty}</option>)}
                 </optgroup>}
@@ -1669,6 +1672,21 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </optgroup>}
                 {doctorsList.filter(d=>d.role==="nurse").length > 0 && <optgroup label="Nursing">
                   {doctorsList.filter(d=>d.role==="nurse").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="coordinator").length > 0 && <optgroup label="Coordinators">
+                  {doctorsList.filter(d=>d.role==="coordinator").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="lab").length > 0 && <optgroup label="Laboratory">
+                  {doctorsList.filter(d=>d.role==="lab").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="pharmacy").length > 0 && <optgroup label="Pharmacy">
+                  {doctorsList.filter(d=>d.role==="pharmacy").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="reception").length > 0 && <optgroup label="Reception">
+                  {doctorsList.filter(d=>d.role==="reception").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>["guest","longevity"].includes(d.role)).length > 0 && <optgroup label="Other">
+                  {doctorsList.filter(d=>["guest","longevity"].includes(d.role)).map(d => <option key={d.id} value={d.id}>{d.name} — {d.specialty}</option>)}
                 </optgroup>}
               </select>
             </div>
