@@ -49,6 +49,75 @@ app.get("/api/health", async (_, res) => {
   }
 });
 
+// ============ AUTH ============
+
+// Get all active doctors (for login screen)
+app.get("/api/doctors", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, name, short_name, specialty, role FROM doctors WHERE is_active=true ORDER BY role, name"
+    );
+    res.json(result.rows);
+  } catch (e) { res.json([]); }
+});
+
+// Login with PIN
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { doctor_id, pin } = req.body;
+    const doc = await pool.query("SELECT * FROM doctors WHERE id=$1 AND pin=$2 AND is_active=true", [doctor_id, pin]);
+    if (doc.rows.length === 0) return res.status(401).json({ error: "Invalid PIN" });
+    
+    // Generate token
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    await pool.query(
+      "INSERT INTO auth_sessions (doctor_id, token) VALUES ($1, $2)",
+      [doctor_id, token]
+    );
+    
+    // Audit
+    await pool.query(
+      "INSERT INTO audit_log (doctor_id, action, details) VALUES ($1, 'login', $2)",
+      [doctor_id, JSON.stringify({ ip: req.ip })]
+    );
+    
+    res.json({ token, doctor: doc.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Verify token middleware
+const authMiddleware = async (req, res, next) => {
+  const token = req.headers["x-auth-token"];
+  if (!token) return next(); // Allow unauthenticated for now (graceful degradation)
+  try {
+    const session = await pool.query(
+      "SELECT s.*, d.name as doctor_name, d.short_name, d.specialty, d.role FROM auth_sessions s JOIN doctors d ON d.id=s.doctor_id WHERE s.token=$1 AND s.expires_at > NOW()",
+      [token]
+    );
+    if (session.rows.length > 0) {
+      req.doctor = session.rows[0];
+    }
+  } catch {}
+  next();
+};
+app.use(authMiddleware);
+
+// Logout
+app.post("/api/auth/logout", async (req, res) => {
+  const token = req.headers["x-auth-token"];
+  if (token) await pool.query("DELETE FROM auth_sessions WHERE token=$1", [token]).catch(()=>{});
+  res.json({ ok: true });
+});
+
+// Check session
+app.get("/api/auth/me", async (req, res) => {
+  if (req.doctor) {
+    res.json({ authenticated: true, doctor: req.doctor });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
 // ============ PATIENTS ============
 
 app.get("/api/patients", async (req, res) => {
@@ -156,7 +225,7 @@ app.post("/api/consultations", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, planEdits } = req.body;
+    const { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, planEdits, moDoctorId, conDoctorId } = req.body;
 
     let patientId, existing = null;
     if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
@@ -188,11 +257,20 @@ app.post("/api/consultations", async (req, res) => {
     }
 
     const con = await client.query(
-      `INSERT INTO consultations (patient_id, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed') RETURNING id`,
-      [patientId, n(moName), n(conName), n(moTranscript), n(conTranscript), n(quickTranscript), safeJson(moData), safeJson(conData), safeJson(planEdits)]
+      `INSERT INTO consultations (patient_id, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11) RETURNING id`,
+      [patientId, n(moName), n(conName), n(moTranscript), n(conTranscript), n(quickTranscript), safeJson(moData), safeJson(conData), safeJson(planEdits), int(moDoctorId), int(conDoctorId)]
     );
     const consultationId = con.rows[0].id;
+
+    // Audit log
+    const doctorId = req.doctor?.doctor_id || int(conDoctorId) || int(moDoctorId);
+    if (doctorId) {
+      await client.query(
+        "INSERT INTO audit_log (doctor_id, action, entity_type, entity_id, details) VALUES ($1, 'save_consultation', 'consultation', $2, $3)",
+        [doctorId, consultationId, JSON.stringify({ patient_id: patientId, patient_name: patient.name })]
+      ).catch(()=>{});
+    }
 
     if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
       await client.query(

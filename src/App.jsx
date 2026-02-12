@@ -44,8 +44,10 @@ const GINI_BRANDS = "Thyronorm,Euthrox,Euthyrox,Telma,Telma AM,Telma H,Telma CT,
 
 // Drug class → biomarker relevance mapping for intelligent filtering
 const DRUG_BIOMARKER_MAP = {
-  // Antidiabetics → HbA1c, Fasting Glucose, Weight
-  diabetes: { patterns: /glycomet|metformin|glizid|gliclazide|glimepiride|glimy|amaryl|galvus|vildagliptin|jalra|sitagliptin|forxiga|dapagliflozin|jardiance|empagliflozin|dianorm|gluconorm|cetanil|mixtard|huminsulin|lantus|tresiba|novorapid|humalog|insulin|ozempic|rybelsus|semaglutide|liraglutide|reclimet|istavel/i, biomarkers: ["hba1c","fpg","weight"] },
+  // Antidiabetics → HbA1c, Fasting Glucose
+  diabetes: { patterns: /glycomet|metformin|glizid|gliclazide|glimepiride|glimy|amaryl|galvus|vildagliptin|jalra|sitagliptin|forxiga|dapagliflozin|jardiance|empagliflozin|dianorm|gluconorm|cetanil|mixtard|huminsulin|lantus|tresiba|novorapid|humalog|insulin|ozempic|rybelsus|semaglutide|liraglutide|reclimet|istavel/i, biomarkers: ["hba1c","fpg"] },
+  // Weight-affecting drugs → Weight (SGLT2i, GLP-1, Metformin)
+  weight: { patterns: /forxiga|dapagliflozin|jardiance|empagliflozin|ozempic|rybelsus|semaglutide|liraglutide|trulicity|dulaglutide|victoza|saxenda|mounjaro|tirzepatide|metformin|glycomet|reclimet/i, biomarkers: ["weight"] },
   // Antihypertensives → BP
   bp: { patterns: /telma|telmisartan|amlong|amlodipine|concor|bisoprolol|stamlo|cilacar|cilnidipine|arkamin|clonidine|prazopress|minipress|dytor|torsemide|lasix|furosemide|aldactone|metoprolol|atenolol|ramipril|enalapril|losartan|cardivas|carvedilol|ciplar|propranolol|metosartan/i, biomarkers: ["bp"] },
   // Statins/Lipid → LDL, Triglycerides, HDL
@@ -660,6 +662,95 @@ export default function GiniScribe() {
   const [timelineDoctor, setTimelineDoctor] = useState("");
   const [expandedDiagnosis, setExpandedDiagnosis] = useState(null);
   const [patientFullData, setPatientFullData] = useState(null);
+  // Auth
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem("gini_auth_token") || "");
+  const [currentDoctor, setCurrentDoctor] = useState(() => { try { return JSON.parse(localStorage.getItem("gini_doctor")||"null"); } catch { return null; }});
+  const [doctorsList, setDoctorsList] = useState([]);
+  const [loginPin, setLoginPin] = useState("");
+  const [loginDoctorId, setLoginDoctorId] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  // Auto-save draft
+  const [draftSaved, setDraftSaved] = useState("");
+
+  // Auth helper: headers with token
+  const authHeaders = (extra = {}) => ({
+    "Content-Type": "application/json",
+    ...(authToken ? { "x-auth-token": authToken } : {}),
+    ...extra
+  });
+
+  // Fetch doctors list on mount
+  useEffect(() => {
+    if (API_URL) fetch(`${API_URL}/api/doctors`).then(r=>r.json()).then(setDoctorsList).catch(()=>{});
+  }, []);
+
+  // Verify auth session on mount
+  useEffect(() => {
+    if (authToken && API_URL) {
+      fetch(`${API_URL}/api/auth/me`, { headers: { "x-auth-token": authToken }})
+        .then(r=>r.json())
+        .then(data => {
+          if (!data.authenticated) { setAuthToken(""); setCurrentDoctor(null); localStorage.removeItem("gini_auth_token"); localStorage.removeItem("gini_doctor"); }
+        }).catch(()=>{});
+    }
+  }, []);
+
+  // Login handler
+  const handleLogin = async () => {
+    if (!loginDoctorId || !loginPin) { setLoginError("Select doctor and enter PIN"); return; }
+    setLoginLoading(true); setLoginError("");
+    try {
+      const resp = await fetch(`${API_URL}/api/auth/login`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doctor_id: parseInt(loginDoctorId), pin: loginPin })
+      });
+      const data = await resp.json();
+      if (resp.ok && data.token) {
+        setAuthToken(data.token);
+        setCurrentDoctor(data.doctor);
+        localStorage.setItem("gini_auth_token", data.token);
+        localStorage.setItem("gini_doctor", JSON.stringify(data.doctor));
+        // Auto-set names based on role
+        if (data.doctor.role === "mo") setMoName(data.doctor.short_name);
+        else setConName(data.doctor.short_name);
+      } else {
+        setLoginError(data.error || "Login failed");
+      }
+    } catch (e) { setLoginError("Connection error"); }
+    setLoginLoading(false); setLoginPin("");
+  };
+
+  // Logout handler
+  const handleLogout = () => {
+    if (authToken) fetch(`${API_URL}/api/auth/logout`, { method:"POST", headers:{"x-auth-token":authToken}}).catch(()=>{});
+    setAuthToken(""); setCurrentDoctor(null);
+    localStorage.removeItem("gini_auth_token"); localStorage.removeItem("gini_doctor");
+  };
+
+  // Auto-save draft every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (patient.name && (moData || conData || quickTranscript)) {
+        try {
+          const draft = { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, timestamp: Date.now() };
+          localStorage.setItem("gini_draft", JSON.stringify(draft));
+          setDraftSaved("💾 " + new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}));
+        } catch {}
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName]);
+
+  // Recover draft on mount
+  useEffect(() => {
+    try {
+      const draft = JSON.parse(localStorage.getItem("gini_draft"));
+      if (draft && draft.timestamp > Date.now() - 3600000) { // within 1 hour
+        setDraftSaved("📋 Draft available from " + new Date(draft.timestamp).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}));
+      }
+    } catch {}
+  }, []);
 
   // localStorage: load saved patients
   useEffect(() => {
@@ -696,11 +787,13 @@ export default function GiniScribe() {
         setSaveStatus("💾 Saving to DB...");
         const resp = await fetch(`${API_URL}/api/consultations`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(),
           body: JSON.stringify({
             patient, vitals, moData, conData,
             moTranscript, conTranscript, quickTranscript,
-            moName, conName, planEdits
+            moName, conName, planEdits,
+            moDoctorId: doctorsList.find(d=>d.short_name===moName)?.id || null,
+            conDoctorId: doctorsList.find(d=>d.short_name===conName)?.id || null
           }),
           signal: controller.signal
         });
@@ -1326,16 +1419,63 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
   return (
     <div style={{ fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", maxWidth:1100, margin:"0 auto", padding:"8px 12px", background:"#fff", minHeight:"100vh" }}>
+
+      {/* ═══ LOGIN SCREEN ═══ */}
+      {!currentDoctor && doctorsList.length > 0 && (
+        <div style={{ position:"fixed", inset:0, background:"linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999 }}>
+          <div style={{ background:"white", borderRadius:20, padding:"36px 32px", width:360, boxShadow:"0 20px 60px rgba(0,0,0,0.4)" }}>
+            <div style={{ textAlign:"center", marginBottom:24 }}>
+              <div style={{ width:52, height:52, background:"#1e293b", borderRadius:14, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:900, fontSize:22, marginBottom:8 }}>G</div>
+              <div style={{ fontSize:20, fontWeight:800, color:"#0f172a" }}>Gini Scribe</div>
+              <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>Gini Advanced Care Hospital</div>
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={{ fontSize:11, fontWeight:700, color:"#475569", display:"block", marginBottom:4 }}>Select Doctor</label>
+              <select value={loginDoctorId} onChange={e=>setLoginDoctorId(e.target.value)}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #e2e8f0", borderRadius:10, fontSize:13, background:"#f8fafc", cursor:"pointer" }}>
+                <option value="">Choose your name...</option>
+                {doctorsList.filter(d=>d.role==="consultant").length > 0 && <optgroup label="Consultants">
+                  {doctorsList.filter(d=>d.role==="consultant").map(d => <option key={d.id} value={d.id}>{d.name} — {d.specialty}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="mo").length > 0 && <optgroup label="Medical Officers">
+                  {doctorsList.filter(d=>d.role==="mo").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="nurse").length > 0 && <optgroup label="Nursing">
+                  {doctorsList.filter(d=>d.role==="nurse").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+              </select>
+            </div>
+            <div style={{ marginBottom:18 }}>
+              <label style={{ fontSize:11, fontWeight:700, color:"#475569", display:"block", marginBottom:4 }}>PIN</label>
+              <input type="password" value={loginPin} onChange={e=>setLoginPin(e.target.value)} placeholder="Enter 4-digit PIN"
+                maxLength={4} onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #e2e8f0", borderRadius:10, fontSize:18, letterSpacing:8, textAlign:"center", boxSizing:"border-box" }} />
+            </div>
+            {loginError && <div style={{ fontSize:11, color:"#dc2626", textAlign:"center", marginBottom:8, fontWeight:600 }}>❌ {loginError}</div>}
+            <button onClick={handleLogin} disabled={loginLoading}
+              style={{ width:"100%", padding:"12px", background:loginLoading?"#94a3b8":"#1e293b", color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:loginLoading?"wait":"pointer" }}>
+              {loginLoading ? "⏳ Logging in..." : "🔐 Login"}
+            </button>
+            <div style={{ textAlign:"center", marginTop:12, fontSize:10, color:"#94a3b8" }}>Default PIN: see admin · v7.8</div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8, paddingBottom:6, borderBottom:"2px solid #1e293b" }}>
         <div style={{ width:28, height:28, background:"#1e293b", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12 }}>G</div>
         <div style={{ fontSize:13, fontWeight:800, color:"#1e293b" }}>Gini Scribe</div>
+        {currentDoctor && <div style={{ fontSize:10, background:"#f0fdf4", color:"#059669", padding:"2px 8px", borderRadius:10, fontWeight:700, border:"1px solid #bbf7d0" }}>
+          👨‍⚕️ {currentDoctor.name}{currentDoctor.specialty ? ` · ${currentDoctor.specialty}` : ""}
+        </div>}
         <div style={{ flex:1 }} />
+        {draftSaved && <span style={{ fontSize:9, color:"#94a3b8" }}>{draftSaved}</span>}
         {keySet && <button onClick={()=>{const next=!showSearch;setShowSearch(next);if(next)searchPatientsDB("");}} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
         {patient.name && <button onClick={saveConsultation} style={{ background:"#2563eb", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>💾 Save</button>}
         {saveStatus && <span style={{ fontSize:10, color:"#059669", fontWeight:600 }}>{saveStatus}</span>}
         {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New</button>}
         {patient.name && <div style={{ fontSize:10, fontWeight:600, background:"#f1f5f9", padding:"2px 6px", borderRadius:4, maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>👤 {patient.name}</div>}
+        {currentDoctor && <button onClick={handleLogout} style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer" }}>Logout</button>}
       </div>
 
       {/* Patient Search Panel */}
@@ -1590,8 +1730,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         <div>
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>MO:</label>
-            <input value={moName} onChange={e=>setMoName(e.target.value)} placeholder="Dr. Name"
-              style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
+            {doctorsList.filter(d=>d.role==="mo").length > 0 ? (
+              <select value={moName} onChange={e=>setMoName(e.target.value)}
+                style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:200, background:"white" }}>
+                {doctorsList.filter(d=>d.role==="mo").map(d => <option key={d.id} value={d.short_name}>{d.name}</option>)}
+                <option value="">— Other —</option>
+              </select>
+            ) : (
+              <input value={moName} onChange={e=>setMoName(e.target.value)} placeholder="Dr. Name"
+                style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
+            )}
           </div>
           <AudioInput label="MO — Patient History" dgKey={dgKey} whisperKey={whisperKey} color="#1e40af" onTranscript={t=>{setMoTranscript(t);setMoData(null);clearErr("mo");}} />
           {moTranscript && <button onClick={processMO} disabled={loading.mo} style={{ marginTop:6, width:"100%", background:loading.mo?"#6b7280":moData?"#059669":"#1e40af", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.mo?"wait":"pointer" }}>
@@ -1702,8 +1850,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         <div>
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Consultant:</label>
-            <input value={conName} onChange={e=>setConName(e.target.value)} placeholder="Dr. Name"
-              style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
+            {doctorsList.filter(d=>d.role==="consultant").length > 0 ? (
+              <select value={conName} onChange={e=>setConName(e.target.value)}
+                style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:260, background:"white" }}>
+                {doctorsList.filter(d=>d.role==="consultant").map(d => <option key={d.id} value={d.short_name}>{d.name} — {d.specialty}</option>)}
+                <option value="">— Other —</option>
+              </select>
+            ) : (
+              <input value={conName} onChange={e=>setConName(e.target.value)} placeholder="Dr. Name"
+                style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
+            )}
           </div>
           <AudioInput label="Consultant — Treatment Decisions" dgKey={dgKey} whisperKey={whisperKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
           {conTranscript && <button onClick={processConsultant} disabled={loading.con} style={{ marginTop:6, width:"100%", background:loading.con?"#6b7280":conData?"#059669":"#7c2d12", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
@@ -2034,8 +2190,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
                 <div>
                   <label style={{ fontSize:8, fontWeight:600, color:"#64748b" }}>Doctor</label>
-                  <input value={historyForm.doctor_name} onChange={e=>setHistoryForm(p=>({...p,doctor_name:e.target.value}))} placeholder="Dr. Name"
-                    style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box" }} />
+                  {doctorsList.length > 0 ? (
+                    <select value={historyForm.doctor_name} onChange={e=>setHistoryForm(p=>({...p,doctor_name:e.target.value}))}
+                      style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box", background:"white" }}>
+                      <option value="">Select Doctor</option>
+                      {doctorsList.map(d => <option key={d.id} value={d.short_name}>{d.name}</option>)}
+                      <option value="_other">— Other/External —</option>
+                    </select>
+                  ) : (
+                    <input value={historyForm.doctor_name} onChange={e=>setHistoryForm(p=>({...p,doctor_name:e.target.value}))} placeholder="Dr. Name"
+                      style={{ width:"100%", padding:"3px 5px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10, boxSizing:"border-box" }} />
+                  )}
                 </div>
               </div>
 
