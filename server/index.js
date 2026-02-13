@@ -225,7 +225,7 @@ app.post("/api/consultations", async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, planEdits, moDoctorId, conDoctorId } = req.body;
+    const { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, planEdits, moDoctorId, conDoctorId, visitDate } = req.body;
 
     let patientId, existing = null;
     if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
@@ -256,10 +256,11 @@ app.post("/api/consultations", async (req, res) => {
       patientId = r.rows[0].id;
     }
 
+    const vDate = n(visitDate) || null;
     const con = await client.query(
-      `INSERT INTO consultations (patient_id, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11) RETURNING id`,
-      [patientId, n(moName), n(conName), n(moTranscript), n(conTranscript), n(quickTranscript), safeJson(moData), safeJson(conData), safeJson(planEdits), int(moDoctorId), int(conDoctorId)]
+      `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
+       VALUES ($1,COALESCE($2::date, CURRENT_DATE),$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12) RETURNING id`,
+      [patientId, vDate, n(moName), n(conName), n(moTranscript), n(conTranscript), n(quickTranscript), safeJson(moData), safeJson(conData), safeJson(planEdits), int(moDoctorId), int(conDoctorId)]
     );
     const consultationId = con.rows[0].id;
 
@@ -274,11 +275,11 @@ app.post("/api/consultations", async (req, res) => {
 
     if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
       await client.query(
-        `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, waist, body_fat, muscle_mass)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, waist, body_fat, muscle_mass, recorded_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::timestamptz, NOW()))`,
         [patientId, consultationId, num(vitals.bp_sys), num(vitals.bp_dia), num(vitals.pulse),
          num(vitals.temp), num(vitals.spo2), num(vitals.weight), num(vitals.height), num(vitals.bmi),
-         num(vitals.waist), num(vitals.body_fat), num(vitals.muscle_mass)]
+         num(vitals.waist), num(vitals.body_fat), num(vitals.muscle_mass), vDate]
       );
     }
 
@@ -311,8 +312,8 @@ app.post("/api/consultations", async (req, res) => {
     for (const inv of (moData?.investigations || [])) {
       if (inv?.test && num(inv.value) !== null) {
         await client.query(
-          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe')`,
-          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical===true, n(inv.ref)]
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe',COALESCE($9::date, CURRENT_DATE))`,
+          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical===true, n(inv.ref), vDate]
         );
       }
     }
@@ -457,7 +458,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
 
     const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
       pool.query(labQ(['HbA1c']), [id, 'HbA1c']),
-      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS']),
+      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG']),
       pool.query(labQ(['LDL','LDL Cholesterol','LDL-C']), [id, 'LDL','LDL Cholesterol','LDL-C']),
       pool.query(labQ(['Triglycerides','TG','Triglyceride']), [id, 'Triglycerides','TG','Triglyceride']),
       pool.query(labQ(['HDL','HDL Cholesterol','HDL-C']), [id, 'HDL','HDL Cholesterol','HDL-C']),
