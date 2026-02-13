@@ -2241,7 +2241,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
                 <div style={{ borderTop:"1px solid rgba(255,255,255,.12)", marginTop:6, paddingTop:5, fontSize:12 }}>
                   <strong>{patient.name}</strong> | {patient.age}Y / {patient.sex} {patient.phone&&`| ${patient.phone}`} {patient.fileNo&&`| ${patient.fileNo}`}
-                  <span style={{ float:"right", fontSize:10, opacity:.6 }}>{new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span>
+                  <span style={{ float:"right", fontSize:10, opacity:.6 }}>{(()=>{const ld=patientFullData?.consultations?.[0]?.visit_date;if(ld){const s=String(ld);const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}return new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
                 </div>
               </div>
 
