@@ -1454,7 +1454,7 @@ export default function GiniScribe() {
     setOutcomesLoading(false);
   };
 
-  const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}); } catch { return ""; } };
+  const fmtDate = (d) => { try { const s=String(d); const dt=s.length===10?new Date(s+"T12:00:00"):new Date(s); return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}); } catch { return ""; } };
 
   // Sparkline with hover tooltips and modern design
   const Sparkline = ({ data, width=200, height=55, color="#2563eb", label, unit, target, lowerBetter, valueKey }) => {
@@ -2452,7 +2452,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>VISIT HISTORY ({historyList.length})</div>
                   {historyList.slice(0,8).map((c,i) => (
                     <div key={i} style={{ display:"flex", gap:8, padding:"3px 0", fontSize:10, borderBottom:i<Math.min(historyList.length,8)-1?"1px solid #f1f5f9":"none" }}>
-                      <span style={{ fontWeight:600, color:"#2563eb", minWidth:70 }}>{new Date(c.visit_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span>
+                      <span style={{ fontWeight:600, color:"#2563eb", minWidth:70 }}>{(()=>{const s=String(c.visit_date||"");const dt=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
                       <span style={{ color:"#64748b" }}>{c.visit_type||"OPD"}</span>
                       <span style={{ color:"#374151" }}>{c.con_name||c.mo_name||""}</span>
                       <span style={{ marginLeft:"auto", fontSize:8, color:c.status==="completed"?"#059669":c.status==="historical"?"#64748b":"#f59e0b", fontWeight:600 }}>{c.status}</span>
@@ -2830,7 +2830,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                       return true; // show string-type lifestyle items
                                     });
                                     const val = dp[c.valueKey||"result"];
-                                    const fd = new Date(dateKey);
+                                    const s = String(dateKey||""); const fd = s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);
                                     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                                     const dateStr = dateKey ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "";
                                     return (
@@ -2838,7 +2838,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                                           <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
                                             <span style={{ fontSize:18, fontWeight:800, color:c.color }}>{val}{c.unit}</span>
-                                            {ctx.doctor && <span style={{ fontSize:10, color:"#94a3b8" }}>👨‍⚕️ Dr. {ctx.doctor}</span>}
+                                            {ctx.doctor && <span style={{ fontSize:10, color:"#94a3b8" }}>👨‍⚕️ {ctx.doctor.startsWith("Dr")?ctx.doctor:"Dr. "+ctx.doctor}</span>}
                                           </div>
                                           <span style={{ fontSize:12, color:"#475569", fontWeight:700, background:"#f1f5f9", padding:"3px 10px", borderRadius:8 }}>{dateStr}</span>
                                         </div>
@@ -3086,7 +3086,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                 const fmtDateNice = (dateStr) => {
                   if (!dateStr) return "—";
-                  const d = new Date(dateStr);
+                  const s = String(dateStr);
+                  const d = s.length === 10 ? new Date(s+"T12:00:00") : new Date(s);
                   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
                 };
@@ -3127,7 +3128,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             style={{ padding:"2px 8px", fontSize:9, fontWeight:600, borderRadius:12, cursor:"pointer",
                               border: timelineDoctor===d ? "none" : "1px solid #e2e8f0",
                               background: timelineDoctor===d ? "#475569" : "white",
-                              color: timelineDoctor===d ? "white" : "#64748b" }}>Dr. {d}</button>
+                              color: timelineDoctor===d ? "white" : "#64748b" }}>{d.startsWith("Dr")?d:"Dr. "+d}</button>
                         ))}
                       </div>
                     )}
@@ -3163,7 +3164,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                               {/* Title + Doctor */}
                               <div style={{ fontSize:14, fontWeight:700, color:"#0f172a" }}>{ev.label}</div>
-                              {ev.doctor && <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>👨‍⚕️ Dr. {ev.doctor}</div>}
+                              {ev.doctor && <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>👨‍⚕️ {ev.doctor.startsWith("Dr")?ev.doctor:"Dr. "+ev.doctor}</div>}
 
                               {/* Summary */}
                               {isVisit && ev.summary && (
@@ -3300,7 +3301,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           {/* Status timeline with BIGGER dates */}
                           <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap", alignItems:"center" }}>
                             {info.history.map((h, i) => {
-                              const hd = new Date(h.date);
+                              const hs = String(h.date||""); const hd = hs.length>=10?new Date(hs.slice(0,10)+"T12:00:00"):new Date(hs);
                               const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                               return (
                                 <div key={i} style={{ display:"flex", alignItems:"center", gap:4 }}>
@@ -3459,7 +3460,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     </tr></thead>
                     <tbody>
                       {patientFullData.lab_results.slice(0, 20).map((l, i) => {
-                        const d = new Date(l.test_date);
+                        const s = String(l.test_date||""); const d = s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);
                         const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                         const dateStr = l.test_date ? `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}` : "";
                         return (
