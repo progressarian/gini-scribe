@@ -651,7 +651,7 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
 
 // ============ HELPERS ============
 const DC = { dm2:"#dc2626", htn:"#ea580c", cad:"#d97706", ckd:"#7c3aed", hypo:"#2563eb", obesity:"#92400e", dyslipidemia:"#0891b2" };
-const FRIENDLY = { dm2:"Type 2 Diabetes", htn:"High Blood Pressure", cad:"Heart Disease", ckd:"Kidney Disease", hypo:"Thyroid (Low)", obesity:"Weight Management", dyslipidemia:"High Cholesterol" };
+const FRIENDLY = { dm2:"Type 2 Diabetes (DM)", dm1:"Type 1 Diabetes (DM)", htn:"High Blood Pressure (Hypertension)", cad:"Heart Disease (CAD)", ckd:"Kidney Disease (CKD)", hypo:"Thyroid — Low (Hypothyroidism)", obesity:"Weight Management (Obesity)", dyslipidemia:"High Cholesterol (Dyslipidemia)", liver:"Fatty Liver (MASLD/NAFLD)", asthma:"Asthma", copd:"COPD", pcos:"PCOS", "overactive-bladder":"Overactive Bladder", "diabetic-neuropathy":"Diabetic Neuropathy", "diabetic-nephropathy":"Diabetic Nephropathy", "diabetic-retinopathy":"Diabetic Retinopathy", osas:"Sleep Apnea (OSAS)", gerd:"Acid Reflux (GERD)", ibs:"IBS", depression:"Depression", anxiety:"Anxiety", "subclinical-hypothyroidism":"Subclinical Hypothyroidism", "hashimotos":"Hashimoto's Thyroiditis" };
 const Badge = ({ id, friendly }) => <span style={{ display:"inline-block", fontSize:9, fontWeight:700, background:(DC[id]||"#64748b")+"18", color:DC[id]||"#64748b", border:`1px solid ${(DC[id]||"#64748b")}35`, borderRadius:10, padding:"1px 5px", marginRight:2 }}>{friendly?(FRIENDLY[id]||id):id?.toUpperCase()}</span>;
 const Err = ({ msg, onDismiss }) => msg ? <div style={{ marginTop:4, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"6px 10px", fontSize:12, color:"#dc2626" }}>❌ {msg} <button onClick={onDismiss} style={{ marginLeft:6, background:"#dc2626", color:"white", border:"none", padding:"2px 8px", borderRadius:4, fontSize:11, cursor:"pointer" }}>Dismiss</button></div> : null;
 const Section = ({ title, color, children }) => <div style={{ marginBottom:14 }}><div style={{ fontSize:12, fontWeight:800, color, borderBottom:`2px solid ${color}`, paddingBottom:3, marginBottom:6 }}>{title}</div>{children}</div>;
@@ -2241,7 +2241,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
                 <div style={{ borderTop:"1px solid rgba(255,255,255,.12)", marginTop:6, paddingTop:5, fontSize:12 }}>
                   <strong>{patient.name}</strong> | {patient.age}Y / {patient.sex} {patient.phone&&`| ${patient.phone}`} {patient.fileNo&&`| ${patient.fileNo}`}
-                  <span style={{ float:"right", fontSize:10, opacity:.6 }}>{(()=>{const ld=patientFullData?.consultations?.[0]?.visit_date;if(ld){const s=String(ld);const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}return new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
+                  <span style={{ float:"right", fontSize:11, fontWeight:700 }}>{(()=>{const ld=patientFullData?.consultations?.[0]?.visit_date;if(ld){const s=String(ld);const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}return new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
                 </div>
               </div>
 
@@ -2255,13 +2255,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {planHidden.has("summary") && <div className="no-print" style={{ marginBottom:4, opacity:.4, cursor:"pointer", fontSize:10, color:"#94a3b8" }} onClick={()=>toggleBlock("summary")}>➕ Summary</div>}
 
                 {/* Chief Complaints */}
-                {(moData?.chief_complaints||[]).length > 0 && <PlanBlock id="complaints" title="🗣️ Chief Complaints" color="#dc2626" hidden={planHidden.has("complaints")} onToggle={()=>toggleBlock("complaints")}>
+                {(() => {
+                  const skipPhrases = ["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints"];
+                  const filtered = (moData?.chief_complaints||[]).filter(c => !skipPhrases.some(s => String(c).toLowerCase().includes(s)));
+                  return filtered.length > 0 && <PlanBlock id="complaints" title="🗣️ Chief Complaints" color="#dc2626" hidden={planHidden.has("complaints")} onToggle={()=>toggleBlock("complaints")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                    {moData.chief_complaints.map((c,i) => (
+                    {filtered.map((c,i) => (
                       <span key={i} style={{ fontSize:11, padding:"3px 8px", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, color:"#dc2626", fontWeight:600 }}>⚠️ {c}</span>
                     ))}
                   </div>
-                </PlanBlock>}
+                </PlanBlock>;
+                })()}
 
                 {/* Diagnoses */}
                 {planDiags.length>0 && <PlanBlock id="diagnoses" title="🏥 Your Conditions" color="#1e293b" hidden={planHidden.has("diagnoses")} onToggle={()=>toggleBlock("diagnoses")}>
@@ -2282,7 +2286,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {/* Vitals */}
                 {vitals.bp_sys && <PlanBlock id="vitals" title="📊 Vitals" color="#ea580c" hidden={planHidden.has("vitals")} onToggle={()=>toggleBlock("vitals")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                    {[{l:"BP",v:`${vitals.bp_sys}/${vitals.bp_dia}`},{l:"Pulse",v:vitals.pulse},{l:"SpO2",v:vitals.spo2&&`${vitals.spo2}%`},{l:"Weight",v:vitals.weight&&`${vitals.weight}kg`},{l:"BMI",v:vitals.bmi}].filter(x=>x.v&&x.v!=="/").map((x,i) => <span key={i} style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"2px 6px", fontSize:11 }}><strong style={{ color:"#9a3412" }}>{x.l}:</strong> {x.v}</span>)}
+                    {[{l:"BP",v:vitals.bp_sys?`${vitals.bp_sys}/${vitals.bp_dia}`:null,suffix:vitals.bp2_sys?" (Sitting)":""},
+                      {l:"BP Standing",v:vitals.bp2_sys?`${vitals.bp2_sys}/${vitals.bp2_dia}`:null},
+                      {l:"Pulse",v:vitals.pulse},{l:"SpO2",v:vitals.spo2&&`${vitals.spo2}%`},{l:"Weight",v:vitals.weight&&`${vitals.weight}kg`},{l:"Height",v:vitals.height&&`${vitals.height}cm`},{l:"BMI",v:vitals.bmi},{l:"Waist",v:vitals.waist&&`${vitals.waist}cm`},{l:"Body Fat",v:vitals.body_fat&&`${vitals.body_fat}%`}].filter(x=>x.v&&x.v!=="/").map((x,i) => <span key={i} style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"2px 6px", fontSize:11 }}><strong style={{ color:"#9a3412" }}>{x.l}:</strong> {x.v}{x.suffix||""}</span>)}
                   </div>
                 </PlanBlock>}
 
@@ -2324,10 +2330,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
                   {planLifestyle.map((l,i) => {
                     const origIdx = sa(conData,"diet_lifestyle").indexOf(l);
+                    const isString = typeof l === "string";
                     return (
                     <div key={i} style={{ display:"flex", gap:5, padding:"3px 0", borderBottom:"1px solid #f1f5f9", fontSize:11, alignItems:"center" }}>
-                      <span style={{ fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:4, color:"white", background:l.category==="Critical"?"#dc2626":l.category==="Diet"?"#059669":"#2563eb", alignSelf:"flex-start", marginTop:2 }}>{l.category}</span>
-                      <div style={{ flex:1 }}><strong>{l.advice}</strong> — {l.detail} {(l.helps||[]).map(d=><Badge key={d} id={d} friendly />)}</div>
+                      {!isString && l.category && <span style={{ fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:4, color:"white", background:l.category==="Critical"?"#dc2626":l.category==="Diet"?"#059669":"#2563eb", alignSelf:"flex-start", marginTop:2 }}>{l.category}</span>}
+                      {isString
+                        ? <div style={{ flex:1 }}>• {l}</div>
+                        : <div style={{ flex:1 }}><strong>{l.advice}</strong>{l.detail ? ` — ${l.detail}` : ""} {(l.helps||[]).map(d=><Badge key={d} id={d} friendly />)}</div>
+                      }
                       <RemoveBtn onClick={()=>removeLifestyle(origIdx)} />
                     </div>
                   );})}
@@ -2337,15 +2347,42 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {planMonitors.length>0 && <PlanBlock id="monitoring" title="📊 What to Monitor at Home" color="#2563eb" hidden={planHidden.has("monitoring")} onToggle={()=>toggleBlock("monitoring")}>
                   {planMonitors.map((sm,i) => {
                     const origIdx = sa(conData,"self_monitoring").indexOf(sm);
+                    const isString = typeof sm === "string";
                     return (
-                    <div key={i} style={{ border:"1px solid #bfdbfe", borderRadius:6, padding:8, marginBottom:4, background:"#f8fafc", position:"relative" }}>
-                      <RemoveBtn onClick={()=>removeMonitor(origIdx)} />
-                      <div style={{ fontWeight:700, color:"#1e40af", fontSize:11 }}>{sm.title}</div>
-                      {(sm.instructions||[]).map((x,j) => <div key={j} style={{ fontSize:11 }}>• {x}</div>)}
-                      {sm.targets && <div style={{ marginTop:2, background:"#f0fdf4", borderRadius:3, padding:"2px 6px", fontSize:10, color:"#059669", fontWeight:600, display:"inline-block" }}>🎯 {sm.targets}</div>}
-                      {sm.alert && <div style={{ marginTop:2, background:"#fef2f2", borderRadius:3, padding:"2px 6px", fontSize:10, color:"#dc2626", fontWeight:700 }}>🚨 {sm.alert}</div>}
+                    <div key={i} style={{ marginBottom:6, background:"#eff6ff", borderRadius:6, padding:8, border:"1px solid #bfdbfe" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between" }}>
+                        {isString
+                          ? <div style={{ fontSize:11, fontWeight:600 }}>• {sm}</div>
+                          : <>
+                            <div style={{ fontSize:11, fontWeight:700, color:"#1e40af" }}>{sm.title}</div>
+                            <RemoveBtn onClick={()=>removeMonitor(origIdx)} />
+                          </>
+                        }
+                      </div>
+                      {!isString && <>
+                        {(sm.instructions||[]).map((ins,j) => <div key={j} style={{ fontSize:10, color:"#334155", paddingLeft:6 }}>• {ins}</div>)}
+                        {sm.targets && <div style={{ fontSize:10, fontWeight:600, color:"#059669", marginTop:3 }}>🎯 Target: {sm.targets}</div>}
+                        {sm.alert && <div style={{ fontSize:10, fontWeight:700, color:"#dc2626", marginTop:2 }}>⚠️ {sm.alert}</div>}
+                      </>}
+                    </div>);
+                  })}
+                </PlanBlock>}
+
+                {/* Investigations Ordered */}
+                {(conData?.investigations_ordered||conData?.investigations_to_order||[]).length > 0 && <PlanBlock id="investigations" title="🔬 Investigations Ordered" color="#7c3aed" hidden={planHidden.has("investigations")} onToggle={()=>toggleBlock("investigations")}>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                    {(conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => (
+                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{t}</span>
+                    ))}
+                  </div>
+                  {conData?.follow_up?.instructions && (
+                    <div style={{ marginTop:8, background:"#fefce8", border:"1px solid #fde68a", borderRadius:6, padding:8, fontSize:11, color:"#92400e", lineHeight:1.6 }}>
+                      <div style={{ fontWeight:700, marginBottom:3 }}>📋 Instructions:</div>
+                      {conData.follow_up.instructions.split(/\n|(?=\d\.)/).filter(Boolean).map((line,j) => (
+                        <div key={j}>• {line.trim()}</div>
+                      ))}
                     </div>
-                  );})}
+                  )}
                 </PlanBlock>}
 
                 {/* Insulin Education */}
@@ -2401,12 +2438,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                 {/* Follow Up */}
                 {conData?.follow_up && <PlanBlock id="followup" title="📅 Follow Up" color="#1e293b" hidden={planHidden.has("followup")} onToggle={()=>toggleBlock("followup")}>
-                  <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                  <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
                     <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
                       <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
-                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
+                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||conData.follow_up.date||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
                     </div>
-                    <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
+                    <div style={{ flex:1 }}>
+                      {(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).length > 0 && (
+                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
+                      )}
+                    </div>
                   </div>
                 </PlanBlock>}
 
@@ -2450,8 +2491,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {historyList.length > 0 && (
                 <div style={{ marginBottom:10, background:"#f8fafc", borderRadius:8, padding:8, border:"1px solid #e2e8f0" }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>VISIT HISTORY ({historyList.length})</div>
-                  {historyList.slice(0,8).map((c,i) => (
-                    <div key={i} style={{ display:"flex", gap:8, padding:"3px 0", fontSize:10, borderBottom:i<Math.min(historyList.length,8)-1?"1px solid #f1f5f9":"none" }}>
+                  {historyList.slice(0,20).map((c,i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"3px 0", fontSize:10, borderBottom:i<Math.min(historyList.length,20)-1?"1px solid #f1f5f9":"none" }}>
                       <span style={{ fontWeight:600, color:"#2563eb", minWidth:70 }}>{(()=>{const s=String(c.visit_date||"");const dt=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
                       <span style={{ color:"#64748b" }}>{c.visit_type||"OPD"}</span>
                       <span style={{ color:"#374151" }}>{c.con_name||c.mo_name||""}</span>
@@ -2769,7 +2810,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   visitCtxByDate[d] = {
                     lifestyle: v.lifestyle || [],
                     compliance: v.compliance || "",
-                    symptoms: v.symptoms || v.chief_complaints || [],
+                    symptoms: (v.symptoms || v.chief_complaints || []).filter(s => !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints"].some(x => String(s).toLowerCase().includes(x))),
                     summary: v.summary || "",
                     doctor: v.con_name || v.mo_name || "",
                     meds_confirmed: v.medications_confirmed || []
@@ -2969,7 +3010,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     newMeds: (visitNewMeds[dateKey] || []).slice(0,6),
                     lifestyle: v.lifestyle || [],
                     compliance: v.compliance || "",
-                    symptoms: v.symptoms || v.chief_complaints || [],
+                    symptoms: (v.symptoms || v.chief_complaints || []).filter(s => !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints"].some(x => String(s).toLowerCase().includes(x))),
                     color:"#0369a1", bg:"#f0f9ff"
                   });
                 });
@@ -3451,32 +3492,47 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <span style={{ fontSize:16 }}>🧪</span>
                     <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Recent Lab Results</span>
                   </div>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                    <thead><tr style={{ borderBottom:"2px solid #f1f5f9" }}>
-                      <th style={{ textAlign:"left", padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Test</th>
-                      <th style={{ padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Result</th>
-                      <th style={{ padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Ref</th>
-                      <th style={{ padding:"6px 10px", fontSize:10, color:"#94a3b8", fontWeight:700 }}>Date</th>
-                    </tr></thead>
-                    <tbody>
-                      {patientFullData.lab_results.slice(0, 20).map((l, i) => {
-                        const s = String(l.test_date||""); const d = s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);
-                        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-                        const dateStr = l.test_date ? `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}` : "";
-                        return (
-                          <tr key={i} style={{ borderBottom:"1px solid #f8fafc", background: i%2 ? "#fafbfc" : "white" }}>
-                            <td style={{ padding:"6px 10px", fontWeight:600, color:"#334155" }}>{l.test_name}</td>
-                            <td style={{ padding:"6px 10px", textAlign:"center", fontWeight:700,
-                              color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#2563eb":"#374151" }}>
-                              {l.result} <span style={{ fontSize:10, fontWeight:400, color:"#94a3b8" }}>{l.unit}</span>
-                            </td>
-                            <td style={{ padding:"6px 10px", textAlign:"center", fontSize:10, color:"#94a3b8" }}>{l.ref_range}</td>
-                            <td style={{ padding:"6px 10px", textAlign:"center", fontSize:11, color:"#64748b", fontWeight:500 }}>{dateStr}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  {(() => {
+                    const labs = patientFullData.lab_results || [];
+                    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                    const fmtD = (dt) => { const s=String(dt||""); const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s); return `${d.getDate()} ${months[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`; };
+                    const dateKey = (dt) => String(dt||"").slice(0,10);
+                    // Get unique dates sorted
+                    const allDates = [...new Set(labs.map(l=>dateKey(l.test_date)))].filter(Boolean).sort();
+                    // Get unique test names in order of first appearance
+                    const seen = new Set(); const testNames = [];
+                    labs.forEach(l => { if (!seen.has(l.test_name)) { seen.add(l.test_name); testNames.push(l.test_name); } });
+                    // Build lookup: test_name -> {date -> {result, flag, unit, ref}}
+                    const lookup = {};
+                    labs.forEach(l => { if (!lookup[l.test_name]) lookup[l.test_name] = {}; lookup[l.test_name][dateKey(l.test_date)] = l; });
+                    const showDates = allDates.slice(-6); // last 6 dates max
+                    return (
+                      <div style={{ overflowX:"auto" }}>
+                        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                          <thead><tr style={{ borderBottom:"2px solid #e2e8f0" }}>
+                            <th style={{ textAlign:"left", padding:"6px 8px", fontSize:10, color:"#94a3b8", fontWeight:700, position:"sticky", left:0, background:"white", minWidth:100 }}>Test</th>
+                            <th style={{ padding:"6px 4px", fontSize:9, color:"#94a3b8", fontWeight:600, minWidth:40 }}>Ref</th>
+                            {showDates.map(dt => <th key={dt} style={{ padding:"6px 6px", fontSize:9, color:"#475569", fontWeight:700, minWidth:55, textAlign:"center" }}>{fmtD(dt)}</th>)}
+                          </tr></thead>
+                          <tbody>
+                            {testNames.map((tn, i) => (
+                              <tr key={tn} style={{ borderBottom:"1px solid #f1f5f9", background:i%2?"#fafbfc":"white" }}>
+                                <td style={{ padding:"5px 8px", fontWeight:600, color:"#334155", position:"sticky", left:0, background:i%2?"#fafbfc":"white" }}>{tn}</td>
+                                <td style={{ padding:"5px 4px", fontSize:9, color:"#94a3b8", textAlign:"center" }}>{lookup[tn][Object.keys(lookup[tn])[0]]?.ref_range||""}</td>
+                                {showDates.map(dt => {
+                                  const v = lookup[tn]?.[dt];
+                                  return <td key={dt} style={{ padding:"5px 6px", textAlign:"center", fontWeight:v?700:400,
+                                    color:!v?"#e2e8f0":v.flag==="H"||v.flag==="HIGH"?"#dc2626":v.flag==="L"||v.flag==="LOW"?"#2563eb":"#374151" }}>
+                                    {v ? <>{v.result}<span style={{ fontSize:8, fontWeight:400, color:"#94a3b8", marginLeft:1 }}>{v.unit}</span></> : "—"}
+                                  </td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
