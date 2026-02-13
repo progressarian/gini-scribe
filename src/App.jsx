@@ -1268,7 +1268,9 @@ export default function GiniScribe() {
   const handleClarification = (i,k,v) => setClarifications(p=>({...p,[i]:{...(p[i]||{}),[k]:v}}));
 
   const allMeds = [
-    ...sa(conData,"medications_confirmed"),
+    ...(sa(conData,"medications_confirmed").length > 0
+      ? sa(conData,"medications_confirmed")
+      : sa(moData,"previous_medications").map(m => ({...m, isNew:false, route:m.route||"Oral"}))),
     ...sa(conData,"medications_needs_clarification").map((m,i) => {
       const c=clarifications[i]||{};
       return c.resolved_name ? {...m, name:c.resolved_name, dose:c.resolved_dose||m.default_dose||"", frequency:c.resolved_freq||"OD", timing:c.resolved_timing||m.default_timing||"", resolved:true, isNew:true} : null;
