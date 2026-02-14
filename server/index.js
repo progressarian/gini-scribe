@@ -122,25 +122,68 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/patients", async (req, res) => {
   try {
-    const { q, limit = 20 } = req.query;
-    let result;
+    const { q, limit = 30, doctor, period } = req.query;
     const baseQ = `SELECT p.*, 
       (SELECT COUNT(*) FROM consultations c WHERE c.patient_id=p.id) as visit_count,
       (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) as last_visit,
-      (SELECT COUNT(*) FROM diagnoses d WHERE d.patient_id=p.id AND d.is_active=true) as active_diagnoses
+      (SELECT string_agg(DISTINCT d.label, ', ' ORDER BY d.label) FROM diagnoses d WHERE d.patient_id=p.id AND d.is_active=true) as diagnosis_labels,
+      (SELECT con_name FROM consultations c WHERE c.patient_id=p.id ORDER BY visit_date DESC LIMIT 1) as last_doctor
       FROM patients p`;
+    const conditions = [];
+    const params = [];
+    let idx = 1;
     if (q) {
-      result = await pool.query(
-        `${baseQ} WHERE p.name ILIKE $1 OR p.phone LIKE $2 OR p.file_no ILIKE $1
-         ORDER BY (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) DESC NULLS LAST LIMIT $3`,
-        [`%${q}%`, `%${q}%`, limit]
-      );
-    } else {
-      result = await pool.query(
-        `${baseQ} ORDER BY (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) DESC NULLS LAST LIMIT $1`, [limit]
-      );
+      conditions.push(`(p.name ILIKE $${idx} OR p.phone LIKE $${idx} OR p.file_no ILIKE $${idx} OR p.abha_id ILIKE $${idx})`);
+      params.push(`%${q}%`); idx++;
     }
+    if (doctor) {
+      conditions.push(`EXISTS (SELECT 1 FROM consultations c WHERE c.patient_id=p.id AND c.con_name ILIKE $${idx})`);
+      params.push(`%${doctor}%`); idx++;
+    }
+    if (period === 'today') {
+      conditions.push(`EXISTS (SELECT 1 FROM consultations c WHERE c.patient_id=p.id AND c.visit_date::date = CURRENT_DATE)`);
+    } else if (period === 'week') {
+      conditions.push(`EXISTS (SELECT 1 FROM consultations c WHERE c.patient_id=p.id AND c.visit_date >= CURRENT_DATE - INTERVAL '7 days')`);
+    } else if (period === 'month') {
+      conditions.push(`EXISTS (SELECT 1 FROM consultations c WHERE c.patient_id=p.id AND c.visit_date >= CURRENT_DATE - INTERVAL '30 days')`);
+    }
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    params.push(parseInt(limit)); idx++;
+    const result = await pool.query(
+      `${baseQ}${where} ORDER BY (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) DESC NULLS LAST LIMIT $${params.length}`,
+      params
+    );
     res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get list of doctors
+app.get("/api/doctors", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT con_name as name, COUNT(DISTINCT patient_id) as patient_count
+       FROM consultations WHERE con_name IS NOT NULL AND con_name != ''
+       GROUP BY con_name ORDER BY patient_count DESC`
+    );
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get patient stats for dashboard
+app.get("/api/stats", async (req, res) => {
+  try {
+    const [total, today, week, topDx] = await Promise.all([
+      pool.query("SELECT COUNT(*) FROM patients"),
+      pool.query("SELECT COUNT(DISTINCT patient_id) FROM consultations WHERE visit_date::date = CURRENT_DATE"),
+      pool.query("SELECT COUNT(DISTINCT patient_id) FROM consultations WHERE visit_date >= CURRENT_DATE - INTERVAL '7 days'"),
+      pool.query("SELECT label, COUNT(*) as cnt FROM diagnoses WHERE is_active=true GROUP BY label ORDER BY cnt DESC LIMIT 5")
+    ]);
+    res.json({
+      total_patients: parseInt(total.rows[0].count),
+      today: parseInt(today.rows[0].count),
+      this_week: parseInt(week.rows[0].count),
+      top_diagnoses: topDx.rows
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

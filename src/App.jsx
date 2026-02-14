@@ -717,6 +717,13 @@ export default function GiniScribe() {
   const [savedPatients, setSavedPatients] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [searchPeriod, setSearchPeriod] = useState(""); // "", "today", "week", "month"
+  const [searchDoctor, setSearchDoctor] = useState("");
+  const [searchDoctorsList, setSearchDoctorsList] = useState([]);
+  const [searchStats, setSearchStats] = useState(null);
+  // AI Rx Review
+  const [rxReview, setRxReview] = useState(null); // {flags:[], loading:false}
+  const [rxReviewLoading, setRxReviewLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
   // History entry form
@@ -989,22 +996,35 @@ export default function GiniScribe() {
 
   // Search patients — DB first, localStorage fallback
   const [dbPatients, setDbPatients] = useState([]);
-  const searchPatientsDB = async (q) => {
+  const searchPatientsDB = async (q, period, doctor) => {
     if (!API_URL) { setDbPatients([]); return; }
-    if (!q || q.length < 2) {
-      // Show recent patients when no query
-      try {
-        const resp = await fetch(`${API_URL}/api/patients?limit=10`);
-        const data = await resp.json();
-        setDbPatients(Array.isArray(data) ? data : []);
-      } catch { setDbPatients([]); }
-      return;
-    }
     try {
-      const resp = await fetch(`${API_URL}/api/patients?q=${encodeURIComponent(q)}`);
+      const params = new URLSearchParams({ limit: "30" });
+      if (q && q.length >= 2) params.set("q", q);
+      if (period) params.set("period", period);
+      if (doctor) params.set("doctor", doctor);
+      const resp = await fetch(`${API_URL}/api/patients?${params}`);
       const data = await resp.json();
       setDbPatients(Array.isArray(data) ? data : []);
     } catch { setDbPatients([]); }
+  };
+  const openSearch = async () => {
+    const next = !showSearch;
+    setShowSearch(next);
+    if (next) {
+      searchPatientsDB("", searchPeriod, searchDoctor);
+      // Load doctors list and stats
+      if (API_URL) {
+        try {
+          const [dResp, sResp] = await Promise.all([
+            fetch(`${API_URL}/api/doctors`),
+            fetch(`${API_URL}/api/stats`)
+          ]);
+          setSearchDoctorsList(await dResp.json());
+          setSearchStats(await sResp.json());
+        } catch {}
+      }
+    }
   };
 
   // Load patient from DB with full history
@@ -1218,6 +1238,58 @@ export default function GiniScribe() {
     else setAiMessages(prev => [...prev, { role: "assistant", content: text }]);
     setAiLoading(false);
     setTimeout(() => aiChatRef.current?.scrollTo(0, aiChatRef.current.scrollHeight), 100);
+  };
+
+  // AI Prescription Review
+  const runRxReview = async () => {
+    setRxReviewLoading(true); setRxReview(null);
+    let ctx = "";
+    if (patient.name) ctx += `Patient: ${patient.name}, ${patient.age}Y/${patient.sex}\n`;
+    const allDiags = sa(moData,"diagnoses");
+    if (allDiags.length) ctx += `Diagnoses: ${allDiags.map(d=>`${d.label} (${d.status})`).join(", ")}\n`;
+    const meds = sa(conData,"medications_confirmed").length > 0 ? sa(conData,"medications_confirmed") : sa(moData,"previous_medications");
+    if (meds.length) ctx += `Current Meds: ${meds.map(m=>`${m.name} ${m.dose} ${m.frequency||m.timing||""}`).join(", ")}\n`;
+    if (moData?.investigations?.length) ctx += `Recent Labs: ${moData.investigations.map(i=>`${i.test}: ${i.value} ${i.unit||""} (ref: ${i.ref||""})`).join(", ")}\n`;
+    if (vitals.bp_sys) ctx += `Vitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, Wt ${vitals.weight}kg, BMI ${vitals.bmi}\n`;
+    if (moData?.complications?.length) ctx += `Complications: ${moData.complications.map(c=>`${c.name}: ${c.status} ${c.detail||""}`).join(", ")}\n`;
+    if (patientFullData?.lab_results?.length) {
+      const recent = patientFullData.lab_results.slice(0,15).map(l=>`${l.test_name}: ${l.result} ${l.unit||""} (${l.test_date||""})`);
+      ctx += `Lab History: ${recent.join(", ")}\n`;
+    }
+    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${conData.investigations_ordered.join(", ")}\n`;
+    if (conData?.follow_up) ctx += `Follow-up: ${conData.follow_up.duration||""} ${conData.follow_up.date||""}\n`;
+    if (conData?.diet_lifestyle?.length) ctx += `Lifestyle: ${conData.diet_lifestyle.map(l=>typeof l==="string"?l:l.advice).join(", ")}\n`;
+    if (conData?.goals?.length) ctx += `Goals: ${conData.goals.map(g=>`${g.marker}: ${g.current} → ${g.target}`).join(", ")}\n`;
+
+    const reviewPrompt = `You are a clinical pharmacist and quality reviewer auditing a prescription at Gini Advanced Care Hospital. 
+Review the prescription below and return a JSON array of findings. Each finding is an object:
+{"type":"warning"|"suggestion"|"good"|"missing","category":"Medication"|"Lab"|"Diagnosis"|"Monitoring"|"Guidelines","text":"concise finding","detail":"1-2 line explanation","priority":"high"|"medium"|"low"}
+
+CHECK FOR:
+1. MISSING MEDICATIONS — based on diagnoses, are any standard-of-care drugs missing? (e.g., DM2 patient without statin, HTN without ACEi/ARB, CKD without SGLT2i if eGFR allows)
+2. DRUG INTERACTIONS — any known interactions between current meds?
+3. MISSING LABS — based on diagnoses, any overdue screenings? (e.g., annual UACR for diabetes, annual lipids, periodic TFTs for thyroid patients, HbA1c every 3-6 months)
+4. DOSE ISSUES — any dose adjustments needed based on labs? (e.g., Metformin dose vs eGFR, statin dose vs LDL target)
+5. GUIDELINE COMPLIANCE — ADA 2024, ESC, KDIGO guidelines: is the prescription following current guidelines? Where is it deviating?
+6. WHAT'S DONE WELL — acknowledge good practices (e.g., appropriate insulin titration, comprehensive lab panel ordered)
+7. MONITORING GAPS — any vitals or home monitoring missing? (e.g., SMBG for insulin patients, home BP monitoring for HTN)
+8. PERSONALIZATION — note any areas where the doctor has made personalized choices that differ from standard guidelines but may be clinically appropriate
+
+Return ONLY valid JSON array. No markdown, no explanation outside the JSON.
+Example: [{"type":"warning","category":"Medication","text":"No statin prescribed","detail":"ADA recommends statin therapy for all DM patients >40y with any ASCVD risk factor","priority":"high"}]`;
+
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
+        body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,system:reviewPrompt,messages:[{role:"user",content:ctx}]})
+      });
+      const d = await r.json();
+      const text = (d.content||[]).map(c=>c.text||"").join("");
+      const clean = text.replace(/```json|```/g,"").trim();
+      const flags = JSON.parse(clean);
+      setRxReview(Array.isArray(flags) ? flags : []);
+    } catch(e) { setRxReview([{type:"warning",text:"Review failed: "+e.message,detail:"",priority:"high"}]); }
+    setRxReviewLoading(false);
   };
 
   const processMO = async () => {
@@ -1717,7 +1789,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         </div>}
         <div style={{ flex:1 }} />
         {draftSaved && <span style={{ fontSize:9, color:"#94a3b8" }}>{draftSaved}</span>}
-        {keySet && <button onClick={()=>{const next=!showSearch;setShowSearch(next);if(next)searchPatientsDB("");}} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
+        {keySet && <button onClick={openSearch} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
         {patient.name && <button onClick={saveConsultation} style={{ background:"#2563eb", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>💾 Save</button>}
         {saveStatus && <span style={{ fontSize:10, color:"#059669", fontWeight:600 }}>{saveStatus}</span>}
         {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New</button>}
@@ -1727,49 +1799,76 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
       {/* Patient Search Panel */}
       {showSearch && (
-        <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:8 }}>
-          <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);searchPatientsDB(e.target.value);}} placeholder="Search by name, phone, file #, ABHA ID..."
-            style={{ width:"100%", padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box", marginBottom:6 }} autoFocus />
-          <div style={{ maxHeight:250, overflow:"auto" }}>
-            {/* DB Results */}
-            {dbPatients.length > 0 && (
+        <div style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:10, padding:12, marginBottom:8, boxShadow:"0 4px 12px rgba(0,0,0,.08)" }}>
+          {/* Stats Bar */}
+          {searchStats && (
+            <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+              {[{label:"Total",val:searchStats.total_patients,bg:"#f1f5f9",color:"#475569"},
+                {label:"Today",val:searchStats.today,bg:"#dbeafe",color:"#1e40af"},
+                {label:"This Week",val:searchStats.this_week,bg:"#dcfce7",color:"#166534"}
+              ].map(s => (
+                <div key={s.label} style={{ flex:1, background:s.bg, borderRadius:6, padding:"6px 8px", textAlign:"center" }}>
+                  <div style={{ fontSize:18, fontWeight:800, color:s.color }}>{s.val}</div>
+                  <div style={{ fontSize:9, fontWeight:600, color:s.color, opacity:.7 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Search Input */}
+          <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);searchPatientsDB(e.target.value,searchPeriod,searchDoctor);}} placeholder="🔍 Search by name, phone, file number..."
+            style={{ width:"100%", padding:"8px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, boxSizing:"border-box", marginBottom:8, outline:"none" }} autoFocus
+            onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e2e8f0"} />
+          {/* Filters */}
+          <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
+            {[{label:"All",val:""},{label:"📅 Today",val:"today"},{label:"This Week",val:"week"},{label:"This Month",val:"month"}].map(f => (
+              <button key={f.val} onClick={()=>{setSearchPeriod(f.val);searchPatientsDB(searchQuery,f.val,searchDoctor);}}
+                style={{ padding:"3px 10px", borderRadius:20, fontSize:10, fontWeight:600, cursor:"pointer",
+                  border:searchPeriod===f.val?"2px solid #2563eb":"1px solid #e2e8f0",
+                  background:searchPeriod===f.val?"#eff6ff":"white",
+                  color:searchPeriod===f.val?"#2563eb":"#64748b" }}>{f.label}</button>
+            ))}
+            <span style={{ borderLeft:"1px solid #e2e8f0", margin:"0 2px" }} />
+            <select value={searchDoctor} onChange={e=>{setSearchDoctor(e.target.value);searchPatientsDB(searchQuery,searchPeriod,e.target.value);}}
+              style={{ padding:"3px 8px", borderRadius:6, fontSize:10, fontWeight:600, border:"1px solid #e2e8f0", color:"#475569", cursor:"pointer" }}>
+              <option value="">All Doctors</option>
+              {searchDoctorsList.map(d => <option key={d.name} value={d.name}>{d.name} ({d.patient_count})</option>)}
+            </select>
+          </div>
+          {/* Results */}
+          <div style={{ maxHeight:320, overflow:"auto" }}>
+            {dbPatients.length > 0 ? (
               <div>
-                <div style={{ fontSize:9, fontWeight:700, color:"#2563eb", padding:"2px 4px", background:"#eff6ff", borderRadius:3, marginBottom:3 }}>📊 DATABASE</div>
-                {dbPatients.slice(0, 10).map(r => (
-                  <div key={`db-${r.id}`} onClick={()=>loadPatientDB(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f1f5f9" }}
-                    onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <div style={{ flex:1 }}>
-                      <strong>{r.name}</strong>
-                      <span style={{ color:"#94a3b8", marginLeft:6 }}>{r.age}Y/{r.sex?.charAt(0)} {r.phone&&`| ${r.phone}`} {r.file_no&&`| ${r.file_no}`}</span>
+                <div style={{ fontSize:9, fontWeight:700, color:"#94a3b8", padding:"0 4px 4px", borderBottom:"1px solid #f1f5f9" }}>
+                  {dbPatients.length} patient{dbPatients.length>1?"s":""} found
+                </div>
+                {dbPatients.map(r => (
+                  <div key={`db-${r.id}`} onClick={()=>loadPatientDB(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 8px", borderRadius:6, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f8fafc", transition:"background .15s" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <div style={{ width:32, height:32, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#1e40af)", display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:13, flexShrink:0 }}>
+                      {(r.name||"?").charAt(0).toUpperCase()}
                     </div>
-                    <div style={{ fontSize:9, color:"#2563eb", fontWeight:600 }}>{r.visit_count || 0} visits</div>
-                    {r.last_visit && <div style={{ fontSize:9, color:"#94a3b8" }}>{new Date(r.last_visit).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>}
-                    {r.active_diagnoses && <div style={{ fontSize:8, color:"#f59e0b", fontWeight:600 }}>{r.active_diagnoses}</div>}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                        <strong style={{ fontSize:12 }}>{r.name}</strong>
+                        <span style={{ fontSize:9, color:"#94a3b8" }}>{r.age}Y/{r.sex?.charAt(0)}</span>
+                        {r.file_no && <span style={{ fontSize:9, color:"#2563eb", fontWeight:600, background:"#eff6ff", padding:"0 4px", borderRadius:3 }}>{r.file_no}</span>}
+                      </div>
+                      {r.diagnosis_labels && <div style={{ fontSize:9, color:"#64748b", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.diagnosis_labels}</div>}
+                    </div>
+                    <div style={{ textAlign:"right", flexShrink:0 }}>
+                      <div style={{ fontSize:10, fontWeight:700, color:"#2563eb" }}>{r.visit_count||0} visits</div>
+                      {r.last_visit && <div style={{ fontSize:9, color:"#94a3b8" }}>{(()=>{const d=new Date(String(r.last_visit).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</div>}
+                      {r.last_doctor && <div style={{ fontSize:8, color:"#059669", fontWeight:600 }}>{r.last_doctor}</div>}
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
-            {/* Local Results */}
-            {filteredPatients.length > 0 && (
-              <div>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", padding:"2px 4px", background:"#f1f5f9", borderRadius:3, marginBottom:3, marginTop:dbPatients.length>0?6:0 }}>💾 LOCAL</div>
-                {filteredPatients.slice(0, 10).map(r => (
-                  <div key={r.id} onClick={()=>loadPatient(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:4, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f1f5f9" }}
-                    onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <div style={{ flex:1 }}>
-                      <strong>{r.patient?.name || "Unknown"}</strong>
-                      <span style={{ color:"#94a3b8", marginLeft:6 }}>{r.patient?.age}Y/{r.patient?.sex?.charAt(0)} {r.patient?.phone&&`| ${r.patient.phone}`} {r.patient?.fileNo&&`| ${r.patient.fileNo}`}</span>
-                    </div>
-                    <div style={{ fontSize:9, color:"#94a3b8" }}>{new Date(r.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>
-                    <div style={{ display:"flex", gap:2 }}>
-                      {r.moData && <span style={{ background:"#dbeafe", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>MO</span>}
-                      {r.conData && <span style={{ background:"#dcfce7", padding:"0 3px", borderRadius:2, fontSize:8, fontWeight:600 }}>CON</span>}
-                    </div>
-                  </div>
-                ))}
+            ) : (
+              <div style={{ textAlign:"center", padding:16, color:"#94a3b8" }}>
+                <div style={{ fontSize:24, marginBottom:4 }}>🔍</div>
+                <div style={{ fontSize:11 }}>{searchQuery ? "No patients found" : "Search or use filters above"}</div>
               </div>
             )}
-            {dbPatients.length === 0 && filteredPatients.length === 0 && <div style={{ fontSize:11, color:"#94a3b8", textAlign:"center", padding:10 }}>No patients found</div>}
           </div>
         </div>
       )}
@@ -2221,14 +2320,51 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {/* ===== TREATMENT PLAN — NULL-SAFE ===== */}
       {tab==="plan" && (
         <div>
-          <div style={{ display:"flex", gap:4, marginBottom:8 }}>
+          <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
             <button onClick={()=>setTab("vitals")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
             <button onClick={()=>setTab("mo")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ MO</button>
             <button onClick={()=>setTab("consultant")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ Consultant</button>
             <button className="no-print" onClick={resetPlanEdits} style={{ background:"#fef3c7", border:"1px solid #fcd34d", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600, color:"#92400e" }}>↩ Reset</button>
+            <button className="no-print" onClick={runRxReview} disabled={rxReviewLoading}
+              style={{ background:rxReview?"#7c3aed":"linear-gradient(135deg,#7c3aed,#2563eb)", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:rxReviewLoading?"wait":"pointer", opacity:rxReviewLoading?.7:1 }}>
+              {rxReviewLoading?"⏳ Reviewing...":"🤖 Review Rx"}
+            </button>
             <div style={{ flex:1 }} />
             <button onClick={()=>window.print()} style={{ background:"#1e293b", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🖨️ Print</button>
           </div>
+
+          {/* AI Rx Review Results */}
+          {rxReview && rxReview.length > 0 && (
+            <div className="no-print" style={{ marginBottom:10, border:"2px solid #7c3aed", borderRadius:8, overflow:"hidden" }}>
+              <div style={{ background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"white", padding:"6px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ fontWeight:700, fontSize:12 }}>🤖 AI Prescription Review</span>
+                <button onClick={()=>setRxReview(null)} style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", borderRadius:4, padding:"1px 6px", fontSize:10, cursor:"pointer", fontWeight:700 }}>✕</button>
+              </div>
+              <div style={{ padding:8, maxHeight:300, overflow:"auto", background:"#faf5ff" }}>
+                {rxReview.map((f,i) => {
+                  const icons = {warning:"⚠️",suggestion:"💡",good:"✅",missing:"❌"};
+                  const colors = {warning:"#fef2f2",suggestion:"#eff6ff",good:"#f0fdf4",missing:"#fef2f2"};
+                  const borders = {warning:"#fecaca",suggestion:"#bfdbfe",good:"#bbf7d0",missing:"#fecaca"};
+                  const textC = {warning:"#dc2626",suggestion:"#1e40af",good:"#059669",missing:"#dc2626"};
+                  return (
+                    <div key={i} style={{ background:colors[f.type]||"#f8fafc", border:`1px solid ${borders[f.type]||"#e2e8f0"}`, borderRadius:6, padding:"6px 10px", marginBottom:4, fontSize:11 }}>
+                      <div style={{ display:"flex", gap:4, alignItems:"flex-start" }}>
+                        <span style={{ fontSize:13 }}>{icons[f.type]||"📋"}</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontWeight:700, color:textC[f.type]||"#334155" }}>
+                            {f.text}
+                            {f.priority==="high" && <span style={{ background:"#dc2626", color:"white", fontSize:8, padding:"0 4px", borderRadius:3, marginLeft:4, fontWeight:800 }}>HIGH</span>}
+                            <span style={{ fontSize:8, color:"#94a3b8", fontWeight:500, marginLeft:4 }}>{f.category}</span>
+                          </div>
+                          {f.detail && <div style={{ color:"#64748b", marginTop:2, lineHeight:1.4 }}>{f.detail}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {!moData && !conData ? <div style={{ textAlign:"center", padding:24, color:"#94a3b8" }}>Complete MO & Consultant first</div> : (
             <div>
