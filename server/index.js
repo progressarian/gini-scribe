@@ -689,12 +689,7 @@ app.get("/api/reports/today", async (req, res) => {
 app.get("/api/reports/diagnoses", async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT d.label, d.diagnosis_id as id, d.status, COUNT(DISTINCT d.patient_id) as patient_count,
-        (SELECT ROUND(AVG(lr.result::numeric),1) FROM lab_results lr 
-         JOIN diagnoses d2 ON d2.patient_id=lr.patient_id 
-         WHERE d2.diagnosis_id=d.diagnosis_id AND d2.is_active=true 
-         AND lr.test_name IN ('HbA1c') AND lr.test_date > CURRENT_DATE - INTERVAL '6 months'
-         AND lr.result ~ '^[0-9.]+$') as avg_hba1c
+      SELECT d.label, d.diagnosis_id as id, d.status, COUNT(DISTINCT d.patient_id) as patient_count
       FROM diagnoses d WHERE d.is_active=true
       GROUP BY d.label, d.diagnosis_id, d.status
       ORDER BY patient_count DESC
@@ -703,11 +698,12 @@ app.get("/api/reports/diagnoses", async (req, res) => {
     // Aggregate by diagnosis (combine statuses)
     const map = {};
     result.rows.forEach(r => {
-      if (!map[r.id]) map[r.id] = { id:r.id, label:r.label, total:0, controlled:0, uncontrolled:0, present:0, avg_hba1c:r.avg_hba1c };
-      map[r.id].total += parseInt(r.patient_count);
-      if (r.status === "Controlled") map[r.id].controlled += parseInt(r.patient_count);
-      else if (r.status === "Uncontrolled") map[r.id].uncontrolled += parseInt(r.patient_count);
-      else map[r.id].present += parseInt(r.patient_count);
+      if (!map[r.id]) map[r.id] = { id:r.id, label:r.label, total:0, controlled:0, uncontrolled:0, present:0 };
+      const cnt = parseInt(r.patient_count);
+      map[r.id].total += cnt;
+      if (r.status === "Controlled") map[r.id].controlled += cnt;
+      else if (r.status === "Uncontrolled") map[r.id].uncontrolled += cnt;
+      else map[r.id].present += cnt;
     });
     
     res.json(Object.values(map).sort((a,b) => b.total - a.total));

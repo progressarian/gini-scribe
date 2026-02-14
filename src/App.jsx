@@ -3815,7 +3815,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           {/* Section Tabs */}
           <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
             {[{id:"summary",label:"📋 Today"},{id:"diagnoses",label:"🏥 Diagnoses"},{id:"query",label:"🤖 AI Query"},{id:"doctors",label:"👨‍⚕️ Doctors"}].map(s => (
-              <button key={s.id} onClick={()=>{setReportSection(s.id);if(!reportData)loadReports(reportPeriod,reportDoctor);}}
+              <button key={s.id} onClick={()=>{setReportSection(s.id);if(!reportData||!reportDx||!reportDoctors)loadReports(reportPeriod,reportDoctor);}}
                 style={{ flex:1, padding:"7px 4px", fontSize:10, fontWeight:600, cursor:"pointer", border:"none",
                   background:reportSection===s.id?"#1e293b":"white", color:reportSection===s.id?"white":"#64748b" }}>{s.label}</button>
             ))}
@@ -3909,6 +3909,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 <div style={{ textAlign:"center", padding:30 }}>
                   <button onClick={()=>loadReports(reportPeriod,reportDoctor)} style={{ background:"#2563eb", color:"white", border:"none", padding:"10px 24px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Load Reports</button>
                 </div>
+              ) : reportDx.length === 0 ? (
+                <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
+                  <div style={{ fontSize:24, marginBottom:4 }}>🏥</div>
+                  <div style={{ fontSize:12 }}>No diagnosis data yet. Import patient records to see distribution.</div>
+                </div>
               ) : (
                 <div>
                   {reportDx.slice(0,12).map((dx,i) => {
@@ -3964,9 +3969,46 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
               </div>
               {reportQueryResult && (
-                <div style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:10, padding:14, fontSize:12, lineHeight:1.7, whiteSpace:"pre-wrap", maxHeight:500, overflow:"auto" }}>
+                <div style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:10, padding:14, fontSize:12, lineHeight:1.7, maxHeight:500, overflow:"auto" }}>
                   <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed", marginBottom:6 }}>🤖 AI ANALYSIS</div>
-                  {reportQueryResult}
+                  {reportQueryResult.split("\n").map((line, li) => {
+                    const l = line.trim();
+                    if (!l) return <div key={li} style={{ height:6 }} />;
+                    // Headers
+                    if (l.startsWith("## ")) return <div key={li} style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginTop:10, marginBottom:4 }}>{l.replace(/^##\s*/,"").replace(/\*\*/g,"")}</div>;
+                    if (l.startsWith("# ")) return <div key={li} style={{ fontSize:14, fontWeight:800, color:"#1e293b", marginTop:10, marginBottom:4 }}>{l.replace(/^#\s*/,"").replace(/\*\*/g,"")}</div>;
+                    // Table rows
+                    if (l.startsWith("|") && l.endsWith("|")) {
+                      if (l.includes("---")) return null; // separator
+                      const cells = l.split("|").filter(Boolean).map(c=>c.trim());
+                      const isHeader = li > 0 && reportQueryResult.split("\n")[li+1]?.trim()?.includes("---");
+                      return (
+                        <div key={li} style={{ display:"flex", gap:0, borderBottom:"1px solid #e2e8f0" }}>
+                          {cells.map((c,ci) => (
+                            <div key={ci} style={{ flex:1, padding:"4px 8px", fontSize:11, fontWeight:isHeader?700:400,
+                              background:isHeader?"#f1f5f9":"white", color:isHeader?"#1e293b":"#334155" }}>
+                              {c.replace(/\*\*/g,"")}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    // List items
+                    if (l.startsWith("- ")) {
+                      const text = l.slice(2);
+                      // Bold parts
+                      const parts = text.split(/(\*\*[^*]+\*\*)/g);
+                      return (
+                        <div key={li} style={{ display:"flex", gap:6, padding:"2px 0", paddingLeft:8 }}>
+                          <span style={{ color:"#7c3aed", fontWeight:800 }}>•</span>
+                          <span>{parts.map((p,pi) => p.startsWith("**") ? <strong key={pi} style={{ color:"#1e293b" }}>{p.replace(/\*\*/g,"")}</strong> : <span key={pi}>{p}</span>)}</span>
+                        </div>
+                      );
+                    }
+                    // Regular text with bold
+                    const parts = l.split(/(\*\*[^*]+\*\*)/g);
+                    return <div key={li} style={{ padding:"1px 0" }}>{parts.map((p,pi) => p.startsWith("**") ? <strong key={pi} style={{ color:"#1e293b" }}>{p.replace(/\*\*/g,"")}</strong> : <span key={pi}>{p}</span>)}</div>;
+                  })}
                 </div>
               )}
             </div>
