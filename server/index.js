@@ -605,6 +605,170 @@ app.post("/api/patients/:id/history", async (req, res) => {
   } finally { client.release(); }
 });
 
+// ============ REPORTS ============
+
+// Today's summary with outcomes trend
+app.get("/api/reports/today", async (req, res) => {
+  try {
+    const { period = "today", doctor } = req.query;
+    let dateFilter = "c.visit_date::date = CURRENT_DATE";
+    if (period === "week") dateFilter = "c.visit_date >= CURRENT_DATE - INTERVAL '7 days'";
+    else if (period === "month") dateFilter = "c.visit_date >= CURRENT_DATE - INTERVAL '30 days'";
+    const doctorFilter = doctor ? ` AND c.con_name ILIKE '%${doctor.replace(/'/g,"")}%'` : "";
+    
+    // Patients seen with their latest key labs
+    const patients = await pool.query(`
+      SELECT DISTINCT ON (p.id) p.id, p.name, p.age, p.sex, p.file_no,
+        c.visit_date, c.con_name,
+        (SELECT json_agg(json_build_object('label',d.label,'status',d.status,'id',d.diagnosis_id))
+         FROM diagnoses d WHERE d.patient_id=p.id AND d.is_active=true) as diagnoses
+      FROM patients p
+      JOIN consultations c ON c.patient_id=p.id
+      WHERE ${dateFilter}${doctorFilter}
+      ORDER BY p.id, c.visit_date DESC
+    `);
+    
+    // Get HbA1c trends for these patients (latest 2 values)
+    const patientIds = patients.rows.map(p=>p.id);
+    let trends = [];
+    if (patientIds.length > 0) {
+      trends = (await pool.query(`
+        SELECT lr.patient_id, lr.test_name, lr.result, lr.test_date
+        FROM lab_results lr
+        WHERE lr.patient_id = ANY($1)
+          AND lr.test_name IN ('HbA1c','FBG','FPG','Fasting Glucose','Fasting Blood Sugar')
+        ORDER BY lr.patient_id, lr.test_name, lr.test_date DESC
+      `, [patientIds])).rows;
+    }
+    
+    // Build trend map per patient
+    const trendMap = {};
+    trends.forEach(t => {
+      if (!trendMap[t.patient_id]) trendMap[t.patient_id] = {};
+      const key = t.test_name.includes("A1c") ? "HbA1c" : "FBG";
+      if (!trendMap[t.patient_id][key]) trendMap[t.patient_id][key] = [];
+      if (trendMap[t.patient_id][key].length < 3) trendMap[t.patient_id][key].push({ val: parseFloat(t.result), date: t.test_date });
+    });
+    
+    // Classify patients
+    let improving = 0, worsening = 0, stable = 0, newPt = 0;
+    const enriched = patients.rows.map(p => {
+      const t = trendMap[p.id] || {};
+      let trend = "new";
+      if (t.HbA1c && t.HbA1c.length >= 2) {
+        const diff = t.HbA1c[0].val - t.HbA1c[1].val;
+        if (diff < -0.2) { trend = "improving"; improving++; }
+        else if (diff > 0.3) { trend = "worsening"; worsening++; }
+        else { trend = "stable"; stable++; }
+      } else if (t.FBG && t.FBG.length >= 2) {
+        const diff = t.FBG[0].val - t.FBG[1].val;
+        if (diff < -10) { trend = "improving"; improving++; }
+        else if (diff > 15) { trend = "worsening"; worsening++; }
+        else { trend = "stable"; stable++; }
+      } else { newPt++; }
+      return { ...p, trend, labs: t };
+    });
+    
+    // Summary counts
+    const byDoctor = {};
+    patients.rows.forEach(p => {
+      const d = p.con_name || "Unknown";
+      byDoctor[d] = (byDoctor[d]||0) + 1;
+    });
+    
+    res.json({
+      total: patients.rows.length,
+      improving, worsening, stable, new: newPt,
+      by_doctor: byDoctor,
+      patients: enriched
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Diagnosis distribution
+app.get("/api/reports/diagnoses", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT d.label, d.diagnosis_id as id, d.status, COUNT(DISTINCT d.patient_id) as patient_count,
+        (SELECT ROUND(AVG(lr.result::numeric),1) FROM lab_results lr 
+         JOIN diagnoses d2 ON d2.patient_id=lr.patient_id 
+         WHERE d2.diagnosis_id=d.diagnosis_id AND d2.is_active=true 
+         AND lr.test_name IN ('HbA1c') AND lr.test_date > CURRENT_DATE - INTERVAL '6 months'
+         AND lr.result ~ '^[0-9.]+$') as avg_hba1c
+      FROM diagnoses d WHERE d.is_active=true
+      GROUP BY d.label, d.diagnosis_id, d.status
+      ORDER BY patient_count DESC
+    `);
+    
+    // Aggregate by diagnosis (combine statuses)
+    const map = {};
+    result.rows.forEach(r => {
+      if (!map[r.id]) map[r.id] = { id:r.id, label:r.label, total:0, controlled:0, uncontrolled:0, present:0, avg_hba1c:r.avg_hba1c };
+      map[r.id].total += parseInt(r.patient_count);
+      if (r.status === "Controlled") map[r.id].controlled += parseInt(r.patient_count);
+      else if (r.status === "Uncontrolled") map[r.id].uncontrolled += parseInt(r.patient_count);
+      else map[r.id].present += parseInt(r.patient_count);
+    });
+    
+    res.json(Object.values(map).sort((a,b) => b.total - a.total));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Doctor performance
+app.get("/api/reports/doctors", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT c.con_name as doctor,
+        COUNT(DISTINCT c.patient_id) as total_patients,
+        COUNT(DISTINCT c.id) as total_visits,
+        COUNT(DISTINCT CASE WHEN c.visit_date::date = CURRENT_DATE THEN c.patient_id END) as today,
+        COUNT(DISTINCT CASE WHEN c.visit_date >= CURRENT_DATE - INTERVAL '7 days' THEN c.patient_id END) as this_week,
+        COUNT(DISTINCT CASE WHEN c.visit_date >= CURRENT_DATE - INTERVAL '30 days' THEN c.patient_id END) as this_month
+      FROM consultations c
+      WHERE c.con_name IS NOT NULL AND c.con_name != ''
+      GROUP BY c.con_name
+      ORDER BY total_patients DESC
+    `);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// AI Query — returns raw data for AI to analyze
+app.get("/api/reports/query-data", async (req, res) => {
+  try {
+    const [patients, meds, labs, diagnoses, vitals] = await Promise.all([
+      pool.query(`SELECT p.id, p.name, p.age, p.sex, p.file_no,
+        (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) as last_visit,
+        (SELECT con_name FROM consultations c WHERE c.patient_id=p.id ORDER BY visit_date DESC LIMIT 1) as doctor
+        FROM patients p ORDER BY (SELECT MAX(visit_date) FROM consultations c WHERE c.patient_id=p.id) DESC NULLS LAST LIMIT 200`),
+      pool.query(`SELECT m.patient_id, m.name, m.dose, m.is_active FROM medications m WHERE m.is_active=true`),
+      pool.query(`SELECT lr.patient_id, lr.test_name, lr.result, lr.unit, lr.test_date 
+        FROM lab_results lr WHERE lr.test_date > CURRENT_DATE - INTERVAL '12 months'
+        ORDER BY lr.test_date DESC`),
+      pool.query(`SELECT d.patient_id, d.label, d.diagnosis_id, d.status, d.is_active FROM diagnoses d WHERE d.is_active=true`),
+      pool.query(`SELECT DISTINCT ON (v.patient_id) v.patient_id, v.weight, v.bp_sys, v.bp_dia, v.bmi, v.recorded_at
+        FROM vitals v ORDER BY v.patient_id, v.recorded_at DESC`)
+    ]);
+    
+    // Build per-patient summary
+    const medMap = {}, labMap = {}, dxMap = {}, vMap = {};
+    meds.rows.forEach(m => { if (!medMap[m.patient_id]) medMap[m.patient_id]=[]; medMap[m.patient_id].push(m); });
+    labs.rows.forEach(l => { if (!labMap[l.patient_id]) labMap[l.patient_id]=[]; if(labMap[l.patient_id].length<10) labMap[l.patient_id].push(l); });
+    diagnoses.rows.forEach(d => { if (!dxMap[d.patient_id]) dxMap[d.patient_id]=[]; dxMap[d.patient_id].push(d); });
+    vitals.rows.forEach(v => { vMap[v.patient_id] = v; });
+    
+    const summary = patients.rows.map(p => ({
+      ...p,
+      medications: (medMap[p.id]||[]).map(m=>`${m.name} ${m.dose}`),
+      diagnoses: (dxMap[p.id]||[]).map(d=>`${d.label}(${d.status})`),
+      recent_labs: (labMap[p.id]||[]).map(l=>`${l.test_name}:${l.result}${l.unit||""}(${String(l.test_date||"").slice(0,10)})`),
+      vitals: vMap[p.id] ? `Wt:${vMap[p.id].weight}kg BP:${vMap[p.id].bp_sys}/${vMap[p.id].bp_dia} BMI:${vMap[p.id].bmi}` : null
+    }));
+    
+    res.json({ patient_count: summary.length, patients: summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============ SERVE FRONTEND ============
 const distPath = path.join(__dirname, "..", "dist");
 app.use(express.static(distPath));

@@ -724,6 +724,17 @@ export default function GiniScribe() {
   // AI Rx Review
   const [rxReview, setRxReview] = useState(null); // {flags:[], loading:false}
   const [rxReviewLoading, setRxReviewLoading] = useState(false);
+  // Reports
+  const [reportData, setReportData] = useState(null);
+  const [reportDx, setReportDx] = useState(null);
+  const [reportDoctors, setReportDoctors] = useState(null);
+  const [reportPeriod, setReportPeriod] = useState("today");
+  const [reportDoctor, setReportDoctor] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportQuery, setReportQuery] = useState("");
+  const [reportQueryResult, setReportQueryResult] = useState("");
+  const [reportQueryLoading, setReportQueryLoading] = useState(false);
+  const [reportSection, setReportSection] = useState("summary"); // summary, diagnoses, query, doctors
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
   // History entry form
@@ -1292,6 +1303,48 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
     setRxReviewLoading(false);
   };
 
+  // ============ REPORTS ============
+  const loadReports = async (period, doctor) => {
+    if (!API_URL) return;
+    setReportLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (period) params.set("period", period);
+      if (doctor) params.set("doctor", doctor);
+      const [todayResp, dxResp, docResp] = await Promise.all([
+        fetch(`${API_URL}/api/reports/today?${params}`),
+        fetch(`${API_URL}/api/reports/diagnoses`),
+        fetch(`${API_URL}/api/reports/doctors`)
+      ]);
+      setReportData(await todayResp.json());
+      setReportDx(await dxResp.json());
+      setReportDoctors(await docResp.json());
+    } catch(e) { console.error("Report load error:", e); }
+    setReportLoading(false);
+  };
+
+  const runReportQuery = async () => {
+    if (!reportQuery.trim() || !API_URL) return;
+    setReportQueryLoading(true); setReportQueryResult("");
+    try {
+      const dataResp = await fetch(`${API_URL}/api/reports/query-data`);
+      const data = await dataResp.json();
+      const dataStr = JSON.stringify(data.patients.slice(0,100), null, 0);
+      const prompt = `You are a clinical analytics assistant for Gini Advanced Care Hospital, Mohali.
+You have access to structured patient data from the hospital database. Analyze and answer the query.
+Be specific with numbers, names, and trends. Use tables for comparisons. Keep answers concise.
+If the data doesn't contain enough info to answer accurately, say so.
+Format: Use markdown. Bold key numbers. Use tables where helpful.`;
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
+        body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,system:prompt,messages:[{role:"user",content:`HOSPITAL DATA (${data.patient_count} patients):\n${dataStr}\n\nQUERY: ${reportQuery}`}]})
+      });
+      const d = await r.json();
+      setReportQueryResult((d.content||[]).map(c=>c.text||"").join(""));
+    } catch(e) { setReportQueryResult("Error: "+e.message); }
+    setReportQueryLoading(false);
+  };
+
   const processMO = async () => {
     if(!moTranscript) return;
     setLoading(p=>({...p,mo:true})); clearErr("mo");
@@ -1663,7 +1716,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"plan", label:"📄 Plan", show:keySet },
     { id:"history", label:"📜 Hx", show:keySet && !!API_URL },
     { id:"outcomes", label:"📊", show:keySet && !!API_URL },
-    { id:"ai", label:"🤖 AI", show:keySet }
+    { id:"ai", label:"🤖 AI", show:keySet },
+    { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
   ];
 
   // Quick Mode: process single dictation into all sections
@@ -3742,6 +3796,215 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {aiLoading?"⏳":"Send →"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ═══ REPORTS TAB ═══ */}
+      {tab==="reports" && (
+        <div>
+          {/* Report Header */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <div style={{ fontSize:15, fontWeight:800, color:"#1e293b" }}>📊 Clinical Reports</div>
+            <div style={{ flex:1 }} />
+            <button onClick={()=>loadReports(reportPeriod,reportDoctor)} disabled={reportLoading}
+              style={{ background:"#2563eb", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+              {reportLoading?"⏳ Loading...":"🔄 Refresh"}
+            </button>
+          </div>
+
+          {/* Section Tabs */}
+          <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+            {[{id:"summary",label:"📋 Today"},{id:"diagnoses",label:"🏥 Diagnoses"},{id:"query",label:"🤖 AI Query"},{id:"doctors",label:"👨‍⚕️ Doctors"}].map(s => (
+              <button key={s.id} onClick={()=>{setReportSection(s.id);if(!reportData)loadReports(reportPeriod,reportDoctor);}}
+                style={{ flex:1, padding:"7px 4px", fontSize:10, fontWeight:600, cursor:"pointer", border:"none",
+                  background:reportSection===s.id?"#1e293b":"white", color:reportSection===s.id?"white":"#64748b" }}>{s.label}</button>
+            ))}
+          </div>
+
+          {/* ═══ TODAY'S SUMMARY ═══ */}
+          {reportSection==="summary" && (
+            <div>
+              {/* Period filters */}
+              <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
+                {[{l:"Today",v:"today"},{l:"This Week",v:"week"},{l:"This Month",v:"month"}].map(f => (
+                  <button key={f.v} onClick={()=>{setReportPeriod(f.v);loadReports(f.v,reportDoctor);}}
+                    style={{ padding:"3px 10px", borderRadius:20, fontSize:10, fontWeight:600, cursor:"pointer",
+                      border:reportPeriod===f.v?"2px solid #2563eb":"1px solid #e2e8f0",
+                      background:reportPeriod===f.v?"#eff6ff":"white", color:reportPeriod===f.v?"#2563eb":"#64748b" }}>{f.l}</button>
+                ))}
+              </div>
+
+              {!reportData ? (
+                <div style={{ textAlign:"center", padding:30 }}>
+                  <button onClick={()=>loadReports(reportPeriod,reportDoctor)} style={{ background:"#2563eb", color:"white", border:"none", padding:"10px 24px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Load Reports</button>
+                </div>
+              ) : (
+                <div>
+                  {/* Summary Cards */}
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6, marginBottom:12 }}>
+                    {[{label:"Total Seen",val:reportData.total,bg:"#f1f5f9",color:"#1e293b",icon:"👥"},
+                      {label:"Improving",val:reportData.improving,bg:"#dcfce7",color:"#166534",icon:"📈"},
+                      {label:"Stable",val:reportData.stable,bg:"#dbeafe",color:"#1e40af",icon:"➡️"},
+                      {label:"Worsening",val:reportData.worsening,bg:"#fef2f2",color:"#dc2626",icon:"📉"}
+                    ].map(c => (
+                      <div key={c.label} style={{ background:c.bg, borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
+                        <div style={{ fontSize:10 }}>{c.icon}</div>
+                        <div style={{ fontSize:22, fontWeight:800, color:c.color }}>{c.val}</div>
+                        <div style={{ fontSize:9, fontWeight:600, color:c.color, opacity:.7 }}>{c.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* By Doctor */}
+                  {reportData.by_doctor && Object.keys(reportData.by_doctor).length > 0 && (
+                    <div style={{ background:"#f8fafc", borderRadius:8, padding:8, marginBottom:10, border:"1px solid #e2e8f0" }}>
+                      <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>BY DOCTOR</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                        {Object.entries(reportData.by_doctor).map(([doc,count]) => (
+                          <span key={doc} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:20, padding:"2px 10px", fontSize:11 }}>
+                            <strong>{doc}</strong>: {count}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Patient List */}
+                  <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>PATIENTS ({reportData.patients?.length||0})</div>
+                  <div style={{ maxHeight:400, overflow:"auto" }}>
+                    {(reportData.patients||[]).map((p,i) => {
+                      const trendColors = {improving:"#059669",worsening:"#dc2626",stable:"#2563eb","new":"#94a3b8"};
+                      const trendIcons = {improving:"📈",worsening:"📉",stable:"➡️","new":"🆕"};
+                      return (
+                        <div key={i} onClick={()=>loadPatientDB({id:p.id,name:p.name,age:p.age,sex:p.sex,file_no:p.file_no})}
+                          style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 8px", borderBottom:"1px solid #f1f5f9", cursor:"pointer", fontSize:11, borderRadius:4 }}
+                          onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <span style={{ fontSize:12 }}>{trendIcons[p.trend]}</span>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <strong>{p.name}</strong>
+                            <span style={{ color:"#94a3b8", marginLeft:4 }}>{p.age}Y/{p.sex?.charAt(0)} {p.file_no&&`| ${p.file_no}`}</span>
+                            {p.diagnoses && <div style={{ fontSize:9, color:"#64748b", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {(p.diagnoses||[]).map(d=>d.label).join(", ")}
+                            </div>}
+                          </div>
+                          <div style={{ textAlign:"right", flexShrink:0 }}>
+                            <div style={{ fontSize:10, fontWeight:700, color:trendColors[p.trend] }}>{p.trend}</div>
+                            {p.labs?.HbA1c?.[0] && <div style={{ fontSize:9, color:"#64748b" }}>A1c: {p.labs.HbA1c[0].val}%</div>}
+                            {p.labs?.FBG?.[0] && <div style={{ fontSize:9, color:"#64748b" }}>FBG: {p.labs.FBG[0].val}</div>}
+                          </div>
+                          <div style={{ fontSize:9, color:"#94a3b8" }}>{p.con_name||""}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ DIAGNOSIS DISTRIBUTION ═══ */}
+          {reportSection==="diagnoses" && (
+            <div>
+              {!reportDx ? (
+                <div style={{ textAlign:"center", padding:30 }}>
+                  <button onClick={()=>loadReports(reportPeriod,reportDoctor)} style={{ background:"#2563eb", color:"white", border:"none", padding:"10px 24px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Load Reports</button>
+                </div>
+              ) : (
+                <div>
+                  {reportDx.slice(0,12).map((dx,i) => {
+                    const maxCount = Math.max(...reportDx.map(d=>d.total));
+                    const controlPct = dx.total > 0 ? Math.round((dx.controlled/dx.total)*100) : 0;
+                    return (
+                      <div key={i} style={{ marginBottom:6 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, marginBottom:2 }}>
+                          <strong>{dx.label || dx.id}</strong>
+                          <span style={{ color:"#64748b" }}>{dx.total} patients</span>
+                        </div>
+                        <div style={{ display:"flex", height:20, borderRadius:4, overflow:"hidden", background:"#f1f5f9" }}>
+                          {dx.controlled > 0 && <div style={{ width:`${(dx.controlled/maxCount)*100}%`, background:"#22c55e", transition:"width .3s" }} title={`Controlled: ${dx.controlled}`} />}
+                          {dx.uncontrolled > 0 && <div style={{ width:`${(dx.uncontrolled/maxCount)*100}%`, background:"#ef4444", transition:"width .3s" }} title={`Uncontrolled: ${dx.uncontrolled}`} />}
+                          {dx.present > 0 && <div style={{ width:`${(dx.present/maxCount)*100}%`, background:"#3b82f6", transition:"width .3s" }} title={`Present: ${dx.present}`} />}
+                        </div>
+                        <div style={{ display:"flex", gap:8, fontSize:9, color:"#64748b", marginTop:1 }}>
+                          {dx.controlled > 0 && <span>✅ {dx.controlled} controlled{dx.total>0?` (${controlPct}%)`:""}</span>}
+                          {dx.uncontrolled > 0 && <span>⚠️ {dx.uncontrolled} uncontrolled</span>}
+                          {dx.present > 0 && <span>📋 {dx.present} present</span>}
+                          {dx.avg_hba1c && <span>📊 Avg HbA1c: {dx.avg_hba1c}%</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display:"flex", gap:12, justifyContent:"center", fontSize:10, color:"#64748b", marginTop:8 }}>
+                    <span>🟢 Controlled</span><span>🔴 Uncontrolled</span><span>🔵 Present</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ AI QUERY ═══ */}
+          {reportSection==="query" && (
+            <div>
+              <div style={{ background:"linear-gradient(135deg,#faf5ff,#eff6ff)", borderRadius:10, padding:12, marginBottom:10, border:"1px solid #c4b5fd" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"#6b21a8", marginBottom:6 }}>🤖 Ask anything about your patient data</div>
+                <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:8 }}>
+                  {["DM2 patients with HbA1c > 8","Patients on Mounjaro - weight trends","Overdue for HbA1c (>3 months)","HTN patients with BP > 140/90","Most prescribed medications","Patients needing follow-up"].map(q => (
+                    <button key={q} onClick={()=>setReportQuery(q)}
+                      style={{ fontSize:9, background:"white", border:"1px solid #d8b4fe", padding:"3px 8px", borderRadius:20, cursor:"pointer", color:"#7c3aed", fontWeight:600 }}>{q}</button>
+                  ))}
+                </div>
+                <div style={{ display:"flex", gap:6 }}>
+                  <input value={reportQuery} onChange={e=>setReportQuery(e.target.value)} placeholder="Ask a question about your patients..."
+                    onKeyDown={e=>e.key==="Enter"&&runReportQuery()}
+                    style={{ flex:1, padding:"8px 12px", border:"1px solid #d8b4fe", borderRadius:8, fontSize:12, outline:"none" }} />
+                  <button onClick={runReportQuery} disabled={reportQueryLoading||!reportQuery.trim()}
+                    style={{ padding:"8px 16px", background:reportQueryLoading?"#94a3b8":"#7c3aed", color:"white", border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:reportQueryLoading?"wait":"pointer" }}>
+                    {reportQueryLoading?"⏳":"Ask →"}
+                  </button>
+                </div>
+              </div>
+              {reportQueryResult && (
+                <div style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:10, padding:14, fontSize:12, lineHeight:1.7, whiteSpace:"pre-wrap", maxHeight:500, overflow:"auto" }}>
+                  <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed", marginBottom:6 }}>🤖 AI ANALYSIS</div>
+                  {reportQueryResult}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ DOCTOR PERFORMANCE ═══ */}
+          {reportSection==="doctors" && (
+            <div>
+              {!reportDoctors ? (
+                <div style={{ textAlign:"center", padding:30 }}>
+                  <button onClick={()=>loadReports(reportPeriod,reportDoctor)} style={{ background:"#2563eb", color:"white", border:"none", padding:"10px 24px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Load Reports</button>
+                </div>
+              ) : (
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                  <thead><tr style={{ background:"#1e293b", color:"white" }}>
+                    <th style={{ padding:"8px 10px", textAlign:"left" }}>Doctor</th>
+                    <th style={{ padding:"8px 6px", textAlign:"center" }}>Patients</th>
+                    <th style={{ padding:"8px 6px", textAlign:"center" }}>Visits</th>
+                    <th style={{ padding:"8px 6px", textAlign:"center" }}>Today</th>
+                    <th style={{ padding:"8px 6px", textAlign:"center" }}>Week</th>
+                    <th style={{ padding:"8px 6px", textAlign:"center" }}>Month</th>
+                  </tr></thead>
+                  <tbody>
+                    {reportDoctors.map((d,i) => (
+                      <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", background:i%2?"#fafafa":"white" }}>
+                        <td style={{ padding:"6px 10px", fontWeight:700 }}>{d.doctor}</td>
+                        <td style={{ padding:"6px 6px", textAlign:"center", fontWeight:700, color:"#1e40af" }}>{d.total_patients}</td>
+                        <td style={{ padding:"6px 6px", textAlign:"center", color:"#64748b" }}>{d.total_visits}</td>
+                        <td style={{ padding:"6px 6px", textAlign:"center", fontWeight:700, color:parseInt(d.today)>0?"#059669":"#cbd5e1" }}>{d.today}</td>
+                        <td style={{ padding:"6px 6px", textAlign:"center", color:"#475569" }}>{d.this_week}</td>
+                        <td style={{ padding:"6px 6px", textAlign:"center", color:"#475569" }}>{d.this_month}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
