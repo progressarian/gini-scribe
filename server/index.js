@@ -22,8 +22,9 @@ const finalDbUrl = cleanDbUrl || undefined;
 const pool = new pg.Pool({
   connectionString: finalDbUrl,
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 20000,
   idleTimeoutMillis: 30000,
+  max: 10,
 });
 
 console.log("📦 DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);

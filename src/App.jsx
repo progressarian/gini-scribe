@@ -892,7 +892,7 @@ export default function GiniScribe() {
     if (API_URL) {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+        const timeout = setTimeout(() => controller.abort(), 30000);
         setSaveStatus("💾 Saving to DB...");
         const resp = await fetch(`${API_URL}/api/consultations`, {
           method: "POST",
@@ -1047,7 +1047,7 @@ export default function GiniScribe() {
   const loadPatientDB = async (dbRecord) => {
     setPatient({
       name: dbRecord.name || "", phone: dbRecord.phone || "", age: dbRecord.age || "",
-      sex: dbRecord.sex || "Male", fileNo: dbRecord.file_no || "", dob: dbRecord.dob || "",
+      sex: dbRecord.sex || "Male", fileNo: dbRecord.file_no || "", dob: dbRecord.dob ? String(dbRecord.dob).slice(0,10) : "",
       abhaId: dbRecord.abha_id || "", healthId: dbRecord.health_id || "",
       aadhaar: dbRecord.aadhaar || "", govtId: dbRecord.govt_id || "", govtIdType: dbRecord.govt_id_type || ""
     });
