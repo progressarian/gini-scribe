@@ -1353,6 +1353,58 @@ export default function GiniScribe() {
   };
 
   // AI Prescription Review
+  // Save treatment plan as document on print (final version)
+  const handlePrintPlan = async () => {
+    // Save plan document to DB if patient is loaded
+    if (dbPatientId && API_URL && conData) {
+      try {
+        const planDoc = {
+          doc_type: "prescription",
+          title: `Treatment Plan — ${conName || "Doctor"} — ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}`,
+          file_name: `plan_${dbPatientId}_${Date.now()}.json`,
+          extracted_data: {
+            patient: { name: patient.name, age: patient.age, sex: patient.sex, phone: patient.phone, fileNo: patient.fileNo },
+            doctor: conName, mo: moName,
+            date: new Date().toISOString(),
+            diagnoses: moData?.diagnoses || [],
+            complications: moData?.complications || [],
+            medications: conData.medications_confirmed || [],
+            diet_lifestyle: conData.diet_lifestyle || [],
+            self_monitoring: conData.self_monitoring || [],
+            goals: conData.goals || [],
+            follow_up: conData.follow_up || {},
+            future_plan: conData.future_plan || [],
+            chief_complaints: moData?.chief_complaints || [],
+            assessment_summary: conData.assessment_summary || "",
+            investigations: moData?.investigations || [],
+            vitals: { ...vitals },
+            plan_edits: planEdits
+          },
+          doc_date: new Date().toISOString().split("T")[0],
+          source: "scribe_print",
+          notes: `Printed by ${currentDoctor?.name || conName}`,
+          consultation_id: patientFullData?.consultations?.[0]?.id || null
+        };
+        const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+          method: "POST", headers: authHeaders(), body: JSON.stringify(planDoc)
+        });
+        const saved = await resp.json();
+        if (saved.id) {
+          // Capture plan HTML and save as file
+          const planEl = document.querySelector('[data-plan-content]');
+          if (planEl) {
+            const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${planDoc.title}</title><style>body{font-family:system-ui;padding:20px;max-width:800px;margin:auto}</style></head><body>${planEl.innerHTML}</body></html>`;
+            const b64 = btoa(unescape(encodeURIComponent(htmlContent)));
+            await uploadFileToStorage(saved.id, b64, "text/html", `plan_${dbPatientId}.html`);
+          }
+          console.log("✅ Plan saved as document #" + saved.id);
+        }
+      } catch (e) { console.log("Plan save on print:", e.message); }
+    }
+    // Then print
+    window.print();
+  };
+
   const runRxReview = async () => {
     setRxReviewLoading(true); setRxReview(null);
     let ctx = "";
@@ -2491,7 +2543,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {rxReviewLoading?"⏳ Reviewing...":"🤖 Review Rx"}
             </button>
             <div style={{ flex:1 }} />
-            <button onClick={()=>window.print()} style={{ background:"#1e293b", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🖨️ Print</button>
+            <button onClick={handlePrintPlan} style={{ background:"#1e293b", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🖨️ Print & Save</button>
           </div>
 
           {/* AI Rx Review Results */}
@@ -2528,7 +2580,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           )}
 
           {!moData && !conData ? <div style={{ textAlign:"center", padding:24, color:"#94a3b8" }}>Complete MO & Consultant first</div> : (
-            <div>
+            <div data-plan-content>
               {/* Plan Header */}
               <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", color:"white", padding:"12px 16px", borderRadius:"10px 10px 0 0" }}>
                 <div style={{ display:"flex", justifyContent:"space-between" }}>
