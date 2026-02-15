@@ -410,6 +410,19 @@ app.get("/api/patients/:id/labs", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Save individual lab result
+app.post("/api/patients/:id/labs", async (req, res) => {
+  try {
+    const { test_name, result, unit, flag, ref_range, test_date, consultation_id } = req.body;
+    const r = await pool.query(
+      `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, ref_range, test_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.params.id, n(consultation_id), test_name, result, n(unit), n(flag)||"N", n(ref_range), n(test_date)||new Date().toISOString().split("T")[0]]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/api/patients/:id/medications", async (req, res) => {
   try {
     const { active } = req.query;

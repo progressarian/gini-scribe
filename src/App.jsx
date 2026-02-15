@@ -735,6 +735,10 @@ export default function GiniScribe() {
   const [reportQueryResult, setReportQueryResult] = useState("");
   const [reportQueryLoading, setReportQueryLoading] = useState(false);
   const [reportSection, setReportSection] = useState("summary"); // summary, diagnoses, query, doctors
+  // Lab Portal
+  const [labPortalFiles, setLabPortalFiles] = useState([]); // [{id, type, base64, mediaType, fileName, date, extracting, extracted, data, error}]
+  const [labPortalDate, setLabPortalDate] = useState(new Date().toISOString().slice(0,10));
+  const labPortalRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
   // History entry form
@@ -817,6 +821,7 @@ export default function GiniScribe() {
         localStorage.setItem("gini_doctor", JSON.stringify(data.doctor));
         // Auto-set names based on role
         if (data.doctor.role === "mo") setMoName(data.doctor.short_name);
+        else if (data.doctor.role === "lab" || data.doctor.role === "nurse" || data.doctor.role === "tech") setTab("labportal");
         else setConName(data.doctor.short_name);
       } else {
         setLoginError(data.error || "Login failed");
@@ -1218,6 +1223,73 @@ export default function GiniScribe() {
 
   // Remove imaging file
   const removeImaging = (fileId) => setImagingFiles(prev => prev.filter(f => f.id !== fileId));
+
+  // ============ LAB PORTAL FUNCTIONS ============
+  const handleLabPortalUpload = (e, reportType) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target.result.split(",")[1];
+      const mediaType = file.type || "image/jpeg";
+      const isLab = ["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].includes(reportType);
+      setLabPortalFiles(prev => [...prev, {
+        id: Date.now(), type: reportType, category: isLab ? "lab" : "imaging",
+        base64, mediaType, fileName: file.name,
+        date: labPortalDate, extracting: false, extracted: false, data: null, error: null, saved: false
+      }]);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const processLabPortalFile = async (fileId) => {
+    setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, extracting: true, error: null } : f));
+    const file = labPortalFiles.find(f => f.id === fileId);
+    if (!file) return;
+    const isLab = file.category === "lab";
+    const extractFn = isLab ? extractLab : extractImaging;
+    const { data, error } = await extractFn(file.base64, file.mediaType);
+    setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, extracting: false, extracted: true, data, error } : f));
+    // Auto-save to DB
+    if (data && dbPatientId && API_URL) {
+      try {
+        const body = {
+          doc_type: isLab ? "lab_report" : (data.report_type || file.type),
+          title: `${file.type} — ${file.fileName}`,
+          file_name: file.fileName,
+          extracted_data: data,
+          doc_date: file.date || labPortalDate || new Date().toISOString().split("T")[0],
+          source: `upload_${currentDoctor?.short_name||"lab"}`,
+          notes: isLab ? `${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests extracted` : (data.impression||"")
+        };
+        await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+          method: "POST", headers: authHeaders(), body: JSON.stringify(body)
+        });
+        // Save lab results to lab_results table too
+        if (isLab && data.panels) {
+          for (const panel of data.panels) {
+            for (const test of panel.tests) {
+              await fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
+                method: "POST", headers: authHeaders(),
+                body: JSON.stringify({
+                  test_name: test.test_name, result: String(test.result_text||test.result),
+                  unit: test.unit||"", flag: test.flag||"N", ref_range: test.ref_range||"",
+                  test_date: file.date || labPortalDate
+                })
+              });
+            }
+          }
+        }
+        setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, saved: true } : f));
+      } catch (e) {
+        console.log("Lab save failed:", e.message);
+        setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, error: "Save failed: "+e.message } : f));
+      }
+    }
+  };
+
+  const removeLabPortalFile = (fileId) => setLabPortalFiles(prev => prev.filter(f => f.id !== fileId));
 
   // AI Chat send message
   const sendAiMessage = async () => {
@@ -1706,17 +1778,20 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     setSummaryLoading(false);
   };
 
+  const isLabRole = currentDoctor?.role==="lab"||currentDoctor?.role==="nurse"||currentDoctor?.role==="tech";
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
-    { id:"quick", label:"⚡ Quick", show:keySet },
-    { id:"patient", label:"👤", show:keySet },
-    { id:"vitals", label:"📋", show:keySet },
-    { id:"mo", label:"🎤 MO", show:keySet },
-    { id:"consultant", label:"👨‍⚕️ Con", show:keySet },
-    { id:"plan", label:"📄 Plan", show:keySet },
-    { id:"history", label:"📜 Hx", show:keySet && !!API_URL },
-    { id:"outcomes", label:"📊", show:keySet && !!API_URL },
-    { id:"ai", label:"🤖 AI", show:keySet },
+    { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole },
+    { id:"patient", label:"👤", show:keySet && !isLabRole },
+    { id:"vitals", label:"📋", show:keySet && !isLabRole },
+    { id:"mo", label:"🎤 MO", show:keySet && !isLabRole },
+    { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole },
+    { id:"plan", label:"📄 Plan", show:keySet && !isLabRole },
+    { id:"docs", label:"📎 Docs", show:keySet && !!API_URL && !!dbPatientId },
+    { id:"labportal", label:"🔬 Upload", show:keySet && !!API_URL && isLabRole },
+    { id:"history", label:"📜 Hx", show:keySet && !!API_URL && !isLabRole },
+    { id:"outcomes", label:"📊", show:keySet && !!API_URL && !isLabRole },
+    { id:"ai", label:"🤖 AI", show:keySet && !isLabRole },
     { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
   ];
 
@@ -1806,6 +1881,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </optgroup>}
                 {doctorsList.filter(d=>d.role==="lab").length > 0 && <optgroup label="Laboratory">
                   {doctorsList.filter(d=>d.role==="lab").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>}
+                {doctorsList.filter(d=>d.role==="tech").length > 0 && <optgroup label="Technicians">
+                  {doctorsList.filter(d=>d.role==="tech").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </optgroup>}
                 {doctorsList.filter(d=>d.role==="pharmacy").length > 0 && <optgroup label="Pharmacy">
                   {doctorsList.filter(d=>d.role==="pharmacy").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -2665,6 +2743,242 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         </div>
       )}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
+
+      {/* ===== DOCUMENTS TAB ===== */}
+      {tab==="docs" && (
+        <div>
+          <div style={{ fontSize:15, fontWeight:800, color:"#1e293b", marginBottom:10 }}>📎 Patient Documents</div>
+          {!dbPatientId ? (
+            <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>📎</div>
+              <div style={{ fontSize:13, fontWeight:600 }}>Load a patient first</div>
+            </div>
+          ) : !patientFullData?.documents?.length ? (
+            <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>📂</div>
+              <div style={{ fontSize:13, fontWeight:600 }}>No documents uploaded yet</div>
+              <div style={{ fontSize:11, marginTop:4 }}>Upload reports from the 📋 Vitals tab or ask the lab team to upload</div>
+            </div>
+          ) : (
+            <div>
+              {/* Group documents by type */}
+              {(() => {
+                const docs = patientFullData.documents;
+                const groups = {};
+                docs.forEach(d => {
+                  const cat = ["lab_report","Blood Test","Thyroid Panel","Lipid Profile","HbA1c","CBC","Urine","Kidney Function","Liver Function"].includes(d.doc_type)
+                    ? "🔬 Lab Reports" : d.doc_type === "prescription" ? "📄 Prescriptions"
+                    : ["X-Ray","MRI","Ultrasound","DEXA","ECG","Echo","CT","ABI","VPT","Fundus","PFT","NCS"].includes(d.doc_type)
+                    ? "🩻 Imaging & Diagnostics" : "📋 Other Documents";
+                  if (!groups[cat]) groups[cat] = [];
+                  groups[cat].push(d);
+                });
+                return Object.entries(groups).map(([cat, items]) => (
+                  <div key={cat} style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #e2e8f0", marginBottom:6 }}>{cat} ({items.length})</div>
+                    {items.map(doc => {
+                      const ed = doc.extracted_data;
+                      return (
+                        <div key={doc.id} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:6, background:"white" }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                            <div>
+                              <strong style={{ fontSize:12 }}>{doc.title || doc.doc_type}</strong>
+                              {doc.file_name && <span style={{ fontSize:9, color:"#94a3b8", marginLeft:6 }}>{doc.file_name}</span>}
+                            </div>
+                            <div style={{ textAlign:"right" }}>
+                              {doc.doc_date && <div style={{ fontSize:10, fontWeight:600, color:"#2563eb" }}>{(()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</div>}
+                              {doc.source && <div style={{ fontSize:8, color:"#94a3b8" }}>{doc.source}</div>}
+                            </div>
+                          </div>
+                          {/* Show extracted data */}
+                          {ed && cat.includes("Lab") && ed.panels && (
+                            <div style={{ marginTop:4 }}>
+                              {(ed.panels||[]).map((panel,pi) => (
+                                <div key={pi} style={{ marginBottom:4 }}>
+                                  <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed", background:"#faf5ff", padding:"2px 6px", borderRadius:3 }}>{panel.panel_name}</div>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:2 }}>
+                                    {(panel.tests||[]).map((t,ti) => (
+                                      <span key={ti} style={{ fontSize:10, padding:"1px 6px", borderRadius:4,
+                                        background:t.flag==="H"?"#fef2f2":t.flag==="L"?"#eff6ff":"#f1f5f9",
+                                        color:t.flag==="H"?"#dc2626":t.flag==="L"?"#2563eb":"#475569",
+                                        fontWeight:t.flag?700:400 }}>
+                                        {t.test_name}: {t.result_text||t.result} {t.unit||""}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {ed && cat.includes("Imaging") && (
+                            <div style={{ marginTop:4 }}>
+                              {ed.impression && <div style={{ fontSize:11, color:"#1e293b", fontWeight:600, padding:"3px 8px", background:"#f0f9ff", borderRadius:4, marginBottom:3 }}>💡 {ed.impression}</div>}
+                              {(ed.findings||[]).length > 0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                                  {ed.findings.map((f,i) => (
+                                    <span key={i} style={{ fontSize:9, padding:"1px 6px", borderRadius:4,
+                                      background:f.interpretation==="Abnormal"?"#fef2f2":f.interpretation==="Borderline"?"#fefce8":"#f1f5f9",
+                                      color:f.interpretation==="Abnormal"?"#dc2626":"#475569" }}>
+                                      {f.parameter}: {f.value} {f.unit||""} ({f.interpretation})
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {doc.notes && !ed && <div style={{ fontSize:10, color:"#64748b", marginTop:3 }}>{doc.notes}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== LAB PORTAL ===== */}
+      {tab==="labportal" && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <div style={{ fontSize:15, fontWeight:800, color:"#0369a1" }}>🔬 Report Upload Portal</div>
+            <div style={{ flex:1 }} />
+            {currentDoctor && <span style={{ fontSize:10, background:"#f0f9ff", color:"#0369a1", padding:"2px 8px", borderRadius:10, fontWeight:600 }}>👤 {currentDoctor.name}</span>}
+          </div>
+
+          {/* Step 1: Patient selection */}
+          {!dbPatientId ? (
+            <div style={{ textAlign:"center", padding:20 }}>
+              <div style={{ fontSize:28, marginBottom:8 }}>🔍</div>
+              <div style={{ fontSize:13, fontWeight:700, color:"#1e293b", marginBottom:4 }}>Step 1: Find Patient</div>
+              <div style={{ fontSize:11, color:"#64748b", marginBottom:10 }}>Search by name, phone, or file number</div>
+              <button onClick={openSearch} style={{ background:"#0369a1", color:"white", border:"none", padding:"10px 24px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>🔍 Find Patient</button>
+            </div>
+          ) : (
+            <div>
+              {/* Patient info bar */}
+              <div style={{ background:"linear-gradient(135deg,#0369a1,#0284c7)", color:"white", borderRadius:10, padding:"10px 14px", marginBottom:10, display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ width:36, height:36, borderRadius:"50%", background:"rgba(255,255,255,.2)", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:16 }}>
+                  {(patient.name||"?").charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:800 }}>{patient.name}</div>
+                  <div style={{ fontSize:10, opacity:.8 }}>{patient.age}Y / {patient.sex} {patient.fileNo && `| ${patient.fileNo}`} {patient.phone && `| ${patient.phone}`}</div>
+                </div>
+                <button onClick={()=>{setDbPatientId(null);setPatient({name:"",phone:"",age:"",sex:"Male",fileNo:"",dob:""});setLabPortalFiles([]);}}
+                  style={{ background:"rgba(255,255,255,.2)", color:"white", border:"none", padding:"4px 10px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer" }}>Change</button>
+              </div>
+
+              {/* Date selector */}
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                <label style={{ fontSize:11, fontWeight:700, color:"#475569" }}>📅 Report Date:</label>
+                <input type="date" value={labPortalDate} onChange={e=>setLabPortalDate(e.target.value)}
+                  style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, fontWeight:600 }} />
+                <button onClick={()=>setLabPortalDate(new Date().toISOString().slice(0,10))}
+                  style={{ fontSize:9, background:"#eff6ff", border:"1px solid #bfdbfe", padding:"3px 8px", borderRadius:4, cursor:"pointer", color:"#1e40af", fontWeight:600 }}>Today</button>
+              </div>
+
+              {/* Upload buttons - Lab Reports */}
+              <div style={{ marginBottom:8 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#7c3aed", marginBottom:4 }}>🔬 Blood Work & Lab Reports</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                  {["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].map(type => (
+                    <label key={type} style={{ padding:"6px 12px", background:"#faf5ff", border:"1px solid #d8b4fe", borderRadius:8, fontSize:11, fontWeight:600, color:"#7c3aed", cursor:"pointer" }}>
+                      📎 {type}
+                      <input type="file" accept="image/*,.pdf" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Upload buttons - Imaging & Diagnostics */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#0369a1", marginBottom:4 }}>🩻 Imaging & Diagnostic Tests</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                  {["X-Ray","ECG","ABI","VPT","Ultrasound","DEXA","MRI","CT","Echo","Fundus","PFT","NCS"].map(type => (
+                    <label key={type} style={{ padding:"6px 12px", background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, fontSize:11, fontWeight:600, color:"#0369a1", cursor:"pointer" }}>
+                      📎 {type}
+                      <input type="file" accept="image/*,.pdf" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Uploaded files */}
+              {labPortalFiles.length > 0 && (
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:6, borderTop:"1px solid #e2e8f0", paddingTop:8 }}>
+                    UPLOADED ({labPortalFiles.length})
+                  </div>
+                  {labPortalFiles.map(file => (
+                    <div key={file.id} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:6,
+                      background:file.saved?"#f0fdf4":file.error?"#fef2f2":"white" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:12, fontWeight:700, color:file.category==="lab"?"#7c3aed":"#0369a1" }}>
+                          {file.category==="lab"?"🔬":"🩻"} {file.type}
+                        </span>
+                        <span style={{ fontSize:10, color:"#94a3b8" }}>{file.fileName}</span>
+                        <span style={{ fontSize:9, color:"#64748b" }}>{file.date}</span>
+                        <div style={{ flex:1 }} />
+                        {!file.extracted && !file.extracting && (
+                          <button onClick={()=>processLabPortalFile(file.id)}
+                            style={{ background:file.category==="lab"?"#7c3aed":"#0369a1", color:"white", border:"none", padding:"4px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                            🔬 Extract & Save
+                          </button>
+                        )}
+                        {file.extracting && <span style={{ fontSize:11, fontWeight:600, color:"#f59e0b" }}>⏳ Processing...</span>}
+                        {file.saved && <span style={{ fontSize:11, fontWeight:700, color:"#059669" }}>✅ Saved</span>}
+                        {file.error && <span style={{ fontSize:10, color:"#dc2626" }}>❌ {file.error}</span>}
+                        <button onClick={()=>removeLabPortalFile(file.id)}
+                          style={{ background:"#fef2f2", color:"#dc2626", border:"none", padding:"2px 6px", borderRadius:4, fontSize:9, cursor:"pointer" }}>✕</button>
+                      </div>
+                      {/* Show extracted results */}
+                      {file.data && file.category==="lab" && (file.data.panels||[]).map((panel,pi) => (
+                        <div key={pi} style={{ marginTop:4 }}>
+                          <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed" }}>{panel.panel_name}</div>
+                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10, marginTop:2 }}><tbody>
+                            {(panel.tests||[]).map((t,ti) => (
+                              <tr key={ti} style={{ background:t.flag==="H"?"#fef2f2":t.flag==="L"?"#eff6ff":ti%2?"#fafafa":"white" }}>
+                                <td style={{ padding:"2px 6px" }}>{t.test_name}</td>
+                                <td style={{ padding:"2px 6px", textAlign:"right", fontWeight:700, color:t.flag==="H"?"#dc2626":t.flag==="L"?"#2563eb":"#1e293b" }}>
+                                  {t.result_text||t.result} {t.unit||""}
+                                </td>
+                                <td style={{ padding:"2px 6px", fontSize:9, color:"#94a3b8" }}>{t.ref_range||""}</td>
+                                <td style={{ padding:"2px 6px", textAlign:"center", fontSize:9 }}>{t.flag==="H"?"↑ HIGH":t.flag==="L"?"↓ LOW":"✓"}</td>
+                              </tr>
+                            ))}
+                          </tbody></table>
+                        </div>
+                      ))}
+                      {file.data && file.category==="imaging" && (
+                        <div style={{ marginTop:4 }}>
+                          {file.data.impression && <div style={{ fontSize:11, fontWeight:600, padding:"3px 8px", background:"#f0f9ff", borderRadius:4 }}>💡 {file.data.impression}</div>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Previously uploaded docs */}
+              {patientFullData?.documents?.length > 0 && (
+                <div style={{ marginTop:12, borderTop:"2px solid #e2e8f0", paddingTop:8 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>📂 PREVIOUS DOCUMENTS ({patientFullData.documents.length})</div>
+                  {patientFullData.documents.slice(0,10).map(doc => (
+                    <div key={doc.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 8px", borderBottom:"1px solid #f1f5f9", fontSize:11 }}>
+                      <span>{doc.doc_type==="lab_report"?"🔬":"🩻"}</span>
+                      <span style={{ flex:1 }}>{doc.title||doc.doc_type}</span>
+                      {doc.doc_date && <span style={{ fontSize:9, color:"#64748b" }}>{(()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</span>}
+                      <span style={{ fontSize:8, color:"#94a3b8" }}>{doc.source||""}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ===== HISTORY ENTRY ===== */}
       {tab==="history" && (
