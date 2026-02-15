@@ -15,11 +15,12 @@ const dbUrl = process.env.DATABASE_URL || "";
 const isInternal = dbUrl.includes(".railway.internal");
 const needsSsl = !!dbUrl && !isInternal;
 
-// Append sslmode if not already in URL
-const finalDbUrl = (needsSsl && !dbUrl.includes("sslmode")) ? dbUrl + "?sslmode=require" : dbUrl;
+// Strip any existing sslmode param to avoid conflicts
+const cleanDbUrl = dbUrl.replace(/[?&]sslmode=[^&]*/g, '');
+const finalDbUrl = cleanDbUrl || undefined;
 
 const pool = new pg.Pool({
-  connectionString: finalDbUrl || undefined,
+  connectionString: finalDbUrl,
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
