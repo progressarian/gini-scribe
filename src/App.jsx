@@ -738,6 +738,7 @@ export default function GiniScribe() {
   // Lab Portal
   const [labPortalFiles, setLabPortalFiles] = useState([]); // [{id, type, base64, mediaType, fileName, date, extracting, extracted, data, error}]
   const [labPortalDate, setLabPortalDate] = useState(new Date().toISOString().slice(0,10));
+  const [expandedDocId, setExpandedDocId] = useState(null);
   const labPortalRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
@@ -1389,16 +1390,7 @@ export default function GiniScribe() {
           method: "POST", headers: authHeaders(), body: JSON.stringify(planDoc)
         });
         const saved = await resp.json();
-        if (saved.id) {
-          // Capture plan HTML and save as file
-          const planEl = document.querySelector('[data-plan-content]');
-          if (planEl) {
-            const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${planDoc.title}</title><style>body{font-family:system-ui;padding:20px;max-width:800px;margin:auto}</style></head><body>${planEl.innerHTML}</body></html>`;
-            const b64 = btoa(unescape(encodeURIComponent(htmlContent)));
-            await uploadFileToStorage(saved.id, b64, "text/html", `plan_${dbPatientId}.html`);
-          }
-          console.log("✅ Plan saved as document #" + saved.id);
-        }
+        if (saved.id) console.log("✅ Plan saved as document #" + saved.id);
       } catch (e) { console.log("Plan save on print:", e.message); }
     }
     // Then print
@@ -2908,12 +2900,74 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             </div>
                           )}
                           {doc.notes && !ed && <div style={{ fontSize:10, color:"#64748b", marginTop:3 }}>{doc.notes}</div>}
-                          {/* View original file button */}
-                          {doc.storage_path && (
-                            <button onClick={()=>viewDocumentFile(doc.id)}
-                              style={{ marginTop:4, background:"#2563eb", color:"white", border:"none", padding:"4px 12px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                              📄 View Original File
-                            </button>
+                          {/* View buttons */}
+                          <div style={{ display:"flex", gap:4, marginTop:4, flexWrap:"wrap" }}>
+                            {doc.storage_path && (
+                              <button onClick={()=>viewDocumentFile(doc.id)}
+                                style={{ background:"#2563eb", color:"white", border:"none", padding:"4px 12px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                                📄 View File
+                              </button>
+                            )}
+                            {doc.doc_type==="prescription" && ed && (
+                              <button onClick={()=>setExpandedDocId(expandedDocId===doc.id?null:doc.id)}
+                                style={{ background:"#059669", color:"white", border:"none", padding:"4px 12px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                                {expandedDocId===doc.id?"▲ Hide Plan":"📋 View Plan"}
+                              </button>
+                            )}
+                          </div>
+                          {/* Expanded prescription/plan view */}
+                          {expandedDocId===doc.id && doc.doc_type==="prescription" && ed && (
+                            <div style={{ marginTop:6, border:"1px solid #d1fae5", borderRadius:8, padding:10, background:"#f0fdf4", fontSize:11 }}>
+                              {ed.assessment_summary && <div style={{ fontWeight:600, color:"#1e293b", marginBottom:6, lineHeight:1.5 }}>{ed.assessment_summary}</div>}
+                              {ed.diagnoses?.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                  <div style={{ fontSize:9, fontWeight:700, color:"#475569", marginBottom:2 }}>DIAGNOSES</div>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                                    {ed.diagnoses.map((d,i) => (
+                                      <span key={i} style={{ fontSize:10, padding:"1px 6px", borderRadius:4,
+                                        background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#f1f5f9",
+                                        color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#475569",
+                                        border:`1px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="Controlled"?"#bbf7d0":"#e2e8f0"}` }}>
+                                        {d.label} ({d.status})
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {ed.medications?.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                  <div style={{ fontSize:9, fontWeight:700, color:"#475569", marginBottom:2 }}>MEDICATIONS</div>
+                                  {ed.medications.map((m,i) => (
+                                    <div key={i} style={{ display:"flex", gap:6, padding:"2px 0", borderBottom:"1px solid #e2e8f0" }}>
+                                      <strong style={{ flex:1 }}>{m.name}</strong>
+                                      <span style={{ color:"#64748b" }}>{m.dose} {m.frequency} {m.timing}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {ed.goals?.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                  <div style={{ fontSize:9, fontWeight:700, color:"#475569", marginBottom:2 }}>GOALS</div>
+                                  {ed.goals.map((g,i) => (
+                                    <div key={i} style={{ fontSize:10, padding:"1px 0" }}>🎯 {g.marker}: {g.current} → {g.target} ({g.timeline})</div>
+                                  ))}
+                                </div>
+                              )}
+                              {ed.diet_lifestyle?.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                  <div style={{ fontSize:9, fontWeight:700, color:"#475569", marginBottom:2 }}>DIET & LIFESTYLE</div>
+                                  {ed.diet_lifestyle.map((d,i) => (
+                                    <div key={i} style={{ fontSize:10, padding:"1px 0" }}>✅ {d.advice}{d.detail?` — ${d.detail}`:""}</div>
+                                  ))}
+                                </div>
+                              )}
+                              {ed.follow_up && (
+                                <div style={{ fontSize:10, fontWeight:600, color:"#2563eb", marginTop:4 }}>
+                                  📅 Follow-up: {ed.follow_up.duration} {ed.follow_up.tests_to_bring?.length?`| Bring: ${ed.follow_up.tests_to_bring.join(", ")}`:""}
+                                </div>
+                              )}
+                              {ed.doctor && <div style={{ fontSize:9, color:"#94a3b8", marginTop:4 }}>Doctor: {ed.doctor} {ed.mo?`| MO: ${ed.mo}`:""}</div>}
+                            </div>
                           )}
                         </div>
                       );
