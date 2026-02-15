@@ -51,6 +51,14 @@ app.get("/api/health", async (_, res) => {
 
 // ============ AUTH ============
 
+// DB health check
+app.get("/api/health", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT NOW() as time, current_database() as db");
+    res.json({ status: "ok", ...result.rows[0], db_url_prefix: (process.env.DATABASE_URL||"").slice(0,50)+"..." });
+  } catch (e) { res.status(500).json({ status: "error", error: e.message, code: e.code }); }
+});
+
 // Get all active doctors (for login screen)
 app.get("/api/doctors", async (req, res) => {
   try {
@@ -58,7 +66,7 @@ app.get("/api/doctors", async (req, res) => {
       "SELECT id, name, short_name, specialty, role FROM doctors WHERE is_active=true ORDER BY role, name"
     );
     res.json(result.rows);
-  } catch (e) { res.json([]); }
+  } catch (e) { console.error("Doctors fetch error:", e.message); res.json([]); }
 });
 
 // Login with PIN
