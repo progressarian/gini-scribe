@@ -1205,7 +1205,7 @@ export default function GiniScribe() {
     // Auto-save to DB if patient loaded
     if (data && dbPatientId && API_URL) {
       try {
-        await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+        const docResp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
           method: "POST", headers: authHeaders(),
           body: JSON.stringify({
             doc_type: data.report_type || file.type,
@@ -1217,6 +1217,10 @@ export default function GiniScribe() {
             notes: data.impression
           })
         });
+        const savedDoc = await docResp.json();
+        if (savedDoc.id) {
+          await uploadFileToStorage(savedDoc.id, file.base64, file.mediaType, file.fileName);
+        }
       } catch (e) { console.log("Doc save failed:", e.message); }
     }
   };
@@ -1263,9 +1267,14 @@ export default function GiniScribe() {
           source: `upload_${currentDoctor?.short_name||"lab"}`,
           notes: isLab ? `${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests extracted` : (data.impression||"")
         };
-        await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+        const docResp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
           method: "POST", headers: authHeaders(), body: JSON.stringify(body)
         });
+        const savedDoc = await docResp.json();
+        // Upload actual file to Supabase Storage
+        if (savedDoc.id) {
+          await uploadFileToStorage(savedDoc.id, file.base64, file.mediaType, file.fileName);
+        }
         // Save lab results to lab_results table too
         if (isLab && data.panels) {
           for (const panel of data.panels) {
@@ -1290,6 +1299,26 @@ export default function GiniScribe() {
   };
 
   const removeLabPortalFile = (fileId) => setLabPortalFiles(prev => prev.filter(f => f.id !== fileId));
+
+  // Upload file to Supabase Storage via server
+  const uploadFileToStorage = async (documentId, base64, mediaType, fileName) => {
+    try {
+      await fetch(`${API_URL}/api/documents/${documentId}/upload-file`, {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ base64, mediaType, fileName })
+      });
+    } catch (e) { console.log("File upload failed:", e.message); }
+  };
+
+  // View file from Supabase Storage
+  const viewDocumentFile = async (documentId) => {
+    try {
+      const resp = await fetch(`${API_URL}/api/documents/${documentId}/file-url`, { headers: authHeaders() });
+      const data = await resp.json();
+      if (data.url) window.open(data.url, "_blank");
+      else alert("No file attached to this document");
+    } catch (e) { alert("Failed to load file: " + e.message); }
+  };
 
   // AI Chat send message
   const sendAiMessage = async () => {
@@ -2827,6 +2856,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             </div>
                           )}
                           {doc.notes && !ed && <div style={{ fontSize:10, color:"#64748b", marginTop:3 }}>{doc.notes}</div>}
+                          {/* View original file button */}
+                          {doc.storage_path && (
+                            <button onClick={()=>viewDocumentFile(doc.id)}
+                              style={{ marginTop:4, background:"#2563eb", color:"white", border:"none", padding:"4px 12px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                              📄 View Original File
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -2967,9 +3003,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>📂 PREVIOUS DOCUMENTS ({patientFullData.documents.length})</div>
                   {patientFullData.documents.slice(0,10).map(doc => (
                     <div key={doc.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 8px", borderBottom:"1px solid #f1f5f9", fontSize:11 }}>
-                      <span>{doc.doc_type==="lab_report"?"🔬":"🩻"}</span>
+                      <span>{doc.doc_type==="lab_report"?"🔬":doc.doc_type==="prescription"?"📄":"🩻"}</span>
                       <span style={{ flex:1 }}>{doc.title||doc.doc_type}</span>
                       {doc.doc_date && <span style={{ fontSize:9, color:"#64748b" }}>{(()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</span>}
+                      {doc.storage_path && <button onClick={()=>viewDocumentFile(doc.id)} style={{ fontSize:8, background:"#2563eb", color:"white", border:"none", padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600 }}>📄 View</button>}
                       <span style={{ fontSize:8, color:"#94a3b8" }}>{doc.source||""}</span>
                     </div>
                   ))}

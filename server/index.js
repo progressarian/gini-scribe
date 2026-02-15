@@ -9,7 +9,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "20mb" }));
+
+// Supabase Storage config
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
+const STORAGE_BUCKET = "patient-files";
 
 const dbUrl = process.env.DATABASE_URL || "";
 const isInternal = dbUrl.includes(".railway.internal");
@@ -216,7 +221,7 @@ app.get("/api/patients/:id", async (req, res) => {
       // Deduplicate diagnoses: latest status per diagnosis_id
       pool.query(`SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
         WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`, [id]),
-      pool.query("SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, consultation_id, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC", [id]),
+      pool.query("SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, consultation_id, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC", [id]),
       pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [id]),
     ]);
 
@@ -459,6 +464,73 @@ app.get("/api/documents/:id", async (req, res) => {
     const result = await pool.query("SELECT * FROM documents WHERE id=$1", [req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
     res.json(result.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Upload file to Supabase Storage and link to document
+app.post("/api/documents/:id/upload-file", async (req, res) => {
+  try {
+    const { base64, mediaType, fileName } = req.body;
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(400).json({ error: "Storage not configured" });
+    
+    // Get document to find patient_id
+    const doc = await pool.query("SELECT * FROM documents WHERE id=$1", [req.params.id]);
+    if (!doc.rows[0]) return res.status(404).json({ error: "Document not found" });
+    const patientId = doc.rows[0].patient_id;
+    
+    // Build storage path: patients/{patient_id}/{doc_type}/{timestamp}_{filename}
+    const docType = doc.rows[0].doc_type || "other";
+    const ts = Date.now();
+    const storagePath = `patients/${patientId}/${docType}/${ts}_${fileName}`;
+    
+    // Upload to Supabase Storage
+    const fileBuffer = Buffer.from(base64, "base64");
+    const uploadResp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+        "Content-Type": mediaType || "application/octet-stream",
+        "x-upsert": "true"
+      },
+      body: fileBuffer
+    });
+    
+    if (!uploadResp.ok) {
+      const err = await uploadResp.text();
+      return res.status(500).json({ error: "Upload failed: " + err });
+    }
+    
+    // Update document record with storage path
+    await pool.query("UPDATE documents SET storage_path=$1, mime_type=$2 WHERE id=$3", [storagePath, mediaType, req.params.id]);
+    
+    res.json({ success: true, storage_path: storagePath });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get signed URL to view/download a file
+app.get("/api/documents/:id/file-url", async (req, res) => {
+  try {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(400).json({ error: "Storage not configured" });
+    
+    const doc = await pool.query("SELECT storage_path, mime_type, file_name FROM documents WHERE id=$1", [req.params.id]);
+    if (!doc.rows[0]?.storage_path) return res.status(404).json({ error: "No file attached" });
+    
+    // Create signed URL (valid for 1 hour)
+    const signResp = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${doc.rows[0].storage_path}`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ expiresIn: 3600 })
+    });
+    
+    if (!signResp.ok) return res.status(500).json({ error: "Failed to generate URL" });
+    const signData = await signResp.json();
+    const signedPath = signData.signedURL || signData.signedUrl || signData.token;
+    
+    const url = signedPath?.startsWith("http") ? signedPath : `${SUPABASE_URL}/storage/v1${signedPath}`;
+    res.json({ url, mime_type: doc.rows[0].mime_type, file_name: doc.rows[0].file_name });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
