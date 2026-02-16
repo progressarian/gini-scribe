@@ -1082,6 +1082,8 @@ export default function GiniScribe() {
       aadhaar: dbRecord.aadhaar || "", govtId: dbRecord.govt_id || "", govtIdType: dbRecord.govt_id_type || ""
     });
     setDbPatientId(dbRecord.id);
+    setNewReportsIncluded(false);
+    setNewReportsExpanded(false);
     // Load full patient record
     if (API_URL && dbRecord.id) {
       try {
@@ -1964,21 +1966,82 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   ];
 
   // New reports banner for MO/Con/Plan tabs
+  const [newReportsExpanded, setNewReportsExpanded] = useState(false);
+  const [newReportsIncluded, setNewReportsIncluded] = useState(false);
+  
+  const includeNewReportsInPlan = () => {
+    // Build a summary of new lab values and inject into consultant transcript
+    const labSummary = newReportsSinceLastVisit.map(l => 
+      `${l.test_name}: ${l.result} ${l.unit||""} ${l.flag==="H"?"(HIGH)":l.flag==="L"?"(LOW)":""} [${l.test_date}]`
+    ).join("\n");
+    const injection = `\n\n--- NEW LAB RESULTS (since last visit) ---\n${labSummary}\n--- END NEW LABS ---`;
+    setConTranscript(prev => (prev||"") + injection);
+    setNewReportsIncluded(true);
+    setConData(null); // Reset so plan regenerates with new data
+  };
+  
   const NewReportsBanner = hasNewReports ? (
     <div style={{ background:"linear-gradient(135deg,#fffbeb,#fef3c7)", border:"1px solid #f59e0b", borderRadius:8, padding:"8px 12px", marginBottom:8 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+      <div onClick={()=>setNewReportsExpanded(!newReportsExpanded)}
+        style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
         <span style={{ fontSize:14 }}>🔔</span>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>
             {newReportsSinceLastVisit.length} New Lab Results Since Last Visit
           </div>
-          <div style={{ fontSize:9, color:"#a16207", marginTop:2, maxHeight:40, overflow:"auto" }}>
-            {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].slice(0,8).join(", ")}
-            {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].length>8 && " ..."}
-          </div>
+          {!newReportsExpanded && (
+            <div style={{ fontSize:9, color:"#a16207", marginTop:2 }}>
+              {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].slice(0,6).join(", ")}
+              {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].length>6 && " ..."}
+            </div>
+          )}
         </div>
-        <span style={{ fontSize:9, color:"#a16207", fontStyle:"italic" }}>Review in plan</span>
+        {newReportsIncluded ? (
+          <span style={{ fontSize:10, fontWeight:700, color:"#059669" }}>✅ Added</span>
+        ) : (
+          <span style={{ fontSize:9, color:"#a16207", fontWeight:600 }}>{newReportsExpanded?"▲ Hide":"▼ Review"}</span>
+        )}
       </div>
+      
+      {newReportsExpanded && (
+        <div style={{ marginTop:8, borderTop:"1px solid #fcd34d", paddingTop:8 }}>
+          {/* Lab values table */}
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10, marginBottom:8 }}>
+            <thead>
+              <tr style={{ background:"rgba(245,158,11,.15)" }}>
+                <th style={{ textAlign:"left", padding:"3px 6px", fontSize:9, fontWeight:700, color:"#92400e" }}>Test</th>
+                <th style={{ textAlign:"center", padding:"3px 6px", fontSize:9, fontWeight:700, color:"#92400e" }}>Result</th>
+                <th style={{ textAlign:"center", padding:"3px 6px", fontSize:9, fontWeight:700, color:"#92400e" }}>Ref</th>
+                <th style={{ textAlign:"center", padding:"3px 6px", fontSize:9, fontWeight:700, color:"#92400e" }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {newReportsSinceLastVisit.map((l,i) => (
+                <tr key={i} style={{ borderBottom:"1px solid #fde68a" }}>
+                  <td style={{ padding:"3px 6px", fontWeight:600 }}>{l.test_name}</td>
+                  <td style={{ padding:"3px 6px", textAlign:"center", fontWeight:700,
+                    color: l.flag==="H"?"#dc2626":l.flag==="L"?"#2563eb":"#059669" }}>
+                    {l.result} {l.unit||""} {l.flag==="H"?"↑":l.flag==="L"?"↓":""}
+                  </td>
+                  <td style={{ padding:"3px 6px", textAlign:"center", fontSize:9, color:"#94a3b8" }}>{l.ref_range||"—"}</td>
+                  <td style={{ padding:"3px 6px", textAlign:"center", fontSize:9, color:"#64748b" }}>{l.test_date?.split("T")[0]||""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          {!newReportsIncluded ? (
+            <button onClick={includeNewReportsInPlan}
+              style={{ width:"100%", background:"linear-gradient(135deg,#f59e0b,#d97706)", color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              📋 Include in Treatment Plan
+            </button>
+          ) : (
+            <div style={{ textAlign:"center", fontSize:11, color:"#059669", fontWeight:700, padding:4 }}>
+              ✅ Added to consultant notes — re-run Plan to include
+            </div>
+          )}
+        </div>
+      )}
     </div>
   ) : null;
 
