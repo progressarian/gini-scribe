@@ -1835,8 +1835,16 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     const latest = values[values.length - 1];
     const first = values[0];
     const trend = latest < first ? "↓" : latest > first ? "↑" : "→";
-    const improving = lowerBetter !== false ? (latest <= first) : (latest >= first);
-    const trendColor = improving ? "#059669" : "#dc2626";
+    // Color: based on target if available, else trend
+    let trendColor;
+    if (target) {
+      const inTarget = lowerBetter !== false ? (latest <= target) : (latest >= target);
+      const nearTarget = lowerBetter !== false ? (latest <= target * 1.15) : (latest >= target * 0.85);
+      trendColor = inTarget ? "#059669" : nearTarget ? "#d97706" : "#dc2626";
+    } else {
+      const improving = lowerBetter !== false ? (latest <= first) : (latest >= first);
+      trendColor = improving ? "#059669" : "#dc2626";
+    }
     const targetY = target ? height - ((target - min) / range) * height : null;
     return (
       <div style={{ background:"white", borderRadius:12, padding:"10px 14px", border:"1px solid #f1f5f9", boxShadow:"0 1px 3px rgba(0,0,0,0.04)", position:"relative" }}>
@@ -3806,20 +3814,23 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     
                     {/* ── SYMPTOMS TRACKER ── */}
                     {(() => {
-                      const symptomsByVisit = (outcomesData.visits||[])
-                        .filter(v => {
+                      const symptomsByVisit = [];
+                      const seenDates = new Set();
+                      (outcomesData.visits||[])
+                        .forEach(v => {
+                          const dateKey = (v.visit_date||"").split("T")[0];
+                          if (seenDates.has(dateKey)) return; // deduplicate same-date visits
                           const syms = [...(v.symptoms||[]), ...(v.chief_complaints||[])].filter(s => 
                             s && !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints","routine","regular follow-up"].some(x => String(s).toLowerCase().includes(x))
                           );
-                          return syms.length > 0;
-                        })
-                        .map(v => ({
-                          date: (v.visit_date||"").split("T")[0],
-                          doctor: v.con_name || v.mo_name || "",
-                          symptoms: [...(v.symptoms||[]), ...(v.chief_complaints||[])].filter(s => 
-                            s && !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints","routine","regular follow-up"].some(x => String(s).toLowerCase().includes(x))
-                          )
-                        }));
+                          if (syms.length === 0) return;
+                          seenDates.add(dateKey);
+                          symptomsByVisit.push({
+                            date: dateKey,
+                            doctor: v.con_name || v.mo_name || "",
+                            symptoms: [...new Set(syms)] // deduplicate within visit
+                          });
+                        });
                       
                       if (symptomsByVisit.length === 0) return null;
                       
@@ -3828,13 +3839,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       symptomsByVisit.forEach(v => {
                         v.symptoms.forEach(s => {
                           const key = String(s).toLowerCase().trim();
-                          if (!allSymptoms[key]) allSymptoms[key] = { label: s, visits: [] };
-                          allSymptoms[key].visits.push(v.date);
+                          if (!allSymptoms[key]) allSymptoms[key] = { label: s, dates: new Set() };
+                          allSymptoms[key].dates.add(v.date);
                         });
                       });
                       
-                      // Sort by frequency
-                      const sortedSymptoms = Object.values(allSymptoms).sort((a,b) => b.visits.length - a.visits.length);
+                      // Sort by frequency (unique dates)
+                      const sortedSymptoms = Object.values(allSymptoms)
+                        .map(s => ({ ...s, count: s.dates.size, dates: [...s.dates].sort() }))
+                        .sort((a,b) => b.count - a.count);
+                      
+                      const recurring = sortedSymptoms.filter(s => s.count >= 2);
                       
                       return (
                         <div style={{ marginBottom:20 }}>
@@ -3843,54 +3858,72 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             <span style={{ fontSize:12, fontWeight:800, color:"#7c2d12", textTransform:"uppercase", letterSpacing:"0.5px" }}>Symptoms Tracker</span>
                           </div>
                           
-                          {/* Symptom frequency cards */}
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
-                            {sortedSymptoms.slice(0,12).map((s,i) => {
-                              const freq = s.visits.length;
-                              const isRecurrent = freq >= 3;
-                              const isRecent = s.visits.some(d => {
-                                const diff = (Date.now() - new Date(d).getTime()) / (1000*60*60*24);
-                                return diff < 30;
-                              });
-                              return (
-                                <div key={i} style={{ 
-                                  background: isRecurrent ? "#fef2f2" : isRecent ? "#fffbeb" : "#f8fafc",
-                                  border: `1px solid ${isRecurrent ? "#fecaca" : isRecent ? "#fde68a" : "#e2e8f0"}`,
-                                  borderRadius:8, padding:"6px 10px", minWidth:110 }}>
-                                  <div style={{ fontSize:11, fontWeight:700, color: isRecurrent ? "#dc2626" : "#475569" }}>{s.label}</div>
-                                  <div style={{ display:"flex", alignItems:"baseline", gap:4, marginTop:2 }}>
-                                    <span style={{ fontSize:16, fontWeight:800, color: isRecurrent ? "#dc2626" : "#64748b" }}>{freq}x</span>
-                                    <span style={{ fontSize:9, color:"#94a3b8" }}>
-                                      {isRecurrent ? "⚠️ Recurring" : isRecent ? "🔸 Recent" : "Past"}
-                                    </span>
+                          {/* Recurring symptoms - prominent */}
+                          {recurring.length > 0 && (
+                            <div style={{ background:"linear-gradient(135deg,#fef2f2,#fff1f2)", border:"1px solid #fecaca", borderRadius:12, padding:12, marginBottom:10 }}>
+                              <div style={{ fontSize:10, fontWeight:700, color:"#991b1b", marginBottom:8, textTransform:"uppercase", letterSpacing:"0.5px" }}>⚠️ Recurring Symptoms</div>
+                              {recurring.map((s,i) => {
+                                const isRecent = s.dates.some(d => (Date.now() - new Date(d).getTime()) / (1000*60*60*24) < 30);
+                                const duration = s.dates.length >= 2 ? (() => {
+                                  const first = new Date(s.dates[0]);
+                                  const last = new Date(s.dates[s.dates.length-1]);
+                                  const days = Math.round((last - first) / (1000*60*60*24));
+                                  return days > 365 ? `${Math.round(days/365)}y` : days > 30 ? `${Math.round(days/30)}mo` : `${days}d`;
+                                })() : "";
+                                return (
+                                  <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom: i < recurring.length-1 ? "1px solid #fecaca" : "none" }}>
+                                    <div style={{ width:32, height:32, borderRadius:"50%", background:"#dc2626", color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, flexShrink:0 }}>
+                                      {s.count}
+                                    </div>
+                                    <div style={{ flex:1 }}>
+                                      <div style={{ fontSize:12, fontWeight:700, color:"#1e293b" }}>{s.label}</div>
+                                      <div style={{ fontSize:9, color:"#64748b", marginTop:1 }}>
+                                        {s.count} visits over {duration}
+                                        {isRecent && <span style={{ marginLeft:6, color:"#dc2626", fontWeight:700 }}>● Still active</span>}
+                                        {!isRecent && <span style={{ marginLeft:6, color:"#059669", fontWeight:700 }}>● Resolved</span>}
+                                      </div>
+                                    </div>
+                                    <div style={{ display:"flex", gap:2, flexShrink:0 }}>
+                                      {s.dates.slice(-6).map((d,di) => (
+                                        <div key={di} style={{ width:6, height:6, borderRadius:"50%", 
+                                          background: (Date.now() - new Date(d).getTime()) / (1000*60*60*24) < 30 ? "#dc2626" : "#fca5a5" }} 
+                                          title={d} />
+                                      ))}
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                                );
+                              })}
+                            </div>
+                          )}
                           
-                          {/* Visit-by-visit timeline */}
+                          {/* All symptoms - compact timeline */}
                           <div style={{ background:"white", borderRadius:10, border:"1px solid #f1f5f9", overflow:"hidden" }}>
-                            {symptomsByVisit.slice(0,8).map((v,i) => {
+                            <div style={{ padding:"6px 12px", background:"#f8fafc", fontSize:9, fontWeight:700, color:"#64748b", textTransform:"uppercase" }}>Visit Timeline</div>
+                            {symptomsByVisit.slice(0,10).map((v,i) => {
                               const s = String(v.date||""); const fd = s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);
                               const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                               const dateStr = v.date ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "";
                               return (
-                                <div key={i} style={{ padding:"8px 12px", borderBottom: i < symptomsByVisit.length-1 ? "1px solid #f1f5f9" : "none",
+                                <div key={i} style={{ padding:"6px 12px", borderBottom: i < symptomsByVisit.length-1 ? "1px solid #f1f5f9" : "none",
                                   display:"flex", gap:10, alignItems:"flex-start" }}>
-                                  <div style={{ minWidth:75, flexShrink:0 }}>
+                                  <div style={{ minWidth:70, flexShrink:0 }}>
                                     <div style={{ fontSize:10, fontWeight:700, color:"#475569" }}>{dateStr}</div>
                                     {v.doctor && <div style={{ fontSize:8, color:"#94a3b8" }}>{v.doctor}</div>}
                                   </div>
                                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                                    {v.symptoms.map((s,si) => (
-                                      <span key={si} style={{ fontSize:10, padding:"2px 8px", borderRadius:6,
-                                        background: sortedSymptoms.find(x=>x.label.toLowerCase()===String(s).toLowerCase())?.visits.length>=3 ? "#fef2f2" : "#f8fafc",
-                                        color: sortedSymptoms.find(x=>x.label.toLowerCase()===String(s).toLowerCase())?.visits.length>=3 ? "#dc2626" : "#475569",
-                                        border:"1px solid #e2e8f0" }}>
-                                        {s}
-                                      </span>
-                                    ))}
+                                    {v.symptoms.map((sym,si) => {
+                                      const symKey = String(sym).toLowerCase().trim();
+                                      const isRecurring = sortedSymptoms.find(x=>x.label.toLowerCase()===symKey)?.count >= 2;
+                                      return (
+                                        <span key={si} style={{ fontSize:10, padding:"2px 8px", borderRadius:6,
+                                          background: isRecurring ? "#fef2f2" : "#f8fafc",
+                                          color: isRecurring ? "#dc2626" : "#475569",
+                                          fontWeight: isRecurring ? 700 : 400,
+                                          border:`1px solid ${isRecurring ? "#fecaca" : "#e2e8f0"}` }}>
+                                          {sym}
+                                        </span>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               );
