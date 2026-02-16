@@ -735,6 +735,8 @@ export default function GiniScribe() {
   const [reportQueryResult, setReportQueryResult] = useState("");
   const [reportQueryLoading, setReportQueryLoading] = useState(false);
   const [reportSection, setReportSection] = useState("summary"); // summary, diagnoses, query, doctors
+  const [reportDrillBio, setReportDrillBio] = useState(null); // expanded biomarker key
+  const [reportDrillPt, setReportDrillPt] = useState(null); // expanded patient id
   // Lab Portal
   const [labPortalFiles, setLabPortalFiles] = useState([]); // [{id, type, base64, mediaType, fileName, date, extracting, extracted, data, error}]
   const [labPortalDate, setLabPortalDate] = useState(new Date().toISOString().slice(0,10));
@@ -4271,7 +4273,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
           {/* Section Tabs */}
           <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
-            {[{id:"summary",label:"📋 Today"},{id:"diagnoses",label:"🏥 Diagnoses"},{id:"query",label:"🤖 AI Query"},{id:"doctors",label:"👨‍⚕️ Doctors"}].map(s => (
+            {[{id:"summary",label:"🎯 Dashboard"},{id:"diagnoses",label:"🏥 Diagnoses"},{id:"query",label:"🤖 AI Query"},{id:"doctors",label:"👨‍⚕️ Doctors"}].map(s => (
               <button key={s.id} onClick={()=>{setReportSection(s.id);if(!reportData||!reportDx||!reportDoctors)loadReports(reportPeriod,reportDoctor);}}
                 style={{ flex:1, padding:"7px 4px", fontSize:10, fontWeight:600, cursor:"pointer", border:"none",
                   background:reportSection===s.id?"#1e293b":"white", color:reportSection===s.id?"white":"#64748b" }}>{s.label}</button>
@@ -4283,7 +4285,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <div>
               {/* Period filters */}
               <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
-                {[{l:"Today",v:"today"},{l:"This Week",v:"week"},{l:"This Month",v:"month"}].map(f => (
+                {[{l:"Today",v:"today"},{l:"This Week",v:"week"},{l:"This Month",v:"month"},{l:"Quarter",v:"quarter"},{l:"Year",v:"year"},{l:"All",v:"all"}].map(f => (
                   <button key={f.v} onClick={()=>{setReportPeriod(f.v);loadReports(f.v,reportDoctor);}}
                     style={{ padding:"3px 10px", borderRadius:20, fontSize:10, fontWeight:600, cursor:"pointer",
                       border:reportPeriod===f.v?"2px solid #2563eb":"1px solid #e2e8f0",
@@ -4297,59 +4299,161 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
               ) : (
                 <div>
-                  {/* Summary Cards */}
-                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6, marginBottom:12 }}>
-                    {[{label:"Total Seen",val:reportData.total,bg:"#f1f5f9",color:"#1e293b",icon:"👥"},
-                      {label:"Improving",val:reportData.improving,bg:"#dcfce7",color:"#166534",icon:"📈"},
-                      {label:"Stable",val:reportData.stable,bg:"#dbeafe",color:"#1e40af",icon:"➡️"},
-                      {label:"Worsening",val:reportData.worsening,bg:"#fef2f2",color:"#dc2626",icon:"📉"}
-                    ].map(c => (
-                      <div key={c.label} style={{ background:c.bg, borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
-                        <div style={{ fontSize:10 }}>{c.icon}</div>
-                        <div style={{ fontSize:22, fontWeight:800, color:c.color }}>{c.val}</div>
-                        <div style={{ fontSize:9, fontWeight:600, color:c.color, opacity:.7 }}>{c.label}</div>
+                  {/* Total patients card */}
+                  <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:10, padding:"12px 16px", marginBottom:10, color:"white" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <div>
+                        <div style={{ fontSize:28, fontWeight:900 }}>{reportData.total}</div>
+                        <div style={{ fontSize:11, opacity:.7 }}>Patients Seen</div>
                       </div>
-                    ))}
+                      {reportData.by_doctor && Object.keys(reportData.by_doctor).length > 0 && (
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:4, justifyContent:"flex-end", maxWidth:"60%" }}>
+                          {Object.entries(reportData.by_doctor).map(([doc,count]) => (
+                            <span key={doc} style={{ background:"rgba(255,255,255,.15)", borderRadius:12, padding:"2px 8px", fontSize:9 }}>
+                              {doc}: {count}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {/* By Doctor */}
-                  {reportData.by_doctor && Object.keys(reportData.by_doctor).length > 0 && (
-                    <div style={{ background:"#f8fafc", borderRadius:8, padding:8, marginBottom:10, border:"1px solid #e2e8f0" }}>
-                      <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:4 }}>BY DOCTOR</div>
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                        {Object.entries(reportData.by_doctor).map(([doc,count]) => (
-                          <span key={doc} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:20, padding:"2px 10px", fontSize:11 }}>
-                            <strong>{doc}</strong>: {count}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {/* ═══ BIOMARKER CONTROL RATES ═══ */}
+                  <div style={{ fontSize:11, fontWeight:800, color:"#1e293b", marginBottom:6 }}>🎯 BIOMARKER CONTROL RATES</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:4, marginBottom:12 }}>
+                    {(reportData.biomarkers||[]).filter(b=>b.tested>0).map(bio => {
+                      const pct = bio.pct;
+                      const pctColor = pct>=70?"#059669":pct>=40?"#d97706":"#dc2626";
+                      const isExpanded = reportDrillBio === bio.key;
+                      return (
+                        <div key={bio.key}>
+                          <div onClick={()=>setReportDrillBio(isExpanded?null:bio.key)}
+                            style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px", cursor:"pointer", transition:"all .15s",
+                              borderColor:isExpanded?"#2563eb":"#e2e8f0", boxShadow:isExpanded?"0 0 0 2px rgba(37,99,235,.15)":"none" }}
+                            onMouseEnter={e=>{if(!isExpanded)e.currentTarget.style.borderColor="#cbd5e1"}} onMouseLeave={e=>{if(!isExpanded)e.currentTarget.style.borderColor="#e2e8f0"}}>
+                            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                              <span style={{ fontSize:14 }}>{bio.emoji}</span>
+                              <div style={{ flex:1 }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                                  <span style={{ fontSize:12, fontWeight:700 }}>{bio.label}</span>
+                                  <span style={{ fontSize:11, fontWeight:800, color:pctColor }}>{pct}%</span>
+                                </div>
+                                <div style={{ fontSize:9, color:"#94a3b8" }}>Target: {bio.target}</div>
+                              </div>
+                            </div>
+                            {/* Progress bar */}
+                            <div style={{ display:"flex", height:6, borderRadius:3, overflow:"hidden", background:"#f1f5f9", gap:1 }}>
+                              {bio.in_control > 0 && <div style={{ width:`${(bio.in_control/bio.total)*100}%`, background:"#22c55e", borderRadius:3 }} />}
+                              {bio.warning > 0 && <div style={{ width:`${(bio.warning/bio.total)*100}%`, background:"#f59e0b", borderRadius:3 }} />}
+                              {bio.out_control > 0 && <div style={{ width:`${(bio.out_control/bio.total)*100}%`, background:"#ef4444", borderRadius:3 }} />}
+                              {bio.no_data > 0 && <div style={{ width:`${(bio.no_data/bio.total)*100}%`, background:"#e2e8f0", borderRadius:3 }} />}
+                            </div>
+                            <div style={{ display:"flex", gap:8, fontSize:9, color:"#64748b", marginTop:3 }}>
+                              <span style={{ color:"#059669" }}>✅ {bio.in_control}</span>
+                              {bio.warning>0 && <span style={{ color:"#d97706" }}>⚠️ {bio.warning}</span>}
+                              <span style={{ color:"#dc2626" }}>❌ {bio.out_control}</span>
+                              {bio.no_data>0 && <span style={{ color:"#94a3b8" }}>— {bio.no_data} no data</span>}
+                              <span style={{ marginLeft:"auto", fontSize:8, color:"#94a3b8" }}>{isExpanded?"▲ Hide":"▼ Details"}</span>
+                            </div>
+                          </div>
+                          
+                          {/* Drill-down patient list */}
+                          {isExpanded && (
+                            <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderTop:"none", borderRadius:"0 0 8px 8px", padding:6, maxHeight:300, overflow:"auto" }}>
+                              {bio.patients.filter(p=>p.status!=="no_data").map((p,i) => (
+                                <div key={i} onClick={()=>loadPatientDB({id:p.id,name:p.name,age:p.age,sex:p.sex,file_no:p.file_no})}
+                                  style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 6px", borderBottom:"1px solid #e2e8f0", cursor:"pointer", fontSize:10, borderRadius:4 }}
+                                  onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                                  <span style={{ fontSize:11 }}>{p.status==="in_control"?"✅":p.status==="warning"?"⚠️":"❌"}</span>
+                                  <div style={{ flex:1 }}>
+                                    <strong>{p.name}</strong>
+                                    <span style={{ color:"#94a3b8", marginLeft:4 }}>{p.age}Y/{p.sex?.charAt(0)}</span>
+                                  </div>
+                                  <span style={{ fontWeight:700, fontSize:11,
+                                    color:p.status==="in_control"?"#059669":p.status==="warning"?"#d97706":"#dc2626" }}>
+                                    {p.display||"—"}
+                                  </span>
+                                  <span style={{ fontSize:8, color:"#94a3b8" }}>{p.con_name}</span>
+                                </div>
+                              ))}
+                              {bio.patients.filter(p=>p.status==="no_data").length>0 && (
+                                <div style={{ fontSize:9, color:"#94a3b8", padding:"4px 6px", fontStyle:"italic" }}>
+                                  + {bio.patients.filter(p=>p.status==="no_data").length} patients with no {bio.label} data
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                  {/* Patient List */}
-                  <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>PATIENTS ({reportData.patients?.length||0})</div>
+                  {/* ═══ PATIENT SCORECARD ═══ */}
+                  <div style={{ fontSize:11, fontWeight:800, color:"#1e293b", marginBottom:6 }}>👥 PATIENT TARGET SCORECARD</div>
                   <div style={{ maxHeight:400, overflow:"auto" }}>
                     {(reportData.patients||[]).map((p,i) => {
-                      const trendColors = {improving:"#059669",worsening:"#dc2626",stable:"#2563eb","new":"#94a3b8"};
-                      const trendIcons = {improving:"📈",worsening:"📉",stable:"➡️","new":"🆕"};
+                      const pctColor = p.pct===null?"#94a3b8":p.pct>=70?"#059669":p.pct>=40?"#d97706":"#dc2626";
+                      const isExpanded = reportDrillPt === p.id;
                       return (
-                        <div key={i} onClick={()=>loadPatientDB({id:p.id,name:p.name,age:p.age,sex:p.sex,file_no:p.file_no})}
-                          style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 8px", borderBottom:"1px solid #f1f5f9", cursor:"pointer", fontSize:11, borderRadius:4 }}
-                          onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                          <span style={{ fontSize:12 }}>{trendIcons[p.trend]}</span>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <strong>{p.name}</strong>
-                            <span style={{ color:"#94a3b8", marginLeft:4 }}>{p.age}Y/{p.sex?.charAt(0)} {p.file_no&&`| ${p.file_no}`}</span>
-                            {p.diagnoses && <div style={{ fontSize:9, color:"#64748b", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {(p.diagnoses||[]).map(d=>d.label).join(", ")}
-                            </div>}
+                        <div key={i} style={{ marginBottom:4 }}>
+                          <div onClick={()=>setReportDrillPt(isExpanded?null:p.id)}
+                            style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 8px", background:"white", border:"1px solid #e2e8f0", borderRadius:8, cursor:"pointer", fontSize:11,
+                              borderColor:isExpanded?"#2563eb":"#e2e8f0" }}
+                            onMouseEnter={e=>{if(!isExpanded)e.currentTarget.style.background="#f8fafc"}} onMouseLeave={e=>{if(!isExpanded)e.currentTarget.style.background="white"}}>
+                            {/* Score circle */}
+                            <div style={{ width:36, height:36, borderRadius:"50%", border:`3px solid ${pctColor}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                              <span style={{ fontSize:11, fontWeight:800, color:pctColor }}>{p.pct!==null?`${p.pct}%`:"—"}</span>
+                            </div>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <div><strong>{p.name}</strong> <span style={{ color:"#94a3b8" }}>{p.age}Y/{p.sex?.charAt(0)} {p.file_no&&`| ${p.file_no}`}</span></div>
+                              <div style={{ fontSize:9, color:"#64748b" }}>
+                                {p.targets_total>0 ? `${p.targets_met}/${p.targets_total} targets met` : "No lab data"}
+                                {p.con_name && ` • ${p.con_name}`}
+                              </div>
+                            </div>
+                            {/* Mini traffic lights */}
+                            <div style={{ display:"flex", gap:2, flexShrink:0, flexWrap:"wrap", maxWidth:100, justifyContent:"flex-end" }}>
+                              {Object.entries(p.conditions||{}).map(([key,c]) => (
+                                <span key={key} title={`${c.label}: ${c.val} (${c.in_control?"In target":"Out of target"} — ${c.target})`}
+                                  style={{ width:8, height:8, borderRadius:"50%", background:c.in_control?"#22c55e":"#ef4444" }} />
+                              ))}
+                            </div>
+                            <span style={{ fontSize:9, color:"#94a3b8" }}>{isExpanded?"▲":"▼"}</span>
                           </div>
-                          <div style={{ textAlign:"right", flexShrink:0 }}>
-                            <div style={{ fontSize:10, fontWeight:700, color:trendColors[p.trend] }}>{p.trend}</div>
-                            {p.labs?.HbA1c?.[0] && <div style={{ fontSize:9, color:"#64748b" }}>A1c: {p.labs.HbA1c[0].val}%</div>}
-                            {p.labs?.FBG?.[0] && <div style={{ fontSize:9, color:"#64748b" }}>FBG: {p.labs.FBG[0].val}</div>}
-                          </div>
-                          <div style={{ fontSize:9, color:"#94a3b8" }}>{p.con_name||""}</div>
+                          
+                          {/* Expanded patient detail */}
+                          {isExpanded && (
+                            <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderTop:"none", borderRadius:"0 0 8px 8px", padding:8 }}>
+                              {/* Condition cards */}
+                              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:4, marginBottom:6 }}>
+                                {Object.entries(p.conditions||{}).map(([key,c]) => (
+                                  <div key={key} style={{ background:c.in_control?"#f0fdf4":"#fef2f2", border:`1px solid ${c.in_control?"#bbf7d0":"#fecaca"}`, borderRadius:6, padding:"4px 8px" }}>
+                                    <div style={{ fontSize:9, color:"#64748b" }}>{c.emoji} {c.label}</div>
+                                    <div style={{ fontSize:13, fontWeight:800, color:c.in_control?"#059669":"#dc2626" }}>
+                                      {typeof c.val==="number" ? (c.label==="Blood Pressure" ? c.val : c.val) : c.val}
+                                    </div>
+                                    <div style={{ fontSize:8, color:"#94a3b8" }}>Target: {c.target}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              {/* Diagnoses */}
+                              {p.diagnoses?.length>0 && (
+                                <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
+                                  {(p.diagnoses||[]).filter((d,i,a)=>a.findIndex(x=>x.id===d.id)===i).map((d,di) => (
+                                    <span key={di} style={{ fontSize:9, padding:"1px 6px", borderRadius:4, 
+                                      background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#f1f5f9",
+                                      color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#64748b" }}>
+                                      {d.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <button onClick={()=>loadPatientDB({id:p.id,name:p.name,age:p.age,sex:p.sex,file_no:p.file_no})}
+                                style={{ background:"#2563eb", color:"white", border:"none", padding:"3px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                                Open Patient →
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

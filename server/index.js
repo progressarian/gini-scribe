@@ -702,69 +702,214 @@ app.post("/api/patients/:id/history", async (req, res) => {
 
 // ============ REPORTS ============
 
-// Today's summary with outcomes trend
+// Today's summary with biomarker control rates
 app.get("/api/reports/today", async (req, res) => {
   try {
     const { period = "today", doctor } = req.query;
     let dateFilter = "c.visit_date::date = CURRENT_DATE";
     if (period === "week") dateFilter = "c.visit_date >= CURRENT_DATE - INTERVAL '7 days'";
     else if (period === "month") dateFilter = "c.visit_date >= CURRENT_DATE - INTERVAL '30 days'";
+    else if (period === "quarter") dateFilter = "c.visit_date >= CURRENT_DATE - INTERVAL '90 days'";
+    else if (period === "year") dateFilter = "c.visit_date >= CURRENT_DATE - INTERVAL '365 days'";
+    else if (period === "all") dateFilter = "1=1";
     const doctorFilter = doctor ? ` AND c.con_name ILIKE '%${doctor.replace(/'/g,"")}%'` : "";
     
-    // Patients seen with their latest key labs
+    // Patients seen in period
     const patients = await pool.query(`
-      SELECT DISTINCT ON (p.id) p.id, p.name, p.age, p.sex, p.file_no,
+      SELECT DISTINCT ON (p.id) p.id, p.name, p.age, p.sex, p.file_no, p.phone,
         c.visit_date, c.con_name,
-        (SELECT json_agg(json_build_object('label',d.label,'status',d.status,'id',d.diagnosis_id))
-         FROM diagnoses d WHERE d.patient_id=p.id AND d.is_active=true) as diagnoses
+        (SELECT json_agg(DISTINCT jsonb_build_object('label',d.label,'status',d.status,'id',d.diagnosis_id))
+         FROM (SELECT DISTINCT ON (patient_id, diagnosis_id) label, status, diagnosis_id, patient_id
+               FROM diagnoses WHERE patient_id=p.id AND is_active=true ORDER BY patient_id, diagnosis_id, created_at DESC) d
+        ) as diagnoses
       FROM patients p
       JOIN consultations c ON c.patient_id=p.id
       WHERE ${dateFilter}${doctorFilter}
       ORDER BY p.id, c.visit_date DESC
     `);
     
-    // Get HbA1c trends for these patients (latest 2 values)
     const patientIds = patients.rows.map(p=>p.id);
-    let trends = [];
-    if (patientIds.length > 0) {
-      trends = (await pool.query(`
-        SELECT lr.patient_id, lr.test_name, lr.result, lr.test_date
-        FROM lab_results lr
-        WHERE lr.patient_id = ANY($1)
-          AND lr.test_name IN ('HbA1c','FBG','FPG','Fasting Glucose','Fasting Blood Sugar')
-        ORDER BY lr.patient_id, lr.test_name, lr.test_date DESC
-      `, [patientIds])).rows;
+    if (patientIds.length === 0) {
+      return res.json({ total:0, biomarkers:[], patients:[], by_doctor:{} });
     }
     
-    // Build trend map per patient
-    const trendMap = {};
-    trends.forEach(t => {
-      if (!trendMap[t.patient_id]) trendMap[t.patient_id] = {};
-      const key = t.test_name.includes("A1c") ? "HbA1c" : "FBG";
-      if (!trendMap[t.patient_id][key]) trendMap[t.patient_id][key] = [];
-      if (trendMap[t.patient_id][key].length < 3) trendMap[t.patient_id][key].push({ val: parseFloat(t.result), date: t.test_date });
+    // Get latest lab values for ALL relevant biomarkers
+    const labs = (await pool.query(`
+      SELECT DISTINCT ON (patient_id, test_name) patient_id, test_name, result, unit, test_date
+      FROM lab_results
+      WHERE patient_id = ANY($1)
+        AND test_name IN ('HbA1c','FBG','FPG','Fasting Glucose','Fasting Blood Sugar','PP','PP Glucose','Post Prandial','PPG',
+                          'LDL','LDL-C','LDL Cholesterol','Triglycerides','TG','Non-HDL','Non HDL','NonHDL',
+                          'eGFR','GFR','UACR','ACR','Microalbumin','Urine ACR',
+                          'Creatinine','Serum Creatinine')
+        AND result IS NOT NULL
+      ORDER BY patient_id, test_name, test_date DESC
+    `, [patientIds])).rows;
+    
+    // Get latest vitals (BP, BMI, Weight)
+    const vitals = (await pool.query(`
+      SELECT DISTINCT ON (patient_id) patient_id, bp_sys, bp_dia, bmi, weight
+      FROM vitals
+      WHERE patient_id = ANY($1) AND (bp_sys IS NOT NULL OR bmi IS NOT NULL OR weight IS NOT NULL)
+      ORDER BY patient_id, recorded_at DESC
+    `, [patientIds])).rows;
+    
+    // Get previous weight for trend
+    const prevWeights = (await pool.query(`
+      SELECT DISTINCT ON (v.patient_id) v.patient_id, v.weight, v.recorded_at
+      FROM vitals v
+      INNER JOIN (
+        SELECT patient_id, MAX(recorded_at) as latest FROM vitals WHERE patient_id = ANY($1) AND weight IS NOT NULL GROUP BY patient_id
+      ) lv ON v.patient_id=lv.patient_id AND v.recorded_at < lv.latest
+      WHERE v.patient_id = ANY($1) AND v.weight IS NOT NULL
+      ORDER BY v.patient_id, v.recorded_at DESC
+    `, [patientIds])).rows;
+    
+    // Build per-patient biomarker map
+    const patientBio = {};
+    patientIds.forEach(id => { patientBio[id] = {}; });
+    
+    // Normalize lab names and map values
+    labs.forEach(l => {
+      const pid = l.patient_id;
+      const val = parseFloat(l.result);
+      if (isNaN(val)) return;
+      const tn = l.test_name.toLowerCase();
+      
+      if (tn.includes('a1c') || tn === 'hba1c') patientBio[pid].hba1c = val;
+      else if (['fbg','fpg','fasting glucose','fasting blood sugar'].includes(tn)) patientBio[pid].fbg = val;
+      else if (['pp','ppg','pp glucose','post prandial'].includes(tn)) patientBio[pid].ppg = val;
+      else if (['ldl','ldl-c','ldl cholesterol'].includes(tn)) patientBio[pid].ldl = val;
+      else if (['tg','triglycerides'].includes(tn)) patientBio[pid].tg = val;
+      else if (['non-hdl','non hdl','nonhdl'].includes(tn)) patientBio[pid].nonhdl = val;
+      else if (['egfr','gfr'].includes(tn)) patientBio[pid].egfr = val;
+      else if (['uacr','acr','microalbumin','urine acr'].includes(tn)) patientBio[pid].uacr = val;
+      else if (['creatinine','serum creatinine'].includes(tn)) patientBio[pid].creatinine = val;
     });
     
-    // Classify patients
-    let improving = 0, worsening = 0, stable = 0, newPt = 0;
-    const enriched = patients.rows.map(p => {
-      const t = trendMap[p.id] || {};
-      let trend = "new";
-      if (t.HbA1c && t.HbA1c.length >= 2) {
-        const diff = t.HbA1c[0].val - t.HbA1c[1].val;
-        if (diff < -0.2) { trend = "improving"; improving++; }
-        else if (diff > 0.3) { trend = "worsening"; worsening++; }
-        else { trend = "stable"; stable++; }
-      } else if (t.FBG && t.FBG.length >= 2) {
-        const diff = t.FBG[0].val - t.FBG[1].val;
-        if (diff < -10) { trend = "improving"; improving++; }
-        else if (diff > 15) { trend = "worsening"; worsening++; }
-        else { trend = "stable"; stable++; }
-      } else { newPt++; }
-      return { ...p, trend, labs: t };
+    vitals.forEach(v => {
+      const pid = v.patient_id;
+      if (v.bp_sys) patientBio[pid].bp_sys = parseFloat(v.bp_sys);
+      if (v.bp_dia) patientBio[pid].bp_dia = parseFloat(v.bp_dia);
+      if (v.bmi) patientBio[pid].bmi = parseFloat(v.bmi);
+      if (v.weight) patientBio[pid].weight = parseFloat(v.weight);
     });
     
-    // Summary counts
+    prevWeights.forEach(w => {
+      patientBio[w.patient_id].prev_weight = parseFloat(w.weight);
+    });
+    
+    // Define biomarker targets
+    const targets = [
+      { key:"hba1c", label:"HbA1c", target:"<7%", unit:"%", good:v=>v<7, warn:v=>v>=7&&v<8, emoji:"🩸" },
+      { key:"fbg", label:"Fasting Glucose", target:"<130 mg/dL", unit:"mg/dL", good:v=>v<130, warn:v=>v>=130&&v<180, emoji:"🍳" },
+      { key:"ppg", label:"Post-Prandial", target:"<180 mg/dL", unit:"mg/dL", good:v=>v<180, warn:v=>v>=180&&v<250, emoji:"🍽️" },
+      { key:"bp", label:"Blood Pressure", target:"<130/80", unit:"mmHg", good:(v,p)=>p.bp_sys<130&&p.bp_dia<80, warn:(v,p)=>p.bp_sys>=130&&p.bp_sys<140, emoji:"💓", composite:true },
+      { key:"ldl", label:"LDL", target:"<100 mg/dL", unit:"mg/dL", good:v=>v<100, warn:v=>v>=100&&v<130, emoji:"🫀" },
+      { key:"tg", label:"Triglycerides", target:"<150 mg/dL", unit:"mg/dL", good:v=>v<150, warn:v=>v>=150&&v<200, emoji:"🧈" },
+      { key:"nonhdl", label:"Non-HDL", target:"<130 mg/dL", unit:"mg/dL", good:v=>v<130, warn:v=>v>=130&&v<160, emoji:"🫀" },
+      { key:"egfr", label:"eGFR", target:">60 mL/min", unit:"mL/min", good:v=>v>60, warn:v=>v>=45&&v<=60, emoji:"🫘" },
+      { key:"uacr", label:"UACR", target:"<30 mg/g", unit:"mg/g", good:v=>v<30, warn:v=>v>=30&&v<300, emoji:"🫘" },
+      { key:"bmi", label:"BMI", target:"<25", unit:"kg/m²", good:v=>v<25, warn:v=>v>=25&&v<30, emoji:"⚖️" },
+      { key:"weight", label:"Weight Trend", target:"Losing/Stable", unit:"kg", good:(v,p)=>p.prev_weight&&v<=p.prev_weight, warn:(v,p)=>!p.prev_weight, emoji:"📉", trend:true }
+    ];
+    
+    // Calculate control rates per biomarker
+    const biomarkers = targets.map(t => {
+      let inControl=0, outControl=0, warning=0, noData=0, tested=0;
+      const patientDetails = [];
+      
+      patients.rows.forEach(p => {
+        const bio = patientBio[p.id];
+        let val, status, displayVal;
+        
+        if (t.composite && t.key==="bp") {
+          if (bio.bp_sys && bio.bp_dia) {
+            val = bio.bp_sys;
+            displayVal = `${bio.bp_sys}/${bio.bp_dia}`;
+            tested++;
+            if (t.good(val, bio)) { status="in_control"; inControl++; }
+            else if (t.warn(val, bio)) { status="warning"; warning++; }
+            else { status="out_control"; outControl++; }
+          } else { status="no_data"; noData++; }
+        } else if (t.trend && t.key==="weight") {
+          if (bio.weight) {
+            val = bio.weight;
+            displayVal = `${bio.weight}kg`;
+            tested++;
+            if (bio.prev_weight) {
+              const diff = bio.weight - bio.prev_weight;
+              displayVal += ` (${diff>0?"+":""}${diff.toFixed(1)})`;
+              if (diff <= 0) { status="in_control"; inControl++; }
+              else if (diff <= 2) { status="warning"; warning++; }
+              else { status="out_control"; outControl++; }
+            } else { status="no_data"; noData++; }
+          } else { status="no_data"; noData++; }
+        } else {
+          val = bio[t.key];
+          if (val !== undefined && val !== null) {
+            displayVal = `${val} ${t.unit}`;
+            tested++;
+            if (t.good(val, bio)) { status="in_control"; inControl++; }
+            else if (t.warn(val, bio)) { status="warning"; warning++; }
+            else { status="out_control"; outControl++; }
+          } else { status="no_data"; noData++; }
+        }
+        
+        patientDetails.push({
+          id:p.id, name:p.name, age:p.age, sex:p.sex, file_no:p.file_no,
+          phone:p.phone, con_name:p.con_name, visit_date:p.visit_date,
+          value:val, display:displayVal, status,
+          diagnoses:p.diagnoses
+        });
+      });
+      
+      return {
+        key:t.key, label:t.label, target:t.target, unit:t.unit, emoji:t.emoji,
+        in_control:inControl, warning, out_control:outControl, no_data:noData,
+        tested, total:patients.rows.length,
+        pct: tested>0 ? Math.round(inControl/tested*100) : null,
+        patients: patientDetails.sort((a,b) => {
+          const order = {out_control:0, warning:1, in_control:2, no_data:3};
+          return (order[a.status]||3) - (order[b.status]||3);
+        })
+      };
+    });
+    
+    // Build per-patient summary (how many targets met)
+    const patientSummaries = patients.rows.map(p => {
+      const bio = patientBio[p.id];
+      let met=0, total=0;
+      const conditions = {};
+      
+      targets.forEach(t => {
+        let val, inCtrl = false, hasData = false;
+        if (t.composite && t.key==="bp") {
+          if (bio.bp_sys && bio.bp_dia) { hasData=true; inCtrl=t.good(bio.bp_sys, bio); val=`${bio.bp_sys}/${bio.bp_dia}`; }
+        } else if (t.trend) {
+          // skip weight from target count
+        } else {
+          val = bio[t.key];
+          if (val !== undefined && val !== null) { hasData=true; inCtrl=t.good(val, bio); }
+        }
+        if (hasData && !t.trend) {
+          total++;
+          if (inCtrl) met++;
+          conditions[t.key] = { val, in_control:inCtrl, label:t.label, emoji:t.emoji, target:t.target };
+        }
+      });
+      
+      return {
+        id:p.id, name:p.name, age:p.age, sex:p.sex, file_no:p.file_no,
+        phone:p.phone, con_name:p.con_name, visit_date:p.visit_date,
+        diagnoses:p.diagnoses,
+        targets_met:met, targets_total:total,
+        pct: total>0?Math.round(met/total*100):null,
+        conditions, all_bio:bio
+      };
+    }).sort((a,b) => (a.pct===null?999:a.pct) - (b.pct===null?999:b.pct));
+    
+    // Doctor breakdown
     const byDoctor = {};
     patients.rows.forEach(p => {
       const d = p.con_name || "Unknown";
@@ -773,11 +918,11 @@ app.get("/api/reports/today", async (req, res) => {
     
     res.json({
       total: patients.rows.length,
-      improving, worsening, stable, new: newPt,
-      by_doctor: byDoctor,
-      patients: enriched
+      biomarkers,
+      patients: patientSummaries,
+      by_doctor: byDoctor
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error("Reports error:", e); res.status(500).json({ error: e.message }); }
 });
 
 // Diagnosis distribution
