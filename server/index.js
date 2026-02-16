@@ -784,9 +784,18 @@ app.get("/api/reports/today", async (req, res) => {
 app.get("/api/reports/diagnoses", async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT d.label, d.diagnosis_id as id, d.status, COUNT(DISTINCT d.patient_id) as patient_count
-      FROM diagnoses d WHERE d.is_active=true
-      GROUP BY d.label, d.diagnosis_id, d.status
+      WITH latest AS (
+        SELECT DISTINCT ON (patient_id, diagnosis_id)
+          patient_id, diagnosis_id, label, status
+        FROM diagnoses WHERE is_active=true
+        ORDER BY patient_id, diagnosis_id, created_at DESC
+      )
+      SELECT diagnosis_id as id, 
+        (array_agg(label ORDER BY label))[1] as label,
+        status, 
+        COUNT(DISTINCT patient_id) as patient_count
+      FROM latest
+      GROUP BY diagnosis_id, status
       ORDER BY patient_count DESC
     `);
     
