@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 // Supabase Storage config
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
@@ -1023,6 +1023,204 @@ app.get("/api/reports/query-data", async (req, res) => {
     }));
     
     res.json({ patient_count: summary.length, patients: summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ CLINICAL REASONING ============
+// Save clinical reasoning for a consultation
+app.post("/api/consultations/:id/reasoning", async (req, res) => {
+  try {
+    const { patient_id, doctor_id, doctor_name, reasoning_text, primary_condition, secondary_conditions, reasoning_tags, capture_method } = req.body;
+    const r = await pool.query(
+      `INSERT INTO clinical_reasoning (consultation_id, patient_id, doctor_id, doctor_name, reasoning_text, primary_condition, secondary_conditions, reasoning_tags, capture_method)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.params.id, patient_id, doctor_id||null, doctor_name, reasoning_text, primary_condition, secondary_conditions||[], reasoning_tags||[], capture_method||'text']
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update clinical reasoning
+app.put("/api/reasoning/:id", async (req, res) => {
+  try {
+    const { reasoning_text, primary_condition, secondary_conditions, reasoning_tags, capture_method, audio_transcript, transcription_status } = req.body;
+    const r = await pool.query(
+      `UPDATE clinical_reasoning SET reasoning_text=COALESCE($1,reasoning_text), primary_condition=COALESCE($2,primary_condition),
+       secondary_conditions=COALESCE($3,secondary_conditions), reasoning_tags=COALESCE($4,reasoning_tags),
+       capture_method=COALESCE($5,capture_method), audio_transcript=COALESCE($6,audio_transcript),
+       transcription_status=COALESCE($7,transcription_status), updated_at=NOW() WHERE id=$8 RETURNING *`,
+      [reasoning_text, primary_condition, secondary_conditions, reasoning_tags, capture_method, audio_transcript, transcription_status, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get clinical reasoning for a consultation
+app.get("/api/consultations/:id/reasoning", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM clinical_reasoning WHERE consultation_id=$1 ORDER BY created_at DESC", [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Upload audio for clinical reasoning
+app.post("/api/reasoning/:id/audio", async (req, res) => {
+  try {
+    const { base64, duration } = req.body;
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(400).json({ error: "Storage not configured" });
+    
+    const cr = await pool.query("SELECT * FROM clinical_reasoning WHERE id=$1", [req.params.id]);
+    if (!cr.rows[0]) return res.status(404).json({ error: "Not found" });
+    
+    const r = cr.rows[0];
+    const ts = Date.now();
+    const storagePath = `clinical-recordings/${r.doctor_id||"unknown"}/${new Date().toISOString().slice(0,7)}/${r.consultation_id}_${ts}.webm`;
+    
+    const fileBuffer = Buffer.from(base64, "base64");
+    const uploadResp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`, "Content-Type": "audio/webm", "x-upsert": "true" },
+      body: fileBuffer
+    });
+    
+    if (!uploadResp.ok) return res.status(500).json({ error: "Upload failed: " + await uploadResp.text() });
+    
+    await pool.query(
+      "UPDATE clinical_reasoning SET audio_url=$1, audio_duration=$2, capture_method=CASE WHEN reasoning_text IS NOT NULL AND reasoning_text!='' THEN 'both' ELSE 'audio' END, transcription_status='pending', updated_at=NOW() WHERE id=$3",
+      [storagePath, duration||0, req.params.id]
+    );
+    
+    res.json({ success: true, storage_path: storagePath });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get signed URL for audio playback
+app.get("/api/reasoning/:id/audio-url", async (req, res) => {
+  try {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(400).json({ error: "Storage not configured" });
+    const cr = await pool.query("SELECT audio_url FROM clinical_reasoning WHERE id=$1", [req.params.id]);
+    if (!cr.rows[0]?.audio_url) return res.status(404).json({ error: "No audio" });
+    
+    const signResp = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${cr.rows[0].audio_url}`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn: 3600 })
+    });
+    if (!signResp.ok) return res.status(500).json({ error: "Failed to generate URL" });
+    const signData = await signResp.json();
+    const signedPath = signData.signedURL || signData.signedUrl || signData.token;
+    res.json({ url: signedPath?.startsWith("http") ? signedPath : `${SUPABASE_URL}/storage/v1${signedPath}` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ RX REVIEW FEEDBACK ============
+app.post("/api/consultations/:id/rx-feedback", async (req, res) => {
+  try {
+    const { patient_id, doctor_id, doctor_name, ai_rx_analysis, ai_model, agreement_level, feedback_text, correct_approach, reason_for_difference, disagreement_tags, primary_condition, medications_involved, severity } = req.body;
+    const r = await pool.query(
+      `INSERT INTO rx_review_feedback (consultation_id, patient_id, doctor_id, doctor_name, ai_rx_analysis, ai_model, agreement_level, feedback_text, correct_approach, reason_for_difference, disagreement_tags, primary_condition, medications_involved, severity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [req.params.id, patient_id, doctor_id||null, doctor_name, ai_rx_analysis, ai_model||'claude-sonnet-4.5', agreement_level, feedback_text, correct_approach, reason_for_difference, disagreement_tags||[], primary_condition, medications_involved||[], severity]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get Rx feedback for a consultation
+app.get("/api/consultations/:id/rx-feedback", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM rx_review_feedback WHERE consultation_id=$1 ORDER BY created_at DESC", [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Upload audio for Rx feedback
+app.post("/api/rx-feedback/:id/audio", async (req, res) => {
+  try {
+    const { base64 } = req.body;
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return res.status(400).json({ error: "Storage not configured" });
+    
+    const fb = await pool.query("SELECT * FROM rx_review_feedback WHERE id=$1", [req.params.id]);
+    if (!fb.rows[0]) return res.status(404).json({ error: "Not found" });
+    
+    const ts = Date.now();
+    const storagePath = `rx-feedback-audio/${fb.rows[0].doctor_id||"unknown"}/${new Date().toISOString().slice(0,7)}/${fb.rows[0].consultation_id}_${ts}.webm`;
+    
+    const fileBuffer = Buffer.from(base64, "base64");
+    const uploadResp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`, "Content-Type": "audio/webm", "x-upsert": "true" },
+      body: fileBuffer
+    });
+    if (!uploadResp.ok) return res.status(500).json({ error: "Upload failed" });
+    
+    await pool.query("UPDATE rx_review_feedback SET feedback_audio_url=$1 WHERE id=$2", [storagePath, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ CLINICAL INTELLIGENCE REPORT ============
+app.get("/api/reports/clinical-intelligence", async (req, res) => {
+  try {
+    const { period } = req.query; // 'month','quarter','year','all'
+    let dateFilter = "";
+    if (period === "month") dateFilter = "AND created_at > NOW() - INTERVAL '1 month'";
+    else if (period === "quarter") dateFilter = "AND created_at > NOW() - INTERVAL '3 months'";
+    else if (period === "year") dateFilter = "AND created_at > NOW() - INTERVAL '1 year'";
+    
+    // Overview stats
+    const [crTotal, crMonth, rxTotal, rxMonth, agreementStats, disagreementTags, weeklyTrend, doctorStats, audioHours] = await Promise.all([
+      pool.query(`SELECT COUNT(*) FROM clinical_reasoning`),
+      pool.query(`SELECT COUNT(*) FROM clinical_reasoning WHERE created_at > NOW() - INTERVAL '1 month'`),
+      pool.query(`SELECT COUNT(*) FROM rx_review_feedback`),
+      pool.query(`SELECT COUNT(*) FROM rx_review_feedback WHERE created_at > NOW() - INTERVAL '1 month'`),
+      pool.query(`SELECT agreement_level, COUNT(*) as count FROM rx_review_feedback ${dateFilter ? 'WHERE 1=1 '+dateFilter : ''} GROUP BY agreement_level`),
+      pool.query(`SELECT unnest(disagreement_tags) as tag, COUNT(*) as count FROM rx_review_feedback WHERE agreement_level != 'agree' ${dateFilter} GROUP BY tag ORDER BY count DESC LIMIT 10`),
+      pool.query(`SELECT date_trunc('week', created_at)::date as week, agreement_level, COUNT(*) as count FROM rx_review_feedback WHERE created_at > NOW() - INTERVAL '3 months' GROUP BY week, agreement_level ORDER BY week`),
+      pool.query(`SELECT doctor_name, 
+        (SELECT COUNT(*) FROM clinical_reasoning cr WHERE cr.doctor_name=d.doctor_name) as reasoning_count,
+        (SELECT COUNT(*) FROM rx_review_feedback rx WHERE rx.doctor_name=d.doctor_name) as rx_count
+        FROM (SELECT DISTINCT doctor_name FROM clinical_reasoning UNION SELECT DISTINCT doctor_name FROM rx_review_feedback) d
+        ORDER BY reasoning_count DESC`),
+      pool.query(`SELECT COALESCE(SUM(audio_duration),0) as total_seconds FROM clinical_reasoning WHERE audio_url IS NOT NULL`),
+    ]);
+    
+    // Recent clinical reasoning entries
+    const reasoningFeed = await pool.query(
+      `SELECT cr.*, p.name as patient_name, p.file_no FROM clinical_reasoning cr JOIN patients p ON p.id=cr.patient_id ${dateFilter ? 'WHERE 1=1 '+dateFilter : ''} ORDER BY cr.created_at DESC LIMIT 50`
+    );
+    
+    // Recent Rx feedback entries
+    const rxFeed = await pool.query(
+      `SELECT rf.*, p.name as patient_name, p.file_no FROM rx_review_feedback rf JOIN patients p ON p.id=rf.patient_id ${dateFilter ? 'WHERE 1=1 '+dateFilter : ''} ORDER BY rf.created_at DESC LIMIT 50`
+    );
+    
+    res.json({
+      overview: {
+        cr_total: parseInt(crTotal.rows[0].count),
+        cr_month: parseInt(crMonth.rows[0].count),
+        rx_total: parseInt(rxTotal.rows[0].count),
+        rx_month: parseInt(rxMonth.rows[0].count),
+        agreement: agreementStats.rows,
+        audio_hours: Math.round(parseInt(audioHours.rows[0].total_seconds) / 3600 * 10) / 10,
+      },
+      disagreement_tags: disagreementTags.rows,
+      weekly_trend: weeklyTrend.rows,
+      doctor_stats: doctorStats.rows,
+      reasoning_feed: reasoningFeed.rows,
+      rx_feed: rxFeed.rows,
+    });
+  } catch (e) { console.error("CI Report error:", e.message); res.status(500).json({ error: e.message }); }
+});
+
+// Export clinical intelligence data as JSON
+app.get("/api/reports/clinical-intelligence/export", async (req, res) => {
+  try {
+    const [reasoning, feedback] = await Promise.all([
+      pool.query(`SELECT cr.*, p.file_no FROM clinical_reasoning cr JOIN patients p ON p.id=cr.patient_id ORDER BY cr.created_at DESC`),
+      pool.query(`SELECT rf.*, p.file_no FROM rx_review_feedback rf JOIN patients p ON p.id=rf.patient_id ORDER BY rf.created_at DESC`),
+    ]);
+    res.json({ clinical_reasoning: reasoning.rows, rx_feedback: feedback.rows, exported_at: new Date().toISOString() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

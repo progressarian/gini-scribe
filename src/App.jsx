@@ -751,6 +751,38 @@ export default function GiniScribe() {
   // AI Rx Review
   const [rxReview, setRxReview] = useState(null); // {flags:[], loading:false}
   const [rxReviewLoading, setRxReviewLoading] = useState(false);
+  
+  // Clinical Reasoning state
+  const [crExpanded, setCrExpanded] = useState(false);
+  const [crText, setCrText] = useState("");
+  const [crCondition, setCrCondition] = useState("");
+  const [crTags, setCrTags] = useState([]);
+  const [crSaving, setCrSaving] = useState(false);
+  const [crSaved, setCrSaved] = useState(null); // saved record
+  const [crRecording, setCrRecording] = useState(false);
+  const [crAudioBlob, setCrAudioBlob] = useState(null);
+  const [crAudioUrl, setCrAudioUrl] = useState(null); // for playback
+  const [crTranscribing, setCrTranscribing] = useState(false);
+  const crRecorderRef = useRef(null);
+  const crStreamRef = useRef(null);
+  const crChunksRef = useRef([]);
+  
+  // Rx Review Feedback state
+  const [rxFbAgreement, setRxFbAgreement] = useState(null); // 'agree','partially_agree','disagree'
+  const [rxFbText, setRxFbText] = useState("");
+  const [rxFbCorrect, setRxFbCorrect] = useState("");
+  const [rxFbReason, setRxFbReason] = useState("");
+  const [rxFbTags, setRxFbTags] = useState([]);
+  const [rxFbSeverity, setRxFbSeverity] = useState(null);
+  const [rxFbSaving, setRxFbSaving] = useState(false);
+  const [rxFbSaved, setRxFbSaved] = useState(null);
+  
+  // Clinical Intelligence Report state
+  const [ciData, setCiData] = useState(null);
+  const [ciLoading, setCiLoading] = useState(false);
+  const [ciPeriod, setCiPeriod] = useState("month");
+  const [ciExpandedCr, setCiExpandedCr] = useState(null);
+  const [ciExpandedRx, setCiExpandedRx] = useState(null);
   // Reports
   const [reportData, setReportData] = useState(null);
   const [reportDx, setReportDx] = useState(null);
@@ -1084,6 +1116,8 @@ export default function GiniScribe() {
     setDbPatientId(dbRecord.id);
     setNewReportsIncluded(false);
     setNewReportsExpanded(false);
+    setCrExpanded(false); setCrText(""); setCrCondition(""); setCrTags([]); setCrSaved(null); setCrAudioBlob(null); setCrAudioUrl(null);
+    setRxFbAgreement(null); setRxFbText(""); setRxFbCorrect(""); setRxFbReason(""); setRxFbTags([]); setRxFbSeverity(null); setRxFbSaved(null);
     // Load full patient record
     if (API_URL && dbRecord.id) {
       try {
@@ -1534,6 +1568,127 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
     setRxReviewLoading(false);
   };
 
+  // ============ CLINICAL REASONING ============
+  const CONDITIONS_LIST = ["Type 2 Diabetes","Type 1 Diabetes","Hypertension","Thyroid","PCOS","Dyslipidemia","CKD","Obesity","Fatty Liver","CAD","Asthma/COPD","Diabetic Neuropathy","Diabetic Nephropathy","General Medicine","Other"];
+  const REASONING_TAGS = ["dose_adjustment","new_medication","medication_switch","lifestyle_change","referral","investigation_ordered","de-escalation","protocol_deviation"];
+
+  const saveClinicalReasoning = async () => {
+    if (!API_URL || !dbPatientId) return;
+    const conId = patientFullData?.consultations?.[0]?.id;
+    if (!conId) return alert("No consultation found — save plan first");
+    setCrSaving(true);
+    try {
+      const body = {
+        patient_id: dbPatientId,
+        doctor_id: currentDoctor?.id || null,
+        doctor_name: conName || currentDoctor?.name || "",
+        reasoning_text: crText,
+        primary_condition: crCondition,
+        reasoning_tags: crTags,
+        capture_method: crAudioBlob ? (crText ? "both" : "audio") : "text"
+      };
+      const resp = await fetch(`${API_URL}/api/consultations/${conId}/reasoning`, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(body)
+      });
+      const saved = await resp.json();
+      setCrSaved(saved);
+      
+      // Upload audio if exists
+      if (crAudioBlob && saved.id) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const base64 = reader.result.split(",")[1];
+          await fetch(`${API_URL}/api/reasoning/${saved.id}/audio`, {
+            method: "POST", headers: authHeaders(),
+            body: JSON.stringify({ base64, duration: Math.round(crAudioBlob.size / 3200) }) // rough estimate
+          });
+          // Transcribe using existing Deepgram
+          if (dgKey) {
+            setCrTranscribing(true);
+            try {
+              const transcript = await transcribeDeepgram(crAudioBlob, dgKey, "en");
+              await fetch(`${API_URL}/api/reasoning/${saved.id}`, {
+                method: "PUT", headers: authHeaders(),
+                body: JSON.stringify({ audio_transcript: transcript, transcription_status: "completed" })
+              });
+            } catch (e) { console.log("Transcription failed:", e.message); }
+            setCrTranscribing(false);
+          }
+        };
+        reader.readAsDataURL(crAudioBlob);
+      }
+    } catch (e) { alert("Save failed: " + e.message); }
+    setCrSaving(false);
+  };
+
+  const startCrRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      crStreamRef.current = stream;
+      const mt = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const rec = new MediaRecorder(stream, { mimeType: mt });
+      crChunksRef.current = [];
+      rec.ondataavailable = e => { if (e.data.size > 0) crChunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(crChunksRef.current, { type: mt });
+        setCrAudioBlob(blob);
+        setCrAudioUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach(t => t.stop());
+      };
+      crRecorderRef.current = rec;
+      rec.start(250);
+      setCrRecording(true);
+    } catch (e) { alert("Microphone access denied"); }
+  };
+
+  const stopCrRecording = () => {
+    if (crRecorderRef.current?.state === "recording") crRecorderRef.current.stop();
+    setCrRecording(false);
+  };
+
+  // ============ RX FEEDBACK ============
+  const DISAGREEMENT_TAGS = ["Different protocol for Indian patients","Cost/affordability consideration","Patient-specific factor AI missed","Drug combination preference","Dosage adjustment preference","Outdated guideline reference","AI overly cautious","AI missed contraindication","Other"];
+
+  const saveRxFeedback = async () => {
+    if (!API_URL || !dbPatientId || !rxFbAgreement) return;
+    const conId = patientFullData?.consultations?.[0]?.id;
+    if (!conId) return;
+    setRxFbSaving(true);
+    try {
+      const body = {
+        patient_id: dbPatientId,
+        doctor_id: currentDoctor?.id || null,
+        doctor_name: conName || currentDoctor?.name || "",
+        ai_rx_analysis: JSON.stringify(rxReview),
+        ai_model: "claude-sonnet-4.5",
+        agreement_level: rxFbAgreement,
+        feedback_text: rxFbText,
+        correct_approach: rxFbCorrect,
+        reason_for_difference: rxFbReason,
+        disagreement_tags: rxFbTags,
+        primary_condition: crCondition || sa(moData,"diagnoses")?.[0]?.label || "",
+        medications_involved: sa(conData,"medications_confirmed").map(m=>m.name).filter(Boolean),
+        severity: rxFbSeverity
+      };
+      const resp = await fetch(`${API_URL}/api/consultations/${conId}/rx-feedback`, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(body)
+      });
+      setRxFbSaved(await resp.json());
+    } catch (e) { alert("Save failed: " + e.message); }
+    setRxFbSaving(false);
+  };
+
+  // Fetch Clinical Intelligence report
+  const loadCIReport = async (p) => {
+    if (!API_URL) return;
+    setCiLoading(true);
+    try {
+      const resp = await fetch(`${API_URL}/api/reports/clinical-intelligence?period=${p||ciPeriod}`, { headers: authHeaders() });
+      setCiData(await resp.json());
+    } catch (e) { console.error("CI report error:", e.message); }
+    setCiLoading(false);
+  };
+
   // ============ REPORTS ============
   const loadReports = async (period, doctor) => {
     if (!API_URL) return;
@@ -1970,7 +2125,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"history", label:"📜 Hx", show:keySet && !!API_URL && !isLabRole },
     { id:"outcomes", label:"📊", show:keySet && !!API_URL && !isLabRole },
     { id:"ai", label:"🤖 AI", show:keySet && !isLabRole },
-    { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
+    { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") },
+    { id:"ci", label:"🧠 CI", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
   ];
 
   // New reports banner for MO/Con/Plan tabs
@@ -2759,6 +2915,73 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   );
                 })}
               </div>
+              
+              {/* ── RX REVIEW FEEDBACK ── */}
+              {!rxFbSaved ? (
+                <div style={{ borderTop:"2px solid #7c3aed", padding:10, background:"#faf5ff" }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:"#4c1d95", marginBottom:6 }}>👨‍⚕️ Doctor's Review</div>
+                  <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                    {[["agree","✅ Agree","#059669","#f0fdf4"],["partially_agree","🔶 Partial","#d97706","#fffbeb"],["disagree","❌ Disagree","#dc2626","#fef2f2"]].map(([val,label,color,bg]) => (
+                      <button key={val} onClick={()=>setRxFbAgreement(val)}
+                        style={{ flex:1, padding:"6px 4px", fontSize:11, fontWeight:700, border:`2px solid ${rxFbAgreement===val?color:"#e2e8f0"}`,
+                          borderRadius:6, cursor:"pointer", background:rxFbAgreement===val?bg:"white", color:rxFbAgreement===val?color:"#64748b", transition:"all .15s" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {rxFbAgreement && (
+                    <>
+                      <textarea value={rxFbText} onChange={e=>setRxFbText(e.target.value)} rows={2}
+                        placeholder={rxFbAgreement==="agree"?"Any additional notes? (optional)":"What would you change or what did the AI miss?"}
+                        style={{ width:"100%", border:"1px solid #e2e8f0", borderRadius:6, padding:8, fontSize:11, marginBottom:6, resize:"vertical", boxSizing:"border-box" }} />
+                      
+                      {rxFbAgreement !== "agree" && (
+                        <>
+                          <textarea value={rxFbCorrect} onChange={e=>setRxFbCorrect(e.target.value)} rows={2}
+                            placeholder="What should be the correct approach?"
+                            style={{ width:"100%", border:"1px solid #e2e8f0", borderRadius:6, padding:8, fontSize:11, marginBottom:6, resize:"vertical", boxSizing:"border-box" }} />
+                          <textarea value={rxFbReason} onChange={e=>setRxFbReason(e.target.value)} rows={2}
+                            placeholder="Reason for difference (most valuable field)"
+                            style={{ width:"100%", border:"1px solid #fecaca", borderRadius:6, padding:8, fontSize:11, marginBottom:6, resize:"vertical", boxSizing:"border-box", background:"#fff5f5" }} />
+                          
+                          {/* Quick tags */}
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:6 }}>
+                            {DISAGREEMENT_TAGS.map(tag => (
+                              <button key={tag} onClick={()=>setRxFbTags(prev=>prev.includes(tag)?prev.filter(t=>t!==tag):[...prev,tag])}
+                                style={{ fontSize:9, padding:"3px 8px", borderRadius:10, border:`1px solid ${rxFbTags.includes(tag)?"#7c3aed":"#e2e8f0"}`,
+                                  background:rxFbTags.includes(tag)?"#f5f3ff":"white", color:rxFbTags.includes(tag)?"#7c3aed":"#64748b", cursor:"pointer", fontWeight:600 }}>
+                                {tag}
+                              </button>
+                            ))}
+                          </div>
+                          
+                          {/* Severity */}
+                          <div style={{ display:"flex", gap:4, marginBottom:8 }}>
+                            <span style={{ fontSize:10, color:"#64748b", fontWeight:600, alignSelf:"center" }}>Severity:</span>
+                            {[["minor","Minor","#94a3b8"],["moderate","Moderate","#d97706"],["major","Major","#dc2626"]].map(([v,l,c]) => (
+                              <button key={v} onClick={()=>setRxFbSeverity(v)}
+                                style={{ fontSize:9, padding:"3px 10px", borderRadius:6, border:`1px solid ${rxFbSeverity===v?c:"#e2e8f0"}`,
+                                  background:rxFbSeverity===v?c+"15":"white", color:rxFbSeverity===v?c:"#94a3b8", cursor:"pointer", fontWeight:700 }}>
+                                {l}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      
+                      <button onClick={saveRxFeedback} disabled={rxFbSaving}
+                        style={{ width:"100%", background:rxFbSaving?"#94a3b8":"#7c3aed", color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:11, fontWeight:700, cursor:rxFbSaving?"wait":"pointer" }}>
+                        {rxFbSaving ? "⏳ Saving..." : "💾 Save Feedback"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div style={{ borderTop:"2px solid #059669", padding:8, background:"#f0fdf4", textAlign:"center", fontSize:11, fontWeight:700, color:"#059669" }}>
+                  ✅ Feedback saved — {rxFbSaved.agreement_level === "agree" ? "AI analysis confirmed" : "Corrections recorded for AI improvement"}
+                </div>
+              )}
             </div>
           )}
 
@@ -3004,6 +3227,90 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </div>
             </div>
           )}
+          
+          {/* ── CLINICAL REASONING ── */}
+          <div className="no-print" style={{ marginTop:12, border:`2px solid ${crSaved?"#059669":"#0ea5e9"}`, borderRadius:10, overflow:"hidden" }}>
+            <div onClick={()=>setCrExpanded(!crExpanded)}
+              style={{ background:crSaved?"linear-gradient(135deg,#059669,#10b981)":"linear-gradient(135deg,#0ea5e9,#0284c7)", color:"white", padding:"8px 12px", cursor:"pointer",
+                display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <span style={{ fontSize:14 }}>🧠</span>
+                <span style={{ fontWeight:700, fontSize:12 }}>Clinical Reasoning</span>
+                {crSaved && <span style={{ fontSize:9, background:"rgba(255,255,255,.25)", padding:"1px 8px", borderRadius:8 }}>✅ Saved</span>}
+              </div>
+              <span style={{ fontSize:11, opacity:.8 }}>{crExpanded ? "▲" : "▼ Capture why"}</span>
+            </div>
+            
+            {crExpanded && (
+              <div style={{ padding:12, background:"#f0f9ff" }}>
+                {/* Condition selector */}
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#0c4a6e", marginBottom:4 }}>Primary Condition</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {CONDITIONS_LIST.map(c => (
+                      <button key={c} onClick={()=>setCrCondition(c)}
+                        style={{ fontSize:9, padding:"3px 8px", borderRadius:8, border:`1px solid ${crCondition===c?"#0ea5e9":"#e2e8f0"}`,
+                          background:crCondition===c?"#e0f2fe":"white", color:crCondition===c?"#0369a1":"#64748b", cursor:"pointer", fontWeight:600 }}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Reasoning text */}
+                <textarea value={crText} onChange={e=>setCrText(e.target.value)} rows={4}
+                  placeholder="Why did you make these treatment decisions? What factors influenced dosage, drug choice, or lifestyle recommendations?"
+                  style={{ width:"100%", border:"1px solid #bae6fd", borderRadius:8, padding:10, fontSize:12, marginBottom:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
+                
+                {/* Audio recording */}
+                <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:8 }}>
+                  {!crRecording ? (
+                    <button onClick={startCrRecording}
+                      style={{ display:"flex", alignItems:"center", gap:4, background:"#dc2626", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                      🎙️ Record Reasoning
+                    </button>
+                  ) : (
+                    <button onClick={stopCrRecording}
+                      style={{ display:"flex", alignItems:"center", gap:4, background:"#1e293b", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer", animation:"pulse 1.5s infinite" }}>
+                      ⏹️ Stop Recording
+                    </button>
+                  )}
+                  {crAudioUrl && (
+                    <audio src={crAudioUrl} controls style={{ height:30, flex:1 }} />
+                  )}
+                  {crAudioBlob && !crAudioUrl && <span style={{ fontSize:10, color:"#059669" }}>🎵 Audio ready</span>}
+                  {crTranscribing && <span style={{ fontSize:10, color:"#0ea5e9", fontWeight:600 }}>⏳ Transcribing...</span>}
+                </div>
+                
+                {/* Reasoning tags */}
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#0c4a6e", marginBottom:4 }}>Decision Tags</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {REASONING_TAGS.map(tag => (
+                      <button key={tag} onClick={()=>setCrTags(prev=>prev.includes(tag)?prev.filter(t=>t!==tag):[...prev,tag])}
+                        style={{ fontSize:9, padding:"3px 8px", borderRadius:8, border:`1px solid ${crTags.includes(tag)?"#0ea5e9":"#e2e8f0"}`,
+                          background:crTags.includes(tag)?"#e0f2fe":"white", color:crTags.includes(tag)?"#0369a1":"#64748b", cursor:"pointer", fontWeight:600 }}>
+                        {tag.replace(/_/g," ")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Save button */}
+                {!crSaved ? (
+                  <button onClick={saveClinicalReasoning} disabled={crSaving || (!crText && !crAudioBlob)}
+                    style={{ width:"100%", background:crSaving?"#94a3b8":(crText||crAudioBlob)?"#0ea5e9":"#cbd5e1", color:"white", border:"none", padding:"10px",
+                      borderRadius:8, fontSize:12, fontWeight:700, cursor:(crSaving||(!crText&&!crAudioBlob))?"not-allowed":"pointer" }}>
+                    {crSaving ? "⏳ Saving..." : "🧠 Save Clinical Reasoning"}
+                  </button>
+                ) : (
+                  <div style={{ textAlign:"center", padding:6, fontSize:11, fontWeight:700, color:"#059669" }}>
+                    ✅ Clinical reasoning saved — captured for AI training
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
@@ -4938,6 +5245,194 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           )}
         </div>
       )}
+
+      {/* ===== CLINICAL INTELLIGENCE ===== */}
+      {tab==="ci" && (
+        <div style={{ maxWidth:920, margin:"0 auto" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+            <div>
+              <div style={{ fontSize:18, fontWeight:800, color:"#0f172a" }}>🧠 Clinical Intelligence</div>
+              <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>AI performance & clinical reasoning capture</div>
+            </div>
+            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+              <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+                {[["month","Month"],["quarter","Quarter"],["year","Year"],["all","All"]].map(([v,l]) => (
+                  <button key={v} onClick={()=>{setCiPeriod(v);loadCIReport(v);}}
+                    style={{ padding:"5px 10px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer",
+                      background:ciPeriod===v?"#0f172a":"white", color:ciPeriod===v?"white":"#64748b" }}>{l}</button>
+                ))}
+              </div>
+              <button onClick={()=>loadCIReport()} style={{ fontSize:12, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:8, cursor:"pointer", background:"white" }}>↻</button>
+            </div>
+          </div>
+
+          {!ciData ? (
+            <div style={{ textAlign:"center", padding:40 }}>
+              <button onClick={()=>loadCIReport()} style={{ background:"#0ea5e9", color:"white", border:"none", padding:"12px 30px", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer" }}>
+                📊 Load Report
+              </button>
+            </div>
+          ) : ciLoading ? (
+            <div style={{ textAlign:"center", padding:40 }}><div style={{ fontSize:24 }}>⏳</div><div style={{ fontSize:13, color:"#94a3b8" }}>Loading...</div></div>
+          ) : (
+            <>
+              {/* Overview Cards */}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:16 }}>
+                {[
+                  { label:"Reasoning Captured", value:ciData.overview.cr_total, sub:`${ciData.overview.cr_month} this month`, icon:"🧠", bg:"linear-gradient(135deg,#e0f2fe,#bae6fd)", color:"#0369a1" },
+                  { label:"Rx Reviews", value:ciData.overview.rx_total, sub:`${ciData.overview.rx_month} this month`, icon:"💊", bg:"linear-gradient(135deg,#f5f3ff,#ede9fe)", color:"#7c3aed" },
+                  { label:"Agreement Rate", value:(()=>{const a=ciData.overview.agreement;const tot=a.reduce((s,r)=>s+parseInt(r.count),0);const agree=a.find(r=>r.agreement_level==="agree");return tot?Math.round((parseInt(agree?.count||0)/tot)*100)+"%":"—"})(), sub:"AI accuracy", icon:"✅", bg:"linear-gradient(135deg,#f0fdf4,#dcfce7)", color:"#059669" },
+                  { label:"Audio Hours", value:ciData.overview.audio_hours||0, sub:"recordings", icon:"🎙️", bg:"linear-gradient(135deg,#fffbeb,#fef3c7)", color:"#d97706" },
+                ].map((c,i) => (
+                  <div key={i} style={{ background:c.bg, borderRadius:12, padding:"12px 14px" }}>
+                    <div style={{ fontSize:9, color:"#64748b", fontWeight:700, textTransform:"uppercase" }}>{c.icon} {c.label}</div>
+                    <div style={{ fontSize:22, fontWeight:900, color:c.color, marginTop:2 }}>{c.value}</div>
+                    <div style={{ fontSize:9, color:"#94a3b8" }}>{c.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Agreement Breakdown */}
+              {ciData.overview.agreement.length > 0 && (
+                <div style={{ background:"white", borderRadius:12, border:"1px solid #f1f5f9", padding:14, marginBottom:16 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#334155", marginBottom:8 }}>📊 AI Review Breakdown</div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    {ciData.overview.agreement.map((a,i) => {
+                      const total = ciData.overview.agreement.reduce((s,r)=>s+parseInt(r.count),0);
+                      const pct = Math.round((parseInt(a.count)/total)*100);
+                      const colors = {agree:"#059669",partially_agree:"#d97706",disagree:"#dc2626"};
+                      const labels = {agree:"✅ Agree",partially_agree:"🔶 Partial",disagree:"❌ Disagree"};
+                      return (
+                        <div key={i} style={{ flex:1, textAlign:"center" }}>
+                          <div style={{ fontSize:24, fontWeight:900, color:colors[a.agreement_level] }}>{pct}%</div>
+                          <div style={{ fontSize:10, color:"#64748b" }}>{labels[a.agreement_level]}</div>
+                          <div style={{ height:6, background:"#f1f5f9", borderRadius:3, marginTop:4 }}>
+                            <div style={{ height:6, borderRadius:3, background:colors[a.agreement_level], width:`${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Disagreement Tags */}
+              {ciData.disagreement_tags?.length > 0 && (
+                <div style={{ background:"white", borderRadius:12, border:"1px solid #f1f5f9", padding:14, marginBottom:16 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#334155", marginBottom:8 }}>⚠️ Top Disagreement Reasons</div>
+                  {ciData.disagreement_tags.map((t,i) => (
+                    <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 0" }}>
+                      <div style={{ flex:1, fontSize:11, color:"#475569" }}>{t.tag}</div>
+                      <div style={{ width:120, height:8, background:"#f1f5f9", borderRadius:4 }}>
+                        <div style={{ height:8, borderRadius:4, background:"#dc2626", width:`${Math.min(100,parseInt(t.count)*20)}%` }} />
+                      </div>
+                      <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", minWidth:20, textAlign:"right" }}>{t.count}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Doctor Stats */}
+              {ciData.doctor_stats?.length > 0 && (
+                <div style={{ background:"white", borderRadius:12, border:"1px solid #f1f5f9", padding:14, marginBottom:16 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#334155", marginBottom:8 }}>👨‍⚕️ Doctor Contributions</div>
+                  {ciData.doctor_stats.map((d,i) => (
+                    <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", borderBottom: i<ciData.doctor_stats.length-1?"1px solid #f8fafc":"none" }}>
+                      <div style={{ fontSize:11, fontWeight:600 }}>{d.doctor_name||"Unknown"}</div>
+                      <div style={{ display:"flex", gap:12, fontSize:10 }}>
+                        <span style={{ color:"#0369a1" }}>🧠 {d.reasoning_count} reasoning</span>
+                        <span style={{ color:"#7c3aed" }}>💊 {d.rx_count} reviews</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Clinical Reasoning Feed */}
+              <div style={{ background:"white", borderRadius:12, border:"1px solid #f1f5f9", padding:14, marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"#334155", marginBottom:8 }}>🧠 Clinical Reasoning Feed</div>
+                {ciData.reasoning_feed?.length === 0 && <div style={{ textAlign:"center", padding:20, color:"#94a3b8", fontSize:12 }}>No entries yet — start capturing reasoning in consultations</div>}
+                {ciData.reasoning_feed?.map((cr,i) => (
+                  <div key={cr.id} onClick={()=>setCiExpandedCr(ciExpandedCr===cr.id?null:cr.id)}
+                    style={{ padding:"8px 0", borderBottom: i<ciData.reasoning_feed.length-1?"1px solid #f8fafc":"none", cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                        <span style={{ fontSize:9, padding:"2px 6px", borderRadius:6, background:"#e0f2fe", color:"#0369a1", fontWeight:700 }}>{cr.primary_condition||"General"}</span>
+                        <span style={{ fontSize:10, fontWeight:600 }}>{cr.file_no||cr.patient_name}</span>
+                        <span style={{ fontSize:9, color:"#94a3b8" }}>by {cr.doctor_name}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                        {cr.audio_url && <span style={{ fontSize:10 }}>🎙️</span>}
+                        <span style={{ fontSize:9, color:"#94a3b8" }}>{new Date(cr.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</span>
+                      </div>
+                    </div>
+                    {ciExpandedCr===cr.id && (
+                      <div style={{ marginTop:6, padding:8, background:"#f0f9ff", borderRadius:6, fontSize:11, color:"#334155", lineHeight:1.6 }}>
+                        {cr.reasoning_text && <div>{cr.reasoning_text}</div>}
+                        {cr.audio_transcript && <div style={{ marginTop:4, fontStyle:"italic", color:"#64748b" }}>🎙️ {cr.audio_transcript}</div>}
+                        {cr.reasoning_tags?.length > 0 && (
+                          <div style={{ marginTop:4, display:"flex", gap:3, flexWrap:"wrap" }}>
+                            {cr.reasoning_tags.map((t,ti) => <span key={ti} style={{ fontSize:8, padding:"1px 6px", borderRadius:4, background:"#dbeafe", color:"#1d4ed8" }}>{t}</span>)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Rx Feedback Feed */}
+              <div style={{ background:"white", borderRadius:12, border:"1px solid #f1f5f9", padding:14, marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"#334155", marginBottom:8 }}>💊 Rx Review Feedback Feed</div>
+                {ciData.rx_feed?.length === 0 && <div style={{ textAlign:"center", padding:20, color:"#94a3b8", fontSize:12 }}>No feedback yet — review AI prescriptions to generate data</div>}
+                {ciData.rx_feed?.map((rf,i) => {
+                  const agColors = {agree:"#059669",partially_agree:"#d97706",disagree:"#dc2626"};
+                  const agLabels = {agree:"✅ Agree",partially_agree:"🔶 Partial",disagree:"❌ Disagree"};
+                  return (
+                    <div key={rf.id} onClick={()=>setCiExpandedRx(ciExpandedRx===rf.id?null:rf.id)}
+                      style={{ padding:"8px 0", borderBottom: i<ciData.rx_feed.length-1?"1px solid #f8fafc":"none", cursor:"pointer" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                          <span style={{ fontSize:9, padding:"2px 6px", borderRadius:6, background:agColors[rf.agreement_level]+"15", color:agColors[rf.agreement_level], fontWeight:700 }}>{agLabels[rf.agreement_level]}</span>
+                          <span style={{ fontSize:10, fontWeight:600 }}>{rf.file_no||rf.patient_name}</span>
+                          {rf.severity && <span style={{ fontSize:8, padding:"1px 5px", borderRadius:3, background:rf.severity==="major"?"#fef2f2":"#fffbeb", color:rf.severity==="major"?"#dc2626":"#d97706", fontWeight:700 }}>{rf.severity}</span>}
+                        </div>
+                        <span style={{ fontSize:9, color:"#94a3b8" }}>{new Date(rf.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</span>
+                      </div>
+                      {ciExpandedRx===rf.id && (
+                        <div style={{ marginTop:6, padding:8, background:"#faf5ff", borderRadius:6, fontSize:11, lineHeight:1.6 }}>
+                          {rf.feedback_text && <div><strong>Feedback:</strong> {rf.feedback_text}</div>}
+                          {rf.correct_approach && <div style={{ marginTop:4 }}><strong>Correct approach:</strong> {rf.correct_approach}</div>}
+                          {rf.reason_for_difference && <div style={{ marginTop:4, color:"#dc2626" }}><strong>Why AI was wrong:</strong> {rf.reason_for_difference}</div>}
+                          {rf.disagreement_tags?.length > 0 && (
+                            <div style={{ marginTop:4, display:"flex", gap:3, flexWrap:"wrap" }}>
+                              {rf.disagreement_tags.map((t,ti) => <span key={ti} style={{ fontSize:8, padding:"1px 6px", borderRadius:4, background:"#ede9fe", color:"#7c3aed" }}>{t}</span>)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Export */}
+              <div style={{ textAlign:"center", padding:10 }}>
+                <button onClick={async()=>{
+                  const resp = await fetch(`${API_URL}/api/reports/clinical-intelligence/export`, { headers: authHeaders() });
+                  const data = await resp.json();
+                  const blob = new Blob([JSON.stringify(data,null,2)], { type:"application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a"); a.href=url; a.download=`clinical-intelligence-${new Date().toISOString().slice(0,10)}.json`; a.click();
+                }} style={{ background:"#1e293b", color:"white", border:"none", padding:"8px 20px", borderRadius:8, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                  📥 Export All Data (JSON)
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
