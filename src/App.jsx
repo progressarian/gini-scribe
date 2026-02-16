@@ -1593,26 +1593,21 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
       const saved = await resp.json();
       setCrSaved(saved);
       
-      // Upload audio if exists
+      // Upload audio if exists (transcript already in crText from auto-transcription)
       if (crAudioBlob && saved.id) {
         const reader = new FileReader();
         reader.onload = async () => {
           const base64 = reader.result.split(",")[1];
           await fetch(`${API_URL}/api/reasoning/${saved.id}/audio`, {
             method: "POST", headers: authHeaders(),
-            body: JSON.stringify({ base64, duration: Math.round(crAudioBlob.size / 3200) }) // rough estimate
+            body: JSON.stringify({ base64, duration: Math.round(crAudioBlob.size / 3200) })
           });
-          // Transcribe using existing Deepgram
-          if (dgKey) {
-            setCrTranscribing(true);
-            try {
-              const transcript = await transcribeDeepgram(crAudioBlob, dgKey, "en");
-              await fetch(`${API_URL}/api/reasoning/${saved.id}`, {
-                method: "PUT", headers: authHeaders(),
-                body: JSON.stringify({ audio_transcript: transcript, transcription_status: "completed" })
-              });
-            } catch (e) { console.log("Transcription failed:", e.message); }
-            setCrTranscribing(false);
+          // Save transcript to audio_transcript field too
+          if (crText) {
+            await fetch(`${API_URL}/api/reasoning/${saved.id}`, {
+              method: "PUT", headers: authHeaders(),
+              body: JSON.stringify({ audio_transcript: crText, transcription_status: "completed" })
+            });
           }
         };
         reader.readAsDataURL(crAudioBlob);
@@ -1629,11 +1624,25 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
       const rec = new MediaRecorder(stream, { mimeType: mt });
       crChunksRef.current = [];
       rec.ondataavailable = e => { if (e.data.size > 0) crChunksRef.current.push(e.data); };
-      rec.onstop = () => {
+      rec.onstop = async () => {
         const blob = new Blob(crChunksRef.current, { type: mt });
         setCrAudioBlob(blob);
         setCrAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach(t => t.stop());
+        // Auto-transcribe
+        setCrTranscribing(true);
+        try {
+          let transcript = "";
+          if (dgKey) {
+            transcript = await transcribeDeepgram(blob, dgKey, "en");
+          } else if (whisperKey) {
+            transcript = await transcribeWhisper(blob, whisperKey, "en");
+          }
+          if (transcript) {
+            setCrText(prev => prev ? prev + "\n\n" + transcript : transcript);
+          }
+        } catch (e) { console.log("CR transcription failed:", e.message); }
+        setCrTranscribing(false);
       };
       crRecorderRef.current = rec;
       rec.start(250);
@@ -2209,6 +2218,92 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     </div>
   ) : null;
 
+  // Reusable Clinical Reasoning Panel
+  const ClinicalReasoningPanel = dbPatientId ? (
+    <div className="no-print" style={{ marginTop:12, border:`2px solid ${crSaved?"#059669":"#0ea5e9"}`, borderRadius:10, overflow:"hidden" }}>
+      <div onClick={()=>setCrExpanded(!crExpanded)}
+        style={{ background:crSaved?"linear-gradient(135deg,#059669,#10b981)":"linear-gradient(135deg,#0ea5e9,#0284c7)", color:"white", padding:"8px 12px", cursor:"pointer",
+          display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize:14 }}>🧠</span>
+          <span style={{ fontWeight:700, fontSize:12 }}>Clinical Reasoning</span>
+          {crSaved && <span style={{ fontSize:9, background:"rgba(255,255,255,.25)", padding:"1px 8px", borderRadius:8 }}>✅ Saved</span>}
+        </div>
+        <span style={{ fontSize:11, opacity:.8 }}>{crExpanded ? "▲" : "▼ Capture why"}</span>
+      </div>
+      
+      {crExpanded && (
+        <div style={{ padding:12, background:"#f0f9ff" }}>
+          {/* Condition selector */}
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#0c4a6e", marginBottom:4 }}>Primary Condition</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+              {CONDITIONS_LIST.map(c => (
+                <button key={c} onClick={()=>setCrCondition(c)}
+                  style={{ fontSize:9, padding:"3px 8px", borderRadius:8, border:`1px solid ${crCondition===c?"#0ea5e9":"#e2e8f0"}`,
+                    background:crCondition===c?"#e0f2fe":"white", color:crCondition===c?"#0369a1":"#64748b", cursor:"pointer", fontWeight:600 }}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Reasoning text */}
+          <textarea value={crText} onChange={e=>setCrText(e.target.value)} rows={4}
+            placeholder="Why did you make these treatment decisions? What factors influenced dosage, drug choice, or lifestyle recommendations?"
+            style={{ width:"100%", border:"1px solid #bae6fd", borderRadius:8, padding:10, fontSize:12, marginBottom:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
+          
+          {/* Audio recording */}
+          <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:8 }}>
+            {!crRecording ? (
+              <button onClick={startCrRecording}
+                style={{ display:"flex", alignItems:"center", gap:4, background:"#dc2626", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                🎙️ Record Reasoning
+              </button>
+            ) : (
+              <button onClick={stopCrRecording}
+                style={{ display:"flex", alignItems:"center", gap:4, background:"#1e293b", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer", animation:"pulse 1.5s infinite" }}>
+                ⏹️ Stop Recording
+              </button>
+            )}
+            {crAudioUrl && (
+              <audio src={crAudioUrl} controls style={{ height:30, flex:1 }} />
+            )}
+            {crAudioBlob && !crAudioUrl && <span style={{ fontSize:10, color:"#059669" }}>🎵 Audio ready</span>}
+            {crTranscribing && <span style={{ fontSize:10, color:"#0ea5e9", fontWeight:600 }}>⏳ Transcribing...</span>}
+          </div>
+          
+          {/* Reasoning tags */}
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#0c4a6e", marginBottom:4 }}>Decision Tags</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+              {REASONING_TAGS.map(tag => (
+                <button key={tag} onClick={()=>setCrTags(prev=>prev.includes(tag)?prev.filter(t=>t!==tag):[...prev,tag])}
+                  style={{ fontSize:9, padding:"3px 8px", borderRadius:8, border:`1px solid ${crTags.includes(tag)?"#0ea5e9":"#e2e8f0"}`,
+                    background:crTags.includes(tag)?"#e0f2fe":"white", color:crTags.includes(tag)?"#0369a1":"#64748b", cursor:"pointer", fontWeight:600 }}>
+                  {tag.replace(/_/g," ")}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Save button */}
+          {!crSaved ? (
+            <button onClick={saveClinicalReasoning} disabled={crSaving || (!crText && !crAudioBlob)}
+              style={{ width:"100%", background:crSaving?"#94a3b8":(crText||crAudioBlob)?"#0ea5e9":"#cbd5e1", color:"white", border:"none", padding:"10px",
+                borderRadius:8, fontSize:12, fontWeight:700, cursor:(crSaving||(!crText&&!crAudioBlob))?"not-allowed":"pointer" }}>
+              {crSaving ? "⏳ Saving..." : "🧠 Save Clinical Reasoning"}
+            </button>
+          ) : (
+            <div style={{ textAlign:"center", padding:6, fontSize:11, fontWeight:700, color:"#059669" }}>
+              ✅ Clinical reasoning saved — captured for AI training
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   // Quick Mode: process single dictation into all sections
   const processQuickMode = async (transcript) => {
     setQuickTranscript(transcript);
@@ -2497,6 +2592,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           <div style={{ marginTop:8, fontSize:10, color:"#94a3b8", textAlign:"center" }}>
             Or use individual tabs → for step-by-step entry
           </div>
+          {ClinicalReasoningPanel}
         </div>
       )}
 
@@ -2865,6 +2961,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </div>
             </div>
           )}
+          {ClinicalReasoningPanel}
         </div>
       )}
 
@@ -3229,88 +3326,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           )}
           
           {/* ── CLINICAL REASONING ── */}
-          <div className="no-print" style={{ marginTop:12, border:`2px solid ${crSaved?"#059669":"#0ea5e9"}`, borderRadius:10, overflow:"hidden" }}>
-            <div onClick={()=>setCrExpanded(!crExpanded)}
-              style={{ background:crSaved?"linear-gradient(135deg,#059669,#10b981)":"linear-gradient(135deg,#0ea5e9,#0284c7)", color:"white", padding:"8px 12px", cursor:"pointer",
-                display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <span style={{ fontSize:14 }}>🧠</span>
-                <span style={{ fontWeight:700, fontSize:12 }}>Clinical Reasoning</span>
-                {crSaved && <span style={{ fontSize:9, background:"rgba(255,255,255,.25)", padding:"1px 8px", borderRadius:8 }}>✅ Saved</span>}
-              </div>
-              <span style={{ fontSize:11, opacity:.8 }}>{crExpanded ? "▲" : "▼ Capture why"}</span>
-            </div>
-            
-            {crExpanded && (
-              <div style={{ padding:12, background:"#f0f9ff" }}>
-                {/* Condition selector */}
-                <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#0c4a6e", marginBottom:4 }}>Primary Condition</div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                    {CONDITIONS_LIST.map(c => (
-                      <button key={c} onClick={()=>setCrCondition(c)}
-                        style={{ fontSize:9, padding:"3px 8px", borderRadius:8, border:`1px solid ${crCondition===c?"#0ea5e9":"#e2e8f0"}`,
-                          background:crCondition===c?"#e0f2fe":"white", color:crCondition===c?"#0369a1":"#64748b", cursor:"pointer", fontWeight:600 }}>
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Reasoning text */}
-                <textarea value={crText} onChange={e=>setCrText(e.target.value)} rows={4}
-                  placeholder="Why did you make these treatment decisions? What factors influenced dosage, drug choice, or lifestyle recommendations?"
-                  style={{ width:"100%", border:"1px solid #bae6fd", borderRadius:8, padding:10, fontSize:12, marginBottom:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
-                
-                {/* Audio recording */}
-                <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:8 }}>
-                  {!crRecording ? (
-                    <button onClick={startCrRecording}
-                      style={{ display:"flex", alignItems:"center", gap:4, background:"#dc2626", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
-                      🎙️ Record Reasoning
-                    </button>
-                  ) : (
-                    <button onClick={stopCrRecording}
-                      style={{ display:"flex", alignItems:"center", gap:4, background:"#1e293b", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer", animation:"pulse 1.5s infinite" }}>
-                      ⏹️ Stop Recording
-                    </button>
-                  )}
-                  {crAudioUrl && (
-                    <audio src={crAudioUrl} controls style={{ height:30, flex:1 }} />
-                  )}
-                  {crAudioBlob && !crAudioUrl && <span style={{ fontSize:10, color:"#059669" }}>🎵 Audio ready</span>}
-                  {crTranscribing && <span style={{ fontSize:10, color:"#0ea5e9", fontWeight:600 }}>⏳ Transcribing...</span>}
-                </div>
-                
-                {/* Reasoning tags */}
-                <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#0c4a6e", marginBottom:4 }}>Decision Tags</div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                    {REASONING_TAGS.map(tag => (
-                      <button key={tag} onClick={()=>setCrTags(prev=>prev.includes(tag)?prev.filter(t=>t!==tag):[...prev,tag])}
-                        style={{ fontSize:9, padding:"3px 8px", borderRadius:8, border:`1px solid ${crTags.includes(tag)?"#0ea5e9":"#e2e8f0"}`,
-                          background:crTags.includes(tag)?"#e0f2fe":"white", color:crTags.includes(tag)?"#0369a1":"#64748b", cursor:"pointer", fontWeight:600 }}>
-                        {tag.replace(/_/g," ")}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Save button */}
-                {!crSaved ? (
-                  <button onClick={saveClinicalReasoning} disabled={crSaving || (!crText && !crAudioBlob)}
-                    style={{ width:"100%", background:crSaving?"#94a3b8":(crText||crAudioBlob)?"#0ea5e9":"#cbd5e1", color:"white", border:"none", padding:"10px",
-                      borderRadius:8, fontSize:12, fontWeight:700, cursor:(crSaving||(!crText&&!crAudioBlob))?"not-allowed":"pointer" }}>
-                    {crSaving ? "⏳ Saving..." : "🧠 Save Clinical Reasoning"}
-                  </button>
-                ) : (
-                  <div style={{ textAlign:"center", padding:6, fontSize:11, fontWeight:700, color:"#059669" }}>
-                    ✅ Clinical reasoning saved — captured for AI training
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {ClinicalReasoningPanel}
         </div>
       )}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
