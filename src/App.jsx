@@ -272,7 +272,7 @@ async function callClaude(prompt, content) {
   } catch (e) { return { data: null, error: e.message }; }
 }
 
-// Convert HEIC/HEIF to JPEG — try native canvas first, then heic2any library
+// Convert HEIC/HEIF to JPEG
 async function convertHeicToJpeg(file) {
   // Method 1: Try native browser support (Safari supports HEIC natively)
   try {
@@ -284,27 +284,12 @@ async function convertHeicToJpeg(file) {
     ctx.drawImage(bitmap, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     bitmap.close();
-    return { base64: dataUrl.split(",")[1], mediaType: "image/jpeg" };
+    if (dataUrl && dataUrl.length > 100) return { base64: dataUrl.split(",")[1], mediaType: "image/jpeg" };
   } catch {}
   
-  // Method 2: Load heic2any library
-  if (!window.heic2any) {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
-      s.onload = resolve;
-      s.onerror = () => {
-        // Try alternate CDN
-        const s2 = document.createElement("script");
-        s2.src = "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
-        s2.onload = resolve;
-        s2.onerror = reject;
-        document.head.appendChild(s2);
-      };
-      document.head.appendChild(s);
-    });
-  }
-  const blob = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+  // Method 2: Use heic2any (bundled)
+  const heic2any = (await import("heic2any")).default;
+  const blob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
   const resultBlob = Array.isArray(blob) ? blob[0] : blob;
   return new Promise((resolve) => {
     const reader = new FileReader();
