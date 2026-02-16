@@ -115,8 +115,8 @@ CRITICAL MEDICATION RULES:
    Fill titration based on consultant's instructions. If not specified, use standard protocols.`;
 
 const LAB_PROMPT = `Extract ALL test results. Return ONLY valid JSON, no backticks.
-{"patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null}]}]}
-flag: "H" high, "L" low, null normal.`;
+{"report_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
+flag: "H" high, "L" low, null normal. report_date: extract the date the tests were performed/collected from the report header. ref_range: extract reference range as shown on report (e.g. "4.0-6.5").`;
 
 const IMAGING_PROMPT = `Extract findings from this medical imaging/diagnostic report. Return ONLY valid JSON, no backticks.
 {
@@ -1330,7 +1330,9 @@ export default function GiniScribe() {
     const isLab = file.category === "lab";
     const extractFn = isLab ? extractLab : extractImaging;
     const { data, error } = await extractFn(file.base64, file.mediaType);
-    setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, extracting: false, extracted: true, data, error } : f));
+    // Use report_date from extraction if available, fall back to user-selected date
+    const effectiveDate = data?.report_date || file.date || labPortalDate || new Date().toISOString().split("T")[0];
+    setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, extracting: false, extracted: true, data, error, date: effectiveDate } : f));
     // Auto-save to DB
     if (data && dbPatientId && API_URL) {
       try {
@@ -1339,7 +1341,7 @@ export default function GiniScribe() {
           title: `${file.type} — ${file.fileName}`,
           file_name: file.fileName,
           extracted_data: data,
-          doc_date: file.date || labPortalDate || new Date().toISOString().split("T")[0],
+          doc_date: effectiveDate,
           source: `upload_${currentDoctor?.short_name||"lab"}`,
           notes: isLab ? `${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests extracted` : (data.impression||"")
         };
@@ -1360,13 +1362,20 @@ export default function GiniScribe() {
                 body: JSON.stringify({
                   test_name: test.test_name, result: String(test.result_text||test.result),
                   unit: test.unit||"", flag: test.flag||"N", ref_range: test.ref_range||"",
-                  test_date: file.date || labPortalDate
+                  test_date: effectiveDate
                 })
               });
             }
           }
         }
         setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, saved: true } : f));
+        // Refresh patient data so new labs show up
+        if (dbPatientId) { 
+          try {
+            const pd = await fetch(`${API_URL}/api/patients/${dbPatientId}/full`, { headers: authHeaders() }).then(r=>r.json());
+            setPatientFullData(pd);
+          } catch (err) {}
+        }
       } catch (e) {
         console.log("Lab save failed:", e.message);
         setLabPortalFiles(prev => prev.map(f => f.id === fileId ? { ...f, error: "Save failed: "+e.message } : f));
@@ -1927,14 +1936,25 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   };
 
   const isLabRole = currentDoctor?.role==="lab"||currentDoctor?.role==="nurse"||currentDoctor?.role==="tech";
+  
+  // Detect new lab results since last consultation
+  const newReportsSinceLastVisit = (() => {
+    if (!patientFullData?.lab_results?.length || !patientFullData?.consultations?.length) return [];
+    const lastVisit = patientFullData.consultations.sort((a,b) => new Date(b.visit_date) - new Date(a.visit_date))[0];
+    const lastVisitDate = lastVisit?.visit_date ? new Date(lastVisit.visit_date).toISOString().split("T")[0] : null;
+    if (!lastVisitDate) return [];
+    return patientFullData.lab_results.filter(l => l.test_date && l.test_date > lastVisitDate);
+  })();
+  const hasNewReports = newReportsSinceLastVisit.length > 0;
+  
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
     { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole },
     { id:"patient", label:"👤", show:keySet && !isLabRole },
     { id:"vitals", label:"📋", show:keySet && !isLabRole },
-    { id:"mo", label:"🎤 MO", show:keySet && !isLabRole },
-    { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole },
-    { id:"plan", label:"📄 Plan", show:keySet && !isLabRole },
+    { id:"mo", label:"🎤 MO", show:keySet && !isLabRole, badge:hasNewReports },
+    { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole, badge:hasNewReports },
+    { id:"plan", label:"📄 Plan", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"docs", label:"📎 Docs", show:keySet && !!API_URL && !!dbPatientId },
     { id:"labportal", label:"🔬 Upload", show:keySet && !!API_URL && isLabRole },
     { id:"history", label:"📜 Hx", show:keySet && !!API_URL && !isLabRole },
@@ -1942,6 +1962,25 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"ai", label:"🤖 AI", show:keySet && !isLabRole },
     { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
   ];
+
+  // New reports banner for MO/Con/Plan tabs
+  const NewReportsBanner = hasNewReports ? (
+    <div style={{ background:"linear-gradient(135deg,#fffbeb,#fef3c7)", border:"1px solid #f59e0b", borderRadius:8, padding:"8px 12px", marginBottom:8 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+        <span style={{ fontSize:14 }}>🔔</span>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>
+            {newReportsSinceLastVisit.length} New Lab Results Since Last Visit
+          </div>
+          <div style={{ fontSize:9, color:"#a16207", marginTop:2, maxHeight:40, overflow:"auto" }}>
+            {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].slice(0,8).join(", ")}
+            {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].length>8 && " ..."}
+          </div>
+        </div>
+        <span style={{ fontSize:9, color:"#a16207", fontStyle:"italic" }}>Review in plan</span>
+      </div>
+    </div>
+  ) : null;
 
   // Quick Mode: process single dictation into all sections
   const processQuickMode = async (transcript) => {
@@ -2156,7 +2195,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {/* Tabs */}
       <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
         {TABS.filter(t=>t.show!==false).map(t => (
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"7px 4px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b" }}>{t.label}</button>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"7px 4px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b", position:"relative" }}>
+            {t.label}
+            {t.badge && tab!==t.id && <span style={{ position:"absolute", top:2, right:2, width:7, height:7, borderRadius:"50%", background:"#f59e0b", border:"1px solid white" }} />}
+          </button>
         ))}
       </div>
 
@@ -2415,6 +2457,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {/* ===== MO SUMMARY — RICH DISPLAY ===== */}
       {tab==="mo" && (
         <div>
+          {NewReportsBanner}
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>MO:</label>
             {doctorsList.filter(d=>d.role==="mo").length > 0 ? (
@@ -2535,6 +2578,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {/* ===== CONSULTANT ===== */}
       {tab==="consultant" && (
         <div>
+          {NewReportsBanner}
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Consultant:</label>
             {doctorsList.filter(d=>d.role==="consultant").length > 0 ? (
@@ -2600,6 +2644,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {/* ===== TREATMENT PLAN — NULL-SAFE ===== */}
       {tab==="plan" && (
         <div>
+          {NewReportsBanner}
           <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
             <button onClick={()=>setTab("vitals")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
             <button onClick={()=>setTab("mo")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ MO</button>
