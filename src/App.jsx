@@ -272,6 +272,31 @@ async function callClaude(prompt, content) {
   } catch (e) { return { data: null, error: e.message }; }
 }
 
+// Convert HEIC/HEIF to JPEG using heic2any library (loaded on demand)
+async function convertHeicToJpeg(file) {
+  // Dynamically load heic2any if not loaded
+  if (!window.heic2any) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js";
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  const blob = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+  const resultBlob = Array.isArray(blob) ? blob[0] : blob;
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ base64: reader.result.split(",")[1], mediaType: "image/jpeg" });
+    reader.readAsDataURL(resultBlob);
+  });
+}
+
+function isHeic(file) {
+  return file.name?.toLowerCase().endsWith(".heic") || file.name?.toLowerCase().endsWith(".heif") || file.type === "image/heic" || file.type === "image/heif";
+}
+
 async function extractLab(base64, mediaType) {
   try {
     const block = mediaType==="application/pdf"
@@ -1154,11 +1179,18 @@ export default function GiniScribe() {
     setLoading(p=>({...p,vv:false}));
   };
 
-  const handleLabUpload = e => {
+  const handleLabUpload = async e => {
     const f=e.target.files[0]; if(!f) return;
-    const reader=new FileReader();
-    reader.onload=ev => setLabImageData({ base64:ev.target.result.split(",")[1], mediaType:f.type.startsWith("image/")?f.type:"application/pdf", fileName:f.name });
-    reader.readAsDataURL(f);
+    if (isHeic(f)) {
+      try {
+        const converted = await convertHeicToJpeg(f);
+        setLabImageData({ base64:converted.base64, mediaType:"image/jpeg", fileName:f.name });
+      } catch { alert("HEIC conversion failed. Please convert to JPEG/PNG first."); }
+    } else {
+      const reader=new FileReader();
+      reader.onload=ev => setLabImageData({ base64:ev.target.result.split(",")[1], mediaType:f.type.startsWith("image/")?f.type:"application/pdf", fileName:f.name });
+      reader.readAsDataURL(f);
+    }
   };
 
   const processLab = async () => {
@@ -1179,23 +1211,29 @@ export default function GiniScribe() {
   };
 
   // Imaging upload handler
-  const handleImagingUpload = (e, reportType) => {
+  const handleImagingUpload = async (e, reportType) => {
     const f = e.target.files[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const newFile = {
-        id: Date.now(),
-        type: reportType || "Unknown",
-        base64: ev.target.result.split(",")[1],
-        mediaType: f.type.startsWith("image/") ? f.type : "application/pdf",
-        fileName: f.name,
-        data: null,
-        extracting: false,
-        error: null
+    if (isHeic(f)) {
+      try {
+        const converted = await convertHeicToJpeg(f);
+        setImagingFiles(prev => [...prev, {
+          id: Date.now(), type: reportType || "Unknown",
+          base64: converted.base64, mediaType: "image/jpeg", fileName: f.name,
+          data: null, extracting: false, error: null
+        }]);
+      } catch { alert("HEIC conversion failed. Please convert to JPEG/PNG first."); }
+    } else {
+      const reader = new FileReader();
+      reader.onload = ev => {
+        setImagingFiles(prev => [...prev, {
+          id: Date.now(), type: reportType || "Unknown",
+          base64: ev.target.result.split(",")[1],
+          mediaType: f.type.startsWith("image/") ? f.type : "application/pdf",
+          fileName: f.name, data: null, extracting: false, error: null
+        }]);
       };
-      setImagingFiles(prev => [...prev, newFile]);
-    };
-    reader.readAsDataURL(f);
+      reader.readAsDataURL(f);
+    }
   };
 
   // Extract imaging findings
@@ -1232,22 +1270,37 @@ export default function GiniScribe() {
   const removeImaging = (fileId) => setImagingFiles(prev => prev.filter(f => f.id !== fileId));
 
   // ============ LAB PORTAL FUNCTIONS ============
-  const handleLabPortalUpload = (e, reportType) => {
+  const handleLabPortalUpload = async (e, reportType) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = ev.target.result.split(",")[1];
-      const mediaType = file.type || "image/jpeg";
-      const isLab = ["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].includes(reportType);
-      setLabPortalFiles(prev => [...prev, {
-        id: Date.now(), type: reportType, category: isLab ? "lab" : "imaging",
-        base64, mediaType, fileName: file.name,
-        date: labPortalDate, extracting: false, extracted: false, data: null, error: null, saved: false
-      }]);
-    };
-    reader.readAsDataURL(file);
     e.target.value = "";
+    
+    let base64, mediaType;
+    if (isHeic(file)) {
+      try {
+        const converted = await convertHeicToJpeg(file);
+        base64 = converted.base64;
+        mediaType = "image/jpeg";
+      } catch (err) {
+        alert("HEIC conversion failed. Please convert to JPEG/PNG first.");
+        return;
+      }
+    } else {
+      const result = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = ev => resolve(ev.target.result);
+        reader.readAsDataURL(file);
+      });
+      base64 = result.split(",")[1];
+      mediaType = file.type || "image/jpeg";
+    }
+    
+    const isLab = ["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].includes(reportType);
+    setLabPortalFiles(prev => [...prev, {
+      id: Date.now(), type: reportType, category: isLab ? "lab" : "imaging",
+      base64, mediaType, fileName: file.name,
+      date: labPortalDate, extracting: false, extracted: false, data: null, error: null, saved: false
+    }]);
   };
 
   const processLabPortalFile = async (fileId) => {
@@ -2251,7 +2304,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <div style={{ flex:1 }}>
               <div style={{ fontSize:13, fontWeight:800, color:"#7c3aed", marginBottom:6 }}>🔬 Lab Reports</div>
               <div onClick={()=>labRef.current?.click()} style={{ border:"2px dashed #c4b5fd", borderRadius:8, padding:14, textAlign:"center", cursor:"pointer", background:"#faf5ff" }}>
-                <input ref={labRef} type="file" accept="image/*,.pdf" onChange={handleLabUpload} style={{ display:"none" }} />
+                <input ref={labRef} type="file" accept="image/*,.pdf,.heic,.heif" onChange={handleLabUpload} style={{ display:"none" }} />
                 {labImageData ? <div style={{ color:"#7c3aed", fontWeight:600, fontSize:12 }}>📋 {labImageData.fileName}</div> : <div><div style={{ fontSize:22 }}>📋</div><div style={{ fontWeight:600, color:"#7c3aed", fontSize:12 }}>Upload Report</div></div>}
               </div>
               {labImageData && !labData && <button onClick={processLab} disabled={loading.lab} style={{ marginTop:4, width:"100%", background:loading.lab?"#94a3b8":"#7c3aed", color:"white", border:"none", padding:"7px", borderRadius:6, fontSize:12, fontWeight:700, cursor:loading.lab?"wait":"pointer" }}>{loading.lab?"🔬 Extracting...":"🔬 Extract Labs"}</button>}
@@ -2282,7 +2335,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {["X-Ray","MRI","Ultrasound","DEXA","ECG","Echo","CT","ABI","VPT","Fundus","PFT","NCS"].map(type => (
                 <label key={type} style={{ padding:"5px 10px", background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, fontSize:10, fontWeight:600, color:"#0369a1", cursor:"pointer", display:"inline-block" }}>
                   📎 {type}
-                  <input type="file" accept="image/*,.pdf" onChange={e=>handleImagingUpload(e, type)} style={{ display:"none" }} />
+                  <input type="file" accept="image/*,.pdf,.heic,.heif" onChange={e=>handleImagingUpload(e, type)} style={{ display:"none" }} />
                 </label>
               ))}
             </div>
@@ -3030,7 +3083,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   {["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].map(type => (
                     <label key={type} style={{ padding:"6px 12px", background:"#faf5ff", border:"1px solid #d8b4fe", borderRadius:8, fontSize:11, fontWeight:600, color:"#7c3aed", cursor:"pointer" }}>
                       📎 {type}
-                      <input type="file" accept="image/*,.pdf" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
+                      <input type="file" accept="image/*,.pdf,.heic,.heif" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
                     </label>
                   ))}
                 </div>
@@ -3043,7 +3096,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   {["X-Ray","ECG","ABI","VPT","Ultrasound","DEXA","MRI","CT","Echo","Fundus","PFT","NCS"].map(type => (
                     <label key={type} style={{ padding:"6px 12px", background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, fontSize:11, fontWeight:600, color:"#0369a1", cursor:"pointer" }}>
                       📎 {type}
-                      <input type="file" accept="image/*,.pdf" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
+                      <input type="file" accept="image/*,.pdf,.heic,.heif" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
                     </label>
                   ))}
                 </div>
@@ -3241,7 +3294,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     </select>
                     <label style={{ display:"flex", alignItems:"center", gap:4, padding:"6px 12px", background:"#7c3aed", color:"white", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
                       📷 Upload
-                      <input type="file" accept="image/*,.pdf" style={{ display:"none" }} onChange={e=>handleReportFile(e, document.getElementById("reportType").value)} />
+                      <input type="file" accept="image/*,.pdf,.heic,.heif" style={{ display:"none" }} onChange={e=>handleReportFile(e, document.getElementById("reportType").value)} />
                     </label>
                   </div>
 
