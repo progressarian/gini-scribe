@@ -3777,6 +3777,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     {renderSection("Diabetes & Metabolic", "🩸", "#b91c1c", [
                       { data:outcomesData.hba1c, label:"HbA1c", unit:"%", color:"#dc2626", target:6.5, biomarkerKey:"hba1c" },
                       { data:outcomesData.fpg, label:"Fasting Glucose", unit:" mg/dl", color:"#ea580c", target:100, biomarkerKey:"fpg" },
+                      { data:outcomesData.ppg, label:"Post-Prandial", unit:" mg/dl", color:"#f97316", target:180, biomarkerKey:"ppg" },
                       { data:outcomesData.bp, label:"BP (Systolic)", unit:" mmHg", color:"#7c3aed", target:130, valueKey:"bp_sys", biomarkerKey:"bp" },
                       { data:outcomesData.weight, label:"Weight", unit:" kg", color:"#2563eb", valueKey:"weight", biomarkerKey:"weight" },
                     ])}
@@ -3784,10 +3785,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       { data:outcomesData.ldl, label:"LDL", unit:" mg/dl", color:"#d97706", target:100, biomarkerKey:"ldl" },
                       { data:outcomesData.triglycerides, label:"Triglycerides", unit:" mg/dl", color:"#b45309", target:150, biomarkerKey:"triglycerides" },
                       { data:outcomesData.hdl, label:"HDL", unit:" mg/dl", color:"#059669", target:40, lowerBetter:false, biomarkerKey:"hdl" },
+                      { data:outcomesData.nonhdl, label:"Non-HDL", unit:" mg/dl", color:"#a16207", target:130, biomarkerKey:"nonhdl" },
                       { data:outcomesData.egfr, label:"eGFR", unit:" ml/min", color:"#0d9488", target:60, lowerBetter:false, biomarkerKey:"egfr" },
                       { data:outcomesData.creatinine, label:"Creatinine", unit:" mg/dl", color:"#6366f1", target:1.2, biomarkerKey:"creatinine" },
                       { data:outcomesData.uacr, label:"UACR", unit:" mg/g", color:"#be185d", target:30, biomarkerKey:"uacr" },
                       { data:outcomesData.tsh, label:"TSH", unit:" mIU/L", color:"#0891b2", biomarkerKey:"tsh" },
+                    ])}
+                    {renderSection("Liver Function", "🫁", "#92400e", [
+                      { data:outcomesData.alt, label:"ALT (SGPT)", unit:" U/L", color:"#dc2626", target:40, biomarkerKey:"alt" },
+                      { data:outcomesData.ast, label:"AST (SGOT)", unit:" U/L", color:"#ea580c", target:40, biomarkerKey:"ast" },
+                      { data:outcomesData.alp, label:"ALP", unit:" U/L", color:"#d97706", target:120, biomarkerKey:"alp" },
                     ])}
                     {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) &&
                       renderSection("Body Composition", "🏋️", "#059669", [
@@ -3796,6 +3803,102 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         { data:outcomesData.muscle_mass, label:"Muscle Mass", unit:" kg", color:"#2563eb", lowerBetter:false, valueKey:"muscle_mass", biomarkerKey:"muscle_mass" },
                       ])
                     }
+                    
+                    {/* ── SYMPTOMS TRACKER ── */}
+                    {(() => {
+                      const symptomsByVisit = (outcomesData.visits||[])
+                        .filter(v => {
+                          const syms = [...(v.symptoms||[]), ...(v.chief_complaints||[])].filter(s => 
+                            s && !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints","routine","regular follow-up"].some(x => String(s).toLowerCase().includes(x))
+                          );
+                          return syms.length > 0;
+                        })
+                        .map(v => ({
+                          date: (v.visit_date||"").split("T")[0],
+                          doctor: v.con_name || v.mo_name || "",
+                          symptoms: [...(v.symptoms||[]), ...(v.chief_complaints||[])].filter(s => 
+                            s && !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints","routine","regular follow-up"].some(x => String(s).toLowerCase().includes(x))
+                          )
+                        }));
+                      
+                      if (symptomsByVisit.length === 0) return null;
+                      
+                      // Track unique symptoms across visits
+                      const allSymptoms = {};
+                      symptomsByVisit.forEach(v => {
+                        v.symptoms.forEach(s => {
+                          const key = String(s).toLowerCase().trim();
+                          if (!allSymptoms[key]) allSymptoms[key] = { label: s, visits: [] };
+                          allSymptoms[key].visits.push(v.date);
+                        });
+                      });
+                      
+                      // Sort by frequency
+                      const sortedSymptoms = Object.values(allSymptoms).sort((a,b) => b.visits.length - a.visits.length);
+                      
+                      return (
+                        <div style={{ marginBottom:20 }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                            <span style={{ fontSize:14 }}>🩺</span>
+                            <span style={{ fontSize:12, fontWeight:800, color:"#7c2d12", textTransform:"uppercase", letterSpacing:"0.5px" }}>Symptoms Tracker</span>
+                          </div>
+                          
+                          {/* Symptom frequency cards */}
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+                            {sortedSymptoms.slice(0,12).map((s,i) => {
+                              const freq = s.visits.length;
+                              const isRecurrent = freq >= 3;
+                              const isRecent = s.visits.some(d => {
+                                const diff = (Date.now() - new Date(d).getTime()) / (1000*60*60*24);
+                                return diff < 30;
+                              });
+                              return (
+                                <div key={i} style={{ 
+                                  background: isRecurrent ? "#fef2f2" : isRecent ? "#fffbeb" : "#f8fafc",
+                                  border: `1px solid ${isRecurrent ? "#fecaca" : isRecent ? "#fde68a" : "#e2e8f0"}`,
+                                  borderRadius:8, padding:"6px 10px", minWidth:110 }}>
+                                  <div style={{ fontSize:11, fontWeight:700, color: isRecurrent ? "#dc2626" : "#475569" }}>{s.label}</div>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:4, marginTop:2 }}>
+                                    <span style={{ fontSize:16, fontWeight:800, color: isRecurrent ? "#dc2626" : "#64748b" }}>{freq}x</span>
+                                    <span style={{ fontSize:9, color:"#94a3b8" }}>
+                                      {isRecurrent ? "⚠️ Recurring" : isRecent ? "🔸 Recent" : "Past"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* Visit-by-visit timeline */}
+                          <div style={{ background:"white", borderRadius:10, border:"1px solid #f1f5f9", overflow:"hidden" }}>
+                            {symptomsByVisit.slice(0,8).map((v,i) => {
+                              const s = String(v.date||""); const fd = s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);
+                              const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                              const dateStr = v.date ? `${fd.getDate()} ${months[fd.getMonth()]} ${fd.getFullYear()}` : "";
+                              return (
+                                <div key={i} style={{ padding:"8px 12px", borderBottom: i < symptomsByVisit.length-1 ? "1px solid #f1f5f9" : "none",
+                                  display:"flex", gap:10, alignItems:"flex-start" }}>
+                                  <div style={{ minWidth:75, flexShrink:0 }}>
+                                    <div style={{ fontSize:10, fontWeight:700, color:"#475569" }}>{dateStr}</div>
+                                    {v.doctor && <div style={{ fontSize:8, color:"#94a3b8" }}>{v.doctor}</div>}
+                                  </div>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                                    {v.symptoms.map((s,si) => (
+                                      <span key={si} style={{ fontSize:10, padding:"2px 8px", borderRadius:6,
+                                        background: sortedSymptoms.find(x=>x.label.toLowerCase()===String(s).toLowerCase())?.visits.length>=3 ? "#fef2f2" : "#f8fafc",
+                                        color: sortedSymptoms.find(x=>x.label.toLowerCase()===String(s).toLowerCase())?.visits.length>=3 ? "#dc2626" : "#475569",
+                                        border:"1px solid #e2e8f0" }}>
+                                        {s}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {(() => {
                       const missing = [];
                       if (!outcomesData.hba1c?.length) missing.push("HbA1c");

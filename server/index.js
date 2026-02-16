@@ -599,9 +599,9 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
 
     const labQ = (names) => `SELECT DISTINCT ON (test_date) result, test_date FROM lab_results WHERE patient_id=$1 AND test_name IN (${names.map((_,i)=>`$${i+2}`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
 
-    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
+    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
       pool.query(labQ(['HbA1c']), [id, 'HbA1c']),
-      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG']),
+      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG','Blood Sugar Fasting']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG','Blood Sugar Fasting']),
       pool.query(labQ(['LDL','LDL Cholesterol','LDL-C']), [id, 'LDL','LDL Cholesterol','LDL-C']),
       pool.query(labQ(['Triglycerides','TG','Triglyceride']), [id, 'Triglycerides','TG','Triglyceride']),
       pool.query(labQ(['HDL','HDL Cholesterol','HDL-C']), [id, 'HDL','HDL Cholesterol','HDL-C']),
@@ -609,6 +609,11 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       pool.query(labQ(['eGFR']), [id, 'eGFR']),
       pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin']),
       pool.query(labQ(['TSH']), [id, 'TSH']),
+      pool.query(labQ(['PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose']), [id, 'PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose']),
+      pool.query(labQ(['SGPT','SGPT (ALT)','ALT','SGPT (ALT), Serum','Alanine Aminotransferase']), [id, 'SGPT','SGPT (ALT)','ALT','SGPT (ALT), Serum','Alanine Aminotransferase']),
+      pool.query(labQ(['SGOT','SGOT (AST)','AST','SGOT (AST), Serum','Aspartate Aminotransferase']), [id, 'SGOT','SGOT (AST)','AST','SGOT (AST), Serum','Aspartate Aminotransferase']),
+      pool.query(labQ(['ALP','Alkaline Phosphatase','Alkaline Phosphatase (ALP)','Alkaline Phosphatase (ALP), Serum']), [id, 'ALP','Alkaline Phosphatase','Alkaline Phosphatase (ALP)','Alkaline Phosphatase (ALP), Serum']),
+      pool.query(labQ(['Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']), [id, 'Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) waist, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND waist IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
@@ -643,8 +648,10 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
        FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC`, [id]);
 
     res.json({
-      hba1c: hba1c.rows, fpg: fpg.rows, ldl: ldl.rows, triglycerides: tg.rows,
-      hdl: hdl.rows, creatinine: creat.rows, egfr: egfr.rows, uacr: uacr.rows, tsh: tsh.rows,
+      hba1c: hba1c.rows, fpg: fpg.rows, ppg: ppg.rows,
+      ldl: ldl.rows, triglycerides: tg.rows, hdl: hdl.rows, nonhdl: nonhdl.rows,
+      creatinine: creat.rows, egfr: egfr.rows, uacr: uacr.rows, tsh: tsh.rows,
+      alt: alt.rows, ast: ast.rows, alp: alp.rows,
       bp: bp.rows, weight: weight.rows,
       waist: waist.rows, body_fat: bodyFat.rows, muscle_mass: muscleMass.rows,
       screenings: screenings.rows,
