@@ -3,7 +3,6 @@ import cors from "cors";
 import pg from "pg";
 import path from "path";
 import { fileURLToPath } from "url";
-import sharp from "sharp";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,18 +66,9 @@ app.get("/api/health", async (req, res) => {
   } catch (e) { res.status(500).json({ status: "error", error: e.message, code: e.code }); }
 });
 
-// Convert HEIC/HEIF to JPEG (server-side via sharp)
+// Convert HEIC/HEIF — not yet supported server-side
 app.post("/api/convert-heic", async (req, res) => {
-  try {
-    const { base64 } = req.body;
-    if (!base64) return res.status(400).json({ error: "No file data" });
-    const inputBuf = Buffer.from(base64, "base64");
-    const jpegBuf = await sharp(inputBuf).jpeg({ quality: 85 }).toBuffer();
-    res.json({ base64: jpegBuf.toString("base64"), mediaType: "image/jpeg" });
-  } catch (e) {
-    console.error("HEIC conversion error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
+  res.status(400).json({ error: "HEIC not supported. Please change iPhone settings: Settings → Camera → Formats → Most Compatible" });
 });
 
 // Get all active doctors (for login screen)
