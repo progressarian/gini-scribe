@@ -272,15 +272,35 @@ async function callClaude(prompt, content) {
   } catch (e) { return { data: null, error: e.message }; }
 }
 
-// Convert HEIC/HEIF to JPEG using heic2any library (loaded on demand)
+// Convert HEIC/HEIF to JPEG — try native canvas first, then heic2any library
 async function convertHeicToJpeg(file) {
-  // Dynamically load heic2any if not loaded
+  // Method 1: Try native browser support (Safari supports HEIC natively)
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    bitmap.close();
+    return { base64: dataUrl.split(",")[1], mediaType: "image/jpeg" };
+  } catch {}
+  
+  // Method 2: Load heic2any library
   if (!window.heic2any) {
     await new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js";
+      s.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
       s.onload = resolve;
-      s.onerror = reject;
+      s.onerror = () => {
+        // Try alternate CDN
+        const s2 = document.createElement("script");
+        s2.src = "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
+        s2.onload = resolve;
+        s2.onerror = reject;
+        document.head.appendChild(s2);
+      };
       document.head.appendChild(s);
     });
   }
@@ -1185,7 +1205,9 @@ export default function GiniScribe() {
       try {
         const converted = await convertHeicToJpeg(f);
         setLabImageData({ base64:converted.base64, mediaType:"image/jpeg", fileName:f.name });
-      } catch { alert("HEIC conversion failed. Please convert to JPEG/PNG first."); }
+      } catch {
+        setErrors(p=>({...p,lab:"HEIC conversion failed. Please convert to JPEG/PNG."}));
+      }
     } else {
       const reader=new FileReader();
       reader.onload=ev => setLabImageData({ base64:ev.target.result.split(",")[1], mediaType:f.type.startsWith("image/")?f.type:"application/pdf", fileName:f.name });
@@ -1212,27 +1234,36 @@ export default function GiniScribe() {
 
   // Imaging upload handler
   const handleImagingUpload = async (e, reportType) => {
-    const f = e.target.files[0]; if (!f) return;
-    if (isHeic(f)) {
-      try {
-        const converted = await convertHeicToJpeg(f);
+    const files = Array.from(e.target.files || []); if (!files.length) return;
+    for (const f of files) {
+      if (isHeic(f)) {
+        try {
+          const converted = await convertHeicToJpeg(f);
+          setImagingFiles(prev => [...prev, {
+            id: Date.now() + Math.random(), type: reportType || "Unknown",
+            base64: converted.base64, mediaType: "image/jpeg", fileName: f.name,
+            data: null, extracting: false, error: null
+          }]);
+        } catch {
+          setImagingFiles(prev => [...prev, {
+            id: Date.now() + Math.random(), type: reportType || "Unknown",
+            base64: null, mediaType: null, fileName: f.name,
+            data: null, extracting: false, error: "HEIC conversion failed"
+          }]);
+        }
+      } else {
+        const result = await new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = ev => resolve(ev.target.result);
+          reader.readAsDataURL(f);
+        });
         setImagingFiles(prev => [...prev, {
-          id: Date.now(), type: reportType || "Unknown",
-          base64: converted.base64, mediaType: "image/jpeg", fileName: f.name,
-          data: null, extracting: false, error: null
-        }]);
-      } catch { alert("HEIC conversion failed. Please convert to JPEG/PNG first."); }
-    } else {
-      const reader = new FileReader();
-      reader.onload = ev => {
-        setImagingFiles(prev => [...prev, {
-          id: Date.now(), type: reportType || "Unknown",
-          base64: ev.target.result.split(",")[1],
+          id: Date.now() + Math.random(), type: reportType || "Unknown",
+          base64: result.split(",")[1],
           mediaType: f.type.startsWith("image/") ? f.type : "application/pdf",
           fileName: f.name, data: null, extracting: false, error: null
         }]);
-      };
-      reader.readAsDataURL(f);
+      }
     }
   };
 
@@ -1271,36 +1302,43 @@ export default function GiniScribe() {
 
   // ============ LAB PORTAL FUNCTIONS ============
   const handleLabPortalUpload = async (e, reportType) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     e.target.value = "";
     
-    let base64, mediaType;
-    if (isHeic(file)) {
-      try {
-        const converted = await convertHeicToJpeg(file);
-        base64 = converted.base64;
-        mediaType = "image/jpeg";
-      } catch (err) {
-        alert("HEIC conversion failed. Please convert to JPEG/PNG first.");
-        return;
-      }
-    } else {
-      const result = await new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = ev => resolve(ev.target.result);
-        reader.readAsDataURL(file);
-      });
-      base64 = result.split(",")[1];
-      mediaType = file.type || "image/jpeg";
-    }
-    
     const isLab = ["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].includes(reportType);
-    setLabPortalFiles(prev => [...prev, {
-      id: Date.now(), type: reportType, category: isLab ? "lab" : "imaging",
-      base64, mediaType, fileName: file.name,
-      date: labPortalDate, extracting: false, extracted: false, data: null, error: null, saved: false
-    }]);
+    
+    for (const file of files) {
+      let base64, mediaType;
+      if (isHeic(file)) {
+        try {
+          const converted = await convertHeicToJpeg(file);
+          base64 = converted.base64;
+          mediaType = "image/jpeg";
+        } catch {
+          setLabPortalFiles(prev => [...prev, {
+            id: Date.now() + Math.random(), type: reportType, category: isLab ? "lab" : "imaging",
+            base64: null, mediaType: null, fileName: file.name,
+            date: labPortalDate, extracting: false, extracted: true, data: null, error: "HEIC conversion failed", saved: false
+          }]);
+          continue;
+        }
+      } else {
+        const result = await new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = ev => resolve(ev.target.result);
+          reader.readAsDataURL(file);
+        });
+        base64 = result.split(",")[1];
+        mediaType = file.type || "image/jpeg";
+      }
+      
+      setLabPortalFiles(prev => [...prev, {
+        id: Date.now() + Math.random(), type: reportType, category: isLab ? "lab" : "imaging",
+        base64, mediaType, fileName: file.name,
+        date: labPortalDate, extracting: false, extracted: false, data: null, error: null, saved: false
+      }]);
+    }
   };
 
   const processLabPortalFile = async (fileId) => {
@@ -2335,7 +2373,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {["X-Ray","MRI","Ultrasound","DEXA","ECG","Echo","CT","ABI","VPT","Fundus","PFT","NCS"].map(type => (
                 <label key={type} style={{ padding:"5px 10px", background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, fontSize:10, fontWeight:600, color:"#0369a1", cursor:"pointer", display:"inline-block" }}>
                   📎 {type}
-                  <input type="file" accept="image/*,.pdf,.heic,.heif" onChange={e=>handleImagingUpload(e, type)} style={{ display:"none" }} />
+                  <input type="file" accept="image/*,.pdf,.heic,.heif" multiple onChange={e=>handleImagingUpload(e, type)} style={{ display:"none" }} />
                 </label>
               ))}
             </div>
@@ -3083,7 +3121,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   {["Blood Test","Thyroid Panel","Lipid Profile","Kidney Function","Liver Function","HbA1c","CBC","Urine","Other Lab"].map(type => (
                     <label key={type} style={{ padding:"6px 12px", background:"#faf5ff", border:"1px solid #d8b4fe", borderRadius:8, fontSize:11, fontWeight:600, color:"#7c3aed", cursor:"pointer" }}>
                       📎 {type}
-                      <input type="file" accept="image/*,.pdf,.heic,.heif" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
+                      <input type="file" accept="image/*,.pdf,.heic,.heif" multiple onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
                     </label>
                   ))}
                 </div>
@@ -3096,7 +3134,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   {["X-Ray","ECG","ABI","VPT","Ultrasound","DEXA","MRI","CT","Echo","Fundus","PFT","NCS"].map(type => (
                     <label key={type} style={{ padding:"6px 12px", background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, fontSize:11, fontWeight:600, color:"#0369a1", cursor:"pointer" }}>
                       📎 {type}
-                      <input type="file" accept="image/*,.pdf,.heic,.heif" onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
+                      <input type="file" accept="image/*,.pdf,.heic,.heif" multiple onChange={e=>handleLabPortalUpload(e,type)} style={{ display:"none" }} />
                     </label>
                   ))}
                 </div>
@@ -3105,8 +3143,19 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {/* Uploaded files */}
               {labPortalFiles.length > 0 && (
                 <div>
-                  <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:6, borderTop:"1px solid #e2e8f0", paddingTop:8 }}>
-                    UPLOADED ({labPortalFiles.length})
+                  <div style={{ display:"flex", alignItems:"center", gap:8, borderTop:"1px solid #e2e8f0", paddingTop:8, marginBottom:6 }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:"#475569" }}>UPLOADED ({labPortalFiles.length})</div>
+                    <div style={{ flex:1 }} />
+                    {labPortalFiles.filter(f=>!f.extracted && !f.extracting && f.base64).length > 1 && (
+                      <button onClick={async()=>{
+                        for (const f of labPortalFiles.filter(f=>!f.extracted && !f.extracting && f.base64)) {
+                          await processLabPortalFile(f.id);
+                        }
+                      }}
+                        style={{ background:"linear-gradient(135deg,#7c3aed,#2563eb)", color:"white", border:"none", padding:"4px 14px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                        🔬 Extract All ({labPortalFiles.filter(f=>!f.extracted && !f.extracting && f.base64).length})
+                      </button>
+                    )}
                   </div>
                   {labPortalFiles.map(file => (
                     <div key={file.id} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:10, marginBottom:6,
