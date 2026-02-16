@@ -3,6 +3,7 @@ import cors from "cors";
 import pg from "pg";
 import path from "path";
 import { fileURLToPath } from "url";
+import sharp from "sharp";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +65,20 @@ app.get("/api/health", async (req, res) => {
     const result = await pool.query("SELECT NOW() as time, current_database() as db");
     res.json({ status: "ok", ...result.rows[0], db_url_prefix: (process.env.DATABASE_URL||"").slice(0,50)+"..." });
   } catch (e) { res.status(500).json({ status: "error", error: e.message, code: e.code }); }
+});
+
+// Convert HEIC/HEIF to JPEG (server-side via sharp)
+app.post("/api/convert-heic", async (req, res) => {
+  try {
+    const { base64 } = req.body;
+    if (!base64) return res.status(400).json({ error: "No file data" });
+    const inputBuf = Buffer.from(base64, "base64");
+    const jpegBuf = await sharp(inputBuf).jpeg({ quality: 85 }).toBuffer();
+    res.json({ base64: jpegBuf.toString("base64"), mediaType: "image/jpeg" });
+  } catch (e) {
+    console.error("HEIC conversion error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Get all active doctors (for login screen)

@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
-import heic2any from "heic2any";
 
 // API base URL — same origin in production (API + frontend on same server)
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -273,31 +272,27 @@ async function callClaude(prompt, content) {
   } catch (e) { return { data: null, error: e.message }; }
 }
 
-// Convert HEIC/HEIF to JPEG
+// Convert HEIC/HEIF to JPEG via server (sharp)
 async function convertHeicToJpeg(file) {
-  // Method 1: Try native browser support (Safari supports HEIC natively)
-  try {
-    const bitmap = await createImageBitmap(file);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-    bitmap.close();
-    if (dataUrl && dataUrl.length > 100) return { base64: dataUrl.split(",")[1], mediaType: "image/jpeg" };
-  } catch (e) { console.log("Native HEIC failed:", e.message); }
-  
-  // Method 2: Use heic2any (bundled via npm)
-  console.log("Converting HEIC with heic2any, file size:", file.size);
-  const blob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
-  const resultBlob = Array.isArray(blob) ? blob[0] : blob;
-  console.log("HEIC converted, blob size:", resultBlob.size);
-  return new Promise((resolve) => {
+  // Read file as base64
+  const raw = await new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onload = () => resolve({ base64: reader.result.split(",")[1], mediaType: "image/jpeg" });
-    reader.readAsDataURL(resultBlob);
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.readAsDataURL(file);
   });
+  
+  // Send to server for conversion
+  const API = import.meta.env.VITE_API_URL || window.location.origin;
+  const resp = await fetch(`${API}/api/convert-heic`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base64: raw })
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || "Server conversion failed");
+  }
+  return await resp.json();
 }
 
 function isHeic(file) {
