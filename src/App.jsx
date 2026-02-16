@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
+import heic2any from "heic2any";
 
 // API base URL — same origin in production (API + frontend on same server)
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -264,7 +265,7 @@ async function callClaude(prompt, content) {
           try {
             const attempt = balance(clean.slice(0, end).replace(/,\s*$/,""));
             return { data: JSON.parse(attempt), error: null };
-          } catch {}
+          } catch (err) {}
         }
         return { data: null, error: `Parse failed. Try shorter input.` };
       }
@@ -285,12 +286,13 @@ async function convertHeicToJpeg(file) {
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     bitmap.close();
     if (dataUrl && dataUrl.length > 100) return { base64: dataUrl.split(",")[1], mediaType: "image/jpeg" };
-  } catch {}
+  } catch (e) { console.log("Native HEIC failed:", e.message); }
   
-  // Method 2: Use heic2any (bundled)
-  const heic2any = (await import("heic2any")).default;
+  // Method 2: Use heic2any (bundled via npm)
+  console.log("Converting HEIC with heic2any, file size:", file.size);
   const blob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
   const resultBlob = Array.isArray(blob) ? blob[0] : blob;
+  console.log("HEIC converted, blob size:", resultBlob.size);
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => resolve({ base64: reader.result.split(",")[1], mediaType: "image/jpeg" });
@@ -390,7 +392,7 @@ async function cleanupTranscript(text) {
     const d = await r.json();
     const cleaned = (d.content || []).map(c => c.text || "").join("").trim();
     return cleaned || text;
-  } catch { return text; }
+  } catch (err) { return text; }
 }
 
 function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) {
@@ -486,7 +488,7 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
             const fullText = [...finalsRef.current, interimRef.current].filter(Boolean).join(" ");
             setLiveText(fullText);
           }
-        } catch {}
+        } catch (err) {}
       };
 
       ws.onerror = () => {
@@ -528,8 +530,8 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
   };
 
   const cleanupStreaming = () => {
-    if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} }
-    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch (err) {} }
+    if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch (err) {} }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
   };
 
@@ -559,7 +561,7 @@ function AudioInput({ onTranscript, dgKey, whisperKey, label, color, compact }) 
         setMode("recording"); setDuration(0);
         tmr.current = setInterval(() => setDuration(d => d + 1), 1000);
       }
-    } catch { setError("Mic access denied. Use Upload or paste text."); }
+    } catch (err) { setError("Mic access denied. Use Upload or paste text."); }
   };
 
   const startRec = () => {
@@ -805,7 +807,7 @@ export default function GiniScribe() {
   const aiChatRef = useRef(null);
   // Auth
   const [authToken, setAuthToken] = useState(() => localStorage.getItem("gini_auth_token") || "");
-  const [currentDoctor, setCurrentDoctor] = useState(() => { try { return JSON.parse(localStorage.getItem("gini_doctor")||"null"); } catch { return null; }});
+  const [currentDoctor, setCurrentDoctor] = useState(() => { try { return JSON.parse(localStorage.getItem("gini_doctor")||"null"); } catch (err) { return null; }});
   const [doctorsList, setDoctorsList] = useState([]);
   const [loginPin, setLoginPin] = useState("");
   const [loginDoctorId, setLoginDoctorId] = useState("");
@@ -878,7 +880,7 @@ export default function GiniScribe() {
           const draft = { patient, vitals, moData, conData, moTranscript, conTranscript, quickTranscript, moName, conName, timestamp: Date.now() };
           localStorage.setItem("gini_draft", JSON.stringify(draft));
           setDraftSaved("💾 " + new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}));
-        } catch {}
+        } catch (err) {}
       }
     }, 60000);
     return () => clearInterval(interval);
@@ -891,7 +893,7 @@ export default function GiniScribe() {
       if (draft && draft.timestamp > Date.now() - 3600000) { // within 1 hour
         setDraftSaved("📋 Draft available from " + new Date(draft.timestamp).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}));
       }
-    } catch {}
+    } catch (err) {}
   }, []);
 
   // localStorage: load saved patients
@@ -899,7 +901,7 @@ export default function GiniScribe() {
     try {
       const saved = JSON.parse(localStorage.getItem("gini_patients") || "[]");
       setSavedPatients(saved);
-    } catch {}
+    } catch (err) {}
   }, []);
 
   // Save current consultation to database + localStorage
@@ -1039,7 +1041,7 @@ export default function GiniScribe() {
           setHistoryList(full.consultations || []);
           fetchOutcomes(match.id);
         }
-      } catch {}
+      } catch (err) {}
     }
   };
 
@@ -1055,7 +1057,7 @@ export default function GiniScribe() {
       const resp = await fetch(`${API_URL}/api/patients?${params}`);
       const data = await resp.json();
       setDbPatients(Array.isArray(data) ? data : []);
-    } catch { setDbPatients([]); }
+    } catch (err) { setDbPatients([]); }
   };
   const openSearch = async () => {
     const next = !showSearch;
@@ -1071,7 +1073,7 @@ export default function GiniScribe() {
           ]);
           setSearchDoctorsList(await dResp.json());
           setSearchStats(await sResp.json());
-        } catch {}
+        } catch (err) {}
       }
     }
   };
@@ -1111,7 +1113,7 @@ export default function GiniScribe() {
         }
         // Load outcomes
         fetchOutcomes(dbRecord.id);
-      } catch {}
+      } catch (err) {}
     }
     setShowSearch(false);
     setTab("patient");
@@ -1147,7 +1149,7 @@ export default function GiniScribe() {
       if (dg && dg.length > 10) setDgKey(dg);
       if (wh && wh.length > 10) setWhisperKey(wh);
       if ((dg && dg.length > 10) || (wh && wh.length > 10)) { setKeySet(true); setTab("patient"); }
-    } catch {}
+    } catch (err) {}
   }, []);
 
   const updatePatient = (k, v) => {
@@ -1190,8 +1192,8 @@ export default function GiniScribe() {
       try {
         const converted = await convertHeicToJpeg(f);
         setLabImageData({ base64:converted.base64, mediaType:"image/jpeg", fileName:f.name });
-      } catch {
-        setErrors(p=>({...p,lab:"HEIC conversion failed. Please convert to JPEG/PNG."}));
+      } catch (err) {
+        setErrors(p=>({...p,lab:"HEIC: " + (err?.message || "conversion failed")}));
       }
     } else {
       const reader=new FileReader();
@@ -1229,11 +1231,11 @@ export default function GiniScribe() {
             base64: converted.base64, mediaType: "image/jpeg", fileName: f.name,
             data: null, extracting: false, error: null
           }]);
-        } catch {
+        } catch (err) {
           setImagingFiles(prev => [...prev, {
             id: Date.now() + Math.random(), type: reportType || "Unknown",
             base64: null, mediaType: null, fileName: f.name,
-            data: null, extracting: false, error: "HEIC conversion failed"
+            data: null, extracting: false, error: "HEIC: " + (err?.message || "conversion failed")
           }]);
         }
       } else {
@@ -1300,11 +1302,11 @@ export default function GiniScribe() {
           const converted = await convertHeicToJpeg(file);
           base64 = converted.base64;
           mediaType = "image/jpeg";
-        } catch {
+        } catch (err) {
           setLabPortalFiles(prev => [...prev, {
             id: Date.now() + Math.random(), type: reportType, category: isLab ? "lab" : "imaging",
             base64: null, mediaType: null, fileName: file.name,
-            date: labPortalDate, extracting: false, extracted: true, data: null, error: "HEIC conversion failed", saved: false
+            date: labPortalDate, extracting: false, extracted: true, data: null, error: "HEIC: " + (err?.message || "conversion failed"), saved: false
           }]);
           continue;
         }
@@ -1800,11 +1802,11 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       const resp = await fetch(url);
       const data = await resp.json();
       setOutcomesData(data);
-    } catch {}
+    } catch (err) {}
     setOutcomesLoading(false);
   };
 
-  const fmtDate = (d) => { try { const s=String(d); const dt=s.length===10?new Date(s+"T12:00:00"):new Date(s); return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}); } catch { return ""; } };
+  const fmtDate = (d) => { try { const s=String(d); const dt=s.length===10?new Date(s+"T12:00:00"):new Date(s); return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}); } catch (err) { return ""; } };
 
   // Sparkline with hover tooltips and modern design
   const Sparkline = ({ data, width=200, height=55, color="#2563eb", label, unit, target, lowerBetter, valueKey }) => {
