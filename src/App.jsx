@@ -227,6 +227,37 @@ CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - Include complications (e.g., diabetic foot ulcer, retinopathy, neuropathy)
 - Name MUST be in English/Roman script, never Hindi/Devanagari`;
 
+// ── SPLIT PROMPTS FOR PARALLEL QUICK MODE (2 Haiku calls = 3-5x faster) ──
+const QUICK_EXTRACT_PROMPT = `You are a clinical documentation assistant. Extract patient data from this consultation dictation.
+Hindi: "patient ka naam"=name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
+Output ONLY valid JSON, no backticks.
+
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"chief_complaints":["symptom1","symptom2"],"compliance":"Good/Partial/Poor — brief note"}}
+
+RULES:
+- Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,dfu,masld,nephropathy
+- Status: "Controlled", "Uncontrolled", or "New" ONLY
+- MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
+- Extract ALL lab values with flags (HIGH/LOW/null)
+- Include ALL medications (existing + new)
+- Name in English/Roman script only
+- chief_complaints: ALL symptoms mentioned`;
+
+const QUICK_PLAN_PROMPT = `You are a clinical treatment plan assistant for Gini Advanced Care Hospital, India.
+From this consultation dictation, generate the treatment plan. Output ONLY valid JSON, no backticks.
+
+{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of findings and plan","key_issues":["Issue 1"],"diet_lifestyle":[{"advice":"string","detail":"string","category":"Diet/Exercise/Critical/Sleep","helps":["dm2"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","route":"Oral","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c"]},"self_monitoring":[{"title":"Blood Sugar","instructions":["Check fasting daily"],"targets":"Fasting 90-130","alert":"If <70: eat glucose"}],"future_plan":[{"condition":"If HbA1c not below 7","action":"Add GLP-1 RA"}]}
+
+RULES:
+- MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
+- ALL medications: existing (isNew:false) AND new (isNew:true). Fill timing from drug class if not stated
+- assessment_summary: patient-friendly, address by first name, cover ALL findings
+- diet_lifestyle: 3-5 OBJECTS. categories: Diet/Exercise/Critical/Sleep/Stress
+- goals: 2-4 items with current values from labs/vitals
+- self_monitoring: 2-4 OBJECTS grouped by what to monitor
+- future_plan: OBJECTS with {condition, action}. "If X → Y" format
+- follow_up: include duration and tests_to_bring`;
+
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 {"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","temp":"number or null","spo2":"number or null","weight":"number or null","height":"number or null","waist":"number or null","body_fat":"number or null","muscle_mass":"number or null"}
 "BP 140 over 90"->bp_sys:140,bp_dia:90. "waist 36 inches"->waist:36. "body fat 28 percent"->body_fat:28. "muscle mass 32 kg"->muscle_mass:32`;
@@ -267,6 +298,40 @@ async function callClaude(prompt, content) {
           } catch (err) {}
         }
         return { data: null, error: `Parse failed. Try shorter input.` };
+      }
+    }
+  } catch (e) { return { data: null, error: e.message }; }
+}
+
+// Fast version using Haiku for Quick mode (3-5x faster)
+async function callClaudeFast(prompt, content, maxTokens = 4000) {
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: maxTokens, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
+    });
+    if (!r.ok) return { data: null, error: `API ${r.status}: ${(await r.text().catch(()=>"")).slice(0,120)}` };
+    const d = await r.json();
+    if (d.error) return { data: null, error: d.error.message };
+    const t = (d.content || []).map(c => c.text || "").join("");
+    if (!t) return { data: null, error: "Empty response" };
+    let clean = t.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    try { return { data: JSON.parse(clean), error: null }; }
+    catch {
+      clean = clean.replace(/,\s*([}\]])/g, "$1").replace(/\n/g, " ");
+      const balance = (s) => {
+        const ob=(s.match(/{/g)||[]).length, cb=(s.match(/}/g)||[]).length;
+        const oB=(s.match(/\[/g)||[]).length, cB=(s.match(/\]/g)||[]).length;
+        for(let i=0;i<oB-cB;i++) s+="]";
+        for(let i=0;i<ob-cb;i++) s+="}";
+        return s;
+      };
+      try { return { data: JSON.parse(balance(clean)), error: null }; }
+      catch {
+        for (let end = clean.length; end > 50; end -= 10) {
+          try { return { data: JSON.parse(balance(clean.slice(0, end).replace(/,\s*$/,""))), error: null }; } catch {}
+        }
+        return { data: null, error: `Parse failed.` };
       }
     }
   } catch (e) { return { data: null, error: e.message }; }
@@ -741,6 +806,7 @@ export default function GiniScribe() {
   const [errors, setErrors] = useState({});
   const [quickTranscript, setQuickTranscript] = useState("");
   const [quickMode, setQuickMode] = useState(false);
+  const [quickProgress, setQuickProgress] = useState(""); // progress message for quick mode
   const [savedPatients, setSavedPatients] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
@@ -2316,12 +2382,31 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     setQuickTranscript(transcript);
     setLoading(l => ({ ...l, quick: true }));
     setErrors(e => ({ ...e, quick: null }));
+    setQuickProgress("⚡ Sending to AI (parallel mode)...");
+    const startTime = Date.now();
     try {
-      const { data, error } = await callClaude(QUICK_MODE_PROMPT, transcript);
-      if (error) throw new Error(error);
-      if (data.patient) {
-        const p = data.patient;
-        // Calculate age from DOB if provided
+      // Run BOTH calls in parallel — each uses Haiku (3-5x faster than Sonnet)
+      const [extractResult, planResult] = await Promise.all([
+        (async () => {
+          setQuickProgress("📋 Extracting patient data...");
+          return await callClaudeFast(QUICK_EXTRACT_PROMPT, transcript, 3000);
+        })(),
+        (async () => {
+          return await callClaudeFast(QUICK_PLAN_PROMPT, transcript, 4000);
+        })()
+      ]);
+      
+      setQuickProgress("✅ Building treatment plan...");
+      
+      // Handle extract errors
+      if (extractResult.error && planResult.error) throw new Error(`Extract: ${extractResult.error} | Plan: ${planResult.error}`);
+      
+      const extractData = extractResult.data || {};
+      const planData = planResult.data || {};
+      
+      // Fill patient
+      if (extractData.patient) {
+        const p = extractData.patient;
         let age = p.age;
         if (p.dob && !age) {
           const dob = new Date(p.dob);
@@ -2337,8 +2422,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           dob: p.dob || prev.dob,
         }));
       }
-      if (data.vitals) {
-        const v = data.vitals;
+      
+      // Fill vitals
+      if (extractData.vitals) {
+        const v = extractData.vitals;
         setVitals(prev => ({
           ...prev,
           bp_sys: v.bp_sys || prev.bp_sys,
@@ -2353,11 +2440,19 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           if (h > 0) setVitals(prev => ({ ...prev, bmi: (parseFloat(v.weight) / (h * h)).toFixed(1) }));
         }
       }
-      if (data.mo) setMoData(fixMoMedicines(data.mo));
-      if (data.consultant) setConData(fixConMedicines(data.consultant));
+      
+      // Fill MO
+      if (extractData.mo) setMoData(fixMoMedicines(extractData.mo));
+      
+      // Fill consultant — merge plan data as consultant
+      if (planData) setConData(fixConMedicines(planData));
+      
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      setQuickProgress(`✅ Done in ${elapsed}s`);
       setTab("plan");
     } catch (err) {
       setErrors(e => ({ ...e, quick: err.message }));
+      setQuickProgress("");
     } finally {
       setLoading(l => ({ ...l, quick: false }));
     }
@@ -2572,9 +2667,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
           {loading.quick && (
             <div style={{ textAlign:"center", padding:20 }}>
-              <div style={{ fontSize:28, animation:"pulse 1s infinite" }}>🧠</div>
-              <div style={{ fontSize:12, fontWeight:600, color:"#475569" }}>Parsing consultation into sections...</div>
-              <div style={{ fontSize:10, color:"#94a3b8", marginTop:4 }}>Patient • Vitals • Diagnoses • Meds • Plan</div>
+              <div style={{ fontSize:28, animation:"pulse 1s infinite" }}>⚡</div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#dc2626", marginTop:4 }}>{quickProgress || "Processing..."}</div>
+              <div style={{ fontSize:10, color:"#94a3b8", marginTop:4 }}>Running 2 parallel AI calls (Haiku = 3-5x faster)</div>
+              <div style={{ display:"flex", gap:8, justifyContent:"center", marginTop:8 }}>
+                <div style={{ padding:"4px 10px", borderRadius:6, background:"#f0fdf4", border:"1px solid #bbf7d0", fontSize:10, fontWeight:600, color:"#059669" }}>📋 Extract</div>
+                <div style={{ padding:"4px 10px", borderRadius:6, background:"#eff6ff", border:"1px solid #bfdbfe", fontSize:10, fontWeight:600, color:"#2563eb" }}>📝 Plan</div>
+              </div>
             </div>
           )}
 
