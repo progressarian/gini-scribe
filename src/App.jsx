@@ -1573,24 +1573,31 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
   const REASONING_TAGS = ["dose_adjustment","new_medication","medication_switch","lifestyle_change","referral","investigation_ordered","de-escalation","protocol_deviation"];
 
   const saveClinicalReasoning = async () => {
-    if (!API_URL || !dbPatientId) return;
+    if (!API_URL) return;
     const conId = patientFullData?.consultations?.[0]?.id;
-    if (!conId) return alert("No consultation found — save plan first");
     setCrSaving(true);
     try {
       const body = {
-        patient_id: dbPatientId,
+        patient_id: dbPatientId || null,
         doctor_id: currentDoctor?.id || null,
         doctor_name: conName || currentDoctor?.name || "",
         reasoning_text: crText,
         primary_condition: crCondition,
         reasoning_tags: crTags,
-        capture_method: crAudioBlob ? (crText ? "both" : "audio") : "text"
+        capture_method: crAudioBlob ? (crText ? "both" : "audio") : "text",
+        patient_context: !dbPatientId ? `Patient: ${patient.name||"?"}, ${patient.age||"?"}Y/${patient.sex||"?"}, Phone: ${patient.phone||"?"}` : undefined
       };
-      const resp = await fetch(`${API_URL}/api/consultations/${conId}/reasoning`, {
+      
+      // Use consultation-linked endpoint if available, otherwise standalone
+      const url = conId 
+        ? `${API_URL}/api/consultations/${conId}/reasoning`
+        : `${API_URL}/api/reasoning`;
+      
+      const resp = await fetch(url, {
         method: "POST", headers: authHeaders(), body: JSON.stringify(body)
       });
       const saved = await resp.json();
+      if (saved.error) { alert("Save failed: " + saved.error); setCrSaving(false); return; }
       setCrSaved(saved);
       
       // Upload audio if exists (transcript already in crText from auto-transcription)
@@ -2219,7 +2226,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   ) : null;
 
   // Reusable Clinical Reasoning Panel
-  const ClinicalReasoningPanel = dbPatientId ? (
+  const ClinicalReasoningPanel = (
     <div className="no-print" style={{ marginTop:12, border:`2px solid ${crSaved?"#059669":"#0ea5e9"}`, borderRadius:10, overflow:"hidden" }}>
       <div onClick={()=>setCrExpanded(!crExpanded)}
         style={{ background:crSaved?"linear-gradient(135deg,#059669,#10b981)":"linear-gradient(135deg,#0ea5e9,#0284c7)", color:"white", padding:"8px 12px", cursor:"pointer",
@@ -2292,17 +2299,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <button onClick={saveClinicalReasoning} disabled={crSaving || (!crText && !crAudioBlob)}
               style={{ width:"100%", background:crSaving?"#94a3b8":(crText||crAudioBlob)?"#0ea5e9":"#cbd5e1", color:"white", border:"none", padding:"10px",
                 borderRadius:8, fontSize:12, fontWeight:700, cursor:(crSaving||(!crText&&!crAudioBlob))?"not-allowed":"pointer" }}>
-              {crSaving ? "⏳ Saving..." : "🧠 Save Clinical Reasoning"}
+              {crSaving ? "⏳ Saving..." : dbPatientId ? "🧠 Save Clinical Reasoning" : "🧠 Save Reasoning (standalone)"}
             </button>
           ) : (
             <div style={{ textAlign:"center", padding:6, fontSize:11, fontWeight:700, color:"#059669" }}>
-              ✅ Clinical reasoning saved — captured for AI training
+              ✅ Clinical reasoning saved{!dbPatientId ? " (standalone — will link when patient is created)" : " — captured for AI training"}
             </div>
           )}
         </div>
       )}
     </div>
-  ) : null;
+  );
 
   // Quick Mode: process single dictation into all sections
   const processQuickMode = async (transcript) => {

@@ -1040,6 +1040,19 @@ app.post("/api/consultations/:id/reasoning", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Save reasoning standalone (no consultation yet)
+app.post("/api/reasoning", async (req, res) => {
+  try {
+    const { patient_id, doctor_id, doctor_name, reasoning_text, primary_condition, secondary_conditions, reasoning_tags, capture_method, patient_context } = req.body;
+    const r = await pool.query(
+      `INSERT INTO clinical_reasoning (consultation_id, patient_id, doctor_id, doctor_name, reasoning_text, primary_condition, secondary_conditions, reasoning_tags, capture_method)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [null, patient_id||null, doctor_id||null, doctor_name, reasoning_text + (patient_context ? "\n\n--- Context ---\n" + patient_context : ""), primary_condition, secondary_conditions||[], reasoning_tags||[], capture_method||'text']
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Update clinical reasoning
 app.put("/api/reasoning/:id", async (req, res) => {
   try {
