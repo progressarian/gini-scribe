@@ -1883,6 +1883,82 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
   const removeFuture = (idx) => setPlanEdits(p => ({ ...p, _removedFuture: [...(p._removedFuture||[]), idx] }));
   const resetPlanEdits = () => { setPlanHidden(new Set()); setPlanEdits({}); };
 
+  // Edit a specific field of a medication inline
+  const editMedField = (medObj, field, value) => {
+    // Find in conData.medications_confirmed or moData.previous_medications
+    const conMeds = conData?.medications_confirmed || [];
+    const conIdx = conMeds.indexOf(medObj);
+    if (conIdx >= 0) {
+      const updated = [...conMeds];
+      updated[conIdx] = { ...updated[conIdx], [field]: value };
+      setConData(prev => ({ ...prev, medications_confirmed: updated }));
+      return;
+    }
+    const moMeds = moData?.previous_medications || [];
+    const moIdx = moMeds.indexOf(medObj);
+    if (moIdx >= 0) {
+      const updated = [...moMeds];
+      updated[moIdx] = { ...updated[moIdx], [field]: value };
+      setMoData(prev => ({ ...prev, previous_medications: updated }));
+    }
+  };
+
+  // Edit a lifestyle item inline
+  const editLifestyleField = (itemObj, field, value) => {
+    const items = conData?.diet_lifestyle || [];
+    const idx = items.indexOf(itemObj);
+    if (idx >= 0) {
+      const updated = [...items];
+      updated[idx] = typeof updated[idx] === "string" ? { advice: value, detail: "", category: "Exercise", helps: [] } : { ...updated[idx], [field]: value };
+      setConData(prev => ({ ...prev, diet_lifestyle: updated }));
+    }
+  };
+  
+  // Add items to plan
+  const addMedToPlan = (med) => {
+    if (!conData) return;
+    const updated = { ...conData, medications_confirmed: [...(conData.medications_confirmed||[]), med] };
+    setConData(updated);
+  };
+  const addLifestyleToPlan = (item) => {
+    if (!conData) return;
+    const updated = { ...conData, diet_lifestyle: [...(conData.diet_lifestyle||[]), item] };
+    setConData(updated);
+  };
+  const addGoalToPlan = (goal) => {
+    if (!conData) return;
+    const updated = { ...conData, goals: [...(conData.goals||[]), goal] };
+    setConData(updated);
+  };
+  const addFutureToPlan = (item) => {
+    if (!conData) return;
+    const updated = { ...conData, future_plan: [...(conData.future_plan||[]), item] };
+    setConData(updated);
+  };
+  const addMonitorToPlan = (item) => {
+    if (!conData) return;
+    const updated = { ...conData, self_monitoring: [...(conData.self_monitoring||[]), item] };
+    setConData(updated);
+  };
+  const addComplaintToPlan = (text) => {
+    if (!moData) return;
+    setMoData(prev => ({ ...prev, chief_complaints: [...(prev.chief_complaints||[]), text] }));
+  };
+  const addDiagToPlan = (diag) => {
+    if (!moData) return;
+    setMoData(prev => ({ ...prev, diagnoses: [...(prev.diagnoses||[]), diag] }));
+  };
+  const addInvestigationToPlan = (test) => {
+    if (!conData) return;
+    const key = conData.investigations_ordered ? "investigations_ordered" : "investigations_to_order";
+    setConData(prev => ({ ...prev, [key]: [...(prev[key]||[]), test] }));
+  };
+
+  // Quick-add state for plan sections
+  const [planAddMode, setPlanAddMode] = useState(null); // which section has add form open
+  const [planAddText, setPlanAddText] = useState("");
+  const [planAddMed, setPlanAddMed] = useState({ name:"", dose:"", frequency:"OD", timing:"Morning" });
+
   // Filtered data for plan
   const planDiags = sa(moData,"diagnoses").filter((_,i) => !(planEdits._removedDiags||[]).includes(i));
   const planMeds = allMeds.filter((_,i) => !(planEdits._removedMeds||[]).includes(i));
@@ -3361,10 +3437,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
               <div style={{ border:"1px solid #e2e8f0", borderTop:"none", borderRadius:"0 0 10px 10px", padding:14 }}>
                 {/* Summary */}
-                {!planHidden.has("summary") && conData?.assessment_summary && <div style={{ background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"1px solid #bfdbfe", borderRadius:8, padding:10, marginBottom:12, fontSize:12, color:"#334155", lineHeight:1.6, position:"relative" }}>
+                {!planHidden.has("summary") && conData?.assessment_summary && <div style={{ background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"1px solid #bfdbfe", borderRadius:8, padding:10, marginBottom:12, position:"relative" }}>
                   <button className="no-print" onClick={()=>toggleBlock("summary")} style={{ position:"absolute", top:4, right:4, background:"#fee2e2", border:"none", borderRadius:3, padding:"1px 5px", fontSize:9, cursor:"pointer", color:"#dc2626", fontWeight:700 }}>✕</button>
-                  <strong style={{ color:"#1e40af" }}>📋 Dear {patient.name?patient.name.split(" ")[0]:"Patient"}:</strong>{" "}
-                  <EditText value={getPlan("summary", conData.assessment_summary)} onChange={v=>editPlan("summary",v)} style={{ fontSize:12 }} />
+                  <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:4 }}>📋 Dear {patient.name?patient.name.split(" ")[0]:"Patient"}:</div>
+                  <textarea className="no-print" value={getPlan("summary", conData.assessment_summary)} onChange={e=>editPlan("summary",e.target.value)}
+                    rows={3} style={{ width:"100%", border:"1px solid #bfdbfe", borderRadius:6, padding:8, fontSize:12, color:"#334155", lineHeight:1.6, resize:"vertical", boxSizing:"border-box", background:"white", outline:"none", fontFamily:"inherit" }}
+                    onFocus={e=>e.target.style.borderColor="#3b82f6"} onBlur={e=>e.target.style.borderColor="#bfdbfe"} />
+                  <div className="print-only" style={{ display:"none", fontSize:12, color:"#334155", lineHeight:1.6 }}>{getPlan("summary", conData.assessment_summary)}</div>
                 </div>}
                 {planHidden.has("summary") && <div className="no-print" style={{ marginBottom:4, opacity:.4, cursor:"pointer", fontSize:10, color:"#94a3b8" }} onClick={()=>toggleBlock("summary")}>➕ Summary</div>}
 
@@ -3375,8 +3454,20 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   return filtered.length > 0 && <PlanBlock id="complaints" title="🗣️ Chief Complaints" color="#dc2626" hidden={planHidden.has("complaints")} onToggle={()=>toggleBlock("complaints")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
                     {filtered.map((c,i) => (
-                      <span key={i} style={{ fontSize:11, padding:"3px 8px", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, color:"#dc2626", fontWeight:600 }}>⚠️ {c}</span>
+                      <span key={i} style={{ fontSize:11, padding:"3px 8px", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, color:"#dc2626", fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>
+                        ⚠️ <EditText value={c} onChange={v=>{
+                          const all = [...(moData.chief_complaints||[])];
+                          const realIdx = all.indexOf(c);
+                          if(realIdx>=0){ all[realIdx]=v; setMoData(prev=>({...prev,chief_complaints:all})); }
+                        }} style={{fontSize:11,color:"#dc2626",fontWeight:600}} />
+                        <button className="no-print" onClick={()=>{
+                          const all = [...(moData.chief_complaints||[])];
+                          const realIdx = all.indexOf(c);
+                          if(realIdx>=0){ all.splice(realIdx,1); setMoData(prev=>({...prev,chief_complaints:all})); }
+                        }} style={{ background:"none", border:"none", color:"#dc2626", fontSize:10, cursor:"pointer", padding:0, fontWeight:700 }}>✕</button>
+                      </span>
                     ))}
+                    <button className="no-print" onClick={()=>{const t=prompt("Add complaint");if(t)addComplaintToPlan(t);}} style={{ fontSize:11, padding:"3px 8px", background:"white", border:"1px dashed #fecaca", borderRadius:6, color:"#dc2626", fontWeight:600, cursor:"pointer" }}>+ Add</button>
                   </div>
                 </PlanBlock>;
                 })()}
@@ -3412,15 +3503,29 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <thead><tr style={{ background:"#059669", color:"white" }}><th style={{padding:"4px 8px",textAlign:"left"}}>Marker</th><th style={{padding:"4px 8px"}}>Current</th><th style={{padding:"4px 8px"}}>Target</th><th style={{padding:"4px 8px"}}>By</th><th className="no-print" style={{padding:"4px 8px",width:20}}></th></tr></thead>
                     <tbody>{planGoals.map((g,i) => {
                       const origIdx = sa(conData,"goals").indexOf(g);
+                      const editGoalField = (field, val) => {
+                        const goals = [...(conData?.goals||[])];
+                        const idx = goals.indexOf(g);
+                        if(idx>=0){ goals[idx]={...goals[idx],[field]:val}; setConData(prev=>({...prev,goals})); }
+                      };
                       return <tr key={i} style={{ background:g.priority==="critical"?"#fef2f2":i%2?"#f0fdf4":"white" }}>
-                        <td style={{padding:"3px 8px",fontWeight:600}}>{g.marker}</td>
-                        <td style={{padding:"3px 8px",textAlign:"center",fontWeight:700,color:"#dc2626"}}>{g.current}</td>
-                        <td style={{padding:"3px 8px",textAlign:"center",fontWeight:700,color:"#059669"}}>{g.target}</td>
-                        <td style={{padding:"3px 8px",textAlign:"center",color:"#64748b"}}>{g.timeline}</td>
+                        <td style={{padding:"3px 8px"}}><EditText value={g.marker} onChange={v=>editGoalField("marker",v)} style={{fontWeight:600}} /></td>
+                        <td style={{padding:"3px 8px",textAlign:"center"}}><EditText value={g.current||""} onChange={v=>editGoalField("current",v)} style={{fontWeight:700,color:"#dc2626"}} /></td>
+                        <td style={{padding:"3px 8px",textAlign:"center"}}><EditText value={g.target||""} onChange={v=>editGoalField("target",v)} style={{fontWeight:700,color:"#059669"}} /></td>
+                        <td style={{padding:"3px 8px",textAlign:"center"}}><EditText value={g.timeline||""} onChange={v=>editGoalField("timeline",v)} style={{color:"#64748b"}} /></td>
                         <td className="no-print" style={{padding:"3px 4px"}}><RemoveBtn onClick={()=>removeGoal(origIdx)} /></td>
                       </tr>;
                     })}</tbody>
                   </table>
+                  {/* Quick Add Goal */}
+                  <button className="no-print" onClick={()=>{
+                    const marker = prompt("Goal marker (e.g., HbA1c, Weight, BP)");
+                    if(!marker) return;
+                    const current = prompt("Current value") || "";
+                    const target = prompt("Target value") || "";
+                    const timeline = prompt("Timeline (e.g., 3 months)") || "";
+                    addGoalToPlan({marker, current, target, timeline});
+                  }} style={{ marginTop:6, background:"#f8fafc", border:"1px dashed #cbd5e1", borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:600, cursor:"pointer", color:"#64748b", width:"100%" }}>+ Add Goal</button>
                 </PlanBlock>}
 
                 {/* Medications */}
@@ -3430,14 +3535,31 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <tbody>{planMeds.map((m,i) => {
                       const origIdx = allMeds.indexOf(m);
                       return <tr key={i} style={{ background:(m.isNew||m.resolved)?"#eff6ff":i%2?"#fafafa":"white" }}>
-                        <td style={{padding:"4px 8px"}}><strong>{m.name}</strong>{m._matched&&<span title={`Pharmacy match: ${m._matched} (${m._confidence}%)`} style={{color:"#059669",fontSize:9,marginLeft:3}}>✓</span>}{(m.isNew||m.resolved)&&<span style={{background:"#1e40af",color:"white",padding:"0 3px",borderRadius:3,fontSize:8,marginLeft:3}}>NEW</span>}{m.composition&&<div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
-                        <td style={{padding:"4px 8px",textAlign:"center",fontWeight:600}}>{m.dose}</td>
-                        <td style={{padding:"4px 8px",textAlign:"center",fontSize:10,fontWeight:600,color:"#1e40af"}}>{m.timing || m.frequency}</td>
+                        <td style={{padding:"4px 8px"}}><EditText value={m.name} onChange={v=>editMedField(m,"name",v)} style={{fontWeight:700}} />{m._matched&&<span title={`Pharmacy match: ${m._matched} (${m._confidence}%)`} style={{color:"#059669",fontSize:9,marginLeft:3}}>✓</span>}{(m.isNew||m.resolved)&&<span style={{background:"#1e40af",color:"white",padding:"0 3px",borderRadius:3,fontSize:8,marginLeft:3}}>NEW</span>}{m.composition&&<div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
+                        <td style={{padding:"4px 8px",textAlign:"center"}}><EditText value={m.dose||""} onChange={v=>editMedField(m,"dose",v)} style={{fontWeight:600}} /></td>
+                        <td style={{padding:"4px 8px",textAlign:"center"}}><EditText value={m.timing||m.frequency||""} onChange={v=>editMedField(m,"timing",v)} style={{fontSize:10,fontWeight:600,color:"#1e40af"}} /></td>
                         <td style={{padding:"4px 8px"}}>{(m.forDiagnosis||[]).map(d=><Badge key={d} id={d} friendly />)}</td>
                         <td className="no-print" style={{padding:"4px 4px"}}><RemoveBtn onClick={()=>removeMed(origIdx)} /></td>
                       </tr>;
                     })}</tbody>
                   </table>
+                  {/* Quick Add Medicine */}
+                  {planAddMode==="med" ? (
+                    <div className="no-print" style={{ display:"flex", gap:4, marginTop:6, flexWrap:"wrap", alignItems:"center", background:"#eff6ff", padding:8, borderRadius:6, border:"1px solid #bfdbfe" }}>
+                      <input value={planAddMed.name} onChange={e=>setPlanAddMed(p=>({...p,name:e.target.value}))} placeholder="Medicine name" style={{ flex:2, minWidth:120, padding:"5px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11 }} autoFocus />
+                      <input value={planAddMed.dose} onChange={e=>setPlanAddMed(p=>({...p,dose:e.target.value}))} placeholder="Dose" style={{ width:70, padding:"5px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11 }} />
+                      <select value={planAddMed.frequency} onChange={e=>setPlanAddMed(p=>({...p,frequency:e.target.value}))} style={{ padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11 }}>
+                        {["OD","BD","TDS","QID","SOS","Weekly"].map(f=><option key={f}>{f}</option>)}
+                      </select>
+                      <select value={planAddMed.timing} onChange={e=>setPlanAddMed(p=>({...p,timing:e.target.value}))} style={{ padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11 }}>
+                        {["Morning","Night","Before meals","After meals","Empty stomach","Bedtime"].map(t=><option key={t}>{t}</option>)}
+                      </select>
+                      <button onClick={()=>{if(planAddMed.name.trim()){addMedToPlan({name:planAddMed.name.toUpperCase(),dose:planAddMed.dose,frequency:planAddMed.frequency,timing:planAddMed.timing,isNew:true,route:"Oral"});setPlanAddMed({name:"",dose:"",frequency:"OD",timing:"Morning"});}}} style={{ background:"#2563eb", color:"white", border:"none", padding:"5px 10px", borderRadius:4, fontSize:11, fontWeight:700, cursor:"pointer" }}>✓ Add</button>
+                      <button onClick={()=>setPlanAddMode(null)} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"5px 8px", borderRadius:4, fontSize:11, cursor:"pointer" }}>✕</button>
+                    </div>
+                  ) : (
+                    <button className="no-print" onClick={()=>setPlanAddMode("med")} style={{ marginTop:6, background:"#f8fafc", border:"1px dashed #cbd5e1", borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:600, cursor:"pointer", color:"#64748b", width:"100%" }}>+ Add Medicine</button>
+                  )}
                 </PlanBlock>}
 
                 {/* Lifestyle */}
@@ -3449,12 +3571,23 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <div key={i} style={{ display:"flex", gap:5, padding:"3px 0", borderBottom:"1px solid #f1f5f9", fontSize:11, alignItems:"center" }}>
                       {!isString && l.category && <span style={{ fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:4, color:"white", background:l.category==="Critical"?"#dc2626":l.category==="Diet"?"#059669":"#2563eb", alignSelf:"flex-start", marginTop:2 }}>{l.category}</span>}
                       {isString
-                        ? <div style={{ flex:1 }}>• {l}</div>
-                        : <div style={{ flex:1 }}><strong>{l.advice}</strong>{l.detail ? ` — ${l.detail}` : ""} {(l.helps||[]).map(d=><Badge key={d} id={d} friendly />)}</div>
+                        ? <div style={{ flex:1 }}>• <EditText value={l} onChange={v=>editLifestyleField(l,"advice",v)} style={{fontSize:11}} /></div>
+                        : <div style={{ flex:1 }}><EditText value={l.advice} onChange={v=>editLifestyleField(l,"advice",v)} style={{fontWeight:700,fontSize:11}} />{l.detail ? <span> — <EditText value={l.detail} onChange={v=>editLifestyleField(l,"detail",v)} style={{fontSize:11}} /></span> : ""} {(l.helps||[]).map(d=><Badge key={d} id={d} friendly />)}</div>
                       }
                       <RemoveBtn onClick={()=>removeLifestyle(origIdx)} />
                     </div>
                   );})}
+                  {/* Quick Add Lifestyle */}
+                  {planAddMode==="lifestyle" ? (
+                    <div className="no-print" style={{ display:"flex", gap:4, marginTop:6, alignItems:"center", background:"#f0fdf4", padding:8, borderRadius:6, border:"1px solid #bbf7d0" }}>
+                      <input value={planAddText} onChange={e=>setPlanAddText(e.target.value)} placeholder="e.g., Walk 30 minutes daily" style={{ flex:1, padding:"5px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:11 }} autoFocus onKeyDown={e=>{if(e.key==="Enter"&&planAddText.trim()){addLifestyleToPlan({advice:planAddText,detail:"",category:"Exercise",helps:[]});setPlanAddText("");setPlanAddMode(null);}}} />
+                      <select id="planAddCat" style={{ padding:"5px 4px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:10 }}><option>Exercise</option><option>Diet</option><option>Critical</option><option>Sleep</option><option>Stress</option></select>
+                      <button onClick={()=>{if(planAddText.trim()){addLifestyleToPlan({advice:planAddText,detail:"",category:document.getElementById("planAddCat").value,helps:[]});setPlanAddText("");setPlanAddMode(null);}}} style={{ background:"#059669", color:"white", border:"none", padding:"5px 10px", borderRadius:4, fontSize:11, fontWeight:700, cursor:"pointer" }}>✓</button>
+                      <button onClick={()=>{setPlanAddMode(null);setPlanAddText("");}} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"5px 8px", borderRadius:4, fontSize:11, cursor:"pointer" }}>✕</button>
+                    </div>
+                  ) : (
+                    <button className="no-print" onClick={()=>setPlanAddMode("lifestyle")} style={{ marginTop:6, background:"#f8fafc", border:"1px dashed #cbd5e1", borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:600, cursor:"pointer", color:"#64748b", width:"100%" }}>+ Add Lifestyle Advice</button>
+                  )}
                 </PlanBlock>}
 
                 {/* Self Monitoring */}
@@ -3589,7 +3722,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           {ClinicalReasoningPanel}
         </div>
       )}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @media print{button,.no-print{display:none!important} .print-only{display:block!important}} .editable-hover:hover{border-bottom-color:#3b82f6!important;background:#eff6ff}`}</style>
 
       {/* ===== DOCUMENTS TAB ===== */}
       {tab==="docs" && (
@@ -5112,27 +5245,36 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <button onClick={()=>setAiMessages([])} style={{ fontSize:10, background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, cursor:"pointer", color:"#64748b" }}>Clear Chat</button>
           </div>
 
-          {aiMessages.length === 0 && (
-            <div style={{ textAlign:"center", padding:"30px 20px", background:"#faf5ff", borderRadius:12, marginBottom:10 }}>
-              <div style={{ fontSize:28, marginBottom:8 }}>🤖</div>
-              <div style={{ fontSize:13, fontWeight:700, color:"#6b21a8", marginBottom:6 }}>Ask me anything about this patient</div>
-              <div style={{ fontSize:11, color:"#7c3aed", lineHeight:1.8 }}>
-                Try: "What are the latest ADA guidelines for this HbA1c level?"<br/>
-                "Any drug interactions between current medications?"<br/>
-                "Suggest investigations for diabetic foot assessment"<br/>
-                "What's the target eGFR for this patient's CKD stage?"<br/>
-                "Draft a referral note for ophthalmology"
-              </div>
-              <div style={{ marginTop:12, display:"flex", flexWrap:"wrap", gap:6, justifyContent:"center" }}>
-                {["Drug interactions check","ADA guidelines for this patient","Suggest next investigations","Diabetic foot protocol","Explain latest lab trends","Referral letter for specialist"].map(q => (
-                  <button key={q} onClick={()=>{setAiInput(q);}} style={{ fontSize:10, background:"white", border:"1px solid #d8b4fe", padding:"4px 10px", borderRadius:20, cursor:"pointer", color:"#7c3aed", fontWeight:600 }}>{q}</button>
-                ))}
-              </div>
+          {/* Input — TOP */}
+          <div style={{ marginBottom:10, background:"#faf5ff", borderRadius:10, padding:10, border:"1px solid #e9d5ff" }}>
+            <label style={{ fontSize:10, fontWeight:700, color:"#7c3aed", display:"block", marginBottom:4 }}>Ask about patient, medications, guidelines, protocols...</label>
+            <div style={{ display:"flex", gap:6 }}>
+              <input value={aiInput} onChange={e=>setAiInput(e.target.value)} placeholder="e.g., Drug interactions check, ADA guidelines for this HbA1c..."
+                onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendAiMessage()}
+                style={{ flex:1, padding:"10px 14px", border:"2px solid #e9d5ff", borderRadius:10, fontSize:13, outline:"none", background:"white" }}
+                onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e9d5ff"} />
+              <button onClick={sendAiMessage} disabled={aiLoading||!aiInput.trim()}
+                style={{ padding:"10px 20px", background:aiLoading?"#94a3b8":"#7c2d12", color:"white", border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:aiLoading?"wait":"pointer" }}>
+                {aiLoading?"⏳":"Send →"}
+              </button>
             </div>
-          )}
+            {/* Quick suggestions */}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:6 }}>
+              {["Drug interactions","ADA guidelines","Suggest investigations","Diabetic foot protocol","Explain lab trends","Referral letter"].map(q => (
+                <button key={q} onClick={()=>setAiInput(q)} style={{ fontSize:9, background:"white", border:"1px solid #d8b4fe", padding:"3px 8px", borderRadius:12, cursor:"pointer", color:"#7c3aed", fontWeight:600 }}>{q}</button>
+              ))}
+            </div>
+          </div>
 
           {/* Chat messages */}
-          <div ref={aiChatRef} style={{ flex:1, overflow:"auto", marginBottom:8, display:"flex", flexDirection:"column", gap:8 }}>
+          <div ref={aiChatRef} style={{ flex:1, overflow:"auto", display:"flex", flexDirection:"column", gap:8 }}>
+            {aiMessages.length === 0 && (
+              <div style={{ textAlign:"center", padding:"40px 20px", color:"#94a3b8" }}>
+                <div style={{ fontSize:32, marginBottom:8 }}>🤖</div>
+                <div style={{ fontSize:13, fontWeight:600 }}>Ask anything about this patient</div>
+                <div style={{ fontSize:11, marginTop:4 }}>Uses full patient context — diagnoses, meds, labs, vitals</div>
+              </div>
+            )}
             {aiMessages.map((msg, i) => (
               <div key={i} style={{ display:"flex", justifyContent:msg.role==="user"?"flex-end":"flex-start" }}>
                 <div style={{
@@ -5154,17 +5296,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Input */}
-          <div style={{ display:"flex", gap:6, padding:"8px 0", borderTop:"2px solid #e2e8f0" }}>
-            <input value={aiInput} onChange={e=>setAiInput(e.target.value)} placeholder="Ask about patient, medications, guidelines, protocols..."
-              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendAiMessage()}
-              style={{ flex:1, padding:"10px 14px", border:"1px solid #e2e8f0", borderRadius:10, fontSize:13, outline:"none" }} />
-            <button onClick={sendAiMessage} disabled={aiLoading||!aiInput.trim()}
-              style={{ padding:"10px 20px", background:aiLoading?"#94a3b8":"#7c2d12", color:"white", border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:aiLoading?"wait":"pointer" }}>
-              {aiLoading?"⏳":"Send →"}
-            </button>
           </div>
         </div>
       )}
