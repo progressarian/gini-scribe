@@ -38,6 +38,7 @@ const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
 const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
+const t = (v, max=500) => { const s = n(v); return s && s.length > max ? s.slice(0, max) : s; }; // safe truncate
 
 app.get("/api/health", async (_, res) => {
   const info = {
@@ -303,18 +304,18 @@ app.post("/api/consultations", async (req, res) => {
          file_no=COALESCE($5,file_no), abha_id=COALESCE($6,abha_id),
          health_id=COALESCE($7,health_id), aadhaar=COALESCE($8,aadhaar),
          govt_id=COALESCE($9,govt_id), govt_id_type=COALESCE($10,govt_id_type),
-         dob=COALESCE($11,dob) WHERE id=$1`,
+         dob=COALESCE($11,dob), address=COALESCE($12,address) WHERE id=$1`,
         [patientId, n(patient.name), int(patient.age), n(patient.sex),
          n(patient.fileNo), n(patient.abhaId), n(patient.healthId),
-         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType), n(patient.dob)||null]
+         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType), n(patient.dob)||null, n(patient.address)]
       );
     } else {
       const r = await client.query(
-        `INSERT INTO patients (name, phone, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, dob)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+        `INSERT INTO patients (name, phone, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, dob, address)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
         [n(patient.name)||'Unknown', n(patient.phone), int(patient.age), n(patient.sex),
          n(patient.fileNo), n(patient.abhaId), n(patient.healthId),
-         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType), n(patient.dob)||null]
+         n(patient.aadhaar), n(patient.govtId), n(patient.govtIdType), n(patient.dob)||null, n(patient.address)]
       );
       patientId = r.rows[0].id;
     }
@@ -350,7 +351,7 @@ app.post("/api/consultations", async (req, res) => {
       if (d?.id && d?.label) {
         await client.query(
           `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-          [patientId, consultationId, d.id, d.label, n(d.status) || 'New']
+          [patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || 'New']
         );
       }
     }
@@ -359,7 +360,7 @@ app.post("/api/consultations", async (req, res) => {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_new, is_active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)`,
-          [patientId, consultationId, m.name, n(m._matched), n(m.composition), n(m.dose), n(m.frequency), n(m.timing)]
+          [patientId, consultationId, t(m.name,200), t(m._matched,200), t(m.composition,200), t(m.dose,100), t(m.frequency,100), t(m.timing,100)]
         );
       }
     }
@@ -368,7 +369,7 @@ app.post("/api/consultations", async (req, res) => {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)`,
-          [patientId, consultationId, m.name, n(m._matched), n(m.composition), n(m.dose), n(m.frequency), n(m.timing), n(m.route)||'Oral', m.isNew===true]
+          [patientId, consultationId, t(m.name,200), t(m._matched,200), t(m.composition,200), t(m.dose,100), t(m.frequency,100), t(m.timing,100), t(m.route,50)||'Oral', m.isNew===true]
         );
       }
     }
@@ -376,20 +377,20 @@ app.post("/api/consultations", async (req, res) => {
       if (inv?.test && num(inv.value) !== null) {
         await client.query(
           `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe',COALESCE($9::date, CURRENT_DATE))`,
-          [patientId, consultationId, inv.test, num(inv.value), n(inv.unit), n(inv.flag), inv.critical===true, n(inv.ref), vDate]
+          [patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), vDate]
         );
       }
     }
     for (const g of (conData?.goals || [])) {
       if (g?.marker) {
         await client.query(`INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [patientId, consultationId, g.marker, n(g.current), n(g.target), n(g.timeline), n(g.priority)]);
+          [patientId, consultationId, t(g.marker,200), t(g.current,200), t(g.target,200), t(g.timeline,200), t(g.priority,100)]);
       }
     }
     for (const c of (moData?.complications || [])) {
       if (c?.name) {
         await client.query(`INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity) VALUES ($1,$2,$3,$4,$5,$6)`,
-          [patientId, consultationId, c.name, n(c.status), n(c.detail), n(c.severity)]);
+          [patientId, consultationId, t(c.name,200), t(c.status,100), t(c.detail,500), t(c.severity,100)]);
       }
     }
 

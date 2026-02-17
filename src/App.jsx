@@ -790,7 +790,7 @@ export default function GiniScribe() {
   const [keySet, setKeySet] = useState(false);
   const [moName, setMoName] = useState("Dr. Beant");
   const [conName, setConName] = useState("Dr. Bhansali");
-  const [patient, setPatient] = useState({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male", abhaId:"", aadhaar:"", healthId:"", govtId:"", govtIdType:"" });
+  const [patient, setPatient] = useState({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male", abhaId:"", aadhaar:"", healthId:"", govtId:"", govtIdType:"", address:"" });
   const [vitals, setVitals] = useState({ bp_sys:"", bp_dia:"", pulse:"", temp:"", spo2:"", weight:"", height:"", bmi:"", waist:"", body_fat:"", muscle_mass:"" });
   const [labData, setLabData] = useState(null);
   const [labImageData, setLabImageData] = useState(null);
@@ -1177,7 +1177,8 @@ export default function GiniScribe() {
       name: dbRecord.name || "", phone: dbRecord.phone || "", age: dbRecord.age || "",
       sex: dbRecord.sex || "Male", fileNo: dbRecord.file_no || "", dob: dbRecord.dob ? String(dbRecord.dob).slice(0,10) : "",
       abhaId: dbRecord.abha_id || "", healthId: dbRecord.health_id || "",
-      aadhaar: dbRecord.aadhaar || "", govtId: dbRecord.govt_id || "", govtIdType: dbRecord.govt_id_type || ""
+      aadhaar: dbRecord.aadhaar || "", govtId: dbRecord.govt_id || "", govtIdType: dbRecord.govt_id_type || "",
+      address: dbRecord.address || ""
     });
     setDbPatientId(dbRecord.id);
     setNewReportsIncluded(false);
@@ -1213,7 +1214,7 @@ export default function GiniScribe() {
       } catch (err) {}
     }
     setShowSearch(false);
-    setTab("patient");
+    setTab("dashboard");
   };
 
   const filteredPatients = savedPatients.filter(r => {
@@ -1228,7 +1229,7 @@ export default function GiniScribe() {
   const clearErr = id => setErrors(p => ({ ...p, [id]: null }));
   
   const newPatient = () => {
-    setPatient({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male", abhaId:"", aadhaar:"", healthId:"", govtId:"", govtIdType:"" });
+    setPatient({ name:"", phone:"", dob:"", fileNo:"", age:"", sex:"Male", abhaId:"", aadhaar:"", healthId:"", govtId:"", govtIdType:"", address:"" });
     setVitals({ bp_sys:"", bp_dia:"", pulse:"", temp:"", spo2:"", weight:"", height:"", bmi:"", waist:"", body_fat:"", muscle_mass:"" });
     setLabData(null); setLabImageData(null); setLabMismatch(null);
     setMoTranscript(""); setConTranscript(""); setQuickTranscript("");
@@ -2196,8 +2197,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
+    { id:"dashboard", label:"🏠 Dashboard", show:keySet && !!dbPatientId },
     { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole },
-    { id:"patient", label:"👤", show:keySet && !isLabRole },
+    { id:"patient", label:"👤", show:keySet },
     { id:"vitals", label:"📋", show:keySet && !isLabRole },
     { id:"mo", label:"🎤 MO", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole, badge:hasNewReports },
@@ -2459,7 +2461,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   };
 
   return (
-    <div style={{ fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", maxWidth:1100, margin:"0 auto", padding:"8px 12px", background:"#fff", minHeight:"100vh" }}>
+    <div style={{ fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", maxWidth:1100, margin:"0 auto", padding:"8px 12px", background:"#fff", minHeight:"100vh" }}>
 
       {/* ═══ LOGIN SCREEN ═══ */}
       {!currentDoctor && doctorsList.length > 0 && (
@@ -2524,92 +2526,138 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       )}
 
       {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8, paddingBottom:6, borderBottom:"2px solid #1e293b" }}>
-        <div style={{ width:28, height:28, background:"#1e293b", borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12 }}>G</div>
-        <div style={{ fontSize:13, fontWeight:800, color:"#1e293b" }}>Gini Scribe</div>
-        {currentDoctor && <div style={{ fontSize:10, background:"#f0fdf4", color:"#059669", padding:"2px 8px", borderRadius:10, fontWeight:700, border:"1px solid #bbf7d0" }}>
-          👨‍⚕️ {currentDoctor.name}{currentDoctor.specialty ? ` · ${currentDoctor.specialty}` : ""}
-        </div>}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, paddingBottom:8, borderBottom:"2px solid #1e293b" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:32, height:32, background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:900, fontSize:14 }}>G</div>
+          <div>
+            <div style={{ fontSize:15, fontWeight:800, color:"#1e293b", lineHeight:1.1 }}>Gini Scribe</div>
+            {currentDoctor && <div style={{ fontSize:10, color:"#64748b", fontWeight:500 }}>{currentDoctor.name}{currentDoctor.specialty ? ` · ${currentDoctor.specialty}` : ""}</div>}
+          </div>
+        </div>
         <div style={{ flex:1 }} />
         {draftSaved && <span style={{ fontSize:9, color:"#94a3b8" }}>{draftSaved}</span>}
-        {keySet && <button onClick={openSearch} style={{ background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#64748b", border:"1px solid #e2e8f0", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:600, cursor:"pointer" }}>🔍 Find</button>}
-        {patient.name && <button onClick={saveConsultation} style={{ background:"#2563eb", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>💾 Save</button>}
-        {saveStatus && <span style={{ fontSize:10, color:"#059669", fontWeight:600 }}>{saveStatus}</span>}
-        {patient.name && <button onClick={newPatient} style={{ background:"#059669", color:"white", border:"none", padding:"3px 8px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>+ New</button>}
-        {patient.name && <div style={{ fontSize:10, fontWeight:600, background:"#f1f5f9", padding:"2px 6px", borderRadius:4, maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>👤 {patient.name}</div>}
-        {currentDoctor && <button onClick={handleLogout} style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer" }}>Logout</button>}
+        {saveStatus && <span style={{ fontSize:11, color:saveStatus.includes("✅")?"#059669":"#f59e0b", fontWeight:600 }}>{saveStatus}</span>}
+        <div style={{ display:"flex", gap:6 }}>
+          {keySet && <button onClick={openSearch} style={{
+            background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#1e293b",
+            border:"1px solid #cbd5e1", padding:"8px 14px", borderRadius:8,
+            fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:4,
+            boxShadow:"0 1px 2px rgba(0,0,0,.05)", transition:"all .15s"
+          }}>🔍 Find</button>}
+          {patient.name && <button onClick={saveConsultation} style={{
+            background:"#2563eb", color:"white", border:"none", padding:"8px 14px", borderRadius:8,
+            fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:4,
+            boxShadow:"0 1px 3px rgba(37,99,235,.3)", transition:"all .15s"
+          }}>💾 Save</button>}
+          {patient.name && <button onClick={newPatient} style={{
+            background:"#059669", color:"white", border:"none", padding:"8px 14px", borderRadius:8,
+            fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:4,
+            boxShadow:"0 1px 3px rgba(5,150,105,.3)", transition:"all .15s"
+          }}>+ New</button>}
+          {currentDoctor && <button onClick={handleLogout} style={{
+            background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", padding:"8px 10px", borderRadius:8,
+            fontSize:11, fontWeight:700, cursor:"pointer"
+          }}>Logout</button>}
+        </div>
       </div>
 
-      {/* Patient Search Panel */}
-      {showSearch && (
-        <div style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:10, padding:12, marginBottom:8, boxShadow:"0 4px 12px rgba(0,0,0,.08)" }}>
-          {/* Stats Bar */}
-          {searchStats && (
-            <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-              {[{label:"Total",val:searchStats.total_patients,bg:"#f1f5f9",color:"#475569"},
-                {label:"Today",val:searchStats.today,bg:"#dbeafe",color:"#1e40af"},
-                {label:"This Week",val:searchStats.this_week,bg:"#dcfce7",color:"#166534"}
-              ].map(s => (
-                <div key={s.label} style={{ flex:1, background:s.bg, borderRadius:6, padding:"6px 8px", textAlign:"center" }}>
-                  <div style={{ fontSize:18, fontWeight:800, color:s.color }}>{s.val}</div>
-                  <div style={{ fontSize:9, fontWeight:600, color:s.color, opacity:.7 }}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Search Input */}
-          <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);searchPatientsDB(e.target.value,searchPeriod,searchDoctor);}} placeholder="🔍 Search by name, phone, file number..."
-            style={{ width:"100%", padding:"8px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, boxSizing:"border-box", marginBottom:8, outline:"none" }} autoFocus
-            onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e2e8f0"} />
-          {/* Filters */}
-          <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
-            {[{label:"All",val:""},{label:"📅 Today",val:"today"},{label:"This Week",val:"week"},{label:"This Month",val:"month"}].map(f => (
-              <button key={f.val} onClick={()=>{setSearchPeriod(f.val);searchPatientsDB(searchQuery,f.val,searchDoctor);}}
-                style={{ padding:"3px 10px", borderRadius:20, fontSize:10, fontWeight:600, cursor:"pointer",
-                  border:searchPeriod===f.val?"2px solid #2563eb":"1px solid #e2e8f0",
-                  background:searchPeriod===f.val?"#eff6ff":"white",
-                  color:searchPeriod===f.val?"#2563eb":"#64748b" }}>{f.label}</button>
-            ))}
-            <span style={{ borderLeft:"1px solid #e2e8f0", margin:"0 2px" }} />
-            <select value={searchDoctor} onChange={e=>{setSearchDoctor(e.target.value);searchPatientsDB(searchQuery,searchPeriod,e.target.value);}}
-              style={{ padding:"3px 8px", borderRadius:6, fontSize:10, fontWeight:600, border:"1px solid #e2e8f0", color:"#475569", cursor:"pointer" }}>
-              <option value="">All Doctors</option>
-              {searchDoctorsList.map(d => <option key={d.name} value={d.name}>{d.name} ({d.patient_count})</option>)}
-            </select>
+      {/* Active Patient Bar */}
+      {patient.name && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 10px", marginBottom:8, background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", borderRadius:8, border:"1px solid #bfdbfe" }}>
+          <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#1e40af)", display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12, flexShrink:0 }}>
+            {patient.name.charAt(0).toUpperCase()}
           </div>
-          {/* Results */}
-          <div style={{ maxHeight:320, overflow:"auto" }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <span style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{patient.name}</span>
+            <span style={{ fontSize:11, color:"#64748b", marginLeft:6 }}>{patient.age}Y/{patient.sex?.charAt(0)}</span>
+            {patient.fileNo && <span style={{ fontSize:10, color:"#2563eb", fontWeight:600, marginLeft:6, background:"#dbeafe", padding:"1px 6px", borderRadius:4 }}>{patient.fileNo}</span>}
+            {patient.phone && <span style={{ fontSize:10, color:"#64748b", marginLeft:6 }}>📱 {patient.phone}</span>}
+          </div>
+          {dbPatientId && <span style={{ fontSize:9, color:"#059669", fontWeight:600, background:"#dcfce7", padding:"2px 6px", borderRadius:4 }}>DB #{dbPatientId}</span>}
+        </div>
+      )}
+
+      {/* ═══ FULL-SCREEN PATIENT SEARCH ═══ */}
+      {showSearch && (
+        <div style={{ position:"fixed", inset:0, background:"#f8fafc", zIndex:9998, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+          {/* Search Header */}
+          <div style={{ padding:"12px 16px", background:"white", borderBottom:"1px solid #e2e8f0", boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+              <button onClick={()=>setShowSearch(false)} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px", fontSize:13, fontWeight:700, cursor:"pointer", color:"#475569" }}>← Back</button>
+              <div style={{ fontSize:18, fontWeight:800, color:"#1e293b" }}>Find Patient</div>
+              <div style={{ flex:1 }} />
+              {searchStats && (
+                <div style={{ display:"flex", gap:8 }}>
+                  {[{label:"Total",val:searchStats.total_patients,color:"#475569"},
+                    {label:"Today",val:searchStats.today,color:"#2563eb"},
+                    {label:"This Week",val:searchStats.this_week,color:"#059669"}
+                  ].map(s => (
+                    <div key={s.label} style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:18, fontWeight:800, color:s.color }}>{s.val}</div>
+                      <div style={{ fontSize:9, fontWeight:600, color:"#94a3b8" }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input value={searchQuery} onChange={e=>{setSearchQuery(e.target.value);searchPatientsDB(e.target.value,searchPeriod,searchDoctor);}}
+              placeholder="Search by name, phone, or file number..."
+              style={{ width:"100%", padding:"12px 16px", border:"2px solid #e2e8f0", borderRadius:10, fontSize:15, boxSizing:"border-box", outline:"none", background:"#f8fafc" }}
+              autoFocus
+              onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e2e8f0"} />
+            <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap" }}>
+              {[{label:"All",val:""},{label:"📅 Today",val:"today"},{label:"This Week",val:"week"},{label:"This Month",val:"month"}].map(f => (
+                <button key={f.val} onClick={()=>{setSearchPeriod(f.val);searchPatientsDB(searchQuery,f.val,searchDoctor);}}
+                  style={{ padding:"6px 14px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer",
+                    border:searchPeriod===f.val?"2px solid #2563eb":"1px solid #e2e8f0",
+                    background:searchPeriod===f.val?"#eff6ff":"white",
+                    color:searchPeriod===f.val?"#2563eb":"#64748b" }}>{f.label}</button>
+              ))}
+              <select value={searchDoctor} onChange={e=>{setSearchDoctor(e.target.value);searchPatientsDB(searchQuery,searchPeriod,e.target.value);}}
+                style={{ padding:"6px 12px", borderRadius:8, fontSize:12, fontWeight:600, border:"1px solid #e2e8f0", color:"#475569", cursor:"pointer" }}>
+                <option value="">All Doctors</option>
+                {searchDoctorsList.map(d => <option key={d.name} value={d.name}>{d.name} ({d.patient_count})</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Search Results */}
+          <div style={{ flex:1, overflow:"auto", padding:"8px 16px" }}>
             {dbPatients.length > 0 ? (
               <div>
-                <div style={{ fontSize:9, fontWeight:700, color:"#94a3b8", padding:"0 4px 4px", borderBottom:"1px solid #f1f5f9" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", padding:"8px 4px", borderBottom:"1px solid #f1f5f9" }}>
                   {dbPatients.length} patient{dbPatients.length>1?"s":""} found
                 </div>
                 {dbPatients.map(r => (
-                  <div key={`db-${r.id}`} onClick={()=>loadPatientDB(r)} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 8px", borderRadius:6, cursor:"pointer", fontSize:11, borderBottom:"1px solid #f8fafc", transition:"background .15s" }}
-                    onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <div style={{ width:32, height:32, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#1e40af)", display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:13, flexShrink:0 }}>
+                  <div key={`db-${r.id}`} onClick={()=>loadPatientDB(r)} style={{
+                    display:"flex", alignItems:"center", gap:12, padding:"12px", borderRadius:10, cursor:"pointer",
+                    borderBottom:"1px solid #f1f5f9", transition:"all .15s", background:"white", marginTop:4
+                  }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"} onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                    <div style={{ width:44, height:44, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#1e40af)", display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:18, flexShrink:0 }}>
                       {(r.name||"?").charAt(0).toUpperCase()}
                     </div>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                        <strong style={{ fontSize:12 }}>{r.name}</strong>
-                        <span style={{ fontSize:9, color:"#94a3b8" }}>{r.age}Y/{r.sex?.charAt(0)}</span>
-                        {r.file_no && <span style={{ fontSize:9, color:"#2563eb", fontWeight:600, background:"#eff6ff", padding:"0 4px", borderRadius:3 }}>{r.file_no}</span>}
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <strong style={{ fontSize:15, color:"#1e293b" }}>{r.name}</strong>
+                        <span style={{ fontSize:12, color:"#94a3b8" }}>{r.age}Y/{r.sex?.charAt(0)}</span>
+                        {r.file_no && <span style={{ fontSize:11, color:"#2563eb", fontWeight:600, background:"#eff6ff", padding:"1px 6px", borderRadius:4 }}>{r.file_no}</span>}
                       </div>
-                      {r.diagnosis_labels && <div style={{ fontSize:9, color:"#64748b", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.diagnosis_labels}</div>}
+                      {r.diagnosis_labels && <div style={{ fontSize:11, color:"#64748b", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.diagnosis_labels}</div>}
+                      {r.phone && <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>📱 {r.phone}</div>}
                     </div>
                     <div style={{ textAlign:"right", flexShrink:0 }}>
-                      <div style={{ fontSize:10, fontWeight:700, color:"#2563eb" }}>{r.visit_count||0} visits</div>
-                      {r.last_visit && <div style={{ fontSize:9, color:"#94a3b8" }}>{(()=>{const d=new Date(String(r.last_visit).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</div>}
-                      {r.last_doctor && <div style={{ fontSize:8, color:"#059669", fontWeight:600 }}>{r.last_doctor}</div>}
+                      <div style={{ fontSize:13, fontWeight:700, color:"#2563eb" }}>{r.visit_count||0} visits</div>
+                      {r.last_visit && <div style={{ fontSize:11, color:"#94a3b8" }}>{(()=>{const d=new Date(String(r.last_visit).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</div>}
+                      {r.last_doctor && <div style={{ fontSize:10, color:"#059669", fontWeight:600 }}>{r.last_doctor}</div>}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ textAlign:"center", padding:16, color:"#94a3b8" }}>
-                <div style={{ fontSize:24, marginBottom:4 }}>🔍</div>
-                <div style={{ fontSize:11 }}>{searchQuery ? "No patients found" : "Search or use filters above"}</div>
+              <div style={{ textAlign:"center", padding:40, color:"#94a3b8" }}>
+                <div style={{ fontSize:40, marginBottom:8 }}>🔍</div>
+                <div style={{ fontSize:14, fontWeight:600 }}>{searchQuery ? "No patients found" : "Search or use filters above"}</div>
+                <div style={{ fontSize:12, marginTop:4 }}>Try name, phone number, or file number</div>
               </div>
             )}
           </div>
@@ -2619,7 +2667,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {/* Tabs */}
       <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
         {TABS.filter(t=>t.show!==false).map(t => (
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"7px 4px", fontSize:11, fontWeight:600, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b", position:"relative" }}>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"8px 4px", fontSize:11, fontWeight:700, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b", position:"relative", letterSpacing:"-0.01em" }}>
             {t.label}
             {t.badge && tab!==t.id && <span style={{ position:"absolute", top:2, right:2, width:7, height:7, borderRadius:"50%", background:"#f59e0b", border:"1px solid white" }} />}
           </button>
@@ -2647,6 +2695,111 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           <button onClick={()=>{if(dgKey.length>10||whisperKey.length>10){setKeySet(true);setTab("patient");}}} style={{ width:"100%", background:(dgKey.length>10||whisperKey.length>10)?"#059669":"#94a3b8", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:700, cursor:(dgKey.length>10||whisperKey.length>10)?"pointer":"not-allowed" }}>
             {dgKey.length>10||whisperKey.length>10?"✅ Start":"Enter at least one key"}
           </button>
+        </div>
+      )}
+
+      {/* ===== PATIENT DASHBOARD ===== */}
+      {tab==="dashboard" && dbPatientId && (
+        <div>
+          {/* Patient Card */}
+          <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:14, padding:20, color:"white", marginBottom:12 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ width:56, height:56, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#60a5fa)", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, fontSize:24, flexShrink:0 }}>
+                {patient.name.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:20, fontWeight:800 }}>{patient.name}</div>
+                <div style={{ fontSize:13, opacity:.8, marginTop:2 }}>
+                  {patient.age}Y · {patient.sex} {patient.fileNo ? ` · ${patient.fileNo}` : ""}
+                </div>
+                {patient.phone && <div style={{ fontSize:12, opacity:.6, marginTop:1 }}>📱 {patient.phone}</div>}
+                {patient.address && <div style={{ fontSize:11, opacity:.5, marginTop:1 }}>📍 {patient.address}</div>}
+              </div>
+              <button onClick={()=>setTab("patient")} style={{ background:"rgba(255,255,255,.15)", border:"1px solid rgba(255,255,255,.2)", color:"white", padding:"6px 12px", borderRadius:8, fontSize:11, fontWeight:600, cursor:"pointer" }}>✏️ Edit</button>
+            </div>
+          </div>
+
+          {/* Quick Stats */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
+            <div style={{ background:"#eff6ff", borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:22, fontWeight:800, color:"#2563eb" }}>{patientFullData?.consultations?.length || 0}</div>
+              <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Total Visits</div>
+            </div>
+            <div style={{ background:"#fef3c7", borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:22, fontWeight:800, color:"#d97706" }}>
+                {patientFullData?.consultations?.[0]?.visit_date
+                  ? new Date(String(patientFullData.consultations[0].visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})
+                  : "—"}
+              </div>
+              <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Last Visit</div>
+            </div>
+            <div style={{ background:"#f0fdf4", borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:22, fontWeight:800, color:"#059669" }}>
+                {patientFullData?.labs?.find(l=>l.test_name==="HbA1c")?.result ? `${patientFullData.labs.find(l=>l.test_name==="HbA1c").result}%` : "—"}
+              </div>
+              <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Last HbA1c</div>
+            </div>
+          </div>
+
+          {/* Active Diagnoses */}
+          {moData?.diagnoses?.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6, letterSpacing:".5px" }}>ACTIVE DIAGNOSES</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                {moData.diagnoses.map((d,i) => (
+                  <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600,
+                    background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#fefce8",
+                    color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#d97706",
+                    border:`1px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="Controlled"?"#bbf7d0":"#fef08a"}`
+                  }}>{d.label}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Navigation Grid */}
+          <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:8, letterSpacing:".5px" }}>GO TO</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+            {[
+              { tab:"quick", icon:"⚡", label:"Quick Dictation", color:"#dc2626", bg:"#fef2f2" },
+              { tab:"patient", icon:"👤", label:"Patient Details", color:"#1e40af", bg:"#eff6ff" },
+              { tab:"vitals", icon:"📋", label:"Vitals", color:"#7c3aed", bg:"#f5f3ff" },
+              { tab:"mo", icon:"🎤", label:"MO Entry", color:"#ea580c", bg:"#fff7ed" },
+              { tab:"consultant", icon:"👨‍⚕️", label:"Consultant", color:"#0d9488", bg:"#f0fdfa" },
+              { tab:"plan", icon:"📄", label:"Plan / Print", color:"#1e293b", bg:"#f1f5f9" },
+              { tab:"docs", icon:"📎", label:"Documents", color:"#6366f1", bg:"#eef2ff" },
+              { tab:"history", icon:"📜", label:"History", color:"#b45309", bg:"#fffbeb" },
+              { tab:"outcomes", icon:"📊", label:"Outcomes", color:"#059669", bg:"#f0fdf4" },
+            ].map(n => (
+              <button key={n.tab} onClick={()=>setTab(n.tab)} style={{
+                background:n.bg, border:`1px solid ${n.color}22`, borderRadius:10, padding:"14px 8px", textAlign:"center",
+                cursor:"pointer", transition:"all .15s"
+              }}
+                onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.02)";e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,.08)"}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="none"}}>
+                <div style={{ fontSize:22, marginBottom:4 }}>{n.icon}</div>
+                <div style={{ fontSize:11, fontWeight:700, color:n.color }}>{n.label}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* Recent Visits */}
+          {patientFullData?.consultations?.length > 0 && (
+            <div style={{ marginTop:14 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6, letterSpacing:".5px" }}>RECENT VISITS</div>
+              {patientFullData.consultations.slice(0,5).map((c,i) => (
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, marginBottom:4, background:"#f8fafc", border:"1px solid #f1f5f9" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#475569", minWidth:70 }}>
+                    {new Date(String(c.visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"})}
+                  </div>
+                  <div style={{ flex:1, fontSize:11, color:"#64748b" }}>
+                    {c.con_name || c.mo_name || "—"}
+                  </div>
+                  <span style={{ fontSize:10, fontWeight:600, color:c.status==="completed"?"#059669":"#d97706", background:c.status==="completed"?"#f0fdf4":"#fefce8", padding:"2px 8px", borderRadius:4 }}>{c.status||"completed"}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2715,6 +2868,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               { k:"fileNo", l:"File No.", ph:"GINI-2025-04821" },
               { k:"dob", l:"DOB", type:"date" },
               { k:"age", l:"Age", ph:"77", disabled:!!patient.dob },
+              { k:"address", l:"Address", ph:"House No, Sector, City", span:2 },
             ].map(f => (
               <div key={f.k} style={{ gridColumn:f.span?"span 2":"span 1" }}>
                 <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>{f.l}</label>
