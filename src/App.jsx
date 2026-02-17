@@ -1958,6 +1958,90 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
   const [planAddMode, setPlanAddMode] = useState(null); // which section has add form open
   const [planAddText, setPlanAddText] = useState("");
   const [planAddMed, setPlanAddMed] = useState({ name:"", dose:"", frequency:"OD", timing:"Morning" });
+  const [conPasteMode, setConPasteMode] = useState(false);
+  const [conPasteText, setConPasteText] = useState("");
+  const [planCopied, setPlanCopied] = useState(false);
+
+  // Load last prescription into consultant transcript
+  const copyLastRx = () => {
+    const lastCon = patientFullData?.consultations?.[0];
+    if (!lastCon) return;
+    // Build Rx text from last visit's stored data
+    const lastMeds = patientFullData?.medications || [];
+    const lastDiags = patientFullData?.diagnoses || [];
+    let rxText = "PREVIOUS PRESCRIPTION (copied for editing):\n";
+    if (lastDiags.length) rxText += `Diagnoses: ${lastDiags.map(d=>`${d.label} - ${d.status}`).join(", ")}\n`;
+    if (lastMeds.length) {
+      rxText += "Medications:\n";
+      lastMeds.forEach(m => { rxText += `- ${m.name} ${m.dose||""} ${m.frequency||""} ${m.timing||""}\n`; });
+    }
+    if (lastCon.con_name) rxText += `Last seen by: ${lastCon.con_name}\n`;
+    setConTranscript(rxText);
+    setConData(null);
+  };
+
+  // Paste Rx text and process through AI
+  const processPastedRx = () => {
+    if (!conPasteText.trim()) return;
+    setConTranscript(conPasteText);
+    setConData(null);
+    setConPasteMode(false);
+    setConPasteText("");
+  };
+
+  // Copy entire treatment plan as text
+  const copyPlanToClipboard = () => {
+    let text = `GINI ADVANCED CARE HOSPITAL — Treatment Plan\n`;
+    text += `Patient: ${patient.name} | ${patient.age}Y/${patient.sex} | ${patient.phone||""} | ${patient.fileNo||""}\n`;
+    text += `Doctor: ${conName} | Date: ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}\n`;
+    text += `${"─".repeat(50)}\n\n`;
+    
+    if (conData?.assessment_summary) {
+      text += `SUMMARY:\n${getPlan("summary", conData.assessment_summary)}\n\n`;
+    }
+    const cc = (moData?.chief_complaints||[]).filter(c => !["no gmi","no hypoglycemia","routine follow-up"].some(s => String(c).toLowerCase().includes(s)));
+    if (cc.length) text += `CHIEF COMPLAINTS: ${cc.join(", ")}\n\n`;
+    
+    if (planDiags.length) {
+      text += `DIAGNOSES:\n`;
+      planDiags.forEach(d => { text += `• ${d.label} — ${d.status}\n`; });
+      text += `\n`;
+    }
+    if (planMeds.length) {
+      text += `MEDICATIONS:\n`;
+      planMeds.forEach(m => {
+        text += `• ${m.name} | ${m.dose||""} | ${m.frequency||""} ${m.timing||""} | For: ${(m.forDiagnosis||[]).join(", ")||"—"}\n`;
+      });
+      text += `\n`;
+    }
+    if (planGoals.length) {
+      text += `GOALS:\n`;
+      planGoals.forEach(g => { text += `• ${g.marker}: ${g.current||""} → ${g.target||""} (${g.timeline||""})\n`; });
+      text += `\n`;
+    }
+    if (planLifestyle.length) {
+      text += `LIFESTYLE:\n`;
+      planLifestyle.forEach(l => { text += typeof l==="string" ? `• ${l}\n` : `• ${l.advice}${l.detail?` — ${l.detail}`:""}\n`; });
+      text += `\n`;
+    }
+    const invs = conData?.investigations_ordered||conData?.investigations_to_order||[];
+    if (invs.length) text += `INVESTIGATIONS: ${invs.join(", ")}\n\n`;
+    
+    if (planMonitors.length) {
+      text += `SELF-MONITORING:\n`;
+      planMonitors.forEach(sm => { text += typeof sm==="string" ? `• ${sm}\n` : `• ${sm.title}${sm.targets?` — Target: ${sm.targets}`:""}\n`; });
+      text += `\n`;
+    }
+    if (conData?.follow_up) {
+      text += `FOLLOW-UP: ${conData.follow_up.timing||conData.follow_up.when||""}\n`;
+      if (conData.follow_up.instructions) text += `Instructions: ${conData.follow_up.instructions}\n`;
+    }
+
+    navigator.clipboard.writeText(text).then(() => {
+      setPlanCopied(true);
+      setTimeout(() => setPlanCopied(false), 2000);
+    });
+  };
 
   // Filtered data for plan
   const planDiags = sa(moData,"diagnoses").filter((_,i) => !(planEdits._removedDiags||[]).includes(i));
@@ -2301,10 +2385,19 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     const injection = `\n\n--- NEW LAB RESULTS (since last visit) ---\n${labSummary}\n--- END NEW LABS ---`;
     setConTranscript(prev => (prev||"") + injection);
     setNewReportsIncluded(true);
+    setNewReportsExpanded(false); // Collapse immediately
     setConData(null); // Reset so plan regenerates with new data
   };
   
   const NewReportsBanner = hasNewReports ? (
+    newReportsIncluded ? (
+      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 10px", marginBottom:8, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8 }}>
+        <span style={{ fontSize:12 }}>✅</span>
+        <span style={{ fontSize:11, fontWeight:600, color:"#059669" }}>{newReportsSinceLastVisit.length} new lab results included</span>
+        <div style={{ flex:1 }} />
+        <button onClick={()=>{setNewReportsIncluded(false);setNewReportsExpanded(true);}} style={{ fontSize:9, background:"white", border:"1px solid #bbf7d0", borderRadius:4, padding:"2px 6px", cursor:"pointer", color:"#64748b" }}>Review again</button>
+      </div>
+    ) : (
     <div style={{ background:"linear-gradient(135deg,#fffbeb,#fef3c7)", border:"1px solid #f59e0b", borderRadius:8, padding:"8px 12px", marginBottom:8 }}>
       <div onClick={()=>setNewReportsExpanded(!newReportsExpanded)}
         style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
@@ -2320,11 +2413,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
           )}
         </div>
-        {newReportsIncluded ? (
-          <span style={{ fontSize:10, fontWeight:700, color:"#059669" }}>✅ Added</span>
-        ) : (
-          <span style={{ fontSize:9, color:"#a16207", fontWeight:600 }}>{newReportsExpanded?"▲ Hide":"▼ Review"}</span>
-        )}
+        <span style={{ fontSize:9, color:"#a16207", fontWeight:600 }}>{newReportsExpanded?"▲ Hide":"▼ Review"}</span>
       </div>
       
       {newReportsExpanded && (
@@ -2354,19 +2443,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </tbody>
           </table>
           
-          {!newReportsIncluded ? (
-            <button onClick={includeNewReportsInPlan}
-              style={{ width:"100%", background:"linear-gradient(135deg,#f59e0b,#d97706)", color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>
-              📋 Include in Treatment Plan
-            </button>
-          ) : (
-            <div style={{ textAlign:"center", fontSize:11, color:"#059669", fontWeight:700, padding:4 }}>
-              ✅ Added to consultant notes — re-run Plan to include
-            </div>
-          )}
+          <button onClick={includeNewReportsInPlan}
+            style={{ width:"100%", background:"linear-gradient(135deg,#f59e0b,#d97706)", color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+            📋 Include in Treatment Plan
+          </button>
         </div>
       )}
     </div>
+    )
   ) : null;
 
   // Reusable Clinical Reasoning Panel
@@ -3250,7 +3334,34 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <input value={conName} onChange={e=>setConName(e.target.value)} placeholder="Dr. Name"
                 style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
             )}
+            <div style={{ flex:1 }} />
+            {dbPatientId && patientFullData?.consultations?.length > 0 && (
+              <button onClick={copyLastRx} style={{ background:"#eff6ff", border:"1px solid #bfdbfe", padding:"4px 10px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer", color:"#2563eb" }}>
+                📋 Copy Last Rx
+              </button>
+            )}
+            <button onClick={()=>setConPasteMode(!conPasteMode)} style={{ background:conPasteMode?"#1e293b":"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 10px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer", color:conPasteMode?"white":"#475569" }}>
+              📝 Paste Rx
+            </button>
           </div>
+
+          {/* Paste Rx Box */}
+          {conPasteMode && (
+            <div style={{ marginBottom:8, background:"#faf5ff", border:"1px solid #d8b4fe", borderRadius:8, padding:10 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#6b21a8", marginBottom:4 }}>📝 Paste prescription or notes — AI will structure it</div>
+              <textarea value={conPasteText} onChange={e=>setConPasteText(e.target.value)}
+                placeholder="Paste old prescription, handwritten notes, or type freely...&#10;&#10;Example:&#10;Tab Glycomet GP2 - morning before food&#10;Tab Telmisartan 40 - morning&#10;Tab Ecosprin 75 - after lunch&#10;Continue insulin Lantus 20U at night&#10;HbA1c target < 7%&#10;Follow up in 3 months with HbA1c, lipids"
+                rows={6} style={{ width:"100%", border:"1px solid #d8b4fe", borderRadius:6, padding:10, fontSize:12, resize:"vertical", boxSizing:"border-box", lineHeight:1.6, fontFamily:"inherit" }} autoFocus />
+              <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                <button onClick={processPastedRx} disabled={!conPasteText.trim()}
+                  style={{ flex:1, background:conPasteText.trim()?"#7c2d12":"#94a3b8", color:"white", border:"none", padding:"8px", borderRadius:6, fontSize:12, fontWeight:700, cursor:conPasteText.trim()?"pointer":"not-allowed" }}>
+                  🔬 Process with AI
+                </button>
+                <button onClick={()=>{setConPasteMode(false);setConPasteText("");}} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"8px 14px", borderRadius:6, fontSize:12, cursor:"pointer", color:"#64748b" }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
           <AudioInput label="Consultant — Treatment Decisions" dgKey={dgKey} whisperKey={whisperKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
           {conTranscript && <button onClick={processConsultant} disabled={loading.con} style={{ marginTop:6, width:"100%", background:loading.con?"#6b7280":conData?"#059669":"#7c2d12", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
             {loading.con?"🔬 Extracting...":conData?"✅ Done — Re-process":"🔬 Extract Treatment Plan"}
@@ -3305,16 +3416,23 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {tab==="plan" && (
         <div>
           {NewReportsBanner}
-          <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
+          <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
             <button onClick={()=>setTab("vitals")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
             <button onClick={()=>setTab("mo")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ MO</button>
             <button onClick={()=>setTab("consultant")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ Consultant</button>
             <button className="no-print" onClick={resetPlanEdits} style={{ background:"#fef3c7", border:"1px solid #fcd34d", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600, color:"#92400e" }}>↩ Reset</button>
+            {conTranscript && <button className="no-print" onClick={processConsultant} disabled={loading.con}
+              style={{ background:loading.con?"#94a3b8":"#7c2d12", color:"white", border:"none", padding:"4px 10px", borderRadius:4, fontSize:10, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
+              {loading.con?"⏳ Regenerating...":"🔄 Regenerate"}
+            </button>}
             <button className="no-print" onClick={runRxReview} disabled={rxReviewLoading}
               style={{ background:rxReview?"#7c3aed":"linear-gradient(135deg,#7c3aed,#2563eb)", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:rxReviewLoading?"wait":"pointer", opacity:rxReviewLoading?.7:1 }}>
               {rxReviewLoading?"⏳ Reviewing...":"🤖 Review Rx"}
             </button>
             <div style={{ flex:1 }} />
+            <button className="no-print" onClick={copyPlanToClipboard} style={{ background:planCopied?"#059669":"#f1f5f9", color:planCopied?"white":"#475569", border:`1px solid ${planCopied?"#059669":"#e2e8f0"}`, padding:"4px 10px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+              {planCopied?"✅ Copied!":"📋 Copy Rx"}
+            </button>
             <button onClick={handlePrintPlan} style={{ background:"#1e293b", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🖨️ Print & Save</button>
           </div>
 
