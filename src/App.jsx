@@ -1044,6 +1044,13 @@ export default function GiniScribe() {
           if (result.success) {
             setSaveStatus(`✅ Saved (DB #${result.consultation_id})`);
             setDbPatientId(result.patient_id);
+            // Reload patient data so latest consultation is available
+            try {
+              const refreshResp = await fetch(`${API_URL}/api/patients/${result.patient_id}`);
+              const refreshData = await refreshResp.json();
+              setPatientFullData(refreshData);
+              setHistoryList(refreshData.consultations || []);
+            } catch (e) { console.log("Refresh after save:", e.message); }
             // Auto-save prescription as retrievable document
             if (conData && result.patient_id) {
               const rxDoc = {
@@ -1192,8 +1199,13 @@ export default function GiniScribe() {
         const full = await resp.json();
         setPatientFullData(full);
         setHistoryList(full.consultations || []);
-        if (full.consultations?.length > 0) {
-          const latest = full.consultations[0];
+        // Sort to get truly latest consultation (by date + creation time)
+        const sortedCons = (full.consultations || []).sort((a,b) => {
+          const d = new Date(b.visit_date) - new Date(a.visit_date);
+          return d !== 0 ? d : new Date(b.created_at) - new Date(a.created_at);
+        });
+        if (sortedCons.length > 0) {
+          const latest = sortedCons[0];
           const conResp = await fetch(`${API_URL}/api/consultations/${latest.id}`);
           const conDetail = await conResp.json();
           if (conDetail.mo_data) setMoData(conDetail.mo_data);
@@ -2348,10 +2360,18 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   // Detect new lab results since last consultation
   const newReportsSinceLastVisit = (() => {
     if (!patientFullData?.lab_results?.length || !patientFullData?.consultations?.length) return [];
-    const lastVisit = patientFullData.consultations.sort((a,b) => new Date(b.visit_date) - new Date(a.visit_date))[0];
-    const lastVisitDate = lastVisit?.visit_date ? new Date(lastVisit.visit_date).toISOString().split("T")[0] : null;
+    const sortedCons = [...patientFullData.consultations].sort((a,b) => {
+      const d = new Date(b.visit_date) - new Date(a.visit_date);
+      return d !== 0 ? d : new Date(b.created_at) - new Date(a.created_at);
+    });
+    const lastVisit = sortedCons[0];
+    const lastVisitDate = lastVisit?.visit_date ? String(lastVisit.visit_date).slice(0,10) : null;
     if (!lastVisitDate) return [];
-    return patientFullData.lab_results.filter(l => l.test_date && l.test_date > lastVisitDate);
+    return patientFullData.lab_results.filter(l => {
+      if (!l.test_date) return false;
+      const labDate = String(l.test_date).slice(0,10); // normalize to YYYY-MM-DD
+      return labDate > lastVisitDate; // strictly after last visit, not same day
+    });
   })();
   const hasNewReports = newReportsSinceLastVisit.length > 0;
   

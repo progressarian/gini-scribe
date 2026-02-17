@@ -216,7 +216,7 @@ app.get("/api/patients/:id", async (req, res) => {
     if (!patient.rows[0]) return res.status(404).json({ error: "Not found" });
 
     const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
-      pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC", [id]),
+      pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
       // Deduplicate meds: latest entry per med name
       pool.query(`SELECT DISTINCT ON (UPPER(name)) * FROM medications
