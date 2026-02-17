@@ -798,6 +798,8 @@ export default function GiniScribe() {
   const [moTranscript, setMoTranscript] = useState("");
   const [conTranscript, setConTranscript] = useState("");
   const [moData, setMoData] = useState(null);
+  const [moBrief, setMoBrief] = useState(null);
+  const [moBriefLoading, setMoBriefLoading] = useState(false);
   const [conData, setConData] = useState(null);
   const [planHidden, setPlanHidden] = useState(new Set());
   const [planEdits, setPlanEdits] = useState({});
@@ -1190,6 +1192,7 @@ export default function GiniScribe() {
     setDbPatientId(dbRecord.id);
     setNewReportsIncluded(false);
     setNewReportsExpanded(false);
+    setMoBrief(null);
     setCrExpanded(false); setCrText(""); setCrCondition(""); setCrTags([]); setCrSaved(null); setCrAudioBlob(null); setCrAudioUrl(null);
     setRxFbAgreement(null); setRxFbText(""); setRxFbCorrect(""); setRxFbReason(""); setRxFbTags([]); setRxFbSeverity(null); setRxFbSaved(null);
     // Load full patient record
@@ -1776,11 +1779,20 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
   // Fetch Clinical Intelligence report
   const loadCIReport = async (p) => {
     if (!API_URL) return;
-    setCiLoading(true);
+    setCiLoading(true); setCiData(null);
     try {
       const resp = await fetch(`${API_URL}/api/reports/clinical-intelligence?period=${p||ciPeriod}`, { headers: authHeaders() });
-      setCiData(await resp.json());
-    } catch (e) { console.error("CI report error:", e.message); }
+      const data = await resp.json();
+      // Ensure required structure exists
+      if (data && data.overview) {
+        setCiData(data);
+      } else {
+        setCiData({ overview: { cr_total:0, cr_month:0, rx_total:0, rx_month:0, agreement:[], audio_hours:0 }, reasoning_feed:[], rx_feed:[], doctor_stats:[], disagreement_tags:[] });
+      }
+    } catch (e) {
+      console.error("CI report error:", e.message);
+      setCiData({ overview: { cr_total:0, cr_month:0, rx_total:0, rx_month:0, agreement:[], audio_hours:0 }, reasoning_feed:[], rx_feed:[], doctor_stats:[], disagreement_tags:[], _error: e.message });
+    }
     setCiLoading(false);
   };
 
@@ -1845,6 +1857,131 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     else if(data) setMoData(fixMoMedicines(data));
     else setErrors(p=>({...p,mo:"No data returned"}));
     setLoading(p=>({...p,mo:false}));
+  };
+
+  // ============ MO BRIEF FOR CONSULTANT ============
+  const generateMOBrief = () => {
+    const pfd = patientFullData;
+    if (!pfd) return null;
+
+    const sortedCons = (pfd.consultations||[]).sort((a,b) => {
+      const d = new Date(b.visit_date) - new Date(a.visit_date);
+      return d !== 0 ? d : new Date(b.created_at) - new Date(a.created_at);
+    });
+    const isFollowUp = sortedCons.length > 0;
+    const lastVisit = sortedCons[0];
+    const prevVisit = sortedCons[1]; // visit before last
+
+    // Current diagnoses
+    const diags = (pfd.diagnoses||[]);
+    const uniqueDiags = [];
+    const seen = new Set();
+    diags.forEach(d => { if (!seen.has(d.diagnosis_id||d.label)) { seen.add(d.diagnosis_id||d.label); uniqueDiags.push(d); }});
+
+    // Current medications (from most recent visit)
+    const meds = (pfd.medications||[]).filter(m => {
+      if (!lastVisit) return true;
+      return m.consultation_id === lastVisit.id;
+    });
+    // If no meds from last visit, get all active meds
+    const activeMeds = meds.length > 0 ? meds : (pfd.medications||[]).slice(0, 15);
+
+    // Vitals comparison
+    const sortedVitals = (pfd.vitals||[]).sort((a,b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+    const currentVitals = vitals.bp_sys ? vitals : sortedVitals[0];
+    const prevVitals = sortedVitals.length > 1 ? sortedVitals[1] : null;
+
+    // Lab trends — group by test, compare latest to previous
+    const labsByTest = {};
+    (pfd.lab_results||[]).forEach(l => {
+      if (!labsByTest[l.test_name]) labsByTest[l.test_name] = [];
+      labsByTest[l.test_name].push(l);
+    });
+    const labTrends = [];
+    const keyTests = ["HbA1c","Fasting Glucose","FBS","PPBS","Post Prandial Glucose","Creatinine","eGFR","EGFR","Total Cholesterol","LDL","HDL","Triglycerides","TSH","SGPT","ALT","SGOT","AST","Hemoglobin","Hb","UACR","Microalbumin"];
+    Object.entries(labsByTest).forEach(([name, results]) => {
+      const sorted = results.sort((a,b) => new Date(b.test_date) - new Date(a.test_date));
+      const latest = sorted[0];
+      const prev = sorted[1];
+      if (!latest?.result) return;
+      const isKey = keyTests.some(k => name.toLowerCase().includes(k.toLowerCase()));
+      if (!isKey && sorted.length < 2) return; // skip non-key single results
+      const latestNum = parseFloat(latest.result);
+      const prevNum = prev ? parseFloat(prev.result) : null;
+      let trend = "stable";
+      if (prevNum !== null && !isNaN(latestNum) && !isNaN(prevNum)) {
+        const pctChange = ((latestNum - prevNum) / Math.abs(prevNum || 1)) * 100;
+        if (pctChange > 10) trend = "worsening";
+        else if (pctChange < -10) trend = "improving";
+      }
+      if (isKey || trend !== "stable") {
+        labTrends.push({
+          name, latest: latest.result, latestUnit: latest.unit||"",
+          latestDate: latest.test_date, latestFlag: latest.flag,
+          previous: prev?.result||null, prevDate: prev?.test_date||null,
+          trend, isKey
+        });
+      }
+    });
+
+    // New labs since last visit
+    const lastDate = lastVisit?.visit_date ? String(lastVisit.visit_date).slice(0,10) : null;
+    const newLabs = lastDate ? (pfd.lab_results||[]).filter(l => l.test_date && String(l.test_date).slice(0,10) > lastDate) : [];
+
+    // Days since last visit
+    const daysSince = lastVisit ? Math.round((Date.now() - new Date(lastVisit.visit_date)) / 86400000) : null;
+
+    // Build brief text for reading out
+    let briefText = "";
+    if (isFollowUp) {
+      briefText += `FOLLOW-UP PATIENT — ${patient.name}, ${patient.age}Y/${patient.sex}`;
+      if (patient.fileNo) briefText += `, File #${patient.fileNo}`;
+      briefText += `\n\n`;
+      briefText += `KNOWN CONDITIONS: ${uniqueDiags.map(d=>`${d.label} (${d.status})`).join(", ") || "None recorded"}\n\n`;
+      briefText += `LAST VISIT: ${lastVisit.visit_date ? new Date(lastVisit.visit_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "Unknown"} — ${daysSince} days ago`;
+      if (lastVisit.con_name) briefText += ` — seen by ${lastVisit.con_name}`;
+      briefText += `\n\n`;
+      briefText += `CURRENT MEDICATIONS:\n${activeMeds.length ? activeMeds.map(m=>`  • ${m.name} ${m.dose||""} ${m.timing||m.frequency||""}`).join("\n") : "  None recorded"}\n\n`;
+
+      // What's changed
+      const improving = labTrends.filter(l => l.trend === "improving");
+      const worsening = labTrends.filter(l => l.trend === "worsening");
+      if (improving.length) briefText += `📈 IMPROVING: ${improving.map(l=>`${l.name} ${l.previous}→${l.latest}${l.latestUnit}`).join(", ")}\n`;
+      if (worsening.length) briefText += `📉 WORSENING: ${worsening.map(l=>`${l.name} ${l.previous}→${l.latest}${l.latestUnit}`).join(", ")}\n`;
+      if (newLabs.length) briefText += `\n🔬 NEW LABS (${newLabs.length}): ${[...new Set(newLabs.map(l=>l.test_name))].join(", ")}\n`;
+
+      if (currentVitals?.bp_sys) {
+        briefText += `\nTODAY'S VITALS: BP ${currentVitals.bp_sys}/${currentVitals.bp_dia}`;
+        if (prevVitals?.bp_sys) briefText += ` (prev: ${prevVitals.bp_sys}/${prevVitals.bp_dia})`;
+        if (currentVitals.weight) {
+          briefText += `, Wt ${currentVitals.weight}kg`;
+          if (prevVitals?.weight) { const d = (parseFloat(currentVitals.weight)-parseFloat(prevVitals.weight)).toFixed(1); if(d!=0) briefText += ` (${d>0?"+":""}${d}kg)`; }
+        }
+        if (currentVitals.bmi) briefText += `, BMI ${currentVitals.bmi}`;
+        briefText += `\n`;
+      }
+    } else {
+      briefText += `NEW PATIENT — ${patient.name}, ${patient.age}Y/${patient.sex}`;
+      if (patient.fileNo) briefText += `, File #${patient.fileNo}`;
+      if (patient.address) briefText += `\nAddress: ${patient.address}`;
+      briefText += `\n\n`;
+      if (moData) {
+        briefText += `CHIEF COMPLAINTS: ${(moData.chief_complaints||[]).join(", ") || "—"}\n\n`;
+        briefText += `DIAGNOSES: ${sa(moData,"diagnoses").map(d=>`${d.label} (${d.status})`).join(", ") || "To be determined"}\n\n`;
+        briefText += `MEDICATIONS: ${sa(moData,"previous_medications").map(m=>`${m.name} ${m.dose||""}`).join(", ") || "None"}\n\n`;
+      }
+      if (currentVitals?.bp_sys) {
+        briefText += `VITALS: BP ${currentVitals.bp_sys}/${currentVitals.bp_dia}, Pulse ${currentVitals.pulse||"—"}, Wt ${currentVitals.weight||"—"}kg, BMI ${currentVitals.bmi||"—"}\n`;
+      }
+    }
+
+    return {
+      isFollowUp, daysSince, briefText,
+      diagnoses: uniqueDiags, medications: activeMeds,
+      labTrends, newLabs, improving: labTrends.filter(l=>l.trend==="improving"),
+      worsening: labTrends.filter(l=>l.trend==="worsening"),
+      currentVitals, prevVitals, lastVisit, totalVisits: sortedCons.length
+    };
   };
 
   const processConsultant = async () => {
@@ -3234,6 +3371,147 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
             )}
           </div>
+
+          {/* ── MO BRIEF FOR CONSULTANT ── */}
+          {dbPatientId && (
+            <div style={{ marginBottom:10 }}>
+              {!moBrief ? (
+                <button onClick={()=>setMoBrief(generateMOBrief())}
+                  style={{ width:"100%", background:"linear-gradient(135deg,#1e40af,#3b82f6)", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                  📋 Generate Consultant Brief
+                </button>
+              ) : (
+                <div style={{ border:"2px solid #1e40af", borderRadius:10, overflow:"hidden" }}>
+                  <div style={{ background:"linear-gradient(135deg,#1e40af,#1e3a8a)", color:"white", padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:14 }}>📋</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:800, fontSize:13 }}>
+                        {moBrief.isFollowUp ? "FOLLOW-UP" : "NEW PATIENT"} BRIEF
+                      </div>
+                      <div style={{ fontSize:10, opacity:.8 }}>
+                        {moBrief.isFollowUp
+                          ? `${moBrief.totalVisits} visits • Last: ${moBrief.daysSince}d ago${moBrief.lastVisit?.con_name ? ` • ${moBrief.lastVisit.con_name}` : ""}`
+                          : "First visit"}
+                      </div>
+                    </div>
+                    <button onClick={()=>{ navigator.clipboard.writeText(moBrief.briefText); }}
+                      style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>📋 Copy</button>
+                    <button onClick={()=>setMoBrief(generateMOBrief())}
+                      style={{ background:"rgba(255,255,255,.15)", border:"none", color:"white", padding:"4px 8px", borderRadius:5, fontSize:10, cursor:"pointer" }}>🔄</button>
+                    <button onClick={()=>setMoBrief(null)}
+                      style={{ background:"rgba(255,255,255,.1)", border:"none", color:"white", padding:"4px 6px", borderRadius:5, fontSize:10, cursor:"pointer" }}>✕</button>
+                  </div>
+
+                  <div style={{ padding:10, fontSize:11, lineHeight:1.7 }}>
+                    {/* Diagnoses */}
+                    {moBrief.diagnoses.length > 0 && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:3 }}>KNOWN CONDITIONS</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                          {moBrief.diagnoses.map((d,i) => (
+                            <span key={i} style={{ padding:"2px 8px", borderRadius:5, fontSize:10, fontWeight:600,
+                              background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#fefce8",
+                              color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#92400e",
+                              border:`1px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="Controlled"?"#bbf7d0":"#fde68a"}` }}>
+                              {d.label} — {d.status}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Medications */}
+                    {moBrief.medications.length > 0 && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:3 }}>CURRENT MEDICATIONS ({moBrief.medications.length})</div>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:2 }}>
+                          {moBrief.medications.map((m,i) => (
+                            <div key={i} style={{ fontSize:10, padding:"2px 6px", background:i%2?"#f8fafc":"white", borderRadius:3 }}>
+                              <strong>{m.name}</strong> {m.dose||""} <span style={{ color:"#64748b" }}>{m.timing||m.frequency||""}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Trends — improving / worsening */}
+                    {(moBrief.improving.length > 0 || moBrief.worsening.length > 0) && (
+                      <div style={{ marginBottom:8, display:"flex", gap:6 }}>
+                        {moBrief.improving.length > 0 && (
+                          <div style={{ flex:1, background:"#f0fdf4", borderRadius:6, padding:6, border:"1px solid #bbf7d0" }}>
+                            <div style={{ fontSize:9, fontWeight:700, color:"#059669" }}>📈 IMPROVING</div>
+                            {moBrief.improving.map((l,i) => (
+                              <div key={i} style={{ fontSize:10, color:"#059669" }}>
+                                {l.name}: <span style={{ textDecoration:"line-through", opacity:.6 }}>{l.previous}</span> → <strong>{l.latest}</strong>{l.latestUnit}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {moBrief.worsening.length > 0 && (
+                          <div style={{ flex:1, background:"#fef2f2", borderRadius:6, padding:6, border:"1px solid #fecaca" }}>
+                            <div style={{ fontSize:9, fontWeight:700, color:"#dc2626" }}>📉 WORSENING</div>
+                            {moBrief.worsening.map((l,i) => (
+                              <div key={i} style={{ fontSize:10, color:"#dc2626" }}>
+                                {l.name}: <span style={{ textDecoration:"line-through", opacity:.6 }}>{l.previous}</span> → <strong>{l.latest}</strong>{l.latestUnit}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Key labs */}
+                    {moBrief.labTrends.filter(l=>l.isKey).length > 0 && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:3 }}>KEY LAB VALUES</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                          {moBrief.labTrends.filter(l=>l.isKey).map((l,i) => (
+                            <span key={i} style={{ padding:"2px 6px", borderRadius:4, fontSize:10, fontWeight:600,
+                              background:l.latestFlag==="H"?"#fef2f2":l.latestFlag==="L"?"#eff6ff":"#f8fafc",
+                              color:l.latestFlag==="H"?"#dc2626":l.latestFlag==="L"?"#2563eb":"#334155",
+                              border:`1px solid ${l.latestFlag==="H"?"#fecaca":l.latestFlag==="L"?"#bfdbfe":"#e2e8f0"}` }}>
+                              {l.name}: <strong>{l.latest}</strong>{l.latestUnit}
+                              {l.previous && <span style={{ opacity:.5, marginLeft:3 }}>(prev: {l.previous})</span>}
+                              {l.latestFlag==="H"?"↑":l.latestFlag==="L"?"↓":""}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Vitals comparison */}
+                    {moBrief.currentVitals?.bp_sys && (
+                      <div style={{ marginBottom:4 }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:3 }}>TODAY'S VITALS</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                          {[
+                            {l:"BP",v:`${moBrief.currentVitals.bp_sys}/${moBrief.currentVitals.bp_dia}`,p:moBrief.prevVitals?`${moBrief.prevVitals.bp_sys}/${moBrief.prevVitals.bp_dia}`:null},
+                            {l:"Wt",v:moBrief.currentVitals.weight?`${moBrief.currentVitals.weight}kg`:null,p:moBrief.prevVitals?.weight?`${moBrief.prevVitals.weight}kg`:null},
+                            {l:"BMI",v:moBrief.currentVitals.bmi,p:moBrief.prevVitals?.bmi},
+                            {l:"Pulse",v:moBrief.currentVitals.pulse,p:null},
+                            {l:"SpO2",v:moBrief.currentVitals.spo2?`${moBrief.currentVitals.spo2}%`:null,p:null}
+                          ].filter(x=>x.v).map((x,i) => (
+                            <span key={i} style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:4, padding:"2px 6px", fontSize:10 }}>
+                              <strong style={{ color:"#9a3412" }}>{x.l}:</strong> {x.v}
+                              {x.p && <span style={{ color:"#94a3b8", marginLeft:3 }}>(prev: {x.p})</span>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* New labs alert */}
+                    {moBrief.newLabs.length > 0 && (
+                      <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:6, marginTop:6 }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:"#92400e" }}>🔬 {moBrief.newLabs.length} NEW RESULTS since last visit</div>
+                        <div style={{ fontSize:9, color:"#a16207", marginTop:2 }}>{[...new Set(moBrief.newLabs.map(l=>l.test_name))].join(", ")}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <AudioInput label="MO — Patient History" dgKey={dgKey} whisperKey={whisperKey} color="#1e40af" onTranscript={t=>{setMoTranscript(t);setMoData(null);clearErr("mo");}} />
           {moTranscript && <button onClick={processMO} disabled={loading.mo} style={{ marginTop:6, width:"100%", background:loading.mo?"#6b7280":moData?"#059669":"#1e40af", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.mo?"wait":"pointer" }}>
             {loading.mo?"🔬 Structuring...":moData?"✅ Done — Re-process":"🔬 Structure MO Summary"}
@@ -3364,6 +3642,31 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               📝 Paste Rx
             </button>
           </div>
+
+          {/* Compact Brief for Consultant */}
+          {moBrief && (
+            <div style={{ marginBottom:8, background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"1px solid #bfdbfe", borderRadius:8, padding:"8px 10px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
+                <span style={{ fontSize:11, fontWeight:800, color:"#1e40af" }}>📋 {moBrief.isFollowUp?"FOLLOW-UP":"NEW"} BRIEF</span>
+                {moBrief.isFollowUp && <span style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>{moBrief.totalVisits} visits • {moBrief.daysSince}d ago</span>}
+                <div style={{flex:1}} />
+                <button onClick={()=>navigator.clipboard.writeText(moBrief.briefText)} style={{ fontSize:9, background:"white", border:"1px solid #bfdbfe", padding:"2px 6px", borderRadius:4, cursor:"pointer", color:"#2563eb", fontWeight:600 }}>Copy</button>
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
+                {moBrief.diagnoses.slice(0,6).map((d,i) => (
+                  <span key={i} style={{ fontSize:9, padding:"1px 5px", borderRadius:4, fontWeight:600,
+                    background:d.status==="Uncontrolled"?"#fef2f2":"#f0fdf4", color:d.status==="Uncontrolled"?"#dc2626":"#059669" }}>{d.label}</span>
+                ))}
+              </div>
+              {moBrief.worsening.length > 0 && (
+                <div style={{ fontSize:9, color:"#dc2626", fontWeight:600 }}>⚠️ Worsening: {moBrief.worsening.map(l=>`${l.name} ${l.previous}→${l.latest}`).join(", ")}</div>
+              )}
+              {moBrief.improving.length > 0 && (
+                <div style={{ fontSize:9, color:"#059669", fontWeight:600 }}>📈 Improving: {moBrief.improving.map(l=>`${l.name} ${l.previous}→${l.latest}`).join(", ")}</div>
+              )}
+              <div style={{ fontSize:9, color:"#64748b", marginTop:2 }}>💊 {moBrief.medications.length} meds{moBrief.newLabs.length > 0 ? ` • 🔬 ${moBrief.newLabs.length} new labs` : ""}</div>
+            </div>
+          )}
 
           {/* Paste Rx Box */}
           {conPasteMode && (
@@ -5811,14 +6114,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
           </div>
 
-          {!ciData ? (
+          {ciLoading ? (
+            <div style={{ textAlign:"center", padding:40 }}><div style={{ fontSize:24 }}>⏳</div><div style={{ fontSize:13, color:"#94a3b8" }}>Loading Clinical Intelligence...</div></div>
+          ) : !ciData ? (
             <div style={{ textAlign:"center", padding:40 }}>
               <button onClick={()=>loadCIReport()} style={{ background:"#0ea5e9", color:"white", border:"none", padding:"12px 30px", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer" }}>
                 📊 Load Report
               </button>
             </div>
-          ) : ciLoading ? (
-            <div style={{ textAlign:"center", padding:40 }}><div style={{ fontSize:24 }}>⏳</div><div style={{ fontSize:13, color:"#94a3b8" }}>Loading...</div></div>
           ) : (
             <>
               {/* Overview Cards */}
