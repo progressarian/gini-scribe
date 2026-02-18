@@ -121,7 +121,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_biomarker: g.biomarker || g.test_name || g.marker,
         p_current_value: String(g.current_value || g.current),
         p_target_value: String(g.target_value || g.target),
-        p_target_date: g.target_date || g.timeline || null,
+        p_target_date: g.target_date || null,
         p_status: 'active',
       });
       if (error) errors.push({ step: 'goal', name: g.biomarker || g.marker, error: error.message });
