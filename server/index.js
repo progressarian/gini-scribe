@@ -3,6 +3,9 @@ import cors from "cors";
 import pg from "pg";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { syncVisitToGenie } = require("./genie-sync.js");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -397,6 +400,21 @@ app.post("/api/consultations", async (req, res) => {
     await client.query("COMMIT");
     console.log(`✅ Saved: patient=${patientId} consultation=${consultationId}`);
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
+
+    // ── Sync to MyHealth Genie (non-blocking) ──
+    const visit = {
+      consultation_id: consultationId,
+      patient_id: patientId,
+      visit_date: vDate || new Date().toISOString().split("T")[0],
+      mo_data: moData,
+      con_data: conData,
+      vitals,
+      plan_edits: planEdits
+    };
+    const doctorInfo = { con_name: conName, mo_name: moName };
+    syncVisitToGenie(visit, patient, doctorInfo)
+      .then(r => { if (r) console.log("📱 Genie sync:", r); })
+      .catch(e => console.log("Genie sync background:", e.message));
   } catch (e) {
     await client.query("ROLLBACK");
     console.error("❌ Save error:", e.message, e.detail || "");
@@ -1237,6 +1255,7 @@ app.get("/api/reports/clinical-intelligence/export", async (req, res) => {
     res.json({ clinical_reasoning: reasoning.rows, rx_feedback: feedback.rows, exported_at: new Date().toISOString() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
 
 // ============ SERVE FRONTEND ============
 const distPath = path.join(__dirname, "..", "dist");
