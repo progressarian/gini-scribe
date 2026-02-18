@@ -23,3 +23,4 @@ npm install
 VITE_DEEPGRAM_KEY=your_key npm run dev
 ```
 # v7.19.1
+
