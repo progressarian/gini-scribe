@@ -46,7 +46,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
     // 2. Sync care team (hospital + doctor + MO)
     const careTeam = [
       { role: 'hospital', name: 'Gini Advanced Care Hospital', phone: process.env.HOSPITAL_PHONE || null, speciality: null, org: 'Gini Advanced Care Hospital', primary: true, sourceId: 'gini-hospital' },
-      { role: 'doctor', name: doctor?.name || visit.doctor_name, phone: doctor?.phone || null, speciality: doctor?.speciality || visit.speciality || null, org: 'Gini Advanced Care Hospital', primary: true, sourceId: `gini-doc-${doctor?.id || 'primary'}` },
+      { role: 'doctor', name: doctor?.name || doctor?.con_name || visit.doctor_name || visit.con_name, phone: doctor?.phone || null, speciality: doctor?.speciality || visit.speciality || null, org: 'Gini Advanced Care Hospital', primary: true, sourceId: `gini-doc-${doctor?.id || 'primary'}` },
     ];
     if (visit.mo_name || patient.coordinator) {
       careTeam.push({ role: 'coordinator', name: visit.mo_name || patient.coordinator, phone: visit.mo_phone || null, speciality: 'Medical Officer', org: 'Gini Advanced Care Hospital', primary: false, sourceId: `gini-mo-${visit.mo_id || 'primary'}` });
@@ -96,7 +96,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
     }
 
     // 5. Sync diagnoses/conditions
-    const diagnoses = visit.diagnoses || visit.conditions || visit.diagnosis_list || [];
+    const diagnoses = visit.diagnoses || visit.conditions || visit.diagnosis_list || visit.mo_data?.diagnoses || [];
     for (let i = 0; i < diagnoses.length; i++) {
       const dx = diagnoses[i];
       const dxName = typeof dx === 'string' ? dx : (dx.name || dx.diagnosis || dx.label);
@@ -117,14 +117,14 @@ async function syncVisitToGenie(visit, patient, doctor) {
       const g = goals[i];
       const { error } = await db.rpc('gini_sync_goal', {
         p_gini_patient_id: giniPatientId,
-        p_source_id: `gini-goal-${g.biomarker?.toLowerCase().replace(/\s+/g,'-') || i}`,
-        p_biomarker: g.biomarker || g.test_name,
+        p_source_id: `gini-goal-${(g.biomarker || g.marker)?.toLowerCase().replace(/\s+/g,'-') || i}`,
+        p_biomarker: g.biomarker || g.test_name || g.marker,
         p_current_value: String(g.current_value || g.current),
         p_target_value: String(g.target_value || g.target),
-        p_target_date: g.target_date || null,
+        p_target_date: g.target_date || g.timeline || null,
         p_status: 'active',
       });
-      if (error) errors.push({ step: 'goal', name: g.biomarker, error: error.message });
+      if (error) errors.push({ step: 'goal', name: g.biomarker || g.marker, error: error.message });
     }
 
     // 7. Sync appointment (next follow-up)
@@ -133,7 +133,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_gini_patient_id: giniPatientId,
         p_source_id: `gini-appt-${visit.id || visit.visit_id || visit.consultation_id}`,
         p_appointment_date: visit.follow_up_date || visit.next_appointment,
-        p_doctor_name: doctor?.name || visit.doctor_name || null,
+        p_doctor_name: doctor?.name || doctor?.con_name || visit.doctor_name || visit.con_name || null,
         p_notes: visit.follow_up_instructions || null,
         p_status: 'scheduled',
       });
@@ -144,7 +144,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
     const { error: tlErr } = await db.rpc('gini_sync_timeline', {
       p_gini_patient_id: giniPatientId,
       p_source_id: `gini-visit-${visit.id || visit.visit_id || visit.consultation_id}`,
-      p_title: `Visit: ${doctor?.name || visit.doctor_name || 'Gini Hospital'} — ${meds.length} medications`,
+      p_title: `Visit: ${doctor?.name || doctor?.con_name || visit.doctor_name || visit.con_name || 'Gini Hospital'} — ${meds.length} medications`,
       p_event_date: visit.visit_date || new Date().toISOString().split('T')[0],
       p_icon: '\u{1F3E5}',
     });
