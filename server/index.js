@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
-const { syncVisitToGenie } = require("./genie-sync.cjs");
+const { syncVisitToGenie } = require("./genie-sync.js");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -409,7 +409,17 @@ app.post("/api/consultations", async (req, res) => {
       mo_data: moData,
       con_data: conData,
       vitals,
-      plan_edits: planEdits
+      plan_edits: planEdits,
+      // Extracted arrays for Genie sync
+      medications: conData?.medications_confirmed || [],
+      lab_results: moData?.investigations || [],
+      diagnoses: moData?.diagnoses || [],
+      goals: conData?.goals || [],
+      lifestyle: conData?.diet_lifestyle || [],
+      self_monitoring: conData?.self_monitoring || [],
+      follow_up: conData?.follow_up || null,
+      chief_complaints: moData?.chief_complaints || [],
+      summary: conData?.assessment_summary || null
     };
     const doctorInfo = { con_name: conName, mo_name: moName };
     syncVisitToGenie(visit, patient, doctorInfo)
