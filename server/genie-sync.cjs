@@ -86,7 +86,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_gini_patient_id: giniPatientId,
         p_source_id: `${visit.id || visit.visit_id || visit.consultation_id}-lab-${i}`,
         p_test_name: lab.test_name || lab.name || lab.test,
-        p_value: String(lab.value),
+        p_value: parseFloat(lab.value) || 0,
         p_unit: lab.unit || null,
         p_reference_range: lab.reference_range || lab.normal_range || lab.ref_range || lab.ref || null,
         p_status: lab.status || lab.flag || (lab.is_abnormal ? 'abnormal' : 'normal'),
