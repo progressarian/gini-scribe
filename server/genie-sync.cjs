@@ -66,7 +66,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
       const med = meds[i];
       const { error } = await db.rpc('gini_sync_medication', {
         p_gini_patient_id: giniPatientId,
-        p_source_id: `${visit.id || visit.visit_id}-med-${i}`,
+        p_source_id: `${visit.id || visit.visit_id || visit.consultation_id}-med-${i}`,
         p_name: med.name || med.medicine_name || med.drug_name,
         p_dose: med.dose || med.dosage || null,
         p_frequency: med.frequency || null,
@@ -84,12 +84,12 @@ async function syncVisitToGenie(visit, patient, doctor) {
       const lab = labs[i];
       const { error } = await db.rpc('gini_sync_lab', {
         p_gini_patient_id: giniPatientId,
-        p_source_id: `${visit.id || visit.visit_id}-lab-${i}`,
-        p_test_name: lab.test_name || lab.name,
+        p_source_id: `${visit.id || visit.visit_id || visit.consultation_id}-lab-${i}`,
+        p_test_name: lab.test_name || lab.name || lab.test,
         p_value: String(lab.value),
         p_unit: lab.unit || null,
-        p_reference_range: lab.reference_range || lab.normal_range || null,
-        p_status: lab.status || (lab.is_abnormal ? 'abnormal' : 'normal'),
+        p_reference_range: lab.reference_range || lab.normal_range || lab.ref_range || lab.ref || null,
+        p_status: lab.status || lab.flag || (lab.is_abnormal ? 'abnormal' : 'normal'),
         p_test_date: lab.test_date || visit.visit_date || new Date().toISOString().split('T')[0],
       });
       if (error) errors.push({ step: 'lab', name: lab.test_name, error: error.message });
@@ -99,7 +99,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
     const diagnoses = visit.diagnoses || visit.conditions || visit.diagnosis_list || [];
     for (let i = 0; i < diagnoses.length; i++) {
       const dx = diagnoses[i];
-      const dxName = typeof dx === 'string' ? dx : (dx.name || dx.diagnosis);
+      const dxName = typeof dx === 'string' ? dx : (dx.name || dx.diagnosis || dx.label);
       const { error } = await db.rpc('gini_sync_condition', {
         p_gini_patient_id: giniPatientId,
         p_source_id: `gini-dx-${dxName?.toLowerCase().replace(/\s+/g,'-')}`,
@@ -131,7 +131,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
     if (visit.follow_up_date || visit.next_appointment) {
       const { error } = await db.rpc('gini_sync_appointment', {
         p_gini_patient_id: giniPatientId,
-        p_source_id: `gini-appt-${visit.id || visit.visit_id}`,
+        p_source_id: `gini-appt-${visit.id || visit.visit_id || visit.consultation_id}`,
         p_appointment_date: visit.follow_up_date || visit.next_appointment,
         p_doctor_name: doctor?.name || visit.doctor_name || null,
         p_notes: visit.follow_up_instructions || null,
@@ -143,7 +143,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
     // 8. Add timeline event
     const { error: tlErr } = await db.rpc('gini_sync_timeline', {
       p_gini_patient_id: giniPatientId,
-      p_source_id: `gini-visit-${visit.id || visit.visit_id}`,
+      p_source_id: `gini-visit-${visit.id || visit.visit_id || visit.consultation_id}`,
       p_title: `Visit: ${doctor?.name || visit.doctor_name || 'Gini Hospital'} — ${meds.length} medications`,
       p_event_date: visit.visit_date || new Date().toISOString().split('T')[0],
       p_icon: '\u{1F3E5}',
