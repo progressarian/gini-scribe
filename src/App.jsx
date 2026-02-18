@@ -1322,6 +1322,40 @@ export default function GiniScribe() {
     if(error) setErrors(p=>({...p,lab:error}));
     else {
       setLabData(data);
+      // Inject extracted labs into moData.investigations + save to DB
+      if (data?.panels?.length) {
+        const newInvs = [];
+        for (const panel of data.panels) {
+          for (const t of panel.tests) {
+            newInvs.push({
+              test: t.test_name, value: t.result_text || t.result,
+              unit: t.unit || "", flag: t.flag || null,
+              critical: t.flag === "CRITICAL", ref: t.ref_range || ""
+            });
+          }
+        }
+        if (newInvs.length) {
+          setMoData(prev => ({
+            ...prev,
+            investigations: [...(prev?.investigations || []), ...newInvs]
+          }));
+        }
+        if (dbPatientId && API_URL) {
+          const labDate = data.report_date || new Date().toISOString().split("T")[0];
+          for (const panel of data.panels) {
+            for (const t of panel.tests) {
+              fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
+                method: "POST", headers: authHeaders(),
+                body: JSON.stringify({
+                  test_name: t.test_name, result: String(t.result_text || t.result),
+                  unit: t.unit || "", flag: t.flag || "N", ref_range: t.ref_range || "",
+                  test_date: labDate
+                })
+              }).catch(() => {});
+            }
+          }
+        }
+      }
       if(data?.patient_on_report?.name && patient.name) {
         const rn=data.patient_on_report.name.toLowerCase(), pn=patient.name.toLowerCase();
         if(rn&&pn&&!rn.includes(pn.split(" ")[0])&&!pn.includes(rn.split(" ")[0]))
