@@ -22,3 +22,4 @@ Railway.app → New Project → Deploy from GitHub → Select repo
 npm install
 VITE_DEEPGRAM_KEY=your_key npm run dev
 ```
+# v7.19.1
