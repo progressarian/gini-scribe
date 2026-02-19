@@ -350,15 +350,13 @@ app.post("/api/consultations", async (req, res) => {
       );
     }
 
-    const diagVals = (moData?.diagnoses || []).filter(d => d?.id && d?.label);
-    if (diagVals.length > 0) {
-      const dParams = []; const dPlaceholders = [];
-      diagVals.forEach((d, i) => {
-        const off = i * 5;
-        dPlaceholders.push(`($${off+1},$${off+2},$${off+3},$${off+4},$${off+5})`);
-        dParams.push(patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || 'New');
-      });
-      await client.query(`INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ${dPlaceholders.join(",")} ON CONFLICT DO NOTHING`, dParams);
+    for (const d of (moData?.diagnoses || [])) {
+      if (d?.id && d?.label) {
+        await client.query(
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || 'New']
+        );
+      }
     }
     for (const m of (moData?.previous_medications || [])) {
       if (m?.name) {
@@ -378,25 +376,19 @@ app.post("/api/consultations", async (req, res) => {
         );
       }
     }
-    const labVals = (moData?.investigations || []).filter(inv => inv?.test && num(inv.value) !== null);
-    if (labVals.length > 0) {
-      const labParams = []; const labPlaceholders = [];
-      labVals.forEach((inv, i) => {
-        const off = i * 9;
-        labPlaceholders.push(`($${off+1},$${off+2},$${off+3},$${off+4},$${off+5},$${off+6},$${off+7},$${off+8},'scribe',COALESCE($${off+9}::date, CURRENT_DATE))`);
-        labParams.push(patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), vDate);
-      });
-      await client.query(`INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ${labPlaceholders.join(",")}`, labParams);
+    for (const inv of (moData?.investigations || [])) {
+      if (inv?.test && num(inv.value) !== null) {
+        await client.query(
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe',COALESCE($9::date, CURRENT_DATE))`,
+          [patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), vDate]
+        );
+      }
     }
-    const goalVals = (conData?.goals || []).filter(g => g?.marker);
-    if (goalVals.length > 0) {
-      const gParams = []; const gPlaceholders = [];
-      goalVals.forEach((g, i) => {
-        const off = i * 7;
-        gPlaceholders.push(`($${off+1},$${off+2},$${off+3},$${off+4},$${off+5},$${off+6},$${off+7})`);
-        gParams.push(patientId, consultationId, t(g.marker,200), t(g.current,200), t(g.target,200), t(g.timeline,200), t(g.priority,100));
-      });
-      await client.query(`INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ${gPlaceholders.join(",")}`, gParams);
+    for (const g of (conData?.goals || [])) {
+      if (g?.marker) {
+        await client.query(`INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [patientId, consultationId, t(g.marker,200), t(g.current,200), t(g.target,200), t(g.timeline,200), t(g.priority,100)]);
+      }
     }
     for (const c of (moData?.complications || [])) {
       if (c?.name) {
