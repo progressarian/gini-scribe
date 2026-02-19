@@ -224,6 +224,7 @@ CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - compliance: "Good"/"Partial"/"Poor" + brief note. Infer from context (taking medicines regularly=Good, missed doses/not walking=Partial)
 - Calculate age from DOB (e.g., born 1957 → ~67-68 years)
 - Extract ALL lab values as investigations with proper flags (HIGH/LOW/null)
+- CRITICAL: ANY numeric lab value mentioned ANYWHERE in the text (FBG, HbA1c, TSH, T3, T4, TG, LDL, HDL, creatinine, potassium, Non-HDL, eGFR, etc) MUST appear in mo.investigations array with value, unit, flag, ref. Do NOT just put them in goals or summary.
 - Include complications (e.g., diabetic foot ulcer, retinopathy, neuropathy)
 - Name MUST be in English/Roman script, never Hindi/Devanagari`;
 
@@ -2176,7 +2177,7 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
   const copyPlanToClipboard = () => {
     let text = `GINI ADVANCED CARE HOSPITAL — Treatment Plan\n`;
     text += `Patient: ${patient.name} | ${patient.age}Y/${patient.sex} | ${patient.phone||""} | ${patient.fileNo||""}\n`;
-    text += `Doctor: ${conName} | Date: ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}\n`;
+    text += `Doctor: ${conName} | Date: ${(vitals?.visit_date ? new Date(vitals.visit_date) : new Date()).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}\n`;
     text += `${"─".repeat(50)}\n\n`;
     
     if (conData?.assessment_summary) {
