@@ -1201,6 +1201,7 @@ export default function GiniScribe() {
     setNewReportsIncluded(false);
     setNewReportsExpanded(false);
     setMoBrief(null);
+    setPatientFullData(null);
     setCrExpanded(false); setCrText(""); setCrCondition(""); setCrTags([]); setCrSaved(null); setCrAudioBlob(null); setCrAudioUrl(null);
     setRxFbAgreement(null); setRxFbText(""); setRxFbCorrect(""); setRxFbReason(""); setRxFbTags([]); setRxFbSeverity(null); setRxFbSaved(null);
     // Load full patient record
