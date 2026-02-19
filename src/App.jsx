@@ -2391,7 +2391,7 @@ RULES:
 - ALWAYS include the full diagnosis list for EVERY visit (not just the first one)
 
 TEXT TO PARSE:
-` + "${bulkText.trim()}";
+` + bulkText.trim();
 
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
