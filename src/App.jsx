@@ -223,8 +223,8 @@ CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - chief_complaints: Extract ALL symptoms patient reports (tingling, fatigue, breathlessness, chest pain, etc). Empty array if none
 - compliance: "Good"/"Partial"/"Poor" + brief note. Infer from context (taking medicines regularly=Good, missed doses/not walking=Partial)
 - Calculate age from DOB (e.g., born 1957 → ~67-68 years)
-- Extract ALL lab values as investigations with proper flags (HIGH/LOW/null)
-- CRITICAL: ANY numeric lab value mentioned ANYWHERE in the text (FBG, HbA1c, TSH, T3, T4, TG, LDL, HDL, creatinine, potassium, Non-HDL, eGFR, etc) MUST appear in mo.investigations array with value, unit, flag, ref. Do NOT just put them in goals or summary.
+- Extract ONLY lab values from the CURRENT/LATEST visit as investigations with proper flags (HIGH/LOW/null). Do NOT include values from previous follow-up dates.
+- CRITICAL: For mo.investigations, ONLY extract lab values from the CURRENT/TODAY/LATEST visit. Do NOT include lab values from historical follow-up notes or previous visits. Look for markers like "FOLLOW UP TODAY", "FOLLOW UP ON [latest date]", or the most recent date in the text. Historical values from older dates should be IGNORED for investigations. Every value in investigations must be from the current visit only.
 - Include complications (e.g., diabetic foot ulcer, retinopathy, neuropathy)
 - Name MUST be in English/Roman script, never Hindi/Devanagari`;
 
@@ -239,7 +239,7 @@ RULES:
 - Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,dfu,masld,nephropathy
 - Status: "Controlled", "Uncontrolled", or "New" ONLY
 - MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
-- Extract ALL lab values with flags (HIGH/LOW/null)
+- Extract ONLY lab values from the CURRENT/TODAY/LATEST visit with flags (HIGH/LOW/null). IGNORE lab values from historical follow-up notes.
 - Include ALL medications (existing + new)
 - Name in English/Roman script only
 - chief_complaints: ALL symptoms mentioned`;
