@@ -2393,12 +2393,13 @@ RULES:
 TEXT TO PARSE:
 ` + "${bulkText.trim()}";
 
-      const resp = await fetch(API_URL + "/api/ai", {
-        method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ messages: [{ role: "user", content: prompt }], model: "haiku" })
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-3-5-haiku-20241022", max_tokens: 8000, messages: [{ role: "user", content: prompt }] })
       });
       const result = await resp.json();
-      const text = (result.content?.[0]?.text || result.text || "").trim();
+      const text = (result.content?.[0]?.text || "").trim();
       const jsonStr = text.replace(/^```json\n?|```$/g, "").trim();
       const visits = JSON.parse(jsonStr);
 
