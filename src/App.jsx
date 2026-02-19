@@ -2399,7 +2399,11 @@ TEXT TO PARSE:
         body: JSON.stringify({ model: "claude-3-5-haiku-20241022", max_tokens: 8000, messages: [{ role: "user", content: prompt }] })
       });
       const result = await resp.json();
+      console.log('Bulk API response:', JSON.stringify(result).slice(0,500));
+      if (result.error) { setBulkProgress("API error: " + result.error.message); setBulkParsing(false); return; }
       const text = (result.content?.[0]?.text || "").trim();
+      console.log('Parsed text:', text.slice(0,200));
+      if (text.length === 0) { setBulkProgress("Empty response from AI"); setBulkParsing(false); return; }
       const jsonStr = text.replace(/^```json\n?|```$/g, "").trim();
       const visits = JSON.parse(jsonStr);
 
