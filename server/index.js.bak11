@@ -708,8 +708,8 @@ app.post("/api/patients/:id/history", async (req, res) => {
     const { visit_date, visit_type, doctor_name, specialty, vitals, diagnoses, medications, labs } = req.body;
 
     const con = await client.query(
-      "INSERT INTO consultations (patient_id, visit_date, visit_type, con_name, con_data, status) VALUES ($1,$2,$3,$4,$5,'historical') RETURNING id",
-      [patientId, visit_date, n(visit_type)||"OPD", n(doctor_name), JSON.stringify({specialty: n(specialty), hospital_name: req.body.hospital_name || null})]
+      "INSERT INTO consultations (patient_id, visit_date, visit_type, con_name, status) VALUES ($1,$2,$3,$4,'historical') RETURNING id",
+      [patientId, visit_date, n(visit_type)||"OPD", n(doctor_name)]
     );
     const cid = con.rows[0].id;
 
@@ -738,15 +738,6 @@ app.post("/api/patients/:id/history", async (req, res) => {
           [patientId, cid, visit_date, l.test_name, num(l.result), n(l.unit), n(l.flag), n(l.ref_range)]);
       }
     }
-
-        // Auto-save as document record
-    try {
-      const docTitle = (n(doctor_name)||"External") + (n(specialty) ? " - "+n(specialty) : "") + " - " + visit_date;
-      await client.query(
-        `INSERT INTO documents (patient_id, consultation_id, doc_type, title, doc_date, source, extracted_data) VALUES ($1,$2,'prescription',$3,$4,$5,$6)`,
-        [patientId, cid, docTitle, visit_date, req.body.hospital_name || "External", JSON.stringify({doctor:n(doctor_name), specialty:n(specialty), hospital:req.body.hospital_name, visit_date, diagnoses, medications, labs, vitals})]
-      );
-    } catch(de) { console.log("Doc save skip:", de.message); }
 
     await client.query("COMMIT");
     console.log(`✅ History saved: patient=${patientId} consultation=${cid}`);

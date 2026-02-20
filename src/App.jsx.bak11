@@ -271,7 +271,7 @@ const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 // ============ API ============
 async function callClaude(prompt, content) {
   try {
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 8000, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
     });
@@ -312,7 +312,7 @@ async function callClaude(prompt, content) {
 // Fast version using Haiku for Quick mode (3-5x faster)
 async function callClaudeFast(prompt, content, maxTokens = 4000) {
   try {
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: maxTokens, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
     });
@@ -375,7 +375,7 @@ async function extractLab(base64, mediaType) {
     const block = mediaType==="application/pdf"
       ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:base64} }
       : { type:"image", source:{type:"base64",media_type:mediaType,data:base64} };
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:LAB_PROMPT}]}]})
     });
@@ -400,7 +400,7 @@ async function extractImaging(base64, mediaType) {
     const block = mediaType==="application/pdf"
       ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:base64} }
       : { type:"image", source:{type:"base64",media_type:mediaType,data:base64} };
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:IMAGING_PROMPT}]}]})
     });
@@ -423,7 +423,7 @@ async function extractImaging(base64, mediaType) {
 async function aiChat(messages, patientContext) {
   try {
     const systemPrompt = AI_CHAT_SYSTEM + (patientContext ? `\n\nPATIENT DATA:\n${patientContext}` : "\n\nNo patient loaded.");
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,system:systemPrompt,messages})
     });
@@ -449,7 +449,7 @@ Do NOT add, remove, or rearrange content. Only fix spelling of medical terms.`;
 async function cleanupTranscript(text) {
   if (!text || text.length < 10) return text;
   try {
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, messages: [{ role: "user", content: `${CLEANUP_PROMPT}\n\nTEXT:\n${text}` }] })
@@ -1081,11 +1081,7 @@ export default function GiniScribe() {
                   doctor: conName, mo: moName,
                   date: new Date().toISOString(),
                   diagnoses: moData?.diagnoses || [],
-                  medications: [...(conData.medications_confirmed || []), ...((patientFullData?.medications||[]).filter(m => {
-            if (!m.is_active) return false;
-            const _cn = new Set((conData.medications_confirmed||[]).map(x=>(x.name||"").toUpperCase().replace(/[^A-Z]/g,"")));
-            return !_cn.has((m.name||"").toUpperCase().replace(/[^A-Z]/g,""));
-          }).map(m => ({...m, _external:true})))],
+                  medications: conData.medications_confirmed || [],
                   diet_lifestyle: conData.diet_lifestyle || [],
                   investigations_ordered: conData.investigations_ordered || [],
                   follow_up: conData.follow_up || {},
@@ -1693,7 +1689,7 @@ Return ONLY valid JSON array. No markdown, no explanation outside the JSON.
 Example: [{"type":"warning","category":"Medication","text":"No statin prescribed","detail":"ADA recommends statin therapy for all DM patients >40y with any ASCVD risk factor","priority":"high"}]`;
 
     try {
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,system:reviewPrompt,messages:[{role:"user",content:ctx}]})
       });
@@ -1884,7 +1880,7 @@ You have access to structured patient data from the hospital database. Analyze a
 Be specific with numbers, names, and trends. Use tables for comparisons. Keep answers concise.
 If the data doesn't contain enough info to answer accurately, say so.
 Format: Use markdown. Bold key numbers. Use tables where helpful.`;
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,system:prompt,messages:[{role:"user",content:`HOSPITAL DATA (${data.patient_count} patients):\n${dataStr}\n\nQUERY: ${reportQuery}`}]})
       });
@@ -2366,7 +2362,7 @@ RULES:
 - Use actual values from the data
 - Keep total brief under 300 words
 - Pure clinical content, no filler`;
-      const resp = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 4000, system: systemPrompt, messages: [{ role: "user", content: "Generate clinical brief:\n\n" + dataPayload }] })
@@ -2748,7 +2744,7 @@ RULES:
 - Include any lifestyle/diet advice in notes
 - If handwritten and hard to read, do your best and note uncertainty in notes`;
 
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 8000, messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }] })
@@ -2832,7 +2828,7 @@ RULES:
       const block = report.mediaType === "application/pdf"
         ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:report.base64} }
         : { type:"image", source:{type:"base64",media_type:report.mediaType,data:report.base64} };
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:REPORT_EXTRACT_PROMPT}]}]})
       });
@@ -2905,7 +2901,7 @@ RULES:
 TEXT TO PARSE:
 ` + bulkText.trim();
 
-      const resp = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 16000, messages: [{ role: "user", content: prompt }] })
@@ -2981,8 +2977,6 @@ TEXT TO PARSE:
         visit_date: historyForm.visit_date,
         visit_type: historyForm.visit_type,
         doctor_name: historyForm.doctor_name,
-          specialty: historyForm.specialty || "",
-          hospital_name: historyForm.hospital_name || "",
         specialty: historyForm.specialty,
         vitals: historyForm.vitals,
         diagnoses: historyForm.diagnoses.filter(d => d.label),
@@ -3147,7 +3141,7 @@ Patient Data: ${JSON.stringify(summaryData)}
 
 Write ONLY the summary paragraph, no headers or formatting.`;
 
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: prompt }] })
@@ -4752,9 +4746,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   extMeds.forEach(m => {
                     const con = conMap[m.consultation_id] || {};
                     const doctor = con.con_name || con.mo_name || "Unknown";
-                    const _cd = typeof con.con_data === "string" ? (()=>{try{return JSON.parse(con.con_data);}catch(e){return {};}})() : (con.con_data||{});
                     const key = doctor + "|||" + (con.visit_date||"");
-                    if (!groups[key]) groups[key] = { doctor, date: con.visit_date, status: con.status, specialty: _cd.specialty||"", hospital: _cd.hospital_name||_cd.hospital||"", meds: [] };
+                    if (!groups[key]) groups[key] = { doctor, date: con.visit_date, status: con.status, meds: [] };
                     const dupKey = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
                     if (!groups[key].meds.find(x => (x.name||"").toUpperCase().replace(/[^A-Z]/g,"") === dupKey)) {
                       groups[key].meds.push(m);
@@ -4782,7 +4775,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         return (
                           <div key={gi} style={{ marginBottom:8 }}>
                             <div style={{ fontSize:10, fontWeight:700, color:"#475569", padding:"3px 8px", background:"#f1f5f9", borderRadius:4, marginBottom:4 }}>
-                              {group.doctor}{group.specialty ? " (" + group.specialty + ")" : ""}{group.date ? " \u2014 " + fDate(group.date) : ""}{group.hospital ? " \u2014 " + group.hospital : ""}
+                              {group.doctor}{group.date ? " \u2014 " + fDate(group.date) : ""}
                             </div>
                             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
                               <tbody>
