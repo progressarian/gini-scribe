@@ -1682,7 +1682,7 @@ export default function GiniScribe() {
       const recent = patientFullData.lab_results.slice(0,15).map(l=>`${l.test_name}: ${l.result} ${l.unit||""} (${l.test_date||""})`);
       ctx += `Lab History: ${recent.join(", ")}\n`;
     }
-    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${conData.investigations_ordered.join(", ")}\n`;
+    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${(conData.investigations_ordered||[]).map(t=>typeof t==="object"?(t.test||t.name||""):t).join(", ")}\n`;
     if (conData?.follow_up) ctx += `Follow-up: ${conData.follow_up.duration||""} ${conData.follow_up.date||""}\n`;
     if (conData?.diet_lifestyle?.length) ctx += `Lifestyle: ${conData.diet_lifestyle.map(l=>typeof l==="string"?l:l.advice).join(", ")}\n`;
     if (conData?.goals?.length) ctx += `Goals: ${conData.goals.map(g=>`${g.marker}: ${g.current} → ${g.target}`).join(", ")}\n`;
@@ -4877,7 +4877,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {(conData?.investigations_ordered||conData?.investigations_to_order||[]).length > 0 && <PlanBlock id="investigations" title="🔬 Investigations Ordered" color="#7c3aed" hidden={planHidden.has("investigations")} onToggle={()=>toggleBlock("investigations")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                     {(conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => (
-                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{t}</span>
+                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{typeof t==="object"?(t.test||t.name||JSON.stringify(t)):t}</span>
                     ))}
                   </div>
                   {conData?.follow_up?.instructions && (
@@ -4952,7 +4952,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     </div>
                     <div style={{ flex:1 }}>
                       {(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).length > 0 && (
-                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
+                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{typeof t==="object"?(t.test||t.name||JSON.stringify(t)):t}</span>)}</div></div>
                       )}
                     </div>
                   </div>
