@@ -1,6 +1,18 @@
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
 
+// Retry wrapper for Anthropic API (handles 529 overloaded)
+const retryAnthropicFetch = async (url, options, maxRetries = 3) => {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await fetch(url, options);
+    if (r.status === 529 && attempt < maxRetries) {
+      await new Promise(res => setTimeout(res, 2000 * (attempt + 1)));
+      continue;
+    }
+    return r;
+  }
+};
+
 // API base URL — same origin in production (API + frontend on same server)
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
