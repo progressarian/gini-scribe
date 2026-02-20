@@ -1928,14 +1928,7 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       if (!lastVisit) return true;
       return m.consultation_id === lastVisit.id;
     });
-    const rawMeds = meds.length > 0 ? meds : (pfd.medications||[]).slice(0, 15);
-    // Deduplicate by normalized name (strip numbers, spaces)
-    const medSeen = new Set();
-    const activeMeds = [];
-    for (const m of rawMeds) {
-      const key = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-      if (!medSeen.has(key) && key.length > 1) { medSeen.add(key); activeMeds.push(m); }
-    }
+    const activeMeds = meds.length > 0 ? meds : (pfd.medications||[]).slice(0, 15);
 
     // Vitals comparison
     const sortedVitals = (pfd.vitals||[]).sort((a,b) => new Date(b.recorded_at) - new Date(a.recorded_at));
@@ -1961,18 +1954,11 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       const latestNum = parseFloat(latest.result);
       const prevNum = prev ? parseFloat(prev.result) : null;
       const oldestNum = oldest ? parseFloat(oldest.result) : null;
-      // For some markers, HIGHER is better (invert the trend)
-      const higherIsBetter = ["Vitamin D","HDL","eGFR","EGFR","Hemoglobin","Hb","HB","Iron","Ferritin","HDL Cholesterol"].some(k => name.toLowerCase().includes(k.toLowerCase()));
       let trend = "stable";
       if (prevNum !== null && !isNaN(latestNum) && !isNaN(prevNum)) {
         const pctChange = ((latestNum - prevNum) / Math.abs(prevNum || 1)) * 100;
-        if (higherIsBetter) {
-          if (pctChange > 10) trend = "improving";
-          else if (pctChange < -10) trend = "worsening";
-        } else {
-          if (pctChange > 10) trend = "worsening";
-          else if (pctChange < -10) trend = "improving";
-        }
+        if (pctChange > 10) trend = "worsening";
+        else if (pctChange < -10) trend = "improving";
       }
       // Build full trajectory string
       let trajectory = "";
@@ -2278,82 +2264,59 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
         currentVitals: cv ? { bp: cv.bp_sys+"/"+cv.bp_dia, weight: cv.weight, bmi: cv.bmi, pulse: cv.pulse } : null,
         currentMO, todayDate: new Date().toISOString().split("T")[0]
       });
-      const systemPrompt = isFollowUp ? `You are an expert clinical briefing AI at Gini Advanced Care Hospital. Generate a CLINICAL BRIEF for the consultant.
+      const systemPrompt = isFollowUp ? `You are an expert clinical briefing AI for Gini Advanced Care Hospital. Generate a comprehensive CLINICAL BRIEF that an MO reads aloud to the Consultant.
 
-Format EXACTLY like this — keep it concise and clinical:
+Write in natural professional English, paragraph form, not bullets.
 
-**30-SECOND OVERVIEW**
-[Age]-year-old [sex]. Known case: [list diagnoses with durations]. Under care [X months/years], [N] visits.
-[1-2 sentences: what's controlled, what's not, current status snapshot]
+Use these exact section headers wrapped in **double asterisks**:
 
-**CURRENT STATUS**
-Group by clinical domain. Use this exact format:
+**PATIENT JOURNEY**
+Who they are, how long under care, total visits, primary diagnoses, what brought them.
 
-Diabetes (or relevant condition):
-- HbA1c [trend with arrows]: X% -> Y%
-- Fasting glucose: Xmg/dL
-- Renal: Cr X, eGFR Y
+**WHAT'S WORKING**
+Controlled conditions, improving labs with specific trajectories and numbers, effective medications.
 
-Lipids:
-- LDL [trend]: X -> Y mg/dL
-- TG: X mg/dL
+**WHAT NEEDS ATTENTION**
+Worsening parameters with trajectories. Uncontrolled conditions. New symptoms. Be specific with numbers and dates.
 
-Thyroid (if applicable):
-- TSH [trend]: X -> Y
-- T3/T4 values
+**MEDICATION REVIEW**
+Current regimen. Recent changes. Duration on current protocol.
 
-Vitals:
-- BP: X/Y (trend if available)
-- Weight: Xkg, BMI Y
-
-**CURRENT MEDICATIONS**
-List medications grouped by purpose. Keep brief: name + dose + timing only.
+**ADHERENCE & COMPLIANCE**
+Visit regularity. Lab compliance. Weight/BP trends suggesting lifestyle compliance.
 
 **SINCE LAST VISIT**
-What changed since previous visit — new labs, symptoms, vitals changes. Be specific.
-
-**CONCERNS & DECISION POINTS**
-Bullet list of 3-5 specific clinical questions or decisions needed. Examples:
-- Any change in thyroid plan given rising T4?
-- Psychiatric medication adjustment for persistent anxiety?
-- Weight optimization strategy?
-
-**CLINICAL CONSIDERATIONS**
-2-3 evidence-based suggestions. Reference actual patient values.
-
-RULES:
-- Use actual numbers from the data, never generic ranges
-- For lab trends, show trajectory with arrows (X -> Y)
-- For markers where HIGHER is better (Vitamin D, HDL, eGFR, Hemoglobin, Iron, Ferritin), mark increases as improvement
-- Keep total brief under 400 words
-- No filler text, no greetings, pure clinical content
-- Use bullet points sparingly, prefer inline values` : `You are an expert clinical briefing AI at Gini Advanced Care Hospital. Generate a NEW PATIENT brief.
-
-Format:
-
-**PRESENTATION**
-[Age]-year-old [sex] presenting with [chief complaints]. [Any relevant history mentioned].
-
-**HISTORY & MEDICATIONS**
-Past medical/surgical history. Family history. Current medications with doses.
-
-**TODAY'S FINDINGS**
-Vitals: BP X/Y, Wt Xkg, BMI Y, Pulse Z
-Labs (if available): list with values and flags
-
-**INITIAL ASSESSMENT**
-Key clinical impressions. Risk factors identified. Severity assessment.
-
-**SUGGESTED WORKUP**
-Specific investigations to order based on presentation.
+What specifically changed. New labs, new symptoms, vitals comparison.
 
 **QUESTIONS TO ASK**
-5-6 specific history questions to clarify diagnosis and guide treatment.
+3-5 specific questions based on data patterns.
 
-RULES:
-- Use actual values from the data
-- Keep total brief under 300 words
-- Pure clinical content, no filler`;
+**CLINICAL CONSIDERATIONS**
+2-3 evidence-based suggestions the consultant might consider. Reference actual values.
+
+Be precise with numbers. No generic advice.` : `You are an expert clinical briefing AI. Generate a NEW PATIENT brief.
+
+Use these exact section headers wrapped in **double asterisks**:
+
+**PATIENT PRESENTATION**
+Demographics, chief complaints, how they present.
+
+**HISTORY SUMMARY**
+Past medical/surgical, family, personal history. Current medications.
+
+**TODAY'S FINDINGS**
+Vitals, lab values, exam findings.
+
+**DIFFERENTIAL CONSIDERATIONS**
+2-3 clinical considerations worth exploring.
+
+**SUGGESTED WORKUP**
+Investigations to order.
+
+**KEY QUESTIONS**
+Important history questions to ask.
+
+Be precise and clinical.`;
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
