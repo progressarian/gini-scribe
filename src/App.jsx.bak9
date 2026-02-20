@@ -1,82 +1,3 @@
-
-                {/* ═══ External Consultant Medications ═══ */}
-                {(() => {
-                  // externalMedsBlock marker
-                  if (!patientFullData?.medications || !patientFullData?.consultations) return null;
-                  // Current consultation meds (names)
-                  const currentMedNames = new Set(sa(conData,"medications_confirmed").map(m=>(m.name||"").toUpperCase().replace(/[^A-Z]/g,"")));
-                  // Get all active meds NOT in current prescription
-                  const allActiveMeds = (patientFullData.medications||[]).filter(m => m.is_active);
-                  const extMeds = allActiveMeds.filter(m => {
-                    const key = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-                    return key.length > 1 && !currentMedNames.has(key);
-                  });
-                  if (extMeds.length === 0) return null;
-                  // Group by consultation (doctor)
-                  const conMap = {};
-                  (patientFullData.consultations||[]).forEach(con => { conMap[con.id] = con; });
-                  const groups = {};
-                  extMeds.forEach(m => {
-                    const con = conMap[m.consultation_id] || {};
-                    const doctor = con.con_name || con.mo_name || "Unknown";
-                    const key = `${doctor}|||${con.visit_date||""}`;
-                    if (!groups[key]) groups[key] = { doctor, date: con.visit_date, status: con.status, meds: [] };
-                    // Deduplicate
-                    const dupKey = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-                    if (!groups[key].meds.find(x => (x.name||"").toUpperCase().replace(/[^A-Z]/g,"") === dupKey)) {
-                      groups[key].meds.push(m);
-                    }
-                  });
-                  const groupArr = Object.values(groups).filter(g => g.meds.length > 0);
-                  if (groupArr.length === 0) return null;
-                  const totalExt = groupArr.reduce((s,g) => s + g.meds.length, 0);
-                  const allConfirmed = extMeds.every(m => confirmedExtMeds[(m.name||"").toUpperCase()]);
-                  return (
-                    <PlanBlock id="extmeds" title={"🏥 Medications by Other Consultants (" + totalExt + ")"} color="#92400e" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
-                      <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:10, color:"#92400e", lineHeight:1.5 }}>
-                        {"⚠️"} <b>Note:</b> External consultant medications listed below are based on copies of prescriptions provided by the patient. Please verify all medications with the patient. Gini Advanced Care Hospital is not responsible for prescriptions by external consultants.
-                      </div>
-                      <div className="no-print" style={{ display:"flex", gap:6, marginBottom:8, alignItems:"center" }}>
-                        <button onClick={()=>{const all={};extMeds.forEach(m=>{all[(m.name||"").toUpperCase()]=true;});setConfirmedExtMeds(prev=>({...prev,...all}));}}
-                          style={{ padding:"4px 10px", background:allConfirmed?"#dcfce7":"#059669", color:allConfirmed?"#059669":"white", border:allConfirmed?"1px solid #bbf7d0":"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                          {allConfirmed ? "✅ All Confirmed" : "✅ Confirm All"}
-                        </button>
-                        <span style={{ fontSize:9, color:"#64748b" }}>
-                          {Object.values(confirmedExtMeds).filter(Boolean).length}/{totalExt} confirmed
-                        </span>
-                      </div>
-                      {groupArr.map((group, gi) => {
-                        const fmtDate = (d) => { try { const s=String(d||""); const dt=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s); return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); } catch(e) { return ""; } };
-                        return (
-                          <div key={gi} style={{ marginBottom:8 }}>
-                            <div style={{ fontSize:10, fontWeight:700, color:"#475569", padding:"3px 8px", background:"#f1f5f9", borderRadius:4, marginBottom:4, display:"flex", justifyContent:"space-between" }}>
-                              <span>{group.doctor}{group.date ? " — " + fmtDate(group.date) : ""}</span>
-                              <span style={{ fontSize:8, color:group.status==="historical"?"#64748b":"#059669" }}>{group.status||"external"}</span>
-                            </div>
-                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
-                              <tbody>
-                                {group.meds.map((m, mi) => {
-                                  const mkey = (m.name||"").toUpperCase();
-                                  const isConf = confirmedExtMeds[mkey];
-                                  return (
-                                    <tr key={mi} style={{ background:isConf?"#f0fdf4":mi%2?"#fafafa":"white", borderBottom:"1px solid #f1f5f9", cursor:"pointer" }}
-                                      onClick={()=>setConfirmedExtMeds(prev=>({...prev,[mkey]:!prev[mkey]}))}>
-                                      <td className="no-print" style={{ padding:"4px 6px", width:24, fontSize:16 }}>{isConf ? "✅" : "🟨"}</td>
-                                      <td style={{ padding:"4px 8px", fontWeight:700 }}>{m.name}{m.composition && <div style={{fontSize:9,color:"#94a3b8"}}>{m.composition}</div>}</td>
-                                      <td style={{ padding:"4px 8px", textAlign:"center", fontWeight:600 }}>{m.dose||""}</td>
-                                      <td style={{ padding:"4px 8px", textAlign:"center", fontSize:10, fontWeight:600, color:"#1e40af" }}>{m.timing||m.frequency||""}</td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        );
-                      })}
-                    </PlanBlock>
-                  );
-                })()}
-
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
 
@@ -2395,8 +2316,7 @@ Vitals:
 **CURRENT MEDICATIONS**
 List medications grouped by purpose. Keep brief: name + dose + timing only.
 
-**SINCE LAST VISIT** (include visits to ANY doctor — internal or external. For each external visit: doctor name, hospital, specialty, date, what was found, what was prescribed, what was planned next)
-**EXTERNAL CONSULTATIONS SUMMARY** (if patient visited other hospitals/doctors, provide a dedicated summary for each: doctor, hospital, date, findings, medications started/changed, follow-up plans)
+**SINCE LAST VISIT**
 What changed since previous visit — new labs, symptoms, vitals changes. Be specific.
 
 **CONCERNS & DECISION POINTS**
@@ -2590,7 +2510,6 @@ RULES:
   // Quick-add state for plan sections
   const [planAddMode, setPlanAddMode] = useState(null); // which section has add form open
   const [planAddText, setPlanAddText] = useState("");
-  const [confirmedExtMeds, setConfirmedExtMeds] = useState({});
   const [planAddMed, setPlanAddMed] = useState({ name:"", dose:"", frequency:"OD", timing:"Morning" });
   const [conPasteMode, setConPasteMode] = useState(false);
   const [conPasteText, setConPasteText] = useState("");
@@ -3198,10 +3117,7 @@ TEXT TO PARSE:
       const summaryData = {
         patient: { name: patient.name, age: patient.age, sex: patient.sex },
         diagnoses: patientFullData.diagnoses?.map(d => `${d.label}: ${d.status}`) || [],
-        medications: patientFullData.medications?.filter(m=>m.is_active).map(m => {
-            const con = (patientFullData.consultations||[]).find(c => c.id === m.consultation_id);
-            return `${m.name} ${m.dose||""} ${m.frequency||""} ${m.timing||""} [prescribed by: ${con?.con_name||con?.mo_name||"unknown"} on ${con?.visit_date||"?"}]`;
-          }) || [],
+        medications: patientFullData.medications?.filter(m=>m.is_active).map(m => `${m.name} ${m.dose} ${m.frequency}`) || [],
         labs: patientFullData.lab_results?.slice(0,15).map(l => `${l.test_name}: ${l.result} ${l.unit} (${l.flag||'normal'}) on ${l.test_date}`) || [],
         vitals_trend: {
           hba1c: outcomesData.hba1c?.map(d => `${d.result}% on ${d.test_date}`),
