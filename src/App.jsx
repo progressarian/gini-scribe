@@ -2597,7 +2597,7 @@ RULES:
     }
     if (conData?.follow_up) {
       text += `FOLLOW-UP: ${conData.follow_up.duration||conData.follow_up.timing||conData.follow_up.when||""}`;
-      if (conData.follow_up.date) text += ` (${new Date(conData.follow_up.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})})`;
+      if (conData.follow_up.date) { const _d = conData.follow_up.date; const _m = _d.match && _d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); const _dt = _m ? new Date(_m[3],_m[2]-1,_m[1]) : new Date(_d); text += ` (${isNaN(_dt) ? _d : _dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})})`; }
       text += `\n`;
       if (conData.follow_up.instructions) text += `Instructions: ${conData.follow_up.instructions}\n`;
     }
@@ -4721,7 +4721,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
                       <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
                       <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
-                      {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#1e40af", marginTop:2 }}>{"📅 "}{new Date(conData.follow_up.date+"T12:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}</div>}
+                      {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#1e40af", marginTop:2 }}>{"📅 "}{(() => { const d = conData.follow_up.date; const m = d.match && d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if (m) { const dt = new Date(m[3],m[2]-1,m[1]); return dt.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); } const dt2 = new Date(d); return isNaN(dt2) ? d : dt2.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); })()}</div>}
                       {conData.follow_up.instructions && <div style={{ fontSize:11, color:"#475569", marginTop:4, padding:"4px 8px", background:"#fef3c7", borderRadius:4, border:"1px solid #fde68a" }}>{"⚠️ "}{conData.follow_up.instructions}</div>}
                     </div>
                     <div style={{ flex:1 }}>
