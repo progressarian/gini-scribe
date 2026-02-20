@@ -257,7 +257,11 @@ RULES:
 - goals: 2-4 items with current values from labs/vitals
 - self_monitoring: 2-4 OBJECTS grouped by what to monitor
 - future_plan: OBJECTS with {condition, action}. "If X → Y" format
-- follow_up: include duration, date (as YYYY-MM-DD if a specific date is mentioned like "28/03/2026"), instructions (fasting requirements, medication omission, lab timing etc), and tests_to_bring
+- follow_up: MUST include ALL of these fields:
+  * duration: "6 weeks" etc
+  * date: Extract the EXACT next appointment date as YYYY-MM-DD. Look for "Next follow up is scheduled on", "FOLLOW UP WITH", or any specific date. Convert "28/03/2026" to "2026-03-28". If no specific date, set to null.
+  * instructions: Any special instructions like "fasting sample", "omit medication for 24hrs". If none, set to null.
+  * tests_to_bring: Array of test names to bring
 - If history information is present (family history, past medical/surgical, personal habits, COVID/vaccination), extract into mo.history object with keys: family, past_medical_surgical, personal, covid, vaccination. Include even if text says "NIL"`;
 
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
@@ -2386,7 +2390,7 @@ RULES:
     }
     const {data,error} = await callClaude(CONSULTANT_PROMPT, context);
     if(error) setErrors(p=>({...p,con:error}));
-    else if(data) setConData(fixConMedicines(data));
+    else if(data) { console.log("conData follow_up:", JSON.stringify(data.follow_up)); setConData(fixConMedicines(data)); }
     else setErrors(p=>({...p,con:"No data returned"}));
     setLoading(p=>({...p,con:false}));
   };
