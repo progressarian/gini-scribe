@@ -2390,7 +2390,22 @@ RULES:
     }
     const {data,error} = await callClaude(CONSULTANT_PROMPT, context);
     if(error) setErrors(p=>({...p,con:error}));
-    else if(data) { console.log("conData follow_up:", JSON.stringify(data.follow_up)); setConData(fixConMedicines(data)); }
+    else if(data) {
+            if (data.follow_up) {
+              if (!data.follow_up.instructions && data.follow_up.special_instructions) data.follow_up.instructions = data.follow_up.special_instructions;
+              if (data.follow_up.date) {
+                const dm = String(data.follow_up.date).match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+                if (dm) data.follow_up.date = dm[3]+"-"+dm[2].padStart(2,"0")+"-"+dm[1].padStart(2,"0");
+              }
+              if (!data.follow_up.date) {
+                const src = conTranscript || quickTranscript || "";
+                const fm = src.match(/(?:follow.?up|next.?visit|scheduled\s+on)[^\d]*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i);
+                if (fm) { const yr = fm[3].length===2 ? "20"+fm[3] : fm[3]; data.follow_up.date = yr+"-"+fm[2].padStart(2,"0")+"-"+fm[1].padStart(2,"0"); }
+              }
+            }
+            console.log("conData follow_up:", JSON.stringify(data.follow_up));
+            setConData(fixConMedicines(data));
+          }
     else setErrors(p=>({...p,con:"No data returned"}));
     setLoading(p=>({...p,con:false}));
   };
@@ -2599,7 +2614,7 @@ RULES:
       text += `FOLLOW-UP: ${conData.follow_up.duration||conData.follow_up.timing||conData.follow_up.when||""}`;
       if (conData.follow_up.date) { const _d = conData.follow_up.date; const _m = _d.match && _d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); const _dt = _m ? new Date(_m[3],_m[2]-1,_m[1]) : new Date(_d); text += ` (${isNaN(_dt) ? _d : _dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})})`; }
       text += `\n`;
-      if (conData.follow_up.instructions) text += `Instructions: ${conData.follow_up.instructions}\n`;
+      if (conData.follow_up.instructions||conData.follow_up.special_instructions) text += `Instructions: ${conData.follow_up.instructions||conData.follow_up.special_instructions}\n`;
     }
 
     navigator.clipboard.writeText(text).then(() => {
@@ -4722,7 +4737,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
                       <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
                       {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#1e40af", marginTop:2 }}>{"📅 "}{(() => { const d = conData.follow_up.date; const m = d.match && d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if (m) { const dt = new Date(m[3],m[2]-1,m[1]); return dt.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); } const dt2 = new Date(d); return isNaN(dt2) ? d : dt2.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); })()}</div>}
-                      {conData.follow_up.instructions && <div style={{ fontSize:11, color:"#475569", marginTop:4, padding:"4px 8px", background:"#fef3c7", borderRadius:4, border:"1px solid #fde68a" }}>{"⚠️ "}{conData.follow_up.instructions}</div>}
+                      {(conData.follow_up.instructions||conData.follow_up.special_instructions) && <div style={{ fontSize:11, color:"#475569", marginTop:4, padding:"4px 8px", background:"#fef3c7", borderRadius:4, border:"1px solid #fde68a" }}>{"⚠️ "}{conData.follow_up.instructions||conData.follow_up.special_instructions}</div>}
                     </div>
                     <div style={{ flex:1 }}>
                       {(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).length > 0 && (
