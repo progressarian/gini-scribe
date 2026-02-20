@@ -205,7 +205,7 @@ The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sec
 Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
 Output ONLY valid JSON, no backticks.
 
-{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"chief_complaints":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","date":"YYYY-MM-DD or null","instructions":"Any special instructions like fasting, medication omission etc","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"chief_complaints":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
 
 CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - Split dictation: patient info → history/meds → plan/changes
@@ -247,7 +247,7 @@ RULES:
 const QUICK_PLAN_PROMPT = `You are a clinical treatment plan assistant for Gini Advanced Care Hospital, India.
 From this consultation dictation, generate the treatment plan. Output ONLY valid JSON, no backticks.
 
-{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of findings and plan","key_issues":["Issue 1"],"diet_lifestyle":[{"advice":"string","detail":"string","category":"Diet/Exercise/Critical/Sleep","helps":["dm2"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","route":"Oral","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","date":"YYYY-MM-DD or null","instructions":"Special instructions","tests_to_bring":["HbA1c"]},"self_monitoring":[{"title":"Blood Sugar","instructions":["Check fasting daily"],"targets":"Fasting 90-130","alert":"If <70: eat glucose"}],"future_plan":[{"condition":"If HbA1c not below 7","action":"Add GLP-1 RA"}]}
+{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of findings and plan","key_issues":["Issue 1"],"diet_lifestyle":[{"advice":"string","detail":"string","category":"Diet/Exercise/Critical/Sleep","helps":["dm2"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","route":"Oral","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c"]},"self_monitoring":[{"title":"Blood Sugar","instructions":["Check fasting daily"],"targets":"Fasting 90-130","alert":"If <70: eat glucose"}],"future_plan":[{"condition":"If HbA1c not below 7","action":"Add GLP-1 RA"}]}
 
 RULES:
 - MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
@@ -257,8 +257,7 @@ RULES:
 - goals: 2-4 items with current values from labs/vitals
 - self_monitoring: 2-4 OBJECTS grouped by what to monitor
 - future_plan: OBJECTS with {condition, action}. "If X → Y" format
-- follow_up: include duration, date (as YYYY-MM-DD if a specific date is mentioned like "28/03/2026"), instructions (fasting requirements, medication omission, lab timing etc), and tests_to_bring
-- If history information is present (family history, past medical/surgical, personal habits, COVID/vaccination), extract into mo.history object with keys: family, past_medical_surgical, personal, covid, vaccination. Include even if text says "NIL"`;
+- follow_up: include duration and tests_to_bring`;
 
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 {"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","temp":"number or null","spo2":"number or null","weight":"number or null","height":"number or null","waist":"number or null","body_fat":"number or null","muscle_mass":"number or null"}
@@ -2529,20 +2528,7 @@ RULES:
     text += `${"─".repeat(50)}\n\n`;
     
     if (conData?.assessment_summary) {
-      // Patient History
-    if (moData?.history) {
-      const h = moData.history;
-      const parts = [];
-      if (h.family && h.family !== "NIL" && h.family !== "-") parts.push("Family: " + h.family);
-      if (h.past_medical_surgical && h.past_medical_surgical !== "NIL" && h.past_medical_surgical !== "-") parts.push("Past Medical/Surgical: " + h.past_medical_surgical);
-      if (h.personal && h.personal !== "NIL" && h.personal !== "-") parts.push("Personal: " + h.personal);
-      if (h.covid) parts.push("COVID: " + h.covid);
-      if (h.vaccination) parts.push("Vaccination: " + h.vaccination);
-      if (parts.length > 0) {
-        text += "HISTORY:\n" + parts.join("\n") + "\n\n";
-      }
-    }
-        // Clinical Progress (longitudinal)
+      // Clinical Progress (longitudinal)
       const brief = generateMOBrief();
       if (brief && brief.isFollowUp && brief.totalVisits > 1) {
         text += `CLINICAL PROGRESS:\n`;
@@ -2592,9 +2578,7 @@ RULES:
       text += `\n`;
     }
     if (conData?.follow_up) {
-      text += `FOLLOW-UP: ${conData.follow_up.duration||conData.follow_up.timing||conData.follow_up.when||""}`;
-      if (conData.follow_up.date) text += ` (${new Date(conData.follow_up.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})})`;
-      text += `\n`;
+      text += `FOLLOW-UP: ${conData.follow_up.timing||conData.follow_up.when||""}\n`;
       if (conData.follow_up.instructions) text += `Instructions: ${conData.follow_up.instructions}\n`;
     }
 
