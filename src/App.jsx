@@ -4498,6 +4498,34 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </PlanBlock>}
 
                 {/* Goals */}
+                {moData?.history && (moData.history.family || moData.history.past_medical_surgical || moData.history.personal) && <PlanBlock id="history" title="📖 Patient History" color="#1e293b" hidden={planHidden.has("history")} onToggle={()=>toggleBlock("history")}>
+                  <div style={{ display:"grid", gap:6 }}>
+                    {moData.history.family && moData.history.family !== "NIL" && moData.history.family !== "-" && (
+                      <div style={{ padding:"6px 10px", background:"#fef2f2", borderRadius:6, border:"1px solid #fecaca" }}>
+                        <div style={{ fontSize:9, fontWeight:700, color:"#dc2626", marginBottom:2 }}>{"👨‍👩‍👧"} FAMILY HISTORY</div>
+                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.family}</div>
+                      </div>
+                    )}
+                    {moData.history.past_medical_surgical && moData.history.past_medical_surgical !== "NIL" && moData.history.past_medical_surgical !== "-" && (
+                      <div style={{ padding:"6px 10px", background:"#f0f9ff", borderRadius:6, border:"1px solid #bae6fd" }}>
+                        <div style={{ fontSize:9, fontWeight:700, color:"#0369a1", marginBottom:2 }}>{"🏥"} PAST MEDICAL / SURGICAL</div>
+                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.past_medical_surgical}</div>
+                      </div>
+                    )}
+                    {moData.history.personal && moData.history.personal !== "NIL" && moData.history.personal !== "-" && (
+                      <div style={{ padding:"6px 10px", background:"#f0fdf4", borderRadius:6, border:"1px solid #bbf7d0" }}>
+                        <div style={{ fontSize:9, fontWeight:700, color:"#15803d", marginBottom:2 }}>{"🚭"} PERSONAL</div>
+                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.personal}</div>
+                      </div>
+                    )}
+                    {moData.history.covid && (
+                      <div style={{ padding:"6px 10px", background:"#faf5ff", borderRadius:6, border:"1px solid #e9d5ff" }}>
+                        <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed", marginBottom:2 }}>{"🦠"} COVID / VACCINATION</div>
+                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.covid}{moData.history.vaccination ? " | Vaccination: " + moData.history.vaccination : ""}</div>
+                      </div>
+                    )}
+                  </div>
+                </PlanBlock>}
                 {planGoals.length>0 && <PlanBlock id="goals" title="🎯 Your Health Goals" color="#059669" hidden={planHidden.has("goals")} onToggle={()=>toggleBlock("goals")}>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #bbf7d0" }}>
                     <thead><tr style={{ background:"#059669", color:"white" }}><th style={{padding:"4px 8px",textAlign:"left"}}>Marker</th><th style={{padding:"4px 8px"}}>Current</th><th style={{padding:"4px 8px"}}>Target</th><th style={{padding:"4px 8px"}}>By</th><th className="no-print" style={{padding:"4px 8px",width:20}}></th></tr></thead>
@@ -4688,7 +4716,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
                     <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
                       <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
-                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||conData.follow_up.date||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
+                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
+                      {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#1e40af", marginTop:2 }}>{"📅 "}{new Date(conData.follow_up.date+"T12:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}</div>}
+                      {conData.follow_up.instructions && <div style={{ fontSize:11, color:"#475569", marginTop:4, padding:"4px 8px", background:"#fef3c7", borderRadius:4, border:"1px solid #fde68a" }}>{"⚠️ "}{conData.follow_up.instructions}</div>}
                     </div>
                     <div style={{ flex:1 }}>
                       {(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).length > 0 && (
