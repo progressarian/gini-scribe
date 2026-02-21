@@ -2242,11 +2242,11 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       if (labTrends.length) {
         narrative += "\n\nRegarding labs: ";
         if (improving.length) {
-          narrative += "Good news \u2014 ";
+          narrative += "Good news — ";
           improving.forEach((l, i) => { narrative += l.name + (l.trajectory ? " has improved: " + l.trajectory : " improved from " + l.previous + " to " + l.latest + l.latestUnit) + (i < improving.length - 1 ? "; " : ". "); });
         }
         if (worsening.length) {
-          narrative += "Concern \u2014 ";
+          narrative += "Concern — ";
           worsening.forEach((l, i) => { narrative += l.name + (l.trajectory ? " has worsened: " + l.trajectory : " went from " + l.previous + " to " + l.latest + l.latestUnit) + (i < worsening.length - 1 ? "; " : ". "); });
         }
         if (stableKey.length) narrative += "Stable: " + stableKey.map(l => l.name + " " + l.latest + l.latestUnit).join(", ") + ". ";
@@ -2277,8 +2277,8 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       }
 
       narrative += "\n\nKey points: ";
-      if (daysSince > 120) narrative += "Patient hasn't visited in " + daysSince + " days \u2014 adherence may need review. ";
-      if (worsening.length) narrative += worsening.length + " parameter" + (worsening.length > 1 ? "s" : "") + " worsening \u2014 may need treatment adjustment. ";
+      if (daysSince > 120) narrative += "Patient hasn't visited in " + daysSince + " days — adherence may need review. ";
+      if (worsening.length) narrative += worsening.length + " parameter" + (worsening.length > 1 ? "s" : "") + " worsening — may need treatment adjustment. ";
       if (!worsening.length && improving.length) narrative += "Overall trajectory is positive with " + improving.length + " parameter" + (improving.length > 1 ? "s" : "") + " improving. ";
       if (!worsening.length && !improving.length && !abnormal.length) narrative += "Patient appears stable on current management. ";
     } else {
@@ -4345,7 +4345,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <span style={{ fontSize:14 }}>\U0001f9e0</span>
                     <div style={{ flex:1, fontWeight:800, fontSize:13 }}>AI CLINICAL BRIEF</div>
                     <button onClick={()=>navigator.clipboard.writeText(aiBrief)}
-                      style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>\U0001f4cb Copy</button>
+                      style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>📋 Copy</button>
                     <button onClick={()=>setAiBrief(null)}
                       style={{ background:"rgba(255,255,255,.1)", border:"none", color:"white", padding:"4px 6px", borderRadius:5, fontSize:10, cursor:"pointer" }}>\u2715</button>
                   </div>
@@ -4823,7 +4823,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   const heldMeds = extMeds.filter(m => getAction(m) === "hold");
                   const fDate = (d) => { try { const s=String(d||""); const dt=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s); return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); } catch(e) { return ""; } };
                   const actionColors = { continue:"#059669", hold:"#f59e0b", stop:"#dc2626" };
-                  const actionIcons = { continue:"\u2705", hold:"\u23f8\ufe0f", stop:"\u274c" };
+                  const actionIcons = { continue:"✅", hold:"⏸️", stop:"❌" };
                   const actionLabels = { continue:"Continue", hold:"Hold", stop:"Stop" };
                   return (
                     <PlanBlock id="extmeds" title={"\U0001f3e5 Medications by Other Consultants (" + totalExt + ")"} color="#92400e" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
@@ -4833,17 +4833,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <div className="no-print" style={{ display:"flex", gap:6, marginBottom:8 }}>
                         <button onClick={()=>setShowReconcile(!showReconcile)}
                           style={{ padding:"4px 10px", background:showReconcile?"#7c3aed":"#f1f5f9", color:showReconcile?"white":"#64748b", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                          {showReconcile ? "Done" : "\u2695\ufe0f Reconcile"}
+                          {showReconcile ? "Done" : "⚕️ Reconcile"}
                         </button>
                         {!showReconcile && <button onClick={()=>{const all={};extMeds.forEach(m=>{all[(m.name||"").toUpperCase()]="continue";});setExtMedActions(prev=>({...prev,...all}));}}
                           style={{ padding:"4px 10px", background:"#059669", color:"white", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                          \u2705 Confirm All Continue
+                          ✅ Confirm All Continue
                         </button>}
                       </div>
                       {groupArr.map((group, gi) => (
                         <div key={gi} style={{ marginBottom:8 }}>
                           <div style={{ fontSize:10, fontWeight:700, color:"#475569", padding:"3px 8px", background:"#f1f5f9", borderRadius:4, marginBottom:4, display:"flex", justifyContent:"space-between" }}>
-                            <span>{group.doctor}{group.specialty ? " (" + group.specialty + ")" : ""}{group.date ? " \u2014 " + fDate(group.date) : ""}</span>
+                            <span>{group.doctor}{group.specialty ? " (" + group.specialty + ")" : ""}{group.date ? " — " + fDate(group.date) : ""}</span>
                             {group.hospital && <span style={{ fontSize:9, color:"#7c3aed", fontWeight:600 }}>{group.hospital}</span>}
                           </div>
                           {group.meds.map((m, mi) => {
@@ -4877,7 +4877,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       ))}
                       {stoppedMeds.length > 0 && (
                         <div style={{ marginTop:8, padding:6, background:"#fef2f2", borderRadius:6, border:"1px solid #fecaca" }}>
-                          <div style={{ fontSize:9, fontWeight:700, color:"#dc2626" }}>\u274c STOPPED / COMPLETED</div>
+                          <div style={{ fontSize:9, fontWeight:700, color:"#dc2626" }}>❌ STOPPED / COMPLETED</div>
                           {stoppedMeds.map((m,i) => {
                             const con = conMap[m.consultation_id]||{};
                             return <div key={i} style={{ fontSize:10, color:"#dc2626", textDecoration:"line-through", padding:"2px 0" }}>{m.name} ({con.con_name||"ext"})</div>;
@@ -4886,11 +4886,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       )}
                       {heldMeds.length > 0 && (
                         <div style={{ marginTop:6, padding:6, background:"#fffbeb", borderRadius:6, border:"1px solid #fde68a" }}>
-                          <div style={{ fontSize:9, fontWeight:700, color:"#92400e" }}>\u23f8\ufe0f ON HOLD \u2014 Discuss with prescribing doctor</div>
+                          <div style={{ fontSize:9, fontWeight:700, color:"#92400e" }}>⏸️ ON HOLD — Discuss with prescribing doctor</div>
                           {heldMeds.map((m,i) => {
                             const con = conMap[m.consultation_id]||{};
                             const _cd2 = typeof con.con_data==="string"?(()=>{try{return JSON.parse(con.con_data)}catch(e){return{}}})():(con.con_data||{});
-                            return <div key={i} style={{ fontSize:10, color:"#92400e", padding:"2px 0" }}>{m.name} \u2014 {con.con_name||"ext"} ({_cd2.hospital_name||_cd2.hospital||""})</div>;
+                            return <div key={i} style={{ fontSize:10, color:"#92400e", padding:"2px 0" }}>{m.name} — {con.con_name||"ext"} ({_cd2.hospital_name||_cd2.hospital||""})</div>;
                           })}
                         </div>
                       )}
@@ -5049,7 +5049,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                 {/* Footer */}
                 <div style={{ borderTop:"2px solid #1e293b", paddingTop:6, display:"flex", justifyContent:"space-between", fontSize:10, color:"#94a3b8" }}>
-                  <div>{conName} | MO: {moName} | \U0001f4de 0172-4120100</div>
+                  <div>{conName} | MO: {moName} | 📞 0172-4120100</div>
                   <div>Gini Clinical Scribe v1</div>
                 </div>
               </div>
@@ -5097,16 +5097,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             });
             const allActive = [...gMeds, ...eMeds];
             const timeSlots = [
-              { id:"wakeup", label:"\U0001f305 Wake Up (Empty Stomach)", time:"6:00 AM" },
-              { id:"morning", label:"\U0001f305 Morning", time:"7:00 AM" },
-              { id:"before_breakfast", label:"\U0001f373 Before Breakfast (30 min)", time:"7:30 AM" },
-              { id:"after_breakfast", label:"\U0001f963 After Breakfast", time:"8:30 AM" },
-              { id:"after_lunch", label:"\U0001f35b After Lunch", time:"1:30 PM" },
-              { id:"evening", label:"\U0001f306 Evening", time:"5:00 PM" },
-              { id:"after_dinner", label:"\U0001f37d\ufe0f After Dinner", time:"8:30 PM" },
-              { id:"night_10pm", label:"\U0001f319 Night (10 PM)", time:"10:00 PM" },
-              { id:"bedtime", label:"\U0001f6cf\ufe0f Bedtime", time:"10:30 PM" },
-              { id:"other", label:"\U0001f4cb As Directed", time:"" },
+              { id:"wakeup", label:"🌅 Wake Up (Empty Stomach)", time:"6:00 AM" },
+              { id:"morning", label:"🌅 Morning", time:"7:00 AM" },
+              { id:"before_breakfast", label:"🍳 Before Breakfast (30 min)", time:"7:30 AM" },
+              { id:"after_breakfast", label:"🥣 After Breakfast", time:"8:30 AM" },
+              { id:"after_lunch", label:"🍛 After Lunch", time:"1:30 PM" },
+              { id:"evening", label:"🌆 Evening", time:"5:00 PM" },
+              { id:"after_dinner", label:"🍽️ After Dinner", time:"8:30 PM" },
+              { id:"night_10pm", label:"🌙 Night (10 PM)", time:"10:00 PM" },
+              { id:"bedtime", label:"🛏️ Bedtime", time:"10:30 PM" },
+              { id:"other", label:"📋 As Directed", time:"" },
             ];
             const medsByTime = {};
             timeSlots.forEach(slot => {
@@ -5122,7 +5122,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:12, padding:14, color:"white", marginBottom:10 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <div>
-                      <div style={{ fontSize:14, fontWeight:800 }}>\U0001f48a YOUR COMPLETE MEDICINE SCHEDULE</div>
+                      <div style={{ fontSize:14, fontWeight:800 }}>💊 YOUR COMPLETE MEDICINE SCHEDULE</div>
                       <div style={{ fontSize:11, opacity:.7, marginTop:2 }}>{patient.name} | {patient.fileNo} | Updated: {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</div>
                     </div>
                     <div style={{ textAlign:"right" }}>
@@ -5142,14 +5142,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <div style={{ background:"white" }}>
                         {slotData.meds.map((m, i) => (
                           <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 12px", borderBottom:i<slotData.meds.length-1?"1px solid #f1f5f9":"none" }}>
-                            <div style={{ width:18, height:18, borderRadius:4, border:"2px solid #cbd5e1", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, flexShrink:0 }}>\u2610</div>
+                            <div style={{ width:18, height:18, borderRadius:4, border:"2px solid #cbd5e1", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, flexShrink:0 }}>☐</div>
                             <div style={{ flex:1 }}>
                               <div style={{ fontSize:12, fontWeight:700 }}>
                                 {m.name}
                                 {m.isNew && <span style={{ background:"#1e40af", color:"white", padding:"0 4px", borderRadius:3, fontSize:8, marginLeft:4 }}>NEW</span>}
                               </div>
                               <div style={{ fontSize:10, color:"#64748b" }}>
-                                {m.dose||""} {m.frequency||""} \u2014 {(m.forDiagnosis||[]).map(d => typeof d==="string"?d:d.label||"").join(", ")||""}
+                                {m.dose||""} {m.frequency||""} — {(m.forDiagnosis||[]).map(d => typeof d==="string"?d:d.label||"").join(", ")||""}
                               </div>
                             </div>
                             <span style={{ fontSize:8, padding:"2px 6px", borderRadius:4, fontWeight:600,
@@ -5166,13 +5166,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {stoppedExt.length > 0 && (
                   <div style={{ marginBottom:8, borderRadius:8, overflow:"hidden", border:"2px solid #fecaca" }}>
                     <div style={{ background:"#fef2f2", padding:"6px 12px", borderBottom:"1px solid #fecaca" }}>
-                      <span style={{ fontSize:12, fontWeight:700, color:"#dc2626" }}>\u274c STOPPED \u2014 Do NOT Take</span>
+                      <span style={{ fontSize:12, fontWeight:700, color:"#dc2626" }}>❌ STOPPED — Do NOT Take</span>
                     </div>
                     <div style={{ background:"white", padding:8 }}>
                       {stoppedExt.map((m,i) => {
                         const con = conMap2[m.consultation_id]||{};
                         return <div key={i} style={{ fontSize:11, padding:"3px 0", textDecoration:"line-through", color:"#dc2626" }}>
-                          {m.name} \u2014 {m.dose||""} ({con.con_name||"ext"})
+                          {m.name} — {m.dose||""} ({con.con_name||"ext"})
                         </div>;
                       })}
                     </div>
@@ -5181,37 +5181,37 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {heldExt.length > 0 && (
                   <div style={{ marginBottom:8, borderRadius:8, overflow:"hidden", border:"2px solid #fde68a" }}>
                     <div style={{ background:"#fffbeb", padding:"6px 12px", borderBottom:"1px solid #fde68a" }}>
-                      <span style={{ fontSize:12, fontWeight:700, color:"#92400e" }}>\u23f8\ufe0f ON HOLD \u2014 Ask Doctor Before Restarting</span>
+                      <span style={{ fontSize:12, fontWeight:700, color:"#92400e" }}>⏸️ ON HOLD — Ask Doctor Before Restarting</span>
                     </div>
                     <div style={{ background:"white", padding:8 }}>
                       {heldExt.map((m,i) => {
                         const con = conMap2[m.consultation_id]||{};
                         const _cd3 = typeof con.con_data==="string"?(()=>{try{return JSON.parse(con.con_data)}catch(e){return{}}})():(con.con_data||{});
                         return <div key={i} style={{ fontSize:11, padding:"3px 0", color:"#92400e" }}>
-                          {m.name} \u2014 {m.dose||""} \u2014 Discuss with {con.con_name||"ext"} ({_cd3.hospital_name||_cd3.hospital||""})
+                          {m.name} — {m.dose||""} — Discuss with {con.con_name||"ext"} ({_cd3.hospital_name||_cd3.hospital||""})
                         </div>;
                       })}
                     </div>
                   </div>
                 )}
                 <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0", marginBottom:8 }}>
-                  <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>\u26a0\ufe0f IMPORTANT REMINDERS</div>
+                  <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>⚠️ IMPORTANT REMINDERS</div>
                   <div style={{ fontSize:10, lineHeight:1.8, color:"#374151" }}>
-                    <div>\u2022 \U0001fa78 <b>If sugar below 70:</b> Eat 3 glucose tablets IMMEDIATELY, recheck in 15 min</div>
-                    <div>\u2022 \U0001f4ca <b>Sugar diary:</b> Fasting daily + post-meal 3x/week</div>
-                    <div>\u2022 \u26a0\ufe0f <b>Before next visit:</b> Get fasting blood test, skip morning DM medicines that day</div>
+                    <div>• 🩸 <b>If sugar below 70:</b> Eat 3 glucose tablets IMMEDIATELY, recheck in 15 min</div>
+                    <div>• 📊 <b>Sugar diary:</b> Fasting daily + post-meal 3x/week</div>
+                    <div>• ⚠️ <b>Before next visit:</b> Get fasting blood test, skip morning DM medicines that day</div>
                   </div>
                 </div>
                 {conData?.follow_up && (
                   <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0", marginBottom:8 }}>
-                    <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>\U0001f4c5 NEXT VISIT</div>
+                    <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>📅 NEXT VISIT</div>
                     <div style={{ fontSize:14, fontWeight:800 }}>{conData.follow_up.duration||""}</div>
                     {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#2563eb" }}>{(() => { const d = conData.follow_up.date; const dt = new Date(d); return isNaN(dt) ? d : dt.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); })()}</div>}
-                    {conData.follow_up.instructions && <div style={{ fontSize:10, color:"#92400e", marginTop:4 }}>\u26a0\ufe0f {conData.follow_up.instructions}</div>}
+                    {conData.follow_up.instructions && <div style={{ fontSize:10, color:"#92400e", marginTop:4 }}>⚠️ {conData.follow_up.instructions}</div>}
                   </div>
                 )}
                 <div style={{ textAlign:"center", fontSize:9, color:"#94a3b8", padding:8 }}>
-                  Medicine schedule prepared at Gini Advanced Care Hospital, Mohali. Verify with your doctor before changes. | \U0001f4de 0172-4120100
+                  Medicine schedule prepared at Gini Advanced Care Hospital, Mohali. Verify with your doctor before changes. | 📞 0172-4120100
                 </div>
               </div>
             );
