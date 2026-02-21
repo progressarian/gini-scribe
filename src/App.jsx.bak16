@@ -1707,13 +1707,6 @@ export default function GiniScribe() {
     if (moData?.complications?.length) ctx += `Complications: ${moData.complications.map(c=>`${c.name}: ${c.status} ${c.detail||""}`).join(", ")}\n`;
     if (patientFullData?.lab_results?.length) {
       const recent = patientFullData.lab_results.slice(0,15).map(l=>`${l.test_name}: ${l.result} ${l.unit||""} (${l.test_date||""})`);
-      // Include extracted data from companion-uploaded documents
-      const companionLabs = [];
-      (patientFullData.documents||[]).forEach(doc => {
-        const ext = doc.extracted_data ? (typeof doc.extracted_data==="string" ? (()=>{try{return JSON.parse(doc.extracted_data)}catch(e){return null}})() : doc.extracted_data) : null;
-        if (ext?.labs) ext.labs.forEach(l => companionLabs.push(`${l.test_name}: ${l.result} ${l.unit||""} (from ${doc.source||"external"}, ${doc.doc_date||""})`));
-      });
-      if (companionLabs.length > 0) recent.push("--- From uploaded documents ---", ...companionLabs.slice(0,10));
       ctx += `Lab History: ${recent.join(", ")}\n`;
     }
     if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${(conData.investigations_ordered||[]).map(t=>typeof t==="object"?(t.test||t.name||""):t).join(", ")}\n`;
@@ -4624,29 +4617,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
           {!moData && !conData ? <div style={{ textAlign:"center", padding:24, color:"#94a3b8" }}>Complete MO & Consultant first</div> : (
             <div data-plan-content style={{display:planView==="plan"?"block":"none"}}>
-              {/* New data alert */}
-              {(() => {
-                const newDocs = (patientFullData?.documents||[]).filter(d => d.created_at && (Date.now()-new Date(d.created_at).getTime()) < 24*60*60*1000);
-                const newLabs = (patientFullData?.lab_results||[]).filter(l => l.created_at && (Date.now()-new Date(l.created_at).getTime()) < 24*60*60*1000);
-                const companionDocs = newDocs.filter(d => (d.source||"").toLowerCase().includes("companion"));
-                if (newDocs.length === 0 && newLabs.length === 0) return null;
-                return (
-                  <div className="no-print" style={{ background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"2px solid #60a5fa", borderRadius:8, padding:"8px 12px", marginBottom:10, animation:"pulse 2s 3" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <span style={{ fontSize:16 }}>📸</span>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:11, fontWeight:800, color:"#1e40af" }}>New Data Available</div>
-                        <div style={{ fontSize:10, color:"#475569" }}>
-                          {newDocs.length > 0 && <span>{newDocs.length} new document{newDocs.length>1?"s":""} </span>}
-                          {newLabs.length > 0 && <span>• {newLabs.length} new lab result{newLabs.length>1?"s":""} </span>}
-                          {companionDocs.length > 0 && <span>• via Companion</span>}
-                        </div>
-                      </div>
-                      <button onClick={()=>setTab("docs")} style={{ fontSize:9, background:"#2563eb", color:"white", border:"none", padding:"4px 8px", borderRadius:4, fontWeight:700, cursor:"pointer" }}>View</button>
-                    </div>
-                  </div>
-                );
-              })()}
               {/* Plan Header */}
               <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", color:"white", padding:"12px 16px", borderRadius:"10px 10px 0 0" }}>
                 <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -5667,57 +5637,15 @@ Return ONLY the summary text, no quotes or markdown.`;
               {patientFullData?.documents?.length > 0 && (
                 <div style={{ marginTop:12, borderTop:"2px solid #e2e8f0", paddingTop:8 }}>
                   <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>📂 PREVIOUS DOCUMENTS ({patientFullData.documents.length})</div>
-                  {patientFullData.documents.slice(0,15).map(doc => {
-                    const _ext = doc.extracted_data ? (typeof doc.extracted_data==="string" ? (()=>{try{return JSON.parse(doc.extracted_data)}catch(e){return null}})() : doc.extracted_data) : null;
-                    const _meds = _ext?.medications?.length||0;
-                    const _labs = _ext?.labs?.length||0;
-                    const _diags = _ext?.diagnoses?.length||0;
-                    const catIcon = ["lab_report","blood_test","thyroid","lipid","kidney","hba1c","urine"].includes(doc.doc_type)?"🔬":doc.doc_type==="prescription"?"💊":["xray","usg","mri","dexa","ecg","ncs","eye"].includes(doc.doc_type)?"🩻":"📄";
-                    const isNew = doc.created_at && (Date.now()-new Date(doc.created_at).getTime())<24*60*60*1000;
-                    return (
-                    <div key={doc.id} style={{ padding:"6px 8px", borderBottom:"1px solid #f1f5f9", background:isNew?"#eff6ff":"white" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:11 }}>
-                        <span style={{ fontSize:14 }}>{catIcon}</span>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontWeight:700 }}>
-                            {doc.title||doc.doc_type}
-                            {isNew && <span style={{ background:"#dc2626", color:"white", padding:"0 4px", borderRadius:3, fontSize:7, marginLeft:4, fontWeight:800 }}>NEW</span>}
-                          </div>
-                          <div style={{ fontSize:9, color:"#64748b" }}>{doc.source||""} • {doc.doc_date ? (()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})() : ""}</div>
-                        </div>
-                        {doc.storage_path && <button onClick={()=>viewDocumentFile(doc.id)} style={{ fontSize:8, background:"#2563eb", color:"white", border:"none", padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600 }}>📄 View</button>}
-                      </div>
-                      {_ext && (_meds>0||_labs>0||_diags>0) && (
-                        <div style={{ marginTop:4, marginLeft:22 }}>
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                            {_diags>0 && (_ext.diagnoses||[]).slice(0,4).map((d,i)=><span key={i} style={{ fontSize:8, background:"#fef3c7", color:"#92400e", padding:"1px 5px", borderRadius:3, fontWeight:600 }}>{typeof d==="string"?d:d.label||d.id||""}</span>)}
-                            {_meds>0 && <span style={{ fontSize:8, background:"#dbeafe", color:"#2563eb", padding:"1px 5px", borderRadius:3, fontWeight:600 }}>💊 {_meds} meds</span>}
-                            {_labs>0 && <span style={{ fontSize:8, background:"#dcfce7", color:"#059669", padding:"1px 5px", borderRadius:3, fontWeight:600 }}>🔬 {_labs} results</span>}
-                          </div>
-                          {_labs>0 && (
-                            <div style={{ marginTop:3, display:"flex", flexWrap:"wrap", gap:2 }}>
-                              {(_ext.labs||[]).slice(0,6).map((l,i)=>(
-                                <span key={i} style={{ fontSize:8, padding:"1px 4px", borderRadius:2, fontWeight:600,
-                                  background:l.flag==="HIGH"?"#fef2f2":l.flag==="LOW"?"#fffbeb":"#f0fdf4",
-                                  color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#f59e0b":"#059669" }}>
-                                  {l.test_name}: {l.result}{l.unit?" "+l.unit:""}
-                                </span>
-                              ))}
-                              {(_ext.labs||[]).length>6 && <span style={{ fontSize:8, color:"#94a3b8" }}>+{(_ext.labs||[]).length-6} more</span>}
-                            </div>
-                          )}
-                          {_meds>0 && (
-                            <div style={{ marginTop:3, display:"flex", flexWrap:"wrap", gap:2 }}>
-                              {(_ext.medications||[]).slice(0,4).map((m,i)=>(
-                                <span key={i} style={{ fontSize:8, background:"#eff6ff", color:"#1e40af", padding:"1px 4px", borderRadius:2, fontWeight:600 }}>{m.name} {m.dose||""}</span>
-                              ))}
-                              {(_ext.medications||[]).length>4 && <span style={{ fontSize:8, color:"#94a3b8" }}>+{(_ext.medications||[]).length-4} more</span>}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>);
-                  })}
+                  {patientFullData.documents.slice(0,10).map(doc => (
+                    <div key={doc.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 8px", borderBottom:"1px solid #f1f5f9", fontSize:11 }}>
+                      <span>{doc.doc_type==="lab_report"?"🔬":doc.doc_type==="prescription"?"📄":"🩻"}</span>
+                      <span style={{ flex:1 }}>{doc.title||doc.doc_type}</span>
+                      {doc.doc_date && <span style={{ fontSize:9, color:"#64748b" }}>{(()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</span>}
+                      {doc.storage_path && <button onClick={()=>viewDocumentFile(doc.id)} style={{ fontSize:8, background:"#2563eb", color:"white", border:"none", padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600 }}>📄 View</button>}
+                      <span style={{ fontSize:8, color:"#94a3b8" }}>{doc.source||""}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
