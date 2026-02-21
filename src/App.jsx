@@ -4865,7 +4865,7 @@ Write a warm, clear 4-5 line summary. Include:
 Use simple language. Be specific about medicine names. Write as "Dear ${patient.name?patient.name.split(" ")[0]:"Patient"}:"
 Return ONLY the summary text, no quotes or markdown.`;
                               const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-                                method:"POST", headers:{"Content-Type":"application/json","x-api-key":window.__ANTHROPIC_KEY||localStorage.getItem("anthropic_key")||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+                                method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
                                 body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:500,messages:[{role:"user",content:prompt}]})
                               });
                               if(!r.ok) throw new Error("API "+r.status);
