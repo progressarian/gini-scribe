@@ -43,19 +43,6 @@ const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 const t = (v, max=500) => { const s = n(v); return s && s.length > max ? s.slice(0, max) : s; }; // safe truncate
 
-// Create patient_briefs table
-pool.query(`CREATE TABLE IF NOT EXISTS patient_briefs (
-  id SERIAL PRIMARY KEY,
-  patient_id INTEGER NOT NULL,
-  brief_type VARCHAR(20) DEFAULT 'clinical',
-  content JSONB,
-  generated_at TIMESTAMPTZ DEFAULT NOW(),
-  data_hash VARCHAR(64),
-  version INTEGER DEFAULT 1,
-  trigger_source VARCHAR(50),
-  UNIQUE(patient_id, brief_type)
-)`).catch(e => console.log("patient_briefs table:", e.message));
-
 app.get("/api/health", async (_, res) => {
   const info = {
     status: "ok",
@@ -256,12 +243,6 @@ app.get("/api/patients/:id", async (req, res) => {
       return true;
     });
 
-    // Fetch latest brief
-    const brief = await pool.query(
-      "SELECT content, generated_at, version, trigger_source FROM patient_briefs WHERE patient_id=$1 AND brief_type='clinical' ORDER BY generated_at DESC LIMIT 1",
-      [id]
-    ).catch(() => ({ rows: [] }));
-
     res.json({
       ...patient.rows[0],
       consultations: uniqueConsultations,
@@ -271,7 +252,6 @@ app.get("/api/patients/:id", async (req, res) => {
       diagnoses: diagnoses.rows,
       documents: docs.rows,
       goals: goals.rows,
-      latest_brief: brief.rows[0] || null,
     });
   } catch (e) { console.error("Patient detail error:", e.message); res.status(500).json({ error: e.message }); }
 });
@@ -496,154 +476,6 @@ app.post("/api/patients/:id/labs", async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [req.params.id, n(consultation_id), test_name, result, n(unit), n(flag)||"N", n(ref_range), n(test_date)||new Date().toISOString().split("T")[0], n(source)||null]
     );
-    res.json(r.rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ═══ PATIENT BRIEF ═══
-app.get("/api/patients/:id/brief", async (req, res) => {
-  try {
-    const r = await pool.query(
-      "SELECT * FROM patient_briefs WHERE patient_id=$1 AND brief_type='clinical' ORDER BY generated_at DESC LIMIT 1",
-      [req.params.id]
-    );
-    if (r.rows[0]) {
-      res.json(r.rows[0]);
-    } else {
-      res.json({ content: null, generated_at: null, message: "No brief generated yet" });
-    }
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Generate/regenerate patient brief
-app.post("/api/patients/:id/brief/generate", async (req, res) => {
-  try {
-    const pid = req.params.id;
-    const trigger = req.body.trigger || "manual";
-    
-    // Gather all patient data
-    const [patient, consultations, labs, meds, docs, vitals, diagnoses] = await Promise.all([
-      pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
-      pool.query("SELECT * FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC LIMIT 20", [pid]),
-      pool.query("SELECT DISTINCT ON (test_name, test_date) * FROM lab_results WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC", [pid]),
-      pool.query("SELECT * FROM medications WHERE patient_id=$1 AND is_active=true", [pid]),
-      pool.query("SELECT id, doc_type, title, doc_date, source, notes, extracted_data, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC LIMIT 20", [pid]),
-      pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 10", [pid]),
-      pool.query("SELECT * FROM diagnoses WHERE patient_id=$1", [pid]),
-    ]);
-    
-    if (!patient.rows[0]) return res.status(404).json({ error: "Patient not found" });
-    const p = patient.rows[0];
-    
-    // Build data hash to check if brief needs regeneration
-    const dataStr = JSON.stringify({
-      labs: labs.rows.length,
-      meds: meds.rows.length,
-      cons: consultations.rows.length,
-      docs: docs.rows.length,
-      lastLab: labs.rows[0]?.test_date,
-      lastCon: consultations.rows[0]?.visit_date,
-      lastDoc: docs.rows[0]?.created_at,
-    });
-    const crypto = require("crypto");
-    const dataHash = crypto.createHash("md5").update(dataStr).digest("hex");
-    
-    // Check if brief already exists with same hash
-    const existing = await pool.query(
-      "SELECT * FROM patient_briefs WHERE patient_id=$1 AND brief_type='clinical' AND data_hash=$2",
-      [pid, dataHash]
-    );
-    if (existing.rows[0] && trigger !== "manual") {
-      return res.json(existing.rows[0]);
-    }
-    
-    // Build context for AI
-    const patientInfo = `${p.name}, ${p.age}Y/${p.sex}, File: ${p.file_no}`;
-    
-    const diagList = diagnoses.rows.map(d => `${d.label || d.diagnosis_code} (${d.status || "active"})`).join(", ") || "None recorded";
-    
-    const medList = meds.rows.map(m => {
-      const con = consultations.rows.find(c => c.id === m.consultation_id);
-      const conName = con?.con_name || con?.mo_name || "Gini";
-      return `${m.name} ${m.dose||""} ${m.frequency||""} ${m.timing||""} [${conName}]`;
-    }).join("\n") || "None";
-    
-    // Get latest labs grouped by test
-    const labsByTest = {};
-    labs.rows.forEach(l => {
-      if (!labsByTest[l.test_name]) labsByTest[l.test_name] = [];
-      labsByTest[l.test_name].push(l);
-    });
-    const labSummary = Object.entries(labsByTest).map(([name, vals]) => {
-      const latest = vals[0];
-      const prev = vals[1];
-      let trend = "";
-      if (prev && latest.result && prev.result) {
-        const diff = parseFloat(latest.result) - parseFloat(prev.result);
-        if (!isNaN(diff)) trend = diff > 0 ? " (↑)" : diff < 0 ? " (↓)" : " (→)";
-      }
-      return `${name}: ${latest.result} ${latest.unit||""} ${latest.flag&&latest.flag!=="N"?"["+latest.flag+"]":""}${trend} (${latest.test_date||""})`;
-    }).join("\n") || "None";
-    
-    // Recent consultations
-    const conSummary = consultations.rows.slice(0,5).map(c => {
-      let cd;
-      try { cd = typeof c.con_data === "string" ? JSON.parse(c.con_data) : c.con_data; } catch(e) { cd = null; }
-      return `${c.visit_date} — ${c.con_name||c.mo_name||""}: ${cd?.assessment_summary?.slice(0,150)||"No summary"}`;
-    }).join("\n") || "None";
-    
-    // Recent documents with extracted data
-    const docSummary = docs.rows.slice(0,10).map(d => {
-      let ext;
-      try { ext = typeof d.extracted_data === "string" ? JSON.parse(d.extracted_data) : d.extracted_data; } catch(e) { ext = null; }
-      let detail = d.title || d.doc_type;
-      if (ext?.findings) detail += " — " + ext.findings.slice(0,100);
-      if (ext?.labs?.length) detail += " — " + ext.labs.map(l => l.test_name+":"+l.result).slice(0,5).join(", ");
-      return `${d.doc_date||""} ${detail} (${d.source||""})`;
-    }).join("\n") || "None";
-    
-    // Vitals
-    const vitalSummary = vitals.rows.slice(0,3).map(v => 
-      `BP:${v.bp_sys||"?"}/${v.bp_dia||"?"} HR:${v.heart_rate||"?"} Wt:${v.weight||"?"}kg BMI:${v.bmi||"?"} (${v.recorded_at||""})`
-    ).join("\n") || "None";
-    
-    // Return the context for client-side AI call
-    res.json({
-      patient_id: pid,
-      data_hash: dataHash,
-      trigger: trigger,
-      context: {
-        patient: patientInfo,
-        diagnoses: diagList,
-        medications: medList,
-        labs: labSummary,
-        consultations: conSummary,
-        documents: docSummary,
-        vitals: vitalSummary,
-        total_visits: consultations.rows.length,
-        total_labs: labs.rows.length,
-        total_meds: meds.rows.length,
-        total_docs: docs.rows.length,
-      }
-    });
-  } catch (e) { console.error("Brief generate:", e); res.status(500).json({ error: e.message }); }
-});
-
-// Save generated brief
-app.post("/api/patients/:id/brief/save", async (req, res) => {
-  try {
-    const { content, data_hash, trigger_source } = req.body;
-    const pid = req.params.id;
-    
-    // Upsert: update if exists, insert if not
-    const r = await pool.query(`
-      INSERT INTO patient_briefs (patient_id, brief_type, content, data_hash, trigger_source, generated_at, version)
-      VALUES ($1, 'clinical', $2, $3, $4, NOW(), 1)
-      ON CONFLICT (patient_id, brief_type) 
-      DO UPDATE SET content=$2, data_hash=$3, trigger_source=$4, generated_at=NOW(), version=patient_briefs.version+1
-      RETURNING *
-    `, [pid, JSON.stringify(content), data_hash, trigger_source || "manual"]);
-    
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

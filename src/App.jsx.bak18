@@ -2563,9 +2563,6 @@ RULES:
   const [planAddText, setPlanAddText] = useState("");
   const [confirmedExtMeds, setConfirmedExtMeds] = useState({});
   const [extMedActions, setExtMedActions] = useState({});
-  const [patientBrief, setPatientBrief] = useState(null);
-  const [briefLoading, setBriefLoading] = useState(false);
-  const [briefExpanded, setBriefExpanded] = useState(false);
   const [extMedReasons, setExtMedReasons] = useState({});
   const [activeReasonPicker, setActiveReasonPicker] = useState(null);
   const [planView, setPlanView] = useState("plan");
@@ -3242,278 +3239,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   });
   const hasNewReports = newReportsSinceLastVisit.length > 0 || newDocsSinceLastVisit.length > 0;
   
-  // ═══ PATIENT BRIEF ═══
-  const loadPatientBrief = () => {
-    if (!dbPatientId) return;
-    // Check if brief already in patientFullData
-    if (patientFullData?.latest_brief?.content) {
-      setPatientBrief(patientFullData.latest_brief.content);
-      return;
-    }
-    // Fetch from API
-    fetch(`${API_URL}/api/patients/${dbPatientId}/brief`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.content) setPatientBrief(typeof data.content === "string" ? JSON.parse(data.content) : data.content);
-      })
-      .catch(e => console.warn("Brief fetch:", e));
-  };
-
-  const generatePatientBrief = async (trigger = "manual") => {
-    if (!dbPatientId) return;
-    setBriefLoading(true);
-    try {
-      // Step 1: Get context from server
-      const ctxR = await fetch(`${API_URL}/api/patients/${dbPatientId}/brief/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger })
-      });
-      if (!ctxR.ok) throw new Error("Context fetch failed");
-      const ctxData = await ctxR.json();
-      
-      // If brief already exists with same hash, use it
-      if (ctxData.content) {
-        const content = typeof ctxData.content === "string" ? JSON.parse(ctxData.content) : ctxData.content;
-        setPatientBrief(content);
-        setBriefLoading(false);
-        return;
-      }
-      
-      const ctx = ctxData.context;
-      
-      // Step 2: Generate with AI
-      const prompt = `You are an expert clinical summarizer for Gini Advanced Care Hospital, India.
-Generate a comprehensive patient brief from this data. Return ONLY valid JSON.
-
-PATIENT: ${ctx.patient}
-DIAGNOSES: ${ctx.diagnoses}
-
-CURRENT MEDICATIONS (${ctx.total_meds} active):
-${ctx.medications}
-
-LAB RESULTS (${ctx.total_labs} total):
-${ctx.labs}
-
-RECENT VITALS:
-${ctx.vitals}
-
-VISIT HISTORY (${ctx.total_visits} visits):
-${ctx.consultations}
-
-RECENT DOCUMENTS (${ctx.total_docs}):
-${ctx.documents}
-
-Return this exact JSON structure:
-{
-  "one_liner": "Brief one-line summary: age/sex, key conditions, medication count, key trend",
-  "conditions": [{"label": "Type 2 DM", "status": "active", "severity": "moderate", "trend": "improving"}],
-  "medication_summary": "Total X meds. Key: [list main ones]. Recent changes: [any new/stopped]",
-  "lab_highlights": [{"test": "HbA1c", "latest": "7.2%", "trend": "improving", "flag": "HIGH", "note": "Down from 8.1%"}],
-  "key_concerns": ["Rising creatinine — needs nephro referral?", "Vitamin D still low despite supplementation"],
-  "last_visit_summary": "Date — Doctor: brief summary of what happened",
-  "pending_actions": ["HbA1c recheck due in 6 weeks", "Eye exam overdue", "Need to discuss diet compliance"],
-  "positive_notes": ["HbA1c improving", "BP well controlled", "Patient compliant with medications"],
-  "lifestyle_notes": "Any diet, exercise, lifestyle observations from history",
-  "risk_flags": ["CKD progression risk", "Cardiac risk — needs lipid optimization"]
-}
-
-Be specific with numbers. Flag anything concerning. Note positive trends too. Return ONLY JSON.`;
-
-      const aiR = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, messages: [{ role: "user", content: prompt }] })
-      });
-      
-      if (!aiR.ok) throw new Error("AI generation failed: " + aiR.status);
-      const aiData = await aiR.json();
-      const text = aiData.content?.[0]?.text || "";
-      const content = JSON.parse(text.replace(/```json|```/g, "").trim());
-      
-      setPatientBrief(content);
-      
-      // Step 3: Save to DB
-      fetch(`${API_URL}/api/patients/${dbPatientId}/brief/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, data_hash: ctxData.data_hash, trigger_source: trigger })
-      }).catch(e => console.warn("Brief save:", e));
-      
-    } catch (e) {
-      console.error("Brief generate:", e);
-      alert("Brief generation failed: " + e.message);
-    }
-    setBriefLoading(false);
-  };
-
-  // Auto-load brief when patient loaded
-  useEffect(() => {
-    if (dbPatientId && patientFullData) loadPatientBrief();
-  }, [dbPatientId, patientFullData]);
-
-  // ═══ BRIEF CARD COMPONENT ═══
-  const PatientBriefCard = ({ compact = false }) => {
-    if (briefLoading) return (
-      <div style={{ padding:12, background:"linear-gradient(135deg,#f0f9ff,#eff6ff)", borderRadius:8, border:"1px solid #bfdbfe", marginBottom:10, textAlign:"center" }}>
-        <span style={{ animation:"pulse 1.5s infinite" }}>🧠</span>
-        <span style={{ fontSize:11, fontWeight:600, color:"#2563eb", marginLeft:6 }}>Generating patient brief...</span>
-      </div>
-    );
-    
-    if (!patientBrief) return (
-      <div className="no-print" style={{ padding:10, background:"#f8fafc", borderRadius:8, border:"1px dashed #cbd5e1", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
-        <span style={{ fontSize:16 }}>📋</span>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:"#475569" }}>No patient brief yet</div>
-          <div style={{ fontSize:9, color:"#94a3b8" }}>Generate a comprehensive AI summary of this patient</div>
-        </div>
-        <button onClick={() => generatePatientBrief("manual")}
-          style={{ fontSize:10, background:"#2563eb", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontWeight:700, cursor:"pointer" }}>🧠 Generate Brief</button>
-      </div>
-    );
-    
-    const b = patientBrief;
-    
-    return (
-      <div style={{ background:"linear-gradient(135deg,#f0f9ff,#faf5ff)", borderRadius:8, border:"1px solid #c7d2fe", marginBottom:10, overflow:"hidden" }}>
-        {/* Header */}
-        <div onClick={() => setBriefExpanded(!briefExpanded)}
-          style={{ padding:"8px 12px", cursor:"pointer", display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:16 }}>📋</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:11, fontWeight:800, color:"#1e293b" }}>Patient Brief</div>
-            <div style={{ fontSize:10, color:"#475569", lineHeight:1.4 }}>{b.one_liner || ""}</div>
-          </div>
-          <button className="no-print" onClick={(e) => { e.stopPropagation(); generatePatientBrief("refresh"); }}
-            style={{ fontSize:8, background:"#e0e7ff", color:"#4338ca", border:"none", padding:"3px 6px", borderRadius:4, fontWeight:700, cursor:"pointer" }}>🔄</button>
-          <span className="no-print" style={{ fontSize:10, color:"#94a3b8" }}>{briefExpanded ? "▲" : "▼"}</span>
-        </div>
-        
-        {/* Collapsed: Key concerns + risk flags */}
-        {!briefExpanded && (
-          <div style={{ padding:"0 12px 8px 12px" }}>
-            {b.key_concerns?.length > 0 && (
-              <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:2 }}>
-                {b.key_concerns.slice(0, compact ? 2 : 3).map((c, i) => (
-                  <span key={i} style={{ fontSize:8, background:"#fef3c7", color:"#92400e", padding:"2px 6px", borderRadius:4, fontWeight:600 }}>⚠️ {c}</span>
-                ))}
-              </div>
-            )}
-            {b.risk_flags?.length > 0 && (
-              <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                {b.risk_flags.slice(0, compact ? 2 : 3).map((r, i) => (
-                  <span key={i} style={{ fontSize:8, background:"#fef2f2", color:"#dc2626", padding:"2px 6px", borderRadius:4, fontWeight:600 }}>🔴 {r}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* Expanded: Full brief */}
-        {briefExpanded && (
-          <div style={{ padding:"0 12px 10px 12px" }}>
-            {/* Conditions */}
-            {b.conditions?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>CONDITIONS</div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                  {b.conditions.map((c, i) => (
-                    <span key={i} style={{ fontSize:9, padding:"2px 8px", borderRadius:4, fontWeight:600,
-                      background:c.severity==="severe"?"#fef2f2":c.trend==="improving"?"#f0fdf4":"#f8fafc",
-                      color:c.severity==="severe"?"#dc2626":c.trend==="improving"?"#059669":"#374151",
-                      border:"1px solid "+(c.severity==="severe"?"#fecaca":c.trend==="improving"?"#bbf7d0":"#e2e8f0") }}>
-                      {c.label} {c.trend === "improving" ? "↗" : c.trend === "worsening" ? "↘" : "→"}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Medications */}
-            {b.medication_summary && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>💊 MEDICATIONS</div>
-                <div style={{ fontSize:10, color:"#374151", lineHeight:1.5 }}>{b.medication_summary}</div>
-              </div>
-            )}
-            
-            {/* Lab highlights */}
-            {b.lab_highlights?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>🔬 KEY LABS</div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                  {b.lab_highlights.map((l, i) => (
-                    <span key={i} style={{ fontSize:9, padding:"2px 8px", borderRadius:4, fontWeight:600,
-                      background:l.flag==="HIGH"?"#fef2f2":l.flag==="LOW"?"#fffbeb":"#f0fdf4",
-                      color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#f59e0b":"#059669" }}>
-                      {l.test}: {l.latest} {l.trend==="improving"?"↗":l.trend==="worsening"?"↘":"→"} {l.note ? `(${l.note})` : ""}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Key concerns */}
-            {b.key_concerns?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>⚠️ CONCERNS</div>
-                {b.key_concerns.map((c, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#92400e", padding:"2px 0" }}>• {c}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Positive notes */}
-            {b.positive_notes?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>✅ POSITIVE</div>
-                {b.positive_notes.map((n, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#059669", padding:"2px 0" }}>• {n}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Pending actions */}
-            {b.pending_actions?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>📌 PENDING ACTIONS</div>
-                {b.pending_actions.map((a, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#1e40af", padding:"2px 0", fontWeight:600 }}>☐ {a}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Risk flags */}
-            {b.risk_flags?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>🔴 RISK FLAGS</div>
-                {b.risk_flags.map((r, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#dc2626", padding:"2px 0", fontWeight:600 }}>• {r}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Last visit + lifestyle */}
-            {b.last_visit_summary && (
-              <div style={{ marginBottom:6 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>📅 LAST VISIT</div>
-                <div style={{ fontSize:10, color:"#374151" }}>{b.last_visit_summary}</div>
-              </div>
-            )}
-            {b.lifestyle_notes && (
-              <div>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>🏃 LIFESTYLE</div>
-                <div style={{ fontSize:10, color:"#374151" }}>{b.lifestyle_notes}</div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-    const TABS = [
+  const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
     { id:"dashboard", label:"🏠 Dashboard", show:keySet && !!dbPatientId },
     { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole },
@@ -3553,8 +3279,6 @@ Be specific with numbers. Flag anything concerning. Note positive trends too. Re
     setNewReportsIncluded(true);
     setNewReportsExpanded(false); // Collapse immediately
     setConData(null); // Reset so plan regenerates with new data
-    // Regenerate patient brief with new data
-    setTimeout(() => generatePatientBrief("consultation_save"), 2000);
   };
   
   const NewReportsBanner = hasNewReports ? (
@@ -4369,7 +4093,6 @@ Be specific with numbers. Flag anything concerning. Note positive trends too. Re
       {tab==="mo" && (
         <div>
           {NewReportsBanner}
-          <PatientBriefCard compact={true} />
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>MO:</label>
             {doctorsList.filter(d=>d.role==="mo").length > 0 ? (
@@ -4670,7 +4393,6 @@ Be specific with numbers. Flag anything concerning. Note positive trends too. Re
       {/* ===== CONSULTANT ===== */}
       {tab==="consultant" && (
         <div>
-            <PatientBriefCard />
           {NewReportsBanner}
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Consultant:</label>
@@ -4920,7 +4642,6 @@ Be specific with numbers. Flag anything concerning. Note positive trends too. Re
 
           {!moData && !conData ? <div style={{ textAlign:"center", padding:24, color:"#94a3b8" }}>Complete MO & Consultant first</div> : (
             <div data-plan-content style={{display:planView==="plan"?"block":"none"}}>
-              <PatientBriefCard compact={true} />
               {/* New data alert */}
               {(() => {
                 const newDocs = (patientFullData?.documents||[]).filter(d => d.created_at && (Date.now()-new Date(d.created_at).getTime()) < 24*60*60*1000);
