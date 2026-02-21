@@ -1,6 +1,33 @@
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
 
+// Map medication timing to time-of-day slots
+const guessTime = (timing) => {
+  const t = (timing||"").toLowerCase();
+  const slots = [];
+  if (/wake|empty.*stomach|thyro|levothyrox/i.test(t)) slots.push("wakeup");
+  if (/morning|od(?![a-z])|once.*daily/i.test(t) && !slots.length) slots.push("morning");
+  if (/before.*break|30.*min.*break|ac.*morning/i.test(t)) { slots.length=0; slots.push("before_breakfast"); }
+  if (/after.*break|post.*break/i.test(t)) slots.push("after_breakfast");
+  if (/after.*lunch|post.*lunch/i.test(t)) slots.push("after_lunch");
+  if (/evening|eve/i.test(t)) slots.push("evening");
+  if (/10.*pm|night(?!.*bed)/i.test(t)) slots.push("night_10pm");
+  if (/after.*dinner|post.*dinner/i.test(t)) slots.push("after_dinner");
+  if (/bedtime|hs(?![a-z])|bed/i.test(t)) slots.push("bedtime");
+  if (/bd|twice/i.test(t) && slots.length < 2) {
+    if (!slots.includes("after_breakfast")) slots.push("after_breakfast");
+    if (!slots.includes("after_dinner")) slots.push("after_dinner");
+  }
+  if (/tds|thrice|3.*times/i.test(t)) {
+    slots.length = 0;
+    slots.push("after_breakfast", "after_lunch", "after_dinner");
+  }
+  if (/after.*meals/i.test(t) && slots.length === 0) {
+    slots.push("after_breakfast", "after_dinner");
+  }
+  return slots;
+};
+
 // Retry wrapper for Anthropic API (handles 529 overloaded)
 const retryAnthropicFetch = async (url, options, maxRetries = 3) => {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
