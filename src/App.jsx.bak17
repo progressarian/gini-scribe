@@ -3213,7 +3213,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   
   // Detect new lab results since last consultation
   const newReportsSinceLastVisit = (() => {
-    if (!patientFullData?.consultations?.length) return [];
+    if (!patientFullData?.lab_results?.length || !patientFullData?.consultations?.length) return [];
     const sortedCons = [...patientFullData.consultations].sort((a,b) => {
       const d = new Date(b.visit_date) - new Date(a.visit_date);
       return d !== 0 ? d : new Date(b.created_at) - new Date(a.created_at);
@@ -3221,23 +3221,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     const lastVisit = sortedCons[0];
     const lastVisitDate = lastVisit?.visit_date ? String(lastVisit.visit_date).slice(0,10) : null;
     if (!lastVisitDate) return [];
-    return (patientFullData?.lab_results||[]).filter(l => {
+    return patientFullData.lab_results.filter(l => {
       if (!l.test_date) return false;
-      return String(l.test_date).slice(0,10) >= lastVisitDate;
+      const labDate = String(l.test_date).slice(0,10); // normalize to YYYY-MM-DD
+      return labDate > lastVisitDate; // strictly after last visit, not same day
     });
   })();
-  const newDocsSinceLastVisit = (() => {
-    if (!patientFullData?.documents?.length) return [];
-    return patientFullData.documents.filter(d => {
-      if (d.created_at && (Date.now() - new Date(d.created_at).getTime()) < 48*60*60*1000) return true;
-      return false;
-    });
-  })();
-  const newDocsWithExtracted = newDocsSinceLastVisit.filter(d => {
-    const ext = d.extracted_data ? (typeof d.extracted_data==="string" ? (()=>{try{return JSON.parse(d.extracted_data)}catch(e){return null}})() : d.extracted_data) : null;
-    return ext && (ext.labs?.length || ext.medications?.length || ext.findings || ext.diagnoses?.length);
-  });
-  const hasNewReports = newReportsSinceLastVisit.length > 0 || newDocsSinceLastVisit.length > 0;
+  const hasNewReports = newReportsSinceLastVisit.length > 0;
   
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
@@ -3263,14 +3253,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   
   const includeNewReportsInPlan = () => {
     // Build a summary of new lab values and inject into consultant transcript
-    const docExtracted = [];
-    newDocsSinceLastVisit.forEach(d => {
-      const ext = d.extracted_data ? (typeof d.extracted_data==="string" ? (()=>{try{return JSON.parse(d.extracted_data)}catch(e){return null}})() : d.extracted_data) : null;
-      if (!ext) return;
-      if (ext.labs) ext.labs.forEach(l => docExtracted.push(l.test_name + ": " + l.result + (l.unit?" "+l.unit:"") + (l.flag&&l.flag!=="NORMAL"?" ("+l.flag+")":"") + " [from " + (d.title||d.doc_type) + "]"));
-      if (ext.findings) docExtracted.push("Findings (" + (d.title||d.doc_type) + "): " + ext.findings);
-      if (ext.medications) docExtracted.push((d.title||"External") + ": " + ext.medications.map(m=>m.name+" "+m.dose).join(", "));
-    });
     const labSummary = newReportsSinceLastVisit.map(l => 
       `${l.test_name}: ${l.result} ${l.unit||""} ${l.flag==="H"?"(HIGH)":l.flag==="L"?"(LOW)":""} [${l.test_date}]`
     ).join("\n");
@@ -3285,7 +3267,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     newReportsIncluded ? (
       <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 10px", marginBottom:8, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8 }}>
         <span style={{ fontSize:12 }}>✅</span>
-        <span style={{ fontSize:11, fontWeight:600, color:"#059669" }}>{newReportsSinceLastVisit.length} lab result{newReportsSinceLastVisit.length!==1?"s":""}{newDocsSinceLastVisit.length>0?" + "+newDocsSinceLastVisit.length+" doc"+(newDocsSinceLastVisit.length!==1?"s":"")+"":" "} included</span>
+        <span style={{ fontSize:11, fontWeight:600, color:"#059669" }}>{newReportsSinceLastVisit.length} new lab results included</span>
         <div style={{ flex:1 }} />
         <button onClick={()=>{setNewReportsIncluded(false);setNewReportsExpanded(true);}} style={{ fontSize:9, background:"white", border:"1px solid #bbf7d0", borderRadius:4, padding:"2px 6px", cursor:"pointer", color:"#64748b" }}>Review again</button>
       </div>
@@ -3296,12 +3278,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         <span style={{ fontSize:14 }}>🔔</span>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>
-            {newReportsSinceLastVisit.length > 0 ? newReportsSinceLastVisit.length + " New Lab Results" : ""}{newReportsSinceLastVisit.length > 0 && newDocsSinceLastVisit.length > 0 ? " + " : ""}{newDocsSinceLastVisit.length > 0 ? newDocsSinceLastVisit.length + " New Documents" : ""} Since Last Visit
+            {newReportsSinceLastVisit.length} New Lab Results Since Last Visit
           </div>
           {!newReportsExpanded && (
             <div style={{ fontSize:9, color:"#a16207", marginTop:2 }}>
-              {[...new Set([...newReportsSinceLastVisit.map(l=>l.test_name), ...newDocsSinceLastVisit.map(d=>d.title||d.doc_type)])].slice(0,6).join(", ")}
-              {[...new Set([...newReportsSinceLastVisit.map(l=>l.test_name), ...newDocsSinceLastVisit.map(d=>d.title||d.doc_type)])].length>6 && " ..."}
+              {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].slice(0,6).join(", ")}
+              {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].length>6 && " ..."}
             </div>
           )}
         </div>

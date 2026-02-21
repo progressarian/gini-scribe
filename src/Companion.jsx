@@ -571,10 +571,10 @@ export default function Companion() {
               {patientTab === "labs" && (
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8 }}>🔬 Lab Results</div>
-                  {(patientData.labs || []).length === 0
+                  {(patientData.lab_results || []).length === 0
                     ? <div style={{ padding: 20, textAlign: "center", color: "#94a3b8" }}>No lab results</div>
                     : <div style={{ background: "white", borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}>
-                        {(patientData.labs || []).slice(0, 40).map((l, i) => (
+                        {(patientData.lab_results || []).slice(0, 40).map((l, i) => (
                           <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "5px 10px", borderBottom: "1px solid #f1f5f9", fontSize: 11 }}>
                             <div>
                               <span style={{ fontWeight: 600 }}>{l.test_name}</span>
