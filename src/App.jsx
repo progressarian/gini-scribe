@@ -2487,6 +2487,8 @@ ${parts.join("\n")}`;
 
   const handleClarification = (i,k,v) => setClarifications(p=>({...p,[i]:{...(p[i]||{}),[k]:v}}));
 
+  // allMeds = current consultant's prescriptions (from voice/AI processing)
+  // External/previous meds come from patientFullData.medications (shown in reconciliation + med card)
   const allMeds = [
     ...(sa(conData,"medications_confirmed").length > 0
       ? sa(conData,"medications_confirmed")
@@ -2496,6 +2498,28 @@ ${parts.join("\n")}`;
       return c.resolved_name ? {...m, name:c.resolved_name, dose:c.resolved_dose||m.default_dose||"", frequency:c.resolved_freq||"OD", timing:c.resolved_timing||m.default_timing||"", resolved:true, isNew:true} : null;
     }).filter(Boolean)
   ];
+
+  // External/previous medications from DB (for reconciliation + medicine card)
+  const externalMeds = (() => {
+    if (sa(moData,"previous_medications").length > 0 && sa(conData,"medications_confirmed").length > 0) {
+      // MO captured external meds AND consultant has confirmed — show MO's external meds for reconciliation
+      return sa(moData,"previous_medications");
+    }
+    if ((patientFullData?.medications||[]).length > 0) {
+      // Fall back to DB medications
+      return patientFullData.medications.filter(m => m.is_active !== false).map(m => ({
+        name: m.name || m.pharmacy_match || "",
+        composition: m.composition || "",
+        dose: m.dose || "",
+        frequency: m.frequency || "",
+        timing: m.timing || "",
+        route: m.route || "Oral",
+        prescriber: m.prescriber || (m.consultation_id ? "Previous visit" : "External"),
+        forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [],
+      }));
+    }
+    return [];
+  })();
 
   // Plan editing helpers
   const toggleBlock = (id) => setPlanHidden(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
@@ -3003,10 +3027,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"mo", label:"🎤 MO", show:keySet && !isLabRole && !visitActive, badge:hasNewReports },
     { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"plan", label:"📄 Plan", show:keySet && !isLabRole, badge:hasNewReports },
-    { id:"docs", label:"📎 Docs", show:keySet && !!API_URL && !!dbPatientId },
+    { id:"docs", label:"📎 Docs", show:keySet && (!!dbPatientId || !!patient.name) },
     { id:"labportal", label:"🔬 Upload", show:keySet && !!API_URL && isLabRole },
-    { id:"history", label:"📜 Hx", show:keySet && !!API_URL && !isLabRole },
-    { id:"outcomes", label:"📊", show:keySet && !!API_URL && !isLabRole },
+    { id:"history", label:"📜 Hx", show:keySet && !isLabRole && (!!dbPatientId || !!patient.name) },
+    { id:"outcomes", label:"📊", show:keySet && !isLabRole && !!dbPatientId },
     { id:"ai", label:"🤖 AI", show:keySet && !isLabRole },
     { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") },
     { id:"ci", label:"🧠 CI", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
@@ -5636,16 +5660,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </PlanBlock>}
 
                 {/* ═══ MEDICINE CARD (v2) ═══ */}
-                {(() => {
-                  const extMeds = (moData?.previous_medications||[]).length > 0
-                    ? moData.previous_medications
-                    : (patientFullData?.medications||[]).map(m=>({name:m.name,dose:m.dose||"",frequency:m.frequency||"",timing:m.timing||"",prescriber:m.prescriber||"External",forDiagnosis:m.forDiagnosis||[]}));
-                  const allCardMeds = [...planMeds, ...extMeds.filter(m=>medRecon[m.name]!=="stop")];
-                  return allCardMeds.length > 0 ? (
+                {(planMeds.length > 0 || externalMeds.length > 0) && (
                 <div className="no-print" style={{ marginBottom:10 }}>
                   <button onClick={()=>setShowMedCard(!showMedCard)}
                     style={{ width:"100%", padding:"8px 14px", background:showMedCard?"#7c3aed":"#faf5ff", color:showMedCard?"white":"#7c3aed", border:"1.5px solid #c4b5fd", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                    💊 {showMedCard ? "Hide" : "Show"} Medicine Card ({allCardMeds.length} medicines)
+                    💊 {showMedCard ? "Hide" : "Show"} Medicine Card ({planMeds.length + externalMeds.filter(m=>medRecon[m.name]!=="stop").length} medicines)
                   </button>
                   {showMedCard && (
                     <div style={{ marginTop:6, border:"2px solid #c4b5fd", borderRadius:10, padding:14, background:"white" }}>
@@ -5679,7 +5698,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           </tr>;
                           })}
                           {/* External meds (continued) */}
-                          {(moData?.previous_medications||[]).filter(m=>medRecon[m.name]!=="stop").map((m,i) => {
+                          {externalMeds.filter(m=>medRecon[m.name]!=="stop").map((m,i) => {
                             const t = (m.timing||m.frequency||"").toLowerCase();
                             const morn = t.includes("morn") || t.includes("od") || t.includes("bd") || t.includes("tds") || t.includes("breakfast");
                             const aft = t.includes("aft") || t.includes("bd") || t.includes("tds");
@@ -5702,18 +5721,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     </div>
                   )}
                 </div>
-                  ) : null;
-                })()}
+                )}
 
                 {/* ═══ EXTERNAL MEDICATION RECONCILIATION (v2) ═══ */}
-                {(() => {
-                  const extMeds = (moData?.previous_medications||[]).length > 0
-                    ? moData.previous_medications
-                    : (patientFullData?.medications||[]).map(m=>({name:m.name,dose:m.dose||"",frequency:m.frequency||"",timing:m.timing||"",prescriber:m.prescriber||"External"}));
-                  return extMeds.length > 0 ? (
-                  <PlanBlock id="extmeds" title="🏥 External / Other Medications — Reconcile" color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
+                {externalMeds.length > 0 && (
+                  <PlanBlock id="extmeds" title={`🏥 External / Other Medications — Reconcile (${externalMeds.length})`} color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
                     <div style={{ fontSize:10, color:"#92400e", marginBottom:6 }}>Review medications from other doctors. Mark each as Continue, Hold, or Stop.</div>
-                    {extMeds.map((m,i) => {
+                    {externalMeds.map((m,i) => {
                       const status = medRecon[m.name] || "continue";
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 8px", marginBottom:3, borderRadius:6,
@@ -5744,10 +5758,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         ⏸ On Hold: {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k])=>k).join(", ")}
                       </div>
                     )}
-
-                    {/* Regenerate Summary with reconciliation */}
                     <button className="no-print" onClick={()=>{
-                      // Build med summary text including reconciliation decisions
                       const summary = Object.entries(medRecon).filter(([_,v])=>v!=="continue").map(([name,action])=>`${action.toUpperCase()}: ${name}`);
                       if (summary.length > 0) {
                         const txt = `Medication Reconciliation:\n${summary.join("\n")}`;
@@ -5757,8 +5768,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       🔄 Add Reconciliation to Notes
                     </button>
                   </PlanBlock>
-                  ) : null;
-                })()}
+                )}
 
                 {/* Lifestyle */}
                 {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
