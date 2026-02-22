@@ -1,45 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { fixMoMedicines, fixConMedicines, fixQuickMedicines, searchPharmacy } from "./medmatch.js";
 
-// Map medication timing to time-of-day slots
-const guessTime = (timing) => {
-  const t = (timing||"").toLowerCase();
-  const slots = [];
-  if (/wake|empty.*stomach|thyro|levothyrox/i.test(t)) slots.push("wakeup");
-  if (/morning|od(?![a-z])|once.*daily/i.test(t) && !slots.length) slots.push("morning");
-  if (/before.*break|30.*min.*break|ac.*morning/i.test(t)) { slots.length=0; slots.push("before_breakfast"); }
-  if (/after.*break|post.*break/i.test(t)) slots.push("after_breakfast");
-  if (/after.*lunch|post.*lunch/i.test(t)) slots.push("after_lunch");
-  if (/evening|eve/i.test(t)) slots.push("evening");
-  if (/10.*pm|night(?!.*bed)/i.test(t)) slots.push("night_10pm");
-  if (/after.*dinner|post.*dinner/i.test(t)) slots.push("after_dinner");
-  if (/bedtime|hs(?![a-z])|bed/i.test(t)) slots.push("bedtime");
-  if (/bd|twice/i.test(t) && slots.length < 2) {
-    if (!slots.includes("after_breakfast")) slots.push("after_breakfast");
-    if (!slots.includes("after_dinner")) slots.push("after_dinner");
-  }
-  if (/tds|thrice|3.*times/i.test(t)) {
-    slots.length = 0;
-    slots.push("after_breakfast", "after_lunch", "after_dinner");
-  }
-  if (/after.*meals/i.test(t) && slots.length === 0) {
-    slots.push("after_breakfast", "after_dinner");
-  }
-  return slots;
-};
-
-// Retry wrapper for Anthropic API (handles 529 overloaded)
-const retryAnthropicFetch = async (url, options, maxRetries = 3) => {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const r = await fetch(url, options);
-    if (r.status === 529 && attempt < maxRetries) {
-      await new Promise(res => setTimeout(res, 2000 * (attempt + 1)));
-      continue;
-    }
-    return r;
-  }
-};
-
 // API base URL — same origin in production (API + frontend on same server)
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
@@ -244,7 +205,7 @@ The doctor has dictated a COMPLETE consultation in one go. Parse it into ALL sec
 Hindi: "patient ka naam"=patient name, "sugar"=diabetes, "BP"=blood pressure, "dawai"=medicine
 Output ONLY valid JSON, no backticks.
 
-{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"chief_complaints":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","date":"YYYY-MM-DD or null","instructions":"Any special instructions like fasting, medication omission etc","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
+{"patient":{"name":"string","age":"number","sex":"Male/Female","phone":"string or null","fileNo":"string or null","dob":"YYYY-MM-DD or null"},"vitals":{"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","spo2":"number or null","weight":"number or null","height":"number or null"},"mo":{"diagnoses":[{"id":"dm2","label":"Type 2 DM (10 years)","status":"Uncontrolled"}],"complications":[{"name":"string","status":"Active/Resolved","detail":"string"}],"history":{"family":"","past_medical_surgical":"","personal":""},"previous_medications":[{"name":"METFORMIN 500MG","composition":"Metformin 500mg","dose":"500mg","frequency":"BD","timing":"After meals"}],"investigations":[{"test":"HbA1c","value":8.5,"unit":"%","flag":"HIGH","critical":false,"ref":"<6.5"}],"chief_complaints":["Tingling in feet","Fatigue","Frequent urination"],"compliance":"Good/Partial/Poor — brief note on medicine and lifestyle adherence"},"consultant":{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of ALL findings, diagnoses, and treatment plan.","key_issues":["Issue 1","Issue 2"],"diet_lifestyle":[{"advice":"Walk 10,000 steps daily","detail":"Start with 5000, increase weekly","category":"Exercise","helps":["dm2","obesity"]},{"advice":"1500 calorie diabetic diet","detail":"Low GI carbs, avoid sugar","category":"Diet","helps":["dm2"]},{"advice":"Reduce salt to <5g/day","detail":"Avoid pickles, papad","category":"Diet","helps":["htn"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night/Before meals","route":"Oral/SC/IM","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c","Fasting glucose"]},"self_monitoring":[{"title":"Blood Sugar Monitoring","instructions":["Check fasting sugar daily morning","Check post-meal sugar twice a week"],"targets":"Fasting 90-130 mg/dL, Post-meal <180 mg/dL","alert":"If sugar <70: eat glucose tablets immediately"},{"title":"Blood Pressure Monitoring","instructions":["Check BP morning and evening","Record in diary"],"targets":"<130/80 mmHg","alert":"If BP >180/110: go to ER immediately"}],"future_plan":[{"condition":"If HbA1c not below 7 in 3 months","action":"Consider adding GLP-1 RA or insulin"},{"condition":"Fundus examination pending","action":"Schedule within 2 weeks"}]}}
 
 CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - Split dictation: patient info → history/meds → plan/changes
@@ -262,8 +223,7 @@ CRITICAL RULES — EVERY FIELD MUST BE FILLED:
 - chief_complaints: Extract ALL symptoms patient reports (tingling, fatigue, breathlessness, chest pain, etc). Empty array if none
 - compliance: "Good"/"Partial"/"Poor" + brief note. Infer from context (taking medicines regularly=Good, missed doses/not walking=Partial)
 - Calculate age from DOB (e.g., born 1957 → ~67-68 years)
-- Extract ONLY lab values from the CURRENT/LATEST visit as investigations with flags (HIGH/LOW/null). IGNORE historical follow-up values.
-- CRITICAL: For mo.investigations, ONLY extract lab values from the CURRENT/TODAY/LATEST visit. The text may contain historical values from previous follow-ups - IGNORE those. Look for the LAST "FOLLOW UP TODAY" or most recent date. Only values from that date go into investigations. Each value needs: test name, numeric value, unit, flag (HIGH/LOW/null), ref range.
+- Extract ALL lab values as investigations with proper flags (HIGH/LOW/null)
 - Include complications (e.g., diabetic foot ulcer, retinopathy, neuropathy)
 - Name MUST be in English/Roman script, never Hindi/Devanagari`;
 
@@ -278,7 +238,7 @@ RULES:
 - Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,dfu,masld,nephropathy
 - Status: "Controlled", "Uncontrolled", or "New" ONLY
 - MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
-- Extract ONLY lab values from the CURRENT/LATEST visit with flags (HIGH/LOW/null). IGNORE historical values.
+- Extract ALL lab values with flags (HIGH/LOW/null)
 - Include ALL medications (existing + new)
 - Name in English/Roman script only
 - chief_complaints: ALL symptoms mentioned`;
@@ -286,7 +246,7 @@ RULES:
 const QUICK_PLAN_PROMPT = `You are a clinical treatment plan assistant for Gini Advanced Care Hospital, India.
 From this consultation dictation, generate the treatment plan. Output ONLY valid JSON, no backticks.
 
-{"assessment_summary":"Dear [FirstName]: Write a warm, clear 3-4 line summary. Start with good news or reassurance. Mention key findings simply. Explain what medicines we are giving and why. End with encouragement. Use simple Hindi-English words patients understand. Example: "Dear Rajesh: Your sugar levels have improved nicely from 8.1 to 7.2 — good progress! Your kidney and heart tests are stable. We are adding a new medicine Dapagliflozin which helps both sugar and kidneys. Keep up the walking and diet changes, you are on the right track."","key_issues":["Issue 1"],"diet_lifestyle":[{"advice":"string","detail":"string","category":"Diet/Exercise/Critical/Sleep","helps":["dm2"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","route":"Oral","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","date":"YYYY-MM-DD or null","instructions":"Special instructions","tests_to_bring":["HbA1c"]},"self_monitoring":[{"title":"Blood Sugar","instructions":["Check fasting daily"],"targets":"Fasting 90-130","alert":"If <70: eat glucose"}],"future_plan":[{"condition":"If HbA1c not below 7","action":"Add GLP-1 RA"}]}
+{"assessment_summary":"Dear [FirstName]: patient-friendly 2-3 line summary of findings and plan","key_issues":["Issue 1"],"diet_lifestyle":[{"advice":"string","detail":"string","category":"Diet/Exercise/Critical/Sleep","helps":["dm2"]}],"medications_confirmed":[{"name":"BRAND NAME","composition":"Generic","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","route":"Oral","forDiagnosis":["dm2"],"isNew":false}],"medications_needs_clarification":[],"goals":[{"marker":"HbA1c","current":"8.5%","target":"<7%","timeline":"3 months"}],"follow_up":{"duration":"6 weeks","tests_to_bring":["HbA1c"]},"self_monitoring":[{"title":"Blood Sugar","instructions":["Check fasting daily"],"targets":"Fasting 90-130","alert":"If <70: eat glucose"}],"future_plan":[{"condition":"If HbA1c not below 7","action":"Add GLP-1 RA"}]}
 
 RULES:
 - MEDICINE NAMES: Use EXACT Gini pharmacy brands: ${GINI_BRANDS}
@@ -296,12 +256,7 @@ RULES:
 - goals: 2-4 items with current values from labs/vitals
 - self_monitoring: 2-4 OBJECTS grouped by what to monitor
 - future_plan: OBJECTS with {condition, action}. "If X → Y" format
-- follow_up: MUST include ALL of these fields:
-  * duration: "6 weeks" etc
-  * date: Extract the EXACT next appointment date as YYYY-MM-DD. Look for "Next follow up is scheduled on", "FOLLOW UP WITH", or any specific date. Convert "28/03/2026" to "2026-03-28". If no specific date, set to null.
-  * instructions: Any special instructions like "fasting sample", "omit medication for 24hrs". If none, set to null.
-  * tests_to_bring: Array of test names to bring
-- If history information is present (family history, past medical/surgical, personal habits, COVID/vaccination), extract into mo.history object with keys: family, past_medical_surgical, personal, covid, vaccination. Include even if text says "NIL"`;
+- follow_up: include duration and tests_to_bring`;
 
 const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 {"bp_sys":"number or null","bp_dia":"number or null","pulse":"number or null","temp":"number or null","spo2":"number or null","weight":"number or null","height":"number or null","waist":"number or null","body_fat":"number or null","muscle_mass":"number or null"}
@@ -310,7 +265,7 @@ const VITALS_VOICE_PROMPT = `Extract vitals. ONLY valid JSON, no backticks.
 // ============ API ============
 async function callClaude(prompt, content) {
   try {
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 8000, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
     });
@@ -351,7 +306,7 @@ async function callClaude(prompt, content) {
 // Fast version using Haiku for Quick mode (3-5x faster)
 async function callClaudeFast(prompt, content, maxTokens = 4000) {
   try {
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: maxTokens, messages: [{ role: "user", content: `${prompt}\n\nINPUT:\n${content}` }] })
     });
@@ -414,7 +369,7 @@ async function extractLab(base64, mediaType) {
     const block = mediaType==="application/pdf"
       ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:base64} }
       : { type:"image", source:{type:"base64",media_type:mediaType,data:base64} };
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:LAB_PROMPT}]}]})
     });
@@ -439,7 +394,7 @@ async function extractImaging(base64, mediaType) {
     const block = mediaType==="application/pdf"
       ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:base64} }
       : { type:"image", source:{type:"base64",media_type:mediaType,data:base64} };
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:IMAGING_PROMPT}]}]})
     });
@@ -462,7 +417,7 @@ async function extractImaging(base64, mediaType) {
 async function aiChat(messages, patientContext) {
   try {
     const systemPrompt = AI_CHAT_SYSTEM + (patientContext ? `\n\nPATIENT DATA:\n${patientContext}` : "\n\nNo patient loaded.");
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,system:systemPrompt,messages})
     });
@@ -488,7 +443,7 @@ Do NOT add, remove, or rearrange content. Only fix spelling of medical terms.`;
 async function cleanupTranscript(text) {
   if (!text || text.length < 10) return text;
   try {
-    const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, messages: [{ role: "user", content: `${CLEANUP_PROMPT}\n\nTEXT:\n${text}` }] })
@@ -844,9 +799,6 @@ export default function GiniScribe() {
   const [conTranscript, setConTranscript] = useState("");
   const [moData, setMoData] = useState(null);
   const [moBrief, setMoBrief] = useState(null);
-  const [aiBrief, setAiBrief] = useState(null);
-  const [aiBriefLoading, setAiBriefLoading] = useState(false);
-  const [briefMode, setBriefMode] = useState("narrative");
   const [moBriefLoading, setMoBriefLoading] = useState(false);
   const [conData, setConData] = useState(null);
   const [planHidden, setPlanHidden] = useState(new Set());
@@ -927,18 +879,10 @@ export default function GiniScribe() {
   const [historyList, setHistoryList] = useState([]);
   const [historySaving, setHistorySaving] = useState(false);
   const [rxText, setRxText] = useState("");
-  const [rxFile, setRxFile] = useState(null);
-  const [rxFileExtracting, setRxFileExtracting] = useState(false);
   const [rxExtracting, setRxExtracting] = useState(false);
   const [rxExtracted, setRxExtracted] = useState(false);
   const [reports, setReports] = useState([]); // {type, file, base64, mediaType, extracted, extracting}
-  const [hxMode, setHxMode] = useState("rx"); // "rx" | "report" | "manual" | "bulk"
-  const [bulkText, setBulkText] = useState("");
-  const [bulkParsing, setBulkParsing] = useState(false);
-  const [bulkVisits, setBulkVisits] = useState([]);
-  const [bulkSaving, setBulkSaving] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState("");
-  const [bulkSaved, setBulkSaved] = useState(0);
+  const [hxMode, setHxMode] = useState("rx"); // "rx" | "report" | "manual"
   // Outcomes data
   const [outcomesData, setOutcomesData] = useState(null);
   const [outcomesLoading, setOutcomesLoading] = useState(false);
@@ -966,6 +910,175 @@ export default function GiniScribe() {
   const [loginLoading, setLoginLoading] = useState(false);
   // Auto-save draft
   const [draftSaved, setDraftSaved] = useState("");
+
+  // ═══════════ VISIT WORKFLOW (v7.20) ═══════════
+  const [visitActive, setVisitActive] = useState(false); // is a visit in progress?
+  const [visitId, setVisitId] = useState(null); // local visit id
+  const [appointments, setAppointments] = useState([]); // [{id,dt,tm,ty,sp,doc,st,notes}]
+  const [showBooking, setShowBooking] = useState(false);
+  const [bookForm, setBookForm] = useState({ dt:"", tm:"", ty:"OPD", sp:"", doc:"", notes:"" });
+  const [editApptId, setEditApptId] = useState(null);
+  // Intake
+  const [complaints, setComplaints] = useState([]);
+  const [complaintText, setComplaintText] = useState("");
+  // Exam
+  const [examSpecialty, setExamSpecialty] = useState("General");
+  const [examData, setExamData] = useState({}); // {sectionId_v: [findings], sectionId_n: true(NAD)}
+  const [examOpen, setExamOpen] = useState(null); // which section is expanded
+  const [examNotes, setExamNotes] = useState("");
+  // Assess
+  const [assessDx, setAssessDx] = useState([]); // selected diagnoses
+  const [assessLabs, setAssessLabs] = useState([]); // ordered labs
+  const [assessNotes, setAssessNotes] = useState("");
+  const [shadowAI, setShadowAI] = useState(false);
+
+  // Exam definitions
+  const EXAM_SECTIONS = {
+    General: [
+      { id:"gen",l:"General",ic:"👤",o:["Well-built","Obese","Thin","Pale","Icteric","Cyanosed","Clubbing","Lymphadenopathy","Edema"] },
+      { id:"skin",l:"Skin",ic:"🖐️",o:["Normal","Acanthosis Nigricans","Shin Spots","Dry","Xanthoma","Candidiasis","Skin Tags"] },
+      { id:"eyes",l:"Eyes",ic:"👁️",o:["Normal","Pallor","Xanthelasma","Icterus","Fundus Normal","DR Background","DR Proliferative"] },
+      { id:"neck",l:"Neck",ic:"🦋",o:["Normal","Goitre Gr1","Goitre Gr2","Goitre Gr3","Acanthosis","Skin Tags","Thyroid Nodule"] },
+      { id:"cvs",l:"CVS",ic:"💓",o:["S1S2 Normal","Murmur","Irregular Rhythm","Raised JVP","Displaced Apex"] },
+      { id:"resp",l:"Respiratory",ic:"🌬️",o:["BAEL","Wheeze","Crepitations","Rhonchi","Reduced Air Entry","Pleural Effusion"] },
+      { id:"abd",l:"Abdomen",ic:"🫃",o:["Soft NT","Striae","Hepatomegaly","Splenomegaly","Ascites","Tenderness"] },
+      { id:"cns",l:"CNS",ic:"🧠",o:["Alert Oriented","Confused","Focal Deficit","DTR Normal","DTR Reduced","DTR Absent"] },
+      { id:"limb",l:"Lower Limb",ic:"🦵",o:["Normal","Edema Pitting","Shin Spots","Hair Loss","Varicose Veins","DVT Signs"] },
+      { id:"foot",l:"Diabetic Foot",ic:"🦶",o:["Normal","Dry","Calluses","Fissures","Ulcer Active","Ulcer Healed","Charcot","Monofilament Reduced","Vibration Reduced"] },
+    ],
+    Ortho: [
+      { id:"knee",l:"Knee",ic:"🦵",o:["Normal ROM","Restricted","Crepitus","Effusion","Varus","Valgus","Lachman+","McMurray+","Drawer+"] },
+      { id:"hip",l:"Hip",ic:"🦴",o:["Normal ROM","Restricted IR","Restricted ER","Trendelenburg+","FABER+"] },
+      { id:"shoulder",l:"Shoulder",ic:"💪",o:["Normal ROM","Restricted Abduction","Impingement+","Neer+","Hawkins+","Drop Arm+"] },
+      { id:"spine",l:"Spine",ic:"🏋️",o:["Normal","Kyphosis","Scoliosis","Tenderness","SLR+","SLRT+","Muscle Spasm"] },
+      { id:"wrist",l:"Wrist/Hand",ic:"✋",o:["Normal","Tinel+","Phalen+","Deformity","Swelling","Trigger Finger"] },
+    ],
+    Pulmo: [
+      { id:"ausc",l:"Auscultation",ic:"🫁",o:["Clear Bilateral","Wheeze","Fine Crepts","Coarse Crepts","Rhonchi","Stridor","Reduced BS"] },
+      { id:"pattern",l:"Breathing",ic:"🌬️",o:["Normal","Tachypnea","Bradypnea","Kussmaul","Cheyne-Stokes","Orthopnea"] },
+      { id:"chest",l:"Chest",ic:"🫁",o:["Normal","Barrel Chest","Pigeon Chest","Asymmetric","Intercostal Recession"] },
+      { id:"perc",l:"Percussion",ic:"🔔",o:["Resonant","Dull","Stony Dull","Hyper-resonant"] },
+    ],
+    Cardio: [
+      { id:"pulse",l:"Pulse",ic:"💓",o:["Regular","Irregularly Irregular","Regularly Irregular","Bounding","Thready","Radio-femoral Delay"] },
+      { id:"jvp",l:"JVP",ic:"🔺",o:["Normal","Raised","Not Visible","Kussmaul Sign+"] },
+      { id:"prec",l:"Precordium",ic:"❤️",o:["Apex Normal","Apex Displaced","Thrill","Heave","S1S2 Normal","S3 Gallop","S4 Gallop","Murmur Systolic","Murmur Diastolic"] },
+      { id:"periph",l:"Peripheral",ic:"🦵",o:["Normal","Pedal Edema","Sacral Edema","Calf Tenderness","Varicose Veins"] },
+    ]
+  };
+
+  const COMPLAINT_CHIPS = ["Routine follow-up","Increased thirst","Frequent urination","Weight gain","Weight loss",
+    "Fatigue","Blurred vision","Tingling/numbness","Foot pain","Wound not healing","Hair loss",
+    "Palpitations","Dizziness","Headache","Chest pain","Breathlessness","Joint pain","Back pain","Knee pain",
+    "Swelling feet","Nausea","Abdominal pain","Fever","Cough","Sleep issues"];
+
+  const CONDITION_CHIPS = [
+    { id:"dm2",l:"Type 2 DM",cl:"#dc2626" },{ id:"dm1",l:"Type 1 DM",cl:"#dc2626" },
+    { id:"htn",l:"Hypertension",cl:"#7c3aed" },{ id:"thyroid",l:"Hypothyroid",cl:"#6366f1" },
+    { id:"hyperthyroid",l:"Hyperthyroid",cl:"#6366f1" },{ id:"dyslip",l:"Dyslipidemia",cl:"#f59e0b" },
+    { id:"ckd",l:"CKD",cl:"#0d9488" },{ id:"obesity",l:"Obesity",cl:"#059669" },
+    { id:"pcos",l:"PCOS",cl:"#e11d48" },{ id:"cad",l:"CAD",cl:"#ef4444" },
+    { id:"osteo",l:"Osteoporosis",cl:"#78716c" },{ id:"nafld",l:"NAFLD/MAFLD",cl:"#a16207" },
+    { id:"vitd",l:"Vit D Deficiency",cl:"#ca8a04" },{ id:"b12",l:"B12 Deficiency",cl:"#0ea5e9" },
+    { id:"gout",l:"Gout",cl:"#be123c" },{ id:"osa",l:"OSA",cl:"#475569" },
+    { id:"neuropathy",l:"DM Neuropathy",cl:"#9333ea" },{ id:"retinopathy",l:"DM Retinopathy",cl:"#be185d" },
+    { id:"nephropathy",l:"DM Nephropathy",cl:"#0f766e" },{ id:"bph",l:"BPH",cl:"#64748b" },
+    { id:"other",l:"Other",cl:"#475569" },
+  ];
+
+  const LAB_ORDER_CHIPS = ["HbA1c","FBS","PPBS","RFT","UACR","Lipid Panel","Vit D","Vit B12","TSH","FT3/FT4","LFT","CBC",
+    "Urine R/M","K+","Na+","Ca+","Phosphate","PTH","Iron Studies","Fasting Insulin","C-Peptide","HOMA-IR",
+    "hs-CRP","NT-proBNP","PSA","Testosterone","AMH","LH/FSH","Cortisol","HbElectrophoresis",
+    "Fundus","ABI","VPT","Echo","ECG","DEXA","USG Abdomen","Doppler","NCS/EMG"];
+
+  const toggleChip = (arr, setFn, val) => {
+    setFn(arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]);
+  };
+
+  const toggleExamFinding = (sectionId, finding) => {
+    const key = sectionId + "_v";
+    const cur = examData[key] || [];
+    setExamData({...examData, [key]: cur.includes(finding) ? cur.filter(x=>x!==finding) : [...cur, finding] });
+  };
+
+  const toggleExamNAD = (sectionId) => {
+    const key = sectionId + "_n";
+    setExamData({...examData, [key]: !examData[key] });
+  };
+
+  const markAllNAD = () => {
+    const sections = EXAM_SECTIONS[examSpecialty] || [];
+    const updates = {};
+    sections.forEach(s => {
+      if (!(examData[s.id+"_v"]||[]).length) updates[s.id+"_n"] = true;
+    });
+    setExamData({...examData, ...updates});
+  };
+
+  // Build exam summary text for AI/save
+  const getExamSummary = () => {
+    const parts = [];
+    Object.entries(EXAM_SECTIONS).forEach(([sp, sections]) => {
+      sections.forEach(s => {
+        const vals = examData[s.id+"_v"] || [];
+        const nad = examData[s.id+"_n"];
+        if (vals.length > 0) parts.push(`${s.l}: ${vals.join(", ")}`);
+        else if (nad) parts.push(`${s.l}: NAD`);
+      });
+    });
+    if (examNotes) parts.push(`Notes: ${examNotes}`);
+    return parts.join(". ");
+  };
+
+  // Start a new visit
+  const startVisit = (apptId) => {
+    setVisitActive(true);
+    setVisitId(Date.now().toString());
+    setComplaints([]);
+    setComplaintText("");
+    setExamData({});
+    setExamNotes("");
+    setAssessDx([]);
+    setAssessLabs([]);
+    setAssessNotes("");
+    setShadowAI(false);
+    // If starting from appointment, mark it
+    if (apptId) {
+      setAppointments(prev => prev.map(a => a.id === apptId ? {...a, st:"in-progress"} : a));
+    }
+    setTab("intake");
+  };
+
+  const endVisit = () => {
+    setVisitActive(false);
+    setVisitId(null);
+    setTab("dashboard");
+  };
+
+  // Booking
+  const openBooking = (appt) => {
+    if (appt) {
+      setEditApptId(appt.id);
+      setBookForm({ dt:appt.dt||"", tm:appt.tm||"", ty:appt.ty||"OPD", sp:appt.sp||"", doc:appt.doc||"", notes:appt.notes||"" });
+    } else {
+      setEditApptId(null);
+      setBookForm({ dt:"", tm:"", ty:"OPD", sp:"", doc:"", notes:"" });
+    }
+    setShowBooking(true);
+  };
+
+  const saveBooking = () => {
+    if (editApptId) {
+      setAppointments(prev => prev.map(a => a.id === editApptId ? {...a, ...bookForm} : a));
+    } else {
+      setAppointments(prev => [...prev, { id: "apt_"+Date.now(), ...bookForm, st:"scheduled" }]);
+    }
+    setShowBooking(false);
+  };
+
+  const cancelAppt = (id) => {
+    setAppointments(prev => prev.filter(a => a.id !== id));
+  };
 
   // Auth helper: headers with token
   const authHeaders = (extra = {}) => ({
@@ -1120,11 +1233,7 @@ export default function GiniScribe() {
                   doctor: conName, mo: moName,
                   date: new Date().toISOString(),
                   diagnoses: moData?.diagnoses || [],
-                  medications: [...(conData.medications_confirmed || []), ...((patientFullData?.medications||[]).filter(m => {
-            if (!m.is_active) return false;
-            const _cn = new Set((conData.medications_confirmed||[]).map(x=>(x.name||"").toUpperCase().replace(/[^A-Z]/g,"")));
-            return !_cn.has((m.name||"").toUpperCase().replace(/[^A-Z]/g,""));
-          }).map(m => ({...m, _external:true, _action:extMedActions[(m.name||'').toUpperCase()]||'continue', _reason:extMedReasons[(m.name||'').toUpperCase()]||''})))],
+                  medications: conData.medications_confirmed || [],
                   diet_lifestyle: conData.diet_lifestyle || [],
                   investigations_ordered: conData.investigations_ordered || [],
                   follow_up: conData.follow_up || {},
@@ -1252,8 +1361,7 @@ export default function GiniScribe() {
     setDbPatientId(dbRecord.id);
     setNewReportsIncluded(false);
     setNewReportsExpanded(false);
-    setMoBrief(null); setAiBrief(null);
-    setPatientFullData(null);
+    setMoBrief(null);
     setCrExpanded(false); setCrText(""); setCrCondition(""); setCrTags([]); setCrSaved(null); setCrAudioBlob(null); setCrAudioUrl(null);
     setRxFbAgreement(null); setRxFbText(""); setRxFbCorrect(""); setRxFbReason(""); setRxFbTags([]); setRxFbSeverity(null); setRxFbSaved(null);
     // Load full patient record
@@ -1383,40 +1491,6 @@ export default function GiniScribe() {
     if(error) setErrors(p=>({...p,lab:error}));
     else {
       setLabData(data);
-      // Inject extracted labs into moData.investigations + save to DB
-      if (data?.panels?.length) {
-        const newInvs = [];
-        for (const panel of data.panels) {
-          for (const t of panel.tests) {
-            newInvs.push({
-              test: t.test_name, value: t.result_text || t.result,
-              unit: t.unit || "", flag: t.flag || null,
-              critical: t.flag === "CRITICAL", ref: t.ref_range || ""
-            });
-          }
-        }
-        if (newInvs.length) {
-          setMoData(prev => ({
-            ...prev,
-            investigations: [...(prev?.investigations || []), ...newInvs]
-          }));
-        }
-        if (dbPatientId && API_URL) {
-          const labDate = data.report_date || new Date().toISOString().split("T")[0];
-          for (const panel of data.panels) {
-            for (const t of panel.tests) {
-              fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
-                method: "POST", headers: authHeaders(),
-                body: JSON.stringify({
-                  test_name: t.test_name, result: String(t.result_text || t.result),
-                  unit: t.unit || "", flag: t.flag || "N", ref_range: t.ref_range || "",
-                  test_date: labDate
-                })
-              }).catch(() => {});
-            }
-          }
-        }
-      }
       if(data?.patient_on_report?.name && patient.name) {
         const rn=data.patient_on_report.name.toLowerCase(), pn=patient.name.toLowerCase();
         if(rn&&pn&&!rn.includes(pn.split(" ")[0])&&!pn.includes(rn.split(" ")[0]))
@@ -1707,16 +1781,9 @@ export default function GiniScribe() {
     if (moData?.complications?.length) ctx += `Complications: ${moData.complications.map(c=>`${c.name}: ${c.status} ${c.detail||""}`).join(", ")}\n`;
     if (patientFullData?.lab_results?.length) {
       const recent = patientFullData.lab_results.slice(0,15).map(l=>`${l.test_name}: ${l.result} ${l.unit||""} (${l.test_date||""})`);
-      // Include extracted data from companion-uploaded documents
-      const companionLabs = [];
-      (patientFullData.documents||[]).forEach(doc => {
-        const ext = doc.extracted_data ? (typeof doc.extracted_data==="string" ? (()=>{try{return JSON.parse(doc.extracted_data)}catch(e){return null}})() : doc.extracted_data) : null;
-        if (ext?.labs) ext.labs.forEach(l => companionLabs.push(`${l.test_name}: ${l.result} ${l.unit||""} (from ${doc.source||"external"}, ${doc.doc_date||""})`));
-      });
-      if (companionLabs.length > 0) recent.push("--- From uploaded documents ---", ...companionLabs.slice(0,10));
       ctx += `Lab History: ${recent.join(", ")}\n`;
     }
-    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${(conData.investigations_ordered||[]).map(t=>typeof t==="object"?(t.test||t.name||""):t).join(", ")}\n`;
+    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${conData.investigations_ordered.join(", ")}\n`;
     if (conData?.follow_up) ctx += `Follow-up: ${conData.follow_up.duration||""} ${conData.follow_up.date||""}\n`;
     if (conData?.diet_lifestyle?.length) ctx += `Lifestyle: ${conData.diet_lifestyle.map(l=>typeof l==="string"?l:l.advice).join(", ")}\n`;
     if (conData?.goals?.length) ctx += `Goals: ${conData.goals.map(g=>`${g.marker}: ${g.current} → ${g.target}`).join(", ")}\n`;
@@ -1739,7 +1806,7 @@ Return ONLY valid JSON array. No markdown, no explanation outside the JSON.
 Example: [{"type":"warning","category":"Medication","text":"No statin prescribed","detail":"ADA recommends statin therapy for all DM patients >40y with any ASCVD risk factor","priority":"high"}]`;
 
     try {
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,system:reviewPrompt,messages:[{role:"user",content:ctx}]})
       });
@@ -1930,7 +1997,7 @@ You have access to structured patient data from the hospital database. Analyze a
 Be specific with numbers, names, and trends. Use tables for comparisons. Keep answers concise.
 If the data doesn't contain enough info to answer accurately, say so.
 Format: Use markdown. Bold key numbers. Use tables where helpful.`;
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,system:prompt,messages:[{role:"user",content:`HOSPITAL DATA (${data.patient_count} patients):\n${dataStr}\n\nQUERY: ${reportQuery}`}]})
       });
@@ -1940,8 +2007,9 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     setReportQueryLoading(false);
   };
 
-  const processMO = async () => {
-    if(!moTranscript) return;
+  const processMO = async (overrideTranscript) => {
+    const txt = overrideTranscript || moTranscript;
+    if(!txt) return;
     setLoading(p=>({...p,mo:true})); clearErr("mo");
     let extra="";
     if(labData?.panels) {
@@ -1954,7 +2022,7 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     if (extractedImaging.length > 0) {
       extra += `\n\nIMAGING REPORTS:\n${extractedImaging.map(f=>`${f.data.report_type}: ${f.data.impression || ""} ${(f.data.findings||[]).map(fi=>`${fi.parameter}=${fi.value}${fi.unit||""} (${fi.interpretation})`).join(", ")}`).join("\n")}`;
     }
-    const {data,error} = await callClaude(MO_PROMPT, moTranscript+extra);
+    const {data,error} = await callClaude(MO_PROMPT, txt+extra);
     if(error) setErrors(p=>({...p,mo:error}));
     else if(data) setMoData(fixMoMedicines(data));
     else setErrors(p=>({...p,mo:"No data returned"}));
@@ -1972,9 +2040,9 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     });
     const isFollowUp = sortedCons.length > 0;
     const lastVisit = sortedCons[0];
-    const prevVisit = sortedCons[1];
+    const prevVisit = sortedCons[1]; // visit before last
 
-    // Current diagnoses (deduplicated)
+    // Current diagnoses
     const diags = (pfd.diagnoses||[]);
     const uniqueDiags = [];
     const seen = new Set();
@@ -1985,67 +2053,43 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       if (!lastVisit) return true;
       return m.consultation_id === lastVisit.id;
     });
-    const rawMeds = meds.length > 0 ? meds : (pfd.medications||[]).slice(0, 15);
-    // Deduplicate by normalized name (strip numbers, spaces)
-    const medSeen = new Set();
-    const activeMeds = [];
-    for (const m of rawMeds) {
-      const key = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-      if (!medSeen.has(key) && key.length > 1) { medSeen.add(key); activeMeds.push(m); }
-    }
+    // If no meds from last visit, get all active meds
+    const activeMeds = meds.length > 0 ? meds : (pfd.medications||[]).slice(0, 15);
 
     // Vitals comparison
     const sortedVitals = (pfd.vitals||[]).sort((a,b) => new Date(b.recorded_at) - new Date(a.recorded_at));
     const currentVitals = vitals.bp_sys ? vitals : sortedVitals[0];
     const prevVitals = sortedVitals.length > 1 ? sortedVitals[1] : null;
 
-    // ── LONGITUDINAL LAB TRENDS (all history, not just last 2) ──
+    // Lab trends — group by test, compare latest to previous
     const labsByTest = {};
     (pfd.lab_results||[]).forEach(l => {
       if (!labsByTest[l.test_name]) labsByTest[l.test_name] = [];
       labsByTest[l.test_name].push(l);
     });
     const labTrends = [];
-    const keyTests = ["HbA1c","Fasting Glucose","FBS","FBG","FPG","PPBS","Post Prandial Glucose","Creatinine","eGFR","EGFR","Total Cholesterol","LDL","HDL","Non-HDL","Non HDL","Triglycerides","TSH","T3","T4","Free T3","Free T4","SGPT","ALT","SGOT","AST","Hemoglobin","Hb","UACR","Microalbumin","Potassium","Sodium","Uric Acid"];
+    const keyTests = ["HbA1c","Fasting Glucose","FBS","PPBS","Post Prandial Glucose","Creatinine","eGFR","EGFR","Total Cholesterol","LDL","HDL","Triglycerides","TSH","SGPT","ALT","SGOT","AST","Hemoglobin","Hb","UACR","Microalbumin"];
     Object.entries(labsByTest).forEach(([name, results]) => {
       const sorted = results.sort((a,b) => new Date(b.test_date) - new Date(a.test_date));
       const latest = sorted[0];
       const prev = sorted[1];
-      const oldest = sorted[sorted.length - 1];
       if (!latest?.result) return;
       const isKey = keyTests.some(k => name.toLowerCase().includes(k.toLowerCase()));
-      if (!isKey && sorted.length < 2) return;
+      if (!isKey && sorted.length < 2) return; // skip non-key single results
       const latestNum = parseFloat(latest.result);
       const prevNum = prev ? parseFloat(prev.result) : null;
-      const oldestNum = oldest ? parseFloat(oldest.result) : null;
-      // For some markers, HIGHER is better (invert the trend)
-      const higherIsBetter = ["Vitamin D","HDL","eGFR","EGFR","Hemoglobin","Hb","HB","Iron","Ferritin","HDL Cholesterol"].some(k => name.toLowerCase().includes(k.toLowerCase()));
       let trend = "stable";
       if (prevNum !== null && !isNaN(latestNum) && !isNaN(prevNum)) {
         const pctChange = ((latestNum - prevNum) / Math.abs(prevNum || 1)) * 100;
-        if (higherIsBetter) {
-          if (pctChange > 10) trend = "improving";
-          else if (pctChange < -10) trend = "worsening";
-        } else {
-          if (pctChange > 10) trend = "worsening";
-          else if (pctChange < -10) trend = "improving";
-        }
-      }
-      // Build full trajectory string
-      let trajectory = "";
-      if (sorted.length >= 2) {
-        trajectory = sorted.slice().reverse().map(r => {
-          const d = r.test_date ? new Date(r.test_date).toLocaleDateString("en-IN",{month:"short",year:"2-digit"}) : "";
-          return `${r.result}${r.unit||""}(${d})`;
-        }).join(" → ");
+        if (pctChange > 10) trend = "worsening";
+        else if (pctChange < -10) trend = "improving";
       }
       if (isKey || trend !== "stable") {
         labTrends.push({
           name, latest: latest.result, latestUnit: latest.unit||"",
           latestDate: latest.test_date, latestFlag: latest.flag,
           previous: prev?.result||null, prevDate: prev?.test_date||null,
-          oldest: oldest?.result||null, oldestDate: oldest?.test_date||null,
-          trend, isKey, trajectory, dataPoints: sorted.length
+          trend, isKey
         });
       }
     });
@@ -2057,145 +2101,38 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     // Days since last visit
     const daysSince = lastVisit ? Math.round((Date.now() - new Date(lastVisit.visit_date)) / 86400000) : null;
 
-    // ── VISIT FREQUENCY ANALYSIS ──
-    const totalVisits = sortedCons.length;
-    const firstVisitDate = sortedCons.length > 0 ? sortedCons[sortedCons.length - 1].visit_date : null;
-    const monthsUnderCare = firstVisitDate ? Math.max(1, Math.round((Date.now() - new Date(firstVisitDate)) / (30*86400000))) : 0;
-    const avgVisitGap = totalVisits > 1 ? Math.round((Date.now() - new Date(firstVisitDate)) / (totalVisits * 86400000)) : null;
-
-    // ── MEDICATION CHANGES ACROSS VISITS ──
-    const medChanges = [];
-    if (sortedCons.length >= 2) {
-      const currentMedNames = new Set(activeMeds.map(m => m.name?.toUpperCase()));
-      const prevMeds = (pfd.medications||[]).filter(m => prevVisit && m.consultation_id === prevVisit.id);
-      const prevMedNames = new Set(prevMeds.map(m => m.name?.toUpperCase()));
-      currentMedNames.forEach(name => { if (!prevMedNames.has(name)) medChanges.push({ type: "added", name }); });
-      prevMedNames.forEach(name => { if (!currentMedNames.has(name)) medChanges.push({ type: "stopped", name }); });
-    }
-
-    // ── WEIGHT TRAJECTORY ──
-    const weightHistory = sortedVitals.filter(v => v.weight).slice(0, 10).reverse();
-    let weightTrend = "";
-    if (weightHistory.length >= 2) {
-      const first = parseFloat(weightHistory[0].weight);
-      const last = parseFloat(weightHistory[weightHistory.length - 1].weight);
-      const diff = (last - first).toFixed(1);
-      weightTrend = `${first}→${last}kg (${diff > 0 ? "+" : ""}${diff}kg over ${weightHistory.length} visits)`;
-    }
-
-    // ── BP TRAJECTORY ──
-    const bpHistory = sortedVitals.filter(v => v.bp_sys).slice(0, 10).reverse();
-    let bpTrend = "";
-    if (bpHistory.length >= 2) {
-      bpTrend = bpHistory.map(v => `${v.bp_sys}/${v.bp_dia}`).join(" → ");
-    }
-
-    // ── GOALS PROGRESS ──
-    const goals = (pfd.goals||[]);
-    const uniqueGoals = [];
-    const seenGoals = new Set();
-    goals.forEach(g => {
-      if (!seenGoals.has(g.marker)) { seenGoals.add(g.marker); uniqueGoals.push(g); }
-    });
-
-    // ── DOCTORS SEEN ──
-    const doctorsSeen = [...new Set(sortedCons.map(c => c.con_name).filter(Boolean))];
-
-    // ═══ BUILD COMPREHENSIVE BRIEF ═══
+    // Build brief text for reading out
     let briefText = "";
     if (isFollowUp) {
-      briefText += `══ FOLLOW-UP PATIENT ══\n`;
-      briefText += `${patient.name}, ${patient.age}Y/${patient.sex}`;
-      if (patient.fileNo) briefText += ` | File #${patient.fileNo}`;
-      briefText += `\n`;
-      briefText += `Under care: ${monthsUnderCare} months (${totalVisits} visits, avg every ${avgVisitGap || "—"} days)\n`;
-      if (doctorsSeen.length) briefText += `Seen by: ${doctorsSeen.join(", ")}\n`;
-      briefText += `\n`;
-
-      briefText += `── CONDITIONS ──\n`;
-      briefText += `${uniqueDiags.map(d => `• ${d.label} — ${d.status}`).join("\n") || "None recorded"}\n\n`;
-
-      briefText += `── LAST VISIT ──\n`;
-      briefText += `${lastVisit.visit_date ? new Date(lastVisit.visit_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "Unknown"} — ${daysSince} days ago`;
-      if (lastVisit.con_name) briefText += ` — ${lastVisit.con_name}`;
+      briefText += `FOLLOW-UP PATIENT — ${patient.name}, ${patient.age}Y/${patient.sex}`;
+      if (patient.fileNo) briefText += `, File #${patient.fileNo}`;
       briefText += `\n\n`;
+      briefText += `KNOWN CONDITIONS: ${uniqueDiags.map(d=>`${d.label} (${d.status})`).join(", ") || "None recorded"}\n\n`;
+      briefText += `LAST VISIT: ${lastVisit.visit_date ? new Date(lastVisit.visit_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "Unknown"} — ${daysSince} days ago`;
+      if (lastVisit.con_name) briefText += ` — seen by ${lastVisit.con_name}`;
+      briefText += `\n\n`;
+      briefText += `CURRENT MEDICATIONS:\n${activeMeds.length ? activeMeds.map(m=>`  • ${m.name} ${m.dose||""} ${m.timing||m.frequency||""}`).join("\n") : "  None recorded"}\n\n`;
 
-      briefText += `── CURRENT MEDICATIONS (${activeMeds.length}) ──\n`;
-      briefText += `${activeMeds.length ? activeMeds.map(m => `• ${m.name} ${m.dose||""} ${m.frequency||""} ${m.timing||""}`).join("\n") : "None recorded"}\n`;
-      if (medChanges.length) {
-        briefText += `Changes since prev visit: ${medChanges.map(c => `${c.type === "added" ? "➕" : "➖"} ${c.name}`).join(", ")}\n`;
-      }
-      briefText += `\n`;
-
-      // Lab trends section with full trajectories
+      // What's changed
       const improving = labTrends.filter(l => l.trend === "improving");
       const worsening = labTrends.filter(l => l.trend === "worsening");
-      const stable = labTrends.filter(l => l.trend === "stable" && l.isKey);
+      if (improving.length) briefText += `📈 IMPROVING: ${improving.map(l=>`${l.name} ${l.previous}→${l.latest}${l.latestUnit}`).join(", ")}\n`;
+      if (worsening.length) briefText += `📉 WORSENING: ${worsening.map(l=>`${l.name} ${l.previous}→${l.latest}${l.latestUnit}`).join(", ")}\n`;
+      if (newLabs.length) briefText += `\n🔬 NEW LABS (${newLabs.length}): ${[...new Set(newLabs.map(l=>l.test_name))].join(", ")}\n`;
 
-      if (labTrends.length > 0) {
-        briefText += `── LAB TRENDS ──\n`;
-        if (worsening.length) {
-          briefText += `⚠️ WORSENING:\n`;
-          worsening.forEach(l => {
-            briefText += `  • ${l.name}: ${l.trajectory || `${l.previous}→${l.latest}${l.latestUnit}`}`;
-            if (l.latestFlag && l.latestFlag !== "N") briefText += ` [${l.latestFlag}]`;
-            briefText += `\n`;
-          });
-        }
-        if (improving.length) {
-          briefText += `✅ IMPROVING:\n`;
-          improving.forEach(l => {
-            briefText += `  • ${l.name}: ${l.trajectory || `${l.previous}→${l.latest}${l.latestUnit}`}\n`;
-          });
-        }
-        if (stable.length) {
-          briefText += `➡️ STABLE: ${stable.map(l => `${l.name}: ${l.latest}${l.latestUnit}`).join(", ")}\n`;
-        }
-        briefText += `\n`;
-      }
-
-      if (newLabs.length) {
-        briefText += `🔬 NEW LABS SINCE LAST VISIT (${newLabs.length}): ${[...new Set(newLabs.map(l=>l.test_name))].join(", ")}\n\n`;
-      }
-
-      // Vitals trends
-      briefText += `── VITALS ──\n`;
       if (currentVitals?.bp_sys) {
-        briefText += `Today: BP ${currentVitals.bp_sys}/${currentVitals.bp_dia}`;
-        if (currentVitals.weight) briefText += `, Wt ${currentVitals.weight}kg`;
+        briefText += `\nTODAY'S VITALS: BP ${currentVitals.bp_sys}/${currentVitals.bp_dia}`;
+        if (prevVitals?.bp_sys) briefText += ` (prev: ${prevVitals.bp_sys}/${prevVitals.bp_dia})`;
+        if (currentVitals.weight) {
+          briefText += `, Wt ${currentVitals.weight}kg`;
+          if (prevVitals?.weight) { const d = (parseFloat(currentVitals.weight)-parseFloat(prevVitals.weight)).toFixed(1); if(d!=0) briefText += ` (${d>0?"+":""}${d}kg)`; }
+        }
         if (currentVitals.bmi) briefText += `, BMI ${currentVitals.bmi}`;
-        if (currentVitals.waist) briefText += `, WC ${currentVitals.waist}cm`;
         briefText += `\n`;
       }
-      if (weightTrend) briefText += `Weight trend: ${weightTrend}\n`;
-      if (bpTrend) briefText += `BP trend: ${bpTrend}\n`;
-      briefText += `\n`;
-
-      // Goals
-      if (uniqueGoals.length > 0) {
-        briefText += `── GOALS ──\n`;
-        uniqueGoals.forEach(g => {
-          // Find current lab value for this goal marker
-          const labMatch = labTrends.find(l => l.name.toLowerCase().includes(g.marker?.toLowerCase() || ""));
-          const currentVal = labMatch ? labMatch.latest + labMatch.latestUnit : g.current_value;
-          briefText += `• ${g.marker}: ${currentVal} → Target: ${g.target_value} (${g.timeline || "ongoing"})\n`;
-        });
-        briefText += `\n`;
-      }
-
-      // Key attention items
-      briefText += `── KEY ATTENTION ──\n`;
-      if (worsening.length) briefText += `⚠️ ${worsening.length} lab(s) worsening — review needed\n`;
-      if (daysSince > 120) briefText += `⚠️ ${daysSince} days since last visit — check adherence\n`;
-      if (!newLabs.length && daysSince > 60) briefText += `⚠️ No new labs — consider ordering\n`;
-      const abnormalLabs = labTrends.filter(l => l.latestFlag && l.latestFlag !== "N" && l.latestFlag !== "normal");
-      if (abnormalLabs.length) briefText += `🔴 Abnormal: ${abnormalLabs.map(l => `${l.name} ${l.latest}${l.latestUnit} [${l.latestFlag}]`).join(", ")}\n`;
-      if (!worsening.length && !abnormalLabs.length && daysSince <= 120) briefText += `✅ Patient appears stable\n`;
-
     } else {
-      briefText += `══ NEW PATIENT ══\n`;
-      briefText += `${patient.name}, ${patient.age}Y/${patient.sex}`;
-      if (patient.fileNo) briefText += ` | File #${patient.fileNo}`;
+      briefText += `NEW PATIENT — ${patient.name}, ${patient.age}Y/${patient.sex}`;
+      if (patient.fileNo) briefText += `, File #${patient.fileNo}`;
       if (patient.address) briefText += `\nAddress: ${patient.address}`;
       briefText += `\n\n`;
       if (moData) {
@@ -2213,215 +2150,8 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       diagnoses: uniqueDiags, medications: activeMeds,
       labTrends, newLabs, improving: labTrends.filter(l=>l.trend==="improving"),
       worsening: labTrends.filter(l=>l.trend==="worsening"),
-      currentVitals, prevVitals, lastVisit, totalVisits: sortedCons.length,
-      weightTrend, bpTrend, medChanges, uniqueGoals, doctorsSeen, monthsUnderCare
+      currentVitals, prevVitals, lastVisit, totalVisits: sortedCons.length
     };
-
-    // ═══ Generate readable narrative ═══
-    let narrative = "";
-    const firstName = patient.name?.split(" ")[0] || "Patient";
-    if (isFollowUp) {
-      narrative += `Sir, ${patient.name}, ${patient.age} year old ${patient.sex?.toLowerCase()||"patient"}`;
-      narrative += `, has been under our care for ${monthsUnderCare > 12 ? Math.round(monthsUnderCare/12) + " years" : monthsUnderCare + " months"}`;
-      narrative += ` with ${totalVisits} visits so far. `;
-      if (daysSince !== null) narrative += daysSince === 0 ? "Seen today. " : `Last visit was ${daysSince} days ago${lastVisit?.con_name ? " with " + lastVisit.con_name : ""}. `;
-
-      const controlled = uniqueDiags.filter(d => d.status?.toLowerCase() === "controlled");
-      const uncontrolled = uniqueDiags.filter(d => d.status?.toLowerCase() === "uncontrolled");
-      narrative += "\n\nDiagnosis: " + uniqueDiags.map(d => d.label).join(", ") + ". ";
-      if (controlled.length) narrative += controlled.map(d => d.label).join(" and ") + (controlled.length === 1 ? " is" : " are") + " well controlled. ";
-      if (uncontrolled.length) narrative += uncontrolled.map(d => d.label).join(" and ") + (uncontrolled.length === 1 ? " remains" : " remain") + " uncontrolled. ";
-
-      narrative += `\n\nCurrently on ${activeMeds.length} medications: `;
-      narrative += activeMeds.map(m => `${m.name} ${m.dose||""} ${m.timing||m.frequency||""}`).join(", ") + ". ";
-      if (medChanges.length) {
-        const added = medChanges.filter(mc => mc.type === "added");
-        const stopped = medChanges.filter(mc => mc.type === "stopped");
-        if (added.length) narrative += "Since last visit, " + added.map(mc => mc.name).join(", ") + (added.length === 1 ? " was" : " were") + " added. ";
-        if (stopped.length) narrative += stopped.map(mc => mc.name).join(", ") + (stopped.length === 1 ? " was" : " were") + " stopped. ";
-      }
-
-      const improving = labTrends.filter(l => l.trend === "improving");
-      const worsening = labTrends.filter(l => l.trend === "worsening");
-      const stableKey = labTrends.filter(l => l.trend === "stable" && l.isKey);
-      const abnormal = labTrends.filter(l => l.latestFlag && l.latestFlag !== "N" && l.latestFlag !== "normal");
-
-      if (labTrends.length) {
-        narrative += "\n\nRegarding labs: ";
-        if (improving.length) {
-          narrative += "Good news — ";
-          improving.forEach((l, i) => { narrative += l.name + (l.trajectory ? " has improved: " + l.trajectory : " improved from " + l.previous + " to " + l.latest + l.latestUnit) + (i < improving.length - 1 ? "; " : ". "); });
-        }
-        if (worsening.length) {
-          narrative += "Concern — ";
-          worsening.forEach((l, i) => { narrative += l.name + (l.trajectory ? " has worsened: " + l.trajectory : " went from " + l.previous + " to " + l.latest + l.latestUnit) + (i < worsening.length - 1 ? "; " : ". "); });
-        }
-        if (stableKey.length) narrative += "Stable: " + stableKey.map(l => l.name + " " + l.latest + l.latestUnit).join(", ") + ". ";
-      }
-      if (newLabs.length) narrative += newLabs.length + " new lab results available since last visit. ";
-
-      narrative += "\n\nToday's vitals: ";
-      if (currentVitals?.bp_sys) {
-        narrative += "BP " + currentVitals.bp_sys + "/" + currentVitals.bp_dia;
-        if (prevVitals?.bp_sys) { const bpDiff = parseInt(currentVitals.bp_sys) - parseInt(prevVitals.bp_sys); if (Math.abs(bpDiff) >= 5) narrative += " (" + (bpDiff > 0 ? "up" : "down") + " from " + prevVitals.bp_sys + "/" + prevVitals.bp_dia + ")"; }
-      }
-      if (currentVitals?.weight) {
-        narrative += ", weight " + currentVitals.weight + "kg";
-        if (prevVitals?.weight) { const wd = (parseFloat(currentVitals.weight) - parseFloat(prevVitals.weight)).toFixed(1); if (Math.abs(wd) >= 0.5) narrative += " (" + (wd > 0 ? "gained" : "lost") + " " + Math.abs(wd) + "kg)"; }
-      }
-      if (currentVitals?.bmi) narrative += ", BMI " + currentVitals.bmi;
-      narrative += ". ";
-      if (weightTrend) narrative += "Overall weight trend: " + weightTrend + ". ";
-
-      if (uniqueGoals.length) {
-        narrative += "\n\nGoals: ";
-        uniqueGoals.forEach((g, i) => {
-          const lm = labTrends.find(l => l.name.toLowerCase().includes(g.marker?.toLowerCase()||""));
-          narrative += g.marker + " currently " + (lm ? lm.latest + lm.latestUnit : g.current_value) + ", target " + g.target_value;
-          if (g.timeline) narrative += " in " + g.timeline;
-          narrative += i < uniqueGoals.length - 1 ? "; " : ". ";
-        });
-      }
-
-      narrative += "\n\nKey points: ";
-      if (daysSince > 120) narrative += "Patient hasn't visited in " + daysSince + " days — adherence may need review. ";
-      if (worsening.length) narrative += worsening.length + " parameter" + (worsening.length > 1 ? "s" : "") + " worsening — may need treatment adjustment. ";
-      if (!worsening.length && improving.length) narrative += "Overall trajectory is positive with " + improving.length + " parameter" + (improving.length > 1 ? "s" : "") + " improving. ";
-      if (!worsening.length && !improving.length && !abnormal.length) narrative += "Patient appears stable on current management. ";
-    } else {
-      narrative += "Sir, this is a new patient. " + patient.name + ", " + patient.age + " year old " + (patient.sex?.toLowerCase()||"patient") + ". ";
-      if (moData?.chief_complaints?.length) narrative += "Presenting with " + moData.chief_complaints.join(", ") + ". ";
-      if (sa(moData,"diagnoses").length) narrative += "Working diagnosis: " + sa(moData,"diagnoses").map(d => d.label).join(", ") + ". ";
-      if (sa(moData,"previous_medications").length) narrative += "Currently taking: " + sa(moData,"previous_medications").map(m => m.name + " " + (m.dose||"")).join(", ") + ". ";
-      if (currentVitals?.bp_sys) narrative += "Vitals: BP " + currentVitals.bp_sys + "/" + currentVitals.bp_dia + ", weight " + (currentVitals.weight||"--") + "kg, BMI " + (currentVitals.bmi||"--") + ". ";
-    }
-
-    result.narrative = narrative;
-    return result;
-  };
-
-  const generateAIBrief = async () => {
-    const pfd = patientFullData;
-    if (!pfd) return;
-    setAiBriefLoading(true); setAiBrief(null);
-    try {
-      const sortedCons = (pfd.consultations||[]).sort((a,b) => new Date(a.visit_date) - new Date(b.visit_date));
-      const isFollowUp = sortedCons.length > 0;
-      const visitsSummary = sortedCons.map(con => {
-        const v = (pfd.vitals||[]).find(vt => vt.consultation_id === con.id);
-        const meds = (pfd.medications||[]).filter(m => m.consultation_id === con.id);
-        const labs = (pfd.lab_results||[]).filter(l => l.consultation_id === con.id);
-        const diags = (pfd.diagnoses||[]).filter(d => d.consultation_id === con.id);
-        return {
-          date: con.visit_date, doctor: con.con_name || con.mo_name,
-          vitals: v ? { bp: v.bp_sys ? v.bp_sys+"/"+v.bp_dia : null, weight: v.weight, bmi: v.bmi, waist: v.waist } : null,
-          meds: meds.slice(0,15).map(m => m.name+" "+(m.dose||"")+" "+(m.frequency||"")+" "+(m.timing||"")),
-          labs: labs.map(l => l.test_name+": "+l.result+(l.unit||"")+" ["+(l.flag||"N")+"]"),
-          diagnoses: diags.map(d => d.label+" ("+d.status+")")
-        };
-      });
-      const cv = vitals.bp_sys ? vitals : null;
-      const currentMO = moData ? {
-        complaints: moData.chief_complaints || [],
-        compliance: moData.compliance || "",
-        investigations: (moData.investigations||[]).map(i => i.test+": "+i.value+(i.unit||"")),
-        diagnoses: (moData.diagnoses||[]).map(d => d.label+" ("+d.status+")")
-      } : null;
-      const dataPayload = JSON.stringify({
-        patient: { name: patient.name, age: patient.age, sex: patient.sex },
-        isFollowUp, totalVisits: sortedCons.length,
-        firstVisit: sortedCons[0]?.visit_date,
-        visits: visitsSummary.slice(-15),
-        currentVitals: cv ? { bp: cv.bp_sys+"/"+cv.bp_dia, weight: cv.weight, bmi: cv.bmi, pulse: cv.pulse } : null,
-        currentMO, todayDate: new Date().toISOString().split("T")[0]
-      });
-      const systemPrompt = isFollowUp ? `You are an expert clinical briefing AI at Gini Advanced Care Hospital. Generate a CLINICAL BRIEF for the consultant.
-
-Format EXACTLY like this — keep it concise and clinical:
-
-**30-SECOND OVERVIEW**
-[Age]-year-old [sex]. Known case: [list diagnoses with durations]. Under care [X months/years], [N] visits.
-[1-2 sentences: what's controlled, what's not, current status snapshot]
-
-**CURRENT STATUS**
-Group by clinical domain. Use this exact format:
-
-Diabetes (or relevant condition):
-- HbA1c [trend with arrows]: X% -> Y%
-- Fasting glucose: Xmg/dL
-- Renal: Cr X, eGFR Y
-
-Lipids:
-- LDL [trend]: X -> Y mg/dL
-- TG: X mg/dL
-
-Thyroid (if applicable):
-- TSH [trend]: X -> Y
-- T3/T4 values
-
-Vitals:
-- BP: X/Y (trend if available)
-- Weight: Xkg, BMI Y
-
-**CURRENT MEDICATIONS**
-List medications grouped by purpose. Keep brief: name + dose + timing only.
-
-**SINCE LAST VISIT** (include visits to other hospitals/doctors)
-**EXTERNAL CONSULTATIONS SUMMARY** (for each external doctor: name, hospital, date, findings, medications started, follow-up)
-What changed since previous visit — new labs, symptoms, vitals changes. Be specific.
-
-**CONCERNS & DECISION POINTS**
-Bullet list of 3-5 specific clinical questions or decisions needed. Examples:
-- Any change in thyroid plan given rising T4?
-- Psychiatric medication adjustment for persistent anxiety?
-- Weight optimization strategy?
-
-**CLINICAL CONSIDERATIONS**
-2-3 evidence-based suggestions. Reference actual patient values.
-
-RULES:
-- Use actual numbers from the data, never generic ranges
-- For lab trends, show trajectory with arrows (X -> Y)
-- For markers where HIGHER is better (Vitamin D, HDL, eGFR, Hemoglobin, Iron, Ferritin), mark increases as improvement
-- Keep total brief under 400 words
-- No filler text, no greetings, pure clinical content
-- Use bullet points sparingly, prefer inline values` : `You are an expert clinical briefing AI at Gini Advanced Care Hospital. Generate a NEW PATIENT brief.
-
-Format:
-
-**PRESENTATION**
-[Age]-year-old [sex] presenting with [chief complaints]. [Any relevant history mentioned].
-
-**HISTORY & MEDICATIONS**
-Past medical/surgical history. Family history. Current medications with doses.
-
-**TODAY'S FINDINGS**
-Vitals: BP X/Y, Wt Xkg, BMI Y, Pulse Z
-Labs (if available): list with values and flags
-
-**INITIAL ASSESSMENT**
-Key clinical impressions. Risk factors identified. Severity assessment.
-
-**SUGGESTED WORKUP**
-Specific investigations to order based on presentation.
-
-**QUESTIONS TO ASK**
-5-6 specific history questions to clarify diagnosis and guide treatment.
-
-RULES:
-- Use actual values from the data
-- Keep total brief under 300 words
-- Pure clinical content, no filler`;
-      const resp = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 4000, system: systemPrompt, messages: [{ role: "user", content: "Generate clinical brief:\n\n" + dataPayload }] })
-      });
-      const result = await resp.json();
-      if (result.error) setAiBrief("Error: " + result.error.message);
-      else setAiBrief((result.content?.[0]?.text || "").trim() || "No brief generated.");
-    } catch (e) { setAiBrief("Error: " + e.message); }
-    setAiBriefLoading(false);
   };
 
   const processConsultant = async () => {
@@ -2443,22 +2173,7 @@ RULES:
     }
     const {data,error} = await callClaude(CONSULTANT_PROMPT, context);
     if(error) setErrors(p=>({...p,con:error}));
-    else if(data) {
-            if (data.follow_up) {
-              if (!data.follow_up.instructions && data.follow_up.special_instructions) data.follow_up.instructions = data.follow_up.special_instructions;
-              if (data.follow_up.date) {
-                const dm = String(data.follow_up.date).match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-                if (dm) data.follow_up.date = dm[3]+"-"+dm[2].padStart(2,"0")+"-"+dm[1].padStart(2,"0");
-              }
-              if (!data.follow_up.date) {
-                const src = conTranscript || quickTranscript || "";
-                const fm = src.match(/(?:follow.?up|next.?visit|scheduled\s+on)[^\d]*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i);
-                if (fm) { const yr = fm[3].length===2 ? "20"+fm[3] : fm[3]; data.follow_up.date = yr+"-"+fm[2].padStart(2,"0")+"-"+fm[1].padStart(2,"0"); }
-              }
-            }
-            console.log("conData follow_up:", JSON.stringify(data.follow_up));
-            setConData(fixConMedicines(data));
-          }
+    else if(data) setConData(fixConMedicines(data));
     else setErrors(p=>({...p,con:"No data returned"}));
     setLoading(p=>({...p,con:false}));
   };
@@ -2561,15 +2276,6 @@ RULES:
   // Quick-add state for plan sections
   const [planAddMode, setPlanAddMode] = useState(null); // which section has add form open
   const [planAddText, setPlanAddText] = useState("");
-  const [confirmedExtMeds, setConfirmedExtMeds] = useState({});
-  const [extMedActions, setExtMedActions] = useState({});
-  const [patientBrief, setPatientBrief] = useState(null);
-  const [briefLoading, setBriefLoading] = useState(false);
-  const [briefExpanded, setBriefExpanded] = useState(false);
-  const [extMedReasons, setExtMedReasons] = useState({});
-  const [activeReasonPicker, setActiveReasonPicker] = useState(null);
-  const [planView, setPlanView] = useState("plan");
-  const [showReconcile, setShowReconcile] = useState(false);
   const [planAddMed, setPlanAddMed] = useState({ name:"", dose:"", frequency:"OD", timing:"Morning" });
   const [conPasteMode, setConPasteMode] = useState(false);
   const [conPasteText, setConPasteText] = useState("");
@@ -2606,37 +2312,10 @@ RULES:
   const copyPlanToClipboard = () => {
     let text = `GINI ADVANCED CARE HOSPITAL — Treatment Plan\n`;
     text += `Patient: ${patient.name} | ${patient.age}Y/${patient.sex} | ${patient.phone||""} | ${patient.fileNo||""}\n`;
-    text += `Doctor: ${conName} | Date: ${(vitals?.visit_date ? new Date(vitals.visit_date) : new Date()).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}\n`;
+    text += `Doctor: ${conName} | Date: ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}\n`;
     text += `${"─".repeat(50)}\n\n`;
     
     if (conData?.assessment_summary) {
-      // Patient History
-    if (moData?.history) {
-      const h = moData.history;
-      const parts = [];
-      if (h.family && h.family !== "NIL" && h.family !== "-") parts.push("Family: " + h.family);
-      if (h.past_medical_surgical && h.past_medical_surgical !== "NIL" && h.past_medical_surgical !== "-") parts.push("Past Medical/Surgical: " + h.past_medical_surgical);
-      if (h.personal && h.personal !== "NIL" && h.personal !== "-") parts.push("Personal: " + h.personal);
-      if (h.covid) parts.push("COVID: " + h.covid);
-      if (h.vaccination) parts.push("Vaccination: " + h.vaccination);
-      if (parts.length > 0) {
-        text += "HISTORY:\n" + parts.join("\n") + "\n\n";
-      }
-    }
-        // Clinical Progress (longitudinal)
-      const brief = generateMOBrief();
-      if (brief && brief.isFollowUp && brief.totalVisits > 1) {
-        text += `CLINICAL PROGRESS:\n`;
-        text += `Under care for ${brief.monthsUnderCare} months (${brief.totalVisits} visits).\n`;
-        if (brief.weightTrend) text += `Weight: ${brief.weightTrend}.\n`;
-        if (brief.bpTrend) text += `BP trend: ${brief.bpTrend}.\n`;
-        const imp = brief.labTrends.filter(l => l.trend === "improving");
-        const wrs = brief.labTrends.filter(l => l.trend === "worsening");
-        if (imp.length) text += `Improving: ${imp.map(l => l.name + " " + (l.trajectory || l.previous+"\u2192"+l.latest+l.latestUnit)).join("; ")}.\n`;
-        if (wrs.length) text += `Needs attention: ${wrs.map(l => l.name + " " + (l.trajectory || l.previous+"\u2192"+l.latest+l.latestUnit)).join("; ")}.\n`;
-        if (brief.medChanges.length) text += `Med changes: ${brief.medChanges.map(c => (c.type === "added" ? "Added" : "Stopped") + " " + c.name).join(", ")}.\n`;
-        text += `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n`;
-      }
       text += `SUMMARY:\n${getPlan("summary", conData.assessment_summary)}\n\n`;
     }
     const cc = (moData?.chief_complaints||[]).filter(c => !["no gmi","no hypoglycemia","routine follow-up"].some(s => String(c).toLowerCase().includes(s)));
@@ -2673,10 +2352,8 @@ RULES:
       text += `\n`;
     }
     if (conData?.follow_up) {
-      text += `FOLLOW-UP: ${conData.follow_up.duration||conData.follow_up.timing||conData.follow_up.when||""}`;
-      if (conData.follow_up.date) { const _d = conData.follow_up.date; const _m = _d.match && _d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); const _dt = _m ? new Date(_m[3],_m[2]-1,_m[1]) : new Date(_d); text += ` (${isNaN(_dt) ? _d : _dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})})`; }
-      text += `\n`;
-      if (conData.follow_up.instructions||conData.follow_up.special_instructions) text += `Instructions: ${conData.follow_up.instructions||conData.follow_up.special_instructions}\n`;
+      text += `FOLLOW-UP: ${conData.follow_up.timing||conData.follow_up.when||""}\n`;
+      if (conData.follow_up.instructions) text += `Instructions: ${conData.follow_up.instructions}\n`;
     }
 
     navigator.clipboard.writeText(text).then(() => {
@@ -2749,120 +2426,6 @@ RULES:
     setRxExtracting(false);
   };
 
-  // Handle prescription file upload (PDF/image)
-  const handleRxFile = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(",")[1];
-      const mediaType = file.type || "image/jpeg";
-      setRxFile({ fileName: file.name, base64, mediaType });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
-
-  const extractRxFromFile = async () => {
-    if (!rxFile) return;
-    setRxFileExtracting(true);
-    try {
-      const block = rxFile.mediaType === "application/pdf"
-        ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:rxFile.base64} }
-        : { type:"image", source:{type:"base64",media_type:rxFile.mediaType,data:rxFile.base64} };
-
-      const prompt = `You are a clinical data extraction AI. Extract ALL information from this prescription image/PDF.
-
-Return ONLY valid JSON with this structure:
-{
-  "visit_date": "YYYY-MM-DD",
-  "doctor_name": "Dr. Name",
-  "specialty": "Endocrinology",
-  "hospital_name": "Hospital name if visible",
-  "vitals": { "bp_sys": 130, "bp_dia": 80, "weight": 65, "height": 155, "bmi": 27, "pulse": null },
-  "diagnoses": [{ "id": "dm2", "label": "Type 2 DM (Since 2005)", "status": "Uncontrolled" }],
-  "medications": [{ "name": "TAB METFORMIN 500", "dose": "500mg", "frequency": "BD", "timing": "After meals" }],
-  "labs": [{ "test_name": "HbA1c", "result": "8.5", "unit": "%", "flag": "H", "ref_range": "<7" }],
-  "chief_complaints": ["symptom1"],
-  "history": {
-    "family": "Father DM, Mother HTN",
-    "past_medical_surgical": "NIL",
-    "personal": "Non-smoker"
-  },
-  "follow_up": { "duration": "6 weeks", "date": "YYYY-MM-DD or null", "instructions": "special instructions", "tests_to_bring": ["HbA1c"] },
-  "notes": "Any additional observations or advice mentioned"
-}
-
-RULES:
-- Extract EVERY piece of information visible: diagnoses, medications with full dose/frequency/timing, all lab values, vitals, history
-- Convert dates to YYYY-MM-DD format
-- Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,masld,nephropathy,neuropathy,hashimotos
-- flag: "H" for high, "L" for low, "N" for normal
-- Include follow-up date if mentioned
-- Include any lifestyle/diet advice in notes
-- If handwritten and hard to read, do your best and note uncertainty in notes`;
-
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 8000, messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }] })
-      });
-      const d = await r.json();
-      if (d.error) { alert("API error: " + d.error.message); setRxFileExtracting(false); return; }
-      const t = (d.content || []).map(c => c.text || "").join("");
-      const clean = t.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      const data = JSON.parse(clean);
-
-      // Fill history form with extracted data
-      setHistoryForm(prev => ({
-        ...prev,
-        visit_date: data.visit_date || prev.visit_date,
-        doctor_name: data.doctor_name || prev.doctor_name,
-        specialty: data.specialty || prev.specialty,
-        vitals: { ...prev.vitals, ...(data.vitals || {}) },
-        diagnoses: (data.diagnoses?.length > 0) ? data.diagnoses : prev.diagnoses,
-        medications: (data.medications?.length > 0) ? data.medications : prev.medications,
-        labs: (data.labs?.length > 0) ? data.labs : prev.labs,
-        notes: [prev.notes, data.notes].filter(Boolean).join("\n"),
-      }));
-      // Also set the text version for reference
-      if (data.notes) setRxText(prev => prev ? prev + "\n" + data.notes : data.notes);
-      setRxExtracted(true);
-      setRxFile(prev => ({ ...prev, extracted: data }));
-
-      // Save document to DB + storage if patient exists
-      if (dbPatientId && API_URL) {
-        try {
-          const docResp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
-            method: "POST", headers: authHeaders(),
-            body: JSON.stringify({
-              doc_type: "prescription",
-              title: `Prescription${data.doctor_name ? " — " + data.doctor_name : ""}${data.visit_date ? " — " + data.visit_date : ""}`,
-              file_name: rxFile.fileName,
-              doc_date: data.visit_date || new Date().toISOString().split("T")[0],
-              source: data.hospital_name || "external",
-              notes: data.notes || "",
-              extracted_data: data
-            })
-          });
-          const docResult = await docResp.json();
-          if (docResult.id) {
-            // Upload file to storage
-            await fetch(`${API_URL}/api/documents/${docResult.id}/upload-file`, {
-              method: "POST", headers: authHeaders(),
-              body: JSON.stringify({ base64: rxFile.base64, mediaType: rxFile.mediaType, fileName: rxFile.fileName })
-            });
-            console.log("Prescription saved to docs:", docResult.id);
-          }
-        } catch (e) { console.log("Doc save error:", e.message); }
-      }
-    } catch (e) {
-      console.error("Rx file extract error:", e);
-      alert("Could not extract from file: " + e.message);
-    }
-    setRxFileExtracting(false);
-  };
-
   // Handle report file upload
   const handleReportFile = (e, reportType) => {
     const file = e.target.files?.[0];
@@ -2886,7 +2449,7 @@ RULES:
       const block = report.mediaType === "application/pdf"
         ? { type:"document", source:{type:"base64",media_type:"application/pdf",data:report.base64} }
         : { type:"image", source:{type:"base64",media_type:report.mediaType,data:report.base64} };
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[block,{type:"text",text:REPORT_EXTRACT_PROMPT}]}]})
       });
@@ -2919,114 +2482,6 @@ RULES:
     setReports(prev => prev.filter((_,i) => i !== index));
   };
 
-  // ═══ BULK HISTORY IMPORT ═══
-  const processBulkImport = async () => {
-    if (!bulkText.trim() || !API_URL) return;
-    setBulkParsing(true); setBulkVisits([]); setBulkProgress("⏳ Splitting visits...");
-    try {
-      const prompt = `You are a clinical data extraction AI. The user is pasting ALL visit history for a patient from another EMR system.
-
-TASK: Split this into INDIVIDUAL VISITS. Each visit has a date and its own data.
-
-Output ONLY valid JSON array, no backticks:
-[
-  {
-    "visit_date": "YYYY-MM-DD",
-    "doctor_name": "Dr. Name",
-    "visit_type": "OPD",
-    "vitals": { "bp_sys": null, "bp_dia": null, "weight": null, "height": null, "bmi": null, "pulse": null },
-    "diagnoses": [{"id": "dm2", "label": "Type 2 DM", "status": "Controlled"}],
-    "medications": [{"name": "BRAND NAME", "dose": "500mg", "frequency": "BD", "timing": "After meals"}],
-    "labs": [{"test_name": "HbA1c", "result": "5.3", "unit": "%", "flag": "N", "ref_range": "<6.5"}],
-    "chief_complaints": ["symptom1"],
-    "notes": "Brief summary of this visit"
-  }
-]
-
-RULES:
-- Split by FOLLOW UP dates. Each date = separate visit object
-- Extract ALL lab values for each visit date with proper units and flags (H/L/N)
-- Extract vitals: height (cm), weight (kg), BMI, BP (split sys/dia), waist circumference
-- Extract medications at each visit (they may change between visits)
-- Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,dfu,masld,nephropathy,osas,hashimotos
-- Sort visits by date ASCENDING (oldest first)
-- If a visit only has labs and no treatment changes, still create a visit entry
-- flag: "H" if above range, "L" if below, "N" if normal
-- Convert dates like "16/9/25" to "2025-09-16", "2nd December 2023" to "2023-12-02"
-- Include the LATEST/TODAY visit as well
-- ALWAYS include the full diagnosis list for EVERY visit (not just the first one)
-
-TEXT TO PARSE:
-` + bulkText.trim();
-
-      const resp = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 16000, messages: [{ role: "user", content: prompt }] })
-      });
-      const result = await resp.json();
-      console.log('Bulk API response:', JSON.stringify(result).slice(0,500));
-      if (result.error) { setBulkProgress("API error: " + result.error.message); setBulkParsing(false); return; }
-      const text = (result.content?.[0]?.text || "").trim();
-      console.log('Parsed text:', text.slice(0,200));
-      if (text.length === 0) { setBulkProgress("Empty response from AI"); setBulkParsing(false); return; }
-      const jsonStr = text.replace(/^```json\n?|```$/g, "").trim();
-      const visits = JSON.parse(jsonStr);
-
-      if (!Array.isArray(visits) || visits.length === 0) {
-        setBulkProgress("❌ Could not parse visits. Try reformatting.");
-        setBulkParsing(false);
-        return;
-      }
-
-      visits.sort((a, b) => new Date(a.visit_date) - new Date(b.visit_date));
-      setBulkVisits(visits);
-      setBulkProgress(`✅ Found ${visits.length} visits. Review and click Save All.`);
-    } catch (e) {
-      setBulkProgress("❌ Parse error: " + e.message);
-    }
-    setBulkParsing(false);
-  };
-
-  const saveBulkVisits = async () => {
-    if (!dbPatientId || !bulkVisits.length) return;
-    setBulkSaving(true); setBulkSaved(0);
-    let saved = 0;
-    for (const visit of bulkVisits) {
-      try {
-        setBulkProgress(`Saving visit ${saved + 1}/${bulkVisits.length}: ${visit.visit_date}...`);
-        const payload = {
-          visit_date: visit.visit_date,
-          visit_type: visit.visit_type || "OPD",
-          doctor_name: visit.doctor_name || "",
-          specialty: visit.specialty || "",
-          vitals: visit.vitals || {},
-          diagnoses: (visit.diagnoses || []).filter(d => d.label),
-          medications: (visit.medications || []).filter(m => m.name),
-          labs: (visit.labs || []).filter(l => l.test_name && l.result),
-          notes: visit.notes || ""
-        };
-        const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}/history`, {
-          method: "POST", headers: authHeaders(),
-          body: JSON.stringify(payload)
-        });
-        const result = await resp.json();
-        if (result.success) saved++;
-      } catch (e) {
-        console.log("Bulk save error for", visit.visit_date, e.message);
-      }
-      setBulkSaved(saved);
-    }
-    setBulkProgress(`✅ Saved ${saved}/${bulkVisits.length} visits!`);
-    setBulkSaving(false);
-    if (dbPatientId) {
-      try {
-        const pd = await fetch(`${API_URL}/api/patients/${dbPatientId}/full`, { headers: authHeaders() }).then(r=>r.json());
-        setPatientFullData(pd);
-      } catch(e) {}
-    }
-  };
-
   const saveHistoryEntry = async () => {
     if (!dbPatientId || !historyForm.visit_date) return;
     setHistorySaving(true);
@@ -3035,8 +2490,6 @@ TEXT TO PARSE:
         visit_date: historyForm.visit_date,
         visit_type: historyForm.visit_type,
         doctor_name: historyForm.doctor_name,
-          specialty: historyForm.specialty || "",
-          hospital_name: historyForm.hospital_name || "",
         specialty: historyForm.specialty,
         vitals: historyForm.vitals,
         diagnoses: historyForm.diagnoses.filter(d => d.label),
@@ -3179,10 +2632,7 @@ TEXT TO PARSE:
       const summaryData = {
         patient: { name: patient.name, age: patient.age, sex: patient.sex },
         diagnoses: patientFullData.diagnoses?.map(d => `${d.label}: ${d.status}`) || [],
-        medications: patientFullData.medications?.filter(m=>m.is_active).map(m => {
-            const _con = (patientFullData.consultations||[]).find(c => c.id === m.consultation_id);
-            return `${m.name} ${m.dose||""} ${m.frequency||""} ${m.timing||""} [by: ${_con?.con_name||_con?.mo_name||"unknown"}, ${_con?.visit_date||"?"}]`;
-          }) || [],
+        medications: patientFullData.medications?.filter(m=>m.is_active).map(m => `${m.name} ${m.dose} ${m.frequency}`) || [],
         labs: patientFullData.lab_results?.slice(0,15).map(l => `${l.test_name}: ${l.result} ${l.unit} (${l.flag||'normal'}) on ${l.test_date}`) || [],
         vitals_trend: {
           hba1c: outcomesData.hba1c?.map(d => `${d.result}% on ${d.test_date}`),
@@ -3201,7 +2651,7 @@ Patient Data: ${JSON.stringify(summaryData)}
 
 Write ONLY the summary paragraph, no headers or formatting.`;
 
-      const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: prompt }] })
@@ -3216,7 +2666,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   
   // Detect new lab results since last consultation
   const newReportsSinceLastVisit = (() => {
-    if (!patientFullData?.consultations?.length) return [];
+    if (!patientFullData?.lab_results?.length || !patientFullData?.consultations?.length) return [];
     const sortedCons = [...patientFullData.consultations].sort((a,b) => {
       const d = new Date(b.visit_date) - new Date(a.visit_date);
       return d !== 0 ? d : new Date(b.created_at) - new Date(a.created_at);
@@ -3224,414 +2674,25 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     const lastVisit = sortedCons[0];
     const lastVisitDate = lastVisit?.visit_date ? String(lastVisit.visit_date).slice(0,10) : null;
     if (!lastVisitDate) return [];
-    return (patientFullData?.lab_results||[]).filter(l => {
+    return patientFullData.lab_results.filter(l => {
       if (!l.test_date) return false;
-      return String(l.test_date).slice(0,10) >= lastVisitDate;
+      const labDate = String(l.test_date).slice(0,10); // normalize to YYYY-MM-DD
+      return labDate > lastVisitDate; // strictly after last visit, not same day
     });
   })();
-  const newDocsSinceLastVisit = (() => {
-    if (!patientFullData?.documents?.length) return [];
-    return patientFullData.documents.filter(d => {
-      if (d.created_at && (Date.now() - new Date(d.created_at).getTime()) < 48*60*60*1000) return true;
-      return false;
-    });
-  })();
-  const newDocsWithExtracted = newDocsSinceLastVisit.filter(d => {
-    const ext = d.extracted_data ? (typeof d.extracted_data==="string" ? (()=>{try{return JSON.parse(d.extracted_data)}catch(e){return null}})() : d.extracted_data) : null;
-    return ext && (ext.labs?.length || ext.medications?.length || ext.findings || ext.diagnoses?.length);
-  });
-  const hasNewReports = newReportsSinceLastVisit.length > 0 || newDocsSinceLastVisit.length > 0;
+  const hasNewReports = newReportsSinceLastVisit.length > 0;
   
-  // ═══ PATIENT BRIEF ═══
-  const loadPatientBrief = () => {
-    if (!dbPatientId) { setPatientBrief(null); return; }
-    // Check if brief already in patientFullData
-    if (patientFullData?.latest_brief?.content) {
-      try {
-        const bc = typeof patientFullData.latest_brief.content === "string" 
-          ? JSON.parse(patientFullData.latest_brief.content) 
-          : patientFullData.latest_brief.content;
-        setPatientBrief(bc);
-      } catch(e) { setPatientBrief(null); }
-      return;
-    }
-    // Clear old brief first, then fetch
-    setPatientBrief(null);
-    fetch(`${API_URL}/api/patients/${dbPatientId}/brief`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.content) {
-          const bc2 = typeof data.content === "string" ? JSON.parse(data.content) : data.content;
-          setPatientBrief(bc2);
-        }
-      })
-      .catch(e => console.warn("Brief fetch:", e));
-  }
-
-  const generatePatientBrief = async (trigger = "manual") => {
-    if (!dbPatientId) return;
-    setBriefLoading(true);
-    try {
-      // Step 1: Get context from server
-      const ctxR = await fetch(`${API_URL}/api/patients/${dbPatientId}/brief/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger })
-      });
-      if (!ctxR.ok) throw new Error("Context fetch failed");
-      const ctxData = await ctxR.json();
-      
-      // If brief already exists with same hash, use it
-      if (ctxData.content) {
-        const content = typeof ctxData.content === "string" ? JSON.parse(ctxData.content) : ctxData.content;
-        setPatientBrief(content);
-        setBriefLoading(false);
-        return;
-      }
-      
-      const ctx = ctxData.context;
-      
-      // Step 2: Generate with AI
-      const prompt = `You are an expert clinical summarizer for Gini Advanced Care Hospital, India (endocrinology-focused).
-Generate a comprehensive patient brief from ALL available data. Return ONLY valid JSON.
-
-PATIENT: ${ctx.patient}
-DIAGNOSES: ${ctx.diagnoses}
-
-CURRENT MEDICATIONS (${ctx.total_meds} active):
-${ctx.medications}
-
-LAB RESULTS (${ctx.total_labs} total):
-${ctx.labs}
-
-RECENT VITALS:
-${ctx.vitals}
-
-VISIT HISTORY (${ctx.total_visits} visits):
-${ctx.consultations}
-
-RECENT DOCUMENTS (${ctx.total_docs}):
-${ctx.documents}
-
-Return this exact JSON structure:
-{
-  "one_liner": "58M | DM2+HTN+CKD3 | 7 meds (GLP1+SGLT2+Metformin) | HbA1c 8.1→7.2 ↗ | Overall: Improving",
-  "overall_trajectory": "improving/stable/declining/fluctuating",
-  "conditions": [{"label": "Type 2 DM", "status": "active", "severity": "moderate", "trend": "improving", "drug_classes": "Metformin + SGLT2i + GLP1-RA"}],
-  "medication_summary": "Total X meds across Y specialists. DM: Metformin+Dapagliflozin(SGLT2i)+Semaglutide(GLP1-RA). HTN: Telmisartan(ARB). Lipids: Rosuvastatin(Statin). Recent changes: Added Dapagliflozin on 15-Feb.",
-  "drug_classes_used": {"diabetes": ["Metformin(Biguanide)", "Dapagliflozin(SGLT2i)"], "hypertension": ["Telmisartan(ARB)"], "lipids": ["Rosuvastatin(Statin)"]},
-  "specialists_involved": [{"name": "Dr. Bhansali", "specialty": "Endocrinology", "hospital": "Gini", "role": "Primary"}, {"name": "Dr. Kapoor", "specialty": "Cardiology", "hospital": "Fortis", "role": "External"}],
-  "lab_highlights": [{"test": "HbA1c", "latest": "7.2%", "previous": "8.1%", "trend": "improving", "flag": "HIGH", "last_done": "18-Feb-2026", "note": "Down from 8.1%, target <7%"}],
-  "latest_tests": {"last_blood_work": "18-Feb-2026", "last_imaging": "10-Jan-2026 (USG Abdomen — mild fatty liver)", "last_ecg": "10-Jan-2026", "last_eye_exam": "Not done in last 1 year"},
-  "tests_due": ["HbA1c recheck (due in 6 weeks)", "Eye/Fundus exam (overdue >1 year)", "Urine ACR (annual screening)"],
-  "key_concerns": ["Rising creatinine 1.1→1.4 — needs nephro review?", "No eye exam done — diabetic retinopathy screening overdue"],
-  "clinical_goals": ["HbA1c target <7%", "BP target <130/80", "LDL target <70 mg/dL", "Protect kidney function"],
-  "last_visit": {"date": "15-Feb-2026", "doctor": "Dr. Bhansali", "summary": "Added Dapagliflozin for renal protection. HbA1c improved. Continue current regimen."},
-  "next_visit": {"date": "29-Mar-2026", "instructions": "Fasting sample 8:30AM. Omit morning DM meds."},
-  "pending_actions": ["Fasting labs before next visit", "Eye exam referral", "Discuss diet compliance"],
-  "positive_notes": ["HbA1c steadily improving over 3 visits", "BP well controlled on single agent", "Compliant with medications"],
-  "risk_flags": ["CKD Stage 3 — monitor eGFR trend", "No retinopathy screening in >1yr", "Cardiac risk — needs lipid optimization"],
-  "lifestyle_notes": "Diet counseling given. Advised 30min walking daily. Sugar diary recommended.",
-  "brief_for_doctor": "Quick 3-line clinical summary for the doctor seeing this patient today. Include what matters most: current control status, recent changes, what to watch for today."
-}
-
-IMPORTANT INSTRUCTIONS:
-- Be specific with drug CLASSES (SGLT2i, GLP1-RA, DPP4i, Sulfonylurea, ARB, ACEi, CCB, Beta-blocker, Statin, Fibrate)
-- Mention ALL specialists the patient sees with their specialties and hospitals
-- Include exact dates for when tests were last done and when they're due
-- Note the overall trajectory: is the patient getting better, worse, or stable OVERALL?
-- Include next visit date and instructions if available from follow_up data
-- clinical_goals should reflect what we're trying to achieve for this patient
-- brief_for_doctor should be the most useful 3 lines a doctor needs before walking in
-- If data is missing (no eye exam, no imaging), flag it as overdue or needed
-- Return ONLY valid JSON. No markdown, no backticks.`;
-
-      const aiR = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, messages: [{ role: "user", content: prompt }] })
-      });
-      
-      if (!aiR.ok) throw new Error("AI generation failed: " + aiR.status);
-      const aiData = await aiR.json();
-      const text = aiData.content?.[0]?.text || "";
-      const content = JSON.parse(text.replace(/```json|```/g, "").trim());
-      
-      setPatientBrief(content);
-      
-      // Step 3: Save to DB
-      fetch(`${API_URL}/api/patients/${dbPatientId}/brief/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, data_hash: ctxData.data_hash, trigger_source: trigger })
-      }).catch(e => console.warn("Brief save:", e));
-      
-    } catch (e) {
-      console.error("Brief generate:", e);
-      alert("Brief generation failed: " + e.message);
-    }
-    setBriefLoading(false);
-  };
-
-  // Auto-load brief when patient loaded
-  useEffect(() => {
-    if (dbPatientId && patientFullData) loadPatientBrief();
-    else setPatientBrief(null);
-  }, [dbPatientId, patientFullData]);
-
-  // ═══ BRIEF CARD COMPONENT ═══
-  const PatientBriefCard = ({ compact = false }) => {
-    if (briefLoading) return (
-      <div style={{ padding:12, background:"linear-gradient(135deg,#f0f9ff,#eff6ff)", borderRadius:8, border:"1px solid #bfdbfe", marginBottom:10, textAlign:"center" }}>
-        <span style={{ animation:"pulse 1.5s infinite" }}>🧠</span>
-        <span style={{ fontSize:11, fontWeight:600, color:"#2563eb", marginLeft:6 }}>Generating patient brief...</span>
-      </div>
-    );
-    
-    if (!patientBrief) return (
-      <div className="no-print" style={{ padding:10, background:"#f8fafc", borderRadius:8, border:"1px dashed #cbd5e1", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
-        <span style={{ fontSize:16 }}>📋</span>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:"#475569" }}>No patient brief yet</div>
-          <div style={{ fontSize:9, color:"#94a3b8" }}>Generate a comprehensive AI summary of this patient</div>
-        </div>
-        <button onClick={() => generatePatientBrief("manual")}
-          style={{ fontSize:10, background:"#2563eb", color:"white", border:"none", padding:"6px 12px", borderRadius:6, fontWeight:700, cursor:"pointer" }}>🧠 Generate Brief</button>
-      </div>
-    );
-    
-    const b = patientBrief;
-    
-    return (
-      <div style={{ background:"linear-gradient(135deg,#f0f9ff,#faf5ff)", borderRadius:8, border:"1px solid #c7d2fe", marginBottom:10, overflow:"hidden" }}>
-        {/* Header */}
-        <div onClick={() => setBriefExpanded(!briefExpanded)}
-          style={{ padding:"8px 12px", cursor:"pointer", display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:16 }}>📋</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:11, fontWeight:800, color:"#1e293b" }}>Patient Brief</div>
-            <div style={{ fontSize:10, color:"#475569", lineHeight:1.4 }}>{b.one_liner || ""}</div>
-            {b.overall_trajectory && (
-              <span style={{ fontSize:8, fontWeight:800, padding:"1px 6px", borderRadius:4, marginTop:2, display:"inline-block",
-                background:b.overall_trajectory==="improving"?"#dcfce7":b.overall_trajectory==="declining"?"#fef2f2":b.overall_trajectory==="fluctuating"?"#fef3c7":"#f1f5f9",
-                color:b.overall_trajectory==="improving"?"#059669":b.overall_trajectory==="declining"?"#dc2626":b.overall_trajectory==="fluctuating"?"#f59e0b":"#64748b" }}>
-                {b.overall_trajectory==="improving"?"↗ IMPROVING":b.overall_trajectory==="declining"?"↘ DECLINING":b.overall_trajectory==="fluctuating"?"↕ FLUCTUATING":"→ STABLE"}
-              </span>
-            )}
-          </div>
-          <button className="no-print" onClick={(e) => { e.stopPropagation(); generatePatientBrief("refresh"); }}
-            style={{ fontSize:8, background:"#e0e7ff", color:"#4338ca", border:"none", padding:"3px 6px", borderRadius:4, fontWeight:700, cursor:"pointer" }}>🔄</button>
-          <span className="no-print" style={{ fontSize:10, color:"#94a3b8" }}>{briefExpanded ? "▲" : "▼"}</span>
-        </div>
-        
-        {/* Collapsed: Key concerns + risk flags */}
-        {!briefExpanded && (
-          <div style={{ padding:"0 12px 8px 12px" }}>
-            {b.key_concerns?.length > 0 && (
-              <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:2 }}>
-                {b.key_concerns.slice(0, compact ? 2 : 3).map((c, i) => (
-                  <span key={i} style={{ fontSize:8, background:"#fef3c7", color:"#92400e", padding:"2px 6px", borderRadius:4, fontWeight:600 }}>⚠️ {c}</span>
-                ))}
-              </div>
-            )}
-            {b.risk_flags?.length > 0 && (
-              <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                {b.risk_flags.slice(0, compact ? 2 : 3).map((r, i) => (
-                  <span key={i} style={{ fontSize:8, background:"#fef2f2", color:"#dc2626", padding:"2px 6px", borderRadius:4, fontWeight:600 }}>🔴 {r}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* Expanded: Full brief */}
-        {briefExpanded && (
-          <div style={{ padding:"0 12px 10px 12px" }}>
-            {/* Conditions */}
-            {b.conditions?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>CONDITIONS</div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                  {b.conditions.map((c, i) => (
-                    <span key={i} style={{ fontSize:9, padding:"2px 8px", borderRadius:4, fontWeight:600,
-                      background:c.severity==="severe"?"#fef2f2":c.trend==="improving"?"#f0fdf4":"#f8fafc",
-                      color:c.severity==="severe"?"#dc2626":c.trend==="improving"?"#059669":"#374151",
-                      border:"1px solid "+(c.severity==="severe"?"#fecaca":c.trend==="improving"?"#bbf7d0":"#e2e8f0") }}>
-                      {c.label} {c.trend === "improving" ? "↗" : c.trend === "worsening" ? "↘" : "→"}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Medications */}
-            {b.medication_summary && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>💊 MEDICATIONS</div>
-                <div style={{ fontSize:10, color:"#374151", lineHeight:1.5 }}>{b.medication_summary}</div>
-              </div>
-            )}
-            
-            {/* Lab highlights */}
-            {b.lab_highlights?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>🔬 KEY LABS</div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                  {b.lab_highlights.map((l, i) => (
-                    <span key={i} style={{ fontSize:9, padding:"2px 8px", borderRadius:4, fontWeight:600,
-                      background:l.flag==="HIGH"?"#fef2f2":l.flag==="LOW"?"#fffbeb":"#f0fdf4",
-                      color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#f59e0b":"#059669" }}>
-                      {l.test}: {l.latest} {l.trend==="improving"?"↗":l.trend==="worsening"?"↘":"→"} {l.note ? `(${l.note})` : ""}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Key concerns */}
-            {b.key_concerns?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>⚠️ CONCERNS</div>
-                {b.key_concerns.map((c, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#92400e", padding:"2px 0" }}>• {c}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Positive notes */}
-            {b.positive_notes?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>✅ POSITIVE</div>
-                {b.positive_notes.map((n, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#059669", padding:"2px 0" }}>• {n}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Pending actions */}
-            {b.pending_actions?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>📌 PENDING ACTIONS</div>
-                {b.pending_actions.map((a, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#1e40af", padding:"2px 0", fontWeight:600 }}>☐ {a}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Risk flags */}
-            {b.risk_flags?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>🔴 RISK FLAGS</div>
-                {b.risk_flags.map((r, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#dc2626", padding:"2px 0", fontWeight:600 }}>• {r}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Last visit + lifestyle */}
-            {b.last_visit_summary && (
-              <div style={{ marginBottom:6 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>📅 LAST VISIT</div>
-                <div style={{ fontSize:10, color:"#374151" }}>{b.last_visit_summary}</div>
-              </div>
-            )}
-            {/* Specialists */}
-            {b.specialists_involved?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>👥 CARE TEAM</div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                  {b.specialists_involved.map((s, i) => (
-                    <span key={i} style={{ fontSize:9, padding:"2px 8px", borderRadius:4, fontWeight:600,
-                      background:s.role==="Primary"?"#dbeafe":"#f3e8ff",
-                      color:s.role==="Primary"?"#1e40af":"#7c3aed",
-                      border:"1px solid "+(s.role==="Primary"?"#bfdbfe":"#e9d5ff") }}>
-                      {s.name} ({s.specialty}) — {s.hospital}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Drug classes */}
-            {b.drug_classes_used && Object.keys(b.drug_classes_used).length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>💊 DRUG CLASSES</div>
-                {Object.entries(b.drug_classes_used).map(([cond, drugs], i) => (
-                  <div key={i} style={{ fontSize:10, padding:"2px 0" }}>
-                    <span style={{ fontWeight:700, color:"#374151", textTransform:"capitalize" }}>{cond}:</span>
-                    <span style={{ color:"#475569", marginLeft:4 }}>{Array.isArray(drugs) ? drugs.join(", ") : drugs}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Latest tests */}
-            {b.latest_tests && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:3 }}>📅 LATEST TESTS</div>
-                {Object.entries(b.latest_tests).map(([key, val], i) => (
-                  <div key={i} style={{ fontSize:10, padding:"1px 0", color: String(val||"").toLowerCase().includes("not done") || String(val||"").toLowerCase().includes("overdue") ? "#dc2626" : "#374151" }}>
-                    <span style={{ fontWeight:600 }}>{key.replace(/_/g," ").replace(/\w/g, l=>l.toUpperCase())}:</span> {val}
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Tests due */}
-            {b.tests_due?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>🔬 TESTS DUE</div>
-                {b.tests_due.map((t, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#b45309", padding:"1px 0", fontWeight:600 }}>⏰ {t}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Clinical goals */}
-            {b.clinical_goals?.length > 0 && (
-              <div style={{ marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>🎯 CLINICAL GOALS</div>
-                {b.clinical_goals.map((g, i) => (
-                  <div key={i} style={{ fontSize:10, color:"#1e40af", padding:"1px 0", fontWeight:600 }}>◎ {g}</div>
-                ))}
-              </div>
-            )}
-            
-            {/* Next visit */}
-            {b.next_visit && (
-              <div style={{ marginBottom:8, padding:"6px 8px", background:"#eff6ff", borderRadius:6, border:"1px solid #bfdbfe" }}>
-                <div style={{ fontSize:10, fontWeight:700, color:"#1e40af" }}>📅 Next Visit: {b.next_visit.date || "TBD"}</div>
-                {b.next_visit.instructions && <div style={{ fontSize:9, color:"#475569", marginTop:2 }}>⚠️ {b.next_visit.instructions}</div>}
-              </div>
-            )}
-            
-            {/* Brief for doctor */}
-            {b.brief_for_doctor && (
-              <div style={{ padding:"6px 8px", background:"#fefce8", borderRadius:6, border:"1px solid #fde68a", marginBottom:8 }}>
-                <div style={{ fontSize:9, fontWeight:700, color:"#92400e", marginBottom:2 }}>👨‍⚕️ FOR THE DOCTOR</div>
-                <div style={{ fontSize:10, color:"#78350f", lineHeight:1.5 }}>{b.brief_for_doctor}</div>
-              </div>
-            )}
-            
-            {b.lifestyle_notes && (
-              <div>
-                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginBottom:2 }}>🏃 LIFESTYLE</div>
-                <div style={{ fontSize:10, color:"#374151" }}>{b.lifestyle_notes}</div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-    const TABS = [
+  const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
     { id:"dashboard", label:"🏠 Dashboard", show:keySet && !!dbPatientId },
-    { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole },
-    { id:"patient", label:"👤", show:keySet },
-    { id:"vitals", label:"📋", show:keySet && !isLabRole },
-    { id:"mo", label:"🎤 MO", show:keySet && !isLabRole, badge:hasNewReports },
+    { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole && !visitActive },
+    { id:"patient", label:"👤", show:keySet && !visitActive },
+    // Visit workflow tabs (only show during active visit)
+    { id:"intake", label:"📝 Intake", show:keySet && !isLabRole && visitActive },
+    { id:"exam", label:"🔍 Exam", show:keySet && !isLabRole && visitActive },
+    { id:"assess", label:"🧪 Assess", show:keySet && !isLabRole && visitActive },
+    // MO stays but only outside visit (voice-only mode)
+    { id:"mo", label:"🎤 MO", show:keySet && !isLabRole && !visitActive, badge:hasNewReports },
     { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"plan", label:"📄 Plan", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"docs", label:"📎 Docs", show:keySet && !!API_URL && !!dbPatientId },
@@ -3649,14 +2710,6 @@ IMPORTANT INSTRUCTIONS:
   
   const includeNewReportsInPlan = () => {
     // Build a summary of new lab values and inject into consultant transcript
-    const docExtracted = [];
-    newDocsSinceLastVisit.forEach(d => {
-      const ext = d.extracted_data ? (typeof d.extracted_data==="string" ? (()=>{try{return JSON.parse(d.extracted_data)}catch(e){return null}})() : d.extracted_data) : null;
-      if (!ext) return;
-      if (ext.labs) ext.labs.forEach(l => docExtracted.push(l.test_name + ": " + l.result + (l.unit?" "+l.unit:"") + (l.flag&&l.flag!=="NORMAL"?" ("+l.flag+")":"") + " [from " + (d.title||d.doc_type) + "]"));
-      if (ext.findings) docExtracted.push("Findings (" + (d.title||d.doc_type) + "): " + ext.findings);
-      if (ext.medications) docExtracted.push((d.title||"External") + ": " + ext.medications.map(m=>m.name+" "+m.dose).join(", "));
-    });
     const labSummary = newReportsSinceLastVisit.map(l => 
       `${l.test_name}: ${l.result} ${l.unit||""} ${l.flag==="H"?"(HIGH)":l.flag==="L"?"(LOW)":""} [${l.test_date}]`
     ).join("\n");
@@ -3665,15 +2718,13 @@ IMPORTANT INSTRUCTIONS:
     setNewReportsIncluded(true);
     setNewReportsExpanded(false); // Collapse immediately
     setConData(null); // Reset so plan regenerates with new data
-    // Regenerate patient brief with new data
-    setTimeout(() => generatePatientBrief("consultation_save"), 2000);
   };
   
   const NewReportsBanner = hasNewReports ? (
     newReportsIncluded ? (
       <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 10px", marginBottom:8, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:8 }}>
         <span style={{ fontSize:12 }}>✅</span>
-        <span style={{ fontSize:11, fontWeight:600, color:"#059669" }}>{newReportsSinceLastVisit.length} lab result{newReportsSinceLastVisit.length!==1?"s":""}{newDocsSinceLastVisit.length>0?" + "+newDocsSinceLastVisit.length+" doc"+(newDocsSinceLastVisit.length!==1?"s":"")+"":" "} included</span>
+        <span style={{ fontSize:11, fontWeight:600, color:"#059669" }}>{newReportsSinceLastVisit.length} new lab results included</span>
         <div style={{ flex:1 }} />
         <button onClick={()=>{setNewReportsIncluded(false);setNewReportsExpanded(true);}} style={{ fontSize:9, background:"white", border:"1px solid #bbf7d0", borderRadius:4, padding:"2px 6px", cursor:"pointer", color:"#64748b" }}>Review again</button>
       </div>
@@ -3684,12 +2735,12 @@ IMPORTANT INSTRUCTIONS:
         <span style={{ fontSize:14 }}>🔔</span>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"#92400e" }}>
-            {newReportsSinceLastVisit.length > 0 ? newReportsSinceLastVisit.length + " New Lab Results" : ""}{newReportsSinceLastVisit.length > 0 && newDocsSinceLastVisit.length > 0 ? " + " : ""}{newDocsSinceLastVisit.length > 0 ? newDocsSinceLastVisit.length + " New Documents" : ""} Since Last Visit
+            {newReportsSinceLastVisit.length} New Lab Results Since Last Visit
           </div>
           {!newReportsExpanded && (
             <div style={{ fontSize:9, color:"#a16207", marginTop:2 }}>
-              {[...new Set([...newReportsSinceLastVisit.map(l=>l.test_name), ...newDocsSinceLastVisit.map(d=>d.title||d.doc_type)])].slice(0,6).join(", ")}
-              {[...new Set([...newReportsSinceLastVisit.map(l=>l.test_name), ...newDocsSinceLastVisit.map(d=>d.title||d.doc_type)])].length>6 && " ..."}
+              {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].slice(0,6).join(", ")}
+              {[...new Set(newReportsSinceLastVisit.map(l=>l.test_name))].length>6 && " ..."}
             </div>
           )}
         </div>
@@ -4114,6 +3165,16 @@ IMPORTANT INSTRUCTIONS:
         ))}
       </div>
 
+      {/* ═══ VISIT ACTIVE BANNER ═══ */}
+      {visitActive && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 12px", marginBottom:8, background:"linear-gradient(135deg,#059669,#10b981)", borderRadius:8, color:"white" }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background:"white", animation:"pulse 1.5s infinite" }} />
+          <span style={{ fontSize:12, fontWeight:800, flex:1 }}>🩺 VISIT IN PROGRESS — {patient.name || "Patient"}</span>
+          <button onClick={()=>{ saveConsultation(); endVisit(); }} style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>💾 Save & End</button>
+          <button onClick={endVisit} style={{ background:"rgba(255,255,255,.15)", border:"none", color:"white", padding:"4px 8px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>✕ End</button>
+        </div>
+      )}
+
       {/* ===== SETUP ===== */}
       {tab==="setup" && (
         <div style={{ maxWidth:420, margin:"0 auto", padding:"14px 0" }}>
@@ -4141,7 +3202,6 @@ IMPORTANT INSTRUCTIONS:
       {/* ===== PATIENT DASHBOARD ===== */}
       {tab==="dashboard" && dbPatientId && (
         <div>
-          <PatientBriefCard />
           {/* Patient Card */}
           <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:14, padding:20, color:"white", marginBottom:12 }}>
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
@@ -4198,13 +3258,119 @@ IMPORTANT INSTRUCTIONS:
             </div>
           )}
 
+          {/* ═══ START VISIT ═══ */}
+          <div style={{ marginBottom:12 }}>
+            <button onClick={()=>startVisit(null)} style={{
+              width:"100%", padding:"14px", background:"linear-gradient(135deg,#059669,#10b981)", color:"white", border:"none",
+              borderRadius:10, fontSize:15, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+              boxShadow:"0 2px 8px rgba(5,150,105,.25)"
+            }}>🩺 Start Visit</button>
+            <div style={{ display:"flex", gap:6, marginTop:6 }}>
+              <button onClick={()=>openBooking(null)} style={{
+                flex:1, padding:"10px", background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:8, fontSize:12, fontWeight:700,
+                cursor:"pointer", color:"#1e40af"
+              }}>📅 Book Appointment</button>
+              <button onClick={()=>{startVisit(null);}} style={{
+                flex:1, padding:"10px", background:"#fef3c7", border:"1.5px solid #fde68a", borderRadius:8, fontSize:12, fontWeight:700,
+                cursor:"pointer", color:"#92400e"
+              }}>🚶 Walk-in Visit</button>
+            </div>
+          </div>
+
+          {/* ═══ BOOKING MODAL ═══ */}
+          {showBooking && (
+            <div style={{ background:"white", border:"2px solid #3b82f6", borderRadius:12, padding:16, marginBottom:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+                <span style={{ fontSize:14, fontWeight:800, color:"#1e40af" }}>{editApptId ? "✏️ Edit Appointment" : "📅 New Appointment"}</span>
+                <button onClick={()=>setShowBooking(false)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#94a3b8" }}>✕</button>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Date</label>
+                  <input type="date" value={bookForm.dt} onChange={e=>setBookForm({...bookForm, dt:e.target.value})}
+                    style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Time</label>
+                  <input type="time" value={bookForm.tm} onChange={e=>setBookForm({...bookForm, tm:e.target.value})}
+                    style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Type</label>
+                  <div style={{ display:"flex", gap:3 }}>
+                    {["OPD","Follow-up","IPD","Lab"].map(t=>(
+                      <button key={t} onClick={()=>setBookForm({...bookForm, ty:t})}
+                        style={{ padding:"5px 10px", borderRadius:6, fontSize:10, fontWeight:600, cursor:"pointer",
+                          border:`1.5px solid ${bookForm.ty===t?"#2563eb":"#e2e8f0"}`,
+                          background:bookForm.ty===t?"#eff6ff":"white", color:bookForm.ty===t?"#2563eb":"#64748b" }}>{t}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Specialty</label>
+                  <select value={bookForm.sp} onChange={e=>setBookForm({...bookForm, sp:e.target.value})}
+                    style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }}>
+                    <option value="">Select</option>
+                    {["Endocrinology","Cardiology","Neurology","Orthopaedics","Urology","Pulmonology","General Medicine","Ophthalmology","Dermatology"].map(s=><option key={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Doctor</label>
+                  <select value={bookForm.doc} onChange={e=>setBookForm({...bookForm, doc:e.target.value})}
+                    style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }}>
+                    <option value="">Select</option>
+                    {doctorsList.map(d=><option key={d.id} value={d.short_name||d.name}>{d.name}{d.specialty?` — ${d.specialty}`:""}</option>)}
+                  </select>
+                </div>
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Notes</label>
+                  <input value={bookForm.notes} onChange={e=>setBookForm({...bookForm, notes:e.target.value})} placeholder="Fasting required..."
+                    style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                </div>
+                <button onClick={saveBooking} style={{ gridColumn:"1/-1", padding:"10px", background:"#059669", color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                  {editApptId ? "✅ Update" : "✅ Book Appointment"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ UPCOMING APPOINTMENTS ═══ */}
+          {appointments.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6, letterSpacing:".5px" }}>UPCOMING APPOINTMENTS</div>
+              {appointments.map(a => (
+                <div key={a.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, marginBottom:4,
+                  background:a.ty==="Lab"?"#f0fdf4":"#f8fafc", border:`1px solid ${a.ty==="Lab"?"#bbf7d0":"#e2e8f0"}` }}>
+                  <div style={{ width:10, height:10, borderRadius:"50%", background:a.ty==="Lab"?"#059669":a.ty==="OPD"?"#3b82f6":"#f59e0b" }} />
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#1e293b" }}>{a.ty} {a.sp ? `— ${a.sp}` : ""}</div>
+                    <div style={{ fontSize:10, color:"#64748b" }}>{a.doc}{a.notes ? ` · ${a.notes}` : ""}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontSize:11, fontWeight:700 }}>{a.dt ? new Date(a.dt).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) : "TBD"}</div>
+                    {a.tm && <div style={{ fontSize:9, color:"#64748b" }}>{a.tm}</div>}
+                  </div>
+                  <div style={{ display:"flex", gap:3 }}>
+                    <button onClick={()=>openBooking(a)} title="Edit"
+                      style={{ padding:"3px 6px", background:"#eff6ff", color:"#2563eb", border:"none", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:700 }}>✏️</button>
+                    <button onClick={()=>cancelAppt(a.id)} title="Cancel"
+                      style={{ padding:"3px 6px", background:"#fef2f2", color:"#dc2626", border:"none", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:700 }}>✕</button>
+                    {a.ty !== "Lab" && (
+                      <button onClick={()=>startVisit(a.id)} title="Start Visit"
+                        style={{ padding:"3px 8px", background:"#059669", color:"white", border:"none", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:700 }}>▶ Start</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Navigation Grid */}
           <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:8, letterSpacing:".5px" }}>GO TO</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
             {[
               { tab:"quick", icon:"⚡", label:"Quick Dictation", color:"#dc2626", bg:"#fef2f2" },
               { tab:"patient", icon:"👤", label:"Patient Details", color:"#1e40af", bg:"#eff6ff" },
-              { tab:"vitals", icon:"📋", label:"Vitals", color:"#7c3aed", bg:"#f5f3ff" },
               { tab:"mo", icon:"🎤", label:"MO Entry", color:"#ea580c", bg:"#fff7ed" },
               { tab:"consultant", icon:"👨‍⚕️", label:"Consultant", color:"#0d9488", bg:"#f0fdfa" },
               { tab:"plan", icon:"📄", label:"Plan / Print", color:"#1e293b", bg:"#f1f5f9" },
@@ -4362,13 +3528,301 @@ IMPORTANT INSTRUCTIONS:
             </div>
           </details>
 
-          <button onClick={()=>{if(patient.name) setTab("vitals");}} style={{ marginTop:10, width:"100%", background:patient.name?"#1e293b":"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:patient.name?"pointer":"not-allowed" }}>
-            {patient.name?"Next: Vitals →":"Enter name first"}
+          <button onClick={()=>{if(patient.name) setTab(visitActive?"intake":"mo");}} style={{ marginTop:10, width:"100%", background:patient.name?"#1e293b":"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:patient.name?"pointer":"not-allowed" }}>
+            {patient.name?(visitActive?"Next: Intake →":"Next: MO →"):"Enter name first"}
           </button>
         </div>
       )}
 
-      {/* ===== VITALS ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== INTAKE TAB (Visit Workflow) ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="intake" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#059669,#10b981)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>📝</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Intake — {patient.name || "Patient"}</div>
+              <div style={{ fontSize:10, opacity:.8 }}>Complaints + Vitals + Reports</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 1/5</span>
+          </div>
+
+          {/* Chief Complaints */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🗣️ Chief Complaints</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:6 }}>
+              {COMPLAINT_CHIPS.map(c => (
+                <button key={c} onClick={()=>toggleChip(complaints,setComplaints,c)}
+                  style={{ padding:"5px 10px", borderRadius:7, fontSize:11, fontWeight:600, cursor:"pointer",
+                    border:`1.5px solid ${complaints.includes(c)?"#2563eb":"#e2e8f0"}`,
+                    background:complaints.includes(c)?"#eff6ff":"white",
+                    color:complaints.includes(c)?"#2563eb":"#64748b" }}>{c}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:4 }}>
+              <input value={complaintText} onChange={e=>setComplaintText(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&complaintText.trim()){setComplaints([...complaints,complaintText.trim()]);setComplaintText("");}}}
+                placeholder="Other complaint + Enter"
+                style={{ flex:1, padding:"8px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+              <AudioInput label="🎤" dgKey={dgKey} whisperKey={whisperKey} color="#059669" compact
+                onTranscript={t=>{if(t.trim()) setComplaints([...complaints, t.trim()]);}} />
+            </div>
+            {complaints.length > 0 && (
+              <div style={{ marginTop:4, display:"flex", flexWrap:"wrap", gap:3 }}>
+                {complaints.map((c,i) => (
+                  <span key={i} style={{ padding:"3px 8px", background:"#2563eb", color:"white", borderRadius:5, fontSize:10, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>
+                    {c}
+                    <button onClick={()=>setComplaints(complaints.filter((_,j)=>j!==i))}
+                      style={{ background:"none", border:"none", color:"white", cursor:"pointer", fontSize:10, padding:0 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Vitals (same as existing vitals section) */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>💓 Vitals</div>
+            <AudioInput label="Say vitals: BP 140/90, weight 80kg" dgKey={dgKey} whisperKey={whisperKey} color="#ea580c" compact onTranscript={voiceFillVitals} />
+            {loading.vv && <div style={{ textAlign:"center", padding:3, fontSize:10, color:"#ea580c" }}>🔬 Filling...</div>}
+            <Err msg={errors.vv} onDismiss={()=>clearErr("vv")} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:5, marginTop:4 }}>
+              {[{k:"bp_sys",l:"BP Sys"},{k:"bp_dia",l:"BP Dia"},{k:"pulse",l:"Pulse"},{k:"temp",l:"Temp °F"},{k:"spo2",l:"SpO2 %"},{k:"weight",l:"Wt kg"},{k:"height",l:"Ht cm"},{k:"bmi",l:"BMI",disabled:true},{k:"waist",l:"Waist cm"},{k:"body_fat",l:"Body Fat %"},{k:"muscle_mass",l:"Muscle kg"}].map(v => (
+                <div key={v.k}>
+                  <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>{v.l}</label>
+                  <input type="number" value={vitals[v.k]} onChange={e=>updateVital(v.k,e.target.value)} disabled={v.disabled}
+                    style={{ width:"100%", padding:"4px 6px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:14, fontWeight:600, boxSizing:"border-box", background:v.disabled?"#f0fdf4":"white" }} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Lab Upload (same as vitals tab) */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, color:"#7c3aed", marginBottom:6 }}>🔬 Upload Reports</div>
+            <div onClick={()=>labRef.current?.click()} style={{ border:"2px dashed #c4b5fd", borderRadius:8, padding:10, textAlign:"center", cursor:"pointer", background:"#faf5ff" }}>
+              <input ref={labRef} type="file" accept="image/*,.pdf,.heic,.heif" onChange={handleLabUpload} style={{ display:"none" }} />
+              {labImageData ? <div style={{ color:"#7c3aed", fontWeight:600, fontSize:12 }}>📋 {labImageData.fileName}</div> : <div><div style={{ fontSize:18 }}>📋</div><div style={{ fontWeight:600, color:"#7c3aed", fontSize:11 }}>Upload Lab Report</div></div>}
+            </div>
+            {labImageData && !labData && <button onClick={processLab} disabled={loading.lab} style={{ marginTop:4, width:"100%", background:loading.lab?"#94a3b8":"#7c3aed", color:"white", border:"none", padding:"7px", borderRadius:6, fontSize:12, fontWeight:700, cursor:loading.lab?"wait":"pointer" }}>{loading.lab?"🔬 Extracting...":"🔬 Extract Labs"}</button>}
+            <Err msg={errors.lab} onDismiss={()=>clearErr("lab")} />
+            {labData && <div style={{ marginTop:3, color:"#059669", fontWeight:600, fontSize:11 }}>✅ {labData.panels?.reduce((a,p)=>a+p.tests.length,0)} tests extracted</div>}
+            {labData && (labData.panels||[]).map((panel,pi) => (
+              <div key={pi} style={{ marginTop:4, border:"1px solid #e2e8f0", borderRadius:6, overflow:"hidden" }}>
+                <div style={{ background:"#7c3aed", color:"white", padding:"3px 8px", fontSize:10, fontWeight:700 }}>{panel.panel_name}</div>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10 }}><tbody>
+                  {panel.tests.map((t,ti) => (
+                    <tr key={ti} style={{ background:t.flag==="H"?"#fef2f2":t.flag==="L"?"#eff6ff":ti%2?"#fafafa":"white" }}>
+                      <td style={{ padding:"2px 6px" }}>{t.test_name}</td>
+                      <td style={{ padding:"2px 6px", textAlign:"right", fontWeight:700, color:t.flag==="H"?"#dc2626":t.flag==="L"?"#2563eb":"#1e293b" }}>{t.result_text||t.result} {t.unit}</td>
+                      <td style={{ padding:"2px 6px", textAlign:"center", fontSize:8 }}>{t.flag==="H"?"↑":t.flag==="L"?"↓":"✓"}</td>
+                    </tr>
+                  ))}
+                </tbody></table>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={()=>setTab("exam")} style={{ width:"100%", background:"#1e293b", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+            Next: Physical Exam →
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== EXAM TAB (Visit Workflow) ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="exam" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#f59e0b,#d97706)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🔍</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Physical Examination</div>
+              <div style={{ fontSize:10, opacity:.8 }}>Tap findings · NAD = Normal</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 2/5</span>
+          </div>
+
+          {/* Specialty selector + Mark All NAD */}
+          <div style={{ display:"flex", gap:4, marginBottom:8, alignItems:"center" }}>
+            {Object.keys(EXAM_SECTIONS).map(sp => (
+              <button key={sp} onClick={()=>setExamSpecialty(sp)}
+                style={{ padding:"5px 10px", borderRadius:7, fontSize:11, fontWeight:600, cursor:"pointer",
+                  border:`1.5px solid ${examSpecialty===sp?"#f59e0b":"#e2e8f0"}`,
+                  background:examSpecialty===sp?"#fef3c7":"white", color:examSpecialty===sp?"#92400e":"#64748b" }}>{sp}</button>
+            ))}
+            <div style={{flex:1}} />
+            <button onClick={markAllNAD} style={{ padding:"5px 12px", background:"#059669", color:"white", border:"none", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+              ✓ All NAD
+            </button>
+          </div>
+
+          {/* Exam Accordion */}
+          {(EXAM_SECTIONS[examSpecialty] || []).map(sec => {
+            const isOpen = examOpen === sec.id;
+            const vals = examData[sec.id+"_v"] || [];
+            const isNAD = examData[sec.id+"_n"];
+            const hasFinding = vals.length > 0;
+            return (
+              <div key={sec.id} style={{ background:"white", borderRadius:8, marginBottom:3, border:`1.5px solid ${hasFinding?"#f59e0b":isNAD?"#bbf7d0":"#e2e8f0"}`, overflow:"hidden" }}>
+                <div onClick={()=>setExamOpen(isOpen?null:sec.id)}
+                  style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 10px", cursor:"pointer", background:hasFinding?"#fffbeb":"white" }}>
+                  <span style={{ fontSize:14 }}>{sec.ic}</span>
+                  <span style={{ flex:1, fontSize:12, fontWeight:700, color:"#1e293b" }}>{sec.l}</span>
+                  {isNAD && !hasFinding && <span style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#dcfce7", color:"#059669", fontWeight:700 }}>NAD</span>}
+                  {hasFinding && <span style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#fef3c7", color:"#92400e", fontWeight:700 }}>{vals.length} finding{vals.length>1?"s":""}</span>}
+                  <button onClick={e=>{e.stopPropagation();toggleExamNAD(sec.id);}}
+                    style={{ fontSize:9, background:isNAD?"#059669":"#f1f5f9", color:isNAD?"white":"#64748b", border:"none", padding:"3px 8px", borderRadius:4, fontWeight:700, cursor:"pointer" }}>NAD</button>
+                  <span style={{ fontSize:10, color:"#94a3b8" }}>{isOpen?"▲":"▼"}</span>
+                </div>
+                {isOpen && (
+                  <div style={{ padding:"6px 10px 10px", borderTop:"1px solid #f1f5f9" }}>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                      {sec.o.map(o => (
+                        <button key={o} onClick={()=>toggleExamFinding(sec.id,o)}
+                          style={{ padding:"5px 10px", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer",
+                            border:`1.5px solid ${vals.includes(o)?"#f59e0b":"#e2e8f0"}`,
+                            background:vals.includes(o)?"#fef3c7":"white", color:vals.includes(o)?"#92400e":"#64748b" }}>{o}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Exam notes */}
+          <div style={{ marginTop:8 }}>
+            <textarea value={examNotes} onChange={e=>setExamNotes(e.target.value)} placeholder="Additional exam notes..."
+              rows={2} style={{ width:"100%", padding:"8px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, resize:"vertical", boxSizing:"border-box" }} />
+          </div>
+
+          <div style={{ display:"flex", gap:6, marginTop:8 }}>
+            <button onClick={()=>setTab("intake")} style={{ flex:1, background:"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>← Intake</button>
+            <button onClick={()=>setTab("assess")} style={{ flex:2, background:"#1e293b", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Assess →</button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== ASSESS TAB (Visit Workflow) ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="assess" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#7c3aed,#6d28d9)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🧪</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Assessment</div>
+              <div style={{ fontSize:10, opacity:.8 }}>Diagnoses + Labs + Notes</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 3/5</span>
+          </div>
+
+          {/* Diagnosis Selection */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🏥 Diagnoses</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+              {CONDITION_CHIPS.map(c => (
+                <button key={c.id} onClick={()=>toggleChip(assessDx,setAssessDx,c.id)}
+                  style={{ padding:"5px 10px", borderRadius:7, fontSize:11, fontWeight:600, cursor:"pointer",
+                    border:`1.5px solid ${assessDx.includes(c.id)?c.cl:"#e2e8f0"}`,
+                    background:assessDx.includes(c.id)?c.cl+"12":"white",
+                    color:assessDx.includes(c.id)?c.cl:"#64748b" }}>{c.l}</button>
+              ))}
+            </div>
+            {assessDx.length > 0 && (
+              <div style={{ marginTop:6, padding:8, background:"#f8fafc", borderRadius:6, border:"1px solid #e2e8f0" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#475569", marginBottom:4 }}>Selected: {assessDx.length}</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                  {assessDx.map(id => {
+                    const c = CONDITION_CHIPS.find(x=>x.id===id);
+                    return c && <span key={id} style={{ padding:"3px 8px", borderRadius:5, fontSize:10, fontWeight:700, background:c.cl, color:"white" }}>{c.l}</span>;
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Lab Orders */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🔬 Order Labs</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+              {LAB_ORDER_CHIPS.map(t => (
+                <button key={t} onClick={()=>toggleChip(assessLabs,setAssessLabs,t)}
+                  style={{ padding:"4px 8px", borderRadius:6, fontSize:10, fontWeight:600, cursor:"pointer",
+                    border:`1.5px solid ${assessLabs.includes(t)?"#059669":"#e2e8f0"}`,
+                    background:assessLabs.includes(t)?"#f0fdf4":"white",
+                    color:assessLabs.includes(t)?"#059669":"#64748b" }}>{t}</button>
+              ))}
+            </div>
+            {assessLabs.length > 0 && (
+              <div style={{ marginTop:4, fontSize:11, color:"#059669", fontWeight:700 }}>
+                ✅ {assessLabs.length} tests ordered: {assessLabs.join(", ")}
+              </div>
+            )}
+          </div>
+
+          {/* MO Notes */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:4 }}>📝 MO Notes</div>
+            <AudioInput label="🎤 Dictate assessment notes" dgKey={dgKey} whisperKey={whisperKey} color="#7c3aed" compact
+              onTranscript={t=>setAssessNotes(prev => prev ? prev + "\n" + t : t)} />
+            <textarea value={assessNotes} onChange={e=>setAssessNotes(e.target.value)} placeholder="Clinical notes, impressions..."
+              rows={3} style={{ width:"100%", padding:"8px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, resize:"vertical", boxSizing:"border-box", marginTop:4 }} />
+          </div>
+
+          {/* Exam Summary (auto-generated from exam tab) */}
+          {getExamSummary() && (
+            <div style={{ marginBottom:12, padding:8, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:"#92400e", marginBottom:2 }}>🔍 EXAM SUMMARY</div>
+              <div style={{ fontSize:11, color:"#78350f", lineHeight:1.6 }}>{getExamSummary()}</div>
+            </div>
+          )}
+
+          {/* Build MO Summary for AI */}
+          <button onClick={()=>{
+            // Build moTranscript from structured data for AI processing
+            const parts = [];
+            if (complaints.length) parts.push("Chief Complaints: " + complaints.join(", "));
+            const examSum = getExamSummary();
+            if (examSum) parts.push("Examination: " + examSum);
+            if (assessDx.length) {
+              const dxLabels = assessDx.map(id => CONDITION_CHIPS.find(c=>c.id===id)?.l || id);
+              parts.push("Diagnoses: " + dxLabels.join(", "));
+            }
+            if (assessNotes) parts.push("Notes: " + assessNotes);
+            if (vitals.bp_sys) parts.push(`Vitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}, Wt ${vitals.weight}kg`);
+            const fullText = parts.join(". ");
+            setMoTranscript(fullText);
+            processMO(fullText);
+          }} disabled={loading.mo}
+            style={{ width:"100%", background:loading.mo?"#94a3b8":"#7c3aed", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.mo?"wait":"pointer", marginBottom:6 }}>
+            {loading.mo ? "🔬 Processing..." : "🤖 Generate MO Summary"}
+          </button>
+
+          {/* Show MO summary if available */}
+          {moData && (
+            <div style={{ marginBottom:8, padding:8, background:"#f0fdf4", border:"1.5px solid #bbf7d0", borderRadius:8 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#059669", marginBottom:4 }}>✅ MO Summary Generated</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                {(moData.diagnoses||[]).map((d,i) => (
+                  <span key={i} style={{ fontSize:10, padding:"2px 6px", borderRadius:4, fontWeight:600,
+                    background:d.status==="Uncontrolled"?"#fef2f2":"#f0fdf4",
+                    color:d.status==="Uncontrolled"?"#dc2626":"#059669" }}>{d.label}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display:"flex", gap:6 }}>
+            <button onClick={()=>setTab("exam")} style={{ flex:1, background:"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>← Exam</button>
+            <button onClick={()=>setTab("consultant")} style={{ flex:2, background:"#1e293b", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Consultant →</button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== VITALS (Legacy — kept for backward compat) ===== */}
       {tab==="vitals" && (
         <div>
           <div style={{ display:"flex", gap:14, alignItems:"flex-start" }}>
@@ -4482,7 +3936,6 @@ IMPORTANT INSTRUCTIONS:
       {tab==="mo" && (
         <div>
           {NewReportsBanner}
-          <PatientBriefCard compact={true} />
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>MO:</label>
             {doctorsList.filter(d=>d.role==="mo").length > 0 ? (
@@ -4519,11 +3972,7 @@ IMPORTANT INSTRUCTIONS:
                           : "First visit"}
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:0,borderRadius:4,overflow:"hidden",border:"1px solid rgba(255,255,255,.3)"}}>
-                      <button onClick={()=>setBriefMode("narrative")} style={{padding:"3px 8px",fontSize:9,fontWeight:700,border:"none",cursor:"pointer",background:briefMode==="narrative"?"rgba(255,255,255,.3)":"transparent",color:"white"}}>📖 Read</button>
-                      <button onClick={()=>setBriefMode("structured")} style={{padding:"3px 8px",fontSize:9,fontWeight:700,border:"none",cursor:"pointer",background:briefMode==="structured"?"rgba(255,255,255,.3)":"transparent",color:"white"}}>📊 Cards</button>
-                    </div>
-                    <button onClick={()=>{ navigator.clipboard.writeText(briefMode==="narrative" ? (moBrief.narrative||moBrief.briefText) : moBrief.briefText); }}
+                    <button onClick={()=>{ navigator.clipboard.writeText(moBrief.briefText); }}
                       style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>📋 Copy</button>
                     <button onClick={()=>setMoBrief(generateMOBrief())}
                       style={{ background:"rgba(255,255,255,.15)", border:"none", color:"white", padding:"4px 8px", borderRadius:5, fontSize:10, cursor:"pointer" }}>🔄</button>
@@ -4532,14 +3981,8 @@ IMPORTANT INSTRUCTIONS:
                   </div>
 
                   <div style={{ padding:10, fontSize:11, lineHeight:1.7 }}>
-                    {/* Narrative View */}
-                    {briefMode === "narrative" && moBrief.narrative && (
-                      <div style={{ whiteSpace:"pre-wrap", fontSize:12, lineHeight:1.8, color:"#1e293b", padding:4 }}>
-                        {moBrief.narrative}
-                      </div>
-                    )}
-                    {/* Structured Cards View */}
-                    {briefMode === "structured" && moBrief.diagnoses.length > 0 && (
+                    {/* Diagnoses */}
+                    {moBrief.diagnoses.length > 0 && (
                       <div style={{ marginBottom:8 }}>
                         <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:3 }}>KNOWN CONDITIONS</div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
@@ -4748,42 +4191,12 @@ IMPORTANT INSTRUCTIONS:
               </div>
             </div>
           )}
-
-          {/* ── AI CLINICAL BRIEF ── */}
-          {dbPatientId && patientFullData && (
-            <div style={{ marginBottom:10 }}>
-              <button onClick={generateAIBrief} disabled={aiBriefLoading}
-                style={{ width:"100%", background: aiBriefLoading ? "#94a3b8" : "linear-gradient(135deg,#7c3aed,#a855f7)", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:aiBriefLoading?"wait":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
-                {aiBriefLoading ? "\u23f3 Generating AI Brief..." : "\U0001f9e0 AI Clinical Brief"}
-              </button>
-              {aiBrief && (
-                <div style={{ marginTop:8, border:"2px solid #7c3aed", borderRadius:10, overflow:"hidden" }}>
-                  <div style={{ background:"linear-gradient(135deg,#7c3aed,#6d28d9)", color:"white", padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ fontSize:14 }}>\U0001f9e0</span>
-                    <div style={{ flex:1, fontWeight:800, fontSize:13 }}>AI CLINICAL BRIEF</div>
-                    <button onClick={()=>navigator.clipboard.writeText(aiBrief)}
-                      style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", padding:"4px 10px", borderRadius:5, fontSize:10, fontWeight:700, cursor:"pointer" }}>📋 Copy</button>
-                    <button onClick={()=>setAiBrief(null)}
-                      style={{ background:"rgba(255,255,255,.1)", border:"none", color:"white", padding:"4px 6px", borderRadius:5, fontSize:10, cursor:"pointer" }}>\u2715</button>
-                  </div>
-                  <div style={{ padding:12, fontSize:12, lineHeight:1.8, color:"#1e293b", whiteSpace:"pre-wrap", maxHeight:500, overflowY:"auto", background:"#faf5ff" }}>
-                    {aiBrief.split(/\*\*(.*?)\*\*/g).map((part, i) =>
-                      i % 2 === 1
-                        ? <div key={i} style={{ fontWeight:800, fontSize:11, color:"#7c3aed", marginTop:i>1?12:0, marginBottom:4, textTransform:"uppercase", letterSpacing:".5px", borderBottom:"1px solid #e9d5ff", paddingBottom:3 }}>{part}</div>
-                        : <span key={i}>{part}</span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
       {/* ===== CONSULTANT ===== */}
       {tab==="consultant" && (
         <div>
-            <PatientBriefCard />
           {NewReportsBanner}
           <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"center" }}>
             <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Consultant:</label>
@@ -4815,7 +4228,7 @@ IMPORTANT INSTRUCTIONS:
                 <span style={{ fontSize:11, fontWeight:800, color:"#1e40af" }}>📋 {moBrief.isFollowUp?"FOLLOW-UP":"NEW"} BRIEF</span>
                 {moBrief.isFollowUp && <span style={{ fontSize:9, color:"#64748b", fontWeight:600 }}>{moBrief.totalVisits} visits • {moBrief.daysSince}d ago</span>}
                 <div style={{flex:1}} />
-                <button onClick={()=>navigator.clipboard.writeText(briefMode==="narrative"?(moBrief.narrative||moBrief.briefText):moBrief.briefText)} style={{ fontSize:9, background:"white", border:"1px solid #bfdbfe", padding:"2px 6px", borderRadius:4, cursor:"pointer", color:"#2563eb", fontWeight:600 }}>Copy</button>
+                <button onClick={()=>navigator.clipboard.writeText(moBrief.briefText)} style={{ fontSize:9, background:"white", border:"1px solid #bfdbfe", padding:"2px 6px", borderRadius:4, cursor:"pointer", color:"#2563eb", fontWeight:600 }}>Copy</button>
               </div>
               <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
                 {moBrief.diagnoses.slice(0,6).map((d,i) => (
@@ -4905,7 +4318,7 @@ IMPORTANT INSTRUCTIONS:
         <div>
           {NewReportsBanner}
           <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
-            <button onClick={()=>setTab("vitals")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
+            <button onClick={()=>setTab(visitActive?"intake":"docs")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
             <button onClick={()=>setTab("mo")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ MO</button>
             <button onClick={()=>setTab("consultant")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ Consultant</button>
             <button className="no-print" onClick={resetPlanEdits} style={{ background:"#fef3c7", border:"1px solid #fcd34d", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600, color:"#92400e" }}>↩ Reset</button>
@@ -4918,14 +4331,7 @@ IMPORTANT INSTRUCTIONS:
               {rxReviewLoading?"⏳ Reviewing...":"🤖 Review Rx"}
             </button>
             <div style={{ flex:1 }} />
-            <div className="no-print" style={{ display:"flex", background:"#f1f5f9", borderRadius:6, padding:2, marginRight:8 }}>
-                  {[["plan","📋 Rx"],["card","💊 Medicine Card"]].map(([id,label])=>(
-                    <button key={id} onClick={()=>setPlanView(id)} style={{ padding:"3px 8px", fontSize:9, fontWeight:700, border:"none", borderRadius:4, cursor:"pointer",
-                      background:planView===id?"white":"transparent", color:planView===id?"#2563eb":"#64748b",
-                      boxShadow:planView===id?"0 1px 2px rgba(0,0,0,.1)":"none" }}>{label}</button>
-                  ))}
-                </div>
-                <button className="no-print" onClick={copyPlanToClipboard} style={{ background:planCopied?"#059669":"#f1f5f9", color:planCopied?"white":"#475569", border:`1px solid ${planCopied?"#059669":"#e2e8f0"}`, padding:"4px 10px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+            <button className="no-print" onClick={copyPlanToClipboard} style={{ background:planCopied?"#059669":"#f1f5f9", color:planCopied?"white":"#475569", border:`1px solid ${planCopied?"#059669":"#e2e8f0"}`, padding:"4px 10px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
               {planCopied?"✅ Copied!":"📋 Copy Rx"}
             </button>
             <button onClick={handlePrintPlan} style={{ background:"#1e293b", color:"white", border:"none", padding:"4px 12px", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>🖨️ Print & Save</button>
@@ -5032,31 +4438,7 @@ IMPORTANT INSTRUCTIONS:
           )}
 
           {!moData && !conData ? <div style={{ textAlign:"center", padding:24, color:"#94a3b8" }}>Complete MO & Consultant first</div> : (
-            <div data-plan-content style={{display:planView==="plan"?"block":"none"}}>
-              <PatientBriefCard compact={true} />
-              {/* New data alert */}
-              {(() => {
-                const newDocs = (patientFullData?.documents||[]).filter(d => d.created_at && (Date.now()-new Date(d.created_at).getTime()) < 24*60*60*1000);
-                const newLabs = (patientFullData?.lab_results||[]).filter(l => l.created_at && (Date.now()-new Date(l.created_at).getTime()) < 24*60*60*1000);
-                const companionDocs = newDocs.filter(d => (d.source||"").toLowerCase().includes("companion"));
-                if (newDocs.length === 0 && newLabs.length === 0) return null;
-                return (
-                  <div className="no-print" style={{ background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", border:"2px solid #60a5fa", borderRadius:8, padding:"8px 12px", marginBottom:10, animation:"pulse 2s 3" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <span style={{ fontSize:16 }}>📸</span>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:11, fontWeight:800, color:"#1e40af" }}>New Data Available</div>
-                        <div style={{ fontSize:10, color:"#475569" }}>
-                          {newDocs.length > 0 && <span>{newDocs.length} new document{newDocs.length>1?"s":""} </span>}
-                          {newLabs.length > 0 && <span>• {newLabs.length} new lab result{newLabs.length>1?"s":""} </span>}
-                          {companionDocs.length > 0 && <span>• via Companion</span>}
-                        </div>
-                      </div>
-                      <button onClick={()=>setTab("docs")} style={{ fontSize:9, background:"#2563eb", color:"white", border:"none", padding:"4px 8px", borderRadius:4, fontWeight:700, cursor:"pointer" }}>View</button>
-                    </div>
-                  </div>
-                );
-              })()}
+            <div data-plan-content>
               {/* Plan Header */}
               <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", color:"white", padding:"12px 16px", borderRadius:"10px 10px 0 0" }}>
                 <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -5135,34 +4517,6 @@ IMPORTANT INSTRUCTIONS:
                 </PlanBlock>}
 
                 {/* Goals */}
-                {moData?.history && (moData.history.family || moData.history.past_medical_surgical || moData.history.personal) && <PlanBlock id="history" title="📖 Patient History" color="#1e293b" hidden={planHidden.has("history")} onToggle={()=>toggleBlock("history")}>
-                  <div style={{ display:"grid", gap:6 }}>
-                    {moData.history.family && moData.history.family !== "NIL" && moData.history.family !== "-" && (
-                      <div style={{ padding:"6px 10px", background:"#fef2f2", borderRadius:6, border:"1px solid #fecaca" }}>
-                        <div style={{ fontSize:9, fontWeight:700, color:"#dc2626", marginBottom:2 }}>{"👨‍👩‍👧"} FAMILY HISTORY</div>
-                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.family}</div>
-                      </div>
-                    )}
-                    {moData.history.past_medical_surgical && moData.history.past_medical_surgical !== "NIL" && moData.history.past_medical_surgical !== "-" && (
-                      <div style={{ padding:"6px 10px", background:"#f0f9ff", borderRadius:6, border:"1px solid #bae6fd" }}>
-                        <div style={{ fontSize:9, fontWeight:700, color:"#0369a1", marginBottom:2 }}>{"🏥"} PAST MEDICAL / SURGICAL</div>
-                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.past_medical_surgical}</div>
-                      </div>
-                    )}
-                    {moData.history.personal && moData.history.personal !== "NIL" && moData.history.personal !== "-" && (
-                      <div style={{ padding:"6px 10px", background:"#f0fdf4", borderRadius:6, border:"1px solid #bbf7d0" }}>
-                        <div style={{ fontSize:9, fontWeight:700, color:"#15803d", marginBottom:2 }}>{"🚭"} PERSONAL</div>
-                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.personal}</div>
-                      </div>
-                    )}
-                    {moData.history.covid && (
-                      <div style={{ padding:"6px 10px", background:"#faf5ff", borderRadius:6, border:"1px solid #e9d5ff" }}>
-                        <div style={{ fontSize:9, fontWeight:700, color:"#7c3aed", marginBottom:2 }}>{"🦠"} COVID / VACCINATION</div>
-                        <div style={{ fontSize:11, color:"#1e293b" }}>{moData.history.covid}{moData.history.vaccination ? " | Vaccination: " + moData.history.vaccination : ""}</div>
-                      </div>
-                    )}
-                  </div>
-                </PlanBlock>}
                 {planGoals.length>0 && <PlanBlock id="goals" title="🎯 Your Health Goals" color="#059669" hidden={planHidden.has("goals")} onToggle={()=>toggleBlock("goals")}>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #bbf7d0" }}>
                     <thead><tr style={{ background:"#059669", color:"white" }}><th style={{padding:"4px 8px",textAlign:"left"}}>Marker</th><th style={{padding:"4px 8px"}}>Current</th><th style={{padding:"4px 8px"}}>Target</th><th style={{padding:"4px 8px"}}>By</th><th className="no-print" style={{padding:"4px 8px",width:20}}></th></tr></thead>
@@ -5227,226 +4581,6 @@ IMPORTANT INSTRUCTIONS:
                   )}
                 </PlanBlock>}
 
-                {/* ═══ External Consultant Medications with Reconciliation ═══ */}
-                {(() => {
-                  if (!patientFullData?.medications || !patientFullData?.consultations) return null;
-                  const currentMedNames = new Set(sa(conData,"medications_confirmed").map(m=>(m.name||"").toUpperCase().replace(/[^A-Z]/g,"")));
-                  const conMap = {};
-                  (patientFullData.consultations||[]).forEach(con => { conMap[con.id] = con; });
-                  const giniDoctors = ["bhansali","khetarpal","beant","rahul","bansali"];
-                  const extMeds = (patientFullData.medications||[]).filter(m => {
-                    if (!m.is_active) return false;
-                    const key = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-                    if (key.length <= 1 || currentMedNames.has(key)) return false;
-                    const con = conMap[m.consultation_id] || {};
-                    const docName = (con.con_name||con.mo_name||"").toLowerCase();
-                    return !giniDoctors.some(gd => docName.includes(gd));
-                  });
-                  if (extMeds.length === 0) return null;
-                  const groups = {};
-                  extMeds.forEach(m => {
-                    const con = conMap[m.consultation_id] || {};
-                    const _cd = typeof con.con_data === "string" ? (()=>{try{return JSON.parse(con.con_data);}catch(e){return {};}})() : (con.con_data||{});
-                    const doctor = con.con_name || con.mo_name || "Unknown";
-                    let _sp = _cd.specialty || con.visit_type || "";
-                    let _hosp = _cd.hospital_name || _cd.hospital || "";
-                    const key = doctor + "|||" + (con.visit_date||"");
-                    if (!groups[key]) groups[key] = { doctor, date: con.visit_date, specialty: _sp, hospital: _hosp, meds: [] };
-                    const dupKey = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-                    if (!groups[key].meds.find(x => (x.name||"").toUpperCase().replace(/[^A-Z]/g,"") === dupKey)) {
-                      groups[key].meds.push(m);
-                    }
-                  });
-                  const groupArr = Object.values(groups).filter(g => g.meds.length > 0);
-                  if (groupArr.length === 0) return null;
-                  const totalExt = groupArr.reduce((s,g) => s + g.meds.length, 0);
-                  const getAction = (m) => extMedActions[(m.name||"").toUpperCase()] || "continue";
-                  const stoppedMeds = extMeds.filter(m => getAction(m) === "stop");
-                  const heldMeds = extMeds.filter(m => getAction(m) === "hold");
-                  const fDate = (d) => { try { const s=String(d||""); const dt=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s); return dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); } catch(e) { return ""; } };
-                  const actionColors = { continue:"#059669", hold:"#f59e0b", stop:"#dc2626" };
-                  const actionIcons = { continue:"✅", hold:"⏸️", stop:"❌" };
-                  const actionLabels = { continue:"Continue", hold:"Hold", stop:"Stop" };
-                  return (
-                    <PlanBlock id="extmeds" title={"\U0001f3e5 Medications by Other Consultants (" + totalExt + ")"} color="#92400e" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
-                      <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:10, color:"#92400e", lineHeight:1.5 }}>
-                        <b>Note:</b> External consultant medications based on prescriptions provided by patient. Verified during this visit.
-                      </div>
-                      <div className="no-print" style={{ display:"flex", gap:6, marginBottom:8 }}>
-                        <button onClick={()=>setShowReconcile(!showReconcile)}
-                          style={{ padding:"4px 10px", background:showReconcile?"#7c3aed":"#f1f5f9", color:showReconcile?"white":"#64748b", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                          {showReconcile ? "Done" : "⚕️ Reconcile"}
-                        </button>
-                        {Object.values(extMedActions).some(a=>a==="stop"||a==="hold") && !showReconcile && (
-                          <button onClick={async()=>{
-                            try {
-                              const reconcileContext = Object.entries(extMedActions).filter(([k,v])=>v!=="continue").map(([k,v])=>{
-                                const reason = extMedReasons[k]||"";
-                                return `${k}: ${v.toUpperCase()}${reason?" — "+reason:""}`;
-                              }).join("\n");
-                              const giniMedsList = sa(conData,"medications_confirmed").map(m=>`${m.name} ${m.dose||""} ${m.frequency||""}`).join(", ");
-                              const prompt = `You are updating a patient-friendly treatment summary for ${patient.name||"the patient"}.
-
-Current Gini medications: ${giniMedsList}
-
-Medication reconciliation changes made today:
-${reconcileContext}
-
-Patient context: ${conData?.assessment_summary||""}
-
-Write a warm, clear 4-5 line summary. Include:
-1. Start with reassurance/good news about their progress
-2. Mention key findings in simple words  
-3. Explain what Gini prescribed and why (new medicines especially)
-4. Explain which external medicines were stopped/held and WHY in patient-friendly language
-5. Mention medicines being continued from other doctors
-6. End with encouragement
-
-Use simple language. Be specific about medicine names. Write as "Dear ${patient.name?patient.name.split(" ")[0]:"Patient"}:"
-Return ONLY the summary text, no quotes or markdown.`;
-                              const r = await retryAnthropicFetch("https://api.anthropic.com/v1/messages", {
-                                method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-                                body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:500,messages:[{role:"user",content:prompt}]})
-                              });
-                              if(!r.ok) throw new Error("API "+r.status);
-                              const data = await r.json();
-                              const newSummary = data.content?.[0]?.text||"";
-                              if(newSummary) setConData(prev=>({...prev, assessment_summary:newSummary}));
-                            } catch(e) { console.error("Summary regen:",e); alert("Could not regenerate: "+e.message); }
-                          }}
-                          style={{ padding:"4px 10px", background:"#2563eb", color:"white", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                            🔄 Update Summary
-                          </button>
-                        )}
-                        {!showReconcile && <button onClick={()=>{const all={};extMeds.forEach(m=>{all[(m.name||"").toUpperCase()]="continue";});setExtMedActions(prev=>({...prev,...all}));}}
-                          style={{ padding:"4px 10px", background:"#059669", color:"white", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                          ✅ Confirm All Continue
-                        </button>}
-                      </div>
-                      {groupArr.map((group, gi) => (
-                        <div key={gi} style={{ marginBottom:8 }}>
-                          <div style={{ fontSize:10, fontWeight:700, color:"#475569", padding:"3px 8px", background:"#f1f5f9", borderRadius:4, marginBottom:4, display:"flex", justifyContent:"space-between" }}>
-                            <span>{group.doctor}{group.specialty ? " (" + group.specialty + ")" : ""}{group.date ? " — " + fDate(group.date) : ""}</span>
-                            {group.hospital && <span style={{ fontSize:9, color:"#7c3aed", fontWeight:600 }}>{group.hospital}</span>}
-                          </div>
-                          {group.meds.map((m, mi) => {
-                            const mkey = (m.name||"").toUpperCase();
-                            const action = extMedActions[mkey] || "continue";
-                            return (
-                              <div key={mi} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 8px", borderBottom:"1px solid #f1f5f9",
-                                background: action==="stop"?"#fef2f2":action==="hold"?"#fffbeb":"white",
-                                opacity: action==="stop"?0.6:1 }}>
-                                <span style={{ fontSize:14, width:20 }}>{actionIcons[action]}</span>
-                                <div style={{ flex:1 }}>
-                                  <span style={{ fontWeight:700, fontSize:11, textDecoration:action==="stop"?"line-through":"none" }}>{m.name}</span>
-                                  {m.composition && <span style={{ fontSize:9, color:"#94a3b8", marginLeft:4 }}>{m.composition}</span>}
-                                </div>
-                                <span style={{ fontSize:10, fontWeight:600, minWidth:50, textAlign:"center" }}>{m.dose||""}</span>
-                                <span style={{ fontSize:10, color:"#1e40af", fontWeight:600, minWidth:70, textAlign:"center" }}>{m.timing||m.frequency||""}</span>
-                                {showReconcile && (
-                                  <div className="no-print" style={{ display:"flex", gap:2, alignItems:"center" }}>
-                                    {["continue","hold","stop"].map(a => (
-                                      <button key={a} onClick={()=>{
-                                        if (a==="continue") { setExtMedActions(prev=>({...prev,[mkey]:a})); setActiveReasonPicker(null); setExtMedReasons(prev=>{const n={...prev};delete n[mkey];return n;}); }
-                                        else { setExtMedActions(prev=>({...prev,[mkey]:a})); setActiveReasonPicker(mkey); }
-                                      }}
-                                        style={{ padding:"2px 6px", borderRadius:4, fontSize:8, fontWeight:700, cursor:"pointer",
-                                          background:action===a?actionColors[a]:"#f1f5f9", color:action===a?"white":"#64748b",
-                                          border:action===a?"none":"1px solid #e2e8f0" }}>{actionLabels[a]}</button>
-                                    ))}
-                                    {extMedReasons[mkey] && <span style={{ fontSize:8, color:"#64748b", maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={extMedReasons[mkey]}>💬 {extMedReasons[mkey]}</span>}
-                                  </div>
-                                )}
-                              {/* Reason picker */}
-                              {activeReasonPicker === mkey && (action === "stop" || action === "hold") && (
-                                <div className="no-print" style={{ padding:"6px 8px", background:action==="stop"?"#fef2f2":"#fffbeb", borderTop:"1px dashed "+actionColors[action], marginTop:4 }}>
-                                  <div style={{ fontSize:9, fontWeight:700, color:actionColors[action], marginBottom:4 }}>
-                                    {action==="stop"?"Why stopping this medicine?":"Why putting on hold?"}
-                                  </div>
-                                  <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
-                                    {(action==="stop" ? [
-                                      "Course completed",
-                                      "No clinical benefit",
-                                      "Side effects reported",
-                                      "Replaced by Gini prescription",
-                                      "Duplicate therapy",
-                                      "Contraindicated with new medicine",
-                                      "Not indicated for diagnosis",
-                                      "Reducing pill burden",
-                                      "Patient not tolerating",
-                                      "Outdated prescription",
-                                    ] : [
-                                      "Discuss with prescribing doctor first",
-                                      "Awaiting lab results",
-                                      "Potential drug interaction",
-                                      "Limited evidence for indication",
-                                      "Monitor before continuing",
-                                      "Dose adjustment needed",
-                                      "Renal function concern",
-                                      "Hepatic function concern",
-                                      "Patient preference",
-                                      "Temporary hold during illness",
-                                    ]).map(reason => (
-                                      <button key={reason} onClick={()=>{setExtMedReasons(prev=>({...prev,[mkey]:reason}));setActiveReasonPicker(null);}}
-                                        style={{ padding:"3px 8px", borderRadius:4, fontSize:9, cursor:"pointer", fontWeight:600,
-                                          background:extMedReasons[mkey]===reason?actionColors[action]:"white",
-                                          color:extMedReasons[mkey]===reason?"white":"#374151",
-                                          border:"1px solid "+(extMedReasons[mkey]===reason?actionColors[action]:"#d1d5db") }}>{reason}</button>
-                                    ))}
-                                  </div>
-                                  <div style={{ display:"flex", gap:4 }}>
-                                    <input placeholder="Other reason..." value={extMedReasons[mkey]&&![
-                                      "Course completed","No clinical benefit","Side effects reported","Replaced by Gini prescription",
-                                      "Duplicate therapy","Contraindicated with new medicine","Not indicated for diagnosis","Reducing pill burden",
-                                      "Patient not tolerating","Outdated prescription",
-                                      "Discuss with prescribing doctor first","Awaiting lab results","Potential drug interaction",
-                                      "Limited evidence for indication","Monitor before continuing","Dose adjustment needed",
-                                      "Renal function concern","Hepatic function concern","Patient preference","Temporary hold during illness"
-                                    ].includes(extMedReasons[mkey]) ? extMedReasons[mkey] : ""}
-                                      onChange={e=>setExtMedReasons(prev=>({...prev,[mkey]:e.target.value}))}
-                                      onKeyDown={e=>{if(e.key==="Enter")setActiveReasonPicker(null);}}
-                                      style={{ flex:1, padding:"4px 8px", border:"1px solid #d1d5db", borderRadius:4, fontSize:10 }} />
-                                    <button onClick={()=>setActiveReasonPicker(null)}
-                                      style={{ padding:"4px 8px", background:actionColors[action], color:"white", border:"none", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer" }}>Done</button>
-                                  </div>
-                                </div>
-                              )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))}
-                      {stoppedMeds.length > 0 && (
-                        <div style={{ marginTop:8, padding:6, background:"#fef2f2", borderRadius:6, border:"1px solid #fecaca" }}>
-                          <div style={{ fontSize:9, fontWeight:700, color:"#dc2626" }}>❌ STOPPED / COMPLETED</div>
-                          {stoppedMeds.map((m,i) => {
-                            const con = conMap[m.consultation_id]||{};
-                            const reason = extMedReasons[(m.name||"").toUpperCase()];
-                            return <div key={i} style={{ fontSize:10, color:"#dc2626", padding:"2px 0" }}>
-                              <span style={{ textDecoration:"line-through" }}>{m.name} ({con.con_name||"ext"})</span>
-                              {reason && <span style={{ fontStyle:"italic", color:"#991b1b", marginLeft:4 }}>— {reason}</span>}
-                            </div>;
-                          })}
-                        </div>
-                      )}
-                      {heldMeds.length > 0 && (
-                        <div style={{ marginTop:6, padding:6, background:"#fffbeb", borderRadius:6, border:"1px solid #fde68a" }}>
-                          <div style={{ fontSize:9, fontWeight:700, color:"#92400e" }}>⏸️ ON HOLD — Discuss with prescribing doctor</div>
-                          {heldMeds.map((m,i) => {
-                            const con = conMap[m.consultation_id]||{};
-                            const _cd2 = typeof con.con_data==="string"?(()=>{try{return JSON.parse(con.con_data)}catch(e){return{}}})():(con.con_data||{});
-                            const reason = extMedReasons[(m.name||"").toUpperCase()];
-                            return <div key={i} style={{ fontSize:10, color:"#92400e", padding:"2px 0" }}>
-                              {m.name} — {con.con_name||"ext"} ({_cd2.hospital_name||_cd2.hospital||""})
-                              {reason && <span style={{ fontStyle:"italic", marginLeft:4 }}>— {reason}</span>}
-                            </div>;
-                          })}
-                        </div>
-                      )}
-                    </PlanBlock>
-                  );
-                })()}
-
                 {/* Lifestyle */}
                 {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
                   {planLifestyle.map((l,i) => {
@@ -5504,7 +4638,7 @@ Return ONLY the summary text, no quotes or markdown.`;
                 {(conData?.investigations_ordered||conData?.investigations_to_order||[]).length > 0 && <PlanBlock id="investigations" title="🔬 Investigations Ordered" color="#7c3aed" hidden={planHidden.has("investigations")} onToggle={()=>toggleBlock("investigations")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                     {(conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => (
-                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{typeof t==="object"?(t.test||t.name||JSON.stringify(t)):t}</span>
+                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{t}</span>
                     ))}
                   </div>
                   {conData?.follow_up?.instructions && (
@@ -5573,13 +4707,11 @@ Return ONLY the summary text, no quotes or markdown.`;
                   <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
                     <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
                       <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
-                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
-                      {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#1e40af", marginTop:2 }}>{"📅 "}{(() => { const d = conData.follow_up.date; const m = d.match && d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if (m) { const dt = new Date(m[3],m[2]-1,m[1]); return dt.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); } const dt2 = new Date(d); return isNaN(dt2) ? d : dt2.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); })()}</div>}
-                      {(conData.follow_up.instructions||conData.follow_up.special_instructions) && <div style={{ fontSize:11, color:"#475569", marginTop:4, padding:"4px 8px", background:"#fef3c7", borderRadius:4, border:"1px solid #fde68a" }}>{"⚠️ "}{conData.follow_up.instructions||conData.follow_up.special_instructions}</div>}
+                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData.follow_up.duration?.toUpperCase()||conData.follow_up.date||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
                     </div>
                     <div style={{ flex:1 }}>
                       {(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).length > 0 && (
-                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{typeof t==="object"?(t.test||t.name||JSON.stringify(t)):t}</span>)}</div></div>
+                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData.follow_up.tests_to_bring||conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
                       )}
                     </div>
                   </div>
@@ -5604,171 +4736,6 @@ Return ONLY the summary text, no quotes or markdown.`;
               </div>
             </div>
           )}
-
-          {/* ═══ MEDICINE CARD VIEW ═══ */}
-          {planView === "card" && conData && (() => {
-            const gMeds = sa(conData,"medications_confirmed").map(m => ({
-              ...m, source:"Gini", sourceLabel:"Dr. Bhansali (Gini)",
-              times: guessTime(m.timing || m.frequency || "")
-            }));
-            const conMap2 = {};
-            (patientFullData?.consultations||[]).forEach(con => { conMap2[con.id] = con; });
-            const giniDocs = ["bhansali","khetarpal","beant","rahul","bansali"];
-            const curNames = new Set(gMeds.map(m=>(m.name||"").toUpperCase().replace(/[^A-Z]/g,"")));
-            const eMeds = (patientFullData?.medications||[]).filter(m => {
-              if (!m.is_active) return false;
-              const k = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-              if (k.length<=1 || curNames.has(k)) return false;
-              const con = conMap2[m.consultation_id]||{};
-              return !giniDocs.some(gd => (con.con_name||con.mo_name||"").toLowerCase().includes(gd));
-            }).filter(m => (extMedActions[(m.name||"").toUpperCase()]||"continue") === "continue")
-              .map(m => {
-                const con = conMap2[m.consultation_id]||{};
-                const _cd = typeof con.con_data==="string"?(()=>{try{return JSON.parse(con.con_data)}catch(e){return{}}})():(con.con_data||{});
-                return { ...m, source:"external", sourceLabel:`${con.con_name||"ext"} (${_cd.hospital_name||_cd.hospital||""})`.replace(/\(\)/,""),
-                  times: guessTime(m.timing || m.frequency || "") };
-              });
-            const stoppedExt = (patientFullData?.medications||[]).filter(m => {
-              if (!m.is_active) return false;
-              const k = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-              if (k.length<=1 || curNames.has(k)) return false;
-              const con = conMap2[m.consultation_id]||{};
-              if (giniDocs.some(gd => (con.con_name||con.mo_name||"").toLowerCase().includes(gd))) return false;
-              return (extMedActions[(m.name||"").toUpperCase()]) === "stop";
-            });
-            const heldExt = (patientFullData?.medications||[]).filter(m => {
-              if (!m.is_active) return false;
-              const k = (m.name||"").toUpperCase().replace(/[^A-Z]/g,"");
-              if (k.length<=1 || curNames.has(k)) return false;
-              const con = conMap2[m.consultation_id]||{};
-              if (giniDocs.some(gd => (con.con_name||con.mo_name||"").toLowerCase().includes(gd))) return false;
-              return (extMedActions[(m.name||"").toUpperCase()]) === "hold";
-            });
-            const allActive = [...gMeds, ...eMeds];
-            const timeSlots = [
-              { id:"wakeup", label:"🌅 Wake Up (Empty Stomach)", time:"6:00 AM" },
-              { id:"morning", label:"🌅 Morning", time:"7:00 AM" },
-              { id:"before_breakfast", label:"🍳 Before Breakfast (30 min)", time:"7:30 AM" },
-              { id:"after_breakfast", label:"🥣 After Breakfast", time:"8:30 AM" },
-              { id:"after_lunch", label:"🍛 After Lunch", time:"1:30 PM" },
-              { id:"evening", label:"🌆 Evening", time:"5:00 PM" },
-              { id:"after_dinner", label:"🍽️ After Dinner", time:"8:30 PM" },
-              { id:"night_10pm", label:"🌙 Night (10 PM)", time:"10:00 PM" },
-              { id:"bedtime", label:"🛏️ Bedtime", time:"10:30 PM" },
-              { id:"other", label:"📋 As Directed", time:"" },
-            ];
-            const medsByTime = {};
-            timeSlots.forEach(slot => {
-              const meds = allActive.filter(m => (m.times||[]).includes(slot.id));
-              if (meds.length > 0) medsByTime[slot.id] = { ...slot, meds };
-            });
-            const ungrouped = allActive.filter(m => !m.times || m.times.length === 0);
-            if (ungrouped.length > 0) {
-              medsByTime["other"] = { ...timeSlots[timeSlots.length-1], meds: [...(medsByTime["other"]?.meds||[]), ...ungrouped] };
-            }
-            return (
-              <div data-medicine-card>
-                <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:12, padding:14, color:"white", marginBottom:10 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div>
-                      <div style={{ fontSize:14, fontWeight:800 }}>💊 YOUR COMPLETE MEDICINE SCHEDULE</div>
-                      <div style={{ fontSize:11, opacity:.7, marginTop:2 }}>{patient.name} | {patient.fileNo} | Updated: {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</div>
-                    </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontSize:24, fontWeight:800 }}>{allActive.length}</div>
-                      <div style={{ fontSize:9, opacity:.7 }}>Active Medicines</div>
-                    </div>
-                  </div>
-                </div>
-                {timeSlots.filter(slot => medsByTime[slot.id]).map(slot => {
-                  const slotData = medsByTime[slot.id];
-                  return (
-                    <div key={slot.id} style={{ marginBottom:8, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
-                      <div style={{ background:"#f8fafc", padding:"6px 12px", display:"flex", justifyContent:"space-between", borderBottom:"1px solid #e2e8f0" }}>
-                        <span style={{ fontSize:12, fontWeight:700 }}>{slot.label}</span>
-                        <span style={{ fontSize:10, color:"#64748b" }}>{slot.time}</span>
-                      </div>
-                      <div style={{ background:"white" }}>
-                        {slotData.meds.map((m, i) => (
-                          <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 12px", borderBottom:i<slotData.meds.length-1?"1px solid #f1f5f9":"none" }}>
-                            <div style={{ width:18, height:18, borderRadius:4, border:"2px solid #cbd5e1", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, flexShrink:0 }}>☐</div>
-                            <div style={{ flex:1 }}>
-                              <div style={{ fontSize:12, fontWeight:700 }}>
-                                {m.name}
-                                {m.isNew && <span style={{ background:"#1e40af", color:"white", padding:"0 4px", borderRadius:3, fontSize:8, marginLeft:4 }}>NEW</span>}
-                              </div>
-                              <div style={{ fontSize:10, color:"#64748b" }}>
-                                {m.dose||""} {m.frequency||""} — {(m.forDiagnosis||[]).map(d => typeof d==="string"?d:d.label||"").join(", ")||""}
-                              </div>
-                            </div>
-                            <span style={{ fontSize:8, padding:"2px 6px", borderRadius:4, fontWeight:600,
-                              background:m.source==="external"?"#fef3c7":"#dbeafe",
-                              color:m.source==="external"?"#92400e":"#2563eb" }}>
-                              {m.source==="external"?m.sourceLabel:"Gini"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-                {stoppedExt.length > 0 && (
-                  <div style={{ marginBottom:8, borderRadius:8, overflow:"hidden", border:"2px solid #fecaca" }}>
-                    <div style={{ background:"#fef2f2", padding:"6px 12px", borderBottom:"1px solid #fecaca" }}>
-                      <span style={{ fontSize:12, fontWeight:700, color:"#dc2626" }}>❌ STOPPED — Do NOT Take</span>
-                    </div>
-                    <div style={{ background:"white", padding:8 }}>
-                      {stoppedExt.map((m,i) => {
-                        const con = conMap2[m.consultation_id]||{};
-                        const _rsn = extMedReasons[(m.name||"").toUpperCase()];
-                        return <div key={i} style={{ fontSize:11, padding:"3px 0", color:"#dc2626" }}>
-                          <span style={{ textDecoration:"line-through" }}>{m.name} — {m.dose||""} ({con.con_name||"ext"})</span>
-                          {_rsn && <div style={{ fontSize:9, fontStyle:"italic", color:"#991b1b", marginLeft:20 }}>Reason: {_rsn}</div>}
-                        </div>;
-                      })}
-                    </div>
-                  </div>
-                )}
-                {heldExt.length > 0 && (
-                  <div style={{ marginBottom:8, borderRadius:8, overflow:"hidden", border:"2px solid #fde68a" }}>
-                    <div style={{ background:"#fffbeb", padding:"6px 12px", borderBottom:"1px solid #fde68a" }}>
-                      <span style={{ fontSize:12, fontWeight:700, color:"#92400e" }}>⏸️ ON HOLD — Ask Doctor Before Restarting</span>
-                    </div>
-                    <div style={{ background:"white", padding:8 }}>
-                      {heldExt.map((m,i) => {
-                        const con = conMap2[m.consultation_id]||{};
-                        const _cd3 = typeof con.con_data==="string"?(()=>{try{return JSON.parse(con.con_data)}catch(e){return{}}})():(con.con_data||{});
-                        const _rsn = extMedReasons[(m.name||"").toUpperCase()];
-                        return <div key={i} style={{ fontSize:11, padding:"3px 0", color:"#92400e" }}>
-                          {m.name} — {m.dose||""} — Discuss with {con.con_name||"ext"} ({_cd3.hospital_name||_cd3.hospital||""})
-                          {_rsn && <div style={{ fontSize:9, fontStyle:"italic", marginLeft:20 }}>Reason: {_rsn}</div>}
-                        </div>;
-                      })}
-                    </div>
-                  </div>
-                )}
-                <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0", marginBottom:8 }}>
-                  <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>⚠️ IMPORTANT REMINDERS</div>
-                  <div style={{ fontSize:10, lineHeight:1.8, color:"#374151" }}>
-                    <div>• 🩸 <b>If sugar below 70:</b> Eat 3 glucose tablets IMMEDIATELY, recheck in 15 min</div>
-                    <div>• 📊 <b>Sugar diary:</b> Fasting daily + post-meal 3x/week</div>
-                    <div>• ⚠️ <b>Before next visit:</b> Get fasting blood test, skip morning DM medicines that day</div>
-                  </div>
-                </div>
-                {conData?.follow_up && (
-                  <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0", marginBottom:8 }}>
-                    <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>📅 NEXT VISIT</div>
-                    <div style={{ fontSize:14, fontWeight:800 }}>{conData.follow_up.duration||""}</div>
-                    {conData.follow_up.date && <div style={{ fontSize:12, fontWeight:700, color:"#2563eb" }}>{(() => { const d = conData.follow_up.date; const dt = new Date(d); return isNaN(dt) ? d : dt.toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"}); })()}</div>}
-                    {conData.follow_up.instructions && <div style={{ fontSize:10, color:"#92400e", marginTop:4 }}>⚠️ {conData.follow_up.instructions}</div>}
-                  </div>
-                )}
-                <div style={{ textAlign:"center", fontSize:9, color:"#94a3b8", padding:8 }}>
-                  Medicine schedule prepared at Gini Advanced Care Hospital, Mohali. Verify with your doctor before changes. | 📞 0172-4120100
-                </div>
-              </div>
-            );
-          })()}
           
           {/* ── CLINICAL REASONING ── */}
           {ClinicalReasoningPanel}
@@ -6077,57 +5044,15 @@ Return ONLY the summary text, no quotes or markdown.`;
               {patientFullData?.documents?.length > 0 && (
                 <div style={{ marginTop:12, borderTop:"2px solid #e2e8f0", paddingTop:8 }}>
                   <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>📂 PREVIOUS DOCUMENTS ({patientFullData.documents.length})</div>
-                  {patientFullData.documents.slice(0,15).map(doc => {
-                    const _ext = doc.extracted_data ? (typeof doc.extracted_data==="string" ? (()=>{try{return JSON.parse(doc.extracted_data)}catch(e){return null}})() : doc.extracted_data) : null;
-                    const _meds = _ext?.medications?.length||0;
-                    const _labs = _ext?.labs?.length||0;
-                    const _diags = _ext?.diagnoses?.length||0;
-                    const catIcon = ["lab_report","blood_test","thyroid","lipid","kidney","hba1c","urine"].includes(doc.doc_type)?"🔬":doc.doc_type==="prescription"?"💊":["xray","usg","mri","dexa","ecg","ncs","eye"].includes(doc.doc_type)?"🩻":"📄";
-                    const isNew = doc.created_at && (Date.now()-new Date(doc.created_at).getTime())<24*60*60*1000;
-                    return (
-                    <div key={doc.id} style={{ padding:"6px 8px", borderBottom:"1px solid #f1f5f9", background:isNew?"#eff6ff":"white" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:11 }}>
-                        <span style={{ fontSize:14 }}>{catIcon}</span>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontWeight:700 }}>
-                            {doc.title||doc.doc_type}
-                            {isNew && <span style={{ background:"#dc2626", color:"white", padding:"0 4px", borderRadius:3, fontSize:7, marginLeft:4, fontWeight:800 }}>NEW</span>}
-                          </div>
-                          <div style={{ fontSize:9, color:"#64748b" }}>{doc.source||""} • {doc.doc_date ? (()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})() : ""}</div>
-                        </div>
-                        {doc.storage_path && <button onClick={()=>viewDocumentFile(doc.id)} style={{ fontSize:8, background:"#2563eb", color:"white", border:"none", padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600 }}>📄 View</button>}
-                      </div>
-                      {_ext && (_meds>0||_labs>0||_diags>0) && (
-                        <div style={{ marginTop:4, marginLeft:22 }}>
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                            {_diags>0 && (_ext.diagnoses||[]).slice(0,4).map((d,i)=><span key={i} style={{ fontSize:8, background:"#fef3c7", color:"#92400e", padding:"1px 5px", borderRadius:3, fontWeight:600 }}>{typeof d==="string"?d:d.label||d.id||""}</span>)}
-                            {_meds>0 && <span style={{ fontSize:8, background:"#dbeafe", color:"#2563eb", padding:"1px 5px", borderRadius:3, fontWeight:600 }}>💊 {_meds} meds</span>}
-                            {_labs>0 && <span style={{ fontSize:8, background:"#dcfce7", color:"#059669", padding:"1px 5px", borderRadius:3, fontWeight:600 }}>🔬 {_labs} results</span>}
-                          </div>
-                          {_labs>0 && (
-                            <div style={{ marginTop:3, display:"flex", flexWrap:"wrap", gap:2 }}>
-                              {(_ext.labs||[]).slice(0,6).map((l,i)=>(
-                                <span key={i} style={{ fontSize:8, padding:"1px 4px", borderRadius:2, fontWeight:600,
-                                  background:l.flag==="HIGH"?"#fef2f2":l.flag==="LOW"?"#fffbeb":"#f0fdf4",
-                                  color:l.flag==="HIGH"?"#dc2626":l.flag==="LOW"?"#f59e0b":"#059669" }}>
-                                  {l.test_name}: {l.result}{l.unit?" "+l.unit:""}
-                                </span>
-                              ))}
-                              {(_ext.labs||[]).length>6 && <span style={{ fontSize:8, color:"#94a3b8" }}>+{(_ext.labs||[]).length-6} more</span>}
-                            </div>
-                          )}
-                          {_meds>0 && (
-                            <div style={{ marginTop:3, display:"flex", flexWrap:"wrap", gap:2 }}>
-                              {(_ext.medications||[]).slice(0,4).map((m,i)=>(
-                                <span key={i} style={{ fontSize:8, background:"#eff6ff", color:"#1e40af", padding:"1px 4px", borderRadius:2, fontWeight:600 }}>{m.name} {m.dose||""}</span>
-                              ))}
-                              {(_ext.medications||[]).length>4 && <span style={{ fontSize:8, color:"#94a3b8" }}>+{(_ext.medications||[]).length-4} more</span>}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>);
-                  })}
+                  {patientFullData.documents.slice(0,10).map(doc => (
+                    <div key={doc.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 8px", borderBottom:"1px solid #f1f5f9", fontSize:11 }}>
+                      <span>{doc.doc_type==="lab_report"?"🔬":doc.doc_type==="prescription"?"📄":"🩻"}</span>
+                      <span style={{ flex:1 }}>{doc.title||doc.doc_type}</span>
+                      {doc.doc_date && <span style={{ fontSize:9, color:"#64748b" }}>{(()=>{const d=new Date(String(doc.doc_date).slice(0,10)+"T12:00:00");return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});})()}</span>}
+                      {doc.storage_path && <button onClick={()=>viewDocumentFile(doc.id)} style={{ fontSize:8, background:"#2563eb", color:"white", border:"none", padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600 }}>📄 View</button>}
+                      <span style={{ fontSize:8, color:"#94a3b8" }}>{doc.source||""}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -6165,7 +5090,7 @@ Return ONLY the summary text, no quotes or markdown.`;
 
               {/* Mode tabs */}
               <div style={{ display:"flex", gap:0, marginBottom:8, borderRadius:6, overflow:"hidden", border:"1px solid #e2e8f0" }}>
-                {[["rx","📝 Prescription"],["report","🧪 Reports"],["manual","📋 Manual"],["bulk","📦 Bulk"]].map(([id,label]) => (
+                {[["rx","📝 Prescription"],["report","🧪 Reports"],["manual","📋 Manual"]].map(([id,label]) => (
                   <button key={id} onClick={()=>setHxMode(id)} style={{ flex:1, padding:"6px", fontSize:10, fontWeight:700, border:"none", cursor:"pointer",
                     background:hxMode===id?"#2563eb":"white", color:hxMode===id?"white":"#64748b" }}>{label}</button>
                 ))}
@@ -6216,35 +5141,7 @@ Return ONLY the summary text, no quotes or markdown.`;
               {hxMode==="rx" && (
                 <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0" }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#2563eb", marginBottom:4 }}>📝 PASTE OR DICTATE OLD PRESCRIPTION</div>
-                  <div style={{ fontSize:9, color:"#94a3b8", marginBottom:6 }}>Paste text, dictate, or upload a photo/PDF of the prescription.</div>
-                  
-                  {/* File upload area */}
-                  <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-                    <label style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:4, padding:"8px", background:rxFile?"#f0fdf4":"#f8fafc", border:`2px dashed ${rxFile?"#22c55e":"#cbd5e1"}`, borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:600, color:rxFile?"#059669":"#64748b" }}>
-                      {rxFile ? ("✅ " + rxFile.fileName) : "📷 Upload Prescription (Photo/PDF)"}
-                      <input type="file" accept="image/*,.pdf,.heic,.heif" style={{ display:"none" }} onChange={handleRxFile} />
-                    </label>
-                    {rxFile && !rxFile.extracted && (
-                      <button onClick={extractRxFromFile} disabled={rxFileExtracting}
-                        style={{ padding:"8px 16px", background:rxFileExtracting?"#94a3b8":"#059669", color:"white", border:"none", borderRadius:8, fontWeight:700, fontSize:11, cursor:rxFileExtracting?"wait":"pointer", whiteSpace:"nowrap" }}>
-                        {rxFileExtracting ? "🔬 Extracting..." : "🔬 Extract"}
-                      </button>
-                    )}
-                    {rxFile && (
-                      <button onClick={()=>setRxFile(null)} style={{ padding:"8px", background:"none", border:"1px solid #fecaca", borderRadius:8, color:"#dc2626", cursor:"pointer", fontSize:11 }}>✕</button>
-                    )}
-                  </div>
-                  {rxFile?.extracted && (
-                    <div style={{ marginBottom:8, padding:6, background:"#f0fdf4", borderRadius:6, border:"1px solid #bbf7d0", fontSize:10 }}>
-                      <span style={{ fontWeight:700, color:"#059669" }}>{"✅"} Extracted from file: </span>
-                      {rxFile.extracted.diagnoses?.length||0} diagnoses, {rxFile.extracted.medications?.length||0} medications, {rxFile.extracted.labs?.length||0} lab values
-                      {rxFile.extracted.doctor_name && <span> | {rxFile.extracted.doctor_name}</span>}
-                      {rxFile.extracted.visit_date && <span> | {rxFile.extracted.visit_date}</span>}
-                      <span style={{ color:"#64748b" }}> | Saved to Documents</span>
-                    </div>
-                  )}
-                  
-                  <div style={{ fontSize:9, fontWeight:600, color:"#64748b", marginBottom:4 }}>— OR type/paste/dictate below —</div>
+                  <div style={{ fontSize:9, color:"#94a3b8", marginBottom:6 }}>Paste prescription text, type from the slip, or use voice recording. Claude will auto-extract diagnoses, medications, vitals.</div>
                   <AudioInput label="Dictate prescription" dgKey={dgKey} whisperKey={whisperKey} color="#2563eb" compact
                     onTranscript={t=>setRxText(prev => prev ? prev + "\n" + t : t)} />
                   <textarea value={rxText} onChange={e=>setRxText(e.target.value)} placeholder={"Paste prescription here...\n\nExample:\nDr. Sharma - Endocrinology\nDx: Type 2 DM (uncontrolled), HTN\nBP: 150/90, Wt: 78kg\nRx:\n1. Tab Metformin 500mg BD\n2. Tab Glimepiride 2mg OD before breakfast\n3. Tab Telmisartan 40mg OD morning\nAdv: HbA1c after 3 months\nF/U: 6 weeks"}
@@ -6329,75 +5226,7 @@ Return ONLY the summary text, no quotes or markdown.`;
               {/* ===== EXTRACTED / MANUAL DATA ===== */}
               <div style={{ background:"white", borderRadius:8, padding:10, border:"1px solid #e2e8f0", marginTop:8 }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#64748b", marginBottom:6 }}>
-    
-              {/* ═══ BULK IMPORT MODE ═══ */}
-              {hxMode==="bulk" && (
-                <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#1e40af", marginBottom:4 }}>📦 PASTE ALL VISIT HISTORY</div>
-                  <div style={{ fontSize:9, color:"#64748b", marginBottom:4 }}>Paste the full EMR dump — all visits, all dates. AI will split into individual visits and save each one separately.</div>
-                  <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)}
-                    placeholder={"Paste all visit history here...\n\nExample:\nFOLLOW UP ON 16/9/25\nHT 159.8 WT 81.7 BMI 32.3\nFBG 69 HBA1C 5.3 TG 268\nTREATMENT: TAB THYRONORM 75MCG...\n\nFOLLOW UP ON 16/5/25\nHT 159.5 WT 83.1 BF 34.75\nHBA1C 5.1 FBG 87.5 TG 287.2..."}
-                    style={{ width:"100%", minHeight:150, padding:8, fontSize:11, borderRadius:6, border:"1px solid #d1d5db", fontFamily:"monospace", resize:"vertical" }} />
-                  <div style={{ display:"flex", gap:6, marginTop:6, alignItems:"center", flexWrap:"wrap" }}>
-                    <button onClick={processBulkImport} disabled={bulkParsing || !bulkText.trim()}
-                      style={{ padding:"8px 16px", fontSize:11, fontWeight:700, background:bulkParsing?"#94a3b8":"#2563eb", color:"white", border:"none", borderRadius:6, cursor:bulkParsing?"wait":"pointer" }}>
-                      {bulkParsing ? "⏳ Parsing..." : "🔍 Parse Visits"}
-                    </button>
-                    {bulkVisits.length > 0 && !bulkSaving && (
-                      <button onClick={saveBulkVisits} disabled={!dbPatientId}
-                        style={{ padding:"8px 16px", fontSize:11, fontWeight:700, background:"#16a34a", color:"white", border:"none", borderRadius:6, cursor:"pointer" }}>
-                        {"💾 Save All " + bulkVisits.length + " Visits"}
-                      </button>
-                    )}
-                    {bulkVisits.length > 0 && (
-                      <button onClick={()=>{setBulkVisits([]);setBulkProgress("");setBulkText("");}}
-                        style={{ padding:"8px 16px", fontSize:11, fontWeight:600, background:"#fef2f2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:6, cursor:"pointer" }}>
-                        🗑️ Clear
-                      </button>
-                    )}
-                    {bulkProgress && <span style={{ fontSize:10, color:bulkProgress.includes("❌")?"#dc2626":"#16a34a", fontWeight:600 }}>{bulkProgress}</span>}
-                  </div>
-                  {bulkSaving && (
-                    <div style={{ marginTop:6, background:"#f0fdf4", borderRadius:6, overflow:"hidden", height:6 }}>
-                      <div style={{ height:"100%", background:"#16a34a", width:`${(bulkSaved/Math.max(bulkVisits.length,1))*100}%` , transition:"width 0.3s" }} />
-                    </div>
-                  )}
-                  {bulkVisits.length > 0 && (
-                    <div style={{ marginTop:8, maxHeight:300, overflowY:"auto" }}>
-                      {bulkVisits.map((v, i) => (
-                        <div key={i} style={{ padding:8, marginBottom:4, background:i%2===0?"#f8fafc":"#f1f5f9", borderRadius:6, fontSize:10, border:"1px solid #e2e8f0" }}>
-                          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
-                            <span style={{ fontWeight:800, color:"#1e40af" }}>{"📅 " + v.visit_date}</span>
-                            <span style={{ color:"#64748b" }}>{v.doctor_name || ""}</span>
-                          </div>
-                          <div style={{ display:"flex", gap:8, flexWrap:"wrap", fontSize:9 }}>
-                            {v.vitals?.weight && <span>{"⚖️ " + v.vitals.weight + "kg"}</span>}
-                            {v.vitals?.bp_sys && <span>{"🩸 " + v.vitals.bp_sys + "/" + v.vitals.bp_dia}</span>}
-                            {v.vitals?.bmi && <span>{"📊 BMI " + v.vitals.bmi}</span>}
-                          </div>
-                          {(v.labs||[]).length > 0 && (
-                            <div style={{ marginTop:3, fontSize:9, color:"#475569" }}>
-                              {"🧪 " + v.labs.map(l => l.test_name + ": " + l.result + (l.unit||"")).join(" | ")}
-                            </div>
-                          )}
-                          {(v.medications||[]).length > 0 && (
-                            <div style={{ marginTop:3, fontSize:9, color:"#475569" }}>
-                              {"💊 " + v.medications.map(m => m.name).join(", ")}
-                            </div>
-                          )}
-                          {(v.diagnoses||[]).length > 0 && (
-                            <div style={{ marginTop:3, fontSize:9, color:"#475569" }}>
-                              {"🏷️ " + v.diagnoses.map(d => d.label).join(", ")}
-                            </div>
-                          )}
-                          {v.notes && <div style={{ marginTop:3, fontSize:9, color:"#64748b", fontStyle:"italic" }}>{v.notes}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {hxMode!=="bulk" && <div style={{ fontSize:11, fontWeight:800, color:"#1e40af", marginTop:8, marginBottom:6 }}>{hxMode==="manual" ? "📋 MANUAL ENTRY" : "📋 REVIEW EXTRACTED DATA"}</div>}
+                  {hxMode==="manual" ? "📋 MANUAL ENTRY" : "📋 REVIEW EXTRACTED DATA"}
                 </div>
 
                 {/* Vitals */}
