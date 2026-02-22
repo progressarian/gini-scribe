@@ -916,7 +916,7 @@ export default function GiniScribe() {
   const [visitId, setVisitId] = useState(null); // local visit id
   const [appointments, setAppointments] = useState([]); // [{id,dt,tm,ty,sp,doc,st,notes}]
   const [showBooking, setShowBooking] = useState(false);
-  const [bookForm, setBookForm] = useState({ dt:"", tm:"", ty:"OPD", sp:"", doc:"", notes:"" });
+  const [bookForm, setBookForm] = useState({ dt:"", tm:"", ty:"OPD", sp:"", doc:"", notes:"", labPickup:"hospital", labTests:[] });
   const [editApptId, setEditApptId] = useState(null);
   // Intake
   const [complaints, setComplaints] = useState([]);
@@ -931,6 +931,11 @@ export default function GiniScribe() {
   const [assessLabs, setAssessLabs] = useState([]); // ordered labs
   const [assessNotes, setAssessNotes] = useState("");
   const [shadowAI, setShadowAI] = useState(false);
+  const [shadowData, setShadowData] = useState(null);
+  const [shadowLoading, setShadowLoading] = useState(false);
+  // Medicine reconciliation
+  const [medRecon, setMedRecon] = useState({}); // {medName: "continue"|"hold"|"stop"|"modify"}
+  const [showMedCard, setShowMedCard] = useState(false);
 
   // Exam definitions
   const EXAM_SECTIONS = {
@@ -2029,6 +2034,47 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     setLoading(p=>({...p,mo:false}));
   };
 
+  // ═══ SHADOW AI ANALYSIS ═══
+  const runShadowAI = async () => {
+    setShadowLoading(true);
+    const parts = [];
+    if (complaints.length) parts.push("Chief Complaints: " + complaints.join(", "));
+    const examSum = getExamSummary();
+    if (examSum) parts.push("Examination: " + examSum);
+    if (assessDx.length) {
+      const dxLabels = assessDx.map(id => CONDITION_CHIPS.find(c=>c.id===id)?.l || id);
+      parts.push("Diagnoses: " + dxLabels.join(", "));
+    }
+    if (assessNotes) parts.push("Notes: " + assessNotes);
+    if (vitals.bp_sys) parts.push(`Vitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}, Wt ${vitals.weight}kg, BMI ${vitals.bmi}`);
+    if (labData?.panels) {
+      const tests=labData.panels.flatMap(p=>p.tests.map(t=>`${t.test_name}: ${t.result_text||t.result} ${t.unit||""} ${t.flag==="H"?"[HIGH]":t.flag==="L"?"[LOW]":""}`));
+      parts.push("Labs: " + tests.join(", "));
+    }
+    // Previous meds from brief
+    if (patientFullData?.medications?.length) {
+      parts.push("Current Medications: " + patientFullData.medications.slice(0,15).map(m=>`${m.name} ${m.dose||""} ${m.frequency||""}`).join(", "));
+    }
+    const shadowPrompt = `You are an endocrinology AI assistant. Given the clinical data below, provide:
+1. DIAGNOSES: List each diagnosis with status (Controlled/Uncontrolled/New) and brief reasoning
+2. TREATMENT_PLAN: For each medication suggest ADD/CONTINUE/MODIFY/STOP with brief reason
+3. INVESTIGATIONS: Tests you'd order with reason
+4. RED_FLAGS: Any urgent concerns
+
+Respond as JSON: {"diagnoses":[{"label":"...","status":"...","reason":"..."}],"treatment_plan":[{"action":"ADD|CONTINUE|MODIFY|STOP","drug":"...","detail":"...","reason":"..."}],"investigations":["..."],"red_flags":["..."]}
+
+CLINICAL DATA:
+${parts.join("\n")}`;
+    try {
+      const {data,error} = await callClaude(shadowPrompt, "Analyze this patient and provide your independent clinical assessment.");
+      if (data) {
+        setShadowData(data);
+        setShadowAI(true);
+      }
+    } catch(e) { console.error("Shadow AI:", e); }
+    setShadowLoading(false);
+  };
+
   // ============ MO BRIEF FOR CONSULTANT ============
   const generateMOBrief = () => {
     const pfd = patientFullData;
@@ -2684,7 +2730,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
-    { id:"dashboard", label:"🏠 Dashboard", show:keySet && !!dbPatientId },
+    { id:"dashboard", label:"🏠 Dashboard", show:keySet && (!!dbPatientId || !!patient.name) },
     { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole && !visitActive },
     { id:"patient", label:"👤", show:keySet && !visitActive },
     // Visit workflow tabs (only show during active visit)
@@ -3199,28 +3245,117 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         </div>
       )}
 
-      {/* ===== PATIENT DASHBOARD ===== */}
-      {tab==="dashboard" && dbPatientId && (
+      {/* ===== PATIENT DASHBOARD (New + Follow-up) ===== */}
+      {tab==="dashboard" && (
         <div>
-          {/* Patient Card */}
+          {/* Patient Card — works for new AND existing patients */}
           <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:14, padding:20, color:"white", marginBottom:12 }}>
             <div style={{ display:"flex", alignItems:"center", gap:12 }}>
               <div style={{ width:56, height:56, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#60a5fa)", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, fontSize:24, flexShrink:0 }}>
-                {patient.name.charAt(0).toUpperCase()}
+                {(patient.name||"?").charAt(0).toUpperCase()}
               </div>
               <div style={{ flex:1 }}>
-                <div style={{ fontSize:20, fontWeight:800 }}>{patient.name}</div>
+                <div style={{ fontSize:20, fontWeight:800 }}>{patient.name || "New Patient"}</div>
                 <div style={{ fontSize:13, opacity:.8, marginTop:2 }}>
-                  {patient.age}Y · {patient.sex} {patient.fileNo ? ` · ${patient.fileNo}` : ""}
+                  {patient.age ? `${patient.age}Y` : ""}{patient.sex ? ` · ${patient.sex}` : ""}{patient.fileNo ? ` · ${patient.fileNo}` : ""}
+                  {!dbPatientId && <span style={{ marginLeft:6, background:"#f59e0b", padding:"2px 8px", borderRadius:4, fontSize:10, fontWeight:700 }}>NEW</span>}
                 </div>
                 {patient.phone && <div style={{ fontSize:12, opacity:.6, marginTop:1 }}>📱 {patient.phone}</div>}
-                {patient.address && <div style={{ fontSize:11, opacity:.5, marginTop:1 }}>📍 {patient.address}</div>}
               </div>
               <button onClick={()=>setTab("patient")} style={{ background:"rgba(255,255,255,.15)", border:"1px solid rgba(255,255,255,.2)", color:"white", padding:"6px 12px", borderRadius:8, fontSize:11, fontWeight:600, cursor:"pointer" }}>✏️ Edit</button>
             </div>
           </div>
 
+          {/* ═══ PATIENT BRIEF (v2 style) ═══ */}
+          {dbPatientId && patientFullData && (
+            <div style={{ background:"linear-gradient(135deg,#f0f9ff,#faf5ff)", borderRadius:12, border:"2px solid #c7d2fe", padding:14, marginBottom:12 }}>
+              {/* One-liner Summary */}
+              <div style={{ fontSize:11, color:"#374151", lineHeight:1.7, padding:"8px 12px", background:"white", borderRadius:8, border:"1px solid #e9d5ff", marginBottom:10 }}>
+                <b>{patient.name} | {patient.age}Y/{patient.sex?.charAt(0)||"?"} | {(patientFullData?.diagnoses||[]).slice(0,4).map(d=>d.label||d.diagnosis_id).join(" + ")||"No known dx"} | {(patientFullData?.medications||[]).length} meds | {patientFullData?.consultations?.length||0} visits</b>
+              </div>
+
+              {/* Risk Flags */}
+              {(() => {
+                const flags = [];
+                const labs = patientFullData?.labs || [];
+                const hba1c = labs.find(l=>l.test_name==="HbA1c");
+                if (hba1c && parseFloat(hba1c.result) > 8) flags.push({t:"🔴 HbA1c "+hba1c.result+"% — uncontrolled",c:"#dc2626",bg:"#fef2f2"});
+                const cr = labs.find(l=>l.test_name==="Creatinine"||l.test_name==="Cr");
+                if (cr && parseFloat(cr.result) > 1.3) flags.push({t:"⚠️ Cr "+cr.result+" — renal concern",c:"#92400e",bg:"#fef3c7"});
+                const egfr = labs.find(l=>l.test_name==="eGFR");
+                if (egfr && parseFloat(egfr.result) < 60) flags.push({t:"⚠️ eGFR "+egfr.result+" — CKD",c:"#92400e",bg:"#fef3c7"});
+                return flags.length > 0 ? (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
+                    {flags.map((f,i) => <span key={i} style={{ fontSize:9, background:f.bg, color:f.c, padding:"3px 8px", borderRadius:4, fontWeight:700 }}>{f.t}</span>)}
+                  </div>
+                ) : null;
+              })()}
+
+              {/* Active Diagnoses */}
+              {(patientFullData?.diagnoses||[]).length > 0 && (
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>CONDITIONS</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                    {[...new Map((patientFullData?.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()].slice(0,8).map((d,i) => (
+                      <span key={i} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, fontWeight:600,
+                        background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#fefce8",
+                        color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#92400e" }}>{d.label||d.diagnosis_id}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Key Lab Values */}
+              {(patientFullData?.labs||[]).length > 0 && (
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>🔬 KEY LABS</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                    {["HbA1c","FBS","PPBS","Creatinine","eGFR","LDL","TSH","Vit D","Vit B12"].map(name => {
+                      const lab = (patientFullData?.labs||[]).find(l=>l.test_name===name);
+                      if (!lab) return null;
+                      return <span key={name} style={{ fontSize:10, padding:"2px 6px", borderRadius:4, fontWeight:600,
+                        background:lab.flag==="H"?"#fef2f2":lab.flag==="L"?"#eff6ff":"#f0fdf4",
+                        color:lab.flag==="H"?"#dc2626":lab.flag==="L"?"#2563eb":"#059669",
+                        border:`1px solid ${lab.flag==="H"?"#fecaca":lab.flag==="L"?"#bfdbfe":"#bbf7d0"}` }}>
+                        {name}: <b>{lab.result}</b>{lab.unit?" "+lab.unit:""} {lab.flag==="H"?"↑":lab.flag==="L"?"↓":""}
+                      </span>;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Medications */}
+              {(patientFullData?.medications||[]).length > 0 && (
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>💊 MEDICATIONS ({(patientFullData?.medications||[]).length})</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:2 }}>
+                    {(patientFullData?.medications||[]).slice(0,10).map((m,i) => (
+                      <div key={i} style={{ fontSize:10, padding:"2px 6px", background:i%2?"#f8fafc":"white", borderRadius:3 }}>
+                        <strong>{m.name}</strong> <span style={{ color:"#64748b" }}>{m.dose||""} {m.frequency||""}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Documents */}
+              {(patientFullData?.documents||[]).length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>📎 RECENT DOCUMENTS</div>
+                  {(patientFullData?.documents||[]).slice(0,4).map((d,i) => (
+                    <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"3px 0", fontSize:10, borderBottom:i<3?"1px solid #f1f5f9":"none" }}>
+                      <span>{d.doc_type==="lab"?"🔬":d.doc_type==="prescription"?"💊":"📋"}</span>
+                      <span style={{ fontWeight:700, flex:1 }}>{d.title||d.doc_type}</span>
+                      <span style={{ fontSize:9, color:"#94a3b8" }}>{d.doc_date ? new Date(d.doc_date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Quick Stats */}
+          {dbPatientId && (
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
             <div style={{ background:"#eff6ff", borderRadius:10, padding:12, textAlign:"center" }}>
               <div style={{ fontSize:22, fontWeight:800, color:"#2563eb" }}>{patientFullData?.consultations?.length || 0}</div>
@@ -3241,21 +3376,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Last HbA1c</div>
             </div>
           </div>
-
-          {/* Active Diagnoses */}
-          {moData?.diagnoses?.length > 0 && (
-            <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6, letterSpacing:".5px" }}>ACTIVE DIAGNOSES</div>
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                {moData.diagnoses.map((d,i) => (
-                  <span key={i} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:600,
-                    background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#fefce8",
-                    color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#d97706",
-                    border:`1px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="Controlled"?"#bbf7d0":"#fef08a"}`
-                  }}>{d.label}</span>
-                ))}
-              </div>
-            </div>
           )}
 
           {/* ═══ START VISIT ═══ */}
@@ -3327,6 +3447,60 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   <input value={bookForm.notes} onChange={e=>setBookForm({...bookForm, notes:e.target.value})} placeholder="Fasting required..."
                     style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
                 </div>
+                {/* Lab-specific options */}
+                {bookForm.ty==="Lab" && (
+                  <>
+                    <div style={{ gridColumn:"1/-1" }}>
+                      <label style={{ fontSize:10, fontWeight:600, color:"#475569", marginBottom:4, display:"block" }}>Sample Collection</label>
+                      <div style={{ display:"flex", gap:4 }}>
+                        {[{v:"hospital",l:"🏥 At Hospital",bg:"#eff6ff",cl:"#2563eb"},{v:"home",l:"🏠 Home Pickup",bg:"#f0fdf4",cl:"#059669"}].map(o=>(
+                          <button key={o.v} onClick={()=>setBookForm({...bookForm, labPickup:o.v})}
+                            style={{ flex:1, padding:"8px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer",
+                              border:`2px solid ${bookForm.labPickup===o.v?o.cl:"#e2e8f0"}`,
+                              background:bookForm.labPickup===o.v?o.bg:"white", color:bookForm.labPickup===o.v?o.cl:"#64748b" }}>{o.l}</button>
+                        ))}
+                      </div>
+                      {bookForm.labPickup==="home" && (
+                        <div style={{ marginTop:4, padding:6, background:"#fffbeb", borderRadius:6, border:"1px solid #fde68a", fontSize:10, color:"#92400e" }}>
+                          ⚠️ Home pickup: ₹200 extra charge. Fasting samples before 8:30 AM.
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ gridColumn:"1/-1" }}>
+                      <label style={{ fontSize:10, fontWeight:600, color:"#475569", marginBottom:4, display:"block" }}>Tests / Packages</label>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:6 }}>
+                        {["HbA1c","Lipid Panel","RFT","LFT","CBC","Thyroid","Vit D","Vit B12","FBS","PPBS","Urine R/M","UACR","Iron Studies"].map(t=>(
+                          <button key={t} onClick={()=>{
+                            const cur=bookForm.labTests||[];
+                            setBookForm({...bookForm, labTests:cur.includes(t)?cur.filter(x=>x!==t):[...cur,t]});
+                          }}
+                            style={{ padding:"4px 8px", borderRadius:5, fontSize:10, fontWeight:600, cursor:"pointer",
+                              border:`1.5px solid ${(bookForm.labTests||[]).includes(t)?"#059669":"#e2e8f0"}`,
+                              background:(bookForm.labTests||[]).includes(t)?"#f0fdf4":"white",
+                              color:(bookForm.labTests||[]).includes(t)?"#059669":"#64748b" }}>{t}</button>
+                        ))}
+                      </div>
+                      {/* Packages */}
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                        {[{l:"📦 DM Panel (HbA1c+FBS+PPBS+RFT+UACR)",tests:["HbA1c","FBS","PPBS","RFT","UACR"]},
+                          {l:"📦 Annual Health (CBC+LFT+RFT+Lipid+Thyroid+VitD)",tests:["CBC","LFT","RFT","Lipid Panel","Thyroid","Vit D"]},
+                          {l:"📦 Cardiac (Lipid+hs-CRP+NT-proBNP+ECG)",tests:["Lipid Panel"]}
+                        ].map(pkg=>(
+                          <button key={pkg.l} onClick={()=>{
+                            const cur=bookForm.labTests||[];
+                            const newTests = [...new Set([...cur, ...pkg.tests])];
+                            setBookForm({...bookForm, labTests:newTests});
+                          }}
+                            style={{ padding:"5px 10px", borderRadius:6, fontSize:10, fontWeight:600, cursor:"pointer",
+                              border:"1.5px solid #7c3aed20", background:"#faf5ff", color:"#6d28d9" }}>{pkg.l}</button>
+                        ))}
+                      </div>
+                      {(bookForm.labTests||[]).length > 0 && (
+                        <div style={{ marginTop:4, fontSize:10, color:"#059669", fontWeight:700 }}>✅ {(bookForm.labTests||[]).length} tests: {(bookForm.labTests||[]).join(", ")}</div>
+                      )}
+                    </div>
+                  </>
+                )}
                 <button onClick={saveBooking} style={{ gridColumn:"1/-1", padding:"10px", background:"#059669", color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>
                   {editApptId ? "✅ Update" : "✅ Book Appointment"}
                 </button>
@@ -3528,8 +3702,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
           </details>
 
-          <button onClick={()=>{if(patient.name) setTab(visitActive?"intake":"mo");}} style={{ marginTop:10, width:"100%", background:patient.name?"#1e293b":"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:patient.name?"pointer":"not-allowed" }}>
-            {patient.name?(visitActive?"Next: Intake →":"Next: MO →"):"Enter name first"}
+          <button onClick={()=>{if(patient.name) setTab("dashboard");}} style={{ marginTop:10, width:"100%", background:patient.name?"#1e293b":"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:patient.name?"pointer":"not-allowed" }}>
+            {patient.name?"Next: Dashboard →":"Enter name first"}
           </button>
         </div>
       )}
@@ -3817,8 +3991,67 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
           <div style={{ display:"flex", gap:6 }}>
             <button onClick={()=>setTab("exam")} style={{ flex:1, background:"#94a3b8", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>← Exam</button>
+            <button onClick={runShadowAI} disabled={shadowLoading}
+              style={{ flex:1, background:shadowLoading?"#94a3b8":"#7c3aed", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:shadowLoading?"wait":"pointer" }}>
+              {shadowLoading?"🔄 Analyzing...":"🤖 Shadow AI"}
+            </button>
             <button onClick={()=>setTab("consultant")} style={{ flex:2, background:"#1e293b", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>Consultant →</button>
           </div>
+
+          {/* Shadow AI Panel */}
+          {shadowAI && shadowData && (
+            <div style={{ marginTop:10, background:"linear-gradient(135deg,#faf5ff,#f0f9ff)", borderRadius:10, border:"2px solid #c4b5fd", overflow:"hidden" }}>
+              <div style={{ padding:"8px 12px", background:"#7c3aed10", display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid #e9d5ff" }}>
+                <span>🤖</span><span style={{ fontSize:12, fontWeight:800, color:"#7c3aed" }}>AI Shadow Analysis</span>
+                <span style={{ fontSize:8, background:"#e9d5ff", color:"#6d28d9", padding:"2px 6px", borderRadius:4, fontWeight:700 }}>Independent</span>
+                <div style={{flex:1}} />
+                <button onClick={()=>setShadowAI(false)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:"#94a3b8" }}>✕</button>
+              </div>
+              <div style={{ padding:12, fontSize:11, lineHeight:1.7 }}>
+                {/* AI Diagnoses */}
+                <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4 }}>DIAGNOSIS</div>
+                {(shadowData.diagnoses||[]).map((d,i) => (
+                  <div key={i} style={{ padding:"3px 8px", background:"white", borderRadius:4, marginBottom:2, borderLeft:"3px solid #7c3aed", fontSize:10 }}>
+                    <b>{d.label}</b> — {d.status} <span style={{ color:"#64748b" }}>({d.reason})</span>
+                  </div>
+                ))}
+
+                {/* AI Treatment Plan */}
+                <div style={{ fontWeight:700, color:"#6d28d9", marginTop:8, marginBottom:4 }}>TREATMENT PLAN</div>
+                {(shadowData.treatment_plan||[]).map((t,i) => (
+                  <div key={i} style={{ padding:"3px 8px", borderRadius:4, marginBottom:2, fontSize:10,
+                    background:t.action==="ADD"?"#f0fdf4":t.action==="STOP"?"#fef2f2":t.action==="MODIFY"?"#fffbeb":"white",
+                    borderLeft:`3px solid ${t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#e2e8f0"}` }}>
+                    <span style={{ fontWeight:700, color:t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#475569" }}>
+                      {t.action==="ADD"?"✅ ADD":t.action==="STOP"?"🔻 STOP":t.action==="MODIFY"?"⚠️ MODIFY":"💊 CONTINUE"}:
+                    </span> {t.drug} {t.detail} <span style={{ color:"#64748b" }}>— {t.reason}</span>
+                  </div>
+                ))}
+
+                {/* Red Flags */}
+                {(shadowData.red_flags||[]).length > 0 && (
+                  <div style={{ marginTop:8 }}>
+                    <div style={{ fontWeight:700, color:"#dc2626", marginBottom:4 }}>🚨 RED FLAGS</div>
+                    {shadowData.red_flags.map((f,i) => (
+                      <div key={i} style={{ padding:"3px 8px", background:"#fef2f2", borderRadius:4, marginBottom:2, fontSize:10, color:"#dc2626" }}>⚠️ {f}</div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Investigations */}
+                {(shadowData.investigations||[]).length > 0 && (
+                  <div style={{ marginTop:8 }}>
+                    <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4 }}>🔬 SUGGESTED TESTS</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                      {shadowData.investigations.map((t,i) => (
+                        <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600, border:"1px solid #bfdbfe" }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -4580,6 +4813,85 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <button className="no-print" onClick={()=>setPlanAddMode("med")} style={{ marginTop:6, background:"#f8fafc", border:"1px dashed #cbd5e1", borderRadius:6, padding:"6px 12px", fontSize:11, fontWeight:600, cursor:"pointer", color:"#64748b", width:"100%" }}>+ Add Medicine</button>
                   )}
                 </PlanBlock>}
+
+                {/* ═══ MEDICINE CARD (v2) ═══ */}
+                <div className="no-print" style={{ marginBottom:10 }}>
+                  <button onClick={()=>setShowMedCard(!showMedCard)}
+                    style={{ width:"100%", padding:"8px 14px", background:showMedCard?"#7c3aed":"#faf5ff", color:showMedCard?"white":"#7c3aed", border:"1.5px solid #c4b5fd", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                    💊 {showMedCard ? "Hide" : "Show"} Medicine Card
+                  </button>
+                  {showMedCard && (
+                    <div style={{ marginTop:6, border:"2px solid #c4b5fd", borderRadius:10, padding:14, background:"white" }}>
+                      <div style={{ textAlign:"center", marginBottom:8 }}>
+                        <div style={{ fontSize:13, fontWeight:800, color:"#7c3aed" }}>💊 MEDICINE CARD — {patient.name}</div>
+                        <div style={{ fontSize:10, color:"#94a3b8" }}>Keep this card with you. Show to any doctor you visit.</div>
+                      </div>
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #e2e8f0" }}>
+                        <thead><tr style={{ background:"#7c3aed", color:"white" }}>
+                          <th style={{ padding:"4px 8px", textAlign:"left" }}>Medicine</th>
+                          <th style={{ padding:"4px 8px" }}>Morning</th>
+                          <th style={{ padding:"4px 8px" }}>Afternoon</th>
+                          <th style={{ padding:"4px 8px" }}>Night</th>
+                          <th style={{ padding:"4px 8px" }}>Special</th>
+                        </tr></thead>
+                        <tbody>{planMeds.map((m,i) => {
+                          const t = (m.timing||m.frequency||"").toLowerCase();
+                          const morn = t.includes("morn") || t.includes("od") || t.includes("bd") || t.includes("tds") || t.includes("empty") || t.includes("breakfast");
+                          const aft = t.includes("aft") || t.includes("bd") || t.includes("tds") || t.includes("lunch");
+                          const night = t.includes("night") || t.includes("hs") || t.includes("bedtime") || t.includes("tds");
+                          return <tr key={i} style={{ background:m.isNew?"#f0fdf4":i%2?"#fafafa":"white" }}>
+                            <td style={{ padding:"3px 8px", fontWeight:700 }}>{m.name}{m.isNew?<span style={{ background:"#059669", color:"white", padding:"0 3px", borderRadius:2, fontSize:8, marginLeft:3, fontWeight:800 }}>NEW</span>:""}</td>
+                            <td style={{ textAlign:"center", padding:"3px" }}>{morn?"✅":""}</td>
+                            <td style={{ textAlign:"center", padding:"3px" }}>{aft?"✅":""}</td>
+                            <td style={{ textAlign:"center", padding:"3px" }}>{night?"✅":""}</td>
+                            <td style={{ padding:"3px 6px", fontSize:9, color:"#64748b" }}>{m.timing||""}</td>
+                          </tr>;
+                        })}</tbody>
+                      </table>
+                      <div style={{ marginTop:6, textAlign:"center" }}>
+                        <button onClick={()=>{window.print();}} style={{ padding:"6px 16px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>🖨️ Print Card</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ═══ EXTERNAL MEDICATION RECONCILIATION (v2) ═══ */}
+                {(moData?.previous_medications||[]).length > 0 && (
+                  <PlanBlock id="extmeds" title="🏥 External Medications — Reconcile" color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
+                    <div style={{ fontSize:10, color:"#92400e", marginBottom:6 }}>Review medications from other doctors. Mark each as Continue, Hold, or Stop.</div>
+                    {(moData.previous_medications||[]).map((m,i) => {
+                      const status = medRecon[m.name] || "continue";
+                      return (
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 8px", marginBottom:3, borderRadius:6,
+                          background:status==="stop"?"#fef2f2":status==="hold"?"#fef3c7":"#f0fdf4",
+                          border:`1px solid ${status==="stop"?"#fecaca":status==="hold"?"#fde68a":"#bbf7d0"}` }}>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:11, fontWeight:700 }}>{m.name}</div>
+                            <div style={{ fontSize:9, color:"#64748b" }}>{m.dose} {m.frequency} {m.timing}</div>
+                          </div>
+                          <div style={{ display:"flex", gap:2 }}>
+                            {[{v:"continue",l:"✅ Continue",c:"#059669"},{v:"hold",l:"⏸ Hold",c:"#f59e0b"},{v:"stop",l:"🛑 Stop",c:"#dc2626"}].map(o=>(
+                              <button key={o.v} onClick={()=>setMedRecon(prev=>({...prev,[m.name]:o.v}))}
+                                style={{ padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer",
+                                  border:`1.5px solid ${status===o.v?o.c:"#e2e8f0"}`,
+                                  background:status===o.v?o.c:"white", color:status===o.v?"white":o.c }}>{o.l}</button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {Object.values(medRecon).filter(v=>v==="stop").length > 0 && (
+                      <div style={{ marginTop:6, padding:6, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, fontSize:10, color:"#dc2626", fontWeight:600 }}>
+                        🛑 Stopped: {Object.entries(medRecon).filter(([_,v])=>v==="stop").map(([k])=>k).join(", ")}
+                      </div>
+                    )}
+                    {Object.values(medRecon).filter(v=>v==="hold").length > 0 && (
+                      <div style={{ marginTop:3, padding:6, background:"#fef3c7", border:"1px solid #fde68a", borderRadius:6, fontSize:10, color:"#92400e", fontWeight:600 }}>
+                        ⏸ On Hold: {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k])=>k).join(", ")}
+                      </div>
+                    )}
+                  </PlanBlock>
+                )}
 
                 {/* Lifestyle */}
                 {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
