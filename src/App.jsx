@@ -4008,7 +4008,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:14, fontWeight:800 }}>Intake — {patient.name || "Patient"}</div>
               <div style={{ fontSize:10, opacity:.8 }}>Complaints + Vitals + Reports</div>
             </div>
-            <span style={{ fontSize:10, opacity:.6 }}>Step 1/5</span>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 1/6</span>
           </div>
 
           {/* Chief Complaints */}
@@ -4108,18 +4108,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <button onClick={async ()=>{
                         setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,extracting:true}:r));
                         try {
-                          const prompt = rpt.type==="imaging" ? IMAGING_PROMPT : LAB_PROMPT;
-                          const {data,error} = await callClaude(prompt, "", [{type:"image",source:{type:"base64",media_type:rpt.mediaType,data:rpt.base64}}]);
+                          const extFn = rpt.type==="imaging" ? extractImaging : extractLab;
+                          const {data,error} = await extFn(rpt.base64, rpt.mediaType);
                           if (data) {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
-                            // Merge lab data for global use
                             if (rpt.type==="lab" && data.panels) {
                               setLabData(prev => {
                                 if (!prev) return data;
                                 return { ...prev, panels: [...(prev.panels||[]), ...(data.panels||[])] };
                               });
                             }
-                            // Auto-detect diagnoses after extraction
                             setTimeout(()=>autoDetectDiagnoses(), 500);
                           } else {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
@@ -4141,8 +4139,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     for (const rpt of intakeReports.filter(r=>!r.data&&!r.extracting)) {
                       setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,extracting:true}:r));
                       try {
-                        const prompt = rpt.type==="imaging" ? IMAGING_PROMPT : LAB_PROMPT;
-                        const {data,error} = await callClaude(prompt, "", [{type:"image",source:{type:"base64",media_type:rpt.mediaType,data:rpt.base64}}]);
+                        const extFn = rpt.type==="imaging" ? extractImaging : extractLab;
+                        const {data,error} = await extFn(rpt.base64, rpt.mediaType);
                         if (data) {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
                           if (rpt.type==="lab" && data.panels) setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...(data.panels||[])]} : data);
@@ -4420,7 +4418,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:14, fontWeight:800 }}>Physical Examination</div>
               <div style={{ fontSize:10, opacity:.8 }}>Tap findings · NAD = Normal</div>
             </div>
-            <span style={{ fontSize:10, opacity:.6 }}>Step 2/5</span>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 3/6</span>
           </div>
 
           {/* Specialty selector + Mark All NAD */}
@@ -4495,12 +4493,26 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:14, fontWeight:800 }}>Assessment</div>
               <div style={{ fontSize:10, opacity:.8 }}>Diagnoses + Labs + Notes</div>
             </div>
-            <span style={{ fontSize:10, opacity:.6 }}>Step 3/5</span>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 4/6</span>
           </div>
 
           {/* Diagnosis Selection */}
           <div style={{ marginBottom:12 }}>
             <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🏥 Diagnoses</div>
+            {/* Pre-populated from History tab */}
+            {hxConditions.length > 0 && assessDx.length === 0 && (
+              <div style={{ padding:6, background:"#faf5ff", border:"1px solid #c4b5fd", borderRadius:6, marginBottom:6 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#7c3aed", marginBottom:3 }}>📜 From Clinical History — click to confirm</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                  {hxConditions.map(c => {
+                    const chip = CONDITION_CHIPS.find(x=>x.l.toLowerCase().includes(c.toLowerCase().slice(0,4)));
+                    return <button key={c} onClick={()=>{if(chip && !assessDx.includes(chip.id))setAssessDx(prev=>[...prev,chip.id]);}}
+                      style={{ padding:"4px 8px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer",
+                        border:"1.5px solid #7c3aed", background:"#faf5ff", color:"#7c3aed" }}>+ {c}</button>;
+                  })}
+                </div>
+              </div>
+            )}
             <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
               {CONDITION_CHIPS.map(c => (
                 <button key={c.id} onClick={()=>toggleChip(assessDx,setAssessDx,c.id)}
@@ -4523,9 +4535,67 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             )}
           </div>
 
-          {/* Lab Orders */}
+          {/* Lab Orders — with AUTO-SUGGESTIONS */}
           <div style={{ marginBottom:12 }}>
             <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🔬 Order Labs</div>
+            
+            {/* AI Suggested based on diagnoses */}
+            {(() => {
+              // Map assessDx chip IDs to CONDITIONS keys for biomarker lookup
+              const dxMap = {"dm2":"Type 2 DM","htn":"Hypertension","hypo":"Hypothyroid","hyper":"Hyperthyroid","dyslip":"Dyslipidemia",
+                "obesity":"Obesity","pcos":"PCOS","ckd":"CKD","cad":"CAD","vitd":"Vit D Deficiency","b12":"B12 Deficiency"};
+              const suggestedTests = [...new Set(
+                assessDx.flatMap(id => {
+                  const condName = dxMap[id];
+                  if (!condName || !CONDITIONS[condName]) return [];
+                  return CONDITIONS[condName].biomarkers || [];
+                })
+              )];
+              // Also add from hxConditions
+              const hxTests = [...new Set(
+                hxConditions.flatMap(c => CONDITIONS[c]?.biomarkers || [])
+              )];
+              const allSuggested = [...new Set([...suggestedTests, ...hxTests])];
+              
+              return allSuggested.length > 0 ? (
+                <div style={{ padding:8, background:"#faf5ff", border:"1.5px solid #c4b5fd", borderRadius:8, marginBottom:8 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
+                    <span style={{ fontSize:10, fontWeight:700, color:"#7c3aed" }}>🤖 Suggested for selected diagnoses</span>
+                    <button onClick={()=>{
+                      const newLabs = allSuggested.filter(t => !assessLabs.includes(t));
+                      setAssessLabs(prev => [...prev, ...newLabs]);
+                    }} style={{ fontSize:9, padding:"2px 8px", borderRadius:4, background:"#7c3aed", color:"white", border:"none", fontWeight:700, cursor:"pointer" }}>
+                      + Add All ({allSuggested.filter(t=>!assessLabs.includes(t)).length})
+                    </button>
+                  </div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                    {allSuggested.map(t => (
+                      <button key={t} onClick={()=>{if(!assessLabs.includes(t))setAssessLabs(prev=>[...prev,t]);}}
+                        style={{ padding:"3px 8px", borderRadius:5, fontSize:10, fontWeight:600, cursor:"pointer",
+                          border:`1.5px solid ${assessLabs.includes(t)?"#059669":"#c4b5fd"}`,
+                          background:assessLabs.includes(t)?"#f0fdf4":"white", color:assessLabs.includes(t)?"#059669":"#7c3aed" }}>
+                        {assessLabs.includes(t)?"✅":"+"} {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Test Packages */}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:6 }}>
+              {[
+                {l:"📦 DM Panel",tests:["HbA1c","FBS","PPBS","C-Peptide","Fasting Insulin","RFT","UACR","Lipid Panel"]},
+                {l:"📦 Thyroid",tests:["TSH","Free T3","Free T4","Anti-TPO"]},
+                {l:"📦 Lipid",tests:["Total Cholesterol","LDL","HDL","Triglycerides","VLDL"]},
+                {l:"📦 Renal",tests:["Creatinine","eGFR","BUN","Urine ACR","Electrolytes"]},
+                {l:"📦 Annual",tests:["CBC","LFT","RFT","Lipid Panel","TSH","HbA1c","Vit D","Vit B12","Urine R/M"]},
+              ].map(pkg => (
+                <button key={pkg.l} onClick={()=>setAssessLabs(prev=>[...new Set([...prev,...pkg.tests])])}
+                  style={{ padding:"5px 10px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer", border:"1.5px solid #7c3aed20", background:"#faf5ff", color:"#6d28d9" }}>{pkg.l}</button>
+              ))}
+            </div>
+
             <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
               {LAB_ORDER_CHIPS.map(t => (
                 <button key={t} onClick={()=>toggleChip(assessLabs,setAssessLabs,t)}
@@ -4536,8 +4606,21 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               ))}
             </div>
             {assessLabs.length > 0 && (
-              <div style={{ marginTop:4, fontSize:11, color:"#059669", fontWeight:700 }}>
-                ✅ {assessLabs.length} tests ordered: {assessLabs.join(", ")}
+              <div style={{ marginTop:6, padding:8, background:"#f0fdf4", borderRadius:6, border:"1px solid #bbf7d0" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                  <div style={{ fontSize:11, color:"#059669", fontWeight:700 }}>✅ {assessLabs.length} tests ordered</div>
+                  <div style={{ display:"flex", gap:4 }}>
+                    <button onClick={()=>{setLabRequisition(prev=>[...new Set([...prev,...assessLabs])]);}}
+                      style={{ padding:"4px 10px", background:"#059669", color:"white", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                      💾 Save to Dashboard
+                    </button>
+                    <button onClick={()=>window.print()}
+                      style={{ padding:"4px 10px", background:"#1e40af", color:"white", border:"none", borderRadius:4, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                      🖨️ Print Requisition
+                    </button>
+                  </div>
+                </div>
+                <div style={{ fontSize:10, color:"#059669" }}>{assessLabs.join(", ")}</div>
               </div>
             )}
           </div>
@@ -5553,10 +5636,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </PlanBlock>}
 
                 {/* ═══ MEDICINE CARD (v2) ═══ */}
+                {(() => {
+                  const extMeds = (moData?.previous_medications||[]).length > 0
+                    ? moData.previous_medications
+                    : (patientFullData?.medications||[]).map(m=>({name:m.name,dose:m.dose||"",frequency:m.frequency||"",timing:m.timing||"",prescriber:m.prescriber||"External",forDiagnosis:m.forDiagnosis||[]}));
+                  const allCardMeds = [...planMeds, ...extMeds.filter(m=>medRecon[m.name]!=="stop")];
+                  return allCardMeds.length > 0 ? (
                 <div className="no-print" style={{ marginBottom:10 }}>
                   <button onClick={()=>setShowMedCard(!showMedCard)}
                     style={{ width:"100%", padding:"8px 14px", background:showMedCard?"#7c3aed":"#faf5ff", color:showMedCard?"white":"#7c3aed", border:"1.5px solid #c4b5fd", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                    💊 {showMedCard ? "Hide" : "Show"} Medicine Card
+                    💊 {showMedCard ? "Hide" : "Show"} Medicine Card ({allCardMeds.length} medicines)
                   </button>
                   {showMedCard && (
                     <div style={{ marginTop:6, border:"2px solid #c4b5fd", borderRadius:10, padding:14, background:"white" }}>
@@ -5613,12 +5702,18 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     </div>
                   )}
                 </div>
+                  ) : null;
+                })()}
 
                 {/* ═══ EXTERNAL MEDICATION RECONCILIATION (v2) ═══ */}
-                {(moData?.previous_medications||[]).length > 0 && (
-                  <PlanBlock id="extmeds" title="🏥 External Medications — Reconcile" color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
+                {(() => {
+                  const extMeds = (moData?.previous_medications||[]).length > 0
+                    ? moData.previous_medications
+                    : (patientFullData?.medications||[]).map(m=>({name:m.name,dose:m.dose||"",frequency:m.frequency||"",timing:m.timing||"",prescriber:m.prescriber||"External"}));
+                  return extMeds.length > 0 ? (
+                  <PlanBlock id="extmeds" title="🏥 External / Other Medications — Reconcile" color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
                     <div style={{ fontSize:10, color:"#92400e", marginBottom:6 }}>Review medications from other doctors. Mark each as Continue, Hold, or Stop.</div>
-                    {(moData.previous_medications||[]).map((m,i) => {
+                    {extMeds.map((m,i) => {
                       const status = medRecon[m.name] || "continue";
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 8px", marginBottom:3, borderRadius:6,
@@ -5626,7 +5721,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           border:`1px solid ${status==="stop"?"#fecaca":status==="hold"?"#fde68a":"#bbf7d0"}` }}>
                           <div style={{ flex:1 }}>
                             <div style={{ fontSize:11, fontWeight:700 }}>{m.name}</div>
-                            <div style={{ fontSize:9, color:"#64748b" }}>{m.dose} {m.frequency} {m.timing}</div>
+                            <div style={{ fontSize:9, color:"#64748b" }}>{m.dose} {m.frequency} {m.timing} {m.prescriber ? `· ${m.prescriber}` : ""}</div>
                           </div>
                           <div style={{ display:"flex", gap:2 }}>
                             {[{v:"continue",l:"✅ Continue",c:"#059669"},{v:"hold",l:"⏸ Hold",c:"#f59e0b"},{v:"stop",l:"🛑 Stop",c:"#dc2626"}].map(o=>(
@@ -5649,8 +5744,21 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         ⏸ On Hold: {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k])=>k).join(", ")}
                       </div>
                     )}
+
+                    {/* Regenerate Summary with reconciliation */}
+                    <button className="no-print" onClick={()=>{
+                      // Build med summary text including reconciliation decisions
+                      const summary = Object.entries(medRecon).filter(([_,v])=>v!=="continue").map(([name,action])=>`${action.toUpperCase()}: ${name}`);
+                      if (summary.length > 0) {
+                        const txt = `Medication Reconciliation:\n${summary.join("\n")}`;
+                        setAssessNotes(prev => prev ? prev + "\n\n" + txt : txt);
+                      }
+                    }} style={{ marginTop:6, width:"100%", padding:"6px", background:"#f59e0b", color:"white", border:"none", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                      🔄 Add Reconciliation to Notes
+                    </button>
                   </PlanBlock>
-                )}
+                  ) : null;
+                })()}
 
                 {/* Lifestyle */}
                 {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
