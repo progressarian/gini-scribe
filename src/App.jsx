@@ -932,6 +932,7 @@ export default function GiniScribe() {
   const [assessNotes, setAssessNotes] = useState("");
   const [shadowAI, setShadowAI] = useState(false);
   const [shadowData, setShadowData] = useState(null);
+  const [shadowTxDecisions, setShadowTxDecisions] = useState({}); // {drug: "adopt"|"disagree"}
   const [shadowLoading, setShadowLoading] = useState(false);
   const [showShadow, setShowShadow] = useState(false);
   // Medicine reconciliation
@@ -4857,15 +4858,41 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
                 {/* AI Treatment Plan */}
                 <div style={{ fontWeight:700, color:"#6d28d9", marginTop:8, marginBottom:4 }}>TREATMENT PLAN</div>
-                {(shadowData.treatment_plan||[]).map((t,i) => (
-                  <div key={i} style={{ padding:"3px 8px", borderRadius:4, marginBottom:2, fontSize:10,
-                    background:t.action==="ADD"?"#f0fdf4":t.action==="STOP"?"#fef2f2":t.action==="MODIFY"?"#fffbeb":"white",
-                    borderLeft:`3px solid ${t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#e2e8f0"}` }}>
-                    <span style={{ fontWeight:700, color:t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#475569" }}>
-                      {t.action==="ADD"?"✅ ADD":t.action==="STOP"?"🔻 STOP":t.action==="MODIFY"?"⚠️ MODIFY":"💊 CONTINUE"}:
-                    </span> {t.drug} {t.detail} <span style={{ color:"#64748b" }}>— {t.reason}</span>
+                {(shadowData.treatment_plan||[]).map((t,i) => {
+                  const key = t.drug||`tx_${i}`;
+                  const dec = shadowTxDecisions[key];
+                  return (
+                  <div key={i} style={{ padding:"4px 8px", borderRadius:4, marginBottom:3, fontSize:10,
+                    background:dec==="disagree"?"#f1f5f9":t.action==="ADD"?"#f0fdf4":t.action==="STOP"?"#fef2f2":t.action==="MODIFY"?"#fffbeb":"white",
+                    borderLeft:`3px solid ${dec==="disagree"?"#94a3b8":t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#e2e8f0"}`,
+                    opacity:dec==="disagree"?.5:1 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                      <div style={{ flex:1 }}>
+                        <span style={{ fontWeight:700, color:t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#475569" }}>
+                          {t.action==="ADD"?"✅ ADD":t.action==="STOP"?"🔻 STOP":t.action==="MODIFY"?"⚠️ MODIFY":"💊 CONTINUE"}:
+                        </span> {t.drug} {t.detail} <span style={{ color:"#64748b" }}>— {t.reason}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:2, flexShrink:0 }}>
+                        <button onClick={()=>{
+                          setShadowTxDecisions(p=>({...p,[key]:"adopt"}));
+                          // If ADD, add to plan meds
+                          if (t.action==="ADD" && t.drug) {
+                            addMedToPlan({name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"OD", timing:t.timing||"Morning", isNew:true, route:"Oral", forDiagnosis:t.forDiagnosis||[]});
+                          }
+                        }} style={{ fontSize:8, padding:"2px 6px", borderRadius:3, border:`1px solid ${dec==="adopt"?"#059669":"#e2e8f0"}`,
+                          background:dec==="adopt"?"#059669":"white", color:dec==="adopt"?"white":"#059669", cursor:"pointer", fontWeight:700 }}>
+                          {dec==="adopt"?"✓ Adopted":"Adopt"}
+                        </button>
+                        <button onClick={()=>setShadowTxDecisions(p=>({...p,[key]:p[key]==="disagree"?null:"disagree"}))}
+                          style={{ fontSize:8, padding:"2px 6px", borderRadius:3, border:`1px solid ${dec==="disagree"?"#dc2626":"#e2e8f0"}`,
+                            background:dec==="disagree"?"#dc2626":"white", color:dec==="disagree"?"white":"#dc2626", cursor:"pointer", fontWeight:700 }}>
+                          {dec==="disagree"?"✗ Rejected":"Disagree"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {/* Red Flags */}
                 {(shadowData.red_flags||[]).length > 0 && (
@@ -5411,13 +5438,38 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   ))}
                   {/* Treatment */}
                   <div style={{ fontWeight:700, color:"#6d28d9", marginTop:6, marginBottom:3 }}>TREATMENT PLAN</div>
-                  {(shadowData.treatment_plan||[]).map((t,i) => (
-                    <div key={i} style={{ padding:"3px 6px", borderRadius:4, marginBottom:2, fontSize:10,
-                      background:t.action==="ADD"?"#f0fdf4":t.action==="STOP"?"#fef2f2":t.action==="MODIFY"?"#fffbeb":"white",
-                      borderLeft:`3px solid ${t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#e2e8f0"}` }}>
-                      <b>{t.action}</b>: {t.drug} {t.detail} <span style={{color:"#94a3b8"}}>— {t.reason}</span>
+                  {(shadowData.treatment_plan||[]).map((t,i) => {
+                    const key = t.drug||`tx_${i}`;
+                    const dec = shadowTxDecisions[key];
+                    return (
+                    <div key={i} style={{ padding:"4px 6px", borderRadius:4, marginBottom:3, fontSize:10,
+                      background:dec==="disagree"?"#f1f5f9":t.action==="ADD"?"#f0fdf4":t.action==="STOP"?"#fef2f2":t.action==="MODIFY"?"#fffbeb":"white",
+                      borderLeft:`3px solid ${dec==="disagree"?"#94a3b8":t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#f59e0b":"#e2e8f0"}`,
+                      opacity:dec==="disagree"?.5:1 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                        <div style={{ flex:1 }}>
+                          <b>{t.action}</b>: {t.drug} {t.detail} <span style={{color:"#94a3b8"}}>— {t.reason}</span>
+                        </div>
+                        <div style={{ display:"flex", gap:2, flexShrink:0 }}>
+                          <button onClick={()=>{
+                            setShadowTxDecisions(p=>({...p,[key]:"adopt"}));
+                            if (t.action==="ADD" && t.drug) {
+                              addMedToPlan({name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"OD", timing:t.timing||"Morning", isNew:true, route:"Oral", forDiagnosis:t.forDiagnosis||[]});
+                            }
+                          }} style={{ fontSize:8, padding:"2px 6px", borderRadius:3, border:`1px solid ${dec==="adopt"?"#059669":"#e2e8f0"}`,
+                            background:dec==="adopt"?"#059669":"white", color:dec==="adopt"?"white":"#059669", cursor:"pointer", fontWeight:700 }}>
+                            {dec==="adopt"?"✓":"Adopt"}
+                          </button>
+                          <button onClick={()=>setShadowTxDecisions(p=>({...p,[key]:p[key]==="disagree"?null:"disagree"}))}
+                            style={{ fontSize:8, padding:"2px 6px", borderRadius:3, border:`1px solid ${dec==="disagree"?"#dc2626":"#e2e8f0"}`,
+                              background:dec==="disagree"?"#dc2626":"white", color:dec==="disagree"?"white":"#dc2626", cursor:"pointer", fontWeight:700 }}>
+                            {dec==="disagree"?"✗":"Disagree"}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   {/* Red flags */}
                   {(shadowData.red_flags||[]).length > 0 && (
                     <div style={{ marginTop:6 }}>
@@ -5861,7 +5913,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     const schedule = buildMedicineSchedule();
                     const totalMeds = planMeds.length + externalMeds.filter(m=>medRecon[m.name]!=="stop").length;
                     return (
-                    <div style={{ marginTop:6, borderRadius:10, overflow:"hidden", border:"2px solid #c4b5fd" }}>
+                    <div data-medcard style={{ marginTop:6, borderRadius:10, overflow:"hidden", border:"2px solid #c4b5fd" }}>
                       <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", padding:"12px 16px", color:"white", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                         <div>
                           <div style={{ fontSize:14, fontWeight:800 }}>💊 YOUR COMPLETE MEDICINE SCHEDULE</div>
@@ -5910,6 +5962,24 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           ))}
                         </div>
                       )}
+                      {/* Held medications */}
+                      {externalMeds.filter(m=>medRecon[m.name]==="hold").length > 0 && (
+                        <div style={{ padding:12, background:"#fef3c7", borderTop:"2px solid #fde68a" }}>
+                          <div style={{ fontSize:11, fontWeight:800, color:"#92400e", marginBottom:4 }}>⏸ MEDICATIONS ON HOLD</div>
+                          {externalMeds.filter(m=>medRecon[m.name]==="hold").map((m,i) => (
+                            <div key={i} style={{ fontSize:11, padding:"3px 0", opacity:.7 }}>⏸ {m.name} {m.dose} — <i>{m.prescriber}</i></div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Stopped medications */}
+                      {externalMeds.filter(m=>medRecon[m.name]==="stop").length > 0 && (
+                        <div style={{ padding:12, background:"#fef2f2", borderTop:"2px solid #fecaca" }}>
+                          <div style={{ fontSize:11, fontWeight:800, color:"#dc2626", marginBottom:4 }}>🛑 MEDICATIONS STOPPED</div>
+                          {externalMeds.filter(m=>medRecon[m.name]==="stop").map((m,i) => (
+                            <div key={i} style={{ fontSize:11, padding:"3px 0", opacity:.7, textDecoration:"line-through" }}>🛑 {m.name} {m.dose} — <i>{m.prescriber}</i></div>
+                          ))}
+                        </div>
+                      )}
                       {(nextVisitDate || conData?.follow_up) && (
                         <div style={{ padding:12, background:"#f0f9ff", borderTop:"2px solid #bfdbfe" }}>
                           <div style={{ fontSize:11, fontWeight:800, marginBottom:2 }}>📅 NEXT VISIT</div>
@@ -5924,7 +5994,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         Medicine schedule prepared at Gini Advanced Care Hospital, Mohali. Verify with your doctor before changes. | 📞 0172-4120100
                       </div>
                       <div className="no-print" style={{ padding:8, textAlign:"center" }}>
-                        <button onClick={()=>window.print()} style={{ padding:"8px 20px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Schedule</button>
+                        <button onClick={()=>{
+                          const el = document.querySelector('[data-medcard]');
+                          if (!el) return;
+                          const w = window.open('','','width=800,height=1000');
+                          w.document.write('<html><head><title>Medicine Card - '+patient.name+'</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:12px}@media print{body{margin:0}}</style></head><body>');
+                          w.document.write(el.innerHTML);
+                          w.document.write('</body></html>');
+                          w.document.close();
+                          setTimeout(()=>{w.print();w.close();},300);
+                        }} style={{ padding:"8px 20px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Medicine Card Only</button>
                       </div>
                     </div>
                     );
