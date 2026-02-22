@@ -1183,6 +1183,37 @@ export default function GiniScribe() {
     if (patient.name) saveSession();
   }, [patient, vitals, tab, visitActive, complaints, hxConditions, examData, assessDx, assessLabs, moTranscript, conTranscript, appointments, nextVisitDate]);
 
+  // Auto-build moData from visit workflow when entering consultant/plan tab
+  // This ensures the plan tab has data even without clicking "Generate MO Summary"
+  useEffect(() => {
+    if ((tab === "consultant" || tab === "plan") && visitActive && !moData && (complaints.length > 0 || assessDx.length > 0 || hxConditions.length > 0)) {
+      const dxMap = {"dm2":"Type 2 DM","htn":"Hypertension","hypo":"Hypothyroid","hyper":"Hyperthyroid","dyslip":"Dyslipidemia",
+        "obesity":"Obesity","pcos":"PCOS","ckd":"CKD","cad":"CAD","vitd":"Vit D Deficiency","b12":"B12 Deficiency"};
+      const autoDx = [
+        ...assessDx.map(id => ({ id, label: dxMap[id] || id, status: "Uncontrolled" })),
+        ...hxConditions.filter(c => !assessDx.some(id => (dxMap[id]||"").toLowerCase() === c.toLowerCase())).map(c => ({
+          id: c.toLowerCase().replace(/\s+/g,"_"), label: c, status: "Active"
+        }))
+      ];
+      const autoInvestigations = labData ? (labData.panels||[]).flatMap(p=>(p.tests||[]).map(t=>({
+        test: t.test_name, value: parseFloat(t.result)||t.result, unit: t.unit||"", flag: t.flag==="H"?"HIGH":t.flag==="L"?"LOW":null, ref: t.ref_range||""
+      }))) : [];
+
+      setMoData({
+        chief_complaints: complaints.length > 0 ? complaints : ["Follow-up"],
+        diagnoses: autoDx,
+        previous_medications: [],
+        investigations: autoInvestigations,
+        history: {
+          family: Object.entries(hxFamilyHx).filter(([k,v])=>v===true).map(([k])=>k).join(", ") || "",
+          past_medical_surgical: hxSurgeries.map(s=>`${s.name}${s.year?` (${s.year})`:""}${s.hospital?` @ ${s.hospital}`:""}`).join(", ") || "",
+          personal: ""
+        },
+        compliance: ""
+      });
+    }
+  }, [tab]);
+
   // Exam definitions
   const EXAM_SECTIONS = {
     General: [
@@ -2500,26 +2531,108 @@ ${parts.join("\n")}`;
   ];
 
   // External/previous medications from DB (for reconciliation + medicine card)
+  // Server now JOINs medications with consultations to provide prescriber info
   const externalMeds = (() => {
     if (sa(moData,"previous_medications").length > 0 && sa(conData,"medications_confirmed").length > 0) {
-      // MO captured external meds AND consultant has confirmed — show MO's external meds for reconciliation
+      // MO captured external meds AND consultant confirmed — use MO data for reconciliation
       return sa(moData,"previous_medications");
     }
-    if ((patientFullData?.medications||[]).length > 0) {
-      // Fall back to DB medications
-      return patientFullData.medications.filter(m => m.is_active !== false).map(m => ({
-        name: m.name || m.pharmacy_match || "",
-        composition: m.composition || "",
-        dose: m.dose || "",
-        frequency: m.frequency || "",
-        timing: m.timing || "",
-        route: m.route || "Oral",
-        prescriber: m.prescriber || (m.consultation_id ? "Previous visit" : "External"),
-        forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [],
-      }));
-    }
-    return [];
+    // Fall back to DB medications from patientFullData
+    const meds = patientFullData?.medications || [];
+    if (meds.length === 0) return [];
+    return meds.filter(m => m.is_active !== false).map(m => ({
+      name: m.name || m.pharmacy_match || "",
+      composition: m.composition || "",
+      dose: m.dose || "",
+      frequency: m.frequency || "",
+      timing: m.timing || "",
+      route: m.route || "Oral",
+      isNew: m.is_new || false,
+      forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [],
+      // Server JOIN provides these fields directly
+      prescriber: m.prescriber || m.con_name || "External",
+      specialty: "", // parsed from prescriber if format is "Dr. Name (Specialty)"
+      hospital: "",
+      visitDate: m.prescribed_date || m.started_date || m.created_at || "",
+      consultationId: m.consultation_id,
+    }));
   })();
+
+  // Group external meds by prescribing doctor
+  const externalMedsByDoctor = (() => {
+    const grouped = {};
+    externalMeds.forEach(m => {
+      const raw = m.prescriber || "Unknown";
+      // Parse "Dr. Name (Specialty)" format
+      const specMatch = raw.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+      const doctor = specMatch ? specMatch[1].trim() : raw;
+      const specialty = specMatch ? specMatch[2].trim() : (m.specialty || "");
+      const key = doctor;
+      if (!grouped[key]) grouped[key] = { doctor, specialty, hospital: m.hospital || "", date: m.visitDate, meds: [] };
+      grouped[key].meds.push(m);
+      // Use latest date
+      if (m.visitDate && (!grouped[key].date || m.visitDate > grouped[key].date)) grouped[key].date = m.visitDate;
+      if (specialty && !grouped[key].specialty) grouped[key].specialty = specialty;
+    });
+    return Object.values(grouped).sort((a,b) => (b.date||"").localeCompare(a.date||""));
+  })();
+
+  // Complete Medicine Schedule — all active meds grouped by time of day
+  const buildMedicineSchedule = () => {
+    const allActiveMeds = [
+      ...planMeds.map(m => ({...m, prescriber: conName || "Gini", isGini: true})),
+      ...externalMeds.filter(m => medRecon[m.name] !== "stop" && medRecon[m.name] !== "hold")
+    ];
+    // Deduplicate by name (prefer Gini version)
+    const seen = new Set();
+    const dedupedMeds = [];
+    allActiveMeds.forEach(m => {
+      const key = (m.name||"").toUpperCase().replace(/\s+/g,"");
+      if (!seen.has(key)) { seen.add(key); dedupedMeds.push(m); }
+    });
+
+    const slots = [
+      { id:"morning", label:"🌅 Morning", time:"7:00 AM", match: t => /morn|wake|empty.?stomach|OD(?!\s*HS)/i.test(t) && !/before.*break|30.*min/i.test(t) },
+      { id:"beforeBreak", label:"🔅 Before Breakfast (30 min)", time:"7:30 AM", match: t => /before.*break|30.*min.*before|empty.*stomach.*break|before.*meal.*morn/i.test(t) },
+      { id:"afterBreak", label:"🍳 After Breakfast", time:"8:30 AM", match: t => /after.*break|after.*meal.*morn|BD|TDS/i.test(t) && !/before/i.test(t) },
+      { id:"afterLunch", label:"🍛 After Lunch", time:"1:30 PM", match: t => /after.*lunch|lunch|afternoon|BD.*after|TDS/i.test(t) },
+      { id:"evening", label:"🌆 Evening", time:"5:00 PM", match: t => /evening|5.*pm|SOS|as.*needed|repeat|fever/i.test(t) },
+      { id:"afterDinner", label:"🍽️ After Dinner", time:"8:30 PM", match: t => /after.*dinner|after.*meal.*night|BD/i.test(t) },
+      { id:"night", label:"🌙 Night (10 PM)", time:"10:00 PM", match: t => /night|HS|bedtime|10.*pm/i.test(t) && !/bed/i.test(t) },
+      { id:"bedtime", label:"🛏️ Bedtime", time:"10:30 PM", match: t => /bedtime|bed|with.*milk|at.*bed/i.test(t) },
+      { id:"asDirected", label:"📋 As Directed", time:"", match: () => false },
+    ];
+
+    const schedule = slots.map(s => ({...s, meds: []}));
+    dedupedMeds.forEach(m => {
+      const t = `${m.timing||""} ${m.frequency||""}`.trim();
+      let placed = false;
+      // BD = morning + night/after dinner
+      if (/BD/i.test(t) && !/TDS/i.test(t)) {
+        schedule.find(s=>s.id==="afterBreak")?.meds.push(m);
+        schedule.find(s=>s.id==="afterDinner")?.meds.push(m);
+        placed = true;
+      }
+      // TDS = morning + afternoon + night
+      else if (/TDS/i.test(t)) {
+        schedule.find(s=>s.id==="afterBreak")?.meds.push(m);
+        schedule.find(s=>s.id==="afterLunch")?.meds.push(m);
+        schedule.find(s=>s.id==="afterDinner")?.meds.push(m);
+        placed = true;
+      }
+      if (!placed) {
+        for (const slot of schedule) {
+          if (slot.match(t)) { slot.meds.push(m); placed = true; break; }
+        }
+      }
+      if (!placed) {
+        // Default: OD = morning
+        if (/OD/i.test(t)) schedule.find(s=>s.id==="morning")?.meds.push(m);
+        else schedule.find(s=>s.id==="asDirected")?.meds.push(m);
+      }
+    });
+    return schedule.filter(s => s.meds.length > 0);
+  };
 
   // Plan editing helpers
   const toggleBlock = (id) => setPlanHidden(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
@@ -4677,8 +4790,22 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               const dxLabels = assessDx.map(id => CONDITION_CHIPS.find(c=>c.id===id)?.l || id);
               parts.push("Diagnoses: " + dxLabels.join(", "));
             }
+            if (hxConditions.length) parts.push("History Conditions: " + hxConditions.join(", "));
+            if (hxAllergies.length) parts.push("Allergies: " + hxAllergies.join(", "));
+            if (hxSurgeries.length) parts.push("Surgeries: " + hxSurgeries.map(s=>`${s.name}${s.year?` (${s.year})`:""}`).join(", "));
             if (assessNotes) parts.push("Notes: " + assessNotes);
-            if (vitals.bp_sys) parts.push(`Vitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}, Wt ${vitals.weight}kg`);
+            if (vitals.bp_sys) parts.push(`Vitals: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}, Wt ${vitals.weight}kg, BMI ${vitals.bmi}`);
+            // Include lab data from reports
+            if (labData?.panels) {
+              const labParts = labData.panels.flatMap(p=>(p.tests||[]).filter(t=>t.flag).map(t=>`${t.test_name}: ${t.result}${t.unit||""} (${t.flag})`));
+              if (labParts.length) parts.push("Key Labs: " + labParts.join(", "));
+            }
+            // Include current meds from DB
+            if (patientFullData?.medications?.length) {
+              const medList = patientFullData.medications.filter(m=>m.is_active!==false).map(m=>`${m.name} ${m.dose||""} ${m.frequency||""} [${m.prescriber||""}]`).join(", ");
+              parts.push("Current Medications: " + medList);
+            }
+            if (assessLabs.length) parts.push("Labs Ordered: " + assessLabs.join(", "));
             const fullText = parts.join(". ");
             setMoTranscript(fullText);
             processMO(fullText);
@@ -5659,116 +5786,152 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   )}
                 </PlanBlock>}
 
-                {/* ═══ MEDICINE CARD (v2) ═══ */}
-                {(planMeds.length > 0 || externalMeds.length > 0) && (
-                <div className="no-print" style={{ marginBottom:10 }}>
-                  <button onClick={()=>setShowMedCard(!showMedCard)}
-                    style={{ width:"100%", padding:"8px 14px", background:showMedCard?"#7c3aed":"#faf5ff", color:showMedCard?"white":"#7c3aed", border:"1.5px solid #c4b5fd", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                    💊 {showMedCard ? "Hide" : "Show"} Medicine Card ({planMeds.length + externalMeds.filter(m=>medRecon[m.name]!=="stop").length} medicines)
-                  </button>
-                  {showMedCard && (
-                    <div style={{ marginTop:6, border:"2px solid #c4b5fd", borderRadius:10, padding:14, background:"white" }}>
-                      <div style={{ textAlign:"center", marginBottom:8 }}>
-                        <div style={{ fontSize:13, fontWeight:800, color:"#7c3aed" }}>💊 MEDICINE CARD — {patient.name}</div>
-                        <div style={{ fontSize:10, color:"#94a3b8" }}>Keep this card with you. Show to any doctor you visit.</div>
+                {/* ═══ EXTERNAL MEDICATION RECONCILIATION — Grouped by Doctor ═══ */}
+                {externalMedsByDoctor.length > 0 && (
+                  <PlanBlock id="extmeds" title={`🏥 Medications by Other Consultants (${externalMeds.length})`} color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
+                    <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:10, color:"#92400e" }}>
+                      <b>Note:</b> External consultant medications based on prescriptions provided by patient. Verified during this visit.
+                    </div>
+                    <div className="no-print" style={{ display:"flex", gap:4, marginBottom:8 }}>
+                      <button onClick={()=>{
+                        const recon = {};
+                        externalMeds.forEach(m => { if(!medRecon[m.name]) recon[m.name] = "continue"; });
+                        setMedRecon(prev => ({...prev, ...recon}));
+                      }} style={{ padding:"5px 12px", background:"#059669", color:"white", border:"none", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                        ✅ Confirm All Continue
+                      </button>
+                    </div>
+                    {externalMedsByDoctor.map((group, gi) => (
+                      <div key={gi} style={{ marginBottom:8 }}>
+                        <div style={{ background:"#f1f5f9", padding:"6px 12px", borderRadius:"6px 6px 0 0", border:"1px solid #e2e8f0", borderBottom:"none", display:"flex", justifyContent:"space-between" }}>
+                          <div style={{ fontSize:11, fontWeight:800, color:"#1e293b" }}>
+                            {group.doctor} {group.specialty ? `(${group.specialty})` : ""}
+                            {group.date && <span style={{ fontWeight:400, color:"#64748b" }}> — {new Date(String(group.date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span>}
+                          </div>
+                          {group.hospital && <span style={{ fontSize:9, color:"#94a3b8", fontWeight:600 }}>{group.hospital}</span>}
+                        </div>
+                        {group.meds.map((m, mi) => {
+                          const status = medRecon[m.name] || "continue";
+                          return (
+                            <div key={mi} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 12px", borderBottom:"1px solid #f1f5f9",
+                              background:status==="stop"?"#fef2f2":status==="hold"?"#fef3c7":"white",
+                              border:`1px solid ${status==="stop"?"#fecaca":status==="hold"?"#fde68a":"#e2e8f0"}`, borderTop:"none" }}>
+                              <span style={{ fontSize:14, color:status==="stop"?"#dc2626":status==="hold"?"#f59e0b":"#059669" }}>
+                                {status==="stop"?"🛑":status==="hold"?"⏸":"✅"}
+                              </span>
+                              <div style={{ flex:1 }}>
+                                <div style={{ fontSize:12, fontWeight:700 }}>{m.name} <span style={{ fontSize:10, fontWeight:400, color:"#94a3b8" }}>{m.composition}</span></div>
+                              </div>
+                              <div style={{ fontSize:11, fontWeight:600, color:"#475569", minWidth:60, textAlign:"right" }}>{m.dose}</div>
+                              <div style={{ fontSize:11, fontWeight:600, color:"#2563eb", minWidth:100 }}>{m.timing || m.frequency}</div>
+                              <div className="no-print" style={{ display:"flex", gap:2 }}>
+                                {[{v:"continue",l:"Continue",c:"#059669"},{v:"hold",l:"Hold",c:"#f59e0b"},{v:"stop",l:"Stop",c:"#dc2626"}].map(o => (
+                                  <button key={o.v} onClick={()=>setMedRecon(prev=>({...prev,[m.name]:o.v}))}
+                                    style={{ padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer",
+                                      border:`1.5px solid ${status===o.v?o.c:"#e2e8f0"}`,
+                                      background:status===o.v?o.c:"white", color:status===o.v?"white":"#475569" }}>{o.l}</button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:10, border:"1px solid #e2e8f0" }}>
-                        <thead><tr style={{ background:"#7c3aed", color:"white" }}>
-                          <th style={{ padding:"4px 6px", textAlign:"left" }}>Medicine</th>
-                          <th style={{ padding:"4px 4px" }}>Morn</th>
-                          <th style={{ padding:"4px 4px" }}>Aft</th>
-                          <th style={{ padding:"4px 4px" }}>Night</th>
-                          <th style={{ padding:"4px 6px", textAlign:"left" }}>For</th>
-                          <th style={{ padding:"4px 6px", textAlign:"left" }}>By</th>
-                        </tr></thead>
-                        <tbody>
-                          {/* Gini prescribed meds */}
-                          {planMeds.map((m,i) => {
-                          const t = (m.timing||m.frequency||"").toLowerCase();
-                          const morn = t.includes("morn") || t.includes("od") || t.includes("bd") || t.includes("tds") || t.includes("empty") || t.includes("breakfast");
-                          const aft = t.includes("aft") || t.includes("bd") || t.includes("tds") || t.includes("lunch");
-                          const night = t.includes("night") || t.includes("hs") || t.includes("bedtime") || t.includes("tds");
-                          return <tr key={i} style={{ background:m.isNew?"#f0fdf4":i%2?"#fafafa":"white" }}>
-                            <td style={{ padding:"3px 6px", fontWeight:700 }}>{m.name}{m.isNew?<span style={{ background:"#059669", color:"white", padding:"0 3px", borderRadius:2, fontSize:7, marginLeft:3, fontWeight:800 }}>NEW</span>:""}<div style={{fontSize:8,color:"#94a3b8"}}>{m.dose} {m.timing||m.frequency||""}</div></td>
-                            <td style={{ textAlign:"center", padding:"2px" }}>{morn?"✅":""}</td>
-                            <td style={{ textAlign:"center", padding:"2px" }}>{aft?"✅":""}</td>
-                            <td style={{ textAlign:"center", padding:"2px" }}>{night?"✅":""}</td>
-                            <td style={{ padding:"2px 4px", fontSize:8, color:"#6d28d9" }}>{(m.forDiagnosis||[]).join(", ")}</td>
-                            <td style={{ padding:"2px 4px", fontSize:8, color:"#1e40af" }}>{conName||"Gini"}</td>
-                          </tr>;
-                          })}
-                          {/* External meds (continued) */}
-                          {externalMeds.filter(m=>medRecon[m.name]!=="stop").map((m,i) => {
-                            const t = (m.timing||m.frequency||"").toLowerCase();
-                            const morn = t.includes("morn") || t.includes("od") || t.includes("bd") || t.includes("tds") || t.includes("breakfast");
-                            const aft = t.includes("aft") || t.includes("bd") || t.includes("tds");
-                            const night = t.includes("night") || t.includes("hs") || t.includes("bedtime") || t.includes("tds");
-                            const isHold = medRecon[m.name]==="hold";
-                            return <tr key={"ext"+i} style={{ background:isHold?"#fef3c7":"#fff7ed", opacity:isHold?0.6:1 }}>
-                              <td style={{ padding:"3px 6px", fontWeight:600 }}>{m.name}{isHold?<span style={{ background:"#f59e0b", color:"white", padding:"0 3px", borderRadius:2, fontSize:7, marginLeft:3 }}>HOLD</span>:""}<div style={{fontSize:8,color:"#94a3b8"}}>{m.dose} {m.timing||m.frequency||""}</div></td>
-                              <td style={{ textAlign:"center", padding:"2px" }}>{morn?"✅":""}</td>
-                              <td style={{ textAlign:"center", padding:"2px" }}>{aft?"✅":""}</td>
-                              <td style={{ textAlign:"center", padding:"2px" }}>{night?"✅":""}</td>
-                              <td style={{ padding:"2px 4px", fontSize:8, color:"#92400e" }}>{(m.forDiagnosis||[]).join(", ")}</td>
-                              <td style={{ padding:"2px 4px", fontSize:8, color:"#f59e0b" }}>{m.prescriber||"External"}</td>
-                            </tr>;
-                          })}
-                        </tbody>
-                      </table>
-                      <div style={{ marginTop:6, textAlign:"center" }}>
-                        <button onClick={()=>{window.print();}} style={{ padding:"6px 16px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>🖨️ Print Card</button>
+                    ))}
+                    {Object.values(medRecon).some(v=>v!=="continue") && (
+                      <div style={{ marginTop:6, padding:8, background:"#f8fafc", borderRadius:6, border:"1px solid #e2e8f0" }}>
+                        {Object.entries(medRecon).filter(([_,v])=>v==="stop").length > 0 && (
+                          <div style={{ fontSize:10, color:"#dc2626", fontWeight:600, marginBottom:2 }}>🛑 Stopped: {Object.entries(medRecon).filter(([_,v])=>v==="stop").map(([k])=>k).join(", ")}</div>
+                        )}
+                        {Object.entries(medRecon).filter(([_,v])=>v==="hold").length > 0 && (
+                          <div style={{ fontSize:10, color:"#f59e0b", fontWeight:600 }}>⏸ On Hold: {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k])=>k).join(", ")}</div>
+                        )}
+                      </div>
+                    )}
+                  </PlanBlock>
+                )}
+
+                {/* ═══ COMPLETE MEDICINE SCHEDULE — Time-of-Day Card ═══ */}
+                {(planMeds.length > 0 || externalMeds.length > 0) && (
+                <div style={{ marginBottom:10 }}>
+                  <button onClick={()=>setShowMedCard(!showMedCard)}
+                    style={{ width:"100%", padding:"10px 14px", background:showMedCard?"linear-gradient(135deg,#1e293b,#334155)":"#faf5ff", color:showMedCard?"white":"#7c3aed", border:"1.5px solid #c4b5fd", borderRadius:8, fontSize:13, fontWeight:800, cursor:"pointer" }}>
+                    💊 {showMedCard ? "Hide" : "Show"} Complete Medicine Schedule
+                  </button>
+                  {showMedCard && (() => {
+                    const schedule = buildMedicineSchedule();
+                    const totalMeds = planMeds.length + externalMeds.filter(m=>medRecon[m.name]!=="stop").length;
+                    return (
+                    <div style={{ marginTop:6, borderRadius:10, overflow:"hidden", border:"2px solid #c4b5fd" }}>
+                      <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", padding:"12px 16px", color:"white", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <div>
+                          <div style={{ fontSize:14, fontWeight:800 }}>💊 YOUR COMPLETE MEDICINE SCHEDULE</div>
+                          <div style={{ fontSize:10, opacity:.7 }}>{patient.name} | {patient.fileNo||""} | Updated: {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontSize:24, fontWeight:800 }}>{totalMeds}</div>
+                          <div style={{ fontSize:8, opacity:.7 }}>Active Medicines</div>
+                        </div>
+                      </div>
+                      {schedule.map(slot => (
+                        <div key={slot.id}>
+                          <div style={{ background:"#f8fafc", padding:"6px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0" }}>
+                            <div style={{ fontSize:12, fontWeight:800, color:"#1e293b" }}>{slot.label}</div>
+                            {slot.time && <div style={{ fontSize:10, color:"#64748b", fontWeight:600 }}>{slot.time}</div>}
+                          </div>
+                          {slot.meds.map((m, mi) => (
+                            <div key={mi} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 16px", borderBottom:"1px solid #f1f5f9" }}>
+                              <span style={{ fontSize:14, color:"#cbd5e1" }}>💊</span>
+                              <div style={{ flex:1 }}>
+                                <div style={{ fontSize:12, fontWeight:700 }}>
+                                  {m.name}
+                                  {m.isNew && <span style={{ background:"#dc2626", color:"white", padding:"0 4px", borderRadius:3, fontSize:8, marginLeft:4, fontWeight:800 }}>NEW</span>}
+                                </div>
+                                <div style={{ fontSize:10, color:"#94a3b8" }}>
+                                  {m.dose} {m.frequency} {(m.forDiagnosis||[]).length > 0 ? `— ${m.forDiagnosis.join(", ")}` : ""}
+                                </div>
+                              </div>
+                              <span style={{ fontSize:10, padding:"2px 8px", borderRadius:4, fontWeight:700,
+                                background:m.isGini?"#2563eb":"#f1f5f9", color:m.isGini?"white":"#64748b" }}>
+                                {m.isGini ? (conName||"Gini") : m.prescriber}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {(conData?.self_monitoring||[]).length > 0 && (
+                        <div style={{ padding:12, background:"#fef3c7", borderTop:"2px solid #fde68a" }}>
+                          <div style={{ fontSize:11, fontWeight:800, marginBottom:4 }}>⚠️ IMPORTANT REMINDERS</div>
+                          {conData.self_monitoring.map((sm, i) => (
+                            <div key={i} style={{ fontSize:10, marginBottom:2 }}>
+                              {sm.alert && <div>• 🔴 <b>{sm.title}:</b> {sm.alert}</div>}
+                              {sm.targets && <div>• 📊 <b>{sm.title}:</b> {sm.targets}</div>}
+                              {(sm.instructions||[]).map((inst,ii) => <div key={ii}>• {inst}</div>)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(nextVisitDate || conData?.follow_up) && (
+                        <div style={{ padding:12, background:"#f0f9ff", borderTop:"2px solid #bfdbfe" }}>
+                          <div style={{ fontSize:11, fontWeight:800, marginBottom:2 }}>📅 NEXT VISIT</div>
+                          <div style={{ fontSize:16, fontWeight:800 }}>{getPlan("followup_dur", conData?.follow_up?.duration||"")}</div>
+                          {nextVisitDate && <div style={{ fontSize:12, fontWeight:700, color:"#2563eb" }}>{new Date(nextVisitDate+"T12:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}</div>}
+                          {(conData?.follow_up?.tests_to_bring||[]).length > 0 && (
+                            <div style={{ fontSize:10, color:"#64748b", marginTop:2 }}>⚠️ {conData.follow_up.tests_to_bring.join(", ")}</div>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ padding:"8px 16px", background:"#f8fafc", textAlign:"center", fontSize:9, color:"#94a3b8", borderTop:"1px solid #e2e8f0" }}>
+                        Medicine schedule prepared at Gini Advanced Care Hospital, Mohali. Verify with your doctor before changes. | 📞 0172-4120100
+                      </div>
+                      <div className="no-print" style={{ padding:8, textAlign:"center" }}>
+                        <button onClick={()=>window.print()} style={{ padding:"8px 20px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>🖨️ Print Schedule</button>
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
                 )}
 
-                {/* ═══ EXTERNAL MEDICATION RECONCILIATION (v2) ═══ */}
-                {externalMeds.length > 0 && (
-                  <PlanBlock id="extmeds" title={`🏥 External / Other Medications — Reconcile (${externalMeds.length})`} color="#f59e0b" hidden={planHidden.has("extmeds")} onToggle={()=>toggleBlock("extmeds")}>
-                    <div style={{ fontSize:10, color:"#92400e", marginBottom:6 }}>Review medications from other doctors. Mark each as Continue, Hold, or Stop.</div>
-                    {externalMeds.map((m,i) => {
-                      const status = medRecon[m.name] || "continue";
-                      return (
-                        <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 8px", marginBottom:3, borderRadius:6,
-                          background:status==="stop"?"#fef2f2":status==="hold"?"#fef3c7":"#f0fdf4",
-                          border:`1px solid ${status==="stop"?"#fecaca":status==="hold"?"#fde68a":"#bbf7d0"}` }}>
-                          <div style={{ flex:1 }}>
-                            <div style={{ fontSize:11, fontWeight:700 }}>{m.name}</div>
-                            <div style={{ fontSize:9, color:"#64748b" }}>{m.dose} {m.frequency} {m.timing} {m.prescriber ? `· ${m.prescriber}` : ""}</div>
-                          </div>
-                          <div style={{ display:"flex", gap:2 }}>
-                            {[{v:"continue",l:"✅ Continue",c:"#059669"},{v:"hold",l:"⏸ Hold",c:"#f59e0b"},{v:"stop",l:"🛑 Stop",c:"#dc2626"}].map(o=>(
-                              <button key={o.v} onClick={()=>setMedRecon(prev=>({...prev,[m.name]:o.v}))}
-                                style={{ padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer",
-                                  border:`1.5px solid ${status===o.v?o.c:"#e2e8f0"}`,
-                                  background:status===o.v?o.c:"white", color:status===o.v?"white":o.c }}>{o.l}</button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {Object.values(medRecon).filter(v=>v==="stop").length > 0 && (
-                      <div style={{ marginTop:6, padding:6, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, fontSize:10, color:"#dc2626", fontWeight:600 }}>
-                        🛑 Stopped: {Object.entries(medRecon).filter(([_,v])=>v==="stop").map(([k])=>k).join(", ")}
-                      </div>
-                    )}
-                    {Object.values(medRecon).filter(v=>v==="hold").length > 0 && (
-                      <div style={{ marginTop:3, padding:6, background:"#fef3c7", border:"1px solid #fde68a", borderRadius:6, fontSize:10, color:"#92400e", fontWeight:600 }}>
-                        ⏸ On Hold: {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k])=>k).join(", ")}
-                      </div>
-                    )}
-                    <button className="no-print" onClick={()=>{
-                      const summary = Object.entries(medRecon).filter(([_,v])=>v!=="continue").map(([name,action])=>`${action.toUpperCase()}: ${name}`);
-                      if (summary.length > 0) {
-                        const txt = `Medication Reconciliation:\n${summary.join("\n")}`;
-                        setAssessNotes(prev => prev ? prev + "\n\n" + txt : txt);
-                      }
-                    }} style={{ marginTop:6, width:"100%", padding:"6px", background:"#f59e0b", color:"white", border:"none", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer" }}>
-                      🔄 Add Reconciliation to Notes
-                    </button>
-                  </PlanBlock>
-                )}
 
                 {/* Lifestyle */}
                 {planLifestyle.length>0 && <PlanBlock id="lifestyle" title="🥗 Lifestyle Changes" color="#059669" hidden={planHidden.has("lifestyle")} onToggle={()=>toggleBlock("lifestyle")}>
@@ -5960,10 +6123,84 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:13, fontWeight:600 }}>Load a patient first</div>
             </div>
           ) : !patientFullData?.documents?.length ? (
-            <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>
-              <div style={{ fontSize:28, marginBottom:8 }}>📂</div>
-              <div style={{ fontSize:13, fontWeight:600 }}>No documents uploaded yet</div>
-              <div style={{ fontSize:11, marginTop:4 }}>Upload reports from the 📋 Vitals tab or ask the lab team to upload</div>
+            <div>
+              <div style={{ textAlign:"center", padding:20, color:"#94a3b8", marginBottom:12 }}>
+                <div style={{ fontSize:22, marginBottom:4 }}>📂</div>
+                <div style={{ fontSize:12, fontWeight:600 }}>No uploaded documents yet</div>
+                <div style={{ fontSize:10, marginTop:2 }}>Upload reports from the Visit Workflow or Lab Portal</div>
+              </div>
+
+              {/* Show lab results from DB if available */}
+              {(patientFullData?.lab_results||[]).length > 0 && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #7c3aed", marginBottom:6 }}>🔬 Lab Results ({patientFullData.lab_results.length})</div>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #e2e8f0" }}>
+                    <thead><tr style={{ background:"#f8fafc" }}>
+                      <th style={{ padding:"4px 8px", textAlign:"left", fontWeight:700, fontSize:10 }}>Test</th>
+                      <th style={{ padding:"4px 8px", textAlign:"right", fontWeight:700, fontSize:10 }}>Result</th>
+                      <th style={{ padding:"4px 8px", textAlign:"center", fontWeight:700, fontSize:10 }}>Flag</th>
+                      <th style={{ padding:"4px 8px", textAlign:"left", fontWeight:700, fontSize:10 }}>Ref</th>
+                      <th style={{ padding:"4px 8px", textAlign:"right", fontWeight:700, fontSize:10 }}>Date</th>
+                    </tr></thead>
+                    <tbody>{patientFullData.lab_results.slice(0,50).map((l,i) => (
+                      <tr key={i} style={{ background:l.flag==="H"?"#fef2f2":l.flag==="L"?"#eff6ff":i%2?"#fafafa":"white", borderBottom:"1px solid #f1f5f9" }}>
+                        <td style={{ padding:"3px 8px", fontWeight:600 }}>{l.test_name}</td>
+                        <td style={{ padding:"3px 8px", textAlign:"right", fontWeight:700, color:l.flag==="H"?"#dc2626":l.flag==="L"?"#2563eb":"#1e293b" }}>{l.result} {l.unit||""}</td>
+                        <td style={{ padding:"3px 8px", textAlign:"center", fontSize:9 }}>{l.flag==="H"?"↑ HIGH":l.flag==="L"?"↓ LOW":"✓"}</td>
+                        <td style={{ padding:"3px 8px", fontSize:9, color:"#94a3b8" }}>{l.ref_range||""}</td>
+                        <td style={{ padding:"3px 8px", textAlign:"right", fontSize:9, color:"#64748b" }}>{l.test_date ? new Date(String(l.test_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}) : ""}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Show medications from DB */}
+              {(patientFullData?.medications||[]).length > 0 && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #059669", marginBottom:6 }}>💊 Active Medications ({patientFullData.medications.filter(m=>m.is_active!==false).length})</div>
+                  {patientFullData.medications.filter(m=>m.is_active!==false).map((m,i) => (
+                    <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderBottom:"1px solid #f1f5f9" }}>
+                      <span style={{ fontSize:11, fontWeight:700, flex:1 }}>{m.name}</span>
+                      <span style={{ fontSize:10, color:"#475569" }}>{m.dose}</span>
+                      <span style={{ fontSize:10, color:"#2563eb" }}>{m.frequency} {m.timing||""}</span>
+                      <span style={{ fontSize:9, color:"#94a3b8" }}>{m.is_new ? "🆕" : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Show diagnoses from DB */}
+              {(patientFullData?.diagnoses||[]).length > 0 && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #f59e0b", marginBottom:6 }}>🩺 Diagnoses ({patientFullData.diagnoses.length})</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {patientFullData.diagnoses.map((d,i) => (
+                      <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:700,
+                        background:d.status==="Controlled"||d.status==="Active-Controlled"?"#f0fdf4":d.status==="Resolved"?"#f8fafc":"#fef2f2",
+                        color:d.status==="Controlled"||d.status==="Active-Controlled"?"#059669":d.status==="Resolved"?"#94a3b8":"#dc2626",
+                        border:`1px solid ${d.status==="Controlled"||d.status==="Active-Controlled"?"#bbf7d0":d.status==="Resolved"?"#e2e8f0":"#fecaca"}` }}>
+                        {d.label} <span style={{ fontSize:9, fontWeight:400 }}>({d.status})</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Show visit history */}
+              {(patientFullData?.consultations||[]).length > 0 && (
+                <div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #2563eb", marginBottom:6 }}>📋 Visit History ({patientFullData.consultations.length})</div>
+                  {patientFullData.consultations.slice(0,20).map((c,i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"4px 8px", fontSize:11, borderBottom:"1px solid #f1f5f9" }}>
+                      <span style={{ fontWeight:700, color:"#2563eb", minWidth:80 }}>{c.visit_date ? new Date(String(c.visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : ""}</span>
+                      <span style={{ color:"#64748b" }}>{c.visit_type||"OPD"}</span>
+                      <span style={{ flex:1 }}>{c.con_name||c.mo_name||""}</span>
+                      <span style={{ fontSize:9, color:c.status==="completed"?"#059669":"#f59e0b", fontWeight:600 }}>{c.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div>
