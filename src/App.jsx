@@ -114,9 +114,23 @@ CRITICAL MEDICATION RULES:
    {"insulin_education":{"type":"Basal/Premix/Bolus","device":"Pen/Syringe","injection_sites":["Abdomen","Thigh"],"storage":"Keep in fridge, room temp vial valid 28 days","titration":"Increase by 2 units every 3 days if fasting >130","hypo_management":"If sugar <70: 3 glucose tablets, recheck 15 min","needle_disposal":"Use sharps container, never reuse needles"}}
    Fill titration based on consultant's instructions. If not specified, use standard protocols.`;
 
-const LAB_PROMPT = `Extract ALL test results. Return ONLY valid JSON, no backticks.
-{"report_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
-flag: "H" high, "L" low, null normal. report_date: extract the date the tests were performed/collected from the report header. ref_range: extract reference range as shown on report (e.g. "4.0-6.5").`;
+const LAB_PROMPT = `Extract ALL test results from this lab report image. Return ONLY valid JSON, no backticks.
+{"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
+CRITICAL RULES:
+- report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD.
+- lab_name: Extract the laboratory/hospital name from the report header.
+- test_name: Use SHORT STANDARD names. Map to these canonical names when applicable:
+  HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
+  Creatinine, BUN, Uric Acid, eGFR, UACR, Sodium, Potassium, Calcium, Phosphorus,
+  TSH, T3, T4, Free T3, Free T4,
+  SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Albumin, Total Protein,
+  Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, ESR, CRP,
+  Vitamin D, Vitamin B12, Ferritin, Iron, TIBC, Folate,
+  PSA, Urine Routine, Microalbumin
+  Example: "Glycated Hemoglobin" → "HbA1c", "Fasting Blood Sugar" → "FBS", "Fasting Plasma Glucose" → "FBS", "Post Prandial Blood Sugar" → "PPBS"
+- flag: "H" high, "L" low, null normal.
+- ref_range: extract reference range as shown (e.g. "4.0-6.5").
+- result: numeric value. result_text: only if result is non-numeric (e.g. "Positive", "Reactive").`;
 
 const IMAGING_PROMPT = `Extract findings from this medical imaging/diagnostic report. Return ONLY valid JSON, no backticks.
 {
@@ -871,6 +885,8 @@ export default function GiniScribe() {
   const labPortalRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
+  const dbPatientIdRef = useRef(null);
+  useEffect(() => { dbPatientIdRef.current = dbPatientId; }, [dbPatientId]);
   // History entry form
   const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", specialty:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
     diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}],
@@ -1045,7 +1061,7 @@ export default function GiniScribe() {
   const [aiDxSuggestions, setAiDxSuggestions] = useState([]); // auto-detected from labs
 
   // Multiple report uploads in intake
-  const [intakeReports, setIntakeReports] = useState([]); // [{id,type,base64,mediaType,fileName,data,extracting,error}]
+  const [intakeReports, setIntakeReports] = useState([]); // [{id,type,base64,mediaType,fileName,data,extracting,error,saved,saveError}]
   const intakeReportRef = useRef(null);
 
   // Lab requisition
@@ -1202,15 +1218,28 @@ export default function GiniScribe() {
           id: c.toLowerCase().replace(/\s+/g,"_"), label: c, status: "Active"
         }))
       ];
-      const autoInvestigations = labData ? (labData.panels||[]).flatMap(p=>(p.tests||[]).map(t=>({
-        test: t.test_name, value: parseFloat(t.result)||t.result, unit: t.unit||"", flag: t.flag==="H"?"HIGH":t.flag==="L"?"LOW":null, ref: t.ref_range||""
-      }))) : [];
+      // Only include KEY biomarkers (abnormal ones + critical ones) — not every single test
+      const KEY_BIOMARKERS = new Set(["HbA1c","FBS","PPBS","TSH","LDL","HDL","Triglycerides","Total Cholesterol","Creatinine","eGFR","UACR","Vitamin D","Vitamin B12","Hemoglobin","SGPT (ALT)","SGOT (AST)","CRP","Ferritin"]);
+      const autoInvestigations = labData ? (labData.panels||[]).flatMap(p=>(p.tests||[])
+        .filter(t => t.flag === "H" || t.flag === "L" || KEY_BIOMARKERS.has(normalizeTestName(t.test_name)))
+        .map(t => {
+          const nName = normalizeTestName(t.test_name);
+          const date = p.report_date || labData.report_date || "";
+          return { test: nName, value: parseFloat(t.result)||t.result, unit: t.unit||"", flag: t.flag==="H"?"HIGH":t.flag==="L"?"LOW":null, ref: t.ref_range||"", date, from_report: true };
+        })
+      ) : [];
+      // Deduplicate by test name (keep latest or flagged)
+      const dedupedInvestigations = [];
+      const seenTests = new Set();
+      autoInvestigations.forEach(t => {
+        if (!seenTests.has(t.test)) { seenTests.add(t.test); dedupedInvestigations.push(t); }
+      });
 
       setMoData({
         chief_complaints: complaints.length > 0 ? complaints : ["Follow-up"],
         diagnoses: autoDx,
         previous_medications: [],
-        investigations: autoInvestigations,
+        investigations: dedupedInvestigations,
         history: {
           family: Object.entries(hxFamilyHx).filter(([k,v])=>v===true).map(([k])=>k).join(", ") || "",
           past_medical_surgical: hxSurgeries.map(s=>`${s.name}${s.year?` (${s.year})`:""}${s.hospital?` @ ${s.hospital}`:""}`).join(", ") || "",
@@ -1575,6 +1604,24 @@ export default function GiniScribe() {
                 }).catch(e => console.log("Imaging doc save:", e.message));
               }
             }
+            // Auto-save unsaved intake reports (uploaded on intake tab)
+            if (result.patient_id && intakeReports.some(r => r.data && !r.saved)) {
+              console.log(`🔄 Auto-saving ${intakeReports.filter(r=>r.data&&!r.saved).length} intake reports...`);
+              dbPatientIdRef.current = result.patient_id; // ensure ref is current
+              for (const rpt of intakeReports.filter(r => r.data && !r.saved)) {
+                const saveResult = await saveIntakeReportToDB(rpt, rpt.data);
+                setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {
+                  ...r, saved: saveResult.ok, saveError: saveResult.ok ? null : saveResult.error
+                } : r));
+                console.log(`  ${saveResult.ok?"✅":"❌"} ${rpt.fileName}: ${saveResult.ok?`doc#${saveResult.docId}, ${saveResult.labsSaved} labs`:saveResult.error}`);
+              }
+              // Re-refresh patient data after reports saved
+              try {
+                const rResp = await fetch(`${API_URL}/api/patients/${result.patient_id}`, { headers: authHeaders() });
+                const rData = await rResp.json();
+                if (rData.patient) setPatientFullData(rData);
+              } catch(e) {}
+            }
           } else {
             setSaveStatus("⚠️ Local only — " + (result.error || "failed").slice(0, 40));
           }
@@ -1817,8 +1864,9 @@ export default function GiniScribe() {
         else setLabMismatch(null);
       }
       // Save to DB
-      if (data && dbPatientId && API_URL) {
-        saveIntakeReportToDB({ type:"lab", base64:labImageData.base64, mediaType:labImageData.mediaType, fileName:labImageData.fileName }, data);
+      if (data && dbPatientIdRef.current && API_URL) {
+        const result = await saveIntakeReportToDB({ type:"lab", base64:labImageData.base64, mediaType:labImageData.mediaType, fileName:labImageData.fileName }, data);
+        if (!result.ok) console.warn("Lab save failed:", result.error);
       }
     }
     setLoading(p=>({...p,lab:false}));
@@ -1970,7 +2018,7 @@ export default function GiniScribe() {
               await fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
                 method: "POST", headers: authHeaders(),
                 body: JSON.stringify({
-                  test_name: test.test_name, result: String(test.result_text||test.result),
+                  test_name: normalizeTestName(test.test_name), result: String(test.result_text||test.result),
                   unit: test.unit||"", flag: test.flag||"N", ref_range: test.ref_range||"",
                   test_date: effectiveDate
                 })
@@ -2005,52 +2053,116 @@ export default function GiniScribe() {
     } catch (e) { console.log("File upload failed:", e.message); }
   };
 
+  // Test name normalization map — maps AI variations to canonical names for outcomes matching
+  const NORMALIZE_TEST = (() => {
+    const map = {};
+    const add = (canonical, ...aliases) => aliases.forEach(a => { map[a.toLowerCase().trim()] = canonical; });
+    add("HbA1c", "glycated hemoglobin", "glycated haemoglobin", "hba1c", "glycosylated hemoglobin", "a1c", "hemoglobin a1c", "haemoglobin a1c", "glycated hb");
+    add("FBS", "fasting blood sugar", "fasting glucose", "fasting plasma glucose", "fpg", "fbs", "fbg", "fasting blood glucose", "blood sugar fasting", "glucose fasting");
+    add("PPBS", "post prandial blood sugar", "pp glucose", "ppg", "ppbs", "post prandial glucose", "pp blood sugar", "blood sugar pp", "glucose pp", "2hr pp glucose", "pp2bs");
+    add("Total Cholesterol", "total cholesterol", "cholesterol total", "cholesterol, total", "serum cholesterol", "t.cholesterol");
+    add("LDL", "ldl cholesterol", "ldl-c", "ldl-cholesterol", "ldl cholesterol (direct)", "ldl direct", "low density lipoprotein");
+    add("HDL", "hdl cholesterol", "hdl-c", "hdl-cholesterol", "hdl cholesterol (direct)", "high density lipoprotein");
+    add("Triglycerides", "triglycerides", "triglyceride", "tg", "trigs", "serum triglycerides");
+    add("VLDL", "vldl cholesterol", "vldl-c", "vldl", "very low density lipoprotein");
+    add("Non-HDL", "non-hdl cholesterol", "non hdl cholesterol", "nonhdl", "non-hdl", "non hdl");
+    add("Creatinine", "creatinine", "serum creatinine", "creatinine, serum", "s. creatinine", "creatinine (serum)");
+    add("BUN", "blood urea nitrogen", "bun", "urea", "blood urea", "serum urea");
+    add("Uric Acid", "uric acid", "serum uric acid", "uric acid, serum", "s. uric acid");
+    add("eGFR", "egfr", "estimated gfr", "gfr", "glomerular filtration rate");
+    add("UACR", "uacr", "urine albumin creatinine ratio", "microalbumin", "urine microalbumin", "albumin creatinine ratio");
+    add("Sodium", "sodium", "na", "na+", "serum sodium");
+    add("Potassium", "potassium", "k", "k+", "serum potassium");
+    add("Calcium", "calcium", "ca", "serum calcium", "calcium, total");
+    add("TSH", "tsh", "thyroid stimulating hormone", "serum tsh", "tsh ultrasensitive", "tsh (ultrasensitive)");
+    add("T3", "t3", "total t3", "triiodothyronine");
+    add("T4", "t4", "total t4", "thyroxine");
+    add("Free T3", "free t3", "ft3");
+    add("Free T4", "free t4", "ft4", "free thyroxine");
+    add("SGPT (ALT)", "sgpt", "alt", "sgpt (alt)", "alanine aminotransferase", "sgpt(alt)", "alt (sgpt)", "alanine transaminase", "sgpt (alt), serum");
+    add("SGOT (AST)", "sgot", "ast", "sgot (ast)", "aspartate aminotransferase", "sgot(ast)", "ast (sgot)", "aspartate transaminase", "sgot (ast), serum");
+    add("ALP", "alp", "alkaline phosphatase", "alkaline phosphatase (alp)", "alk phosphatase", "alkaline phosphatase (alp), serum");
+    add("GGT", "ggt", "gamma gt", "gamma glutamyl transferase", "gamma-glutamyl transferase");
+    add("Total Bilirubin", "total bilirubin", "bilirubin total", "bilirubin, total", "s. bilirubin", "serum bilirubin");
+    add("Direct Bilirubin", "direct bilirubin", "bilirubin direct", "bilirubin, direct", "conjugated bilirubin");
+    add("Albumin", "albumin", "serum albumin", "s. albumin");
+    add("Total Protein", "total protein", "protein total", "serum total protein", "s. protein");
+    add("Hemoglobin", "hemoglobin", "haemoglobin", "hb", "hgb");
+    add("WBC", "wbc", "white blood cells", "total wbc", "total leucocyte count", "tlc", "leucocyte count");
+    add("RBC", "rbc", "red blood cells", "total rbc", "erythrocyte count");
+    add("Platelets", "platelets", "platelet count", "plt");
+    add("ESR", "esr", "erythrocyte sedimentation rate", "sed rate");
+    add("CRP", "crp", "c-reactive protein", "hs-crp", "c reactive protein");
+    add("Vitamin D", "vitamin d", "25-hydroxy vitamin d", "25-oh vitamin d", "vit d", "25 hydroxy vitamin d", "vitamin d3", "vitamin d total", "vitamin d 25 hydroxy", "25(oh) vitamin d");
+    add("Vitamin B12", "vitamin b12", "vit b12", "b12", "cyanocobalamin", "cobalamin");
+    add("Ferritin", "ferritin", "serum ferritin", "s. ferritin");
+    add("Iron", "iron", "serum iron", "s. iron", "iron, serum");
+    add("TIBC", "tibc", "total iron binding capacity", "iron binding capacity");
+    add("Fasting Insulin", "fasting insulin", "insulin fasting", "serum insulin", "insulin");
+    add("C-Peptide", "c-peptide", "c peptide", "c-peptide fasting");
+    add("PSA", "psa", "prostate specific antigen");
+    add("Phosphorus", "phosphorus", "phosphate", "serum phosphorus", "inorganic phosphorus");
+    return map;
+  })();
+
+  const normalizeTestName = (name) => {
+    if (!name) return name;
+    const lower = name.toLowerCase().trim();
+    return NORMALIZE_TEST[lower] || name;
+  };
+
+  // Queue for reports extracted before patient is loaded
   // Save extracted report from intake upload to DB (documents + lab_results)
   const saveIntakeReportToDB = async (rpt, data) => {
-    if (!dbPatientId || !API_URL || !data) return;
+    const pid = dbPatientIdRef.current;
+    if (!API_URL || !data) return { ok: false, error: "No data" };
+    if (!pid) return { ok: false, error: "No patient loaded" };
     try {
       const isLab = rpt.type === "lab";
-      const effectiveDate = data.report_date || data.date || new Date().toISOString().split("T")[0];
+      const effectiveDate = data.report_date || data.collection_date || data.date || null;
       // 1. Save document record
-      const docResp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+      const docResp = await fetch(`${API_URL}/api/patients/${pid}/documents`, {
         method: "POST", headers: authHeaders(),
         body: JSON.stringify({
           doc_type: isLab ? "lab_report" : (data.report_type || rpt.type),
-          title: `${isLab ? "Lab Report" : (data.report_type || rpt.type)} — ${rpt.fileName}`,
+          title: `${isLab ? (data.lab_name || "Lab Report") : (data.report_type || rpt.type)} — ${rpt.fileName}`,
           file_name: rpt.fileName,
           extracted_data: data,
           doc_date: effectiveDate,
-          source: `intake_${currentDoctor?.short_name || "mo"}`,
-          notes: isLab ? `${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests extracted` : (data.impression || "")
+          source: data.lab_name || `intake_${currentDoctor?.short_name || "mo"}`,
+          notes: isLab ? `${data.lab_name || ""} | ${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests | ${effectiveDate||"no date"}` : (data.impression || "")
         })
       });
+      if (!docResp.ok) return { ok: false, error: `Server ${docResp.status}` };
       const savedDoc = await docResp.json();
-      // 2. Upload actual file to storage
-      if (savedDoc.id && rpt.base64) {
-        await uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
-      }
-      // 3. Save individual lab results to lab_results table
+      if (!savedDoc.id) return { ok: false, error: "No doc ID returned" };
+      // 2. Upload file to storage
+      if (rpt.base64) await uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
+      // 3. Save lab results with NORMALIZED names
+      let labsSaved = 0;
       if (isLab && data.panels) {
         for (const panel of data.panels) {
           for (const test of (panel.tests || [])) {
             try {
-              await fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
+              const r = await fetch(`${API_URL}/api/patients/${pid}/labs`, {
                 method: "POST", headers: authHeaders(),
                 body: JSON.stringify({
-                  test_name: test.test_name, result: String(test.result_text || test.result),
+                  test_name: normalizeTestName(test.test_name),
+                  result: String(test.result_text || test.result),
                   unit: test.unit || "", flag: test.flag || "N", ref_range: test.ref_range || "",
                   test_date: effectiveDate
                 })
               });
-            } catch (e) { /* individual test save failure — continue */ }
+              if (r.ok) labsSaved++;
+            } catch (e) {}
           }
         }
       }
-      // 4. Save imaging findings to lab_results too (for trends)
+      // 4. Save imaging findings
       if (!isLab && data.findings) {
         for (const f of (data.findings || [])) {
           try {
-            await fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
+            await fetch(`${API_URL}/api/patients/${pid}/labs`, {
               method: "POST", headers: authHeaders(),
               body: JSON.stringify({
                 test_name: f.parameter || data.report_type, result: String(f.value || f.interpretation || ""),
@@ -2058,20 +2170,36 @@ export default function GiniScribe() {
                 ref_range: f.normal_range || "", test_date: effectiveDate
               })
             });
-          } catch (e) { /* continue */ }
+          } catch (e) {}
         }
       }
-      console.log(`✅ Intake report saved to DB: ${rpt.fileName}`);
-      // Refresh patient data so Docs tab + Dashboard update
-      try {
-        const refreshResp = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() });
-        const refreshData = await refreshResp.json();
-        if (refreshData.patient) setPatientFullData(refreshData);
-      } catch(e) { /* refresh will happen on tab switch anyway */ }
+      return { ok: true, docId: savedDoc.id, labsSaved, date: effectiveDate };
     } catch (e) {
-      console.log("Intake report DB save failed:", e.message);
+      return { ok: false, error: e.message };
     }
   };
+
+  // Save ALL extracted intake reports to DB with visible progress
+  const saveAllIntakeReports = async () => {
+    const pid = dbPatientIdRef.current;
+    if (!pid) { alert("Please search/create patient first"); return; }
+    const extracted = intakeReports.filter(r => r.data && !r.saved);
+    if (!extracted.length) return;
+    for (const rpt of extracted) {
+      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? { ...r, saving: true, saveError: null } : r));
+      const result = await saveIntakeReportToDB(rpt, rpt.data);
+      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {
+        ...r, saving: false, saved: result.ok, saveError: result.ok ? null : result.error
+      } : r));
+    }
+    // Refresh patient data so Docs/Dashboard update
+    try {
+      const resp = await fetch(`${API_URL}/api/patients/${pid}`, { headers: authHeaders() });
+      const data = await resp.json();
+      if (data.patient) setPatientFullData(data);
+    } catch(e) {}
+  };
+
 
   // View file from Supabase Storage
   const viewDocumentFile = async (documentId) => {
@@ -4321,11 +4449,21 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             {intakeReports.length > 0 && (
               <div style={{ marginBottom:6 }}>
                 {intakeReports.map(rpt => (
-                  <div key={rpt.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 8px", marginBottom:3, borderRadius:6, background:rpt.data?"#f0fdf4":rpt.error?"#fef2f2":"#f8fafc", border:`1px solid ${rpt.data?"#bbf7d0":rpt.error?"#fecaca":"#e2e8f0"}` }}>
-                    <span style={{ fontSize:12 }}>{rpt.type==="lab"?"🔬":rpt.type==="imaging"?"📡":"📋"}</span>
+                  <div key={rpt.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 8px", marginBottom:3, borderRadius:6,
+                    background:rpt.saved?"#f0fdf4":rpt.saveError?"#fef2f2":rpt.data?"#faf5ff":rpt.error?"#fef2f2":"#f8fafc",
+                    border:`1px solid ${rpt.saved?"#bbf7d0":rpt.saveError?"#fecaca":rpt.data?"#c4b5fd":rpt.error?"#fecaca":"#e2e8f0"}` }}>
+                    <span style={{ fontSize:12 }}>{rpt.saved?"✅":rpt.type==="lab"?"🔬":rpt.type==="imaging"?"📡":"📋"}</span>
                     <div style={{ flex:1 }}>
                       <div style={{ fontSize:11, fontWeight:700 }}>{rpt.fileName}</div>
-                      {rpt.data && <div style={{ fontSize:9, color:"#059669" }}>✅ {rpt.data.panels?.reduce((a,p)=>a+p.tests.length,0)||0} tests extracted</div>}
+                      {rpt.data && <div style={{ fontSize:9, color:"#059669" }}>
+                        {rpt.data.panels?.reduce((a,p)=>a+p.tests.length,0)||0} tests
+                        {rpt.data.lab_name && <span style={{ color:"#7c3aed" }}> • {rpt.data.lab_name}</span>}
+                        {rpt.data.report_date && <span style={{ color:"#2563eb" }}> • {rpt.data.report_date}</span>}
+                        {!rpt.data.report_date && <span style={{ color:"#dc2626" }}> • ⚠️ No date found</span>}
+                      </div>}
+                      {rpt.saved && <div style={{ fontSize:9, color:"#059669", fontWeight:700 }}>💾 Saved to patient record</div>}
+                      {rpt.saving && <div style={{ fontSize:9, color:"#7c3aed" }}>⏳ Saving...</div>}
+                      {rpt.saveError && <div style={{ fontSize:9, color:"#dc2626" }}>❌ Save failed: {rpt.saveError}</div>}
                       {rpt.error && <div style={{ fontSize:9, color:"#dc2626" }}>❌ {rpt.error}</div>}
                     </div>
                     <select value={rpt.type} onChange={e=>setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,type:e.target.value}:r))}
@@ -4344,13 +4482,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           if (data) {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
                             if (rpt.type==="lab" && data.panels) {
+                              // Tag panels with their report date + lab name
+                              const taggedPanels = (data.panels||[]).map(p => ({...p, report_date: data.report_date, lab_name: data.lab_name}));
                               setLabData(prev => {
-                                if (!prev) return data;
-                                return { ...prev, panels: [...(prev.panels||[]), ...(data.panels||[])] };
+                                if (!prev) return {...data, panels: taggedPanels};
+                                return { ...prev, panels: [...(prev.panels||[]), ...taggedPanels] };
                               });
                             }
-                            // Save to DB (documents + lab_results)
-                            saveIntakeReportToDB(rpt, data);
                             setTimeout(()=>autoDetectDiagnoses(), 500);
                           } else {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
@@ -4376,9 +4514,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         const {data,error} = await extFn(rpt.base64, rpt.mediaType);
                         if (data) {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
-                          if (rpt.type==="lab" && data.panels) setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...(data.panels||[])]} : data);
-                          // Save to DB (documents + lab_results)
-                          saveIntakeReportToDB(rpt, data);
+                          if (rpt.type==="lab" && data.panels) {
+                            const taggedPanels = (data.panels||[]).map(p => ({...p, report_date: data.report_date, lab_name: data.lab_name}));
+                            setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...taggedPanels]} : {...data, panels: taggedPanels});
+                          }
                         } else {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
                         }
@@ -4390,6 +4529,24 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   }} style={{ width:"100%", padding:"8px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer", marginTop:4 }}>
                     🔬 Extract All ({intakeReports.filter(r=>!r.data&&!r.extracting).length})
                   </button>
+                )}
+                {/* Save All to DB button */}
+                {intakeReports.some(r=>r.data&&!r.saved) && dbPatientId && (
+                  <button onClick={saveAllIntakeReports} disabled={intakeReports.some(r=>r.saving)}
+                    style={{ width:"100%", padding:"10px", background:intakeReports.some(r=>r.saving)?"#94a3b8":"linear-gradient(135deg,#059669,#10b981)", color:"white", border:"none", borderRadius:6, fontSize:13, fontWeight:800, cursor:intakeReports.some(r=>r.saving)?"wait":"pointer", marginTop:6 }}>
+                    {intakeReports.some(r=>r.saving) ? `⏳ Saving ${intakeReports.filter(r=>r.saving).length}...`
+                      : `💾 Save ${intakeReports.filter(r=>r.data&&!r.saved).length} Reports to Patient Record`}
+                  </button>
+                )}
+                {intakeReports.some(r=>r.data&&!r.saved) && !dbPatientId && (
+                  <div style={{ marginTop:6, padding:8, background:"#fef3c7", border:"1px solid #fde68a", borderRadius:6, fontSize:11, color:"#92400e", fontWeight:600, textAlign:"center" }}>
+                    ⚠️ Search or create patient first to save reports to their record
+                  </div>
+                )}
+                {intakeReports.length > 0 && intakeReports.every(r=>r.saved) && (
+                  <div style={{ marginTop:6, padding:8, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, fontSize:11, color:"#059669", fontWeight:700, textAlign:"center" }}>
+                    ✅ All {intakeReports.length} reports saved to patient record
+                  </div>
                 )}
               </div>
             )}
@@ -5364,7 +5521,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <div style={{ fontSize:11, fontWeight:700, color:"#7c3aed", marginBottom:4 }}>🔬 INVESTIGATIONS</div>
                     {sa(moData,"investigations").map((inv,i) => (
                       <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", marginBottom:2, borderRadius:4, background:inv.critical?"#fef2f2":inv.flag==="HIGH"?"#fff7ed":inv.flag==="LOW"?"#eff6ff":"#f0fdf4", border:`1px solid ${inv.critical?"#fecaca":inv.flag==="HIGH"?"#fed7aa":inv.flag==="LOW"?"#bfdbfe":"#bbf7d0"}` }}>
-                        <span style={{ fontSize:12, fontWeight:600 }}>{inv.test}</span>
+                        <span style={{ fontSize:12, fontWeight:600 }}>
+                          {inv.test}
+                          {inv.date && <span style={{ fontSize:9, color:"#94a3b8", marginLeft:4 }}>({inv.date})</span>}
+                        </span>
                         <span style={{ display:"flex", alignItems:"center", gap:4 }}>
                           <span style={{ fontSize:13, fontWeight:800, color:inv.critical?"#dc2626":inv.flag==="HIGH"?"#ea580c":inv.flag==="LOW"?"#2563eb":"#059669" }}>{inv.value} {inv.unit}</span>
                           {inv.critical && <span style={{ background:"#dc2626", color:"white", padding:"0 4px", borderRadius:4, fontSize:9, fontWeight:700 }}>CRITICAL</span>}
@@ -7249,6 +7409,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       { data:outcomesData.alt, label:"ALT (SGPT)", unit:" U/L", color:"#dc2626", target:40, biomarkerKey:"alt" },
                       { data:outcomesData.ast, label:"AST (SGOT)", unit:" U/L", color:"#ea580c", target:40, biomarkerKey:"ast" },
                       { data:outcomesData.alp, label:"ALP", unit:" U/L", color:"#d97706", target:120, biomarkerKey:"alp" },
+                    ])}
+                    {renderSection("Vitamins & Inflammation", "💊", "#7c3aed", [
+                      { data:outcomesData.vitamin_d, label:"Vitamin D", unit:" ng/ml", color:"#7c3aed", target:30, lowerBetter:false, biomarkerKey:"vitamind" },
+                      { data:outcomesData.vitamin_b12, label:"Vitamin B12", unit:" pg/ml", color:"#6366f1", target:200, lowerBetter:false, biomarkerKey:"vitaminb12" },
+                      { data:outcomesData.ferritin, label:"Ferritin", unit:" ng/ml", color:"#b45309", biomarkerKey:"ferritin" },
+                      { data:outcomesData.crp, label:"CRP", unit:" mg/L", color:"#dc2626", target:3, biomarkerKey:"crp" },
                     ])}
                     {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) &&
                       renderSection("Body Composition", "🏋️", "#059669", [

@@ -378,10 +378,11 @@ app.post("/api/consultations", async (req, res) => {
       }
     }
     for (const inv of (moData?.investigations || [])) {
-      if (inv?.test && num(inv.value) !== null) {
+      if (inv?.test && num(inv.value) !== null && !inv.from_report) {
+        const invDate = inv.date || vDate || null;
         await client.query(
           `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe',COALESCE($9::date, CURRENT_DATE))`,
-          [patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), vDate]
+          [patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), invDate]
         );
       }
     }
@@ -627,23 +628,27 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
     else if (period === "6m") { df = "AND test_date > NOW() - INTERVAL '6 months'"; vf = "AND recorded_at > NOW() - INTERVAL '6 months'"; }
     else if (period === "1y") { df = "AND test_date > NOW() - INTERVAL '1 year'"; vf = "AND recorded_at > NOW() - INTERVAL '1 year'"; }
 
-    const labQ = (names) => `SELECT DISTINCT ON (test_date) result, test_date FROM lab_results WHERE patient_id=$1 AND test_name IN (${names.map((_,i)=>`$${i+2}`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
+    const labQ = (names) => `SELECT result, test_date, test_name FROM lab_results WHERE patient_id=$1 AND LOWER(test_name) IN (${names.map((_,i)=>`LOWER($${i+2})`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
 
-    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
-      pool.query(labQ(['HbA1c']), [id, 'HbA1c']),
-      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG','Blood Sugar Fasting']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG','Blood Sugar Fasting']),
-      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C']), [id, 'LDL','LDL Cholesterol','LDL-C']),
-      pool.query(labQ(['Triglycerides','TG','Triglyceride']), [id, 'Triglycerides','TG','Triglyceride']),
-      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C']), [id, 'HDL','HDL Cholesterol','HDL-C']),
-      pool.query(labQ(['Creatinine','Serum Creatinine']), [id, 'Creatinine','Serum Creatinine']),
-      pool.query(labQ(['eGFR']), [id, 'eGFR']),
-      pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin']),
-      pool.query(labQ(['TSH']), [id, 'TSH']),
-      pool.query(labQ(['PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose']), [id, 'PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose']),
-      pool.query(labQ(['SGPT','SGPT (ALT)','ALT','SGPT (ALT), Serum','Alanine Aminotransferase']), [id, 'SGPT','SGPT (ALT)','ALT','SGPT (ALT), Serum','Alanine Aminotransferase']),
-      pool.query(labQ(['SGOT','SGOT (AST)','AST','SGOT (AST), Serum','Aspartate Aminotransferase']), [id, 'SGOT','SGOT (AST)','AST','SGOT (AST), Serum','Aspartate Aminotransferase']),
-      pool.query(labQ(['ALP','Alkaline Phosphatase','Alkaline Phosphatase (ALP)','Alkaline Phosphatase (ALP), Serum']), [id, 'ALP','Alkaline Phosphatase','Alkaline Phosphatase (ALP)','Alkaline Phosphatase (ALP), Serum']),
+    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, vitd, vitb12, ferritin, crp, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
+      pool.query(labQ(['HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']), [id, 'HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']),
+      pool.query(labQ(['FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting','Glucose Fasting']), [id, 'FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting','Glucose Fasting']),
+      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)','Low Density Lipoprotein']), [id, 'LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)','Low Density Lipoprotein']),
+      pool.query(labQ(['Triglycerides','TG','Triglyceride','Serum Triglycerides']), [id, 'Triglycerides','TG','Triglyceride','Serum Triglycerides']),
+      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)','High Density Lipoprotein']), [id, 'HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)','High Density Lipoprotein']),
+      pool.query(labQ(['Creatinine','Serum Creatinine','S. Creatinine']), [id, 'Creatinine','Serum Creatinine','S. Creatinine']),
+      pool.query(labQ(['eGFR','GFR','Estimated GFR']), [id, 'eGFR','GFR','Estimated GFR']),
+      pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin','Urine Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin','Urine Microalbumin']),
+      pool.query(labQ(['TSH','Thyroid Stimulating Hormone','TSH Ultrasensitive']), [id, 'TSH','Thyroid Stimulating Hormone','TSH Ultrasensitive']),
+      pool.query(labQ(['PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar','PP Blood Sugar']), [id, 'PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar','PP Blood Sugar']),
+      pool.query(labQ(['SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase','SGPT(ALT)']), [id, 'SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase','SGPT(ALT)']),
+      pool.query(labQ(['SGOT (AST)','SGOT','AST','Aspartate Aminotransferase','SGOT(AST)']), [id, 'SGOT (AST)','SGOT','AST','Aspartate Aminotransferase','SGOT(AST)']),
+      pool.query(labQ(['ALP','Alkaline Phosphatase']), [id, 'ALP','Alkaline Phosphatase']),
       pool.query(labQ(['Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']), [id, 'Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']),
+      pool.query(labQ(['Vitamin D','25-OH Vitamin D','Vit D','Vitamin D3','25(OH) Vitamin D','25 Hydroxy Vitamin D']), [id, 'Vitamin D','25-OH Vitamin D','Vit D','Vitamin D3','25(OH) Vitamin D','25 Hydroxy Vitamin D']),
+      pool.query(labQ(['Vitamin B12','Vit B12','B12','Cyanocobalamin']), [id, 'Vitamin B12','Vit B12','B12','Cyanocobalamin']),
+      pool.query(labQ(['Ferritin','Serum Ferritin']), [id, 'Ferritin','Serum Ferritin']),
+      pool.query(labQ(['CRP','C-Reactive Protein','hs-CRP']), [id, 'CRP','C-Reactive Protein','hs-CRP']),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) waist, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND waist IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
@@ -682,6 +687,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       ldl: ldl.rows, triglycerides: tg.rows, hdl: hdl.rows, nonhdl: nonhdl.rows,
       creatinine: creat.rows, egfr: egfr.rows, uacr: uacr.rows, tsh: tsh.rows,
       alt: alt.rows, ast: ast.rows, alp: alp.rows,
+      vitamin_d: vitd.rows, vitamin_b12: vitb12.rows, ferritin: ferritin.rows, crp: crp.rows,
       bp: bp.rows, weight: weight.rows,
       waist: waist.rows, body_fat: bodyFat.rows, muscle_mass: muscleMass.rows,
       screenings: screenings.rows,
