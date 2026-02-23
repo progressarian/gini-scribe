@@ -1610,11 +1610,6 @@ export default function GiniScribe() {
                 }).catch(e => console.log("Imaging doc save:", e.message));
               }
             }
-            // Auto-save unsaved intake reports (uploaded on intake tab)
-            if (result.patient_id && intakeReports.some(r => r.data && !r.saved)) {
-              console.log(`🔄 Auto-saving ${intakeReports.filter(r=>r.data&&!r.saved).length} intake reports...`);
-              await saveAllIntakeReports(result.patient_id);
-            }
           } else {
             setSaveStatus("⚠️ Local only — " + (result.error || "failed").slice(0, 40));
           }
@@ -2542,6 +2537,12 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
 2. TREATMENT_PLAN: For each medication suggest ADD/CONTINUE/MODIFY/STOP with brief reason
 3. INVESTIGATIONS: Tests you'd order with reason
 4. RED_FLAGS: Any urgent concerns
+
+CRITICAL CLASSIFICATION RULES:
+- Type 2 DM: HbA1c < 7% = "Controlled", HbA1c 7-8% = "Uncontrolled", HbA1c > 8% = "Uncontrolled" (severely)
+- Hypertension: BP < 130/80 = "Controlled"
+- Dyslipidemia: LDL at target for risk category = "Controlled"
+- Do NOT mark a condition as "Uncontrolled" if the key biomarker is within accepted target range
 
 Respond as JSON: {"diagnoses":[{"label":"...","status":"...","reason":"..."}],"treatment_plan":[{"action":"ADD|CONTINUE|MODIFY|STOP","drug":"...","detail":"...","reason":"..."}],"investigations":["..."],"red_flags":["..."]}
 
@@ -5096,10 +5097,15 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       </div>
                       <div style={{ display:"flex", gap:2, flexShrink:0 }}>
                         <button onClick={()=>{
-                          setShadowTxDecisions(p=>({...p,[key]:"adopt"}));
-                          // If ADD, add to plan meds
-                          if (t.action==="ADD" && t.drug) {
-                            addMedToPlan({name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"OD", timing:t.timing||"Morning", isNew:true, route:"Oral", forDiagnosis:t.forDiagnosis||[]});
+                          const current = shadowTxDecisions[key];
+                          if (current === "adopt") {
+                            setShadowTxDecisions(p=>({...p,[key]:null}));
+                          } else {
+                            setShadowTxDecisions(p=>({...p,[key]:"adopt"}));
+                            // If ADD, add to plan meds
+                            if (t.action==="ADD" && t.drug) {
+                              addMedToPlan({name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"OD", timing:t.timing||"Morning", isNew:true, route:"Oral", forDiagnosis:t.forDiagnosis||[]});
+                            }
                           }
                         }} style={{ fontSize:8, padding:"2px 6px", borderRadius:3, border:`1px solid ${dec==="adopt"?"#059669":"#e2e8f0"}`,
                           background:dec==="adopt"?"#059669":"white", color:dec==="adopt"?"white":"#059669", cursor:"pointer", fontWeight:700 }}>
@@ -5677,9 +5683,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         </div>
                         <div style={{ display:"flex", gap:2, flexShrink:0 }}>
                           <button onClick={()=>{
-                            setShadowTxDecisions(p=>({...p,[key]:"adopt"}));
-                            if (t.action==="ADD" && t.drug) {
-                              addMedToPlan({name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"OD", timing:t.timing||"Morning", isNew:true, route:"Oral", forDiagnosis:t.forDiagnosis||[]});
+                            const current = shadowTxDecisions[key];
+                            if (current === "adopt") {
+                              setShadowTxDecisions(p=>({...p,[key]:null}));
+                            } else {
+                              setShadowTxDecisions(p=>({...p,[key]:"adopt"}));
+                              if (t.action==="ADD" && t.drug) {
+                                addMedToPlan({name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"OD", timing:t.timing||"Morning", isNew:true, route:"Oral", forDiagnosis:t.forDiagnosis||[]});
+                              }
                             }
                           }} style={{ fontSize:8, padding:"2px 6px", borderRadius:3, border:`1px solid ${dec==="adopt"?"#059669":"#e2e8f0"}`,
                             background:dec==="adopt"?"#059669":"white", color:dec==="adopt"?"white":"#059669", cursor:"pointer", fontWeight:700 }}>
@@ -6299,8 +6310,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       {(nextVisitDate || conData?.follow_up) && (
                         <div style={{ padding:12, background:"#f0f9ff", borderTop:"2px solid #bfdbfe" }}>
                           <div style={{ fontSize:11, fontWeight:800, marginBottom:2 }}>📅 NEXT VISIT</div>
-                          <div style={{ fontSize:16, fontWeight:800 }}>{getPlan("followup_dur", conData?.follow_up?.duration||"")}</div>
-                          {nextVisitDate && <div style={{ fontSize:12, fontWeight:700, color:"#2563eb" }}>{new Date(nextVisitDate+"T12:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}</div>}
+                          {nextVisitDate ? (
+                            <div style={{ fontSize:16, fontWeight:800, color:"#2563eb" }}>{new Date(nextVisitDate+"T12:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}</div>
+                          ) : (
+                            <div style={{ fontSize:16, fontWeight:800 }}>{getPlan("followup_dur", conData?.follow_up?.duration||"")}</div>
+                          )}
+                          {nextVisitDate && conData?.follow_up?.duration && <div style={{ fontSize:10, color:"#64748b" }}>({conData.follow_up.duration})</div>}
                           {(conData?.follow_up?.tests_to_bring||[]).length > 0 && (
                             <div style={{ fontSize:10, color:"#64748b", marginTop:2 }}>⚠️ {conData.follow_up.tests_to_bring.map(ts).join(", ")}</div>
                           )}
@@ -6452,9 +6467,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {/* Follow Up */}
                 {(conData?.follow_up || nextVisitDate) && <PlanBlock id="followup" title="📅 Follow Up" color="#1e293b" hidden={planHidden.has("followup")} onToggle={()=>toggleBlock("followup")}>
                   <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                    <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center" }}>
+                    <div style={{ background:"#f8fafc", border:"2px solid #1e293b", borderRadius:6, padding:"6px 14px", textAlign:"center", minWidth:90 }}>
                       <div style={{ fontSize:8, color:"#64748b" }}>NEXT VISIT</div>
-                      <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData?.follow_up?.duration?.toUpperCase()||conData?.follow_up?.date||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
+                      {nextVisitDate ? (
+                        <div style={{ fontSize:14, fontWeight:800, color:"#059669" }}>{new Date(nextVisitDate+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</div>
+                      ) : (
+                        <div style={{ fontSize:18, fontWeight:800 }}><EditText value={getPlan("followup_dur", conData?.follow_up?.duration?.toUpperCase()||conData?.follow_up?.date||"")} onChange={v=>editPlan("followup_dur",v)} style={{ fontSize:18, fontWeight:800 }} /></div>
+                      )}
                     </div>
                     <div style={{ flex:1 }}>
                       {/* Actual date picker */}
