@@ -5,7 +5,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
-const { syncVisitToGenie } = require("./genie-sync.js");
+let syncVisitToGenie = null;
+try { syncVisitToGenie = require("./genie-sync.js").syncVisitToGenie; } catch(e) { console.log("genie-sync.js not found — Genie sync disabled"); }
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -424,7 +425,7 @@ app.post("/api/consultations", async (req, res) => {
       summary: conData?.assessment_summary || null
     };
     const doctorInfo = { con_name: conName, mo_name: moName };
-    syncVisitToGenie(visit, patient, doctorInfo)
+    if (syncVisitToGenie) syncVisitToGenie(visit, patient, doctorInfo)
       .then(r => { if (r) console.log("📱 Genie sync:", r); })
       .catch(e => console.log("Genie sync background:", e.message));
   } catch (e) {
