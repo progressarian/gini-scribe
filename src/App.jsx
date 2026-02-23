@@ -4691,7 +4691,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <span style={{ fontSize:10, opacity:.6 }}>Step 1/6</span>
           </div>
 
-          {/* ═══ FOLLOW-UP BRIEF — CONDITION CARDS ═══ */}
+          {/* ═══ FOLLOW-UP CLINICAL DASHBOARD ═══ */}
           {pfd?.consultations?.length > 0 && (() => {
             const lastCon = pfd.consultations[0];
             const lastDate = lastCon?.visit_date ? new Date(String(lastCon.visit_date).slice(0,10)+"T12:00:00") : null;
@@ -4719,204 +4719,323 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             const getTrend = (name) => {
               const vals = labsByName[name] || [];
               if (!vals.length) return null;
-              const latest = vals[0]; const prev = vals[1];
-              let trend = "→"; let direction = "stable";
+              const latest = vals[0]; const prev = vals.length > 1 ? vals[1] : null; const prev2 = vals.length > 2 ? vals[2] : null;
+              let direction = "stable";
               if (prev) {
                 const diff = parseFloat(latest.result) - parseFloat(prev.result);
                 const pct = Math.abs(diff / (parseFloat(prev.result)||1)) * 100;
-                if (pct > 5) { trend = diff > 0 ? "↑" : "↓"; direction = diff > 0 ? "up" : "down"; }
+                if (pct > 5) direction = diff > 0 ? "up" : "down";
               }
-              return { latest: latest.result, unit: latest.unit||"", prev: prev?.result, trend, direction, isNew: latest._isNew, date: latest.test_date };
+              return { vals: vals.slice(0,4).reverse(), latest: latest.result, unit: latest.unit||"", prev: prev?.result, prev2: prev2?.result, direction, isNew: latest._isNew, flag: latest.flag };
             };
 
-            // Condition → biomarkers + "lower is better" mapping
+            // Condition → biomarkers + targets
             const DX_BIO = {
-              "Type 2 DM":{markers:["HbA1c","FBS","PPBS"],lower:true}, "Type 1 DM":{markers:["HbA1c","FBS","PPBS"],lower:true},
-              "Hypertension":{markers:["BP"],lower:true}, "Dyslipidemia":{markers:["LDL","HDL","Triglycerides","Non-HDL"],lower:true},
-              "Hypothyroidism":{markers:["TSH","Free T4"],lower:false}, "Hypothyroid":{markers:["TSH","Free T4"],lower:false},
-              "CKD":{markers:["Creatinine","eGFR","UACR"],lower:true}, "Obesity":{markers:["Weight","BMI"],lower:true},
-              "CAD":{markers:["LDL","Triglycerides"],lower:true}, "NAFLD/MAFLD":{markers:["SGPT (ALT)","SGOT (AST)"],lower:true},
-              "Vit D Deficiency":{markers:["Vitamin D"],lower:false}, "B12 Deficiency":{markers:["Vitamin B12"],lower:false},
-              "DM Nephropathy":{markers:["UACR","eGFR","Creatinine"],lower:true}, "Gout":{markers:["Uric Acid"],lower:true},
+              "Type 2 DM":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%",FBS:"<110",PPBS:"<180"}},
+              "Type 1 DM":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%"}},
+              "Hypertension":{markers:[],lower:true,targets:{}},
+              "Dyslipidemia":{markers:["LDL","HDL","Triglycerides","Non-HDL","Total Cholesterol"],lower:true,targets:{LDL:"<100",HDL:">40",Triglycerides:"<150","Non-HDL":"<130"}},
+              "Hypothyroidism":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
+              "Hypothyroid":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
+              "CKD":{markers:["Creatinine","eGFR","UACR"],lower:true,targets:{eGFR:">60",UACR:"<30"}},
+              "Obesity":{markers:[],lower:true,targets:{}},
+              "CAD":{markers:["LDL","Triglycerides"],lower:true,targets:{LDL:"<70"}},
+              "NAFLD/MAFLD":{markers:["SGPT (ALT)","SGOT (AST)"],lower:true,targets:{}},
+              "Vit D Deficiency":{markers:["Vitamin D"],lower:false,targets:{"Vitamin D":">30"}},
+              "B12 Deficiency":{markers:["Vitamin B12"],lower:false,targets:{"Vitamin B12":">300"}},
+              "DM Nephropathy":{markers:["UACR","eGFR","Creatinine"],lower:true,targets:{UACR:"<30",eGFR:">60"}},
+              "Gout":{markers:["Uric Acid"],lower:true,targets:{"Uric Acid":"<6"}},
+              "MASLD":{markers:["SGPT (ALT)","SGOT (AST)","GGT"],lower:true,targets:{}},
+              "Seropositive Hashimoto":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
             };
 
-            const getConditionStatus = (dx) => {
+            // Collect all trackable biomarkers across conditions
+            const allMarkers = new Map(); // name → {dxLabels, lower, target, trend, meds}
+            uniqueDx.forEach(dx => {
               const bio = DX_BIO[dx.label] || DX_BIO[Object.keys(DX_BIO).find(k => dx.label?.includes(k))] || null;
-              if (!bio) return { status: dx.status || "Active", color: "#64748b", icon: "•" };
-              const trends = bio.markers.map(getTrend).filter(Boolean);
-              if (!trends.length) return { status: dx.status || "Active", color: "#64748b", icon: "•" };
-              const improving = trends.filter(t => bio.lower ? t.direction==="down" : t.direction==="up");
-              const worsening = trends.filter(t => bio.lower ? t.direction==="up" : t.direction==="down");
-              if (worsening.length > improving.length) return { status: "Worsening", color: "#dc2626", icon: "↘️" };
-              if (improving.length > worsening.length) return { status: "Improving", color: "#059669", icon: "↗️" };
-              return { status: "Stable", color: "#d97706", icon: "→" };
-            };
-
-            // Get meds for a condition
-            const getMedsForDx = (dxLabel) => {
-              const keywords = dxLabel.toLowerCase().split(/[\s\/]+/);
-              return uniqueMeds.filter(m => {
-                const forDx = (m.for_diagnosis||m.forDiagnosis||[]).map(d=>d.toLowerCase());
-                if (forDx.some(f => keywords.some(k => f.includes(k)))) return true;
-                return false;
+              if (!bio) return;
+              bio.markers.forEach(m => {
+                const t = getTrend(m);
+                if (!t) return;
+                const existing = allMarkers.get(m);
+                const goal = lastGoals.find(g => g.marker === m);
+                const target = goal?.target || bio.targets?.[m] || "";
+                if (existing) { existing.dxLabels.push(dx.label); }
+                else {
+                  // Find meds linked to this condition
+                  const linkedMeds = uniqueMeds.filter(med => {
+                    const forDx = (med.for_diagnosis||med.forDiagnosis||[]).map(d=>d.toLowerCase());
+                    return forDx.some(f => dx.label.toLowerCase().split(/[\s\/]+/).some(k => f.includes(k)));
+                  });
+                  allMarkers.set(m, { name:m, dxLabels:[dx.label], lower:bio.lower, target, trend:t, meds:linkedMeds, goal });
+                }
               });
+            });
+
+            // Also find NEW abnormal values not in condition tracking
+            const flaggedNew = [];
+            if (labData?.panels) {
+              labData.panels.forEach(p => (p.tests||[]).forEach(t => {
+                if ((t.flag === "H" || t.flag === "L") && !allMarkers.has(t.test_name)) {
+                  flaggedNew.push({ name: t.test_name, result: t.result_text || String(t.result), unit: t.unit||"", flag: t.flag });
+                }
+              }));
+            }
+
+            const getStatusBadge = (marker) => {
+              const t = marker.trend;
+              const improving = (marker.lower && t.direction==="down") || (!marker.lower && t.direction==="up");
+              const worsening = (marker.lower && t.direction==="up") || (!marker.lower && t.direction==="down");
+              if (worsening) return { label:"Worsening", bg:"#dc2626", icon:"📉" };
+              if (improving) return { label:"Improving", bg:"#059669", icon:"📈" };
+              return { label:"Stable", bg:"#d97706", icon:"➡️" };
             };
 
             return (
-              <div style={{ marginBottom:12, borderRadius:10, border:"2px solid #7c3aed", overflow:"hidden" }}>
-                <div style={{ background:"linear-gradient(135deg,#7c3aed,#6d28d9)", color:"white", padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontSize:16 }}>🔄</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:800 }}>What Changed? — Follow-up Brief</div>
-                    <div style={{ fontSize:10, opacity:.8 }}>
-                      Last: {lastDate ? lastDate.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "—"} 
-                      {daysSince ? ` (${daysSince}d ago)` : ""} • {lastCon.con_name||lastCon.mo_name||""} • {pfd.consultations.length} total visits
+              <div style={{ marginBottom:12, borderRadius:12, overflow:"hidden", boxShadow:"0 4px 20px rgba(124,58,237,.15)" }}>
+                {/* ── HEADER ── */}
+                <div style={{ background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"white", padding:"12px 16px" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                    <span style={{ fontSize:22 }}>🔄</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:16, fontWeight:900, letterSpacing:"-0.3px" }}>Follow-up Dashboard</div>
+                      <div style={{ fontSize:11, opacity:.85 }}>
+                        Last: {lastDate ? lastDate.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "—"}
+                        {daysSince ? ` • ${daysSince} days ago` : ""} • {lastCon.con_name||lastCon.mo_name||""} • {pfd.consultations.length} visits
+                      </div>
                     </div>
+                    {labData && <span style={{ fontSize:11, background:"#10b981", padding:"4px 12px", borderRadius:6, fontWeight:800 }}>🧪 Today's labs loaded</span>}
                   </div>
-                  {labData && <span style={{ fontSize:9, background:"#10b981", padding:"2px 8px", borderRadius:4, fontWeight:700 }}>🧪 New labs loaded</span>}
-                </div>
-
-                <div style={{ padding:10, background:"#faf5ff" }}>
-                  {/* ── CONDITION CARDS ── */}
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
+                  {/* Diagnoses row */}
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
                     {uniqueDx.slice(0,10).map((dx,i) => {
-                      const cs = getConditionStatus(dx);
                       const bio = DX_BIO[dx.label] || DX_BIO[Object.keys(DX_BIO).find(k => dx.label?.includes(k))] || null;
-                      const trends = bio ? bio.markers.map(m => ({ name:m, ...getTrend(m) })).filter(t => t.latest) : [];
-                      const goal = lastGoals.find(g => trends.some(t => t.name === g.marker));
-                      const meds = getMedsForDx(dx.label);
+                      const hasTrend = bio && bio.markers.some(m => getTrend(m));
+                      const statusColor = dx.status==="Uncontrolled"?"#fca5a5":dx.status==="Controlled"?"#86efac":"rgba(255,255,255,.4)";
                       return (
-                        <div key={i} style={{ background:"white", borderRadius:8, border:`2px solid ${cs.color}22`, overflow:"hidden" }}>
-                          <div style={{ padding:"5px 8px", background:`${cs.color}10`, display:"flex", alignItems:"center", gap:4, borderBottom:`1px solid ${cs.color}22` }}>
-                            <span style={{ fontSize:12 }}>{cs.icon}</span>
-                            <span style={{ fontSize:11, fontWeight:800, color:"#1e293b", flex:1 }}>{dx.label}</span>
-                            <span style={{ fontSize:9, fontWeight:700, color:cs.color, background:`${cs.color}15`, padding:"1px 6px", borderRadius:3 }}>{cs.status}</span>
-                          </div>
-                          <div style={{ padding:"4px 8px" }}>
-                            {trends.length > 0 ? trends.map((t,ti) => (
-                              <div key={ti} style={{ display:"flex", alignItems:"center", gap:4, fontSize:10, padding:"1px 0" }}>
-                                <span style={{ color:"#64748b", minWidth:60, fontWeight:600 }}>{t.name}:</span>
-                                <span style={{ fontWeight:800, color:t.direction==="stable"?"#475569":((bio.lower && t.direction==="down")||(!bio.lower && t.direction==="up"))?"#059669":"#dc2626" }}>
-                                  {t.latest}{t.unit}
-                                </span>
-                                {t.prev && <span style={{ fontSize:9, color:"#94a3b8" }}>(was {t.prev}) {t.trend}</span>}
-                                {t.isNew && <span style={{ fontSize:7, background:"#10b981", color:"white", padding:"0 3px", borderRadius:2, fontWeight:800 }}>NEW</span>}
-                              </div>
-                            )) : (
-                              <div style={{ fontSize:9, color:"#94a3b8", fontStyle:"italic", padding:"2px 0" }}>No biomarkers tracked</div>
-                            )}
-                            {goal && (
-                              <div style={{ fontSize:9, color:"#7c3aed", fontWeight:600, padding:"2px 0", borderTop:"1px solid #f1f5f9", marginTop:2 }}>
-                                🎯 Target: {goal.target} {goal.timeline ? `(${goal.timeline})` : ""}
-                              </div>
-                            )}
-                            {meds.length > 0 && (
-                              <div style={{ fontSize:8, color:"#64748b", padding:"2px 0", borderTop:"1px solid #f1f5f9", marginTop:1 }}>
-                                💊 {meds.map(m=>m.name).join(", ")}
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:700,
+                          background:"rgba(255,255,255,.15)", border:`1.5px solid ${statusColor}`, color:"white" }}>
+                          {dx.label} <span style={{ opacity:.7 }}>• {dx.status||"Active"}</span>
+                        </span>
                       );
                     })}
                   </div>
+                </div>
 
-                  {/* ── ORDERED TESTS STATUS ── */}
-                  {orderedTests.length > 0 && (
-                    <div style={{ marginBottom:8, padding:"6px 8px", background:"white", borderRadius:6, border:"1px solid #e9d5ff" }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:3 }}>📋 ORDERED TESTS</div>
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                        {orderedTests.map((t,i) => {
-                          const testName = typeof t === "string" ? t : t.test || t;
-                          const done = (labsByName[testName]||[]).some(l => l.test_date && new Date(l.test_date) > (lastDate || new Date(0)));
-                          return (
-                            <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, fontWeight:600,
-                              background:done?"#f0fdf4":"#fefce8", color:done?"#059669":"#d97706" }}>
-                              {done?"✅":"⏳"} {testName}
-                            </span>
-                          );
-                        })}
-                      </div>
+                {/* ── GOALS PROGRESS ── */}
+                {lastGoals.length > 0 && (
+                  <div style={{ padding:"10px 16px", background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", borderBottom:"1px solid #e2e8f0" }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#1e40af", marginBottom:6 }}>🎯 Goals from Last Visit</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:8 }}>
+                      {lastGoals.map((g,i) => {
+                        const t = getTrend(g.marker);
+                        const marker = allMarkers.get(g.marker);
+                        const status = t ? (marker ? getStatusBadge(marker) : { label:"—", bg:"#94a3b8", icon:"•" }) : null;
+                        return (
+                          <div key={i} style={{ padding:"8px 12px", background:"white", borderRadius:8, border:"1px solid #e2e8f0",
+                            borderLeft:`4px solid ${status?.bg||"#94a3b8"}` }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 }}>
+                              <span style={{ fontSize:13, fontWeight:800, color:"#1e293b" }}>{g.marker}</span>
+                              {status && <span style={{ fontSize:10, fontWeight:700, color:"white", background:status.bg, padding:"2px 8px", borderRadius:4 }}>
+                                {status.icon} {status.label}
+                              </span>}
+                            </div>
+                            <div style={{ fontSize:11, color:"#64748b" }}>Target: <b>{g.target}</b> {g.timeline ? `in ${g.timeline}` : ""}</div>
+                            {t && (
+                              <div style={{ fontSize:13, fontWeight:800, color:status?.bg||"#475569", marginTop:2 }}>
+                                {t.latest}{t.unit} {t.prev ? <span style={{ fontSize:11, fontWeight:500, color:"#94a3b8" }}>(was {t.prev})</span> : ""}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* ── WHAT CHANGED SINCE LAST VISIT ── */}
-                  <div style={{ marginBottom:8, padding:"6px 8px", background:"white", borderRadius:6, border:"1px solid #e9d5ff" }}>
-                    <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:4 }}>🔀 CHANGES SINCE LAST VISIT</div>
-                    
-                    {/* External meds */}
-                    <div style={{ marginBottom:4 }}>
-                      <div style={{ fontSize:8, fontWeight:700, color:"#475569", marginBottom:2 }}>💊 New external medicines:</div>
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:2, marginBottom:2 }}>
-                        {fuExtMeds.map((m,i) => (
-                          <span key={i} style={{ fontSize:9, padding:"2px 6px", background:"#fef3c7", borderRadius:3, fontWeight:600, display:"flex", alignItems:"center", gap:3 }}>
-                            {m.name} {m.dose} {m.doctor ? `(${m.doctor})` : ""}
-                            <button onClick={()=>setFuExtMeds(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:10,padding:0 }}>×</button>
+                {/* ── BIOMARKER TREND TABLE ── */}
+                {allMarkers.size > 0 && (
+                  <div style={{ padding:"10px 16px", background:"white", borderBottom:"1px solid #e2e8f0" }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginBottom:8 }}>🧪 Biomarker Trends + Medications</div>
+                    <div style={{ overflowX:"auto" }}>
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                        <thead>
+                          <tr style={{ background:"#f8fafc", fontSize:10, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:"0.5px" }}>
+                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0" }}>Marker</td>
+                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Trend</td>
+                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Current</td>
+                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Target</td>
+                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Status</td>
+                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0" }}>Medications</td>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...allMarkers.values()].map((mk,i) => {
+                            const st = getStatusBadge(mk);
+                            const vals = mk.trend.vals || [];
+                            return (
+                              <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", background:i%2===0?"white":"#fafbfc" }}>
+                                <td style={{ padding:"8px", fontWeight:700, color:"#1e293b" }}>
+                                  <div>{mk.name}</div>
+                                  <div style={{ fontSize:9, color:"#94a3b8", fontWeight:500 }}>{mk.dxLabels.join(", ")}</div>
+                                </td>
+                                <td style={{ padding:"8px", textAlign:"center" }}>
+                                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:3 }}>
+                                    {vals.map((v,vi) => {
+                                      const isLast = vi === vals.length-1;
+                                      return (
+                                        <React.Fragment key={vi}>
+                                          <span style={{ fontSize:isLast?13:10, fontWeight:isLast?800:500, color:isLast?(st.bg):"#94a3b8",
+                                            background:isLast?`${st.bg}12`:"none", padding:isLast?"2px 6px":"0", borderRadius:4 }}>
+                                            {parseFloat(v.result)||v.result}
+                                          </span>
+                                          {vi < vals.length-1 && <span style={{ color:"#d1d5db", fontSize:8 }}>→</span>}
+                                        </React.Fragment>
+                                      );
+                                    })}
+                                  </div>
+                                  {mk.trend.isNew && <div style={{ fontSize:8, color:"#10b981", fontWeight:800, marginTop:1 }}>● TODAY</div>}
+                                </td>
+                                <td style={{ padding:"8px", textAlign:"center", fontSize:15, fontWeight:900, color:st.bg }}>
+                                  {mk.trend.latest}{mk.trend.unit}
+                                </td>
+                                <td style={{ padding:"8px", textAlign:"center", fontSize:12, fontWeight:600, color:"#475569" }}>
+                                  {mk.target || "—"}
+                                </td>
+                                <td style={{ padding:"8px", textAlign:"center" }}>
+                                  <span style={{ fontSize:11, fontWeight:700, color:"white", background:st.bg, padding:"3px 10px", borderRadius:5, whiteSpace:"nowrap" }}>
+                                    {st.icon} {st.label}
+                                  </span>
+                                </td>
+                                <td style={{ padding:"8px" }}>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>
+                                    {mk.meds.length > 0 ? mk.meds.slice(0,3).map((m,mi) => (
+                                      <span key={mi} style={{ fontSize:9, padding:"2px 6px", background:"#eff6ff", color:"#2563eb", borderRadius:3, fontWeight:600 }}>
+                                        {m.name} {m.dose||""}
+                                      </span>
+                                    )) : <span style={{ fontSize:9, color:"#cbd5e1" }}>—</span>}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── FLAGGED NEW FINDINGS ── */}
+                {flaggedNew.length > 0 && (
+                  <div style={{ padding:"10px 16px", background:"#fef2f2", borderBottom:"1px solid #fecaca" }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#dc2626", marginBottom:6 }}>🚨 New Abnormal Findings (Today)</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                      {flaggedNew.map((f,i) => (
+                        <span key={i} style={{ padding:"5px 12px", background:"white", borderRadius:6, fontSize:12, fontWeight:700,
+                          border:`2px solid ${f.flag==="H"?"#dc2626":"#2563eb"}`,
+                          color:f.flag==="H"?"#dc2626":"#2563eb" }}>
+                          {f.flag==="H"?"⬆":"⬇"} {f.name}: {f.result}{f.unit}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── ORDERED TESTS STATUS ── */}
+                {orderedTests.length > 0 && (
+                  <div style={{ padding:"10px 16px", background:"#fffbeb", borderBottom:"1px solid #fde68a" }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#92400e", marginBottom:6 }}>📋 Ordered Tests</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                      {orderedTests.map((t,i) => {
+                        const testName = typeof t === "string" ? t : t.test || t;
+                        const done = (labsByName[testName]||[]).some(l => l.test_date && new Date(l.test_date) > (lastDate || new Date(0)));
+                        return (
+                          <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:12, fontWeight:700,
+                            background:done?"#f0fdf4":"white", color:done?"#059669":"#d97706",
+                            border:`1.5px solid ${done?"#bbf7d0":"#fde68a"}` }}>
+                            {done?"✅":"⏳"} {testName}
                           </span>
-                        ))}
-                      </div>
-                      <div style={{ display:"flex", gap:3 }}>
-                        <input id="fuExtMedName" placeholder="Med name" style={{ flex:2, padding:"3px 6px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9 }} />
-                        <input id="fuExtMedDose" placeholder="Dose" style={{ flex:1, padding:"3px 6px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9 }} />
-                        <input id="fuExtMedDoc" placeholder="Dr." style={{ flex:1, padding:"3px 6px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9 }} />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── CHANGES SINCE LAST VISIT ── */}
+                <div style={{ padding:"12px 16px", background:"#f8fafc", borderBottom:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginBottom:8 }}>🔀 Changes Since Last Visit</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                    {/* External meds */}
+                    <div>
+                      <div style={{ fontSize:11, fontWeight:700, color:"#92400e", marginBottom:4 }}>💊 New External Medicines</div>
+                      {fuExtMeds.map((m,i) => (
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 8px", background:"#fef3c7", borderRadius:5, marginBottom:2, fontSize:11, fontWeight:600 }}>
+                          <span style={{ flex:1 }}>{m.name} {m.dose} {m.doctor ? <span style={{color:"#64748b",fontWeight:400}}>— {m.doctor}</span> : ""}</span>
+                          <button onClick={()=>setFuExtMeds(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:13,padding:0 }}>×</button>
+                        </div>
+                      ))}
+                      <div style={{ display:"flex", gap:4, marginTop:4 }}>
+                        <input id="fuExtMedName" placeholder="Medicine name" style={{ flex:2, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
+                        <input id="fuExtMedDose" placeholder="Dose" style={{ flex:1, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
+                        <input id="fuExtMedDoc" placeholder="Dr. name" style={{ flex:1, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
                         <button onClick={()=>{
                           const n=document.getElementById("fuExtMedName");const d=document.getElementById("fuExtMedDose");const dr=document.getElementById("fuExtMedDoc");
                           if(n.value.trim()){setFuExtMeds(p=>[...p,{name:n.value.trim(),dose:d.value.trim(),doctor:dr.value.trim()}]);n.value="";d.value="";dr.value="";}
-                        }} style={{ padding:"3px 8px", background:"#f59e0b", color:"white", border:"none", borderRadius:3, fontSize:9, fontWeight:700, cursor:"pointer" }}>+</button>
+                        }} style={{ padding:"6px 14px", background:"#f59e0b", color:"white", border:"none", borderRadius:6, fontSize:14, fontWeight:800, cursor:"pointer" }}>+</button>
                       </div>
                     </div>
-
                     {/* New conditions */}
                     <div>
-                      <div style={{ fontSize:8, fontWeight:700, color:"#475569", marginBottom:2 }}>🆕 New conditions/diagnoses:</div>
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:2, marginBottom:2 }}>
-                        {fuNewConditions.map((c,i) => (
-                          <span key={i} style={{ fontSize:9, padding:"2px 6px", background:"#fee2e2", borderRadius:3, fontWeight:600, display:"flex", alignItems:"center", gap:3 }}>
-                            {c}
-                            <button onClick={()=>setFuNewConditions(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:10,padding:0 }}>×</button>
-                          </span>
-                        ))}
-                      </div>
-                      <div style={{ display:"flex", gap:3 }}>
-                        <input id="fuNewCond" placeholder="e.g. Diagnosed sleep apnea by pulmonologist" style={{ flex:1, padding:"3px 6px", border:"1px solid #e2e8f0", borderRadius:3, fontSize:9 }} onKeyDown={e=>{
-                          if(e.key==="Enter"&&e.target.value.trim()){setFuNewConditions(p=>[...p,e.target.value.trim()]);e.target.value="";}
-                        }} />
+                      <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", marginBottom:4 }}>🆕 New Conditions / Diagnoses</div>
+                      {fuNewConditions.map((c,i) => (
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 8px", background:"#fee2e2", borderRadius:5, marginBottom:2, fontSize:11, fontWeight:600 }}>
+                          <span style={{ flex:1 }}>{c}</span>
+                          <button onClick={()=>setFuNewConditions(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:13,padding:0 }}>×</button>
+                        </div>
+                      ))}
+                      <div style={{ display:"flex", gap:4, marginTop:4 }}>
+                        <input id="fuNewCond" placeholder="e.g. Sleep apnea diagnosed by pulmonologist" style={{ flex:1, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }}
+                          onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){setFuNewConditions(p=>[...p,e.target.value.trim()]);e.target.value="";}}} />
                         <button onClick={()=>{const el=document.getElementById("fuNewCond");if(el.value.trim()){setFuNewConditions(p=>[...p,el.value.trim()]);el.value="";}}}
-                          style={{ padding:"3px 8px", background:"#dc2626", color:"white", border:"none", borderRadius:3, fontSize:9, fontWeight:700, cursor:"pointer" }}>+</button>
+                          style={{ padding:"6px 14px", background:"#dc2626", color:"white", border:"none", borderRadius:6, fontSize:14, fontWeight:800, cursor:"pointer" }}>+</button>
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  {/* ── QUICK ASSESSMENT ── */}
-                  <div style={{ background:"white", borderRadius:6, padding:8, border:"1px solid #e9d5ff" }}>
-                    <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:4 }}>📝 QUICK ASSESSMENT</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                      {[
-                        { key:"medCompliance", label:"💊 Med Compliance", opts:["Good","Partial","Poor","Missed doses"] },
-                        { key:"dietExercise", label:"🥗 Diet & Exercise", opts:["Adherent","Partial","Not following","Improved"] },
-                        { key:"sideEffects", label:"⚠️ Side Effects", opts:["None","Mild","Significant","Needs change"] },
-                        { key:"newSymptoms", label:"🆕 New Symptoms", opts:["None","Mild","Concerning","Urgent"] },
-                      ].map(q => (
-                        <div key={q.key}>
-                          <div style={{ fontSize:8, fontWeight:700, color:"#475569", marginBottom:2 }}>{q.label}</div>
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>
-                            {q.opts.map(o => (
+                {/* ── QUICK ASSESSMENT ── */}
+                <div style={{ padding:"12px 16px", background:"white" }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginBottom:8 }}>📝 Quick Assessment</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                    {[
+                      { key:"medCompliance", label:"💊 Medicine Compliance", opts:["Good","Partial","Poor","Missed doses"], colors:["#059669","#d97706","#dc2626","#dc2626"] },
+                      { key:"dietExercise", label:"🥗 Diet & Exercise", opts:["Adherent","Partial","Not following","Improved"], colors:["#059669","#d97706","#dc2626","#2563eb"] },
+                      { key:"sideEffects", label:"⚠️ Side Effects", opts:["None","Mild","Significant","Needs change"], colors:["#059669","#d97706","#dc2626","#dc2626"] },
+                      { key:"newSymptoms", label:"🆕 New Symptoms", opts:["None","Mild","Concerning","Urgent"], colors:["#059669","#d97706","#dc2626","#dc2626"] },
+                    ].map(q => (
+                      <div key={q.key}>
+                        <div style={{ fontSize:12, fontWeight:700, color:"#374151", marginBottom:4 }}>{q.label}</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                          {q.opts.map((o,oi) => {
+                            const active = fuChecks[q.key]===o;
+                            const cl = q.colors[oi];
+                            return (
                               <button key={o} onClick={()=>setFuChecks(p=>({...p,[q.key]:p[q.key]===o?"":o}))}
-                                style={{ fontSize:8, padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600,
-                                  border:`1px solid ${fuChecks[q.key]===o?"#7c3aed":"#e2e8f0"}`,
-                                  background:fuChecks[q.key]===o?"#7c3aed":"white",
-                                  color:fuChecks[q.key]===o?"white":"#64748b" }}>{o}</button>
-                            ))}
-                          </div>
+                                style={{ fontSize:12, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontWeight:700, transition:"all .15s",
+                                  border:`2px solid ${active?cl:"#e2e8f0"}`,
+                                  background:active?cl:"white",
+                                  color:active?"white":"#475569" }}>{o}</button>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop:4 }}>
-                      <div style={{ fontSize:8, fontWeight:700, color:"#475569", marginBottom:2 }}>💬 Challenges / Notes</div>
-                      <textarea value={fuChecks.challenges} onChange={e=>setFuChecks(p=>({...p,challenges:e.target.value}))}
-                        placeholder="Patient reports: difficulty with morning meds, sugar cravings..."
-                        rows={2} style={{ width:"100%", fontSize:10, padding:6, border:"1px solid #e2e8f0", borderRadius:4, resize:"vertical", boxSizing:"border-box" }} />
-                    </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop:8 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#374151", marginBottom:4 }}>💬 Challenges / Notes</div>
+                    <textarea value={fuChecks.challenges} onChange={e=>setFuChecks(p=>({...p,challenges:e.target.value}))}
+                      placeholder="Patient reports: difficulty with morning meds, sugar cravings at night, new numbness in feet..."
+                      rows={2} style={{ width:"100%", fontSize:13, padding:10, border:"2px solid #e2e8f0", borderRadius:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
                   </div>
                 </div>
               </div>
