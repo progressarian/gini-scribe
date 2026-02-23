@@ -4884,13 +4884,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                     {vals.map((v,vi) => {
                                       const isLast = vi === vals.length-1;
                                       return (
-                                        <React.Fragment key={vi}>
+                                        <span key={vi} style={{ display:"inline-flex", alignItems:"center", gap:3 }}>
                                           <span style={{ fontSize:isLast?13:10, fontWeight:isLast?800:500, color:isLast?(st.bg):"#94a3b8",
                                             background:isLast?`${st.bg}12`:"none", padding:isLast?"2px 6px":"0", borderRadius:4 }}>
                                             {parseFloat(v.result)||v.result}
                                           </span>
                                           {vi < vals.length-1 && <span style={{ color:"#d1d5db", fontSize:8 }}>→</span>}
-                                        </React.Fragment>
+                                        </span>
                                       );
                                     })}
                                   </div>
