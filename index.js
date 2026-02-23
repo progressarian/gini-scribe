@@ -5,7 +5,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
-const { syncVisitToGenie } = require("./genie-sync.js");
+let syncVisitToGenie = null;
+try { syncVisitToGenie = require("./genie-sync.js").syncVisitToGenie; } catch(e) { console.log("genie-sync.js not found — Genie sync disabled"); }
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -221,10 +222,10 @@ app.get("/api/patients/:id", async (req, res) => {
     const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
       pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
-      // Deduplicate meds: latest entry per med name, include prescribing doctor
-      pool.query(`SELECT DISTINCT ON (UPPER(m.name)) m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
+      // Return ALL medications with prescribing doctor info (client handles dedup for schedule)
+      pool.query(`SELECT m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
         FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
-        WHERE m.patient_id=$1 ORDER BY UPPER(m.name), m.created_at DESC`, [id]),
+        WHERE m.patient_id=$1 ORDER BY m.created_at DESC`, [id]),
       // Deduplicate labs: distinct by test+date
       pool.query(`SELECT DISTINCT ON (test_name, test_date) * FROM lab_results
         WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`, [id]),
@@ -424,7 +425,7 @@ app.post("/api/consultations", async (req, res) => {
       summary: conData?.assessment_summary || null
     };
     const doctorInfo = { con_name: conName, mo_name: moName };
-    syncVisitToGenie(visit, patient, doctorInfo)
+    if (syncVisitToGenie) syncVisitToGenie(visit, patient, doctorInfo)
       .then(r => { if (r) console.log("📱 Genie sync:", r); })
       .catch(e => console.log("Genie sync background:", e.message));
   } catch (e) {
@@ -632,17 +633,17 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
 
     const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, vitd, vitb12, ferritin, crp, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
       pool.query(labQ(['HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']), [id, 'HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']),
-      pool.query(labQ(['FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting','Glucose Fasting']), [id, 'FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting','Glucose Fasting']),
-      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)','Low Density Lipoprotein']), [id, 'LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)','Low Density Lipoprotein']),
+      pool.query(labQ(['FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting']), [id, 'FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting']),
+      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)']), [id, 'LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)']),
       pool.query(labQ(['Triglycerides','TG','Triglyceride','Serum Triglycerides']), [id, 'Triglycerides','TG','Triglyceride','Serum Triglycerides']),
-      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)','High Density Lipoprotein']), [id, 'HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)','High Density Lipoprotein']),
+      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)']), [id, 'HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)']),
       pool.query(labQ(['Creatinine','Serum Creatinine','S. Creatinine']), [id, 'Creatinine','Serum Creatinine','S. Creatinine']),
       pool.query(labQ(['eGFR','GFR','Estimated GFR']), [id, 'eGFR','GFR','Estimated GFR']),
       pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin','Urine Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin','Urine Microalbumin']),
       pool.query(labQ(['TSH','Thyroid Stimulating Hormone','TSH Ultrasensitive']), [id, 'TSH','Thyroid Stimulating Hormone','TSH Ultrasensitive']),
-      pool.query(labQ(['PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar','PP Blood Sugar']), [id, 'PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar','PP Blood Sugar']),
-      pool.query(labQ(['SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase','SGPT(ALT)']), [id, 'SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase','SGPT(ALT)']),
-      pool.query(labQ(['SGOT (AST)','SGOT','AST','Aspartate Aminotransferase','SGOT(AST)']), [id, 'SGOT (AST)','SGOT','AST','Aspartate Aminotransferase','SGOT(AST)']),
+      pool.query(labQ(['PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar']), [id, 'PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar']),
+      pool.query(labQ(['SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase']), [id, 'SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase']),
+      pool.query(labQ(['SGOT (AST)','SGOT','AST','Aspartate Aminotransferase']), [id, 'SGOT (AST)','SGOT','AST','Aspartate Aminotransferase']),
       pool.query(labQ(['ALP','Alkaline Phosphatase']), [id, 'ALP','Alkaline Phosphatase']),
       pool.query(labQ(['Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']), [id, 'Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']),
       pool.query(labQ(['Vitamin D','25-OH Vitamin D','Vit D','Vitamin D3','25(OH) Vitamin D','25 Hydroxy Vitamin D']), [id, 'Vitamin D','25-OH Vitamin D','Vit D','Vitamin D3','25(OH) Vitamin D','25 Hydroxy Vitamin D']),

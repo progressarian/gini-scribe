@@ -2127,7 +2127,9 @@ export default function GiniScribe() {
           notes: isLab ? `${data.lab_name||""} | ${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests | ${effectiveDate||""}` : (data.impression || "")
         })
       });
+      if (!docResp.ok) { console.error("Doc save HTTP error:", docResp.status, await docResp.text()); intakeSavedIds.current.delete(rpt.id); return false; }
       const savedDoc = await docResp.json();
+      console.log("📄 Document saved:", savedDoc.id, rpt.fileName);
       // 2. Upload file to storage
       if (savedDoc.id && rpt.base64) await uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
       // 3. Save lab results with normalized names
@@ -2787,16 +2789,22 @@ ${parts.join("\n")}`;
   ];
 
   // External/previous medications from DB (for reconciliation + medicine card)
-  // Server now JOINs medications with consultations to provide prescriber info
+  // Server now returns ALL medications with prescriber info from consultation JOIN
   const externalMeds = (() => {
-    if (sa(moData,"previous_medications").length > 0 && sa(conData,"medications_confirmed").length > 0) {
-      // MO captured external meds AND consultant confirmed — use MO data for reconciliation
-      return sa(moData,"previous_medications");
-    }
-    // Fall back to DB medications from patientFullData
+    // Always use DB medications for external meds view — they have prescriber info
     const meds = patientFullData?.medications || [];
-    if (meds.length === 0) return [];
-    return meds.filter(m => m.is_active !== false).map(m => ({
+    if (meds.length === 0) {
+      // Fall back to MO captured meds if no DB meds
+      return sa(moData,"previous_medications").map(m => ({...m, prescriber: "Previous", isNew: false, route: m.route||"Oral"}));
+    }
+    // Deduplicate by name (keep latest per name for reconciliation)
+    const seen = new Set();
+    return meds.filter(m => {
+      const key = (m.name||"").toUpperCase().replace(/\s+/g,"");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return m.is_active !== false;
+    }).map(m => ({
       name: m.name || m.pharmacy_match || "",
       composition: m.composition || "",
       dose: m.dose || "",
@@ -2805,29 +2813,38 @@ ${parts.join("\n")}`;
       route: m.route || "Oral",
       isNew: m.is_new || false,
       forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [],
-      // Server JOIN provides these fields directly
       prescriber: m.prescriber || m.con_name || "External",
-      specialty: "", // parsed from prescriber if format is "Dr. Name (Specialty)"
+      specialty: "",
       hospital: "",
       visitDate: m.prescribed_date || m.started_date || m.created_at || "",
       consultationId: m.consultation_id,
     }));
   })();
 
-  // Group external meds by prescribing doctor
+  // Group external meds by prescribing doctor — use ALL meds from DB (not deduplicated)
   const externalMedsByDoctor = (() => {
+    const meds = patientFullData?.medications || [];
+    if (meds.length === 0) return [];
     const grouped = {};
-    externalMeds.forEach(m => {
-      const raw = m.prescriber || "Unknown";
-      // Parse "Dr. Name (Specialty)" format
+    meds.filter(m => m.is_active !== false).forEach(m => {
+      const raw = m.prescriber || m.con_name || "Unknown";
       const specMatch = raw.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
       const doctor = specMatch ? specMatch[1].trim() : raw;
-      const specialty = specMatch ? specMatch[2].trim() : (m.specialty || "");
+      const specialty = specMatch ? specMatch[2].trim() : "";
       const key = doctor;
-      if (!grouped[key]) grouped[key] = { doctor, specialty, hospital: m.hospital || "", date: m.visitDate, meds: [] };
-      grouped[key].meds.push(m);
-      // Use latest date
-      if (m.visitDate && (!grouped[key].date || m.visitDate > grouped[key].date)) grouped[key].date = m.visitDate;
+      if (!grouped[key]) grouped[key] = { doctor, specialty, hospital: "", date: m.prescribed_date || m.created_at, meds: [] };
+      // Deduplicate within same doctor
+      const medKey = (m.name||"").toUpperCase().replace(/\s+/g,"");
+      if (!grouped[key].meds.some(em => (em.name||"").toUpperCase().replace(/\s+/g,"") === medKey)) {
+        grouped[key].meds.push({
+          name: m.name || "", composition: m.composition || "",
+          dose: m.dose || "", frequency: m.frequency || "",
+          timing: m.timing || "", route: m.route || "Oral",
+          isNew: m.is_new || false, prescriber: raw,
+          visitDate: m.prescribed_date || m.created_at || "",
+        });
+      }
+      if (m.prescribed_date && (!grouped[key].date || m.prescribed_date > grouped[key].date)) grouped[key].date = m.prescribed_date;
       if (specialty && !grouped[key].specialty) grouped[key].specialty = specialty;
     });
     return Object.values(grouped).sort((a,b) => (b.date||"").localeCompare(a.date||""));
@@ -4523,8 +4540,18 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 return { ...prev, panels: [...(prev.panels||[]), ...taggedPanels] };
                               });
                             }
-                            // Auto-save to DB (like v19 lab portal)
-                            if (dbPatientId) saveIntakeReportToDB(rpt, data);
+                            // Auto-save to DB (like v19 lab portal) + refresh patient data
+                            if (dbPatientId) {
+                              try {
+                                const ok = await saveIntakeReportToDB(rpt, data);
+                                console.log(`${ok?"✅":"❌"} Auto-saved intake report: ${rpt.fileName}`);
+                                if (ok) {
+                                  const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() });
+                                  const pd = await resp.json();
+                                  if (pd.id) setPatientFullData(pd);
+                                }
+                              } catch(e) { console.error("Auto-save failed:", e); }
+                            }
                             setTimeout(()=>autoDetectDiagnoses(), 500);
                           } else {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
@@ -4555,13 +4582,26 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...taggedPanels]} : {...data, panels: taggedPanels});
                           }
                           // Auto-save to DB
-                          if (dbPatientId) saveIntakeReportToDB(rpt, data);
+                          if (dbPatientId) {
+                            try {
+                              const ok = await saveIntakeReportToDB(rpt, data);
+                              console.log(`${ok?"✅":"❌"} Auto-saved: ${rpt.fileName}`);
+                            } catch(e) { console.error("Auto-save failed:", e); }
+                          }
                         } else {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
                         }
                       } catch(e) {
                         setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:e.message,extracting:false}:r));
                       }
+                    }
+                    // Refresh patient data so new docs/labs appear
+                    if (dbPatientId) {
+                      try {
+                        const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() });
+                        const pd = await resp.json();
+                        if (pd.id) setPatientFullData(pd);
+                      } catch(e) {}
                     }
                     setTimeout(()=>autoDetectDiagnoses(), 500);
                   }} style={{ width:"100%", padding:"8px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer", marginTop:4 }}>
