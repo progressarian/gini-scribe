@@ -957,6 +957,7 @@ export default function GiniScribe() {
   // Intake
   const [complaints, setComplaints] = useState([]);
   const [complaintText, setComplaintText] = useState("");
+  const [fuChecks, setFuChecks] = useState({ medCompliance:"", dietExercise:"", sideEffects:"", newSymptoms:"", challenges:"" });
   // Exam
   const [examSpecialty, setExamSpecialty] = useState("General");
   const [examData, setExamData] = useState({}); // {sectionId_v: [findings], sectionId_n: true(NAD)}
@@ -1738,7 +1739,7 @@ export default function GiniScribe() {
     setClarifications({}); setErrors({});
     setPlanHidden(new Set()); setPlanEdits({});
     setVisitActive(false); setVisitId(null);
-    setComplaints([]); setComplaintText("");
+    setComplaints([]); setComplaintText(""); setFuChecks({ medCompliance:"", dietExercise:"", sideEffects:"", newSymptoms:"", challenges:"" });
     setIntakeReports([]); setLabRequisition([]);
     intakeSavedIds.current.clear();
     rxSavedConsultationId.current = null; planPrintSavedRef.current = false;
@@ -1810,7 +1811,7 @@ export default function GiniScribe() {
     setPlanHidden(new Set()); setPlanEdits({});
     // Clear visit workflow state
     setVisitActive(false); setVisitId(null);
-    setComplaints([]); setComplaintText("");
+    setComplaints([]); setComplaintText(""); setFuChecks({ medCompliance:"", dietExercise:"", sideEffects:"", newSymptoms:"", challenges:"" });
     setHxConditions([]); setHxCondData({}); setHxSurgeries([]); setHxAllergies([]);
     setHxFamilyHx({dm:false,htn:false,cardiac:false,thyroid:false,cancer:false,ckd:false,obesity:false,notes:""});
     setHxHospitalizations([]); setAiDxSuggestions([]);
@@ -2602,6 +2603,20 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       extra=`\n\nLAB RESULTS:\n${tests.join("\n")}`;
     }
     if(vitals.bp_sys) extra+=`\nVITALS: BP ${vitals.bp_sys}/${vitals.bp_dia}, Pulse ${vitals.pulse}, SpO2 ${vitals.spo2}%, Wt ${vitals.weight}kg, BMI ${vitals.bmi}`;
+    // Follow-up context
+    if (pfd?.consultations?.length > 0) {
+      extra += `\n\nFOLLOW-UP VISIT CONTEXT:`;
+      if (fuChecks.medCompliance) extra += `\nMedication Compliance: ${fuChecks.medCompliance}`;
+      if (fuChecks.dietExercise) extra += `\nDiet/Exercise Adherence: ${fuChecks.dietExercise}`;
+      if (fuChecks.sideEffects) extra += `\nSide Effects: ${fuChecks.sideEffects}`;
+      if (fuChecks.newSymptoms) extra += `\nNew Symptoms: ${fuChecks.newSymptoms}`;
+      if (fuChecks.challenges) extra += `\nChallenges: ${fuChecks.challenges}`;
+      const uniqueDx = [...new Map((pfd.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()];
+      if (uniqueDx.length) extra += `\nKnown Diagnoses: ${uniqueDx.map(d=>`${d.label} (${d.status})`).join(", ")}`;
+      const lastCon = pfd.consultations[0];
+      const lastGoals = lastCon?.con_data?.goals || [];
+      if (lastGoals.length) extra += `\nPrevious Goals: ${lastGoals.map(g=>`${g.marker}: ${g.current} → target ${g.target}`).join(", ")}`;
+    }
     // Add imaging findings context
     const extractedImaging = imagingFiles.filter(f=>f.data);
     if (extractedImaging.length > 0) {
@@ -2634,6 +2649,16 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
     // Previous meds from brief
     if (patientFullData?.medications?.length) {
       parts.push("Current Medications: " + patientFullData.medications.slice(0,15).map(m=>`${m.name} ${m.dose||""} ${m.frequency||""}`).join(", "));
+    }
+    // Follow-up context for shadow
+    if (pfd?.consultations?.length > 0) {
+      const fuParts = [];
+      if (fuChecks.medCompliance) fuParts.push(`Med Compliance: ${fuChecks.medCompliance}`);
+      if (fuChecks.dietExercise) fuParts.push(`Diet/Exercise: ${fuChecks.dietExercise}`);
+      if (fuChecks.sideEffects) fuParts.push(`Side Effects: ${fuChecks.sideEffects}`);
+      if (fuChecks.newSymptoms) fuParts.push(`New Symptoms: ${fuChecks.newSymptoms}`);
+      if (fuChecks.challenges) fuParts.push(`Challenges: ${fuChecks.challenges}`);
+      if (fuParts.length) parts.push("Follow-up Assessment: " + fuParts.join(", "));
     }
     const shadowPrompt = `You are an endocrinology AI assistant. Given the clinical data below, provide:
 1. DIAGNOSES: List each diagnosis with status (Controlled/Uncontrolled/New) and brief reasoning
@@ -4655,10 +4680,182 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <span style={{ fontSize:16 }}>📝</span>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:14, fontWeight:800 }}>Intake — {patient.name || "Patient"}</div>
-              <div style={{ fontSize:10, opacity:.8 }}>Complaints + Vitals + Reports</div>
+              <div style={{ fontSize:10, opacity:.8 }}>{pfd?.consultations?.length > 0 ? `Follow-up Visit • ${pfd.consultations.length} previous visits` : "Complaints + Vitals + Reports"}</div>
             </div>
             <span style={{ fontSize:10, opacity:.6 }}>Step 1/6</span>
           </div>
+
+          {/* ═══ FOLLOW-UP BRIEF ═══ */}
+          {pfd?.consultations?.length > 0 && (() => {
+            const lastCon = pfd.consultations[0];
+            const lastDate = lastCon?.visit_date ? new Date(String(lastCon.visit_date).slice(0,10)+"T12:00:00") : null;
+            const daysSince = lastDate ? Math.round((Date.now() - lastDate) / 86400000) : null;
+            const lastConData = lastCon?.con_data || {};
+            const lastGoals = lastConData.goals || [];
+            const lastFollowUp = lastConData.follow_up || {};
+            const orderedTests = lastFollowUp.tests_to_bring || lastConData.investigations_to_order || [];
+            const uniqueDx = [...new Map((pfd.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()];
+            const activeMeds = (pfd.medications||[]).filter(m=>m.is_active!==false);
+            const uniqueMeds = [...new Map(activeMeds.map(m=>[(m.name||"").toUpperCase(),m])).values()];
+
+            // Lab trends: compare latest vs previous for key markers
+            const labsByName = {};
+            (pfd.lab_results||[]).forEach(l => {
+              const n = l.test_name;
+              if (!labsByName[n]) labsByName[n] = [];
+              labsByName[n].push(l);
+            });
+            const keyLabs = ["HbA1c","FBS","PPBS","LDL","HDL","Triglycerides","Creatinine","eGFR","TSH","Vitamin D","UACR"];
+            const labTrends = keyLabs.map(name => {
+              const vals = (labsByName[name]||[]).sort((a,b) => new Date(b.test_date) - new Date(a.test_date));
+              if (vals.length === 0) return null;
+              const latest = vals[0]; const prev = vals[1];
+              let trend = "→";
+              if (prev) {
+                const diff = parseFloat(latest.result) - parseFloat(prev.result);
+                const pct = Math.abs(diff / parseFloat(prev.result)) * 100;
+                if (pct > 10) trend = diff > 0 ? "↑" : "↓";
+              }
+              return { name, latest: latest.result, unit: latest.unit||"", date: latest.test_date, prev: prev?.result, trend };
+            }).filter(Boolean);
+
+            return (
+              <div style={{ marginBottom:12, borderRadius:10, border:"2px solid #7c3aed", overflow:"hidden" }}>
+                {/* Header */}
+                <div style={{ background:"linear-gradient(135deg,#7c3aed,#6d28d9)", color:"white", padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:16 }}>🔄</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:12, fontWeight:800 }}>Follow-up Brief</div>
+                    <div style={{ fontSize:10, opacity:.8 }}>
+                      Last visit: {lastDate ? lastDate.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "—"} 
+                      {daysSince && ` (${daysSince} days ago)`} • {lastCon.con_name||lastCon.mo_name||""}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding:10, background:"#faf5ff" }}>
+                  {/* Diagnoses with status */}
+                  <div style={{ marginBottom:8 }}>
+                    <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:3 }}>ACTIVE DIAGNOSES</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                      {uniqueDx.slice(0,8).map((d,i) => (
+                        <span key={i} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, fontWeight:700,
+                          background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#f1f5f9",
+                          color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#475569",
+                          border:`1px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="Controlled"?"#bbf7d0":"#e2e8f0"}` }}>
+                          {d.label} • {d.status||"Active"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Goals Progress */}
+                  {lastGoals.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:3 }}>🎯 GOALS FROM LAST VISIT</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                        {lastGoals.slice(0,6).map((g,i) => {
+                          const trend = labTrends.find(l => l.name === g.marker);
+                          return (
+                            <div key={i} style={{ padding:"4px 8px", background:"white", borderRadius:5, fontSize:10, border:"1px solid #e9d5ff" }}>
+                              <div style={{ fontWeight:700, color:"#1e293b" }}>{g.marker}</div>
+                              <div style={{ color:"#64748b" }}>
+                                Target: {g.target} {g.timeline ? `in ${g.timeline}` : ""}
+                              </div>
+                              {trend && (
+                                <div style={{ fontWeight:700, color:trend.trend==="↓"?"#059669":trend.trend==="↑"?"#dc2626":"#64748b" }}>
+                                  Now: {trend.latest}{trend.unit} {trend.prev ? `(was ${trend.prev}) ${trend.trend}` : ""}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Key Lab Trends */}
+                  {labTrends.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:3 }}>🧪 KEY LAB TRENDS</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                        {labTrends.slice(0,10).map((l,i) => (
+                          <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, fontWeight:600,
+                            background:l.trend==="↑"?"#fef2f2":l.trend==="↓"?"#f0fdf4":"#f8fafc",
+                            color:l.trend==="↑"?"#dc2626":l.trend==="↓"?"#059669":"#64748b" }}>
+                            {l.name}: {l.latest}{l.unit} {l.prev ? `(${l.prev}${l.trend})` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ordered tests check */}
+                  {orderedTests.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:3 }}>📋 ORDERED TESTS — Done?</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                        {orderedTests.map((t,i) => {
+                          const testName = typeof t === "string" ? t : t.test || t;
+                          const done = labTrends.some(l => l.name === testName && l.date && new Date(l.date) > (lastDate || new Date(0)));
+                          return (
+                            <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, fontWeight:600,
+                              background:done?"#f0fdf4":"#fefce8", color:done?"#059669":"#d97706",
+                              border:`1px solid ${done?"#bbf7d0":"#fde68a"}` }}>
+                              {done?"✅":"⏳"} {testName}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Current Medications */}
+                  <div style={{ marginBottom:8 }}>
+                    <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:3 }}>💊 CURRENT MEDICATIONS ({uniqueMeds.length})</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>
+                      {uniqueMeds.slice(0,12).map((m,i) => (
+                        <span key={i} style={{ fontSize:8, padding:"1px 5px", borderRadius:3, background:"white", border:"1px solid #e9d5ff", color:"#475569" }}>
+                          {m.name} {m.dose||""} {m.frequency||""}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Follow-up Assessment Checkboxes */}
+                  <div style={{ background:"white", borderRadius:6, padding:8, border:"1px solid #e9d5ff" }}>
+                    <div style={{ fontSize:9, fontWeight:800, color:"#6d28d9", marginBottom:4 }}>📝 QUICK FOLLOW-UP ASSESSMENT</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                      {[
+                        { key:"medCompliance", label:"💊 Medicine Compliance", opts:["Good","Partial","Poor","Missed doses"] },
+                        { key:"dietExercise", label:"🥗 Diet & Exercise", opts:["Adherent","Partial","Not following","Improved"] },
+                        { key:"sideEffects", label:"⚠️ Side Effects", opts:["None","Mild","Significant","Needs change"] },
+                        { key:"newSymptoms", label:"🆕 New Symptoms", opts:["None","Mild","Concerning","Urgent"] },
+                      ].map(q => (
+                        <div key={q.key}>
+                          <div style={{ fontSize:8, fontWeight:700, color:"#475569", marginBottom:2 }}>{q.label}</div>
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>
+                            {q.opts.map(o => (
+                              <button key={o} onClick={()=>setFuChecks(p=>({...p,[q.key]:p[q.key]===o?"":o}))}
+                                style={{ fontSize:8, padding:"2px 6px", borderRadius:3, cursor:"pointer", fontWeight:600,
+                                  border:`1px solid ${fuChecks[q.key]===o?"#7c3aed":"#e2e8f0"}`,
+                                  background:fuChecks[q.key]===o?"#7c3aed":"white",
+                                  color:fuChecks[q.key]===o?"white":"#64748b" }}>{o}</button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop:4 }}>
+                      <div style={{ fontSize:8, fontWeight:700, color:"#475569", marginBottom:2 }}>💬 Challenges / Notes</div>
+                      <textarea value={fuChecks.challenges} onChange={e=>setFuChecks(p=>({...p,challenges:e.target.value}))}
+                        placeholder="Patient reports: difficulty taking morning meds, sugar cravings at night..."
+                        rows={2} style={{ width:"100%", fontSize:10, padding:6, border:"1px solid #e2e8f0", borderRadius:4, resize:"vertical", boxSizing:"border-box" }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Chief Complaints */}
           <div style={{ marginBottom:12 }}>
