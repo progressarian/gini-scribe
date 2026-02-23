@@ -3299,7 +3299,7 @@ ${parts.join("\n")}`;
 
   // ═══ BULK HISTORY IMPORT ═══
   const processBulkImport = async () => {
-    if (!bulkText.trim() || !API_URL) return;
+    if (!bulkText.trim()) return;
     setBulkParsing(true); setBulkVisits([]); setBulkProgress("⏳ Splitting visits...");
     try {
       const prompt = `You are a clinical data extraction AI. The user is pasting ALL visit history for a patient from another EMR system.
@@ -3335,14 +3335,18 @@ RULES:
 - ALWAYS include the full diagnosis list for EVERY visit (not just the first one)
 
 TEXT TO PARSE:
-${bulkText.trim()}`;
+` + bulkText.trim();
 
-      const resp = await fetch(API_URL + "/api/ai", {
-        method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ messages: [{ role: "user", content: prompt }], model: "haiku" })
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 8000, messages: [{ role: "user", content: prompt }] })
       });
       const result = await resp.json();
-      const text = (result.content?.[0]?.text || result.text || "").trim();
+      console.log('Bulk API response:', JSON.stringify(result).slice(0,500));
+      if (result.error) { setBulkProgress("❌ API error: " + result.error.message); setBulkParsing(false); return; }
+      const text = (result.content?.[0]?.text || "").trim();
+      if (!text) { setBulkProgress("❌ Empty response from AI"); setBulkParsing(false); return; }
       const jsonStr = text.replace(/^```json\n?|```$/g, "").trim();
       const visits = JSON.parse(jsonStr);
 
