@@ -1744,7 +1744,7 @@ export default function GiniScribe() {
     rxSavedConsultationId.current = null; planPrintSavedRef.current = false;
     setNextVisitDate(""); setMedRecon({}); setMedReconReasons({});
     setShadowData(null); setShadowAI(false); setShadowOriginal(null); setShowShadowDiff(false);
-    setShadowTxDecisions({});
+    setShadowTxDecisions({}); setConSourceMode("merge");
     setImagingFiles([]); setLabPortalFiles([]);
     setOutcomesData(null); setRxReview(null); setShowMedCard(false);
     setAssessDx([]); setAssessLabs([]); setAssessNotes("");
@@ -1828,7 +1828,7 @@ export default function GiniScribe() {
     setLabPortalFiles([]); setOutcomesData(null); setOutcomesLoading(false);
     setRxReview(null); setRxReviewLoading(false);
     setShowMedCard(false); setCiData(null);
-    setShadowTxDecisions({});
+    setShadowTxDecisions({}); setConSourceMode("merge");
     setBulkText(""); setBulkVisits([]); setBulkProgress(""); setBulkSaved(0);
     setRxText(""); setRxExtracted(false); setReports([]);
     localStorage.removeItem(STORAGE_KEY);
@@ -2857,6 +2857,37 @@ ${parts.join("\n")}`;
         context += `\nImaging: ${extractedImaging.map(f=>`${f.data.report_type}: ${f.data.impression || (f.data.findings||[]).map(fi=>`${fi.parameter}=${fi.value}`).join(", ")}`).join("; ")}`;
       }
     }
+    // ═══ MERGE MODE: Include adopted Shadow AI items as baseline ═══
+    if (conSourceMode === "merge" && shadowData) {
+      const adopted = (shadowData.treatment_plan||[]).filter(t => {
+        const key = t.drug||`tx_${(shadowData.treatment_plan||[]).indexOf(t)}`;
+        return shadowTxDecisions[key] !== "disagree";
+      });
+      const rejected = (shadowData.treatment_plan||[]).filter(t => {
+        const key = t.drug||`tx_${(shadowData.treatment_plan||[]).indexOf(t)}`;
+        return shadowTxDecisions[key] === "disagree";
+      });
+      let shadowCtx = "\n\n═══ AI SHADOW ANALYSIS (adopted by consultant as baseline) ═══";
+      shadowCtx += `\nDiagnoses: ${(shadowData.diagnoses||[]).map(d=>`${d.label} (${d.status}) — ${d.reason}`).join("; ")}`;
+      if (adopted.length > 0) {
+        shadowCtx += `\nAdopted Treatment Plan:`;
+        adopted.forEach(t => { shadowCtx += `\n  ${t.action}: ${t.drug} ${t.dose||""} ${t.frequency||""} ${t.timing||""} — ${t.reason||""}`; });
+      }
+      if (rejected.length > 0) {
+        shadowCtx += `\nRejected by consultant (DO NOT include):`;
+        rejected.forEach(t => { shadowCtx += `\n  ${t.action}: ${t.drug} — REJECTED`; });
+      }
+      if ((shadowData.investigations||[]).length > 0) {
+        shadowCtx += `\nSuggested investigations: ${shadowData.investigations.map(ts).join(", ")}`;
+      }
+      if ((shadowData.red_flags||[]).length > 0) {
+        shadowCtx += `\nRed flags: ${shadowData.red_flags.join("; ")}`;
+      }
+      shadowCtx += `\n\nIMPORTANT: The consultant's verbal notes OVERRIDE the AI baseline. If the consultant says "change insulin to bedtime" or "add vitamin D" or "stop the second statin", apply those changes to the AI baseline. The final output should be the MERGED result: AI baseline + consultant's modifications.`;
+      shadowCtx += `\nIf consultant says "agree with AI" or doesn't mention specific changes, keep the AI recommendations as-is.`;
+      shadowCtx += `\n═══ END AI CONTEXT ═══`;
+      context += shadowCtx;
+    }
     const {data,error} = await callClaude(CONSULTANT_PROMPT, context);
     if(error) setErrors(p=>({...p,con:error}));
     else if(data) setConData(fixConMedicines(data));
@@ -3094,6 +3125,7 @@ ${parts.join("\n")}`;
   const [planAddMed, setPlanAddMed] = useState({ name:"", dose:"", frequency:"OD", timing:"Morning" });
   const [conPasteMode, setConPasteMode] = useState(false);
   const [conPasteText, setConPasteText] = useState("");
+  const [conSourceMode, setConSourceMode] = useState("merge"); // "own" | "merge" — merge includes AI shadow context
   const [planCopied, setPlanCopied] = useState(false);
 
   // Load last prescription into consultant transcript
@@ -5397,8 +5429,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 <span style={{ fontSize:8, background:"#e9d5ff", color:"#6d28d9", padding:"2px 6px", borderRadius:4, fontWeight:700 }}>Independent</span>
                 {shadowOriginal && <span style={{ fontSize:8, background:"#fef3c7", color:"#92400e", padding:"2px 6px", borderRadius:4, fontWeight:700 }}>Edited</span>}
                 <div style={{flex:1}} />
+                <button onClick={()=>{setConSourceMode("merge");setTab("consultant");}} style={{ fontSize:9, padding:"3px 10px", background:"#7c3aed", color:"white", border:"none", borderRadius:4, fontWeight:800, cursor:"pointer" }}>
+                  🔀 Edit + Dictate
+                </button>
                 <button onClick={createPlanFromShadow} style={{ fontSize:9, padding:"3px 10px", background:"#059669", color:"white", border:"none", borderRadius:4, fontWeight:800, cursor:"pointer" }}>
-                  🚀 Create Plan
+                  🚀 AI Only → Plan
                 </button>
                 <button onClick={()=>setShadowAI(false)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:"#94a3b8" }}>✕</button>
               </div>
@@ -6081,6 +6116,53 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           )}
 
           {/* Next visit date for consultant */}
+          {shadowData && (
+            <div style={{ marginBottom:8, borderRadius:8, overflow:"hidden", border:"2px solid #c4b5fd" }}>
+              <div style={{ display:"flex", gap:0 }}>
+                {[
+                  { id:"merge", icon:"🔀", label:"AI + Your Notes", desc:"Start from AI, dictate changes" },
+                  { id:"own", icon:"🎙️", label:"Own Notes Only", desc:"Ignore AI, fresh dictation" },
+                ].map(m => (
+                  <button key={m.id} onClick={()=>setConSourceMode(m.id)}
+                    style={{ flex:1, padding:"8px 6px", border:"none", cursor:"pointer", transition:"all .15s",
+                      background:conSourceMode===m.id ? (m.id==="merge"?"linear-gradient(135deg,#7c3aed,#6d28d9)":"linear-gradient(135deg,#7c2d12,#9a3412)") : "#f8fafc",
+                      color:conSourceMode===m.id?"white":"#64748b" }}>
+                    <div style={{ fontSize:13 }}>{m.icon}</div>
+                    <div style={{ fontSize:10, fontWeight:800 }}>{m.label}</div>
+                    <div style={{ fontSize:8, opacity:0.8 }}>{m.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {conSourceMode==="merge" && (
+                <div style={{ padding:"8px 10px", background:"#faf5ff", borderTop:"1px solid #e9d5ff", fontSize:10 }}>
+                  <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4 }}>✅ AI Baseline (adopted items):</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4 }}>
+                    {(shadowData.diagnoses||[]).map((d,i) => (
+                      <span key={i} style={{ padding:"1px 6px", borderRadius:4, fontSize:9, fontWeight:600,
+                        background:d.status==="Uncontrolled"?"#fef2f2":"#f0fdf4",
+                        color:d.status==="Uncontrolled"?"#dc2626":"#059669" }}>{d.label} ({d.status})</span>
+                    ))}
+                  </div>
+                  {(shadowData.treatment_plan||[]).map((t,i) => {
+                    const key = t.drug||`tx_${i}`;
+                    const rejected = shadowTxDecisions[key] === "disagree";
+                    return (
+                      <div key={i} style={{ padding:"2px 6px", marginBottom:1, borderRadius:3, fontSize:9,
+                        background:rejected?"#fef2f2":"white", textDecoration:rejected?"line-through":"none",
+                        color:rejected?"#94a3b8":"#374151", borderLeft:`3px solid ${rejected?"#fca5a5":t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":"#f59e0b"}` }}>
+                        <b>{t.action}</b>: {t.drug} {t.dose||""} {t.frequency||""} {t.timing||""}
+                        {rejected && <span style={{ color:"#dc2626", fontWeight:700 }}> ✕ Rejected</span>}
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginTop:4, fontSize:9, color:"#7c3aed", fontStyle:"italic" }}>
+                    💡 Now dictate your additions or changes — AI will merge both
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:8, padding:6, background:"#eff6ff", borderRadius:6, border:"1px solid #bfdbfe" }}>
             <span style={{ fontSize:10, fontWeight:700, color:"#1e40af" }}>📅 Next Visit:</span>
             <input type="date" value={nextVisitDate} onChange={e=>setNextVisitDate(e.target.value)}
@@ -6107,9 +6189,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
           )}
 
-          <AudioInput label="Consultant — Treatment Decisions" dgKey={dgKey} whisperKey={whisperKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
-          {conTranscript && <button onClick={processConsultant} disabled={loading.con} style={{ marginTop:6, width:"100%", background:loading.con?"#6b7280":conData?"#059669":"#7c2d12", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
-            {loading.con?"🔬 Extracting...":conData?"✅ Done — Re-process":"🔬 Extract Treatment Plan"}
+          <AudioInput label={shadowData && conSourceMode==="merge" ? "Dictate changes to AI plan (or say 'agree with everything')" : "Consultant — Treatment Decisions"} dgKey={dgKey} whisperKey={whisperKey} color="#7c2d12" onTranscript={t=>{setConTranscript(t);setConData(null);clearErr("con");}} />
+          {conTranscript && <button onClick={processConsultant} disabled={loading.con} style={{ marginTop:6, width:"100%", background:loading.con?"#6b7280":conData?"#059669":(shadowData && conSourceMode==="merge")?"#7c3aed":"#7c2d12", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:loading.con?"wait":"pointer" }}>
+            {loading.con?"🔬 Merging AI + Notes...":(shadowData && conSourceMode==="merge") ? (conData?"✅ Done — Re-merge":"🔀 Merge AI Analysis + Your Notes") : (conData?"✅ Done — Re-process":"🔬 Extract Treatment Plan")}
           </button>}
           <Err msg={errors.con} onDismiss={()=>clearErr("con")} />
           {conData && (
