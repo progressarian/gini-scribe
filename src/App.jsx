@@ -954,9 +954,11 @@ export default function GiniScribe() {
   const [assessNotes, setAssessNotes] = useState("");
   const [shadowAI, setShadowAI] = useState(false);
   const [shadowData, setShadowData] = useState(null);
+  const [shadowOriginal, setShadowOriginal] = useState(null); // Original shadow for diff
   const [shadowTxDecisions, setShadowTxDecisions] = useState({}); // {drug: "adopt"|"disagree"}
   const [shadowLoading, setShadowLoading] = useState(false);
   const [showShadow, setShowShadow] = useState(false);
+  const [showShadowDiff, setShowShadowDiff] = useState(false);
   // Medicine reconciliation
   const [medRecon, setMedRecon] = useState({}); // {medName: "continue"|"hold"|"stop"|"modify"}
   const [medReconReasons, setMedReconReasons] = useState({}); // {medName: "reason"}
@@ -1068,6 +1070,7 @@ export default function GiniScribe() {
 
   // Multiple report uploads in intake
   const [intakeReports, setIntakeReports] = useState([]); // [{id,type,base64,mediaType,fileName,data,extracting,error,saved,saveError}]
+  const intakeSavedIds = useRef(new Set()); // Track saved report IDs to prevent duplicates
   const intakeReportRef = useRef(null);
 
   // Lab requisition
@@ -1610,6 +1613,10 @@ export default function GiniScribe() {
                 }).catch(e => console.log("Imaging doc save:", e.message));
               }
             }
+            // Auto-save any unsaved intake reports (dedup via intakeSavedIds ref)
+            if (result.patient_id && intakeReports.some(r => r.data && !r.saved)) {
+              saveAllIntakeReports(result.patient_id);
+            }
           } else {
             setSaveStatus("⚠️ Local only — " + (result.error || "failed").slice(0, 40));
           }
@@ -1767,8 +1774,9 @@ export default function GiniScribe() {
     setHxHospitalizations([]); setAiDxSuggestions([]);
     setExamData({}); setExamNotes("");
     setAssessDx([]); setAssessLabs([]); setAssessNotes("");
-    setShadowData(null); setShadowAI(false);
+    setShadowData(null); setShadowAI(false); setShadowOriginal(null);
     setIntakeReports([]); setLabRequisition([]);
+    intakeSavedIds.current.clear();
     setNextVisitDate(""); setMedRecon({});
     setDbPatientId(null); setPatientFullData(null); setHistoryList([]);
     setMoBrief(null); setAppointments([]);
@@ -2103,6 +2111,8 @@ export default function GiniScribe() {
   const saveIntakeReportToDB = async (rpt, data, pid) => {
     const patientId = pid || dbPatientId;
     if (!API_URL || !data || !patientId) return false;
+    if (intakeSavedIds.current.has(rpt.id)) return true; // Already saved
+    intakeSavedIds.current.add(rpt.id); // Mark early to prevent race
     try {
       const isLab = rpt.type === "lab";
       const effectiveDate = data.report_date || data.collection_date || data.date || null;
@@ -2139,6 +2149,7 @@ export default function GiniScribe() {
       setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saved: true, saveError: null} : r));
       return true;
     } catch(e) {
+      intakeSavedIds.current.delete(rpt.id); // Allow retry
       setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saveError: e.message} : r));
       return false;
     }
@@ -2556,6 +2567,60 @@ ${parts.join("\n")}`;
       }
     } catch(e) { console.error("Shadow AI:", e); }
     setShadowLoading(false);
+  };
+
+  // ═══ CREATE PLAN FROM SHADOW AI ═══
+  const createPlanFromShadow = () => {
+    if (!shadowData) return;
+    // Save original for diff comparison
+    setShadowOriginal(JSON.parse(JSON.stringify(shadowData)));
+    // Build conData from shadow AI
+    const adopted = (shadowData.treatment_plan||[]).filter(t => {
+      const key = t.drug||`tx_${(shadowData.treatment_plan||[]).indexOf(t)}`;
+      return shadowTxDecisions[key] !== "disagree";
+    });
+    const newConData = {
+      assessment_summary: `${patient.name}: ${(shadowData.diagnoses||[]).map(d=>`${d.label} (${d.status})`).join(", ")}. ${(shadowData.red_flags||[]).length > 0 ? "⚠️ "+shadowData.red_flags[0] : ""}`,
+      key_issues: (shadowData.diagnoses||[]).map(d => `${d.label} — ${d.status}: ${d.reason}`),
+      medications_confirmed: adopted.filter(t=>t.action!=="STOP").map(t => ({
+        name: (t.drug||"").toUpperCase(), composition: t.drug||"", dose: t.dose||t.detail||"",
+        frequency: t.frequency||"OD", timing: t.timing||"Morning", route: "Oral",
+        forDiagnosis: t.forDiagnosis||[], isNew: t.action==="ADD",
+        _shadowAction: t.action, _shadowReason: t.reason
+      })),
+      medications_stopped: adopted.filter(t=>t.action==="STOP").map(t => ({
+        name: (t.drug||"").toUpperCase(), reason: t.reason||""
+      })),
+      investigations_ordered: (shadowData.investigations||[]).map(ts),
+      diet_lifestyle: [],
+      follow_up: { duration: "6 weeks", tests_to_bring: (shadowData.investigations||[]).slice(0,5).map(ts) },
+      goals: [],
+      self_monitoring: [],
+      future_plan: [],
+      _fromShadow: true
+    };
+    setConData(newConData);
+    setTab("plan");
+  };
+
+  // Edit shadow AI suggestion inline
+  const editShadowItem = (section, index, field, value) => {
+    setShadowData(prev => {
+      const updated = {...prev};
+      if (updated[section]?.[index]) {
+        updated[section] = [...updated[section]];
+        updated[section][index] = {...updated[section][index], [field]: value};
+      }
+      return updated;
+    });
+  };
+
+  const addShadowItem = (section, item) => {
+    setShadowData(prev => ({...prev, [section]: [...(prev[section]||[]), item]}));
+  };
+
+  const removeShadowItem = (section, index) => {
+    setShadowData(prev => ({...prev, [section]: (prev[section]||[]).filter((_,i)=>i!==index)}));
   };
 
   // ============ MO BRIEF FOR CONSULTANT ============
@@ -4458,6 +4523,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 return { ...prev, panels: [...(prev.panels||[]), ...taggedPanels] };
                               });
                             }
+                            // Auto-save to DB (like v19 lab portal)
+                            if (dbPatientId) saveIntakeReportToDB(rpt, data);
                             setTimeout(()=>autoDetectDiagnoses(), 500);
                           } else {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
@@ -4487,6 +4554,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             const taggedPanels = (data.panels||[]).map(p => ({...p, report_date: data.report_date, lab_name: data.lab_name}));
                             setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...taggedPanels]} : {...data, panels: taggedPanels});
                           }
+                          // Auto-save to DB
+                          if (dbPatientId) saveIntakeReportToDB(rpt, data);
                         } else {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
                         }
@@ -5067,15 +5136,32 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ padding:"8px 12px", background:"#7c3aed10", display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid #e9d5ff" }}>
                 <span>🤖</span><span style={{ fontSize:12, fontWeight:800, color:"#7c3aed" }}>AI Shadow Analysis</span>
                 <span style={{ fontSize:8, background:"#e9d5ff", color:"#6d28d9", padding:"2px 6px", borderRadius:4, fontWeight:700 }}>Independent</span>
+                {shadowOriginal && <span style={{ fontSize:8, background:"#fef3c7", color:"#92400e", padding:"2px 6px", borderRadius:4, fontWeight:700 }}>Edited</span>}
                 <div style={{flex:1}} />
+                <button onClick={createPlanFromShadow} style={{ fontSize:9, padding:"3px 10px", background:"#059669", color:"white", border:"none", borderRadius:4, fontWeight:800, cursor:"pointer" }}>
+                  🚀 Create Plan
+                </button>
                 <button onClick={()=>setShadowAI(false)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:"#94a3b8" }}>✕</button>
               </div>
               <div style={{ padding:12, fontSize:11, lineHeight:1.7 }}>
                 {/* AI Diagnoses */}
-                <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4 }}>DIAGNOSIS</div>
+                <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
+                  DIAGNOSIS
+                  <button onClick={()=>addShadowItem("diagnoses",{label:"New Diagnosis",status:"New",reason:""})} style={{ fontSize:8, padding:"1px 6px", background:"#e9d5ff", color:"#6d28d9", border:"none", borderRadius:3, cursor:"pointer", fontWeight:700 }}>+ Add</button>
+                </div>
                 {(shadowData.diagnoses||[]).map((d,i) => (
-                  <div key={i} style={{ padding:"3px 8px", background:"white", borderRadius:4, marginBottom:2, borderLeft:"3px solid #7c3aed", fontSize:10 }}>
-                    <b>{d.label}</b> — {d.status} <span style={{ color:"#64748b" }}>({d.reason})</span>
+                  <div key={i} style={{ padding:"3px 8px", background:"white", borderRadius:4, marginBottom:2, borderLeft:`3px solid ${d.status==="Controlled"?"#059669":d.status==="Uncontrolled"?"#dc2626":"#7c3aed"}`, fontSize:10, display:"flex", alignItems:"center", gap:4 }}>
+                    <div style={{ flex:1 }}>
+                      <b contentEditable suppressContentEditableWarning onBlur={e=>editShadowItem("diagnoses",i,"label",e.target.innerText)}>{d.label}</b>
+                      {" — "}
+                      <select value={d.status} onChange={e=>editShadowItem("diagnoses",i,"status",e.target.value)} style={{ fontSize:9, border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 4px", fontWeight:700, color:d.status==="Controlled"?"#059669":"#dc2626" }}>
+                        <option value="Controlled">Controlled</option>
+                        <option value="Uncontrolled">Uncontrolled</option>
+                        <option value="New">New</option>
+                      </select>
+                      <span style={{ color:"#64748b" }}> ({d.reason})</span>
+                    </div>
+                    <button onClick={()=>removeShadowItem("diagnoses",i)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:"#dc2626" }}>✕</button>
                   </div>
                 ))}
 
@@ -5135,10 +5221,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {/* Investigations */}
                 {(shadowData.investigations||[]).length > 0 && (
                   <div style={{ marginTop:8 }}>
-                    <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4 }}>🔬 SUGGESTED TESTS</div>
+                    <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
+                      🔬 SUGGESTED TESTS
+                      <button onClick={()=>{const t=prompt("Add test:");if(t)addShadowItem("investigations",t);}} style={{ fontSize:8, padding:"1px 6px", background:"#e9d5ff", color:"#6d28d9", border:"none", borderRadius:3, cursor:"pointer", fontWeight:700 }}>+ Add</button>
+                    </div>
                     <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                       {shadowData.investigations.map((t,i) => (
-                        <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600, border:"1px solid #bfdbfe" }}>{ts(t)}</span>
+                        <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600, border:"1px solid #bfdbfe", display:"flex", alignItems:"center", gap:3 }}>
+                          {ts(t)}
+                          <button onClick={()=>removeShadowItem("investigations",i)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:8, color:"#dc2626", padding:0 }}>✕</button>
+                        </span>
                       ))}
                     </div>
                   </div>
@@ -5810,6 +5902,38 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {tab==="plan" && (
         <div>
           {NewReportsBanner}
+          {/* Shadow AI Origin Banner */}
+          {conData?._fromShadow && shadowOriginal && (
+            <div className="no-print" style={{ marginBottom:8, padding:"8px 12px", background:"linear-gradient(135deg,#faf5ff,#f0f9ff)", border:"2px solid #c4b5fd", borderRadius:8 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <span>🤖</span>
+                <span style={{ fontSize:11, fontWeight:800, color:"#7c3aed" }}>Plan from AI Shadow Analysis</span>
+                <button onClick={()=>setShowShadowDiff(p=>!p)} style={{ fontSize:9, padding:"2px 8px", background:"#e9d5ff", color:"#6d28d9", border:"none", borderRadius:4, cursor:"pointer", fontWeight:700 }}>
+                  {showShadowDiff ? "Hide Diff" : "View Original"}
+                </button>
+              </div>
+              {showShadowDiff && (
+                <div style={{ marginTop:6, display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:9 }}>
+                  <div>
+                    <div style={{ fontWeight:800, color:"#94a3b8", marginBottom:3 }}>ORIGINAL AI</div>
+                    {(shadowOriginal.diagnoses||[]).map((d,i) => <div key={i} style={{ padding:"2px 6px", background:"#f1f5f9", borderRadius:3, marginBottom:1 }}>{d.label}: {d.status}</div>)}
+                    <div style={{ marginTop:3, fontWeight:700 }}>Meds:</div>
+                    {(shadowOriginal.treatment_plan||[]).map((t,i) => <div key={i} style={{ padding:"2px 6px", background:"#f1f5f9", borderRadius:3, marginBottom:1 }}>{t.action}: {t.drug}</div>)}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight:800, color:"#7c3aed", marginBottom:3 }}>CURRENT</div>
+                    {(shadowData?.diagnoses||[]).map((d,i) => {
+                      const orig = shadowOriginal.diagnoses?.[i];
+                      const changed = !orig || orig.label !== d.label || orig.status !== d.status;
+                      return <div key={i} style={{ padding:"2px 6px", background:changed?"#fef3c7":"#f0fdf4", borderRadius:3, marginBottom:1 }}>{d.label}: {d.status} {changed?"✏️":""}</div>;
+                    })}
+                    <div style={{ marginTop:3, fontWeight:700 }}>Meds:</div>
+                    {(conData?.medications_confirmed||[]).map((m,i) => <div key={i} style={{ padding:"2px 6px", background:"#f0fdf4", borderRadius:3, marginBottom:1 }}>{m._shadowAction||"KEEP"}: {m.name}</div>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap", alignItems:"center" }}>
             <button onClick={()=>setTab(visitActive?"intake":"docs")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>+ Reports</button>
             <button onClick={()=>setTab("mo")} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", padding:"4px 8px", borderRadius:4, fontSize:10, cursor:"pointer", fontWeight:600 }}>✏️ MO</button>
