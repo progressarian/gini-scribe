@@ -299,8 +299,10 @@ app.post("/api/consultations", async (req, res) => {
     let patientId, existing = null;
     if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
     if (!existing && n(patient.fileNo)) existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo])).rows[0];
-    // Fallback: match by name (for Quick mode without phone/fileNo)
-    if (!existing && n(patient.name)) existing = (await client.query("SELECT id FROM patients WHERE LOWER(name)=LOWER($1) LIMIT 1", [patient.name])).rows[0];
+    // Only match by name if BOTH name AND age+sex match (avoid false merges)
+    if (!existing && n(patient.name) && patient.age && patient.sex) {
+      existing = (await client.query("SELECT id FROM patients WHERE LOWER(name)=LOWER($1) AND age=$2 AND sex=$3 LIMIT 1", [patient.name, int(patient.age), patient.sex])).rows[0];
+    }
 
     if (existing) {
       patientId = existing.id;

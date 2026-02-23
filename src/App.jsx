@@ -918,7 +918,10 @@ export default function GiniScribe() {
       console.log(`⚠️ New patient mode but patientFullData still set (id=${patientFullData.id}) — clearing`);
       setPatientFullData(null);
     }
-  }, [dbPatientId]);
+  }, [dbPatientId, patientFullData]);
+
+  // Safe accessor: only return patientFullData if it matches current patient
+  const pfd = (!patientFullData || !dbPatientId || patientFullData.id !== dbPatientId) ? null : patientFullData;
   // Imaging uploads
   const [imagingFiles, setImagingFiles] = useState([]); // [{type, base64, mediaType, fileName, data, extracting, error}]
   const imagingRef = useRef(null);
@@ -2667,10 +2670,10 @@ ${parts.join("\n")}`;
 
   // ============ MO BRIEF FOR CONSULTANT ============
   const generateMOBrief = () => {
-    const pfd = patientFullData;
-    if (!pfd) return null;
+    const briefData = patientFullData;
+    if (!briefData) return null;
 
-    const sortedCons = (pfd.consultations||[]).sort((a,b) => {
+    const sortedCons = (briefData.consultations||[]).sort((a,b) => {
       const d = new Date(b.visit_date) - new Date(a.visit_date);
       return d !== 0 ? d : new Date(b.created_at) - new Date(a.created_at);
     });
@@ -2679,27 +2682,27 @@ ${parts.join("\n")}`;
     const prevVisit = sortedCons[1]; // visit before last
 
     // Current diagnoses
-    const diags = (pfd.diagnoses||[]);
+    const diags = (briefData.diagnoses||[]);
     const uniqueDiags = [];
     const seen = new Set();
     diags.forEach(d => { if (!seen.has(d.diagnosis_id||d.label)) { seen.add(d.diagnosis_id||d.label); uniqueDiags.push(d); }});
 
     // Current medications (from most recent visit)
-    const meds = (pfd.medications||[]).filter(m => {
+    const meds = (briefData.medications||[]).filter(m => {
       if (!lastVisit) return true;
       return m.consultation_id === lastVisit.id;
     });
     // If no meds from last visit, get all active meds
-    const activeMeds = meds.length > 0 ? meds : (pfd.medications||[]).slice(0, 15);
+    const activeMeds = meds.length > 0 ? meds : (briefData.medications||[]).slice(0, 15);
 
     // Vitals comparison
-    const sortedVitals = (pfd.vitals||[]).sort((a,b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+    const sortedVitals = (briefData.vitals||[]).sort((a,b) => new Date(b.recorded_at) - new Date(a.recorded_at));
     const currentVitals = vitals.bp_sys ? vitals : sortedVitals[0];
     const prevVitals = sortedVitals.length > 1 ? sortedVitals[1] : null;
 
     // Lab trends — group by test, compare latest to previous
     const labsByTest = {};
-    (pfd.lab_results||[]).forEach(l => {
+    (briefData.lab_results||[]).forEach(l => {
       if (!labsByTest[l.test_name]) labsByTest[l.test_name] = [];
       labsByTest[l.test_name].push(l);
     });
@@ -2732,7 +2735,7 @@ ${parts.join("\n")}`;
 
     // New labs since last visit
     const lastDate = lastVisit?.visit_date ? String(lastVisit.visit_date).slice(0,10) : null;
-    const newLabs = lastDate ? (pfd.lab_results||[]).filter(l => l.test_date && String(l.test_date).slice(0,10) > lastDate) : [];
+    const newLabs = lastDate ? (briefData.lab_results||[]).filter(l => l.test_date && String(l.test_date).slice(0,10) > lastDate) : [];
 
     // Days since last visit
     const daysSince = lastVisit ? Math.round((Date.now() - new Date(lastVisit.visit_date)) / 86400000) : null;
@@ -2832,7 +2835,7 @@ ${parts.join("\n")}`;
   // Server now returns ALL medications with prescriber info from consultation JOIN
   const externalMeds = (() => {
     // Always use DB medications for external meds view — they have prescriber info
-    const meds = patientFullData?.medications || [];
+    const meds = pfd?.medications || [];
     if (meds.length === 0) {
       // Fall back to MO captured meds if no DB meds
       return sa(moData,"previous_medications").map(m => ({...m, prescriber: "Previous", isNew: false, route: m.route||"Oral"}));
@@ -2863,7 +2866,7 @@ ${parts.join("\n")}`;
 
   // Group external meds by prescribing doctor — use ALL meds from DB (not deduplicated)
   const externalMedsByDoctor = (() => {
-    const meds = patientFullData?.medications || [];
+    const meds = pfd?.medications || [];
     if (meds.length === 0) return [];
     const grouped = {};
     meds.filter(m => m.is_active !== false).forEach(m => {
@@ -3988,17 +3991,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           </div>
 
           {/* ═══ PATIENT BRIEF (v2 style) ═══ */}
-          {dbPatientId && patientFullData && (
+          {dbPatientId && pfd && (
             <div style={{ background:"linear-gradient(135deg,#f0f9ff,#faf5ff)", borderRadius:12, border:"2px solid #c7d2fe", padding:14, marginBottom:12 }}>
               {/* One-liner Summary */}
               <div style={{ fontSize:11, color:"#374151", lineHeight:1.7, padding:"8px 12px", background:"white", borderRadius:8, border:"1px solid #e9d5ff", marginBottom:10 }}>
-                <b>{patient.name} | {patient.age}Y/{patient.sex?.charAt(0)||"?"} | {(patientFullData?.diagnoses||[]).slice(0,4).map(d=>d.label||d.diagnosis_id).join(" + ")||"No known dx"} | {(patientFullData?.medications||[]).length} meds | {patientFullData?.consultations?.length||0} visits</b>
+                <b>{patient.name} | {patient.age}Y/{patient.sex?.charAt(0)||"?"} | {(pfd?.diagnoses||[]).slice(0,4).map(d=>d.label||d.diagnosis_id).join(" + ")||"No known dx"} | {(pfd?.medications||[]).length} meds | {pfd?.consultations?.length||0} visits</b>
               </div>
 
               {/* Risk Flags */}
               {(() => {
                 const flags = [];
-                const labs = patientFullData?.labs || [];
+                const labs = pfd?.labs || [];
                 const hba1c = labs.find(l=>l.test_name==="HbA1c");
                 if (hba1c && parseFloat(hba1c.result) > 8) flags.push({t:"🔴 HbA1c "+hba1c.result+"% — uncontrolled",c:"#dc2626",bg:"#fef2f2"});
                 const cr = labs.find(l=>l.test_name==="Creatinine"||l.test_name==="Cr");
@@ -4013,11 +4016,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               })()}
 
               {/* Active Diagnoses */}
-              {(patientFullData?.diagnoses||[]).length > 0 && (
+              {(pfd?.diagnoses||[]).length > 0 && (
                 <div style={{ marginBottom:8 }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>CONDITIONS</div>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                    {[...new Map((patientFullData?.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()].slice(0,8).map((d,i) => (
+                    {[...new Map((pfd?.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()].slice(0,8).map((d,i) => (
                       <span key={i} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, fontWeight:600,
                         background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#fefce8",
                         color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#92400e" }}>{d.label||d.diagnosis_id}</span>
@@ -4027,12 +4030,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Key Lab Values */}
-              {(patientFullData?.labs||[]).length > 0 && (
+              {(pfd?.labs||[]).length > 0 && (
                 <div style={{ marginBottom:8 }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>🔬 KEY LABS</div>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                     {["HbA1c","FBS","PPBS","Creatinine","eGFR","LDL","TSH","Vit D","Vit B12"].map(name => {
-                      const lab = (patientFullData?.labs||[]).find(l=>l.test_name===name);
+                      const lab = (pfd?.labs||[]).find(l=>l.test_name===name);
                       if (!lab) return null;
                       return <span key={name} style={{ fontSize:10, padding:"2px 6px", borderRadius:4, fontWeight:600,
                         background:lab.flag==="H"?"#fef2f2":lab.flag==="L"?"#eff6ff":"#f0fdf4",
@@ -4046,11 +4049,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Medications */}
-              {(patientFullData?.medications||[]).length > 0 && (
+              {(pfd?.medications||[]).length > 0 && (
                 <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>💊 MEDICATIONS ({(patientFullData?.medications||[]).length})</div>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>💊 MEDICATIONS ({(pfd?.medications||[]).length})</div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:2 }}>
-                    {(patientFullData?.medications||[]).slice(0,10).map((m,i) => (
+                    {(pfd?.medications||[]).slice(0,10).map((m,i) => (
                       <div key={i} style={{ fontSize:10, padding:"2px 6px", background:i%2?"#f8fafc":"white", borderRadius:3 }}>
                         <strong>{m.name}</strong> <span style={{ color:"#64748b" }}>{m.dose||""} {m.frequency||""}</span>
                       </div>
@@ -4060,10 +4063,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Recent Documents */}
-              {(patientFullData?.documents||[]).length > 0 && (
+              {(pfd?.documents||[]).length > 0 && (
                 <div>
                   <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>📎 RECENT DOCUMENTS</div>
-                  {(patientFullData?.documents||[]).slice(0,4).map((d,i) => (
+                  {(pfd?.documents||[]).slice(0,4).map((d,i) => (
                     <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"3px 0", fontSize:10, borderBottom:i<3?"1px solid #f1f5f9":"none" }}>
                       <span>{d.doc_type==="lab"?"🔬":d.doc_type==="prescription"?"💊":"📋"}</span>
                       <span style={{ fontWeight:700, flex:1 }}>{d.title||d.doc_type}</span>
@@ -4079,20 +4082,20 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           {dbPatientId && (
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
             <div style={{ background:"#eff6ff", borderRadius:10, padding:12, textAlign:"center" }}>
-              <div style={{ fontSize:22, fontWeight:800, color:"#2563eb" }}>{patientFullData?.consultations?.length || 0}</div>
+              <div style={{ fontSize:22, fontWeight:800, color:"#2563eb" }}>{pfd?.consultations?.length || 0}</div>
               <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Total Visits</div>
             </div>
             <div style={{ background:"#fef3c7", borderRadius:10, padding:12, textAlign:"center" }}>
               <div style={{ fontSize:22, fontWeight:800, color:"#d97706" }}>
-                {patientFullData?.consultations?.[0]?.visit_date
-                  ? new Date(String(patientFullData.consultations[0].visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})
+                {pfd?.consultations?.[0]?.visit_date
+                  ? new Date(String(pfd.consultations[0].visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})
                   : "—"}
               </div>
               <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Last Visit</div>
             </div>
             <div style={{ background:"#f0fdf4", borderRadius:10, padding:12, textAlign:"center" }}>
               <div style={{ fontSize:22, fontWeight:800, color:"#059669" }}>
-                {patientFullData?.labs?.find(l=>l.test_name==="HbA1c")?.result ? `${patientFullData.labs.find(l=>l.test_name==="HbA1c").result}%` : "—"}
+                {pfd?.labs?.find(l=>l.test_name==="HbA1c")?.result ? `${pfd.labs.find(l=>l.test_name==="HbA1c").result}%` : "—"}
               </div>
               <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Last HbA1c</div>
             </div>
@@ -4312,10 +4315,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           </div>
 
           {/* Recent Visits */}
-          {patientFullData?.consultations?.length > 0 && (
+          {pfd?.consultations?.length > 0 && (
             <div style={{ marginTop:14 }}>
               <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6, letterSpacing:".5px" }}>RECENT VISITS</div>
-              {patientFullData.consultations.slice(0,5).map((c,i) => (
+              {pfd.consultations.slice(0,5).map((c,i) => (
                 <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, marginBottom:4, background:"#f8fafc", border:"1px solid #f1f5f9" }}>
                   <div style={{ fontSize:12, fontWeight:700, color:"#475569", minWidth:70 }}>
                     {new Date(String(c.visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"})}
@@ -5183,7 +5186,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             }
             // Include current meds from DB
             if (patientFullData?.medications?.length) {
-              const medList = patientFullData.medications.filter(m=>m.is_active!==false).map(m=>`${m.name} ${m.dose||""} ${m.frequency||""} [${m.prescriber||""}]`).join(", ");
+              const medList = pfd?.medications?.filter(m=>m.is_active!==false).map(m=>`${m.name} ${m.dose||""} ${m.frequency||""} [${m.prescriber||""}]`).join(", ");
               parts.push("Current Medications: " + medList);
             }
             if (assessLabs.length) parts.push("Labs Ordered: " + assessLabs.join(", "));
@@ -5721,7 +5724,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 style={{ padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:600, width:160 }} />
             )}
             <div style={{ flex:1 }} />
-            {dbPatientId && patientFullData?.consultations?.length > 0 && (
+            {dbPatientId && pfd?.consultations?.length > 0 && (
               <button onClick={copyLastRx} style={{ background:"#eff6ff", border:"1px solid #bfdbfe", padding:"4px 10px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer", color:"#2563eb" }}>
                 📋 Copy Last Rx
               </button>
@@ -6155,7 +6158,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
                 <div style={{ borderTop:"1px solid rgba(255,255,255,.12)", marginTop:6, paddingTop:5, fontSize:12 }}>
                   <strong>{patient.name}</strong> | {patient.age}Y / {patient.sex} {patient.phone&&`| ${patient.phone}`} {patient.fileNo&&`| ${patient.fileNo}`}
-                  <span style={{ float:"right", fontSize:11, fontWeight:700 }}>{(()=>{const ld=patientFullData?.consultations?.[0]?.visit_date;if(ld){const s=String(ld);const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}return new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
+                  <span style={{ float:"right", fontSize:11, fontWeight:700 }}>{(()=>{const ld=pfd?.consultations?.[0]?.visit_date;if(ld){const s=String(ld);const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s);return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});}return new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});})()}</span>
                 </div>
               </div>
 
@@ -6748,7 +6751,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:28, marginBottom:8 }}>📎</div>
               <div style={{ fontSize:13, fontWeight:600 }}>Load a patient first</div>
             </div>
-          ) : !patientFullData?.documents?.length ? (
+          ) : !pfd?.documents?.length ? (
             <div>
               <div style={{ textAlign:"center", padding:20, color:"#94a3b8", marginBottom:12 }}>
                 <div style={{ fontSize:22, marginBottom:4 }}>📂</div>
@@ -6757,9 +6760,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </div>
 
               {/* Show lab results from DB if available */}
-              {(patientFullData?.lab_results||[]).length > 0 && (
+              {(pfd?.lab_results||[]).length > 0 && (
                 <div style={{ marginBottom:12 }}>
-                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #7c3aed", marginBottom:6 }}>🔬 Lab Results ({patientFullData.lab_results.length})</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #7c3aed", marginBottom:6 }}>🔬 Lab Results ({pfd.lab_results.length})</div>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, border:"1px solid #e2e8f0" }}>
                     <thead><tr style={{ background:"#f8fafc" }}>
                       <th style={{ padding:"4px 8px", textAlign:"left", fontWeight:700, fontSize:10 }}>Test</th>
@@ -6768,7 +6771,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <th style={{ padding:"4px 8px", textAlign:"left", fontWeight:700, fontSize:10 }}>Ref</th>
                       <th style={{ padding:"4px 8px", textAlign:"right", fontWeight:700, fontSize:10 }}>Date</th>
                     </tr></thead>
-                    <tbody>{patientFullData.lab_results.slice(0,50).map((l,i) => (
+                    <tbody>{pfd.lab_results.slice(0,50).map((l,i) => (
                       <tr key={i} style={{ background:l.flag==="H"?"#fef2f2":l.flag==="L"?"#eff6ff":i%2?"#fafafa":"white", borderBottom:"1px solid #f1f5f9" }}>
                         <td style={{ padding:"3px 8px", fontWeight:600 }}>{l.test_name}</td>
                         <td style={{ padding:"3px 8px", textAlign:"right", fontWeight:700, color:l.flag==="H"?"#dc2626":l.flag==="L"?"#2563eb":"#1e293b" }}>{l.result} {l.unit||""}</td>
@@ -6782,10 +6785,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Show medications from DB */}
-              {(patientFullData?.medications||[]).length > 0 && (
+              {(pfd?.medications||[]).length > 0 && (
                 <div style={{ marginBottom:12 }}>
-                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #059669", marginBottom:6 }}>💊 Active Medications ({patientFullData.medications.filter(m=>m.is_active!==false).length})</div>
-                  {patientFullData.medications.filter(m=>m.is_active!==false).map((m,i) => (
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #059669", marginBottom:6 }}>💊 Active Medications ({pfd.medications.filter(m=>m.is_active!==false).length})</div>
+                  {pfd.medications.filter(m=>m.is_active!==false).map((m,i) => (
                     <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderBottom:"1px solid #f1f5f9" }}>
                       <span style={{ fontSize:11, fontWeight:700, flex:1 }}>{m.name}</span>
                       <span style={{ fontSize:10, color:"#475569" }}>{m.dose}</span>
@@ -6797,11 +6800,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Show diagnoses from DB */}
-              {(patientFullData?.diagnoses||[]).length > 0 && (
+              {(pfd?.diagnoses||[]).length > 0 && (
                 <div style={{ marginBottom:12 }}>
-                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #f59e0b", marginBottom:6 }}>🩺 Diagnoses ({patientFullData.diagnoses.length})</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #f59e0b", marginBottom:6 }}>🩺 Diagnoses ({pfd.diagnoses.length})</div>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-                    {patientFullData.diagnoses.map((d,i) => (
+                    {pfd.diagnoses.map((d,i) => (
                       <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:700,
                         background:d.status==="Controlled"||d.status==="Active-Controlled"?"#f0fdf4":d.status==="Resolved"?"#f8fafc":"#fef2f2",
                         color:d.status==="Controlled"||d.status==="Active-Controlled"?"#059669":d.status==="Resolved"?"#94a3b8":"#dc2626",
@@ -6814,10 +6817,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Show visit history */}
-              {(patientFullData?.consultations||[]).length > 0 && (
+              {(pfd?.consultations||[]).length > 0 && (
                 <div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #2563eb", marginBottom:6 }}>📋 Visit History ({patientFullData.consultations.length})</div>
-                  {patientFullData.consultations.slice(0,20).map((c,i) => (
+                  <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", padding:"6px 0", borderBottom:"2px solid #2563eb", marginBottom:6 }}>📋 Visit History ({pfd.consultations.length})</div>
+                  {pfd.consultations.slice(0,20).map((c,i) => (
                     <div key={i} style={{ display:"flex", gap:8, padding:"4px 8px", fontSize:11, borderBottom:"1px solid #f1f5f9" }}>
                       <span style={{ fontWeight:700, color:"#2563eb", minWidth:80 }}>{c.visit_date ? new Date(String(c.visit_date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : ""}</span>
                       <span style={{ color:"#64748b" }}>{c.visit_type||"OPD"}</span>
@@ -6832,7 +6835,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <div>
               {/* Group documents by type */}
               {(() => {
-                const docs = patientFullData.documents;
+                const docs = pfd?.documents || [];
                 const groups = {};
                 docs.forEach(d => {
                   const cat = ["lab_report","Blood Test","Thyroid Panel","Lipid Profile","HbA1c","CBC","Urine","Kidney Function","Liver Function"].includes(d.doc_type)
@@ -7111,10 +7114,10 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Previously uploaded docs */}
-              {patientFullData?.documents?.length > 0 && (
+              {pfd?.documents?.length > 0 && (
                 <div style={{ marginTop:12, borderTop:"2px solid #e2e8f0", paddingTop:8 }}>
-                  <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>📂 PREVIOUS DOCUMENTS ({patientFullData.documents.length})</div>
-                  {patientFullData.documents.slice(0,10).map(doc => (
+                  <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>📂 PREVIOUS DOCUMENTS ({pfd?.documents?.length || 0})</div>
+                  {(pfd?.documents||[]).slice(0,10).map(doc => (
                     <div key={doc.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"4px 8px", borderBottom:"1px solid #f1f5f9", fontSize:11 }}>
                       <span>{doc.doc_type==="lab_report"?"🔬":doc.doc_type==="prescription"?"📄":"🩻"}</span>
                       <span style={{ flex:1 }}>{doc.title||doc.doc_type}</span>
@@ -7421,13 +7424,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </div>
 
               {/* ── SUMMARY CARDS ── */}
-              {patientFullData && (
+              {pfd && (
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10, marginBottom:20 }}>
                   {[
-                    { label:"Visits", value:patientFullData.consultations?.length||0, icon:"📋", bg:"linear-gradient(135deg,#eff6ff,#dbeafe)", color:"#1d4ed8" },
-                    { label:"Active Meds", value:(()=>{const seen=new Set();return(patientFullData.medications||[]).filter(m=>{if(!m.is_active)return false;const k=(m.name||"").toUpperCase();if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"💊", bg:"linear-gradient(135deg,#f0fdf4,#dcfce7)", color:"#059669" },
-                    { label:"Diagnoses", value:(()=>{const seen=new Set();return(patientFullData.diagnoses||[]).filter(d=>{const k=d.diagnosis_id||d.label;if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"🩺", bg:"linear-gradient(135deg,#fffbeb,#fef3c7)", color:"#d97706" },
-                    { label:"Lab Tests", value:patientFullData.lab_results?.length||0, icon:"🧪", bg:"linear-gradient(135deg,#fdf2f8,#fce7f3)", color:"#db2777" },
+                    { label:"Visits", value:pfd.consultations?.length||0, icon:"📋", bg:"linear-gradient(135deg,#eff6ff,#dbeafe)", color:"#1d4ed8" },
+                    { label:"Active Meds", value:(()=>{const seen=new Set();return(pfd.medications||[]).filter(m=>{if(!m.is_active)return false;const k=(m.name||"").toUpperCase();if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"💊", bg:"linear-gradient(135deg,#f0fdf4,#dcfce7)", color:"#059669" },
+                    { label:"Diagnoses", value:(()=>{const seen=new Set();return(pfd.diagnoses||[]).filter(d=>{const k=d.diagnosis_id||d.label;if(seen.has(k))return false;seen.add(k);return true}).length})(), icon:"🩺", bg:"linear-gradient(135deg,#fffbeb,#fef3c7)", color:"#d97706" },
+                    { label:"Lab Tests", value:pfd.lab_results?.length||0, icon:"🧪", bg:"linear-gradient(135deg,#fdf2f8,#fce7f3)", color:"#db2777" },
                   ].map((c,i) => (
                     <div key={i} style={{ background:c.bg, borderRadius:14, padding:"12px 14px", textAlign:"center" }}>
                       <div style={{ fontSize:9, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.6px" }}>{c.icon} {c.label}</div>
@@ -8276,14 +8279,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               })()}
 
               {/* ── RECENT LABS ── */}
-              {patientFullData?.lab_results?.length > 0 && (
+              {pfd?.lab_results?.length > 0 && (
                 <div style={{ background:"white", borderRadius:16, padding:16, border:"1px solid #f1f5f9", boxShadow:"0 1px 3px rgba(0,0,0,0.04)", marginBottom:20 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
                     <span style={{ fontSize:16 }}>🧪</span>
                     <span style={{ fontSize:14, fontWeight:800, color:"#0f172a" }}>Recent Lab Results</span>
                   </div>
                   {(() => {
-                    const labs = patientFullData.lab_results || [];
+                    const labs = pfd.lab_results || [];
                     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
                     const fmtD = (dt) => { const s=String(dt||""); const d=s.length>=10?new Date(s.slice(0,10)+"T12:00:00"):new Date(s); return `${d.getDate()} ${months[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`; };
                     const dateKey = (dt) => String(dt||"").slice(0,10);
