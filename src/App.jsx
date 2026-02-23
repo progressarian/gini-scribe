@@ -885,8 +885,6 @@ export default function GiniScribe() {
   const labPortalRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState("");
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
-  const dbPatientIdRef = useRef(null);
-  useEffect(() => { dbPatientIdRef.current = dbPatientId; }, [dbPatientId]);
   // History entry form
   const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", specialty:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
     diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}],
@@ -1607,20 +1605,7 @@ export default function GiniScribe() {
             // Auto-save unsaved intake reports (uploaded on intake tab)
             if (result.patient_id && intakeReports.some(r => r.data && !r.saved)) {
               console.log(`🔄 Auto-saving ${intakeReports.filter(r=>r.data&&!r.saved).length} intake reports...`);
-              dbPatientIdRef.current = result.patient_id; // ensure ref is current
-              for (const rpt of intakeReports.filter(r => r.data && !r.saved)) {
-                const saveResult = await saveIntakeReportToDB(rpt, rpt.data);
-                setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {
-                  ...r, saved: saveResult.ok, saveError: saveResult.ok ? null : saveResult.error
-                } : r));
-                console.log(`  ${saveResult.ok?"✅":"❌"} ${rpt.fileName}: ${saveResult.ok?`doc#${saveResult.docId}, ${saveResult.labsSaved} labs`:saveResult.error}`);
-              }
-              // Re-refresh patient data after reports saved
-              try {
-                const rResp = await fetch(`${API_URL}/api/patients/${result.patient_id}`, { headers: authHeaders() });
-                const rData = await rResp.json();
-                if (rData.patient) setPatientFullData(rData);
-              } catch(e) {}
+              await saveAllIntakeReports(result.patient_id);
             }
           } else {
             setSaveStatus("⚠️ Local only — " + (result.error || "failed").slice(0, 40));
@@ -1864,9 +1849,8 @@ export default function GiniScribe() {
         else setLabMismatch(null);
       }
       // Save to DB
-      if (data && dbPatientIdRef.current && API_URL) {
-        const result = await saveIntakeReportToDB({ type:"lab", base64:labImageData.base64, mediaType:labImageData.mediaType, fileName:labImageData.fileName }, data);
-        if (!result.ok) console.warn("Lab save failed:", result.error);
+      if (data && dbPatientId && API_URL) {
+        await saveIntakeReportToDB({ id:"single_lab_"+Date.now(), type:"lab", base64:labImageData.base64, mediaType:labImageData.mediaType, fileName:labImageData.fileName }, data);
       }
     }
     setLoading(p=>({...p,lab:false}));
@@ -2030,7 +2014,7 @@ export default function GiniScribe() {
         // Refresh patient data so new labs show up
         if (dbPatientId) { 
           try {
-            const pd = await fetch(`${API_URL}/api/patients/${dbPatientId}/full`, { headers: authHeaders() }).then(r=>r.json());
+            const pd = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() }).then(r=>r.json());
             setPatientFullData(pd);
           } catch (err) {}
         }
@@ -2111,94 +2095,70 @@ export default function GiniScribe() {
     return NORMALIZE_TEST[lower] || name;
   };
 
-  // Queue for reports extracted before patient is loaded
-  // Save extracted report from intake upload to DB (documents + lab_results)
-  const saveIntakeReportToDB = async (rpt, data) => {
-    const pid = dbPatientIdRef.current;
-    if (!API_URL || !data) return { ok: false, error: "No data" };
-    if (!pid) return { ok: false, error: "No patient loaded" };
+
+  // Save single intake report to DB (mirrors v19 lab portal pattern)
+  const saveIntakeReportToDB = async (rpt, data, pid) => {
+    const patientId = pid || dbPatientId;
+    if (!API_URL || !data || !patientId) return false;
     try {
       const isLab = rpt.type === "lab";
       const effectiveDate = data.report_date || data.collection_date || data.date || null;
-      // 1. Save document record
-      const docResp = await fetch(`${API_URL}/api/patients/${pid}/documents`, {
+      // 1. Save document
+      const docResp = await fetch(`${API_URL}/api/patients/${patientId}/documents`, {
         method: "POST", headers: authHeaders(),
         body: JSON.stringify({
           doc_type: isLab ? "lab_report" : (data.report_type || rpt.type),
           title: `${isLab ? (data.lab_name || "Lab Report") : (data.report_type || rpt.type)} — ${rpt.fileName}`,
-          file_name: rpt.fileName,
-          extracted_data: data,
-          doc_date: effectiveDate,
+          file_name: rpt.fileName, extracted_data: data, doc_date: effectiveDate,
           source: data.lab_name || `intake_${currentDoctor?.short_name || "mo"}`,
-          notes: isLab ? `${data.lab_name || ""} | ${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests | ${effectiveDate||"no date"}` : (data.impression || "")
+          notes: isLab ? `${data.lab_name||""} | ${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests | ${effectiveDate||""}` : (data.impression || "")
         })
       });
-      if (!docResp.ok) return { ok: false, error: `Server ${docResp.status}` };
       const savedDoc = await docResp.json();
-      if (!savedDoc.id) return { ok: false, error: "No doc ID returned" };
       // 2. Upload file to storage
-      if (rpt.base64) await uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
-      // 3. Save lab results with NORMALIZED names
-      let labsSaved = 0;
+      if (savedDoc.id && rpt.base64) await uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
+      // 3. Save lab results with normalized names
       if (isLab && data.panels) {
         for (const panel of data.panels) {
-          for (const test of (panel.tests || [])) {
-            try {
-              const r = await fetch(`${API_URL}/api/patients/${pid}/labs`, {
-                method: "POST", headers: authHeaders(),
-                body: JSON.stringify({
-                  test_name: normalizeTestName(test.test_name),
-                  result: String(test.result_text || test.result),
-                  unit: test.unit || "", flag: test.flag || "N", ref_range: test.ref_range || "",
-                  test_date: effectiveDate
-                })
-              });
-              if (r.ok) labsSaved++;
-            } catch (e) {}
+          for (const test of (panel.tests||[])) {
+            await fetch(`${API_URL}/api/patients/${patientId}/labs`, {
+              method: "POST", headers: authHeaders(),
+              body: JSON.stringify({
+                test_name: normalizeTestName(test.test_name),
+                result: String(test.result_text||test.result),
+                unit: test.unit||"", flag: test.flag||"N", ref_range: test.ref_range||"",
+                test_date: effectiveDate
+              })
+            }).catch(()=>{});
           }
         }
       }
-      // 4. Save imaging findings
-      if (!isLab && data.findings) {
-        for (const f of (data.findings || [])) {
-          try {
-            await fetch(`${API_URL}/api/patients/${pid}/labs`, {
-              method: "POST", headers: authHeaders(),
-              body: JSON.stringify({
-                test_name: f.parameter || data.report_type, result: String(f.value || f.interpretation || ""),
-                unit: f.unit || "", flag: f.interpretation === "Abnormal" ? "H" : "N",
-                ref_range: f.normal_range || "", test_date: effectiveDate
-              })
-            });
-          } catch (e) {}
-        }
-      }
-      return { ok: true, docId: savedDoc.id, labsSaved, date: effectiveDate };
-    } catch (e) {
-      return { ok: false, error: e.message };
+      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saved: true, saveError: null} : r));
+      return true;
+    } catch(e) {
+      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saveError: e.message} : r));
+      return false;
     }
   };
 
-  // Save ALL extracted intake reports to DB with visible progress
-  const saveAllIntakeReports = async () => {
-    const pid = dbPatientIdRef.current;
-    if (!pid) { alert("Please search/create patient first"); return; }
-    const extracted = intakeReports.filter(r => r.data && !r.saved);
-    if (!extracted.length) return;
-    for (const rpt of extracted) {
-      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? { ...r, saving: true, saveError: null } : r));
-      const result = await saveIntakeReportToDB(rpt, rpt.data);
-      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {
-        ...r, saving: false, saved: result.ok, saveError: result.ok ? null : result.error
-      } : r));
+  // Save all unsaved intake reports + refresh patient data
+  const saveAllIntakeReports = async (pid) => {
+    const patientId = pid || dbPatientId;
+    if (!patientId) { alert("Search or create patient first"); return; }
+    const unsaved = intakeReports.filter(r => r.data && !r.saved);
+    for (const rpt of unsaved) {
+      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saving: true} : r));
+      await saveIntakeReportToDB(rpt, rpt.data, patientId);
+      setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saving: false} : r));
     }
-    // Refresh patient data so Docs/Dashboard update
+    // Refresh patient data
     try {
-      const resp = await fetch(`${API_URL}/api/patients/${pid}`, { headers: authHeaders() });
+      const resp = await fetch(`${API_URL}/api/patients/${patientId}`, { headers: authHeaders() });
       const data = await resp.json();
-      if (data.patient) setPatientFullData(data);
+      if (data.patient || data.id) setPatientFullData(data);
     } catch(e) {}
   };
+
 
 
   // View file from Supabase Storage

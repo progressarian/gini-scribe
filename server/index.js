@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
-const { syncVisitToGenie } = require("./genie-sync.cjs");
+const { syncVisitToGenie } = require("./genie-sync.js");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,19 +42,6 @@ const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
 const int = v => { const x = parseInt(v); return isNaN(x) ? null : x; };
 const safeJson = v => { try { return v ? JSON.stringify(v) : null; } catch { return null; } };
 const t = (v, max=500) => { const s = n(v); return s && s.length > max ? s.slice(0, max) : s; }; // safe truncate
-
-// Create patient_briefs table
-pool.query(`CREATE TABLE IF NOT EXISTS patient_briefs (
-  id SERIAL PRIMARY KEY,
-  patient_id INTEGER NOT NULL,
-  brief_type VARCHAR(20) DEFAULT 'clinical',
-  content JSONB,
-  generated_at TIMESTAMPTZ DEFAULT NOW(),
-  data_hash VARCHAR(64),
-  version INTEGER DEFAULT 1,
-  trigger_source VARCHAR(50),
-  UNIQUE(patient_id, brief_type)
-)`).catch(e => console.log("patient_briefs table:", e.message));
 
 app.get("/api/health", async (_, res) => {
   const info = {
@@ -232,11 +219,12 @@ app.get("/api/patients/:id", async (req, res) => {
     if (!patient.rows[0]) return res.status(404).json({ error: "Not found" });
 
     const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
-      pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, con_data, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
+      pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
-      // Deduplicate meds: latest entry per med name
-      pool.query(`SELECT DISTINCT ON (UPPER(name)) * FROM medications
-        WHERE patient_id=$1 ORDER BY UPPER(name), created_at DESC`, [id]),
+      // Deduplicate meds: latest entry per med name, include prescribing doctor
+      pool.query(`SELECT DISTINCT ON (UPPER(m.name)) m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
+        FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
+        WHERE m.patient_id=$1 ORDER BY UPPER(m.name), m.created_at DESC`, [id]),
       // Deduplicate labs: distinct by test+date
       pool.query(`SELECT DISTINCT ON (test_name, test_date) * FROM lab_results
         WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`, [id]),
@@ -256,12 +244,6 @@ app.get("/api/patients/:id", async (req, res) => {
       return true;
     });
 
-    // Fetch latest brief
-    const brief = await pool.query(
-      "SELECT content, generated_at, version, trigger_source FROM patient_briefs WHERE patient_id=$1 AND brief_type='clinical' ORDER BY generated_at DESC LIMIT 1",
-      [id]
-    ).catch(() => ({ rows: [] }));
-
     res.json({
       ...patient.rows[0],
       consultations: uniqueConsultations,
@@ -271,7 +253,6 @@ app.get("/api/patients/:id", async (req, res) => {
       diagnoses: diagnoses.rows,
       documents: docs.rows,
       goals: goals.rows,
-      latest_brief: brief.rows[0] || null,
     });
   } catch (e) { console.error("Patient detail error:", e.message); res.status(500).json({ error: e.message }); }
 });
@@ -370,15 +351,13 @@ app.post("/api/consultations", async (req, res) => {
       );
     }
 
-    const diagVals = (moData?.diagnoses || []).filter(d => d?.id && d?.label);
-    if (diagVals.length > 0) {
-      const dParams = []; const dPlaceholders = [];
-      diagVals.forEach((d, i) => {
-        const off = i * 5;
-        dPlaceholders.push(`($${off+1},$${off+2},$${off+3},$${off+4},$${off+5})`);
-        dParams.push(patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || 'New');
-      });
-      await client.query(`INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ${dPlaceholders.join(",")} ON CONFLICT DO NOTHING`, dParams);
+    for (const d of (moData?.diagnoses || [])) {
+      if (d?.id && d?.label) {
+        await client.query(
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || 'New']
+        );
+      }
     }
     for (const m of (moData?.previous_medications || [])) {
       if (m?.name) {
@@ -398,25 +377,20 @@ app.post("/api/consultations", async (req, res) => {
         );
       }
     }
-    const labVals = (moData?.investigations || []).filter(inv => inv?.test && num(inv.value) !== null);
-    if (labVals.length > 0) {
-      const labParams = []; const labPlaceholders = [];
-      labVals.forEach((inv, i) => {
-        const off = i * 9;
-        labPlaceholders.push(`($${off+1},$${off+2},$${off+3},$${off+4},$${off+5},$${off+6},$${off+7},$${off+8},'scribe',COALESCE($${off+9}::date, CURRENT_DATE))`);
-        labParams.push(patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), vDate);
-      });
-      await client.query(`INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ${labPlaceholders.join(",")}`, labParams);
+    for (const inv of (moData?.investigations || [])) {
+      if (inv?.test && num(inv.value) !== null && !inv.from_report) {
+        const invDate = inv.date || vDate || null;
+        await client.query(
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe',COALESCE($9::date, CURRENT_DATE))`,
+          [patientId, consultationId, t(inv.test,200), num(inv.value), t(inv.unit,50), t(inv.flag,50), inv.critical===true, t(inv.ref,100), invDate]
+        );
+      }
     }
-    const goalVals = (conData?.goals || []).filter(g => g?.marker);
-    if (goalVals.length > 0) {
-      const gParams = []; const gPlaceholders = [];
-      goalVals.forEach((g, i) => {
-        const off = i * 7;
-        gPlaceholders.push(`($${off+1},$${off+2},$${off+3},$${off+4},$${off+5},$${off+6},$${off+7})`);
-        gParams.push(patientId, consultationId, t(g.marker,200), t(g.current,200), t(g.target,200), t(g.timeline,200), t(g.priority,100));
-      });
-      await client.query(`INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ${gPlaceholders.join(",")}`, gParams);
+    for (const g of (conData?.goals || [])) {
+      if (g?.marker) {
+        await client.query(`INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [patientId, consultationId, t(g.marker,200), t(g.current,200), t(g.target,200), t(g.timeline,200), t(g.priority,100)]);
+      }
     }
     for (const c of (moData?.complications || [])) {
       if (c?.name) {
@@ -490,160 +464,12 @@ app.get("/api/patients/:id/labs", async (req, res) => {
 // Save individual lab result
 app.post("/api/patients/:id/labs", async (req, res) => {
   try {
-    const { test_name, result, unit, flag, ref_range, test_date, consultation_id, source } = req.body;
+    const { test_name, result, unit, flag, ref_range, test_date, consultation_id } = req.body;
     const r = await pool.query(
-      `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, ref_range, test_date, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [req.params.id, n(consultation_id), test_name, result, n(unit), n(flag)||"N", n(ref_range), n(test_date)||new Date().toISOString().split("T")[0], n(source)||null]
+      `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, ref_range, test_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.params.id, n(consultation_id), test_name, result, n(unit), n(flag)||"N", n(ref_range), n(test_date)||new Date().toISOString().split("T")[0]]
     );
-    res.json(r.rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ═══ PATIENT BRIEF ═══
-app.get("/api/patients/:id/brief", async (req, res) => {
-  try {
-    const r = await pool.query(
-      "SELECT * FROM patient_briefs WHERE patient_id=$1 AND brief_type='clinical' ORDER BY generated_at DESC LIMIT 1",
-      [req.params.id]
-    );
-    if (r.rows[0]) {
-      res.json(r.rows[0]);
-    } else {
-      res.json({ content: null, generated_at: null, message: "No brief generated yet" });
-    }
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Generate/regenerate patient brief
-app.post("/api/patients/:id/brief/generate", async (req, res) => {
-  try {
-    const pid = req.params.id;
-    const trigger = req.body.trigger || "manual";
-    
-    // Gather all patient data
-    const [patient, consultations, labs, meds, docs, vitals, diagnoses] = await Promise.all([
-      pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
-      pool.query("SELECT * FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC LIMIT 20", [pid]),
-      pool.query("SELECT DISTINCT ON (test_name, test_date) * FROM lab_results WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC", [pid]),
-      pool.query("SELECT * FROM medications WHERE patient_id=$1 AND is_active=true", [pid]),
-      pool.query("SELECT id, doc_type, title, doc_date, source, notes, extracted_data, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC LIMIT 20", [pid]),
-      pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 10", [pid]),
-      pool.query("SELECT * FROM diagnoses WHERE patient_id=$1", [pid]),
-    ]);
-    
-    if (!patient.rows[0]) return res.status(404).json({ error: "Patient not found" });
-    const p = patient.rows[0];
-    
-    // Build data hash to check if brief needs regeneration
-    const dataStr = JSON.stringify({
-      labs: labs.rows.length,
-      meds: meds.rows.length,
-      cons: consultations.rows.length,
-      docs: docs.rows.length,
-      lastLab: labs.rows[0]?.test_date,
-      lastCon: consultations.rows[0]?.visit_date,
-      lastDoc: docs.rows[0]?.created_at,
-    });
-    const crypto = require("crypto");
-    const dataHash = crypto.createHash("md5").update(dataStr).digest("hex");
-    
-    // Check if brief already exists with same hash
-    const existing = await pool.query(
-      "SELECT * FROM patient_briefs WHERE patient_id=$1 AND brief_type='clinical' AND data_hash=$2",
-      [pid, dataHash]
-    );
-    if (existing.rows[0] && trigger !== "manual") {
-      return res.json(existing.rows[0]);
-    }
-    
-    // Build context for AI
-    const patientInfo = `${p.name}, ${p.age}Y/${p.sex}, File: ${p.file_no}`;
-    
-    const diagList = diagnoses.rows.map(d => `${d.label || d.diagnosis_code} (${d.status || "active"})`).join(", ") || "None recorded";
-    
-    const medList = meds.rows.map(m => {
-      const con = consultations.rows.find(c => c.id === m.consultation_id);
-      const conName = con?.con_name || con?.mo_name || "Gini";
-      return `${m.name} ${m.dose||""} ${m.frequency||""} ${m.timing||""} [${conName}]`;
-    }).join("\n") || "None";
-    
-    // Get latest labs grouped by test
-    const labsByTest = {};
-    labs.rows.forEach(l => {
-      if (!labsByTest[l.test_name]) labsByTest[l.test_name] = [];
-      labsByTest[l.test_name].push(l);
-    });
-    const labSummary = Object.entries(labsByTest).map(([name, vals]) => {
-      const latest = vals[0];
-      const prev = vals[1];
-      let trend = "";
-      if (prev && latest.result && prev.result) {
-        const diff = parseFloat(latest.result) - parseFloat(prev.result);
-        if (!isNaN(diff)) trend = diff > 0 ? " (↑)" : diff < 0 ? " (↓)" : " (→)";
-      }
-      return `${name}: ${latest.result} ${latest.unit||""} ${latest.flag&&latest.flag!=="N"?"["+latest.flag+"]":""}${trend} (${latest.test_date||""})`;
-    }).join("\n") || "None";
-    
-    // Recent consultations
-    const conSummary = consultations.rows.slice(0,5).map(c => {
-      let cd;
-      try { cd = typeof c.con_data === "string" ? JSON.parse(c.con_data) : c.con_data; } catch(e) { cd = null; }
-      return `${c.visit_date} — ${c.con_name||c.mo_name||""}: ${cd?.assessment_summary?.slice(0,150)||"No summary"}`;
-    }).join("\n") || "None";
-    
-    // Recent documents with extracted data
-    const docSummary = docs.rows.slice(0,10).map(d => {
-      let ext;
-      try { ext = typeof d.extracted_data === "string" ? JSON.parse(d.extracted_data) : d.extracted_data; } catch(e) { ext = null; }
-      let detail = d.title || d.doc_type;
-      if (ext?.findings) detail += " — " + ext.findings.slice(0,100);
-      if (ext?.labs?.length) detail += " — " + ext.labs.map(l => l.test_name+":"+l.result).slice(0,5).join(", ");
-      return `${d.doc_date||""} ${detail} (${d.source||""})`;
-    }).join("\n") || "None";
-    
-    // Vitals
-    const vitalSummary = vitals.rows.slice(0,3).map(v => 
-      `BP:${v.bp_sys||"?"}/${v.bp_dia||"?"} HR:${v.heart_rate||"?"} Wt:${v.weight||"?"}kg BMI:${v.bmi||"?"} (${v.recorded_at||""})`
-    ).join("\n") || "None";
-    
-    // Return the context for client-side AI call
-    res.json({
-      patient_id: pid,
-      data_hash: dataHash,
-      trigger: trigger,
-      context: {
-        patient: patientInfo,
-        diagnoses: diagList,
-        medications: medList,
-        labs: labSummary,
-        consultations: conSummary,
-        documents: docSummary,
-        vitals: vitalSummary,
-        total_visits: consultations.rows.length,
-        total_labs: labs.rows.length,
-        total_meds: meds.rows.length,
-        total_docs: docs.rows.length,
-      }
-    });
-  } catch (e) { console.error("Brief generate:", e); res.status(500).json({ error: e.message }); }
-});
-
-// Save generated brief
-app.post("/api/patients/:id/brief/save", async (req, res) => {
-  try {
-    const { content, data_hash, trigger_source } = req.body;
-    const pid = req.params.id;
-    
-    // Upsert: update if exists, insert if not
-    const r = await pool.query(`
-      INSERT INTO patient_briefs (patient_id, brief_type, content, data_hash, trigger_source, generated_at, version)
-      VALUES ($1, 'clinical', $2, $3, $4, NOW(), 1)
-      ON CONFLICT (patient_id, brief_type) 
-      DO UPDATE SET content=$2, data_hash=$3, trigger_source=$4, generated_at=NOW(), version=patient_briefs.version+1
-      RETURNING *
-    `, [pid, JSON.stringify(content), data_hash, trigger_source || "manual"]);
-    
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -802,23 +628,27 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
     else if (period === "6m") { df = "AND test_date > NOW() - INTERVAL '6 months'"; vf = "AND recorded_at > NOW() - INTERVAL '6 months'"; }
     else if (period === "1y") { df = "AND test_date > NOW() - INTERVAL '1 year'"; vf = "AND recorded_at > NOW() - INTERVAL '1 year'"; }
 
-    const labQ = (names) => `SELECT DISTINCT ON (test_date) result, test_date FROM lab_results WHERE patient_id=$1 AND test_name IN (${names.map((_,i)=>`$${i+2}`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
+    const labQ = (names) => `SELECT result, test_date, test_name FROM lab_results WHERE patient_id=$1 AND LOWER(test_name) IN (${names.map((_,i)=>`LOWER($${i+2})`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
 
-    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
-      pool.query(labQ(['HbA1c']), [id, 'HbA1c']),
-      pool.query(labQ(['FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG','Blood Sugar Fasting']), [id, 'FPG','Fasting Glucose','Fasting Blood Sugar','FBS','FBG','Blood Sugar Fasting']),
-      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C']), [id, 'LDL','LDL Cholesterol','LDL-C']),
-      pool.query(labQ(['Triglycerides','TG','Triglyceride']), [id, 'Triglycerides','TG','Triglyceride']),
-      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C']), [id, 'HDL','HDL Cholesterol','HDL-C']),
-      pool.query(labQ(['Creatinine','Serum Creatinine']), [id, 'Creatinine','Serum Creatinine']),
-      pool.query(labQ(['eGFR']), [id, 'eGFR']),
-      pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin']),
-      pool.query(labQ(['TSH']), [id, 'TSH']),
-      pool.query(labQ(['PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose']), [id, 'PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose']),
-      pool.query(labQ(['SGPT','SGPT (ALT)','ALT','SGPT (ALT), Serum','Alanine Aminotransferase']), [id, 'SGPT','SGPT (ALT)','ALT','SGPT (ALT), Serum','Alanine Aminotransferase']),
-      pool.query(labQ(['SGOT','SGOT (AST)','AST','SGOT (AST), Serum','Aspartate Aminotransferase']), [id, 'SGOT','SGOT (AST)','AST','SGOT (AST), Serum','Aspartate Aminotransferase']),
-      pool.query(labQ(['ALP','Alkaline Phosphatase','Alkaline Phosphatase (ALP)','Alkaline Phosphatase (ALP), Serum']), [id, 'ALP','Alkaline Phosphatase','Alkaline Phosphatase (ALP)','Alkaline Phosphatase (ALP), Serum']),
+    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, vitd, vitb12, ferritin, crp, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
+      pool.query(labQ(['HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']), [id, 'HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']),
+      pool.query(labQ(['FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting']), [id, 'FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting']),
+      pool.query(labQ(['LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)']), [id, 'LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)']),
+      pool.query(labQ(['Triglycerides','TG','Triglyceride','Serum Triglycerides']), [id, 'Triglycerides','TG','Triglyceride','Serum Triglycerides']),
+      pool.query(labQ(['HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)']), [id, 'HDL','HDL Cholesterol','HDL-C','HDL Cholesterol (Direct)']),
+      pool.query(labQ(['Creatinine','Serum Creatinine','S. Creatinine']), [id, 'Creatinine','Serum Creatinine','S. Creatinine']),
+      pool.query(labQ(['eGFR','GFR','Estimated GFR']), [id, 'eGFR','GFR','Estimated GFR']),
+      pool.query(labQ(['UACR','Urine Albumin Creatinine Ratio','Microalbumin','Urine Microalbumin']), [id, 'UACR','Urine Albumin Creatinine Ratio','Microalbumin','Urine Microalbumin']),
+      pool.query(labQ(['TSH','Thyroid Stimulating Hormone','TSH Ultrasensitive']), [id, 'TSH','Thyroid Stimulating Hormone','TSH Ultrasensitive']),
+      pool.query(labQ(['PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar']), [id, 'PPBS','PP','PPG','PP Glucose','Post Prandial','Post Prandial Glucose','Post Prandial Blood Sugar']),
+      pool.query(labQ(['SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase']), [id, 'SGPT (ALT)','SGPT','ALT','Alanine Aminotransferase']),
+      pool.query(labQ(['SGOT (AST)','SGOT','AST','Aspartate Aminotransferase']), [id, 'SGOT (AST)','SGOT','AST','Aspartate Aminotransferase']),
+      pool.query(labQ(['ALP','Alkaline Phosphatase']), [id, 'ALP','Alkaline Phosphatase']),
       pool.query(labQ(['Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']), [id, 'Non-HDL','Non HDL','NonHDL','Non-HDL Cholesterol']),
+      pool.query(labQ(['Vitamin D','25-OH Vitamin D','Vit D','Vitamin D3','25(OH) Vitamin D','25 Hydroxy Vitamin D']), [id, 'Vitamin D','25-OH Vitamin D','Vit D','Vitamin D3','25(OH) Vitamin D','25 Hydroxy Vitamin D']),
+      pool.query(labQ(['Vitamin B12','Vit B12','B12','Cyanocobalamin']), [id, 'Vitamin B12','Vit B12','B12','Cyanocobalamin']),
+      pool.query(labQ(['Ferritin','Serum Ferritin']), [id, 'Ferritin','Serum Ferritin']),
+      pool.query(labQ(['CRP','C-Reactive Protein','hs-CRP']), [id, 'CRP','C-Reactive Protein','hs-CRP']),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) waist, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND waist IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
@@ -857,6 +687,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       ldl: ldl.rows, triglycerides: tg.rows, hdl: hdl.rows, nonhdl: nonhdl.rows,
       creatinine: creat.rows, egfr: egfr.rows, uacr: uacr.rows, tsh: tsh.rows,
       alt: alt.rows, ast: ast.rows, alp: alp.rows,
+      vitamin_d: vitd.rows, vitamin_b12: vitb12.rows, ferritin: ferritin.rows, crp: crp.rows,
       bp: bp.rows, weight: weight.rows,
       waist: waist.rows, body_fat: bodyFat.rows, muscle_mass: muscleMass.rows,
       screenings: screenings.rows,
@@ -874,10 +705,11 @@ app.post("/api/patients/:id/history", async (req, res) => {
     await client.query("BEGIN");
     const patientId = req.params.id;
     const { visit_date, visit_type, doctor_name, specialty, vitals, diagnoses, medications, labs } = req.body;
+    const conNameStr = doctor_name ? (specialty ? `${doctor_name} (${specialty})` : doctor_name) : "Unknown";
 
     const con = await client.query(
-      "INSERT INTO consultations (patient_id, visit_date, visit_type, con_name, con_data, status) VALUES ($1,$2,$3,$4,$5,'historical') RETURNING id",
-      [patientId, visit_date, n(visit_type)||"OPD", n(doctor_name), JSON.stringify({specialty: n(specialty), hospital_name: req.body.hospital_name || null})]
+      "INSERT INTO consultations (patient_id, visit_date, visit_type, con_name, status) VALUES ($1,$2,$3,$4,'historical') RETURNING id",
+      [patientId, visit_date, n(visit_type)||"OPD", conNameStr]
     );
     const cid = con.rows[0].id;
 
@@ -906,15 +738,6 @@ app.post("/api/patients/:id/history", async (req, res) => {
           [patientId, cid, visit_date, l.test_name, num(l.result), n(l.unit), n(l.flag), n(l.ref_range)]);
       }
     }
-
-        // Auto-save as document record
-    try {
-      const docTitle = (n(doctor_name)||"External") + (n(specialty) ? " - "+n(specialty) : "") + " - " + visit_date;
-      await client.query(
-        `INSERT INTO documents (patient_id, consultation_id, doc_type, title, doc_date, source, extracted_data) VALUES ($1,$2,'prescription',$3,$4,$5,$6)`,
-        [patientId, cid, docTitle, visit_date, req.body.hospital_name || "External", JSON.stringify({doctor:n(doctor_name), specialty:n(specialty), hospital:req.body.hospital_name, visit_date, diagnoses, medications, labs, vitals})]
-      );
-    } catch(de) { console.log("Doc save skip:", de.message); }
 
     await client.query("COMMIT");
     console.log(`✅ History saved: patient=${patientId} consultation=${cid}`);
