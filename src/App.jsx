@@ -906,6 +906,13 @@ export default function GiniScribe() {
   const [timelineDoctor, setTimelineDoctor] = useState("");
   const [expandedDiagnosis, setExpandedDiagnosis] = useState(null);
   const [patientFullData, setPatientFullData] = useState(null);
+  // Clear stale patient data when switching patients
+  useEffect(() => {
+    if (patientFullData && dbPatientId && patientFullData.id && patientFullData.id !== dbPatientId) {
+      console.log(`⚠️ patientFullData (id=${patientFullData.id}) doesn't match dbPatientId (${dbPatientId}) — clearing stale data`);
+      setPatientFullData(null);
+    }
+  }, [dbPatientId]);
   // Imaging uploads
   const [imagingFiles, setImagingFiles] = useState([]); // [{type, base64, mediaType, fileName, data, extracting, error}]
   const imagingRef = useRef(null);
@@ -1256,7 +1263,7 @@ export default function GiniScribe() {
         try {
           const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() });
           const data = await resp.json();
-          if (data.patient) setPatientFullData(data);
+          if (data.id) setPatientFullData(data);
         } catch(e) {}
       })();
       if (tab === "outcomes") fetchOutcomes(dbPatientId);
