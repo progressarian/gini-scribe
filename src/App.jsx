@@ -1079,6 +1079,7 @@ export default function GiniScribe() {
   // Multiple report uploads in intake
   const [intakeReports, setIntakeReports] = useState([]); // [{id,type,base64,mediaType,fileName,data,extracting,error,saved,saveError}]
   const intakeSavedIds = useRef(new Set()); // Track saved report IDs to prevent duplicates
+  const rxSavedConsultationId = useRef(null); // Track if prescription already saved for this consultation
   const intakeReportsRef = useRef([]); // Ref mirror for closures
   intakeReportsRef.current = intakeReports; // Always sync
   const intakeReportRef = useRef(null);
@@ -1574,8 +1575,9 @@ export default function GiniScribe() {
               setPatientFullData(refreshData);
               setHistoryList(refreshData.consultations || []);
             } catch (e) { console.log("Refresh after save:", e.message); }
-            // Auto-save prescription as retrievable document
-            if (conData && result.patient_id) {
+            // Auto-save prescription as retrievable document (once per consultation)
+            if (conData && result.patient_id && rxSavedConsultationId.current !== result.consultation_id) {
+              rxSavedConsultationId.current = result.consultation_id;
               const rxDoc = {
                 doc_type: "prescription",
                 title: `Prescription — ${conName} — ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}`,
@@ -1732,6 +1734,7 @@ export default function GiniScribe() {
     setComplaints([]); setComplaintText("");
     setIntakeReports([]); setLabRequisition([]);
     intakeSavedIds.current.clear();
+    rxSavedConsultationId.current = null; planPrintSavedRef.current = false;
     setNextVisitDate(""); setMedRecon({}); setMedReconReasons({});
     setShadowData(null); setShadowAI(false); setShadowOriginal(null); setShowShadowDiff(false);
     setShadowTxDecisions({});
@@ -1810,6 +1813,7 @@ export default function GiniScribe() {
     setIntakeReports([]); setLabRequisition([]);
     intakeSavedIds.current.clear();
     setNextVisitDate(""); setMedRecon({}); setMedReconReasons({});
+    rxSavedConsultationId.current = null; planPrintSavedRef.current = false;
     setDbPatientId(null); setPatientFullData(null); setHistoryList([]);
     setMoBrief(null); setAppointments([]);
     setImagingFiles([]);
@@ -2262,11 +2266,12 @@ export default function GiniScribe() {
     setTimeout(() => aiChatRef.current?.scrollTo(0, aiChatRef.current.scrollHeight), 100);
   };
 
-  // AI Prescription Review
-  // Save treatment plan as document on print (final version)
+  // Save treatment plan as document on print (final version) + generate PDF
+  const planPrintSavedRef = useRef(false); // Track if plan was already saved on print
   const handlePrintPlan = async () => {
-    // Save plan document to DB if patient is loaded
-    if (dbPatientId && API_URL && conData) {
+    // Save plan document to DB if patient is loaded (only once per session)
+    if (dbPatientId && API_URL && conData && !planPrintSavedRef.current) {
+      planPrintSavedRef.current = true;
       try {
         const planDoc = {
           doc_type: "prescription",
@@ -2293,13 +2298,46 @@ export default function GiniScribe() {
           doc_date: new Date().toISOString().split("T")[0],
           source: "scribe_print",
           notes: `Printed by ${currentDoctor?.name || conName}`,
-          consultation_id: patientFullData?.consultations?.[0]?.id || null
+          consultation_id: pfd?.consultations?.[0]?.id || null
         };
         const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
           method: "POST", headers: authHeaders(), body: JSON.stringify(planDoc)
         });
         const saved = await resp.json();
-        if (saved.id) console.log("✅ Plan saved as document #" + saved.id);
+        if (saved.id) {
+          console.log("✅ Plan saved as document #" + saved.id);
+          // Generate PDF from plan area and upload
+          try {
+            const planEl = document.querySelector('[data-plan-area]') || document.querySelector('.print-area');
+            if (planEl) {
+              // Dynamically load html2pdf.js from CDN
+              if (!window.html2pdf) {
+                await new Promise((resolve, reject) => {
+                  const script = document.createElement('script');
+                  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+                  script.onload = resolve;
+                  script.onerror = reject;
+                  document.head.appendChild(script);
+                });
+              }
+              const pdfBlob = await window.html2pdf().set({
+                margin: [8, 8, 8, 8],
+                filename: `Treatment_Plan_${patient.name}_${new Date().toISOString().split("T")[0]}.pdf`,
+                image: { type: 'jpeg', quality: 0.95 },
+                html2canvas: { scale: 2, useCORS: true, logging: false },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+              }).from(planEl).outputPdf('blob');
+              // Convert blob to base64
+              const reader = new FileReader();
+              const base64 = await new Promise(resolve => {
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(pdfBlob);
+              });
+              await uploadFileToStorage(saved.id, base64, 'application/pdf', `Treatment_Plan_${patient.name}.pdf`);
+              console.log("📄 PDF uploaded for plan #" + saved.id);
+            }
+          } catch (pdfErr) { console.log("PDF generation:", pdfErr.message); }
+        }
       } catch (e) { console.log("Plan save on print:", e.message); }
     }
     // Then print
@@ -5021,19 +5059,31 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           <div style={{ marginBottom:12 }}>
             <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🏥 Diagnoses</div>
             {/* Pre-populated from History tab */}
-            {hxConditions.length > 0 && assessDx.length === 0 && (
+            {hxConditions.length > 0 && (() => {
+              // Show unconfirmed clinical history diagnoses
+              const unconfirmed = hxConditions.filter(c => {
+                const chip = CONDITION_CHIPS.find(x=>x.l.toLowerCase().includes(c.toLowerCase().slice(0,4)));
+                return chip && !assessDx.includes(chip.id);
+              });
+              return unconfirmed.length > 0 ? (
               <div style={{ padding:6, background:"#faf5ff", border:"1px solid #c4b5fd", borderRadius:6, marginBottom:6 }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#7c3aed", marginBottom:3 }}>📜 From Clinical History — click to confirm</div>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
-                  {hxConditions.map(c => {
+                  {unconfirmed.map(c => {
                     const chip = CONDITION_CHIPS.find(x=>x.l.toLowerCase().includes(c.toLowerCase().slice(0,4)));
                     return <button key={c} onClick={()=>{if(chip && !assessDx.includes(chip.id))setAssessDx(prev=>[...prev,chip.id]);}}
                       style={{ padding:"4px 8px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer",
                         border:"1.5px solid #7c3aed", background:"#faf5ff", color:"#7c3aed" }}>+ {c}</button>;
                   })}
+                  <button onClick={()=>{
+                    const allIds = hxConditions.map(c => CONDITION_CHIPS.find(x=>x.l.toLowerCase().includes(c.toLowerCase().slice(0,4)))?.id).filter(Boolean);
+                    setAssessDx(prev => [...new Set([...prev, ...allIds])]);
+                  }} style={{ padding:"4px 8px", borderRadius:6, fontSize:10, fontWeight:800, cursor:"pointer",
+                    border:"1.5px solid #059669", background:"#f0fdf4", color:"#059669" }}>✓ Confirm All ({unconfirmed.length})</button>
                 </div>
               </div>
-            )}
+              ) : null;
+            })()}
             <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
               {CONDITION_CHIPS.map(c => (
                 <button key={c.id} onClick={()=>toggleChip(assessDx,setAssessDx,c.id)}
@@ -5991,7 +6041,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
       {/* ===== TREATMENT PLAN — NULL-SAFE ===== */}
       {tab==="plan" && (
-        <div>
+        <div data-plan-area>
           {NewReportsBanner}
           {/* Shadow AI Origin Banner */}
           {conData?._fromShadow && shadowOriginal && (
