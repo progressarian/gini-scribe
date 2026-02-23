@@ -795,6 +795,7 @@ const EditText = ({ value, onChange, style: s }) => {
 const RemoveBtn = ({ onClick }) => <button className="no-print" onClick={onClick} title="Remove" style={{ background:"#fee2e2", border:"none", borderRadius:3, padding:"0 4px", fontSize:9, cursor:"pointer", color:"#dc2626", fontWeight:700, lineHeight:"16px" }}>✕</button>;
 // Safe array accessor
 const sa = (obj, key) => (obj && Array.isArray(obj[key])) ? obj[key] : [];
+const ts = (item) => typeof item === "string" ? item : (item?.test || item?.name || item?.marker || JSON.stringify(item)); // safe to-string for test items
 
 // ============ MAIN ============
 export default function GiniScribe() {
@@ -2269,7 +2270,7 @@ export default function GiniScribe() {
       const recent = patientFullData.lab_results.slice(0,15).map(l=>`${l.test_name}: ${l.result} ${l.unit||""} (${l.test_date||""})`);
       ctx += `Lab History: ${recent.join(", ")}\n`;
     }
-    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${conData.investigations_ordered.join(", ")}\n`;
+    if (conData?.investigations_ordered?.length) ctx += `Investigations Ordered: ${conData.investigations_ordered.map(ts).join(", ")}\n`;
     if (conData?.follow_up) ctx += `Follow-up: ${conData.follow_up.duration||""} ${conData.follow_up.date||""}\n`;
     if (conData?.diet_lifestyle?.length) ctx += `Lifestyle: ${conData.diet_lifestyle.map(l=>typeof l==="string"?l:l.advice).join(", ")}\n`;
     if (conData?.goals?.length) ctx += `Goals: ${conData.goals.map(g=>`${g.marker}: ${g.current} → ${g.target}`).join(", ")}\n`;
@@ -2976,7 +2977,7 @@ ${parts.join("\n")}`;
       planLifestyle.forEach(l => { text += typeof l==="string" ? `• ${l}\n` : `• ${l.advice}${l.detail?` — ${l.detail}`:""}\n`; });
       text += `\n`;
     }
-    const invs = conData?.investigations_ordered||conData?.investigations_to_order||[];
+    const invs = (conData?.investigations_ordered||conData?.investigations_to_order||[]).map(ts);
     if (invs.length) text += `INVESTIGATIONS: ${invs.join(", ")}\n\n`;
     
     if (planMonitors.length) {
@@ -5131,7 +5132,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:4 }}>🔬 SUGGESTED TESTS</div>
                     <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                       {shadowData.investigations.map((t,i) => (
-                        <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600, border:"1px solid #bfdbfe" }}>{t}</span>
+                        <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600, border:"1px solid #bfdbfe" }}>{ts(t)}</span>
                       ))}
                     </div>
                   </div>
@@ -5707,7 +5708,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       <div style={{ fontWeight:700, color:"#6d28d9", marginBottom:2 }}>🔬 SUGGESTED TESTS</div>
                       <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                         {shadowData.investigations.map((t,i) => (
-                          <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600 }}>{t}</span>
+                          <span key={i} style={{ fontSize:9, padding:"2px 6px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600 }}>{ts(t)}</span>
                         ))}
                       </div>
                     </div>
@@ -6301,7 +6302,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           <div style={{ fontSize:16, fontWeight:800 }}>{getPlan("followup_dur", conData?.follow_up?.duration||"")}</div>
                           {nextVisitDate && <div style={{ fontSize:12, fontWeight:700, color:"#2563eb" }}>{new Date(nextVisitDate+"T12:00:00").toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}</div>}
                           {(conData?.follow_up?.tests_to_bring||[]).length > 0 && (
-                            <div style={{ fontSize:10, color:"#64748b", marginTop:2 }}>⚠️ {conData.follow_up.tests_to_bring.join(", ")}</div>
+                            <div style={{ fontSize:10, color:"#64748b", marginTop:2 }}>⚠️ {conData.follow_up.tests_to_bring.map(ts).join(", ")}</div>
                           )}
                         </div>
                       )}
@@ -6384,7 +6385,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {(conData?.investigations_ordered||conData?.investigations_to_order||[]).length > 0 && <PlanBlock id="investigations" title="🔬 Investigations Ordered" color="#7c3aed" hidden={planHidden.has("investigations")} onToggle={()=>toggleBlock("investigations")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                     {(conData.investigations_ordered||conData.investigations_to_order||[]).map((t,i) => (
-                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{t}</span>
+                      <span key={i} style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600, color:"#6d28d9" }}>{ts(t)}</span>
                     ))}
                   </div>
                   {conData?.follow_up?.instructions && (
@@ -6466,7 +6467,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         </span>}
                       </div>
                       {(conData?.follow_up?.tests_to_bring||conData?.investigations_ordered||conData?.investigations_to_order||[]).length > 0 && (
-                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData?.follow_up?.tests_to_bring||conData?.investigations_ordered||conData?.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{t}</span>)}</div></div>
+                        <div><div style={{ fontSize:11, fontWeight:600, marginBottom:2 }}>Please bring these reports:</div><div style={{ display:"flex", flexWrap:"wrap", gap:2 }}>{(conData?.follow_up?.tests_to_bring||conData?.investigations_ordered||conData?.investigations_to_order||[]).map((t,i) => <span key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:3, padding:"1px 5px", fontSize:10, fontWeight:600 }}>{ts(t)}</span>)}</div></div>
                       )}
                     </div>
                   </div>
@@ -6476,7 +6477,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 {shadowData?.investigations?.length > 0 && <PlanBlock id="aitests" title="🤖 AI Suggested Investigations" color="#7c3aed" hidden={planHidden.has("aitests")} onToggle={()=>toggleBlock("aitests")}>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                     {shadowData.investigations.map((t,i) => (
-                      <span key={i} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, fontWeight:600, background:"#faf5ff", color:"#6d28d9", border:"1px solid #c4b5fd" }}>{t}</span>
+                      <span key={i} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, fontWeight:600, background:"#faf5ff", color:"#6d28d9", border:"1px solid #c4b5fd" }}>{ts(t)}</span>
                     ))}
                   </div>
                 </PlanBlock>}
@@ -6727,7 +6728,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                               )}
                               {ed.follow_up && (
                                 <div style={{ fontSize:10, fontWeight:600, color:"#2563eb", marginTop:4 }}>
-                                  📅 Follow-up: {ed.follow_up.duration} {ed.follow_up.tests_to_bring?.length?`| Bring: ${ed.follow_up.tests_to_bring.join(", ")}`:""}
+                                  📅 Follow-up: {ed.follow_up.duration} {ed.follow_up.tests_to_bring?.length?`| Bring: ${ed.follow_up.tests_to_bring.map(ts).join(", ")}`:""}
                                 </div>
                               )}
                               {ed.doctor && <div style={{ fontSize:9, color:"#94a3b8", marginTop:4 }}>Doctor: {ed.doctor} {ed.mo?`| MO: ${ed.mo}`:""}</div>}
