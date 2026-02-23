@@ -937,7 +937,12 @@ export default function GiniScribe() {
   const [showShadow, setShowShadow] = useState(false);
   // Medicine reconciliation
   const [medRecon, setMedRecon] = useState({}); // {medName: "continue"|"hold"|"stop"|"modify"}
+  const [medReconReasons, setMedReconReasons] = useState({}); // {medName: "reason"}
   const [showMedCard, setShowMedCard] = useState(false);
+  const RECON_REASONS = {
+    stop: ["Duplication with Gini prescription","Drug interaction","Not clinically indicated","Side effects reported","Patient preference","Not effective","Replaced by better alternative","Contraindicated","Completed course"],
+    hold: ["Pending lab results","Fasting / pre-procedure","Temporary side effect","Dose adjustment needed","Drug interaction — temporary","Patient preference","Reassess at next visit"]
+  };
 
   // ═══ CONDITIONS TEMPLATES (v2 — with biomarkers + questions) ═══
   const CONDITIONS = {
@@ -1135,7 +1140,7 @@ export default function GiniScribe() {
         examData, examNotes, examSpecialty, assessDx, assessLabs, assessNotes,
         moTranscript, conTranscript, moName, conName, appointments,
         intakeReports: intakeReports.map(r=>({...r, base64: undefined})), // don't save base64
-        nextVisitDate, labRequisition, medRecon, hxHospitalizations,
+        nextVisitDate, labRequisition, medRecon, medReconReasons, hxHospitalizations,
         savedAt: Date.now()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -1172,6 +1177,7 @@ export default function GiniScribe() {
           if (saved.nextVisitDate) setNextVisitDate(saved.nextVisitDate);
           if (saved.labRequisition?.length) setLabRequisition(saved.labRequisition);
           if (saved.medRecon) setMedRecon(saved.medRecon);
+          if (saved.medReconReasons) setMedReconReasons(saved.medReconReasons);
           if (saved.hxHospitalizations?.length) setHxHospitalizations(saved.hxHospitalizations);
           console.log("Session restored:", saved.patient.name);
         }
@@ -1482,7 +1488,7 @@ export default function GiniScribe() {
           body: JSON.stringify({
             patient, vitals, moData, conData,
             moTranscript, conTranscript, quickTranscript,
-            moName, conName, planEdits,
+            moName, conName, planEdits: {...planEdits, medRecon, medReconReasons},
             moDoctorId: doctorsList.find(d=>d.short_name===moName)?.id || null,
             conDoctorId: doctorsList.find(d=>d.short_name===conName)?.id || null
           }),
@@ -5844,7 +5850,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:10, color:"#92400e" }}>
                       <b>Note:</b> External consultant medications based on prescriptions provided by patient. Verified during this visit.
                     </div>
-                    <div className="no-print" style={{ display:"flex", gap:4, marginBottom:8 }}>
+                    <div className="no-print" style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
                       <button onClick={()=>{
                         const recon = {};
                         externalMeds.forEach(m => { if(!medRecon[m.name]) recon[m.name] = "continue"; });
@@ -5852,51 +5858,129 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       }} style={{ padding:"5px 12px", background:"#059669", color:"white", border:"none", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
                         ✅ Confirm All Continue
                       </button>
+                      <button onClick={()=>{
+                        // Done — generate reconciliation summary
+                        const contMeds = externalMeds.filter(m=>medRecon[m.name]!=="stop"&&medRecon[m.name]!=="hold");
+                        const heldMeds = externalMeds.filter(m=>medRecon[m.name]==="hold");
+                        const stoppedMeds = externalMeds.filter(m=>medRecon[m.name]==="stop");
+                        let summary = "";
+                        if (contMeds.length) {
+                          const byDoc = {};
+                          contMeds.forEach(m => { const d=m.prescriber||"External"; if(!byDoc[d])byDoc[d]=[]; byDoc[d].push(m.name); });
+                          summary += "Medications continued: " + Object.entries(byDoc).map(([doc,meds])=>`${meds.join(", ")} (prescribed by ${doc})`).join("; ") + ". ";
+                        }
+                        if (stoppedMeds.length) {
+                          summary += "Medications stopped: " + stoppedMeds.map(m => {
+                            const reason = medReconReasons[m.name];
+                            return `${m.name}${reason ? ` (${reason})` : ""}`;
+                          }).join(", ") + ". ";
+                        }
+                        if (heldMeds.length) {
+                          summary += "Medications on hold: " + heldMeds.map(m => {
+                            const reason = medReconReasons[m.name];
+                            return `${m.name}${reason ? ` (${reason})` : ""}`;
+                          }).join(", ") + ". ";
+                        }
+                        if (summary) {
+                          const existing = getPlan("summary", conData?.assessment_summary || "");
+                          const reconTag = "\n\n📋 Medication Reconciliation: ";
+                          const cleaned = existing.includes("📋 Medication Reconciliation:") ? existing.split("📋 Medication Reconciliation:")[0].trim() : existing;
+                          editPlan("summary", cleaned + reconTag + summary);
+                        }
+                      }} style={{ padding:"5px 12px", background:"#2563eb", color:"white", border:"none", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                        📋 Done — Add to Summary
+                      </button>
                     </div>
                     {externalMedsByDoctor.map((group, gi) => (
-                      <div key={gi} style={{ marginBottom:8 }}>
-                        <div style={{ background:"#f1f5f9", padding:"6px 12px", borderRadius:"6px 6px 0 0", border:"1px solid #e2e8f0", borderBottom:"none", display:"flex", justifyContent:"space-between" }}>
-                          <div style={{ fontSize:11, fontWeight:800, color:"#1e293b" }}>
-                            {group.doctor} {group.specialty ? `(${group.specialty})` : ""}
-                            {group.date && <span style={{ fontWeight:400, color:"#64748b" }}> — {new Date(String(group.date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</span>}
+                      <div key={gi} style={{ marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+                        {/* Doctor header — rich like screenshot */}
+                        <div style={{ background:"linear-gradient(135deg,#f1f5f9,#e2e8f0)", padding:"8px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                          <div>
+                            <div style={{ fontSize:12, fontWeight:800, color:"#1e293b" }}>
+                              {group.doctor}
+                              {group.specialty && <span style={{ fontWeight:600, color:"#475569" }}> ({group.specialty})</span>}
+                            </div>
+                            {group.date && <div style={{ fontSize:10, color:"#64748b", marginTop:1 }}>
+                              {new Date(String(group.date).slice(0,10)+"T12:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}
+                            </div>}
                           </div>
-                          {group.hospital && <span style={{ fontSize:9, color:"#94a3b8", fontWeight:600 }}>{group.hospital}</span>}
+                          <div style={{ textAlign:"right" }}>
+                            {group.hospital && <div style={{ fontSize:10, fontWeight:700, color:"#dc2626" }}>{group.hospital}</div>}
+                            <div style={{ fontSize:9, color:"#94a3b8" }}>{group.meds.length} medicine{group.meds.length>1?"s":""}</div>
+                          </div>
                         </div>
+                        {/* Medications under this doctor */}
                         {group.meds.map((m, mi) => {
                           const status = medRecon[m.name] || "continue";
+                          const reason = medReconReasons[m.name] || "";
                           return (
-                            <div key={mi} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 12px", borderBottom:"1px solid #f1f5f9",
-                              background:status==="stop"?"#fef2f2":status==="hold"?"#fef3c7":"white",
-                              border:`1px solid ${status==="stop"?"#fecaca":status==="hold"?"#fde68a":"#e2e8f0"}`, borderTop:"none" }}>
-                              <span style={{ fontSize:14, color:status==="stop"?"#dc2626":status==="hold"?"#f59e0b":"#059669" }}>
-                                {status==="stop"?"🛑":status==="hold"?"⏸":"✅"}
-                              </span>
-                              <div style={{ flex:1 }}>
-                                <div style={{ fontSize:12, fontWeight:700 }}>{m.name} <span style={{ fontSize:10, fontWeight:400, color:"#94a3b8" }}>{m.composition}</span></div>
+                            <div key={mi}>
+                              <div style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 14px",
+                                background:status==="stop"?"#fef2f2":status==="hold"?"#fef3c7":"white",
+                                borderTop:"1px solid #f1f5f9" }}>
+                                <span style={{ fontSize:16, color:status==="stop"?"#dc2626":status==="hold"?"#f59e0b":"#059669" }}>
+                                  {status==="stop"?"🛑":status==="hold"?"⏸":"✅"}
+                                </span>
+                                <div style={{ flex:1 }}>
+                                  <div style={{ fontSize:12, fontWeight:700, color:status==="stop"?"#94a3b8":"#1e293b", textDecoration:status==="stop"?"line-through":"none" }}>
+                                    {m.name} <span style={{ fontSize:10, fontWeight:400, color:"#94a3b8" }}>{m.composition}</span>
+                                  </div>
+                                </div>
+                                <div style={{ fontSize:11, fontWeight:700, color:"#475569", minWidth:55, textAlign:"right" }}>{m.dose}</div>
+                                <div style={{ fontSize:11, fontWeight:600, color:"#2563eb", minWidth:90, textAlign:"center" }}>{m.timing || m.frequency}</div>
+                                <div className="no-print" style={{ display:"flex", gap:2 }}>
+                                  {[{v:"continue",l:"Continue",c:"#059669"},{v:"hold",l:"Hold",c:"#f59e0b"},{v:"stop",l:"Stop",c:"#dc2626"}].map(o => (
+                                    <button key={o.v} onClick={()=>{
+                                      setMedRecon(prev=>({...prev,[m.name]:o.v}));
+                                      if (o.v === "continue") setMedReconReasons(prev=>{const n={...prev};delete n[m.name];return n;});
+                                    }}
+                                      style={{ padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer",
+                                        border:`1.5px solid ${status===o.v?o.c:"#e2e8f0"}`,
+                                        background:status===o.v?o.c:"white", color:status===o.v?"white":"#475569" }}>{o.l}</button>
+                                  ))}
+                                </div>
                               </div>
-                              <div style={{ fontSize:11, fontWeight:600, color:"#475569", minWidth:60, textAlign:"right" }}>{m.dose}</div>
-                              <div style={{ fontSize:11, fontWeight:600, color:"#2563eb", minWidth:100 }}>{m.timing || m.frequency}</div>
-                              <div className="no-print" style={{ display:"flex", gap:2 }}>
-                                {[{v:"continue",l:"Continue",c:"#059669"},{v:"hold",l:"Hold",c:"#f59e0b"},{v:"stop",l:"Stop",c:"#dc2626"}].map(o => (
-                                  <button key={o.v} onClick={()=>setMedRecon(prev=>({...prev,[m.name]:o.v}))}
-                                    style={{ padding:"3px 8px", borderRadius:4, fontSize:9, fontWeight:700, cursor:"pointer",
-                                      border:`1.5px solid ${status===o.v?o.c:"#e2e8f0"}`,
-                                      background:status===o.v?o.c:"white", color:status===o.v?"white":"#475569" }}>{o.l}</button>
-                                ))}
-                              </div>
+                              {/* Reason picker — shown when hold or stop selected */}
+                              {(status === "hold" || status === "stop") && (
+                                <div className="no-print" style={{ padding:"4px 14px 8px 44px", background:status==="stop"?"#fef2f2":"#fef3c7" }}>
+                                  <div style={{ fontSize:9, fontWeight:700, color:status==="stop"?"#dc2626":"#92400e", marginBottom:3 }}>
+                                    Reason for {status==="stop"?"stopping":"holding"}:
+                                  </div>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                                    {(RECON_REASONS[status]||[]).map(r => (
+                                      <button key={r} onClick={()=>setMedReconReasons(prev=>({...prev,[m.name]:r}))}
+                                        style={{ fontSize:9, padding:"3px 8px", borderRadius:12, cursor:"pointer", fontWeight:600,
+                                          border:`1.5px solid ${reason===r?(status==="stop"?"#dc2626":"#f59e0b"):"#e2e8f0"}`,
+                                          background:reason===r?(status==="stop"?"#dc2626":"#f59e0b"):"white",
+                                          color:reason===r?"white":"#475569" }}>{r}</button>
+                                    ))}
+                                  </div>
+                                  {reason && <div style={{ fontSize:9, marginTop:3, color:status==="stop"?"#dc2626":"#92400e", fontWeight:600 }}>
+                                    ✓ {reason}
+                                  </div>}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
                       </div>
                     ))}
+                    {/* Summary of changes */}
                     {Object.values(medRecon).some(v=>v!=="continue") && (
-                      <div style={{ marginTop:6, padding:8, background:"#f8fafc", borderRadius:6, border:"1px solid #e2e8f0" }}>
-                        {Object.entries(medRecon).filter(([_,v])=>v==="stop").length > 0 && (
-                          <div style={{ fontSize:10, color:"#dc2626", fontWeight:600, marginBottom:2 }}>🛑 Stopped: {Object.entries(medRecon).filter(([_,v])=>v==="stop").map(([k])=>k).join(", ")}</div>
-                        )}
-                        {Object.entries(medRecon).filter(([_,v])=>v==="hold").length > 0 && (
-                          <div style={{ fontSize:10, color:"#f59e0b", fontWeight:600 }}>⏸ On Hold: {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k])=>k).join(", ")}</div>
-                        )}
+                      <div style={{ marginTop:6, padding:10, background:"#f8fafc", borderRadius:8, border:"1px solid #e2e8f0" }}>
+                        <div style={{ fontSize:10, fontWeight:700, color:"#1e293b", marginBottom:4 }}>📋 Reconciliation Summary</div>
+                        {Object.entries(medRecon).filter(([_,v])=>v==="stop").map(([k]) => (
+                          <div key={k} style={{ fontSize:10, color:"#dc2626", fontWeight:600, marginBottom:2, display:"flex", gap:4 }}>
+                            <span>🛑</span>
+                            <span>{k} — STOPPED{medReconReasons[k] ? ` (${medReconReasons[k]})` : ""}</span>
+                          </div>
+                        ))}
+                        {Object.entries(medRecon).filter(([_,v])=>v==="hold").map(([k]) => (
+                          <div key={k} style={{ fontSize:10, color:"#f59e0b", fontWeight:600, marginBottom:2, display:"flex", gap:4 }}>
+                            <span>⏸</span>
+                            <span>{k} — ON HOLD{medReconReasons[k] ? ` (${medReconReasons[k]})` : ""}</span>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </PlanBlock>
@@ -5943,8 +6027,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 </div>
                               </div>
                               <span style={{ fontSize:10, padding:"2px 8px", borderRadius:4, fontWeight:700,
-                                background:m.isGini?"#2563eb":"#f1f5f9", color:m.isGini?"white":"#64748b" }}>
-                                {m.isGini ? (conName||"Gini") : m.prescriber}
+                                background:m.isGini?"#2563eb":"#f8fafc", color:m.isGini?"white":"#475569",
+                                border:m.isGini?"none":"1px solid #e2e8f0" }}>
+                                {m.isGini ? (conName||"Gini") : (m.prescriber && m.prescriber !== "External" ? m.prescriber : "Other")}
                               </span>
                             </div>
                           ))}
@@ -5967,7 +6052,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         <div style={{ padding:12, background:"#fef3c7", borderTop:"2px solid #fde68a" }}>
                           <div style={{ fontSize:11, fontWeight:800, color:"#92400e", marginBottom:4 }}>⏸ MEDICATIONS ON HOLD</div>
                           {externalMeds.filter(m=>medRecon[m.name]==="hold").map((m,i) => (
-                            <div key={i} style={{ fontSize:11, padding:"3px 0", opacity:.7 }}>⏸ {m.name} {m.dose} — <i>{m.prescriber}</i></div>
+                            <div key={i} style={{ fontSize:11, padding:"4px 0", borderBottom:"1px solid #fde68a40" }}>
+                              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                                <span style={{ fontWeight:700 }}>⏸ {m.name} {m.dose}</span>
+                                <span style={{ fontSize:10, color:"#92400e" }}>{m.prescriber && m.prescriber !== "External" ? m.prescriber : ""}</span>
+                              </div>
+                              {medReconReasons[m.name] && <div style={{ fontSize:9, color:"#b45309", fontStyle:"italic", marginTop:1 }}>Reason: {medReconReasons[m.name]}</div>}
+                            </div>
                           ))}
                         </div>
                       )}
@@ -5976,7 +6067,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         <div style={{ padding:12, background:"#fef2f2", borderTop:"2px solid #fecaca" }}>
                           <div style={{ fontSize:11, fontWeight:800, color:"#dc2626", marginBottom:4 }}>🛑 MEDICATIONS STOPPED</div>
                           {externalMeds.filter(m=>medRecon[m.name]==="stop").map((m,i) => (
-                            <div key={i} style={{ fontSize:11, padding:"3px 0", opacity:.7, textDecoration:"line-through" }}>🛑 {m.name} {m.dose} — <i>{m.prescriber}</i></div>
+                            <div key={i} style={{ fontSize:11, padding:"4px 0", borderBottom:"1px solid #fecaca40" }}>
+                              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                                <span style={{ fontWeight:700, textDecoration:"line-through", opacity:.7 }}>🛑 {m.name} {m.dose}</span>
+                                <span style={{ fontSize:10, color:"#dc2626" }}>{m.prescriber && m.prescriber !== "External" ? m.prescriber : ""}</span>
+                              </div>
+                              {medReconReasons[m.name] && <div style={{ fontSize:9, color:"#dc2626", fontStyle:"italic", marginTop:1 }}>Reason: {medReconReasons[m.name]}</div>}
+                            </div>
                           ))}
                         </div>
                       )}
