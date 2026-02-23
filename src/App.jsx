@@ -913,6 +913,11 @@ export default function GiniScribe() {
       console.log(`⚠️ patientFullData (id=${patientFullData.id}) doesn't match dbPatientId (${dbPatientId}) — clearing stale data`);
       setPatientFullData(null);
     }
+    // Also clear if dbPatientId is null but we still have old data (new patient scenario)
+    if (patientFullData && !dbPatientId) {
+      console.log(`⚠️ New patient mode but patientFullData still set (id=${patientFullData.id}) — clearing`);
+      setPatientFullData(null);
+    }
   }, [dbPatientId]);
   // Imaging uploads
   const [imagingFiles, setImagingFiles] = useState([]); // [{type, base64, mediaType, fileName, data, extracting, error}]
@@ -1071,6 +1076,8 @@ export default function GiniScribe() {
   // Multiple report uploads in intake
   const [intakeReports, setIntakeReports] = useState([]); // [{id,type,base64,mediaType,fileName,data,extracting,error,saved,saveError}]
   const intakeSavedIds = useRef(new Set()); // Track saved report IDs to prevent duplicates
+  const intakeReportsRef = useRef([]); // Ref mirror for closures
+  intakeReportsRef.current = intakeReports; // Always sync
   const intakeReportRef = useRef(null);
 
   // Lab requisition
@@ -1613,8 +1620,10 @@ export default function GiniScribe() {
                 }).catch(e => console.log("Imaging doc save:", e.message));
               }
             }
-            // Auto-save any unsaved intake reports (dedup via intakeSavedIds ref)
-            if (result.patient_id && intakeReports.some(r => r.data && !r.saved)) {
+            // Auto-save any unsaved intake reports (use ref to avoid stale closure)
+            const currentReports = intakeReportsRef.current;
+            if (result.patient_id && currentReports.some(r => r.data && !r.saved)) {
+              console.log(`🔄 Auto-flushing ${currentReports.filter(r=>r.data&&!r.saved).length} intake reports after consult save...`);
               saveAllIntakeReports(result.patient_id);
             }
           } else {
@@ -1705,9 +1714,29 @@ export default function GiniScribe() {
       address: dbRecord.address || ""
     });
     setDbPatientId(dbRecord.id);
+    setPatientFullData(null); // Clear stale data immediately before async fetch
+    setHistoryList([]);
     setNewReportsIncluded(false);
     setNewReportsExpanded(false);
     setMoBrief(null);
+    // Clear all visit-specific state from previous patient
+    setLabData(null); setLabImageData(null); setLabMismatch(null);
+    setMoTranscript(""); setConTranscript(""); setQuickTranscript("");
+    setMoData(null); setConData(null);
+    setClarifications({}); setErrors({});
+    setPlanHidden(new Set()); setPlanEdits({});
+    setVisitActive(false); setVisitId(null);
+    setComplaints([]); setComplaintText("");
+    setIntakeReports([]); setLabRequisition([]);
+    intakeSavedIds.current.clear();
+    setNextVisitDate(""); setMedRecon({}); setMedReconReasons({});
+    setShadowData(null); setShadowAI(false); setShadowOriginal(null); setShowShadowDiff(false);
+    setShadowTxDecisions({});
+    setImagingFiles([]); setLabPortalFiles([]);
+    setOutcomesData(null); setRxReview(null); setShowMedCard(false);
+    setAssessDx([]); setAssessLabs([]); setAssessNotes("");
+    setExamData({}); setExamNotes("");
+    setHxConditions([]); setHxCondData({}); setHxSurgeries([]); setHxAllergies([]);
     setCrExpanded(false); setCrText(""); setCrCondition(""); setCrTags([]); setCrSaved(null); setCrAudioBlob(null); setCrAudioUrl(null);
     setRxFbAgreement(null); setRxFbText(""); setRxFbCorrect(""); setRxFbReason(""); setRxFbTags([]); setRxFbSeverity(null); setRxFbSaved(null);
     // Load full patient record
@@ -1774,13 +1803,18 @@ export default function GiniScribe() {
     setHxHospitalizations([]); setAiDxSuggestions([]);
     setExamData({}); setExamNotes("");
     setAssessDx([]); setAssessLabs([]); setAssessNotes("");
-    setShadowData(null); setShadowAI(false); setShadowOriginal(null);
+    setShadowData(null); setShadowAI(false); setShadowOriginal(null); setShowShadowDiff(false);
     setIntakeReports([]); setLabRequisition([]);
     intakeSavedIds.current.clear();
-    setNextVisitDate(""); setMedRecon({});
+    setNextVisitDate(""); setMedRecon({}); setMedReconReasons({});
     setDbPatientId(null); setPatientFullData(null); setHistoryList([]);
     setMoBrief(null); setAppointments([]);
     setImagingFiles([]);
+    // Clear remaining patient-specific state
+    setLabPortalFiles([]); setOutcomesData(null); setOutcomesLoading(false);
+    setRxReview(null); setRxReviewLoading(false);
+    setShowMedCard(false); setCiData(null);
+    setShadowTxDecisions({});
     localStorage.removeItem(STORAGE_KEY);
     setTab("patient");
   };
@@ -2161,7 +2195,8 @@ export default function GiniScribe() {
   const saveAllIntakeReports = async (pid) => {
     const patientId = pid || dbPatientId;
     if (!patientId) { alert("Search or create patient first"); return; }
-    const unsaved = intakeReports.filter(r => r.data && !r.saved);
+    // Use ref to get latest reports (avoids stale closure)
+    const unsaved = intakeReportsRef.current.filter(r => r.data && !r.saved);
     for (const rpt of unsaved) {
       setIntakeReports(prev => prev.map(r => r.id === rpt.id ? {...r, saving: true} : r));
       await saveIntakeReportToDB(rpt, rpt.data, patientId);
@@ -2175,8 +2210,13 @@ export default function GiniScribe() {
     } catch(e) {}
   };
 
-
-
+  // Auto-save unsaved intake reports when dbPatientId first becomes available (new patient flow)
+  useEffect(() => {
+    if (dbPatientId && intakeReports.some(r => r.data && !r.saved)) {
+      console.log(`🔄 dbPatientId set (${dbPatientId}), auto-saving ${intakeReports.filter(r=>r.data&&!r.saved).length} unsaved intake reports...`);
+      saveAllIntakeReports(dbPatientId);
+    }
+  }, [dbPatientId]);
   // View file from Supabase Storage
   const viewDocumentFile = async (documentId) => {
     try {
@@ -2871,17 +2911,25 @@ ${parts.join("\n")}`;
       { id:"afterLunch", label:"🍛 After Lunch", time:"1:30 PM", match: t => /after.*lunch|lunch|afternoon|BD.*after|TDS/i.test(t) },
       { id:"evening", label:"🌆 Evening", time:"5:00 PM", match: t => /evening|5.*pm|SOS|as.*needed|repeat|fever/i.test(t) },
       { id:"afterDinner", label:"🍽️ After Dinner", time:"8:30 PM", match: t => /after.*dinner|after.*meal.*night|BD/i.test(t) },
-      { id:"night", label:"🌙 Night (10 PM)", time:"10:00 PM", match: t => /night|HS|bedtime|10.*pm/i.test(t) && !/bed/i.test(t) },
-      { id:"bedtime", label:"🛏️ Bedtime", time:"10:30 PM", match: t => /bedtime|bed|with.*milk|at.*bed/i.test(t) },
+      { id:"bedtime", label:"🌙 Night / Bedtime", time:"10:00 PM", match: t => /night|HS|bedtime|bed|10.*pm|with.*milk|at.*bed/i.test(t) },
       { id:"asDirected", label:"📋 As Directed", time:"", match: () => false },
     ];
+
+    // Drug-specific overrides: statins always at bedtime
+    const BEDTIME_DRUGS = /atorva|rosuvasta|atchol|lipitor|crestor|statin|simva|pravasta|fluvasta/i;
 
     const schedule = slots.map(s => ({...s, meds: []}));
     dedupedMeds.forEach(m => {
       const t = `${m.timing||""} ${m.frequency||""}`.trim();
+      const drugName = (m.name||"").toUpperCase();
       let placed = false;
+      // Drug-specific override: statins always bedtime
+      if (BEDTIME_DRUGS.test(drugName)) {
+        schedule.find(s=>s.id==="bedtime")?.meds.push(m);
+        placed = true;
+      }
       // BD = morning + night/after dinner
-      if (/BD/i.test(t) && !/TDS/i.test(t)) {
+      else if (/BD/i.test(t) && !/TDS/i.test(t)) {
         schedule.find(s=>s.id==="afterBreak")?.meds.push(m);
         schedule.find(s=>s.id==="afterDinner")?.meds.push(m);
         placed = true;
@@ -6417,7 +6465,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                   {m.isNew && <span style={{ background:"#dc2626", color:"white", padding:"0 4px", borderRadius:3, fontSize:8, marginLeft:4, fontWeight:800 }}>NEW</span>}
                                 </div>
                                 <div style={{ fontSize:10, color:"#94a3b8" }}>
-                                  {m.dose} {m.frequency} {(m.forDiagnosis||[]).length > 0 ? `— ${m.forDiagnosis.join(", ")}` : ""}
+                                  {m.dose} {m.frequency} {m.timing && m.timing !== m.frequency ? `• ${m.timing}` : ""} {(m.forDiagnosis||[]).length > 0 ? `— ${m.forDiagnosis.join(", ")}` : ""}
                                 </div>
                               </div>
                               <span style={{ fontSize:10, padding:"2px 8px", borderRadius:4, fontWeight:700,
@@ -6956,7 +7004,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   <div style={{ fontSize:14, fontWeight:800 }}>{patient.name}</div>
                   <div style={{ fontSize:10, opacity:.8 }}>{patient.age}Y / {patient.sex} {patient.fileNo && `| ${patient.fileNo}`} {patient.phone && `| ${patient.phone}`}</div>
                 </div>
-                <button onClick={()=>{setDbPatientId(null);setPatient({name:"",phone:"",age:"",sex:"Male",fileNo:"",dob:""});setLabPortalFiles([]);}}
+                <button onClick={newPatient}
                   style={{ background:"rgba(255,255,255,.2)", color:"white", border:"none", padding:"4px 10px", borderRadius:6, fontSize:10, fontWeight:700, cursor:"pointer" }}>Change</button>
               </div>
 
