@@ -1221,6 +1221,21 @@ export default function GiniScribe() {
     }
   }, [tab]);
 
+  // Auto-refresh patient data when switching to docs or outcomes tabs
+  useEffect(() => {
+    if ((tab === "outcomes" || tab === "docs") && dbPatientId && API_URL) {
+      // Refresh patientFullData so new docs/labs show up
+      (async () => {
+        try {
+          const resp = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() });
+          const data = await resp.json();
+          if (data.patient) setPatientFullData(data);
+        } catch(e) {}
+      })();
+      if (tab === "outcomes") fetchOutcomes(dbPatientId);
+    }
+  }, [tab]);
+
   // Exam definitions
   const EXAM_SECTIONS = {
     General: [
@@ -1801,6 +1816,10 @@ export default function GiniScribe() {
           setLabMismatch(`Report: "${data.patient_on_report.name}" ≠ "${patient.name}"`);
         else setLabMismatch(null);
       }
+      // Save to DB
+      if (data && dbPatientId && API_URL) {
+        saveIntakeReportToDB({ type:"lab", base64:labImageData.base64, mediaType:labImageData.mediaType, fileName:labImageData.fileName }, data);
+      }
     }
     setLoading(p=>({...p,lab:false}));
   };
@@ -1984,6 +2003,74 @@ export default function GiniScribe() {
         body: JSON.stringify({ base64, mediaType, fileName })
       });
     } catch (e) { console.log("File upload failed:", e.message); }
+  };
+
+  // Save extracted report from intake upload to DB (documents + lab_results)
+  const saveIntakeReportToDB = async (rpt, data) => {
+    if (!dbPatientId || !API_URL || !data) return;
+    try {
+      const isLab = rpt.type === "lab";
+      const effectiveDate = data.report_date || data.date || new Date().toISOString().split("T")[0];
+      // 1. Save document record
+      const docResp = await fetch(`${API_URL}/api/patients/${dbPatientId}/documents`, {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({
+          doc_type: isLab ? "lab_report" : (data.report_type || rpt.type),
+          title: `${isLab ? "Lab Report" : (data.report_type || rpt.type)} — ${rpt.fileName}`,
+          file_name: rpt.fileName,
+          extracted_data: data,
+          doc_date: effectiveDate,
+          source: `intake_${currentDoctor?.short_name || "mo"}`,
+          notes: isLab ? `${(data.panels||[]).reduce((a,p)=>a+p.tests.length,0)} tests extracted` : (data.impression || "")
+        })
+      });
+      const savedDoc = await docResp.json();
+      // 2. Upload actual file to storage
+      if (savedDoc.id && rpt.base64) {
+        await uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
+      }
+      // 3. Save individual lab results to lab_results table
+      if (isLab && data.panels) {
+        for (const panel of data.panels) {
+          for (const test of (panel.tests || [])) {
+            try {
+              await fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
+                method: "POST", headers: authHeaders(),
+                body: JSON.stringify({
+                  test_name: test.test_name, result: String(test.result_text || test.result),
+                  unit: test.unit || "", flag: test.flag || "N", ref_range: test.ref_range || "",
+                  test_date: effectiveDate
+                })
+              });
+            } catch (e) { /* individual test save failure — continue */ }
+          }
+        }
+      }
+      // 4. Save imaging findings to lab_results too (for trends)
+      if (!isLab && data.findings) {
+        for (const f of (data.findings || [])) {
+          try {
+            await fetch(`${API_URL}/api/patients/${dbPatientId}/labs`, {
+              method: "POST", headers: authHeaders(),
+              body: JSON.stringify({
+                test_name: f.parameter || data.report_type, result: String(f.value || f.interpretation || ""),
+                unit: f.unit || "", flag: f.interpretation === "Abnormal" ? "H" : "N",
+                ref_range: f.normal_range || "", test_date: effectiveDate
+              })
+            });
+          } catch (e) { /* continue */ }
+        }
+      }
+      console.log(`✅ Intake report saved to DB: ${rpt.fileName}`);
+      // Refresh patient data so Docs tab + Dashboard update
+      try {
+        const refreshResp = await fetch(`${API_URL}/api/patients/${dbPatientId}`, { headers: authHeaders() });
+        const refreshData = await refreshResp.json();
+        if (refreshData.patient) setPatientFullData(refreshData);
+      } catch(e) { /* refresh will happen on tab switch anyway */ }
+    } catch (e) {
+      console.log("Intake report DB save failed:", e.message);
+    }
   };
 
   // View file from Supabase Storage
@@ -4262,6 +4349,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 return { ...prev, panels: [...(prev.panels||[]), ...(data.panels||[])] };
                               });
                             }
+                            // Save to DB (documents + lab_results)
+                            saveIntakeReportToDB(rpt, data);
                             setTimeout(()=>autoDetectDiagnoses(), 500);
                           } else {
                             setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
@@ -4288,6 +4377,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         if (data) {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
                           if (rpt.type==="lab" && data.panels) setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...(data.panels||[])]} : data);
+                          // Save to DB (documents + lab_results)
+                          saveIntakeReportToDB(rpt, data);
                         } else {
                           setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
                         }
