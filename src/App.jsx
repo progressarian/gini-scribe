@@ -4700,13 +4700,16 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             const lastGoals = lastConData.goals || [];
             const lastFollowUp = lastConData.follow_up || {};
             const orderedTests = lastFollowUp.tests_to_bring || lastConData.investigations_to_order || [];
+            const lastMeds = lastConData.medications_confirmed || [];
+            const lastStopped = lastConData.medications_stopped || [];
             const uniqueDx = [...new Map((pfd.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()];
             const activeMeds = (pfd.medications||[]).filter(m=>m.is_active!==false);
             const uniqueMeds = [...new Map(activeMeds.map(m=>[(m.name||"").toUpperCase(),m])).values()];
 
             // Merge historical labs + freshly loaded intake labs
             const allLabs = [...(pfd.lab_results||[])];
-            if (labData?.panels) {
+            const hasNewLabs = !!labData?.panels;
+            if (hasNewLabs) {
               const today = new Date().toISOString().split("T")[0];
               labData.panels.forEach(p => (p.tests||[]).forEach(t => {
                 allLabs.push({ test_name: t.test_name, result: t.result_text || String(t.result), unit: t.unit||"", flag: t.flag, test_date: labData.report_date || today, _isNew: true });
@@ -4719,20 +4722,20 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             const getTrend = (name) => {
               const vals = labsByName[name] || [];
               if (!vals.length) return null;
-              const latest = vals[0]; const prev = vals.length > 1 ? vals[1] : null; const prev2 = vals.length > 2 ? vals[2] : null;
+              const latest = vals[0]; const prev = vals.length > 1 ? vals[1] : null;
               let direction = "stable";
               if (prev) {
                 const diff = parseFloat(latest.result) - parseFloat(prev.result);
                 const pct = Math.abs(diff / (parseFloat(prev.result)||1)) * 100;
                 if (pct > 5) direction = diff > 0 ? "up" : "down";
               }
-              return { vals: vals.slice(0,4).reverse(), latest: latest.result, unit: latest.unit||"", prev: prev?.result, prev2: prev2?.result, direction, isNew: latest._isNew, flag: latest.flag };
+              return { vals: vals.slice(0,4).reverse(), latest: latest.result, unit: latest.unit||"", prev: prev?.result, direction, isNew: latest._isNew, flag: latest.flag };
             };
 
-            // Condition → biomarkers + targets
             const DX_BIO = {
               "Type 2 DM":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%",FBS:"<110",PPBS:"<180"}},
               "Type 1 DM":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%"}},
+              "Type 2 Diabetes Mellitus":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%",FBS:"<110",PPBS:"<180"}},
               "Hypertension":{markers:[],lower:true,targets:{}},
               "Dyslipidemia":{markers:["LDL","HDL","Triglycerides","Non-HDL","Total Cholesterol"],lower:true,targets:{LDL:"<100",HDL:">40",Triglycerides:"<150","Non-HDL":"<130"}},
               "Hypothyroidism":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
@@ -4741,18 +4744,17 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               "Obesity":{markers:[],lower:true,targets:{}},
               "CAD":{markers:["LDL","Triglycerides"],lower:true,targets:{LDL:"<70"}},
               "NAFLD/MAFLD":{markers:["SGPT (ALT)","SGOT (AST)"],lower:true,targets:{}},
+              "MASLD":{markers:["SGPT (ALT)","SGOT (AST)","GGT"],lower:true,targets:{}},
               "Vit D Deficiency":{markers:["Vitamin D"],lower:false,targets:{"Vitamin D":">30"}},
               "B12 Deficiency":{markers:["Vitamin B12"],lower:false,targets:{"Vitamin B12":">300"}},
               "DM Nephropathy":{markers:["UACR","eGFR","Creatinine"],lower:true,targets:{UACR:"<30",eGFR:">60"}},
               "Gout":{markers:["Uric Acid"],lower:true,targets:{"Uric Acid":"<6"}},
-              "MASLD":{markers:["SGPT (ALT)","SGOT (AST)","GGT"],lower:true,targets:{}},
-              "Seropositive Hashimoto":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
             };
+            const findBio = (label) => DX_BIO[label] || DX_BIO[Object.keys(DX_BIO).find(k => label?.toLowerCase().includes(k.toLowerCase()))] || null;
 
-            // Collect all trackable biomarkers across conditions
-            const allMarkers = new Map(); // name → {dxLabels, lower, target, trend, meds}
+            const allMarkers = new Map();
             uniqueDx.forEach(dx => {
-              const bio = DX_BIO[dx.label] || DX_BIO[Object.keys(DX_BIO).find(k => dx.label?.includes(k))] || null;
+              const bio = findBio(dx.label);
               if (!bio) return;
               bio.markers.forEach(m => {
                 const t = getTrend(m);
@@ -4762,7 +4764,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 const target = goal?.target || bio.targets?.[m] || "";
                 if (existing) { existing.dxLabels.push(dx.label); }
                 else {
-                  // Find meds linked to this condition
                   const linkedMeds = uniqueMeds.filter(med => {
                     const forDx = (med.for_diagnosis||med.forDiagnosis||[]).map(d=>d.toLowerCase());
                     return forDx.some(f => dx.label.toLowerCase().split(/[\s\/]+/).some(k => f.includes(k)));
@@ -4772,9 +4773,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               });
             });
 
-            // Also find NEW abnormal values not in condition tracking
             const flaggedNew = [];
-            if (labData?.panels) {
+            if (hasNewLabs) {
               labData.panels.forEach(p => (p.tests||[]).forEach(t => {
                 if ((t.flag === "H" || t.flag === "L") && !allMarkers.has(t.test_name)) {
                   flaggedNew.push({ name: t.test_name, result: t.result_text || String(t.result), unit: t.unit||"", flag: t.flag });
@@ -4792,28 +4792,29 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             };
 
             return (
-              <div style={{ marginBottom:12, borderRadius:12, overflow:"hidden", boxShadow:"0 4px 20px rgba(124,58,237,.15)" }}>
+              <div style={{ marginBottom:14, borderRadius:12, overflow:"hidden", boxShadow:"0 4px 24px rgba(124,58,237,.15)" }}>
                 {/* ── HEADER ── */}
-                <div style={{ background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"white", padding:"12px 16px" }}>
+                <div style={{ background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"white", padding:"14px 16px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
-                    <span style={{ fontSize:22 }}>🔄</span>
+                    <span style={{ fontSize:24 }}>🔄</span>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontSize:16, fontWeight:900, letterSpacing:"-0.3px" }}>Follow-up Dashboard</div>
-                      <div style={{ fontSize:11, opacity:.85 }}>
+                      <div style={{ fontSize:17, fontWeight:900, letterSpacing:"-0.3px" }}>Follow-up Dashboard</div>
+                      <div style={{ fontSize:12, opacity:.85 }}>
                         Last: {lastDate ? lastDate.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "—"}
-                        {daysSince ? ` • ${daysSince} days ago` : ""} • {lastCon.con_name||lastCon.mo_name||""} • {pfd.consultations.length} visits
+                        {daysSince ? ` • ${daysSince} days ago` : ""} • {lastCon.con_name||lastCon.mo_name||""} • Visit #{pfd.consultations.length+1}
                       </div>
                     </div>
-                    {labData && <span style={{ fontSize:11, background:"#10b981", padding:"4px 12px", borderRadius:6, fontWeight:800 }}>🧪 Today's labs loaded</span>}
+                    {hasNewLabs ? (
+                      <span style={{ fontSize:12, background:"#10b981", padding:"5px 14px", borderRadius:8, fontWeight:800 }}>🧪 Today's labs loaded</span>
+                    ) : (
+                      <span style={{ fontSize:12, background:"rgba(255,255,255,.2)", padding:"5px 14px", borderRadius:8, fontWeight:700, animation:"pulse 2s infinite" }}>📤 Upload reports below</span>
+                    )}
                   </div>
-                  {/* Diagnoses row */}
                   <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
                     {uniqueDx.slice(0,10).map((dx,i) => {
-                      const bio = DX_BIO[dx.label] || DX_BIO[Object.keys(DX_BIO).find(k => dx.label?.includes(k))] || null;
-                      const hasTrend = bio && bio.markers.some(m => getTrend(m));
                       const statusColor = dx.status==="Uncontrolled"?"#fca5a5":dx.status==="Controlled"?"#86efac":"rgba(255,255,255,.4)";
                       return (
-                        <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:700,
+                        <span key={i} style={{ padding:"4px 12px", borderRadius:6, fontSize:12, fontWeight:700,
                           background:"rgba(255,255,255,.15)", border:`1.5px solid ${statusColor}`, color:"white" }}>
                           {dx.label} <span style={{ opacity:.7 }}>• {dx.status||"Active"}</span>
                         </span>
@@ -4822,51 +4823,120 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   </div>
                 </div>
 
-                {/* ── GOALS PROGRESS ── */}
-                {lastGoals.length > 0 && (
-                  <div style={{ padding:"10px 16px", background:"linear-gradient(135deg,#eff6ff,#f0fdf4)", borderBottom:"1px solid #e2e8f0" }}>
-                    <div style={{ fontSize:13, fontWeight:800, color:"#1e40af", marginBottom:6 }}>🎯 Goals from Last Visit</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:8 }}>
-                      {lastGoals.map((g,i) => {
-                        const t = getTrend(g.marker);
-                        const marker = allMarkers.get(g.marker);
-                        const status = t ? (marker ? getStatusBadge(marker) : { label:"—", bg:"#94a3b8", icon:"•" }) : null;
-                        return (
-                          <div key={i} style={{ padding:"8px 12px", background:"white", borderRadius:8, border:"1px solid #e2e8f0",
-                            borderLeft:`4px solid ${status?.bg||"#94a3b8"}` }}>
-                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 }}>
-                              <span style={{ fontSize:13, fontWeight:800, color:"#1e293b" }}>{g.marker}</span>
-                              {status && <span style={{ fontSize:10, fontWeight:700, color:"white", background:status.bg, padding:"2px 8px", borderRadius:4 }}>
-                                {status.icon} {status.label}
-                              </span>}
-                            </div>
-                            <div style={{ fontSize:11, color:"#64748b" }}>Target: <b>{g.target}</b> {g.timeline ? `in ${g.timeline}` : ""}</div>
-                            {t && (
-                              <div style={{ fontSize:13, fontWeight:800, color:status?.bg||"#475569", marginTop:2 }}>
-                                {t.latest}{t.unit} {t.prev ? <span style={{ fontSize:11, fontWeight:500, color:"#94a3b8" }}>(was {t.prev})</span> : ""}
+                {/* ── LAST TREATMENT PLAN (always visible) ── */}
+                <div style={{ padding:"12px 16px", background:"linear-gradient(135deg,#faf5ff,#eff6ff)", borderBottom:"2px solid #e9d5ff" }}>
+                  <div style={{ fontSize:14, fontWeight:900, color:"#6d28d9", marginBottom:8, display:"flex", alignItems:"center", gap:6 }}>
+                    📋 Last Treatment Plan
+                    <span style={{ fontSize:11, color:"#94a3b8", fontWeight:500 }}>
+                      — {lastDate ? lastDate.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : ""}
+                    </span>
+                  </div>
+                  {/* Medications table */}
+                  {(lastMeds.length > 0 || uniqueMeds.length > 0) && (
+                    <div style={{ marginBottom:10 }}>
+                      <div style={{ fontSize:12, fontWeight:800, color:"#1e40af", marginBottom:4 }}>💊 Current Medications</div>
+                      <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                        <tbody>
+                          {(lastMeds.length > 0 ? lastMeds : uniqueMeds).map((m,i) => (
+                            <tr key={i} style={{ borderBottom:"1px solid #e9d5ff" }}>
+                              <td style={{ padding:"5px 8px", fontSize:12, fontWeight:700, color:"#1e293b" }}>
+                                {m.name}
+                                {m.isNew && <span style={{ fontSize:8, color:"#059669", fontWeight:800, marginLeft:4, background:"#f0fdf4", padding:"1px 4px", borderRadius:3 }}>NEW</span>}
+                                {m._shadowAction==="MODIFY" && <span style={{ fontSize:8, color:"#f59e0b", fontWeight:800, marginLeft:4, background:"#fefce8", padding:"1px 4px", borderRadius:3 }}>MOD</span>}
+                              </td>
+                              <td style={{ padding:"5px 8px", fontSize:11, color:"#475569" }}>{m.dose||""}</td>
+                              <td style={{ padding:"5px 8px", fontSize:11, color:"#475569" }}>{m.frequency||""}</td>
+                              <td style={{ padding:"5px 8px", fontSize:11, color:"#64748b" }}>{m.timing||""}</td>
+                              <td style={{ padding:"5px 8px", fontSize:10, color:"#94a3b8" }}>{(m.forDiagnosis||[]).join(", ")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {lastStopped.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", marginBottom:3 }}>🛑 Stopped</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                        {lastStopped.map((m,i) => (
+                          <span key={i} style={{ fontSize:11, padding:"3px 10px", background:"#fef2f2", borderRadius:5, color:"#dc2626", fontWeight:600, textDecoration:"line-through" }}>
+                            {m.name} {m.reason ? `— ${m.reason}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Goals row */}
+                  {lastGoals.length > 0 && (
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:800, color:"#1e40af", marginBottom:4 }}>🎯 Goals</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {lastGoals.map((g,i) => {
+                          const t = getTrend(g.marker);
+                          const mk = allMarkers.get(g.marker);
+                          const st = mk ? getStatusBadge(mk) : null;
+                          return (
+                            <div key={i} style={{ padding:"8px 12px", background:"white", borderRadius:8, border:`2px solid ${st?.bg||"#e2e8f0"}`,
+                              borderLeft:`5px solid ${st?.bg||"#94a3b8"}`, minWidth:150 }}>
+                              <div style={{ fontSize:14, fontWeight:800, color:"#1e293b" }}>{g.marker}</div>
+                              <div style={{ fontSize:11, color:"#64748b" }}>
+                                {g.current ? `Was: ${g.current} → ` : ""}Target: <b>{g.target}</b>
                               </div>
-                            )}
-                          </div>
+                              {t ? (
+                                <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4 }}>
+                                  <span style={{ fontSize:16, fontWeight:900, color:st?.bg||"#475569" }}>{t.latest}{t.unit}</span>
+                                  {t.isNew && <span style={{ fontSize:9, background:"#10b981", color:"white", padding:"1px 6px", borderRadius:3, fontWeight:800 }}>TODAY</span>}
+                                  {st && <span style={{ fontSize:10, fontWeight:700, color:"white", background:st.bg, padding:"2px 8px", borderRadius:4 }}>{st.icon} {st.label}</span>}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize:11, color:"#d97706", fontStyle:"italic", marginTop:3 }}>⏳ Awaiting labs</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── ORDERED TESTS (prominent when labs not loaded) ── */}
+                {orderedTests.length > 0 && (
+                  <div style={{ padding:"12px 16px", background:hasNewLabs?"#f0fdf4":"#fffbeb", borderBottom:"2px solid "+( hasNewLabs?"#bbf7d0":"#fde68a") }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:hasNewLabs?"#059669":"#92400e", marginBottom:6 }}>
+                      📋 Tests Ordered Last Visit {!hasNewLabs && "— Upload reports to see updated trends"}
+                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                      {orderedTests.map((t,i) => {
+                        const testName = typeof t === "string" ? t : t.test || t;
+                        const done = (labsByName[testName]||[]).some(l => l.test_date && new Date(l.test_date) > (lastDate || new Date(0)));
+                        return (
+                          <span key={i} style={{ padding:"5px 12px", borderRadius:6, fontSize:12, fontWeight:700,
+                            background:done?"#f0fdf4":"white", color:done?"#059669":"#d97706",
+                            border:`1.5px solid ${done?"#bbf7d0":"#fde68a"}` }}>
+                            {done?"✅":"⏳"} {testName}
+                          </span>
                         );
                       })}
                     </div>
                   </div>
                 )}
 
-                {/* ── BIOMARKER TREND TABLE ── */}
+                {/* ── BIOMARKER TREND TABLE (historical + today) ── */}
                 {allMarkers.size > 0 && (
-                  <div style={{ padding:"10px 16px", background:"white", borderBottom:"1px solid #e2e8f0" }}>
-                    <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginBottom:8 }}>🧪 Biomarker Trends + Medications</div>
+                  <div style={{ padding:"12px 16px", background:"white", borderBottom:"1px solid #e2e8f0" }}>
+                    <div style={{ fontSize:14, fontWeight:900, color:"#1e293b", marginBottom:8 }}>
+                      🧪 Biomarker Trends {hasNewLabs ? "+ Today's Results" : "(Historical)"}
+                    </div>
                     <div style={{ overflowX:"auto" }}>
                       <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                         <thead>
                           <tr style={{ background:"#f8fafc", fontSize:10, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:"0.5px" }}>
-                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0" }}>Marker</td>
-                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Trend</td>
-                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Current</td>
-                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Target</td>
-                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Status</td>
-                            <td style={{ padding:"6px 8px", borderBottom:"2px solid #e2e8f0" }}>Medications</td>
+                            <td style={{ padding:"8px", borderBottom:"2px solid #e2e8f0" }}>Marker</td>
+                            <td style={{ padding:"8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Trend</td>
+                            <td style={{ padding:"8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Latest</td>
+                            <td style={{ padding:"8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Target</td>
+                            <td style={{ padding:"8px", borderBottom:"2px solid #e2e8f0", textAlign:"center" }}>Status</td>
+                            <td style={{ padding:"8px", borderBottom:"2px solid #e2e8f0" }}>Medications</td>
                           </tr>
                         </thead>
                         <tbody>
@@ -4876,27 +4946,27 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             return (
                               <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", background:i%2===0?"white":"#fafbfc" }}>
                                 <td style={{ padding:"8px", fontWeight:700, color:"#1e293b" }}>
-                                  <div>{mk.name}</div>
+                                  <div style={{ fontSize:12 }}>{mk.name}</div>
                                   <div style={{ fontSize:9, color:"#94a3b8", fontWeight:500 }}>{mk.dxLabels.join(", ")}</div>
                                 </td>
                                 <td style={{ padding:"8px", textAlign:"center" }}>
-                                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:3 }}>
+                                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:3, flexWrap:"wrap" }}>
                                     {vals.map((v,vi) => {
                                       const isLast = vi === vals.length-1;
                                       return (
                                         <span key={vi} style={{ display:"inline-flex", alignItems:"center", gap:3 }}>
-                                          <span style={{ fontSize:isLast?13:10, fontWeight:isLast?800:500, color:isLast?(st.bg):"#94a3b8",
+                                          <span style={{ fontSize:isLast?14:10, fontWeight:isLast?800:500, color:isLast?st.bg:"#94a3b8",
                                             background:isLast?`${st.bg}12`:"none", padding:isLast?"2px 6px":"0", borderRadius:4 }}>
                                             {parseFloat(v.result)||v.result}
                                           </span>
-                                          {vi < vals.length-1 && <span style={{ color:"#d1d5db", fontSize:8 }}>→</span>}
+                                          {vi < vals.length-1 && <span style={{ color:"#d1d5db", fontSize:9 }}>→</span>}
                                         </span>
                                       );
                                     })}
                                   </div>
-                                  {mk.trend.isNew && <div style={{ fontSize:8, color:"#10b981", fontWeight:800, marginTop:1 }}>● TODAY</div>}
+                                  {mk.trend.isNew && <div style={{ fontSize:9, color:"#10b981", fontWeight:800, marginTop:2 }}>● TODAY</div>}
                                 </td>
-                                <td style={{ padding:"8px", textAlign:"center", fontSize:15, fontWeight:900, color:st.bg }}>
+                                <td style={{ padding:"8px", textAlign:"center", fontSize:16, fontWeight:900, color:st.bg }}>
                                   {mk.trend.latest}{mk.trend.unit}
                                 </td>
                                 <td style={{ padding:"8px", textAlign:"center", fontSize:12, fontWeight:600, color:"#475569" }}>
@@ -4925,13 +4995,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   </div>
                 )}
 
-                {/* ── FLAGGED NEW FINDINGS ── */}
+                {/* ── FLAGGED NEW FINDINGS (only after labs loaded) ── */}
                 {flaggedNew.length > 0 && (
-                  <div style={{ padding:"10px 16px", background:"#fef2f2", borderBottom:"1px solid #fecaca" }}>
-                    <div style={{ fontSize:13, fontWeight:800, color:"#dc2626", marginBottom:6 }}>🚨 New Abnormal Findings (Today)</div>
+                  <div style={{ padding:"12px 16px", background:"#fef2f2", borderBottom:"1px solid #fecaca" }}>
+                    <div style={{ fontSize:14, fontWeight:900, color:"#dc2626", marginBottom:6 }}>🚨 New Abnormal Findings (Today)</div>
                     <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                       {flaggedNew.map((f,i) => (
-                        <span key={i} style={{ padding:"5px 12px", background:"white", borderRadius:6, fontSize:12, fontWeight:700,
+                        <span key={i} style={{ padding:"6px 14px", background:"white", borderRadius:8, fontSize:13, fontWeight:700,
                           border:`2px solid ${f.flag==="H"?"#dc2626":"#2563eb"}`,
                           color:f.flag==="H"?"#dc2626":"#2563eb" }}>
                           {f.flag==="H"?"⬆":"⬇"} {f.name}: {f.result}{f.unit}
@@ -4941,72 +5011,50 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   </div>
                 )}
 
-                {/* ── ORDERED TESTS STATUS ── */}
-                {orderedTests.length > 0 && (
-                  <div style={{ padding:"10px 16px", background:"#fffbeb", borderBottom:"1px solid #fde68a" }}>
-                    <div style={{ fontSize:13, fontWeight:800, color:"#92400e", marginBottom:6 }}>📋 Ordered Tests</div>
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                      {orderedTests.map((t,i) => {
-                        const testName = typeof t === "string" ? t : t.test || t;
-                        const done = (labsByName[testName]||[]).some(l => l.test_date && new Date(l.test_date) > (lastDate || new Date(0)));
-                        return (
-                          <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:12, fontWeight:700,
-                            background:done?"#f0fdf4":"white", color:done?"#059669":"#d97706",
-                            border:`1.5px solid ${done?"#bbf7d0":"#fde68a"}` }}>
-                            {done?"✅":"⏳"} {testName}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
                 {/* ── CHANGES SINCE LAST VISIT ── */}
                 <div style={{ padding:"12px 16px", background:"#f8fafc", borderBottom:"1px solid #e2e8f0" }}>
                   <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginBottom:8 }}>🔀 Changes Since Last Visit</div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                    {/* External meds */}
                     <div>
-                      <div style={{ fontSize:11, fontWeight:700, color:"#92400e", marginBottom:4 }}>💊 New External Medicines</div>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#92400e", marginBottom:4 }}>💊 New External Medicines</div>
                       {fuExtMeds.map((m,i) => (
-                        <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 8px", background:"#fef3c7", borderRadius:5, marginBottom:2, fontSize:11, fontWeight:600 }}>
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"4px 10px", background:"#fef3c7", borderRadius:6, marginBottom:3, fontSize:12, fontWeight:600 }}>
                           <span style={{ flex:1 }}>{m.name} {m.dose} {m.doctor ? <span style={{color:"#64748b",fontWeight:400}}>— {m.doctor}</span> : ""}</span>
-                          <button onClick={()=>setFuExtMeds(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:13,padding:0 }}>×</button>
+                          <button onClick={()=>setFuExtMeds(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:14,padding:0 }}>×</button>
                         </div>
                       ))}
                       <div style={{ display:"flex", gap:4, marginTop:4 }}>
-                        <input id="fuExtMedName" placeholder="Medicine name" style={{ flex:2, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
-                        <input id="fuExtMedDose" placeholder="Dose" style={{ flex:1, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
-                        <input id="fuExtMedDoc" placeholder="Dr. name" style={{ flex:1, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
+                        <input id="fuExtMedName" placeholder="Medicine name" style={{ flex:2, padding:"7px 10px", border:"1.5px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
+                        <input id="fuExtMedDose" placeholder="Dose" style={{ flex:1, padding:"7px 10px", border:"1.5px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
+                        <input id="fuExtMedDoc" placeholder="Dr. name" style={{ flex:1, padding:"7px 10px", border:"1.5px solid #e2e8f0", borderRadius:6, fontSize:12 }} />
                         <button onClick={()=>{
                           const n=document.getElementById("fuExtMedName");const d=document.getElementById("fuExtMedDose");const dr=document.getElementById("fuExtMedDoc");
                           if(n.value.trim()){setFuExtMeds(p=>[...p,{name:n.value.trim(),dose:d.value.trim(),doctor:dr.value.trim()}]);n.value="";d.value="";dr.value="";}
-                        }} style={{ padding:"6px 14px", background:"#f59e0b", color:"white", border:"none", borderRadius:6, fontSize:14, fontWeight:800, cursor:"pointer" }}>+</button>
+                        }} style={{ padding:"7px 14px", background:"#f59e0b", color:"white", border:"none", borderRadius:6, fontSize:15, fontWeight:800, cursor:"pointer" }}>+</button>
                       </div>
                     </div>
-                    {/* New conditions */}
                     <div>
-                      <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", marginBottom:4 }}>🆕 New Conditions / Diagnoses</div>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#dc2626", marginBottom:4 }}>🆕 New Conditions / Diagnoses</div>
                       {fuNewConditions.map((c,i) => (
-                        <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 8px", background:"#fee2e2", borderRadius:5, marginBottom:2, fontSize:11, fontWeight:600 }}>
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"4px 10px", background:"#fee2e2", borderRadius:6, marginBottom:3, fontSize:12, fontWeight:600 }}>
                           <span style={{ flex:1 }}>{c}</span>
-                          <button onClick={()=>setFuNewConditions(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:13,padding:0 }}>×</button>
+                          <button onClick={()=>setFuNewConditions(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:14,padding:0 }}>×</button>
                         </div>
                       ))}
                       <div style={{ display:"flex", gap:4, marginTop:4 }}>
-                        <input id="fuNewCond" placeholder="e.g. Sleep apnea diagnosed by pulmonologist" style={{ flex:1, padding:"6px 10px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12 }}
+                        <input id="fuNewCond" placeholder="e.g. Sleep apnea by pulmonologist" style={{ flex:1, padding:"7px 10px", border:"1.5px solid #e2e8f0", borderRadius:6, fontSize:12 }}
                           onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){setFuNewConditions(p=>[...p,e.target.value.trim()]);e.target.value="";}}} />
                         <button onClick={()=>{const el=document.getElementById("fuNewCond");if(el.value.trim()){setFuNewConditions(p=>[...p,el.value.trim()]);el.value="";}}}
-                          style={{ padding:"6px 14px", background:"#dc2626", color:"white", border:"none", borderRadius:6, fontSize:14, fontWeight:800, cursor:"pointer" }}>+</button>
+                          style={{ padding:"7px 14px", background:"#dc2626", color:"white", border:"none", borderRadius:6, fontSize:15, fontWeight:800, cursor:"pointer" }}>+</button>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* ── QUICK ASSESSMENT ── */}
-                <div style={{ padding:"12px 16px", background:"white" }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", marginBottom:8 }}>📝 Quick Assessment</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <div style={{ padding:"14px 16px", background:"white" }}>
+                  <div style={{ fontSize:14, fontWeight:900, color:"#1e293b", marginBottom:10 }}>📝 Quick Assessment</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
                     {[
                       { key:"medCompliance", label:"💊 Medicine Compliance", opts:["Good","Partial","Poor","Missed doses"], colors:["#059669","#d97706","#dc2626","#dc2626"] },
                       { key:"dietExercise", label:"🥗 Diet & Exercise", opts:["Adherent","Partial","Not following","Improved"], colors:["#059669","#d97706","#dc2626","#2563eb"] },
@@ -5014,14 +5062,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       { key:"newSymptoms", label:"🆕 New Symptoms", opts:["None","Mild","Concerning","Urgent"], colors:["#059669","#d97706","#dc2626","#dc2626"] },
                     ].map(q => (
                       <div key={q.key}>
-                        <div style={{ fontSize:12, fontWeight:700, color:"#374151", marginBottom:4 }}>{q.label}</div>
-                        <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:"#374151", marginBottom:5 }}>{q.label}</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
                           {q.opts.map((o,oi) => {
                             const active = fuChecks[q.key]===o;
                             const cl = q.colors[oi];
                             return (
                               <button key={o} onClick={()=>setFuChecks(p=>({...p,[q.key]:p[q.key]===o?"":o}))}
-                                style={{ fontSize:12, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontWeight:700, transition:"all .15s",
+                                style={{ fontSize:13, padding:"8px 16px", borderRadius:8, cursor:"pointer", fontWeight:700, transition:"all .15s",
                                   border:`2px solid ${active?cl:"#e2e8f0"}`,
                                   background:active?cl:"white",
                                   color:active?"white":"#475569" }}>{o}</button>
@@ -5031,11 +5079,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       </div>
                     ))}
                   </div>
-                  <div style={{ marginTop:8 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:"#374151", marginBottom:4 }}>💬 Challenges / Notes</div>
+                  <div style={{ marginTop:10 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#374151", marginBottom:4 }}>💬 Challenges / Notes</div>
                     <textarea value={fuChecks.challenges} onChange={e=>setFuChecks(p=>({...p,challenges:e.target.value}))}
                       placeholder="Patient reports: difficulty with morning meds, sugar cravings at night, new numbness in feet..."
-                      rows={2} style={{ width:"100%", fontSize:13, padding:10, border:"2px solid #e2e8f0", borderRadius:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
+                      rows={2} style={{ width:"100%", fontSize:14, padding:12, border:"2px solid #e2e8f0", borderRadius:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
                   </div>
                 </div>
               </div>
