@@ -928,6 +928,7 @@ export default function GiniScribe() {
 
   // Safe accessor: only return patientFullData if it matches current patient
   const pfd = (!patientFullData || !dbPatientId || patientFullData.id !== dbPatientId) ? null : patientFullData;
+  const isFollowUp = (pfd?.consultations?.length || 0) > 0;
   // Imaging uploads
   const [imagingFiles, setImagingFiles] = useState([]); // [{type, base64, mediaType, fileName, data, extracting, error}]
   const imagingRef = useRef(null);
@@ -960,6 +961,15 @@ export default function GiniScribe() {
   const [fuChecks, setFuChecks] = useState({ medCompliance:"", dietExercise:"", sideEffects:"", newSymptoms:"", challenges:"" });
   const [fuExtMeds, setFuExtMeds] = useState([]); // [{name,dose,frequency,doctor}]
   const [fuNewConditions, setFuNewConditions] = useState([]); // ["string"]
+  // Follow-up workflow
+  const [fuMedEdits, setFuMedEdits] = useState({}); // {idx: {dose, freq, action:"MODIFY"|"STOP"|"CONTINUE"}}
+  const [fuNewMeds, setFuNewMeds] = useState([]); // [{name,dose,freq,timing,forDx}]
+  const [fuPlanSource, setFuPlanSource] = useState(null); // "edit"|"shadow"|"consultant"|"merge"
+  const [fuShowLastSummary, setFuShowLastSummary] = useState(false);
+  const [fuAbnormalActions, setFuAbnormalActions] = useState({}); // {testName: "Investigate"|"Treat Now"|...}
+  const [fuConNotes, setFuConNotes] = useState("");
+  const [fuMoNotes, setFuMoNotes] = useState("");
+  const [fuPlanGenerated, setFuPlanGenerated] = useState(false);
   // Exam
   const [examSpecialty, setExamSpecialty] = useState("General");
   const [examData, setExamData] = useState({}); // {sectionId_v: [findings], sectionId_n: true(NAD)}
@@ -1238,14 +1248,18 @@ export default function GiniScribe() {
   // Auto-build moData from visit workflow when entering consultant/plan tab
   // This ensures the plan tab has data even without clicking "Generate MO Summary"
   useEffect(() => {
-    if ((tab === "consultant" || tab === "plan") && visitActive && !moData && (complaints.length > 0 || assessDx.length > 0 || hxConditions.length > 0)) {
+    if ((tab === "consultant" || tab === "plan") && visitActive && !moData && (complaints.length > 0 || assessDx.length > 0 || hxConditions.length > 0 || isFollowUp)) {
       const dxMap = {"dm2":"Type 2 DM","htn":"Hypertension","hypo":"Hypothyroid","hyper":"Hyperthyroid","dyslip":"Dyslipidemia",
         "obesity":"Obesity","pcos":"PCOS","ckd":"CKD","cad":"CAD","vitd":"Vit D Deficiency","b12":"B12 Deficiency"};
       const autoDx = [
         ...assessDx.map(id => ({ id, label: dxMap[id] || id, status: "Uncontrolled" })),
         ...hxConditions.filter(c => !assessDx.some(id => (dxMap[id]||"").toLowerCase() === c.toLowerCase())).map(c => ({
           id: c.toLowerCase().replace(/\s+/g,"_"), label: c, status: "Active"
-        }))
+        })),
+        // Include pfd diagnoses for follow-up visits
+        ...(isFollowUp && assessDx.length === 0 ? (pfd?.diagnoses||[]).map(d => ({
+          id: d.diagnosis_id||d.label?.toLowerCase().replace(/\s+/g,"_")||"", label: d.label, status: d.status||"Active"
+        })) : [])
       ];
       // Only include KEY biomarkers (abnormal ones + critical ones) — not every single test
       const KEY_BIOMARKERS = new Set(["HbA1c","FBS","PPBS","TSH","LDL","HDL","Triglycerides","Total Cholesterol","Creatinine","eGFR","UACR","Vitamin D","Vitamin B12","Hemoglobin","SGPT (ALT)","SGOT (AST)","CRP","Ferritin"]);
@@ -1408,7 +1422,18 @@ export default function GiniScribe() {
     if (apptId) {
       setAppointments(prev => prev.map(a => a.id === apptId ? {...a, st:"in-progress"} : a));
     }
-    setTab("intake");
+    setTab(isFollowUp ? "fu_load" : "intake");
+    // Reset follow-up workflow state
+    if (isFollowUp) {
+      setFuMedEdits({});
+      setFuNewMeds([]);
+      setFuPlanSource(null);
+      setFuShowLastSummary(false);
+      setFuAbnormalActions({});
+      setFuConNotes("");
+      setFuMoNotes("");
+      setFuPlanGenerated(false);
+    }
   };
 
   const endVisit = () => {
@@ -3674,14 +3699,20 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"dashboard", label:"🏠 Dashboard", show:keySet && (!!dbPatientId || !!patient.name) },
     { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole && !visitActive },
     { id:"patient", label:"👤", show:keySet && !visitActive },
-    // Visit workflow tabs (only show during active visit)
-    { id:"intake", label:"📝 Intake", show:keySet && !isLabRole && visitActive },
-    { id:"hxclinical", label:"📜 History", show:keySet && !isLabRole && visitActive },
-    { id:"exam", label:"🔍 Exam", show:keySet && !isLabRole && visitActive },
-    { id:"assess", label:"🧪 Assess", show:keySet && !isLabRole && visitActive },
-    // MO stays but only outside visit (voice-only mode)
+    // Follow-up visit workflow (when patient has previous consultations)
+    { id:"fu_load", label:"📤 Load", show:keySet && !isLabRole && visitActive && isFollowUp },
+    { id:"fu_review", label:"📊 Review", show:keySet && !isLabRole && visitActive && isFollowUp },
+    { id:"fu_edit", label:"📋 Edit Plan", show:keySet && !isLabRole && visitActive && isFollowUp },
+    { id:"fu_symptoms", label:"🗣️ Symptoms", show:keySet && !isLabRole && visitActive && isFollowUp },
+    { id:"fu_gen", label:"🤖 Create Plan", show:keySet && !isLabRole && visitActive && isFollowUp },
+    // New patient visit workflow (only show during active visit with no previous consultations)
+    { id:"intake", label:"📝 Intake", show:keySet && !isLabRole && visitActive && !isFollowUp },
+    { id:"hxclinical", label:"📜 History", show:keySet && !isLabRole && visitActive && !isFollowUp },
+    { id:"exam", label:"🔍 Exam", show:keySet && !isLabRole && visitActive && !isFollowUp },
+    { id:"assess", label:"🧪 Assess", show:keySet && !isLabRole && visitActive && !isFollowUp },
+    // MO stays but only outside visit (voice-only mode) — or new patient
     { id:"mo", label:"🎤 MO", show:keySet && !isLabRole && !visitActive, badge:hasNewReports },
-    { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole, badge:hasNewReports },
+    { id:"consultant", label:"👨‍⚕️ Con", show:keySet && !isLabRole && !isFollowUp, badge:hasNewReports },
     { id:"plan", label:"📄 Plan", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"docs", label:"📎 Docs", show:keySet && (!!dbPatientId || !!patient.name) },
     { id:"labportal", label:"🔬 Upload", show:keySet && !!API_URL && isLabRole },
@@ -5339,6 +5370,809 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           <button onClick={()=>setTab("hxclinical")} style={{ width:"100%", background:"#1e293b", color:"white", border:"none", padding:"10px", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>
             Next: Clinical History →
           </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== FOLLOW-UP: LOAD TAB ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="fu_load" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#7c3aed,#4f46e5)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>📤</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Load — {patient.name || "Patient"}</div>
+              <div style={{ fontSize:10, opacity:.85 }}>Visit #{(pfd?.consultations?.length||0)+1} • {new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})} • {conName||"Dr."}</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 1/5</span>
+          </div>
+
+          {/* Vitals */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>💓 Vitals</div>
+            <AudioInput label="Say vitals: BP 140/90, weight 80kg" dgKey={dgKey} whisperKey={whisperKey} color="#ea580c" compact onTranscript={voiceFillVitals} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:4, marginTop:4 }}>
+              {[{k:"bp_sys",l:"BP Sys"},{k:"bp_dia",l:"BP Dia"},{k:"pulse",l:"Pulse"},{k:"spo2",l:"SpO2"},{k:"weight",l:"Weight"},{k:"height",l:"Height"},{k:"temp",l:"Temp"},{k:"waist",l:"Waist"}].map(v => (
+                <div key={v.k}>
+                  <label style={{ fontSize:9, fontWeight:600, color:"#64748b" }}>{v.l}</label>
+                  <input value={vitals[v.k]||""} onChange={e=>{const val=e.target.value;setVitals(p=>{const n={...p,[v.k]:val};if(n.weight&&n.height)n.bmi=(parseFloat(n.weight)/((parseFloat(n.height)/100)**2)).toFixed(1);return n;})}}
+                    style={{ width:"100%", padding:"6px 8px", border:"1.5px solid #e2e8f0", borderRadius:6, fontSize:13, fontWeight:600, boxSizing:"border-box" }} />
+                </div>
+              ))}
+            </div>
+            {vitals.bmi && <div style={{ fontSize:11, marginTop:4, fontWeight:700, color:parseFloat(vitals.bmi)>25?"#dc2626":"#059669" }}>BMI: {vitals.bmi}</div>}
+          </div>
+
+          {/* Lab Upload */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, color:"#7c3aed", marginBottom:6 }}>🔬 Upload Reports</div>
+            <div style={{ display:"flex", gap:4, marginBottom:6 }}>
+              <label style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"14px", background:"#faf5ff", border:"2px dashed #c4b5fd", borderRadius:10, cursor:"pointer" }}>
+                <input type="file" accept="image/*,.pdf" multiple hidden onChange={e=>{
+                  [...e.target.files].forEach(file=>{
+                    const reader = new FileReader();
+                    reader.onload = ev => {
+                      const base64 = ev.target.result.split(",")[1];
+                      const mediaType = file.type || "image/jpeg";
+                      setIntakeReports(prev => [...prev, { id:"rpt_"+Date.now()+Math.random(), type:"lab", base64, mediaType, fileName:file.name, data:null, extracting:false, error:null }]);
+                    };
+                    reader.readAsDataURL(file);
+                  });
+                }} />
+                <span style={{ fontWeight:700, color:"#7c3aed", fontSize:12 }}>🧪 Upload Lab / Imaging Reports</span>
+              </label>
+            </div>
+            {/* Show uploaded reports */}
+            {intakeReports.length > 0 && (
+              <div style={{ marginBottom:6 }}>
+                {intakeReports.map(rpt => (
+                  <div key={rpt.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 8px", marginBottom:3, borderRadius:6,
+                    background:rpt.saved?"#f0fdf4":rpt.error?"#fef2f2":rpt.data?"#eff6ff":"#f8fafc",
+                    border:`1px solid ${rpt.saved?"#bbf7d0":rpt.error?"#fecaca":rpt.data?"#bfdbfe":"#e2e8f0"}` }}>
+                    <span style={{ fontSize:11 }}>{rpt.saved?"✅":rpt.error?"❌":rpt.data?"📊":rpt.extracting?"⏳":"📎"}</span>
+                    <span style={{ flex:1, fontSize:11, fontWeight:600 }}>{rpt.fileName}</span>
+                    <select value={rpt.type} onChange={e=>setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,type:e.target.value}:r))}
+                      style={{ fontSize:10, padding:"2px 4px", border:"1px solid #e2e8f0", borderRadius:4 }}>
+                      <option value="lab">Lab Report</option>
+                      <option value="imaging">Imaging</option>
+                      <option value="rx">Other Doctor Rx</option>
+                    </select>
+                    {!rpt.data && !rpt.extracting && (
+                      <button onClick={async()=>{
+                        setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,extracting:true}:r));
+                        try {
+                          const extFn = rpt.type==="imaging" ? extractImaging : extractLab;
+                          const {data,error} = await extFn(rpt.base64, rpt.mediaType);
+                          if (data) {
+                            setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
+                            if (rpt.type!=="imaging" && data.panels) {
+                              const taggedPanels = data.panels.map(p=>({...p, _source:rpt.fileName}));
+                              setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...taggedPanels]} : {...data, panels: taggedPanels});
+                            }
+                          } else {
+                            setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
+                          }
+                        } catch(e) {
+                          setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:e.message,extracting:false}:r));
+                        }
+                      }} style={{ fontSize:10, background:"#7c3aed", color:"white", border:"none", padding:"4px 10px", borderRadius:4, fontWeight:700, cursor:"pointer" }}>Extract</button>
+                    )}
+                    {rpt.extracting && <span style={{ fontSize:10, color:"#7c3aed" }}>⏳</span>}
+                    <button onClick={()=>setIntakeReports(prev=>prev.filter(r=>r.id!==rpt.id))}
+                      style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:12, padding:0 }}>✕</button>
+                  </div>
+                ))}
+                {intakeReports.some(r=>!r.data&&!r.extracting) && (
+                  <button onClick={async()=>{
+                    for (const rpt of intakeReports.filter(r=>!r.data&&!r.extracting)) {
+                      setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,extracting:true}:r));
+                      try {
+                        const extFn = rpt.type==="imaging" ? extractImaging : extractLab;
+                        const {data,error} = await extFn(rpt.base64, rpt.mediaType);
+                        if (data) {
+                          setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,data,extracting:false}:r));
+                          if (rpt.type!=="imaging" && data.panels) {
+                            const taggedPanels = data.panels.map(p=>({...p, _source:rpt.fileName}));
+                            setLabData(prev => prev ? {...prev, panels:[...(prev.panels||[]),...taggedPanels]} : {...data, panels: taggedPanels});
+                          }
+                        } else {
+                          setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:error||"No data",extracting:false}:r));
+                        }
+                      } catch(e) {
+                        setIntakeReports(prev=>prev.map(r=>r.id===rpt.id?{...r,error:e.message,extracting:false}:r));
+                      }
+                    }
+                  }} style={{ width:"100%", padding:"8px", background:"#7c3aed", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer", marginTop:4 }}>
+                    🔬 Extract All ({intakeReports.filter(r=>!r.data&&!r.extracting).length})
+                  </button>
+                )}
+                {intakeReports.some(r=>r.data&&!r.saved) && dbPatientId && (
+                  <button onClick={saveAllIntakeReports} disabled={intakeReports.some(r=>r.saving)}
+                    style={{ width:"100%", padding:"10px", background:intakeReports.some(r=>r.saving)?"#94a3b8":"linear-gradient(135deg,#059669,#10b981)", color:"white", border:"none", borderRadius:6, fontSize:13, fontWeight:800, cursor:intakeReports.some(r=>r.saving)?"wait":"pointer", marginTop:6 }}>
+                    {intakeReports.some(r=>r.saving) ? `⏳ Saving...` : `💾 Save ${intakeReports.filter(r=>r.data&&!r.saved).length} Reports`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Ordered tests checklist */}
+          {(() => {
+            const lastCon = pfd?.consultations?.[0];
+            const lastConData = lastCon?.con_data || {};
+            const orderedTests = lastConData.follow_up?.tests_to_bring || lastConData.investigations_to_order || [];
+            if (!orderedTests.length) return null;
+            const loadedTests = labData?.panels?.flatMap(p=>p.tests.map(t=>t.test_name.toLowerCase())) || [];
+            return (
+              <div style={{ padding:"8px 10px", background:"#fefce8", borderRadius:8, marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#92400e", marginBottom:4 }}>📋 Tests ordered last visit:</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                  {orderedTests.map((t,i) => {
+                    const tStr = typeof t === "string" ? t : (t.test || t.name || "");
+                    const done = loadedTests.some(lt => lt.includes(tStr.toLowerCase().split(" ")[0]));
+                    return <span key={i} style={{ fontSize:11, padding:"3px 8px", borderRadius:5, fontWeight:600, background:done?"#f0fdf4":"white", color:done?"#059669":"#d97706", border:`1px solid ${done?"#bbf7d0":"#fde68a"}` }}>{done?"✅":"⏳"} {tStr}</span>;
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          <button onClick={()=>setTab("fu_review")} style={{ width:"100%", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+            Continue to Review →
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== FOLLOW-UP: REVIEW TAB ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="fu_review" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#7c3aed,#4f46e5)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>📊</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Review — What Changed?</div>
+              <div style={{ fontSize:10, opacity:.85 }}>Visit #{(pfd?.consultations?.length||0)+1} • {patient.name}</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 2/5</span>
+          </div>
+
+          {/* Reuse the existing follow-up dashboard computation */}
+          {pfd?.consultations?.length > 0 && (() => {
+            const lastCon = pfd.consultations[0];
+            const lastDate = lastCon?.visit_date ? new Date(String(lastCon.visit_date).slice(0,10)+"T12:00:00") : null;
+            const daysSince = lastDate ? Math.round((Date.now() - lastDate) / 86400000) : null;
+            const lastConData = lastCon?.con_data || {};
+            const lastGoals = lastConData.goals || [];
+            const uniqueDx = [...new Map((pfd.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()];
+            const activeMeds = (pfd.medications||[]).filter(m=>m.is_active!==false);
+            const uniqueMeds = [...new Map(activeMeds.map(m=>[(m.name||"").toUpperCase(),m])).values()];
+
+            const allLabs = [...(pfd.lab_results||[])];
+            const hasNewLabs = !!labData?.panels;
+            if (hasNewLabs) {
+              const today = new Date().toISOString().split("T")[0];
+              labData.panels.forEach(p => (p.tests||[]).forEach(t => {
+                allLabs.push({ test_name: t.test_name, result: t.result_text || String(t.result), unit: t.unit||"", flag: t.flag, test_date: labData.report_date || today, _isNew: true });
+              }));
+            }
+            const labsByName = {};
+            allLabs.forEach(l => { if (!labsByName[l.test_name]) labsByName[l.test_name] = []; labsByName[l.test_name].push(l); });
+            Object.values(labsByName).forEach(arr => arr.sort((a,b) => new Date(b.test_date) - new Date(a.test_date)));
+
+            const DX_BIO = {
+              "Type 2 DM":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%",FBS:"<110",PPBS:"<180"}},
+              "Type 1 DM":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%"}},
+              "Type 2 Diabetes Mellitus":{markers:["HbA1c","FBS","PPBS"],lower:true,targets:{HbA1c:"<7%",FBS:"<110",PPBS:"<180"}},
+              "Hypertension":{markers:[],lower:true,targets:{}},
+              "Dyslipidemia":{markers:["LDL","HDL","Triglycerides","Non-HDL","Total Cholesterol"],lower:true,targets:{LDL:"<100",HDL:">40",Triglycerides:"<150","Non-HDL":"<130"}},
+              "Hypothyroidism":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
+              "Hypothyroid":{markers:["TSH","Free T4"],lower:false,targets:{TSH:"0.4-4.0"}},
+              "CKD":{markers:["Creatinine","eGFR","UACR"],lower:true,targets:{eGFR:">60",UACR:"<30"}},
+              "CAD":{markers:["LDL","Triglycerides"],lower:true,targets:{LDL:"<70"}},
+              "MASLD":{markers:["SGPT (ALT)","SGOT (AST)","GGT"],lower:true,targets:{}},
+              "Vit D Deficiency":{markers:["Vitamin D"],lower:false,targets:{"Vitamin D":">30"}},
+              "Gout":{markers:["Uric Acid"],lower:true,targets:{"Uric Acid":"<6"}},
+            };
+            const findBio = (label) => DX_BIO[label] || DX_BIO[Object.keys(DX_BIO).find(k => label?.toLowerCase().includes(k.toLowerCase()))] || null;
+            const getTrend = (name) => {
+              const vals = labsByName[name] || [];
+              if (!vals.length) return null;
+              const latest = vals[0]; const prev = vals.length > 1 ? vals[1] : null;
+              let direction = "stable";
+              if (prev) { const diff = parseFloat(latest.result) - parseFloat(prev.result); const pct = Math.abs(diff / (parseFloat(prev.result)||1)) * 100; if (pct > 5) direction = diff > 0 ? "up" : "down"; }
+              return { vals: vals.slice(0,4).reverse(), latest: latest.result, unit: latest.unit||"", prev: prev?.result, direction, isNew: latest._isNew, flag: latest.flag };
+            };
+
+            const allMarkers = new Map();
+            uniqueDx.forEach(dx => {
+              const bio = findBio(dx.label);
+              if (!bio) return;
+              bio.markers.forEach(m => {
+                const t = getTrend(m);
+                if (!t) return;
+                if (!allMarkers.has(m)) {
+                  const goal = lastGoals.find(g => g.marker === m);
+                  const target = goal?.target || bio.targets?.[m] || "";
+                  const linkedMeds = uniqueMeds.filter(med => {
+                    const forDx = (med.for_diagnosis||med.forDiagnosis||[]).map(d=>d.toLowerCase());
+                    return forDx.some(f => dx.label.toLowerCase().split(/[\s\/]+/).some(k => f.includes(k)));
+                  });
+                  allMarkers.set(m, { name:m, dxLabels:[dx.label], lower:bio.lower, target, trend:t, meds:linkedMeds, goal });
+                } else { allMarkers.get(m).dxLabels.push(dx.label); }
+              });
+            });
+
+            const flaggedNew = [];
+            if (hasNewLabs) {
+              labData.panels.forEach(p => (p.tests||[]).forEach(t => {
+                if ((t.flag === "H" || t.flag === "L") && !allMarkers.has(t.test_name)) {
+                  flaggedNew.push({ name: t.test_name, result: t.result_text || String(t.result), unit: t.unit||"", flag: t.flag });
+                }
+              }));
+            }
+
+            const getStatusBadge = (marker) => {
+              const t = marker.trend;
+              const improving = (marker.lower && t.direction==="down") || (!marker.lower && t.direction==="up");
+              const worsening = (marker.lower && t.direction==="up") || (!marker.lower && t.direction==="down");
+              if (worsening) return { label:"Worsening", bg:"#dc2626", icon:"📉" };
+              if (improving) return { label:"Improving", bg:"#059669", icon:"📈" };
+              return { label:"Stable", bg:"#d97706", icon:"➡️" };
+            };
+
+            const otherDoctors = [...new Set((pfd.medications||[]).filter(m=>m.prescriber && m.prescriber!=="Dr. Bhansali" && m.prescriber!==conName).map(m=>m.prescriber))];
+
+            return (
+              <div>
+                {/* Last Visit Summary (expandable) */}
+                {lastConData.assessment_summary && (
+                  <div style={{ marginBottom:10, background:"white", borderRadius:10, border:"2px solid #e9d5ff", overflow:"hidden" }}>
+                    <button onClick={()=>setFuShowLastSummary(!fuShowLastSummary)} style={{ width:"100%", padding:"10px 14px", background:"#faf5ff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:8, textAlign:"left" }}>
+                      <span style={{ fontSize:14 }}>📄</span>
+                      <span style={{ flex:1, fontSize:12, fontWeight:800, color:"#6d28d9" }}>Last Visit Summary — {lastDate?lastDate.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):""}</span>
+                      <span style={{ fontSize:12, color:"#7c3aed" }}>{fuShowLastSummary ? "▲" : "▼"}</span>
+                    </button>
+                    {fuShowLastSummary && (
+                      <div style={{ padding:"10px 14px", borderTop:"1px solid #e9d5ff", fontSize:12, lineHeight:1.6, color:"#374151" }}>
+                        {lastConData.assessment_summary}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* AI Brief */}
+                <div style={{ marginBottom:10, borderRadius:10, border:"2px solid #c4b5fd", overflow:"hidden" }}>
+                  <div style={{ padding:"10px 14px", background:"linear-gradient(135deg,#7c3aed,#6d28d9)", color:"white" }}>
+                    <div style={{ fontSize:13, fontWeight:800 }}>🤖 AI Patient Brief</div>
+                    <div style={{ fontSize:10, opacity:.8 }}>{pfd.consultations.length} visits • {uniqueMeds.length} medications</div>
+                  </div>
+                  <div style={{ padding:"10px 14px", background:"linear-gradient(135deg,#faf5ff,#eff6ff)" }}>
+                    <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap" }}>
+                      <span style={{ fontSize:10, padding:"3px 8px", background:"white", borderRadius:5, fontWeight:700, color:"#6d28d9" }}>🏥 {pfd.consultations.length} visits</span>
+                      <span style={{ fontSize:10, padding:"3px 8px", background:"white", borderRadius:5, fontWeight:700, color:"#6d28d9" }}>💊 {uniqueMeds.length} medications</span>
+                      {otherDoctors.slice(0,3).map((d,i) => <span key={i} style={{ fontSize:10, padding:"3px 8px", background:"#fefce8", borderRadius:5, fontWeight:600, color:"#92400e" }}>👨‍⚕️ {d}</span>)}
+                    </div>
+                    {/* Conditions */}
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
+                      {uniqueDx.map((d,i) => (
+                        <span key={i} style={{ padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:700,
+                          background:d.status==="Uncontrolled"?"#fef2f2":d.status==="Controlled"?"#f0fdf4":"#f8fafc",
+                          color:d.status==="Uncontrolled"?"#dc2626":d.status==="Controlled"?"#059669":"#64748b",
+                          border:`1.5px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="Controlled"?"#bbf7d0":"#e2e8f0"}` }}>
+                          {d.label} • {d.status||"Active"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Goal Trends */}
+                {allMarkers.size > 0 && (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🎯 Goal Progress</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                      {[...allMarkers.values()].map((marker, i) => {
+                        const st = getStatusBadge(marker);
+                        const t = marker.trend;
+                        return (
+                          <div key={i} style={{ background:"white", borderRadius:10, overflow:"hidden", border:`2px solid ${st.bg}22` }}>
+                            <div style={{ padding:"8px 12px", display:"flex", alignItems:"center", borderBottom:`1px solid ${st.bg}20` }}>
+                              <div style={{ flex:1 }}><div style={{ fontSize:13, fontWeight:800 }}>{marker.name}</div><div style={{ fontSize:10, color:"#64748b" }}>Target: {marker.target||"—"}</div></div>
+                              <span style={{ fontSize:9, fontWeight:700, color:"white", background:st.bg, padding:"3px 8px", borderRadius:5 }}>{st.icon} {st.label}</span>
+                            </div>
+                            <div style={{ padding:"8px 12px" }}>
+                              {t.vals.length > 0 && (
+                                <div style={{ display:"flex", alignItems:"end", gap:2, height:36, marginBottom:4 }}>
+                                  {t.vals.map((v,vi) => {
+                                    const nums = t.vals.map(x => parseFloat(x.result)||0);
+                                    const max = Math.max(...nums)*1.1||1, min = Math.min(...nums)*0.9||0;
+                                    const val = parseFloat(v.result)||0;
+                                    const h = ((val-min)/(max-min||1))*30+6;
+                                    return (
+                                      <div key={vi} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+                                        <div style={{ fontSize:8, color:v._isNew?st.bg:"#94a3b8", fontWeight:v._isNew?800:600 }}>{v.result}</div>
+                                        <div style={{ width:"100%", height:h, background:v._isNew?st.bg:"#e2e8f0", borderRadius:3 }} />
+                                        <div style={{ fontSize:7, color:v._isNew?st.bg:"#94a3b8", fontWeight:v._isNew?800:400 }}>{v._isNew?"NOW":v.test_date?.slice(5,10)||""}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              <div style={{ fontSize:11, color:"#64748b" }}>
+                                {t.prev && <span>Was: <b>{t.prev}</b></span>}
+                                {t.isNew && <span> → Now: <b style={{ color:st.bg, fontSize:14 }}>{t.latest}</b></span>}
+                                {!t.isNew && !t.prev && <span>Latest: <b>{t.latest}</b></span>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* New Abnormal Findings */}
+                {flaggedNew.length > 0 && (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#dc2626", marginBottom:6 }}>🚨 New Abnormal Findings — Action Required</div>
+                    {flaggedNew.map((ab, i) => (
+                      <div key={i} style={{ background:"white", borderRadius:10, border:"2px solid #fecaca", overflow:"hidden", marginBottom:6 }}>
+                        <div style={{ padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:18, color:ab.flag==="H"?"#dc2626":"#2563eb" }}>{ab.flag==="H"?"⬆":"⬇"}</span>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:14, fontWeight:800 }}>{ab.name}: <span style={{ color:ab.flag==="H"?"#dc2626":"#2563eb" }}>{ab.result} {ab.unit}</span></div>
+                            <div style={{ fontSize:10, color:"#dc2626", fontWeight:600 }}>⚠️ Not part of current diagnoses</div>
+                          </div>
+                        </div>
+                        <div style={{ padding:"6px 12px", background:"#fafbfc", borderTop:"1px solid #fecaca", display:"flex", gap:4 }}>
+                          {["🔍 Investigate","💊 Treat Now","📋 Add Diagnosis","👀 Monitor"].map(action => {
+                            const active = fuAbnormalActions[ab.name] === action;
+                            return <button key={action} onClick={()=>setFuAbnormalActions(p=>({...p,[ab.name]:active?"":action}))}
+                              style={{ fontSize:11, padding:"5px 10px", borderRadius:5, cursor:"pointer", fontWeight:700, border:`2px solid ${active?"#7c3aed":"#e2e8f0"}`, background:active?"#7c3aed":"white", color:active?"white":"#475569" }}>{action}</button>;
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <button onClick={()=>setTab("fu_edit")} style={{ width:"100%", background:"#1e293b", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+            Next: Edit Plan →
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== FOLLOW-UP: EDIT PLAN TAB ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="fu_edit" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#059669,#10b981)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>📋</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Edit Last Treatment Plan</div>
+              <div style={{ fontSize:10, opacity:.85 }}>Make quick adjustments to medications & goals</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 3/5</span>
+          </div>
+
+          {(() => {
+            const lastCon = pfd?.consultations?.[0];
+            const lastConData = lastCon?.con_data || {};
+            const lastMeds = lastConData.medications_confirmed || [];
+            const lastGoals = lastConData.goals || [];
+
+            return (
+              <div>
+                {/* Medications Table */}
+                <div style={{ background:"white", borderRadius:10, overflow:"hidden", border:"2px solid #e2e8f0", marginBottom:10 }}>
+                  <div style={{ padding:"8px 12px", background:"#f8fafc", borderBottom:"2px solid #e2e8f0", display:"flex", alignItems:"center" }}>
+                    <span style={{ fontSize:13, fontWeight:800, flex:1 }}>💊 Medications ({lastMeds.length})</span>
+                    <button onClick={()=>setFuNewMeds(p=>[...p,{name:"",dose:"",freq:"OD",timing:"Morning",forDx:""}])}
+                      style={{ fontSize:11, padding:"4px 12px", background:"#059669", color:"white", border:"none", borderRadius:5, fontWeight:700, cursor:"pointer" }}>+ Add</button>
+                  </div>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                    <thead><tr style={{ background:"#fafbfc", fontSize:9, fontWeight:700, color:"#64748b", textTransform:"uppercase" }}>
+                      <td style={{ padding:"5px 8px" }}>Medicine</td><td style={{ padding:"5px 8px" }}>Dose</td><td style={{ padding:"5px 8px" }}>Freq</td><td style={{ padding:"5px 8px" }}>For</td><td style={{ padding:"5px 8px", textAlign:"center", width:60 }}>Action</td>
+                    </tr></thead>
+                    <tbody>
+                      {lastMeds.map((m, i) => {
+                        const edit = fuMedEdits[i] || {};
+                        const stopped = edit.action === "STOP";
+                        const modified = edit.action === "MODIFY" || edit.dose || edit.freq;
+                        return (
+                          <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", opacity:stopped?.35:1, background:modified?"#fffbeb":stopped?"#fef2f2":"white" }}>
+                            <td style={{ padding:"6px 8px", fontWeight:700, textDecoration:stopped?"line-through":"none" }}>{m.name}{modified&&<span style={{fontSize:8,color:"#d97706",marginLeft:4}}>✏️</span>}</td>
+                            <td style={{ padding:"6px 8px" }}><input defaultValue={m.dose||""} disabled={stopped} style={{ width:"100%", padding:"3px 5px", border:"1.5px solid #e2e8f0", borderRadius:4, fontSize:11, fontWeight:600, boxSizing:"border-box" }}
+                              onChange={e=>setFuMedEdits(p=>({...p,[i]:{...(p[i]||{}),dose:e.target.value,action:"MODIFY"}}))} /></td>
+                            <td style={{ padding:"6px 8px" }}><input defaultValue={m.frequency||m.freq||""} disabled={stopped} style={{ width:50, padding:"3px 5px", border:"1.5px solid #e2e8f0", borderRadius:4, fontSize:11, boxSizing:"border-box" }}
+                              onChange={e=>setFuMedEdits(p=>({...p,[i]:{...(p[i]||{}),freq:e.target.value,action:"MODIFY"}}))} /></td>
+                            <td style={{ padding:"6px 8px", fontSize:9, color:"#94a3b8" }}>{(m.forDiagnosis||[]).join(", ")}</td>
+                            <td style={{ padding:"6px 8px", textAlign:"center" }}><button onClick={()=>setFuMedEdits(p=>({...p,[i]:{...(p[i]||{}),action:stopped?"CONTINUE":"STOP"}}))}
+                              style={{ fontSize:9, padding:"3px 8px", borderRadius:4, border:"none", cursor:"pointer", fontWeight:700, background:stopped?"#f0fdf4":"#fef2f2", color:stopped?"#059669":"#dc2626" }}>{stopped?"↩":"🛑"}</button></td>
+                          </tr>
+                        );
+                      })}
+                      {fuNewMeds.map((nm, i) => (
+                        <tr key={`n${i}`} style={{ background:"#f0fdf4", borderBottom:"1px solid #bbf7d0" }}>
+                          <td style={{ padding:"6px 8px" }}><input placeholder="Medicine" value={nm.name} onChange={e=>setFuNewMeds(p=>p.map((m,j)=>j===i?{...m,name:e.target.value}:m))} style={{ width:"100%", padding:"3px 5px", border:"1.5px solid #bbf7d0", borderRadius:4, fontSize:11, fontWeight:700, boxSizing:"border-box" }} /></td>
+                          <td style={{ padding:"6px 8px" }}><input placeholder="Dose" value={nm.dose} onChange={e=>setFuNewMeds(p=>p.map((m,j)=>j===i?{...m,dose:e.target.value}:m))} style={{ width:"100%", padding:"3px 5px", border:"1.5px solid #bbf7d0", borderRadius:4, fontSize:11, boxSizing:"border-box" }} /></td>
+                          <td style={{ padding:"6px 8px" }}><input placeholder="OD" value={nm.freq} onChange={e=>setFuNewMeds(p=>p.map((m,j)=>j===i?{...m,freq:e.target.value}:m))} style={{ width:50, padding:"3px 5px", border:"1.5px solid #bbf7d0", borderRadius:4, fontSize:11, boxSizing:"border-box" }} /></td>
+                          <td colSpan={2} style={{ padding:"6px 8px" }}>
+                            <span style={{ fontSize:8, background:"#f0fdf4", color:"#059669", fontWeight:800, padding:"2px 6px", borderRadius:3 }}>➕ NEW</span>
+                            <button onClick={()=>setFuNewMeds(p=>p.filter((_,j)=>j!==i))} style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:11, marginLeft:4 }}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Goals */}
+                {lastGoals.length > 0 && (
+                  <div style={{ background:"white", borderRadius:10, padding:12, border:"2px solid #e2e8f0", marginBottom:10 }}>
+                    <div style={{ fontSize:13, fontWeight:800, marginBottom:6 }}>🎯 Goals — Update targets</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+                      {lastGoals.map((g, i) => (
+                        <div key={i} style={{ padding:"6px 8px", background:"#f8fafc", borderRadius:6, border:"1.5px solid #e2e8f0" }}>
+                          <div style={{ fontSize:12, fontWeight:800, marginBottom:3 }}>{g.marker}</div>
+                          <div style={{ display:"flex", gap:3, alignItems:"center" }}>
+                            <span style={{ fontSize:9, color:"#64748b" }}>Target:</span>
+                            <input defaultValue={g.target||""} style={{ flex:1, padding:"3px 5px", border:"1.5px solid #e2e8f0", borderRadius:4, fontSize:12, fontWeight:700 }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick summary of changes */}
+                {(Object.keys(fuMedEdits).length > 0 || fuNewMeds.length > 0) && (
+                  <div style={{ padding:"8px 12px", background:"#fffbeb", borderRadius:8, border:"1.5px solid #fde68a", marginBottom:10, display:"flex", gap:12, fontSize:12 }}>
+                    <span style={{ fontWeight:700, color:"#d97706" }}>✏️ {Object.values(fuMedEdits).filter(e=>e.action==="MODIFY").length} modified</span>
+                    <span style={{ fontWeight:700, color:"#dc2626" }}>🛑 {Object.values(fuMedEdits).filter(e=>e.action==="STOP").length} stopped</span>
+                    <span style={{ fontWeight:700, color:"#059669" }}>➕ {fuNewMeds.filter(m=>m.name).length} new</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <button onClick={()=>setTab("fu_symptoms")} style={{ width:"100%", background:"#1e293b", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+            Next: Symptoms →
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== FOLLOW-UP: SYMPTOMS TAB ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="fu_symptoms" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#2563eb,#3b82f6)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🗣️</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Symptoms & Assessment</div>
+              <div style={{ fontSize:10, opacity:.85 }}>Quick checks + complaints</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 4/5</span>
+          </div>
+
+          {/* Quick Assessment */}
+          <div style={{ background:"white", borderRadius:10, padding:12, border:"2px solid #e2e8f0", marginBottom:10 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+              {[
+                { key:"medCompliance", label:"💊 Medicine Compliance", opts:["Good","Partial","Poor"], colors:["#059669","#d97706","#dc2626"] },
+                { key:"dietExercise", label:"🥗 Diet & Exercise", opts:["Adherent","Partial","Not following"], colors:["#059669","#d97706","#dc2626"] },
+                { key:"sideEffects", label:"⚠️ Side Effects", opts:["None","Mild","Significant"], colors:["#059669","#d97706","#dc2626"] },
+                { key:"newSymptoms", label:"🆕 New Symptoms", opts:["None","Mild","Concerning"], colors:["#059669","#d97706","#dc2626"] },
+              ].map(q => (
+                <div key={q.key}>
+                  <div style={{ fontSize:12, fontWeight:700, marginBottom:4 }}>{q.label}</div>
+                  <div style={{ display:"flex", gap:4 }}>
+                    {q.opts.map((o,oi) => {
+                      const active = fuChecks[q.key]===o;
+                      return <button key={o} onClick={()=>setFuChecks(p=>({...p,[q.key]:p[q.key]===o?"":o}))}
+                        style={{ flex:1, fontSize:12, padding:"8px", borderRadius:6, cursor:"pointer", fontWeight:700, border:`2px solid ${active?q.colors[oi]:"#e2e8f0"}`, background:active?q.colors[oi]:"white", color:active?"white":"#475569" }}>{o}</button>;
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Complaints */}
+            <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>🗣️ Chief Complaints</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:6 }}>
+              {COMPLAINT_CHIPS.map(c => (
+                <button key={c} onClick={()=>toggleChip(complaints,setComplaints,c)}
+                  style={{ padding:"5px 10px", borderRadius:7, fontSize:11, fontWeight:600, cursor:"pointer",
+                    border:`1.5px solid ${complaints.includes(c)?"#2563eb":"#e2e8f0"}`,
+                    background:complaints.includes(c)?"#2563eb":"white",
+                    color:complaints.includes(c)?"white":"#475569" }}>{c}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:4, marginBottom:8 }}>
+              <input value={complaintText} onChange={e=>setComplaintText(e.target.value)} placeholder="Add complaint..."
+                style={{ flex:1, padding:"8px 10px", border:"1.5px solid #e2e8f0", borderRadius:6, fontSize:12 }}
+                onKeyDown={e=>{if(e.key==="Enter"&&complaintText.trim()){setComplaints(p=>[...p,complaintText.trim()]);setComplaintText("");}}} />
+              <button onClick={()=>{if(complaintText.trim()){setComplaints(p=>[...p,complaintText.trim()]);setComplaintText("");}}}
+                style={{ padding:"8px 14px", background:"#2563eb", color:"white", border:"none", borderRadius:6, fontWeight:700, cursor:"pointer" }}>+</button>
+            </div>
+
+            {/* Challenges */}
+            <div style={{ fontSize:12, fontWeight:700, marginBottom:4 }}>💬 Challenges / Notes</div>
+            <textarea value={fuChecks.challenges||""} onChange={e=>setFuChecks(p=>({...p,challenges:e.target.value}))}
+              placeholder="Patient reports: difficulty with timing of meds, sugar cravings..."
+              rows={2} style={{ width:"100%", fontSize:13, padding:10, border:"2px solid #e2e8f0", borderRadius:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5 }} />
+
+            {/* New external meds + conditions */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}>
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:"#92400e", marginBottom:4 }}>💊 New External Medicines</div>
+                {fuExtMeds.map((m,i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"4px 8px", background:"#fef3c7", borderRadius:6, marginBottom:3, fontSize:11, fontWeight:600 }}>
+                    <span style={{ flex:1 }}>{m.name} {m.dose} {m.doctor?<span style={{color:"#64748b"}}>— {m.doctor}</span>:""}</span>
+                    <button onClick={()=>setFuExtMeds(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:12,padding:0 }}>×</button>
+                  </div>
+                ))}
+                <div style={{ display:"flex", gap:3, marginTop:3 }}>
+                  <input id="fuExtName2" placeholder="Medicine" style={{ flex:2, padding:"5px 8px", border:"1.5px solid #e2e8f0", borderRadius:5, fontSize:11 }} />
+                  <input id="fuExtDose2" placeholder="Dose" style={{ flex:1, padding:"5px 8px", border:"1.5px solid #e2e8f0", borderRadius:5, fontSize:11 }} />
+                  <button onClick={()=>{const n=document.getElementById("fuExtName2");const d=document.getElementById("fuExtDose2");if(n.value.trim()){setFuExtMeds(p=>[...p,{name:n.value.trim(),dose:d.value.trim(),doctor:""}]);n.value="";d.value="";}}}
+                    style={{ padding:"5px 10px", background:"#f59e0b", color:"white", border:"none", borderRadius:5, fontWeight:800, cursor:"pointer" }}>+</button>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:"#dc2626", marginBottom:4 }}>🆕 New Conditions</div>
+                {fuNewConditions.map((c,i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:4, padding:"4px 8px", background:"#fee2e2", borderRadius:6, marginBottom:3, fontSize:11, fontWeight:600 }}>
+                    <span style={{ flex:1 }}>{c}</span>
+                    <button onClick={()=>setFuNewConditions(p=>p.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",cursor:"pointer",color:"#dc2626",fontSize:12,padding:0 }}>×</button>
+                  </div>
+                ))}
+                <input id="fuNewCond2" placeholder="e.g. Hyperuricemia" style={{ width:"100%", padding:"5px 8px", border:"1.5px solid #e2e8f0", borderRadius:5, fontSize:11, boxSizing:"border-box" }}
+                  onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){setFuNewConditions(p=>[...p,e.target.value.trim()]);e.target.value="";}}} />
+              </div>
+            </div>
+          </div>
+
+          <button onClick={()=>setTab("fu_gen")} style={{ width:"100%", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+            Next: Create Plan →
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════ */}
+      {/* ===== FOLLOW-UP: CREATE PLAN TAB ===== */}
+      {/* ═══════════════════════════════════════════ */}
+      {tab==="fu_gen" && (
+        <div>
+          <div style={{ background:"linear-gradient(135deg,#059669,#047857)", borderRadius:10, padding:"10px 14px", marginBottom:10, color:"white", display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🤖</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800 }}>Create Treatment Plan</div>
+              <div style={{ fontSize:10, opacity:.85 }}>Choose how to generate</div>
+            </div>
+            <span style={{ fontSize:10, opacity:.6 }}>Step 5/5</span>
+          </div>
+
+          {/* 4 PATH OPTIONS */}
+          {!fuPlanSource && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+              {[
+                { id:"edit", icon:"✏️", title:"From Quick Edits", desc:"Use medication edits from Step 3", color:"#059669", bg:"#f0fdf4" },
+                { id:"shadow", icon:"🤖", title:"Shadow AI Analysis", desc:"AI analyzes labs + trends + meds", color:"#7c3aed", bg:"#faf5ff" },
+                { id:"consultant", icon:"🎙️", title:"Consultant Dictation", desc:"Consultant dictates changes", color:"#9a3412", bg:"#fff7ed" },
+                { id:"merge", icon:"🔀", title:"AI + Consultant Merge", desc:"AI first, consultant reviews & overrides", color:"#1e40af", bg:"#eff6ff" },
+              ].map(p => (
+                <button key={p.id} onClick={()=>{
+                  setFuPlanSource(p.id);
+                  if (p.id==="shadow"||p.id==="merge") { runShadowAI(); }
+                }} style={{ padding:14, background:p.bg, border:`2px solid ${p.color}30`, borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+                  <div style={{ fontSize:22, marginBottom:4 }}>{p.icon}</div>
+                  <div style={{ fontSize:13, fontWeight:800, color:p.color }}>{p.title}</div>
+                  <div style={{ fontSize:10, color:"#64748b", marginTop:2 }}>{p.desc}</div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* PATH: Quick Edit → Plan */}
+          {fuPlanSource==="edit" && (
+            <div style={{ background:"white", borderRadius:10, padding:14, border:"2px solid #059669", marginBottom:12 }}>
+              <div style={{ fontSize:13, fontWeight:800, color:"#059669", marginBottom:6 }}>✏️ Generate from Quick Edits</div>
+              <div style={{ fontSize:11, color:"#64748b", marginBottom:8 }}>
+                {Object.values(fuMedEdits).filter(e=>e.action==="MODIFY").length} modified, {Object.values(fuMedEdits).filter(e=>e.action==="STOP").length} stopped, {fuNewMeds.filter(m=>m.name).length} new
+              </div>
+              <div style={{ fontSize:11, color:"#475569", marginBottom:8, background:"#f8fafc", padding:8, borderRadius:6 }}>
+                This will use your med edits to build the treatment plan. For more intelligent analysis, try Shadow AI.
+              </div>
+              <button onClick={()=>{
+                // Build conData from edits
+                const lastCon = pfd?.consultations?.[0];
+                const lastConData = lastCon?.con_data || {};
+                const lastMeds = lastConData.medications_confirmed || [];
+                const meds = lastMeds.filter((m,i)=>fuMedEdits[i]?.action!=="STOP").map((m,i)=>{
+                  const edit = fuMedEdits[i]||{};
+                  return {...m, dose:edit.dose||m.dose, frequency:edit.freq||m.frequency, isNew:false, _shadowAction:edit.action==="MODIFY"?"MODIFY":"CONTINUE"};
+                });
+                fuNewMeds.filter(nm=>nm.name.trim()).forEach(nm=>{
+                  meds.push({name:nm.name.toUpperCase(),dose:nm.dose,frequency:nm.freq,timing:nm.timing,isNew:true,route:"Oral",forDiagnosis:[nm.forDx||""],_shadowAction:"ADD"});
+                });
+                const newConData = {
+                  ...lastConData,
+                  medications_confirmed: fixConMedicines({medications_confirmed:meds}).medications_confirmed,
+                  medications_stopped: lastMeds.filter((m,i)=>fuMedEdits[i]?.action==="STOP").map(m=>({name:m.name,reason:"Stopped at follow-up"})),
+                  assessment_summary: lastConData.assessment_summary || `Follow-up visit. ${Object.values(fuMedEdits).filter(e=>e.action==="MODIFY").length} medications modified, ${Object.values(fuMedEdits).filter(e=>e.action==="STOP").length} stopped, ${fuNewMeds.filter(m=>m.name).length} new added.`,
+                };
+                setConData(newConData);
+                if (!moData) {
+                  setMoData({ diagnoses: pfd?.diagnoses||[], chief_complaints: complaints, previous_medications: lastMeds });
+                }
+                setTab("plan");
+              }} style={{ width:"100%", padding:12, background:"linear-gradient(135deg,#059669,#047857)", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+                📄 Generate Treatment Plan from Edits
+              </button>
+            </div>
+          )}
+
+          {/* PATH: Shadow AI (running / results) */}
+          {(fuPlanSource==="shadow"||fuPlanSource==="merge") && (
+            <div style={{ marginBottom:12 }}>
+              {shadowLoading && <div style={{ padding:16, textAlign:"center", color:"#7c3aed", fontSize:13, fontWeight:700, background:"white", borderRadius:10, border:"2px solid #c4b5fd" }}>🧠 AI analyzing labs, trends, medications, history...</div>}
+              {shadowData && (
+                <div style={{ background:"white", borderRadius:10, border:"2px solid #c4b5fd", overflow:"hidden", marginBottom:10 }}>
+                  <div style={{ padding:"8px 12px", background:"#faf5ff", borderBottom:"2px solid #c4b5fd" }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#6d28d9" }}>🤖 Shadow AI Analysis</div>
+                  </div>
+                  <div style={{ padding:12 }}>
+                    {/* Diagnoses */}
+                    {(shadowData.diagnoses||[]).length > 0 && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:11, fontWeight:800, marginBottom:4 }}>🏥 Diagnoses</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                          {shadowData.diagnoses.map((d,i) => (
+                            <span key={i} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, fontWeight:700,
+                              background:d.status==="Uncontrolled"?"#fef2f2":d.status==="New"?"#eff6ff":"#f0fdf4",
+                              color:d.status==="Uncontrolled"?"#dc2626":d.status==="New"?"#2563eb":"#059669",
+                              border:`1px solid ${d.status==="Uncontrolled"?"#fecaca":d.status==="New"?"#bfdbfe":"#bbf7d0"}` }}>
+                              {d.label} • {d.status}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Treatment recommendations */}
+                    {(shadowData.treatment_plan||[]).length > 0 && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:11, fontWeight:800, marginBottom:4 }}>💊 Medication Recommendations</div>
+                        {shadowData.treatment_plan.map((t,i) => {
+                          const key = t.drug||`tx_${i}`;
+                          const decision = shadowTxDecisions[key];
+                          return (
+                            <div key={i} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 8px", marginBottom:3, borderRadius:6,
+                              background:t.action==="ADD"?"#f0fdf4":t.action==="STOP"?"#fef2f2":t.action==="MODIFY"?"#fffbeb":"#f8fafc",
+                              border:`1px solid ${t.action==="ADD"?"#bbf7d0":t.action==="STOP"?"#fecaca":t.action==="MODIFY"?"#fde68a":"#e2e8f0"}` }}>
+                              <span style={{ fontSize:9, fontWeight:800, minWidth:40, color:t.action==="ADD"?"#059669":t.action==="STOP"?"#dc2626":t.action==="MODIFY"?"#d97706":"#475569" }}>{t.action}</span>
+                              <div style={{ flex:1 }}>
+                                <span style={{ fontSize:11, fontWeight:700 }}>{t.drug}</span>
+                                <span style={{ fontSize:10, color:"#64748b", marginLeft:4 }}>{t.dose||""} {t.frequency||""}</span>
+                                {t.reason && <div style={{ fontSize:9, color:"#94a3b8" }}>{t.reason}</div>}
+                              </div>
+                              <div className="no-print" style={{ display:"flex", gap:2 }}>
+                                <button onClick={()=>setShadowTxDecisions(p=>({...p,[key]:decision==="adopt"?undefined:"adopt"}))}
+                                  style={{ fontSize:9, padding:"2px 6px", borderRadius:4, border:"none", cursor:"pointer", fontWeight:700,
+                                    background:decision==="adopt"?"#059669":"#f0fdf4", color:decision==="adopt"?"white":"#059669" }}>✓</button>
+                                <button onClick={()=>setShadowTxDecisions(p=>({...p,[key]:decision==="disagree"?undefined:"disagree"}))}
+                                  style={{ fontSize:9, padding:"2px 6px", borderRadius:4, border:"none", cursor:"pointer", fontWeight:700,
+                                    background:decision==="disagree"?"#dc2626":"#fef2f2", color:decision==="disagree"?"white":"#dc2626" }}>✕</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Investigations */}
+                    {(shadowData.investigations||[]).length > 0 && (
+                      <div style={{ marginBottom:6 }}>
+                        <div style={{ fontSize:11, fontWeight:800, marginBottom:3 }}>🧪 Investigations</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                          {shadowData.investigations.map((t,i) => <span key={i} style={{ fontSize:10, padding:"2px 8px", borderRadius:4, background:"#eff6ff", color:"#2563eb", fontWeight:600 }}>{typeof t==="string"?t:t.test||""}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {/* Red flags */}
+                    {(shadowData.red_flags||[]).length > 0 && (
+                      <div>
+                        {shadowData.red_flags.map((rf,i) => <div key={i} style={{ fontSize:10, color:"#dc2626", padding:"2px 0" }}>⚠️ {rf}</div>)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Shadow-only: adopt button */}
+                  {fuPlanSource==="shadow" && (
+                    <div style={{ padding:12, borderTop:"2px solid #c4b5fd", display:"flex", gap:6 }}>
+                      <button onClick={()=>{
+                        // Adopt shadow AI as conData
+                        const adopted = (shadowData.treatment_plan||[]).filter(t => {
+                          const key = t.drug||`tx_${(shadowData.treatment_plan||[]).indexOf(t)}`;
+                          return shadowTxDecisions[key] !== "disagree";
+                        });
+                        const meds = adopted.filter(t=>t.action!=="STOP").map(t=>({
+                          name:(t.drug||"").toUpperCase(), dose:t.dose||"", frequency:t.frequency||"", timing:t.timing||"",
+                          forDiagnosis:t.for?[t.for]:[], isNew:t.action==="ADD", _shadowAction:t.action, route:"Oral"
+                        }));
+                        const stopped = adopted.filter(t=>t.action==="STOP").map(t=>({name:t.drug,reason:t.reason||"AI recommended stop"}));
+                        const newConData = {
+                          diagnoses: shadowData.diagnoses||[],
+                          medications_confirmed: fixConMedicines({medications_confirmed:meds}).medications_confirmed,
+                          medications_stopped: stopped,
+                          goals: shadowData.goals||[],
+                          investigations_ordered: shadowData.investigations||[],
+                          diet_lifestyle: shadowData.diet_lifestyle||[],
+                          self_monitoring: shadowData.self_monitoring||[],
+                          follow_up: shadowData.follow_up||{},
+                          assessment_summary: shadowData.assessment_summary || `AI-generated treatment plan based on ${pfd?.consultations?.length||0} previous visits.`,
+                          red_flags: shadowData.red_flags||[],
+                          _fromShadow: true,
+                        };
+                        setConData(newConData);
+                        if (!moData) {
+                          setMoData({ diagnoses: shadowData.diagnoses||[], chief_complaints: complaints, previous_medications: pfd?.medications||[] });
+                        }
+                        setTab("plan");
+                      }} style={{ flex:1, padding:12, background:"linear-gradient(135deg,#7c3aed,#6d28d9)", color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:800, cursor:"pointer" }}>
+                        ✅ Adopt AI Plan → View
+                      </button>
+                      <button onClick={()=>setFuPlanSource("merge")}
+                        style={{ padding:"12px 16px", background:"#f8fafc", border:"2px solid #e2e8f0", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer", color:"#475569" }}>
+                        + Add Consultant Notes
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PATH: Consultant dictation / Merge */}
+          {(fuPlanSource==="consultant" || (fuPlanSource==="merge" && shadowData && !shadowLoading)) && (
+            <div style={{ background:"white", borderRadius:10, border:`2px solid ${fuPlanSource==="merge"?"#1e40af":"#9a3412"}`, overflow:"hidden", marginBottom:12 }}>
+              <div style={{ padding:"8px 12px", background:fuPlanSource==="merge"?"#eff6ff":"#fff7ed", borderBottom:"2px solid #e2e8f0" }}>
+                <div style={{ fontSize:13, fontWeight:800, color:fuPlanSource==="merge"?"#1e40af":"#9a3412" }}>
+                  {fuPlanSource==="merge" ? "🔀 Consultant Reviews AI + Dictates" : "🎙️ Consultant Dictation"}
+                </div>
+              </div>
+              <div style={{ padding:12 }}>
+                <AudioInput label="Dictate treatment plan changes" dgKey={dgKey} whisperKey={whisperKey}
+                  color={fuPlanSource==="merge"?"#1e40af":"#9a3412"} compact
+                  onTranscript={t=>setConTranscript(p=>(p?p+"\n":"")+t)} />
+                <textarea value={conTranscript||""} onChange={e=>setConTranscript(e.target.value)}
+                  placeholder={fuPlanSource==="merge" ? "Consultant: I agree with statin increase, reduce thyroid to 50, also add calcium 500 BD..." : "Dictate full plan: Continue DM meds, increase statin, reduce thyroid..."}
+                  rows={4} style={{ width:"100%", fontSize:13, padding:10, border:"2px solid #e2e8f0", borderRadius:8, resize:"vertical", boxSizing:"border-box", lineHeight:1.5, marginTop:6 }} />
+                <button onClick={()=>{
+                  if (fuPlanSource==="merge") { setConSourceMode("merge"); }
+                  processConsultant();
+                  setTab("plan");
+                }} disabled={loading.con || !conTranscript}
+                  style={{ width:"100%", marginTop:8, padding:12, background:loading.con?"#94a3b8":`linear-gradient(135deg,${fuPlanSource==="merge"?"#1e40af,#1d4ed8":"#9a3412,#7c2d12"})`, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:800, cursor:loading.con?"wait":"pointer" }}>
+                  {loading.con ? "⏳ Processing..." : fuPlanSource==="merge" ? "🔀 Merge & Generate Plan" : "📄 Generate Plan from Dictation"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Back to path selection */}
+          {fuPlanSource && (
+            <button onClick={()=>{setFuPlanSource(null);setShadowData(null);setShadowTxDecisions({});}}
+              style={{ width:"100%", padding:8, background:"#f8fafc", border:"2px solid #e2e8f0", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer", color:"#64748b", marginTop:8 }}>
+              ← Choose Different Path
+            </button>
+          )}
         </div>
       )}
 
