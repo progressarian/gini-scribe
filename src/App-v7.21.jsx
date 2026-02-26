@@ -912,6 +912,7 @@ export default function GiniScribe() {
   const [timelineFilter, setTimelineFilter] = useState("All");
   const [timelineDoctor, setTimelineDoctor] = useState("");
   const [expandedDiagnosis, setExpandedDiagnosis] = useState(null);
+  const [expandedPrescription, setExpandedPrescription] = useState(null);
   const [patientFullData, setPatientFullData] = useState(null);
   // Clear stale patient data when switching patients
   useEffect(() => {
@@ -9415,6 +9416,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     lifestyle: v.lifestyle || [],
                     compliance: v.compliance || "",
                     symptoms: (v.symptoms || v.chief_complaints || []).filter(s => !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints"].some(x => String(s).toLowerCase().includes(x))),
+                    con_transcript: v.con_transcript || "",
+                    visit_id: v.id,
                     color:"#0369a1", bg:"#f0f9ff"
                   });
                 });
@@ -9677,6 +9680,27 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                     <span key={mi} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8,
                                       background:"#faf5ff", color:"#7c3aed", border:"1px solid #e9d5ff" }}>💊 {m}</span>
                                   ))}
+                                </div>
+                              )}
+
+                              {/* View Prescription */}
+                              {isVisit && ev.con_transcript && ev.con_transcript.trim().length > 20 && (
+                                <div style={{ marginTop:8 }}>
+                                  <button onClick={(e) => { e.stopPropagation(); setExpandedPrescription(expandedPrescription === ev.visit_id ? null : ev.visit_id); }}
+                                    style={{ fontSize:10, fontWeight:700, padding:"4px 12px", borderRadius:8, cursor:"pointer",
+                                      border: expandedPrescription === ev.visit_id ? "1px solid #0369a1" : "1px solid #e2e8f0",
+                                      background: expandedPrescription === ev.visit_id ? "#f0f9ff" : "white",
+                                      color: expandedPrescription === ev.visit_id ? "#0369a1" : "#64748b" }}>
+                                    {expandedPrescription === ev.visit_id ? "▼ Hide Prescription" : "📄 View Prescription"}
+                                  </button>
+                                  {expandedPrescription === ev.visit_id && (
+                                    <div style={{ marginTop:8, background:"white", border:"1px solid #e2e8f0", borderRadius:10,
+                                      padding:14, maxHeight:400, overflowY:"auto", fontSize:11, lineHeight:"1.6",
+                                      color:"#334155", fontFamily:"'SF Mono', 'Menlo', 'Monaco', monospace", whiteSpace:"pre-wrap",
+                                      boxShadow:"inset 0 1px 3px rgba(0,0,0,0.06)" }}>
+                                      {ev.con_transcript}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

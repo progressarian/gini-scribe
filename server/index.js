@@ -685,7 +685,8 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
        mo_data->'chief_complaints' as chief_complaints,
        con_data->'diet_lifestyle' as lifestyle, con_data->'self_monitoring' as monitoring,
        con_data->'assessment_summary' as summary,
-       con_data->'medications_confirmed' as medications_confirmed
+       con_data->'medications_confirmed' as medications_confirmed,
+       con_transcript
        FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC`, [id]);
 
     res.json({
