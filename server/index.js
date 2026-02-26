@@ -222,10 +222,10 @@ app.get("/api/patients/:id", async (req, res) => {
     const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
       pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
-      // Deduplicate meds: latest entry per med name, include prescribing doctor
-      pool.query(`SELECT DISTINCT ON (UPPER(m.name)) m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
+      // Return ALL medications with prescribing doctor info (client handles dedup for schedule)
+      pool.query(`SELECT m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
         FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
-        WHERE m.patient_id=$1 ORDER BY UPPER(m.name), m.created_at DESC`, [id]),
+        WHERE m.patient_id=$1 ORDER BY m.created_at DESC`, [id]),
       // Deduplicate labs: distinct by test+date
       pool.query(`SELECT DISTINCT ON (test_name, test_date) * FROM lab_results
         WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`, [id]),
@@ -299,8 +299,10 @@ app.post("/api/consultations", async (req, res) => {
     let patientId, existing = null;
     if (n(patient.phone)) existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone])).rows[0];
     if (!existing && n(patient.fileNo)) existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo])).rows[0];
-    // Fallback: match by name (for Quick mode without phone/fileNo)
-    if (!existing && n(patient.name)) existing = (await client.query("SELECT id FROM patients WHERE LOWER(name)=LOWER($1) LIMIT 1", [patient.name])).rows[0];
+    // Only match by name if BOTH name AND age+sex match (avoid false merges)
+    if (!existing && n(patient.name) && patient.age && patient.sex) {
+      existing = (await client.query("SELECT id FROM patients WHERE LOWER(name)=LOWER($1) AND age=$2 AND sex=$3 LIMIT 1", [patient.name, int(patient.age), patient.sex])).rows[0];
+    }
 
     if (existing) {
       patientId = existing.id;
@@ -631,7 +633,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
 
     const labQ = (names) => `SELECT result, test_date, test_name FROM lab_results WHERE patient_id=$1 AND LOWER(test_name) IN (${names.map((_,i)=>`LOWER($${i+2})`).join(',')}) ${df} ORDER BY test_date, created_at DESC`;
 
-    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, vitd, vitb12, ferritin, crp, bp, weight, waist, bodyFat, muscleMass] = await Promise.all([
+    const [hba1c, fpg, ldl, tg, hdl, creat, egfr, uacr, tsh, ppg, alt, ast, alp, nonhdl, vitd, vitb12, ferritin, crp, bp, weight, waist, bodyFat, muscleMass, heartRate, height, bmi] = await Promise.all([
       pool.query(labQ(['HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']), [id, 'HbA1c','Glycated Hemoglobin','Glycated Haemoglobin','A1c','Hemoglobin A1c']),
       pool.query(labQ(['FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting']), [id, 'FBS','FPG','Fasting Glucose','Fasting Blood Sugar','Fasting Plasma Glucose','FBG','Blood Sugar Fasting']),
       pool.query(labQ(['LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)']), [id, 'LDL','LDL Cholesterol','LDL-C','LDL Cholesterol (Direct)']),
@@ -655,6 +657,9 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       pool.query(`SELECT DISTINCT ON (recorded_at::date) waist, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND waist IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) body_fat, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND body_fat IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
       pool.query(`SELECT DISTINCT ON (recorded_at::date) muscle_mass, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND muscle_mass IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) pulse, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND pulse IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) height, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND height IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
+      pool.query(`SELECT DISTINCT ON (recorded_at::date) bmi, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bmi IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`, [id]),
     ]);
 
     const screenings = await pool.query(
@@ -691,6 +696,7 @@ app.get("/api/patients/:id/outcomes", async (req, res) => {
       vitamin_d: vitd.rows, vitamin_b12: vitb12.rows, ferritin: ferritin.rows, crp: crp.rows,
       bp: bp.rows, weight: weight.rows,
       waist: waist.rows, body_fat: bodyFat.rows, muscle_mass: muscleMass.rows,
+      heart_rate: heartRate.rows, height: height.rows, bmi: bmi.rows,
       screenings: screenings.rows,
       diagnosis_journey: diagJourney.rows,
       med_timeline: medTimeline.rows,
