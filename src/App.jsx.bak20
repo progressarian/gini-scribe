@@ -912,7 +912,6 @@ export default function GiniScribe() {
   const [timelineFilter, setTimelineFilter] = useState("All");
   const [timelineDoctor, setTimelineDoctor] = useState("");
   const [expandedDiagnosis, setExpandedDiagnosis] = useState(null);
-  const [expandedPrescription, setExpandedPrescription] = useState(null);
   const [patientFullData, setPatientFullData] = useState(null);
   // Clear stale patient data when switching patients
   useEffect(() => {
@@ -9080,20 +9079,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   allMedsByDate[d].push(m);
                 });
 
-                // Helper: find nearest visit date for context (labs may have dates that don't match any visit)
-                const visitDates = Object.keys(visitCtxByDate).sort();
-                const medDates = Object.keys(allMedsByDate).sort();
-                const findNearest = (dateKey, dates) => {
-                  if (!dateKey || dates.length === 0) return null;
-                  let best = dates[0], bestDiff = Math.abs(new Date(dateKey) - new Date(dates[0]));
-                  for (const d of dates) {
-                    const diff = Math.abs(new Date(dateKey) - new Date(d));
-                    if (diff < bestDiff) { best = d; bestDiff = diff; }
-                  }
-                  // Only match if within 60 days
-                  return bestDiff <= 60 * 86400000 ? best : null;
-                };
-
                 const renderSection = (title, icon, color, charts) => {
                   const hasData = charts.some(c => c.data?.length > 0);
                   if (!hasData) return null;
@@ -9124,9 +9109,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                   <div style={{ fontSize:11, fontWeight:700, color:"#475569", marginBottom:10 }}>📋 What was happening at each reading:</div>
                                   {c.data.slice().reverse().map((dp, di) => {
                                     const dateKey = (dp.test_date || dp.date || "").split("T")[0];
-                                    const ctx = visitCtxByDate[dateKey] || visitCtxByDate[findNearest(dateKey, visitDates)] || {};
-                                    const nearestMedDate = findNearest(dateKey, medDates) || dateKey;
-                                    const allMeds = allMedsByDate[dateKey] || allMedsByDate[nearestMedDate] || [];
+                                    const ctx = visitCtxByDate[dateKey] || {};
+                                    const allMeds = allMedsByDate[dateKey] || [];
                                     // Filter to RELEVANT meds only
                                     const relevantMeds = getMedsForBiomarker(bioKey, allMeds.map(m=>m.pharmacy_match||m.name));
                                     // Filter lifestyle by helps array matching biomarker
@@ -9208,7 +9192,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       { data:outcomesData.ppg, label:"Post-Prandial", unit:" mg/dl", color:"#f97316", target:180, biomarkerKey:"ppg" },
                       { data:outcomesData.bp, label:"BP (Systolic)", unit:" mmHg", color:"#7c3aed", target:130, valueKey:"bp_sys", biomarkerKey:"bp" },
                       { data:outcomesData.weight, label:"Weight", unit:" kg", color:"#2563eb", valueKey:"weight", biomarkerKey:"weight" },
-                      { data:outcomesData.heart_rate, label:"Heart Rate", unit:" bpm", color:"#e11d48", valueKey:"pulse", biomarkerKey:"hr" },
                     ])}
                     {renderSection("Lipids & Kidney", "💧", "#1d4ed8", [
                       { data:outcomesData.ldl, label:"LDL", unit:" mg/dl", color:"#d97706", target:100, biomarkerKey:"ldl" },
@@ -9231,12 +9214,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       { data:outcomesData.ferritin, label:"Ferritin", unit:" ng/ml", color:"#b45309", biomarkerKey:"ferritin" },
                       { data:outcomesData.crp, label:"CRP", unit:" mg/L", color:"#dc2626", target:3, biomarkerKey:"crp" },
                     ])}
-                    {renderSection("Body Composition", "🏋️", "#059669", [
-                        { data:outcomesData.bmi, label:"BMI", unit:" kg/m²", color:"#0d9488", target:25, valueKey:"bmi", biomarkerKey:"bmi" },
+                    {(outcomesData.waist?.length > 0 || outcomesData.body_fat?.length > 0 || outcomesData.muscle_mass?.length > 0) &&
+                      renderSection("Body Composition", "🏋️", "#059669", [
                         { data:outcomesData.waist, label:"Waist", unit:" cm", color:"#059669", valueKey:"waist", biomarkerKey:"waist" },
                         { data:outcomesData.body_fat, label:"Body Fat", unit:"%", color:"#d97706", valueKey:"body_fat", biomarkerKey:"body_fat" },
                         { data:outcomesData.muscle_mass, label:"Muscle Mass", unit:" kg", color:"#2563eb", lowerBetter:false, valueKey:"muscle_mass", biomarkerKey:"muscle_mass" },
-                      ])}
+                      ])
+                    }
                     
                     {/* ── SYMPTOMS TRACKER ── */}
                     {(() => {
@@ -9416,8 +9400,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     lifestyle: v.lifestyle || [],
                     compliance: v.compliance || "",
                     symptoms: (v.symptoms || v.chief_complaints || []).filter(s => !["no gmi","no hypoglycemia","no hypoglycaemia","routine follow-up","follow-up visit","no complaints"].some(x => String(s).toLowerCase().includes(x))),
-                    con_transcript: v.con_transcript || "",
-                    visit_id: v.id,
                     color:"#0369a1", bg:"#f0f9ff"
                   });
                 });
@@ -9680,27 +9662,6 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                     <span key={mi} style={{ fontSize:9, fontWeight:600, padding:"2px 6px", borderRadius:8,
                                       background:"#faf5ff", color:"#7c3aed", border:"1px solid #e9d5ff" }}>💊 {m}</span>
                                   ))}
-                                </div>
-                              )}
-
-                              {/* View Prescription */}
-                              {isVisit && ev.con_transcript && ev.con_transcript.trim().length > 20 && (
-                                <div style={{ marginTop:8 }}>
-                                  <button onClick={(e) => { e.stopPropagation(); setExpandedPrescription(expandedPrescription === ev.visit_id ? null : ev.visit_id); }}
-                                    style={{ fontSize:10, fontWeight:700, padding:"4px 12px", borderRadius:8, cursor:"pointer",
-                                      border: expandedPrescription === ev.visit_id ? "1px solid #0369a1" : "1px solid #e2e8f0",
-                                      background: expandedPrescription === ev.visit_id ? "#f0f9ff" : "white",
-                                      color: expandedPrescription === ev.visit_id ? "#0369a1" : "#64748b" }}>
-                                    {expandedPrescription === ev.visit_id ? "▼ Hide Prescription" : "📄 View Prescription"}
-                                  </button>
-                                  {expandedPrescription === ev.visit_id && (
-                                    <div style={{ marginTop:8, background:"white", border:"1px solid #e2e8f0", borderRadius:10,
-                                      padding:14, maxHeight:400, overflowY:"auto", fontSize:11, lineHeight:"1.6",
-                                      color:"#334155", fontFamily:"'SF Mono', 'Menlo', 'Monaco', monospace", whiteSpace:"pre-wrap",
-                                      boxShadow:"inset 0 1px 3px rgba(0,0,0,0.06)" }}>
-                                      {ev.con_transcript}
-                                    </div>
-                                  )}
                                 </div>
                               )}
                             </div>
