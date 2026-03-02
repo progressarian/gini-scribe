@@ -885,6 +885,7 @@ export default function GiniScribe() {
   const [expandedDocId, setExpandedDocId] = useState(null);
   const labPortalRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState("");
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // {patient_id, name, file_no, phone}
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
   // History entry form
   const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", specialty:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
@@ -1609,6 +1610,25 @@ export default function GiniScribe() {
   // Save current consultation to database + localStorage
   const saveConsultation = async () => {
     if (!patient.name) return;
+
+    // Duplicate check: if this is a NEW patient (not loaded from DB), check file_no and phone
+    if (!dbPatientId && API_URL && (patient.fileNo || patient.phone)) {
+      try {
+        const params = new URLSearchParams();
+        if (patient.fileNo) params.set("file_no", patient.fileNo);
+        if (patient.phone) params.set("phone", patient.phone);
+        const checkResp = await fetch(`${API_URL}/api/patients/check-duplicate?${params}`);
+        const checkData = await checkResp.json();
+        if (checkData.exists && checkData.patient) {
+          const p = checkData.patient;
+          setDuplicateWarning(p);
+          setSaveStatus("");
+          return; // Block save
+        }
+      } catch(e) { console.log("Duplicate check failed, proceeding:", e.message); }
+    }
+    setDuplicateWarning(null);
+
     setSaveStatus("💾 Saving...");
     const record = {
       id: Date.now().toString(),
@@ -1804,6 +1824,7 @@ export default function GiniScribe() {
       address: dbRecord.address || ""
     });
     setDbPatientId(dbRecord.id);
+    setDuplicateWarning(null);
     setPatientFullData(null); // Clear stale data immediately before async fetch
     setHistoryList([]);
     setBulkText(""); setBulkVisits([]); setBulkProgress(""); setBulkSaved(0);
@@ -1900,7 +1921,7 @@ export default function GiniScribe() {
     intakeSavedIds.current.clear();
     setNextVisitDate(""); setMedRecon({}); setMedReconReasons({});
     rxSavedConsultationId.current = null; planPrintSavedRef.current = false;
-    setDbPatientId(null); setPatientFullData(null); setHistoryList([]);
+    setDbPatientId(null); setPatientFullData(null); setHistoryList([]); setDuplicateWarning(null);
     setMoBrief(null); setAppointments([]);
     setImagingFiles([]);
     // Clear remaining patient-specific state
@@ -1925,8 +1946,24 @@ export default function GiniScribe() {
     } catch (err) {}
   }, []);
 
+  const dupCheckTimer = useRef(null);
   const updatePatient = (k, v) => {
     setPatient(p => { const u = { ...p, [k]: v }; if (k==="dob"&&v) { const a=Math.floor((Date.now()-new Date(v).getTime())/31557600000); u.age=a>0?String(a):""; } return u; });
+    // Proactive duplicate check when fileNo or phone is entered (only for new patients)
+    if (!dbPatientId && API_URL && (k === "fileNo" || k === "phone") && v && v.length >= 3) {
+      clearTimeout(dupCheckTimer.current);
+      dupCheckTimer.current = setTimeout(async () => {
+        try {
+          const params = new URLSearchParams();
+          if (k === "fileNo") params.set("file_no", v);
+          if (k === "phone") params.set("phone", v);
+          const resp = await fetch(`${API_URL}/api/patients/check-duplicate?${params}`);
+          const data = await resp.json();
+          if (data.exists && data.patient) setDuplicateWarning(data.patient);
+          else setDuplicateWarning(null);
+        } catch(e) {}
+      }, 600);
+    }
   };
 
   const voiceFillPatient = async (t) => {
@@ -4111,6 +4148,27 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         <div style={{ flex:1 }} />
         {draftSaved && <span style={{ fontSize:9, color:"#94a3b8" }}>{draftSaved}</span>}
         {saveStatus && <span style={{ fontSize:11, color:saveStatus.includes("✅")?"#059669":"#f59e0b", fontWeight:600 }}>{saveStatus}</span>}
+        {duplicateWarning && (
+          <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:9999, background:"#fef2f2", borderBottom:"3px solid #dc2626", padding:"12px 16px", display:"flex", alignItems:"center", gap:10, boxShadow:"0 4px 12px rgba(220,38,38,.2)" }}>
+            <span style={{ fontSize:20 }}>⚠️</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:13, fontWeight:800, color:"#dc2626" }}>Patient Already Exists!</div>
+              <div style={{ fontSize:12, color:"#7f1d1d", marginTop:2 }}>
+                <b>{duplicateWarning.name}</b>{duplicateWarning.file_no ? ` · ${duplicateWarning.file_no}` : ""}{duplicateWarning.phone ? ` · ${duplicateWarning.phone}` : ""}{duplicateWarning.age ? ` · ${duplicateWarning.age}Y/${(duplicateWarning.sex||"?").charAt(0)}` : ""}
+              </div>
+              <div style={{ fontSize:11, color:"#991b1b", marginTop:2 }}>Please look up this patient from Find Patient, or use a different file number.</div>
+            </div>
+            <button onClick={() => {
+              loadPatientDB({ id:duplicateWarning.id, name:duplicateWarning.name, phone:duplicateWarning.phone, file_no:duplicateWarning.file_no, age:duplicateWarning.age, sex:duplicateWarning.sex });
+              setDuplicateWarning(null);
+            }} style={{ padding:"8px 16px", background:"#2563eb", color:"white", border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+              📂 Load This Patient
+            </button>
+            <button onClick={() => setDuplicateWarning(null)} style={{ padding:"8px 12px", background:"white", color:"#dc2626", border:"1.5px solid #fecaca", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              ✕ Dismiss
+            </button>
+          </div>
+        )}
         <div style={{ display:"flex", gap:6 }}>
           {keySet && <button onClick={openSearch} style={{
             background:showSearch?"#1e293b":"#f1f5f9", color:showSearch?"white":"#1e293b",
@@ -4935,9 +4993,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               { k:"address", l:"Address", ph:"House No, Sector, City", span:2 },
             ].map(f => (
               <div key={f.k} style={{ gridColumn:f.span?"span 2":"span 1" }}>
-                <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>{f.l}</label>
+                <label style={{ fontSize:10, fontWeight:600, color: (f.k==="fileNo"||f.k==="phone") && duplicateWarning ? "#dc2626" : "#475569" }}>{f.l}</label>
                 <input type={f.type||"text"} value={patient[f.k]} onChange={e=>updatePatient(f.k,e.target.value)} disabled={f.disabled} placeholder={f.ph}
-                  style={{ width:"100%", padding:"6px 8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:14, boxSizing:"border-box", background:f.disabled?"#f8fafc":"white" }} />
+                  style={{ width:"100%", padding:"6px 8px", border:`1px solid ${(f.k==="fileNo"||f.k==="phone") && duplicateWarning ? "#dc2626" : "#e2e8f0"}`, borderRadius:6, fontSize:14, boxSizing:"border-box", background:f.disabled?"#f8fafc":"white" }} />
               </div>
             ))}
             <div>
@@ -4949,6 +5007,29 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </div>
             </div>
           </div>
+
+          {/* Duplicate Patient Warning */}
+          {!dbPatientId && duplicateWarning && (
+            <div style={{ marginTop:8, padding:10, background:"#fef2f2", border:"2px solid #dc2626", borderRadius:8 }}>
+              <div style={{ fontSize:12, fontWeight:800, color:"#dc2626", marginBottom:4 }}>⚠️ This patient file already exists!</div>
+              <div style={{ fontSize:11, color:"#7f1d1d", marginBottom:6 }}>
+                <b>{duplicateWarning.name}</b>{duplicateWarning.file_no ? ` · ${duplicateWarning.file_no}` : ""}{duplicateWarning.phone ? ` · ${duplicateWarning.phone}` : ""}{duplicateWarning.age ? ` · ${duplicateWarning.age}Y/${(duplicateWarning.sex||"?").charAt(0)}` : ""}
+              </div>
+              <div style={{ fontSize:10, color:"#991b1b", marginBottom:8 }}>Please look up this patient from Find Patient, or use a different file number.</div>
+              <div style={{ display:"flex", gap:6 }}>
+                <button onClick={() => {
+                  loadPatientDB({ id:duplicateWarning.id, name:duplicateWarning.name, phone:duplicateWarning.phone, file_no:duplicateWarning.file_no, age:duplicateWarning.age, sex:duplicateWarning.sex });
+                  setDuplicateWarning(null);
+                }} style={{ flex:1, padding:"8px", background:"#2563eb", color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                  📂 Load Existing Patient
+                </button>
+                <button onClick={() => { updatePatient("fileNo",""); setDuplicateWarning(null); }}
+                  style={{ padding:"8px 12px", background:"white", color:"#dc2626", border:"1.5px solid #fecaca", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                  Clear File No
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* IDs Section */}
           <details style={{ marginTop:10, border:"1px solid #e2e8f0", borderRadius:8, overflow:"hidden" }}>

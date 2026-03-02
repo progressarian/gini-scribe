@@ -212,6 +212,18 @@ app.get("/api/stats", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ============ PATIENT DUPLICATE CHECK (must be before /:id route) ============
+app.get("/api/patients/check-duplicate", async (req, res) => {
+  try {
+    const { file_no, phone, name, age, sex } = req.query;
+    let match = null;
+    if (file_no) match = (await pool.query("SELECT id, name, phone, file_no, age, sex FROM patients WHERE file_no=$1 LIMIT 1", [file_no])).rows[0];
+    if (!match && phone) match = (await pool.query("SELECT id, name, phone, file_no, age, sex FROM patients WHERE phone=$1 LIMIT 1", [phone])).rows[0];
+    if (!match && name && age && sex) match = (await pool.query("SELECT id, name, phone, file_no, age, sex FROM patients WHERE LOWER(name)=LOWER($1) AND age=$2 AND sex=$3 LIMIT 1", [name, parseInt(age), sex])).rows[0];
+    res.json({ exists: !!match, patient: match || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Get single patient — DEDUPLICATED
 app.get("/api/patients/:id", async (req, res) => {
   try {
