@@ -222,10 +222,21 @@ app.get("/api/patients/:id", async (req, res) => {
     const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
       pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
-      // Return ALL medications with prescribing doctor info (client handles dedup for schedule)
-      pool.query(`SELECT m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
+      // Return medications from each doctor's LATEST consultation only (supersedes previous)
+      pool.query(`WITH latest_cons AS (
+        SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id, con_name, mo_name, visit_date
+        FROM consultations WHERE patient_id=$1
+        ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
+      )
+      SELECT m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
         FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
-        WHERE m.patient_id=$1 ORDER BY m.created_at DESC`, [id]),
+        WHERE m.patient_id=$1
+          AND m.is_active = true
+          AND (
+            m.consultation_id IN (SELECT id FROM latest_cons)
+            OR m.consultation_id IS NULL
+          )
+        ORDER BY m.created_at DESC`, [id]),
       // Deduplicate labs: distinct by test+date
       pool.query(`SELECT DISTINCT ON (test_name, test_date) * FROM lab_results
         WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`, [id]),
@@ -399,6 +410,25 @@ app.post("/api/consultations", async (req, res) => {
       if (c?.name) {
         await client.query(`INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity) VALUES ($1,$2,$3,$4,$5,$6)`,
           [patientId, consultationId, t(c.name,200), t(c.status,100), t(c.detail,500), t(c.severity,100)]);
+      }
+    }
+
+    // Auto-stop previous Gini medications not in new plan
+    // Only stops meds from same doctor (conName), keeps external doctor meds active
+    if ((conData?.medications_confirmed || []).length > 0 && n(conName)) {
+      const newMedNames = (conData.medications_confirmed || []).map(m => (m.name||"").toUpperCase().replace(/\s+/g,""));
+      const prevMeds = (await client.query(
+        `SELECT id, name FROM medications WHERE patient_id=$1 AND consultation_id != $2 AND is_active=true
+         AND consultation_id IN (SELECT id FROM consultations WHERE patient_id=$1 AND con_name=$3)`,
+        [patientId, consultationId, conName]
+      )).rows;
+      const toStop = prevMeds.filter(m => !newMedNames.includes((m.name||"").toUpperCase().replace(/\s+/g,"")));
+      if (toStop.length > 0) {
+        await client.query(
+          `UPDATE medications SET is_active=false WHERE id = ANY($1::int[])`,
+          [toStop.map(m => m.id)]
+        );
+        console.log(`  ↳ Auto-stopped ${toStop.length} previous meds from ${conName}: ${toStop.map(m=>m.name).join(", ")}`);
       }
     }
 

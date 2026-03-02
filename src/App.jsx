@@ -2644,7 +2644,7 @@ Format: Use markdown. Bold key numbers. Use tables where helpful.`;
       if (fuExtMeds.length) extra += `\nNew external medicines: ${fuExtMeds.map(m=>`${m.name} ${m.dose} ${m.doctor?`(from ${m.doctor})`:""}`).join(", ")}`;
       if (fuNewConditions.length) extra += `\nNew conditions since last visit: ${fuNewConditions.join(", ")}`;
       const lastCon = pfd.consultations[0];
-      const lastGoals = lastCon?.con_data?.goals || [];
+      const lastGoals = conData?.goals || lastCon?.con_data?.goals || [];
       if (lastGoals.length) extra += `\nPrevious Goals: ${lastGoals.map(g=>`${g.marker}: ${g.current} → target ${g.target}`).join(", ")}`;
     }
     // Add imaging findings context
@@ -2968,6 +2968,7 @@ ${parts.join("\n")}`;
 
   // External/previous medications from DB (for reconciliation + medicine card)
   // Server now returns ALL medications with prescriber info from consultation JOIN
+  // Only include meds from OTHER doctors — same-doctor old meds are superseded by current plan
   const externalMeds = (() => {
     // Always use DB medications for external meds view — they have prescriber info
     const meds = pfd?.medications || [];
@@ -2975,13 +2976,25 @@ ${parts.join("\n")}`;
       // Fall back to MO captured meds if no DB meds
       return sa(moData,"previous_medications").map(m => ({...m, prescriber: "Previous", isNew: false, route: m.route||"Oral"}));
     }
+    // Current consultation's doctor name
+    const currentDoctor = conName || pfd?.consultations?.[0]?.con_name || "";
+    // Current plan med names for dedup
+    const planMedNames = new Set(
+      sa(conData,"medications_confirmed").map(m => (m.name||"").toUpperCase().replace(/\s+/g,""))
+    );
     // Deduplicate by name (keep latest per name for reconciliation)
     const seen = new Set();
     return meds.filter(m => {
       const key = (m.name||"").toUpperCase().replace(/\s+/g,"");
       if (seen.has(key)) return false;
       seen.add(key);
-      return m.is_active !== false;
+      if (m.is_active === false) return false;
+      // Skip meds already in current plan
+      if (planMedNames.has(key)) return false;
+      // Skip meds from same doctor (superseded by current plan)
+      const medDoctor = m.prescriber || m.con_name || "";
+      if (currentDoctor && medDoctor === currentDoctor) return false;
+      return true;
     }).map(m => ({
       name: m.name || m.pharmacy_match || "",
       composition: m.composition || "",
@@ -4246,13 +4259,13 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <div style={{ background:"linear-gradient(135deg,#f0f9ff,#faf5ff)", borderRadius:12, border:"2px solid #c7d2fe", padding:14, marginBottom:12 }}>
               {/* One-liner Summary */}
               <div style={{ fontSize:11, color:"#374151", lineHeight:1.7, padding:"8px 12px", background:"white", borderRadius:8, border:"1px solid #e9d5ff", marginBottom:10 }}>
-                <b>{patient.name} | {patient.age}Y/{patient.sex?.charAt(0)||"?"} | {(pfd?.diagnoses||[]).slice(0,4).map(d=>d.label||d.diagnosis_id).join(" + ")||"No known dx"} | {(pfd?.medications||[]).length} meds | {pfd?.consultations?.length||0} visits</b>
+                <b>{patient.name} | {patient.age}Y/{patient.sex?.charAt(0)||"?"} | {(pfd?.diagnoses||[]).slice(0,4).map(d=>d.label||d.diagnosis_id).join(" + ")||"No known dx"} | {[...new Set((pfd?.medications||[]).map(m=>(m.name||"").toUpperCase().replace(/\s+/g,"")))].length} meds | {pfd?.consultations?.length||0} visits</b>
               </div>
 
               {/* Risk Flags */}
               {(() => {
                 const flags = [];
-                const labs = pfd?.labs || [];
+                const labs = pfd?.lab_results || [];
                 const hba1c = labs.find(l=>l.test_name==="HbA1c");
                 if (hba1c && parseFloat(hba1c.result) > 8) flags.push({t:"🔴 HbA1c "+hba1c.result+"% — uncontrolled",c:"#dc2626",bg:"#fef2f2"});
                 const cr = labs.find(l=>l.test_name==="Creatinine"||l.test_name==="Cr");
@@ -4264,6 +4277,57 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     {flags.map((f,i) => <span key={i} style={{ fontSize:9, background:f.bg, color:f.c, padding:"3px 8px", borderRadius:4, fontWeight:700 }}>{f.t}</span>)}
                   </div>
                 ) : null;
+              })()}
+
+              {/* Patient Trajectory Status & Biomarker Control */}
+              {(() => {
+                const labs = pfd?.lab_results || [];
+                const consults = pfd?.consultations || [];
+                if (labs.length === 0) return null;
+                const biomarkers = [];
+                const a1c = labs.find(l=>l.test_name==="HbA1c");
+                if (a1c) { const val = parseFloat(a1c.result); biomarkers.push({ name:"HbA1c", val:`${val}%`, atTarget: val<7, target:"<7%" }); }
+                const fbg = labs.find(l=>l.test_name==="FBS"||l.test_name==="Fasting Glucose");
+                if (fbg) { const val = parseFloat(fbg.result); biomarkers.push({ name:"FBG", val:`${val}`, atTarget: val<110, target:"<110" }); }
+                const egfr = labs.find(l=>l.test_name==="eGFR");
+                if (egfr) { const val = parseFloat(egfr.result); biomarkers.push({ name:"eGFR", val:`${val}`, atTarget: val>=60, target:"≥60" }); }
+                const ldl = labs.find(l=>l.test_name==="LDL");
+                if (ldl) { const val = parseFloat(ldl.result); biomarkers.push({ name:"LDL", val:`${val}`, atTarget: val<100, target:"<100" }); }
+                const tsh = labs.find(l=>l.test_name==="TSH");
+                if (tsh) { const val = parseFloat(tsh.result); biomarkers.push({ name:"TSH", val:`${val}`, atTarget: val>=0.4&&val<=4.5, target:"0.4-4.5" }); }
+                const bp = pfd?.vitals?.[0];
+                if (bp?.bp_sys) { const atT = bp.bp_sys<130 && (bp.bp_dia||0)<80; biomarkers.push({ name:"BP", val:`${bp.bp_sys}/${bp.bp_dia||"?"}`, atTarget: atT, target:"<130/80" }); }
+                if (biomarkers.length === 0) return null;
+                const controlled = biomarkers.filter(b=>b.atTarget).length;
+                const total = biomarkers.length;
+                const uncontrolled = biomarkers.filter(b=>!b.atTarget);
+                let status, sC, sBg, sI;
+                if (controlled/total >= 0.8) { status="Well Controlled"; sC="#059669"; sBg="#f0fdf4"; sI="✅"; }
+                else if (controlled/total >= 0.5) { status="Partially Controlled"; sC="#d97706"; sBg="#fffbeb"; sI="⚠️"; }
+                else { status="Needs Attention"; sC="#dc2626"; sBg="#fef2f2"; sI="🔴"; }
+                return (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                      <span style={{ fontSize:12, fontWeight:800, background:sBg, color:sC, padding:"4px 12px", borderRadius:6, border:`1.5px solid ${sC}30` }}>
+                        {sI} {status} — {controlled}/{total} at target
+                      </span>
+                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                      {biomarkers.map((b,i) => (
+                        <span key={i} style={{ fontSize:9, padding:"3px 7px", borderRadius:4, fontWeight:700,
+                          background: b.atTarget?"#f0fdf4":"#fef2f2", color: b.atTarget?"#059669":"#dc2626",
+                          border:`1px solid ${b.atTarget?"#bbf7d0":"#fecaca"}` }}>
+                          {b.atTarget?"✓":"✗"} {b.name}: {b.val} {!b.atTarget?`(→${b.target})`:""}
+                        </span>
+                      ))}
+                    </div>
+                    {uncontrolled.length > 0 && (
+                      <div style={{ marginTop:6, fontSize:10, color:"#dc2626", fontWeight:600, background:"#fef2f2", padding:"4px 8px", borderRadius:4, border:"1px solid #fecaca" }}>
+                        ⚡ Focus: {uncontrolled.map(b=>`${b.name} ${b.val} → ${b.target}`).join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                );
               })()}
 
               {/* Active Diagnoses */}
@@ -4281,12 +4345,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               )}
 
               {/* Key Lab Values */}
-              {(pfd?.labs||[]).length > 0 && (
+              {(pfd?.lab_results||[]).length > 0 && (
                 <div style={{ marginBottom:8 }}>
                   <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>🔬 KEY LABS</div>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
                     {["HbA1c","FBS","PPBS","Creatinine","eGFR","LDL","TSH","Vit D","Vit B12"].map(name => {
-                      const lab = (pfd?.labs||[]).find(l=>l.test_name===name);
+                      const lab = (pfd?.lab_results||[]).find(l=>l.test_name===name);
                       if (!lab) return null;
                       return <span key={name} style={{ fontSize:10, padding:"2px 6px", borderRadius:4, fontWeight:600,
                         background:lab.flag==="H"?"#fef2f2":lab.flag==="L"?"#eff6ff":"#f0fdf4",
@@ -4299,16 +4363,25 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 </div>
               )}
 
-              {/* Medications */}
+              {/* Medications — current plan + active external only */}
               {(pfd?.medications||[]).length > 0 && (
                 <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>💊 MEDICATIONS ({(pfd?.medications||[]).length})</div>
+                  <div style={{ fontSize:10, fontWeight:700, color:"#6d28d9", marginBottom:4 }}>💊 ACTIVE MEDICATIONS ({(pfd?.medications||[]).filter(m=>m.is_active!==false).length})</div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:2 }}>
-                    {(pfd?.medications||[]).slice(0,10).map((m,i) => (
-                      <div key={i} style={{ fontSize:10, padding:"2px 6px", background:i%2?"#f8fafc":"white", borderRadius:3 }}>
-                        <strong>{m.name}</strong> <span style={{ color:"#64748b" }}>{m.dose||""} {m.frequency||""}</span>
-                      </div>
-                    ))}
+                    {(() => {
+                      const seen = new Set();
+                      return (pfd?.medications||[]).filter(m => {
+                        if (m.is_active === false) return false;
+                        const k = (m.name||"").toUpperCase().replace(/\s+/g,"");
+                        if (seen.has(k)) return false;
+                        seen.add(k); return true;
+                      }).slice(0,12).map((m,i) => (
+                        <div key={i} style={{ fontSize:10, padding:"2px 6px", background:m.is_new?"#f0fdf4":i%2?"#f8fafc":"white", borderRadius:3 }}>
+                          <strong>{m.name}</strong> <span style={{ color:"#64748b" }}>{m.dose||""} {m.frequency||""}</span>
+                          {m.is_new && <span style={{ fontSize:7, color:"#059669", fontWeight:800, marginLeft:3 }}>NEW</span>}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
@@ -4346,7 +4419,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
             <div style={{ background:"#f0fdf4", borderRadius:10, padding:12, textAlign:"center" }}>
               <div style={{ fontSize:22, fontWeight:800, color:"#059669" }}>
-                {pfd?.labs?.find(l=>l.test_name==="HbA1c")?.result ? `${pfd.labs.find(l=>l.test_name==="HbA1c").result}%` : "—"}
+                {pfd?.lab_results?.find(l=>l.test_name==="HbA1c")?.result ? `${pfd.lab_results.find(l=>l.test_name==="HbA1c").result}%` : "—"}
               </div>
               <div style={{ fontSize:10, fontWeight:600, color:"#64748b" }}>Last HbA1c</div>
             </div>
@@ -4728,7 +4801,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             const lastCon = pfd.consultations[0];
             const lastDate = lastCon?.visit_date ? new Date(String(lastCon.visit_date).slice(0,10)+"T12:00:00") : null;
             const daysSince = lastDate ? Math.round((Date.now() - lastDate) / 86400000) : null;
-            const lastConData = lastCon?.con_data || {};
+            const lastConData = conData || lastCon?.con_data || {};
             const lastGoals = lastConData.goals || [];
             const lastFollowUp = lastConData.follow_up || {};
             const orderedTests = lastFollowUp.tests_to_bring || lastConData.investigations_to_order || [];
@@ -5500,7 +5573,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           {/* Ordered tests checklist */}
           {(() => {
             const lastCon = pfd?.consultations?.[0];
-            const lastConData = lastCon?.con_data || {};
+            const lastConData = conData || lastCon?.con_data || {};
             const orderedTests = lastConData.follow_up?.tests_to_bring || lastConData.investigations_to_order || [];
             if (!orderedTests.length) return null;
             const loadedTests = labData?.panels?.flatMap(p=>p.tests.map(t=>t.test_name.toLowerCase())) || [];
@@ -5543,7 +5616,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             const lastCon = pfd.consultations[0];
             const lastDate = lastCon?.visit_date ? new Date(String(lastCon.visit_date).slice(0,10)+"T12:00:00") : null;
             const daysSince = lastDate ? Math.round((Date.now() - lastDate) / 86400000) : null;
-            const lastConData = lastCon?.con_data || {};
+            const lastConData = conData || lastCon?.con_data || {};
             const lastGoals = lastConData.goals || [];
             const uniqueDx = [...new Map((pfd.diagnoses||[]).map(d=>[d.diagnosis_id||d.label,d])).values()];
             const activeMeds = (pfd.medications||[]).filter(m=>m.is_active!==false);
@@ -5763,9 +5836,43 @@ Write ONLY the summary paragraph, no headers or formatting.`;
 
           {(() => {
             const lastCon = pfd?.consultations?.[0];
-            const lastConData = lastCon?.con_data || {};
-            const lastMeds = lastConData.medications_confirmed || [];
-            const lastGoals = lastConData.goals || [];
+            // FIX: Use conData state (populated from API) not pfd.con_data (not returned in patient list)
+            const lastConData = conData || lastCon?.con_data || {};
+            // Fall back to DB medications if conData has no medications_confirmed (e.g. bulk uploads)
+            const conMeds = lastConData.medications_confirmed || [];
+            const lastMeds = conMeds.length > 0 ? conMeds : (() => {
+              // Build from pfd.medications (already filtered to active + latest by API)
+              const seen = new Set();
+              return (pfd?.medications || []).filter(m => {
+                const k = (m.name||"").toUpperCase().replace(/\s+/g,"");
+                if (seen.has(k)) return false; seen.add(k); return true;
+              }).map(m => ({
+                name: m.name||"", composition: m.composition||"", dose: m.dose||"",
+                frequency: m.frequency||"", timing: m.timing||"", route: m.route||"Oral",
+                forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [], isNew: false
+              }));
+            })();
+            const lastGoals = lastConData.goals || conData?.goals || [];
+
+            // External meds from other doctors not already in lastMeds
+            const lastMedNames = new Set(lastMeds.map(m => (m.name||"").toUpperCase().replace(/\s+/g,"")));
+            const extMeds = (pfd?.medications || []).filter(m =>
+              m.is_active !== false &&
+              !lastMedNames.has((m.name||"").toUpperCase().replace(/\s+/g,"")) &&
+              (m.prescriber || m.con_name || "") !== (pfd?.consultations?.[0]?.con_name || "")
+            ).map(m => ({
+              name: m.name||"", composition: m.composition||"", dose: m.dose||"",
+              frequency: m.frequency||"", timing: m.timing||"", route: m.route||"Oral",
+              forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [],
+              isExternal: true, prescriber: m.prescriber || m.con_name || "External"
+            }));
+            // Deduplicate external meds
+            const extSeen = new Set();
+            const uniqueExtMeds = extMeds.filter(m => {
+              const k = (m.name||"").toUpperCase().replace(/\s+/g,"");
+              if (extSeen.has(k)) return false;
+              extSeen.add(k); return true;
+            });
 
             return (
               <div>
@@ -5809,6 +5916,34 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           </td>
                         </tr>
                       ))}
+                      {/* External consultant medications */}
+                      {uniqueExtMeds.length > 0 && (
+                        <>
+                          <tr><td colSpan={5} style={{ padding:"6px 8px", background:"#f0f9ff", fontSize:9, fontWeight:800, color:"#0369a1", borderBottom:"1px solid #bae6fd" }}>
+                            🏥 FROM OTHER CONSULTANTS ({uniqueExtMeds.length})
+                          </td></tr>
+                          {uniqueExtMeds.map((m, i) => {
+                            const extIdx = `ext_${i}`;
+                            const edit = fuMedEdits[extIdx] || {};
+                            const stopped = edit.action === "STOP";
+                            return (
+                              <tr key={extIdx} style={{ borderBottom:"1px solid #e0f2fe", opacity:stopped?.35:1, background:stopped?"#fef2f2":"#f0f9ff" }}>
+                                <td style={{ padding:"6px 8px", fontWeight:700, textDecoration:stopped?"line-through":"none" }}>
+                                  {m.name}
+                                  <div style={{ fontSize:8, color:"#0369a1", fontWeight:400 }}>via {m.prescriber}</div>
+                                </td>
+                                <td style={{ padding:"6px 8px" }}><input defaultValue={m.dose||""} disabled={stopped} style={{ width:"100%", padding:"3px 5px", border:"1.5px solid #bae6fd", borderRadius:4, fontSize:11, fontWeight:600, boxSizing:"border-box" }}
+                                  onChange={e=>setFuMedEdits(p=>({...p,[extIdx]:{...(p[extIdx]||{}),dose:e.target.value,action:"MODIFY"}}))} /></td>
+                                <td style={{ padding:"6px 8px" }}><input defaultValue={m.frequency||""} disabled={stopped} style={{ width:50, padding:"3px 5px", border:"1.5px solid #bae6fd", borderRadius:4, fontSize:11, boxSizing:"border-box" }}
+                                  onChange={e=>setFuMedEdits(p=>({...p,[extIdx]:{...(p[extIdx]||{}),freq:e.target.value,action:"MODIFY"}}))} /></td>
+                                <td style={{ padding:"6px 8px", fontSize:9, color:"#94a3b8" }}>{(m.forDiagnosis||[]).join(", ")}</td>
+                                <td style={{ padding:"6px 8px", textAlign:"center" }}><button onClick={()=>setFuMedEdits(p=>({...p,[extIdx]:{...(p[extIdx]||{}),action:stopped?"CONTINUE":"STOP"}}))}
+                                  style={{ fontSize:9, padding:"3px 8px", borderRadius:4, border:"none", cursor:"pointer", fontWeight:700, background:stopped?"#f0fdf4":"#fef2f2", color:stopped?"#059669":"#dc2626" }}>{stopped?"↩":"🛑"}</button></td>
+                              </tr>
+                            );
+                          })}
+                        </>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -5993,10 +6128,21 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 This will use your med edits to build the treatment plan. For more intelligent analysis, try Shadow AI.
               </div>
               <button onClick={()=>{
-                // Build conData from edits
-                const lastCon = pfd?.consultations?.[0];
-                const lastConData = lastCon?.con_data || {};
-                const lastMeds = lastConData.medications_confirmed || [];
+                // Build conData from edits — use conData state (NOT pfd.con_data which is empty)
+                const lastConData = conData || pfd?.consultations?.[0]?.con_data || {};
+                // Fall back to DB medications if con_data has no medications_confirmed
+                const conMeds = lastConData.medications_confirmed || [];
+                const lastMeds = conMeds.length > 0 ? conMeds : (() => {
+                  const seen = new Set();
+                  return (pfd?.medications || []).filter(m => {
+                    const k = (m.name||"").toUpperCase().replace(/\s+/g,"");
+                    if (seen.has(k)) return false; seen.add(k); return true;
+                  }).map(m => ({
+                    name: m.name||"", composition: m.composition||"", dose: m.dose||"",
+                    frequency: m.frequency||"", timing: m.timing||"", route: m.route||"Oral",
+                    forDiagnosis: m.for_diagnosis ? [m.for_diagnosis] : [], isNew: false
+                  }));
+                })();
                 const meds = lastMeds.filter((m,i)=>fuMedEdits[i]?.action!=="STOP").map((m,i)=>{
                   const edit = fuMedEdits[i]||{};
                   return {...m, dose:edit.dose||m.dose, frequency:edit.freq||m.frequency, isNew:false, _shadowAction:edit.action==="MODIFY"?"MODIFY":"CONTINUE"};
@@ -6004,10 +6150,27 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 fuNewMeds.filter(nm=>nm.name.trim()).forEach(nm=>{
                   meds.push({name:nm.name.toUpperCase(),dose:nm.dose,frequency:nm.freq,timing:nm.timing,isNew:true,route:"Oral",forDiagnosis:[nm.forDx||""],_shadowAction:"ADD"});
                 });
+                // Include external consultant meds that weren't stopped
+                const medNames = new Set(meds.map(m=>(m.name||"").toUpperCase().replace(/\s+/g,"")));
+                (pfd?.medications||[]).filter(m =>
+                  m.is_active !== false &&
+                  !medNames.has((m.name||"").toUpperCase().replace(/\s+/g,"")) &&
+                  (m.prescriber||m.con_name||"") !== (pfd?.consultations?.[0]?.con_name||"") &&
+                  fuMedEdits[`ext_${(pfd?.medications||[]).filter(em=>em.is_active!==false&&!medNames.has((em.name||"").toUpperCase().replace(/\s+/g,""))).indexOf(m)}`]?.action !== "STOP"
+                ).forEach(m => {
+                  const k = (m.name||"").toUpperCase().replace(/\s+/g,"");
+                  if (!medNames.has(k)) {
+                    medNames.add(k);
+                    meds.push({name:m.name||"",composition:m.composition||"",dose:m.dose||"",frequency:m.frequency||"",timing:m.timing||"",route:m.route||"Oral",isNew:false,forDiagnosis:m.for_diagnosis?[m.for_diagnosis]:[],_shadowAction:"CONTINUE",prescriber:m.prescriber||m.con_name||"External"});
+                  }
+                });
+                const stoppedMeds = [
+                  ...lastMeds.filter((m,i)=>fuMedEdits[i]?.action==="STOP").map(m=>({name:m.name,reason:"Stopped at follow-up"})),
+                ];
                 const newConData = {
                   ...lastConData,
                   medications_confirmed: fixConMedicines({medications_confirmed:meds}).medications_confirmed,
-                  medications_stopped: lastMeds.filter((m,i)=>fuMedEdits[i]?.action==="STOP").map(m=>({name:m.name,reason:"Stopped at follow-up"})),
+                  medications_stopped: stoppedMeds,
                   assessment_summary: lastConData.assessment_summary || `Follow-up visit. ${Object.values(fuMedEdits).filter(e=>e.action==="MODIFY").length} medications modified, ${Object.values(fuMedEdits).filter(e=>e.action==="STOP").length} stopped, ${fuNewMeds.filter(m=>m.name).length} new added.`,
                 };
                 setConData(newConData);
