@@ -436,6 +436,13 @@ app.post("/api/consultations", async (req, res) => {
     console.log(`✅ Saved: patient=${patientId} consultation=${consultationId}`);
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
 
+    // Auto-mark today's appointment as completed (non-blocking)
+    pool.query(
+      `UPDATE appointments SET status='completed', updated_at=NOW()
+       WHERE patient_id=$1 AND appointment_date=CURRENT_DATE AND status='scheduled'`,
+      [patientId]
+    ).catch(()=>{});
+
     // ── Sync to MyHealth Genie (non-blocking) ──
     const visit = {
       consultation_id: consultationId,
@@ -1312,6 +1319,54 @@ app.get("/api/reports/clinical-intelligence/export", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// ============ APPOINTMENTS ============
+app.get("/api/appointments", async (req, res) => {
+  try {
+    const { date, doctor, status } = req.query;
+    const d = date || new Date().toISOString().split("T")[0];
+    let q = `SELECT a.*, p.age, p.sex FROM appointments a LEFT JOIN patients p ON p.id = a.patient_id WHERE a.appointment_date = $1`;
+    const params = [d];
+    if (doctor) { params.push(doctor); q += ` AND a.doctor_name = $${params.length}`; }
+    if (status) { params.push(status); q += ` AND a.status = $${params.length}`; }
+    q += ` ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC`;
+    const { rows } = await pool.query(q, params);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/appointments", async (req, res) => {
+  try {
+    const { patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes } = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [patient_id||null, patient_name, file_no||null, phone||null, doctor_name, appointment_date||new Date().toISOString().split("T")[0], time_slot||null, visit_type||'OPD', notes||null]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/api/appointments/:id", async (req, res) => {
+  try {
+    const { doctor_name, appointment_date, time_slot, visit_type, status, notes } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE appointments SET doctor_name=COALESCE($2,doctor_name), appointment_date=COALESCE($3,appointment_date),
+       time_slot=COALESCE($4,time_slot), visit_type=COALESCE($5,visit_type), status=COALESCE($6,status),
+       notes=COALESCE($7,notes), updated_at=NOW() WHERE id=$1 RETURNING *`,
+      [req.params.id, doctor_name, appointment_date, time_slot, visit_type, status, notes]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/appointments/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM appointments WHERE id=$1", [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ============ SERVE FRONTEND ============
 const distPath = path.join(__dirname, "..", "dist");

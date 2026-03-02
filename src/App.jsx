@@ -953,6 +953,10 @@ export default function GiniScribe() {
   const [visitActive, setVisitActive] = useState(false); // is a visit in progress?
   const [visitId, setVisitId] = useState(null); // local visit id
   const [appointments, setAppointments] = useState([]); // [{id,dt,tm,ty,sp,doc,st,notes}]
+  const [todayAppointments, setTodayAppointments] = useState([]);
+  const [todayApptLoading, setTodayApptLoading] = useState(false);
+  const [showQuickBook, setShowQuickBook] = useState(false);
+  const [quickBookPatient, setQuickBookPatient] = useState({ name:"", file_no:"", phone:"" });
   const [showBooking, setShowBooking] = useState(false);
   const [bookForm, setBookForm] = useState({ dt:"", tm:"", ty:"OPD", sp:"", doc:"", notes:"", labPickup:"hospital", labTests:[] });
   const [editApptId, setEditApptId] = useState(null);
@@ -1455,17 +1459,50 @@ export default function GiniScribe() {
     setShowBooking(true);
   };
 
-  const saveBooking = () => {
-    if (editApptId) {
-      setAppointments(prev => prev.map(a => a.id === editApptId ? {...a, ...bookForm} : a));
-    } else {
-      setAppointments(prev => [...prev, { id: "apt_"+Date.now(), ...bookForm, st:"scheduled" }]);
+  const saveBooking = async () => {
+    const apptData = {
+      patient_id: dbPatientId || null,
+      patient_name: patient.name || "",
+      file_no: patient.fileNo || "",
+      phone: patient.phone || "",
+      doctor_name: bookForm.doc || "",
+      appointment_date: bookForm.dt || new Date().toISOString().split("T")[0],
+      time_slot: bookForm.tm || null,
+      visit_type: bookForm.ty || "OPD",
+      notes: bookForm.notes || null
+    };
+    try {
+      if (editApptId && typeof editApptId === "number") {
+        await fetch(`${API_URL}/api/appointments/${editApptId}`, {
+          method: "PUT", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(apptData)
+        });
+      } else {
+        const resp = await fetch(`${API_URL}/api/appointments`, {
+          method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(apptData)
+        });
+        const saved = await resp.json();
+        // Also add to local per-patient appointments
+        setAppointments(prev => [...prev, { id: saved.id || "apt_"+Date.now(), ...bookForm, st:"scheduled" }]);
+      }
+      fetchTodayAppointments();
+    } catch(e) {
+      // Fallback to local-only
+      if (editApptId) {
+        setAppointments(prev => prev.map(a => a.id === editApptId ? {...a, ...bookForm} : a));
+      } else {
+        setAppointments(prev => [...prev, { id: "apt_"+Date.now(), ...bookForm, st:"scheduled" }]);
+      }
     }
     setShowBooking(false);
   };
 
-  const cancelAppt = (id) => {
+  const cancelAppt = async (id) => {
     setAppointments(prev => prev.filter(a => a.id !== id));
+    if (typeof id === "number" && API_URL) {
+      try { await fetch(`${API_URL}/api/appointments/${id}`, { method: "DELETE" }); fetchTodayAppointments(); } catch(e) {}
+    }
   };
 
   // Auth helper: headers with token
@@ -1479,6 +1516,19 @@ export default function GiniScribe() {
   useEffect(() => {
     if (API_URL) fetch(`${API_URL}/api/doctors`).then(r=>r.json()).then(setDoctorsList).catch(()=>{});
   }, []);
+
+  // Load today's appointments on mount
+  const fetchTodayAppointments = async () => {
+    if (!API_URL) return;
+    setTodayApptLoading(true);
+    try {
+      const resp = await fetch(`${API_URL}/api/appointments`);
+      const data = await resp.json();
+      setTodayAppointments(Array.isArray(data) ? data : []);
+    } catch(e) { console.error("Appointments fetch error:", e); }
+    setTodayApptLoading(false);
+  };
+  useEffect(() => { fetchTodayAppointments(); }, []);
 
   // Verify auth session on mount
   useEffect(() => {
@@ -4109,6 +4159,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
               <button onClick={()=>setShowSearch(false)} style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px", fontSize:13, fontWeight:700, cursor:"pointer", color:"#475569" }}>← Back</button>
               <div style={{ fontSize:18, fontWeight:800, color:"#1e293b" }}>Find Patient</div>
+              <button onClick={()=>{ setEditApptId(null); setBookForm({ dt:new Date().toISOString().split("T")[0], tm:"", ty:"OPD", sp:"", doc:"", notes:"" }); setShowQuickBook(!showQuickBook); }}
+                style={{ padding:"8px 14px", background:"linear-gradient(135deg,#2563eb,#1e40af)", color:"white", border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}>📅 + Book</button>
               <div style={{ flex:1 }} />
               {searchStats && (
                 <div style={{ display:"flex", gap:8 }}>
@@ -4146,6 +4198,163 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           </div>
           {/* Search Results */}
           <div style={{ flex:1, overflow:"auto", padding:"8px 16px" }}>
+
+            {/* ═══ TODAY'S APPOINTMENTS ═══ */}
+            {!searchQuery && todayAppointments.length > 0 && (
+              <div style={{ marginBottom:12 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:"#1e40af" }}>📅 Today's Appointments ({todayAppointments.length})</div>
+                  <button onClick={fetchTodayAppointments} style={{ fontSize:10, padding:"4px 10px", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:6, cursor:"pointer", color:"#2563eb", fontWeight:600 }}>↻ Refresh</button>
+                </div>
+                {todayAppointments.map(a => {
+                  const isCompleted = a.status === "completed" || a.status === "in-progress";
+                  return (
+                    <div key={a.id} onClick={() => {
+                      if (a.patient_id) {
+                        loadPatientDB({ id: a.patient_id, name: a.patient_name, phone: a.phone, file_no: a.file_no });
+                      }
+                    }} style={{
+                      display:"flex", alignItems:"center", gap:10, padding:"10px 12px", borderRadius:10, marginBottom:4,
+                      background: isCompleted ? "#f0fdf4" : "white",
+                      border: `1.5px solid ${isCompleted ? "#bbf7d0" : a.status==="cancelled" ? "#fecaca" : "#e2e8f0"}`,
+                      cursor: a.patient_id ? "pointer" : "default",
+                      opacity: a.status === "cancelled" ? 0.5 : 1,
+                      transition: "all .15s"
+                    }}
+                      onMouseEnter={e => { if(a.patient_id) e.currentTarget.style.background = isCompleted ? "#dcfce7" : "#f0f9ff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = isCompleted ? "#f0fdf4" : "white"; }}>
+
+                      {/* Time */}
+                      <div style={{ width:55, textAlign:"center", flexShrink:0 }}>
+                        <div style={{ fontSize:14, fontWeight:800, color: isCompleted ? "#059669" : "#1e40af" }}>
+                          {a.time_slot ? new Date(`2000-01-01T${a.time_slot}`).toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit",hour12:true}) : "—"}
+                        </div>
+                        <div style={{ fontSize:8, fontWeight:700, color:"#94a3b8", textTransform:"uppercase" }}>{a.visit_type||"OPD"}</div>
+                      </div>
+
+                      {/* Patient Info */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:800, color:"#1e293b", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {a.patient_name || "Unknown"}
+                          {a.age ? ` (${a.age}Y/${(a.sex||"?").charAt(0)})` : ""}
+                        </div>
+                        <div style={{ fontSize:10, color:"#64748b" }}>
+                          {a.file_no ? `#${a.file_no}` : ""}{a.file_no && a.phone ? " · " : ""}{a.phone || ""}
+                        </div>
+                      </div>
+
+                      {/* Doctor */}
+                      <div style={{ fontSize:10, fontWeight:600, color:"#6d28d9", textAlign:"right", flexShrink:0 }}>
+                        {a.doctor_name || ""}
+                      </div>
+
+                      {/* Status */}
+                      <div style={{ flexShrink:0 }}>
+                        {isCompleted ? (
+                          <span style={{ fontSize:9, fontWeight:700, background:"#f0fdf4", color:"#059669", padding:"3px 8px", borderRadius:4, border:"1px solid #bbf7d0" }}>✅ Done</span>
+                        ) : a.status === "cancelled" ? (
+                          <span style={{ fontSize:9, fontWeight:700, background:"#fef2f2", color:"#dc2626", padding:"3px 8px", borderRadius:4 }}>Cancelled</span>
+                        ) : (
+                          <div style={{ display:"flex", gap:3 }}>
+                            <button onClick={e => { e.stopPropagation();
+                              fetch(`${API_URL}/api/appointments/${a.id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({status:"completed"})}).then(()=>fetchTodayAppointments());
+                            }} style={{ fontSize:9, padding:"3px 8px", borderRadius:4, border:"none", cursor:"pointer", fontWeight:700, background:"#f0fdf4", color:"#059669" }}>✓</button>
+                            <button onClick={e => { e.stopPropagation();
+                              fetch(`${API_URL}/api/appointments/${a.id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({status:"cancelled"})}).then(()=>fetchTodayAppointments());
+                            }} style={{ fontSize:9, padding:"3px 8px", borderRadius:4, border:"none", cursor:"pointer", fontWeight:700, background:"#fef2f2", color:"#dc2626" }}>✕</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {!searchQuery && todayAppointments.length === 0 && !todayApptLoading && (
+              <div style={{ textAlign:"center", padding:"16px", color:"#94a3b8", fontSize:12 }}>No appointments booked for today</div>
+            )}
+
+            {/* ═══ QUICK BOOK FORM ═══ */}
+            {showQuickBook && (
+              <div style={{ background:"white", border:"2px solid #3b82f6", borderRadius:12, padding:16, marginBottom:12 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+                  <span style={{ fontSize:14, fontWeight:800, color:"#1e40af" }}>📅 Book Appointment</span>
+                  <button onClick={()=>setShowQuickBook(false)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#94a3b8" }}>✕</button>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:8 }}>
+                  <div>
+                    <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Patient Name *</label>
+                    <input value={quickBookPatient.name} onChange={e=>setQuickBookPatient({...quickBookPatient, name:e.target.value})} placeholder="Patient name"
+                      style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>File No</label>
+                    <input value={quickBookPatient.file_no} onChange={e=>setQuickBookPatient({...quickBookPatient, file_no:e.target.value})} placeholder="P_XXXXX"
+                      style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Phone</label>
+                    <input value={quickBookPatient.phone} onChange={e=>setQuickBookPatient({...quickBookPatient, phone:e.target.value})} placeholder="Mobile"
+                      style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:8 }}>
+                  <div>
+                    <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Date</label>
+                    <input type="date" value={bookForm.dt} onChange={e=>setBookForm({...bookForm, dt:e.target.value})}
+                      style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Time</label>
+                    <input type="time" value={bookForm.tm} onChange={e=>setBookForm({...bookForm, tm:e.target.value})}
+                      style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Type</label>
+                    <div style={{ display:"flex", gap:3 }}>
+                      {["OPD","Follow-up","Lab"].map(t=>(
+                        <button key={t} onClick={()=>setBookForm({...bookForm, ty:t})}
+                          style={{ padding:"5px 8px", borderRadius:6, fontSize:10, fontWeight:600, cursor:"pointer",
+                            border:`1.5px solid ${bookForm.ty===t?"#2563eb":"#e2e8f0"}`,
+                            background:bookForm.ty===t?"#eff6ff":"white", color:bookForm.ty===t?"#2563eb":"#64748b" }}>{t}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginBottom:8 }}>
+                  <label style={{ fontSize:10, fontWeight:600, color:"#475569" }}>Doctor</label>
+                  <select value={bookForm.doc} onChange={e=>setBookForm({...bookForm, doc:e.target.value})}
+                    style={{ width:"100%", padding:"8px", border:"1px solid #e2e8f0", borderRadius:6, fontSize:12, boxSizing:"border-box" }}>
+                    <option value="">Select Doctor</option>
+                    {doctorsList.map(d=><option key={d.id} value={d.short_name||d.name}>{d.name}{d.specialty?` — ${d.specialty}`:""}</option>)}
+                  </select>
+                </div>
+                <button onClick={async ()=>{
+                  if (!quickBookPatient.name.trim()) return;
+                  try {
+                    await fetch(`${API_URL}/api/appointments`, {
+                      method:"POST", headers:{"Content-Type":"application/json"},
+                      body: JSON.stringify({
+                        patient_name: quickBookPatient.name,
+                        file_no: quickBookPatient.file_no,
+                        phone: quickBookPatient.phone,
+                        doctor_name: bookForm.doc,
+                        appointment_date: bookForm.dt || new Date().toISOString().split("T")[0],
+                        time_slot: bookForm.tm || null,
+                        visit_type: bookForm.ty || "OPD",
+                        notes: bookForm.notes || null
+                      })
+                    });
+                    fetchTodayAppointments();
+                    setShowQuickBook(false);
+                    setQuickBookPatient({ name:"", file_no:"", phone:"" });
+                    setBookForm({ dt:new Date().toISOString().split("T")[0], tm:"", ty:"OPD", sp:"", doc:"", notes:"" });
+                  } catch(e) { console.error("Book error:", e); }
+                }} style={{ width:"100%", padding:"10px", background:"#059669", color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                  ✅ Book Appointment
+                </button>
+              </div>
+            )}
             {dbPatients.length > 0 ? (
               <div>
                 <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", padding:"8px 4px", borderBottom:"1px solid #f1f5f9" }}>
