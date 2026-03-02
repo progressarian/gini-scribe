@@ -1414,6 +1414,7 @@ export default function GiniScribe() {
 
   // Start a new visit
   const startVisit = (apptId) => {
+    if (duplicateWarning && !dbPatientId) return; // Block visit start when duplicate detected
     setVisitActive(true);
     setVisitId(Date.now().toString());
     setComplaints([]);
@@ -4455,7 +4456,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs — hidden when duplicate detected on new patient */}
+      {!(duplicateWarning && !dbPatientId) && (
       <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
         {TABS.filter(t=>t.show!==false).map(t => (
           <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"8px 4px", fontSize:11, fontWeight:700, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b", position:"relative", letterSpacing:"-0.01em" }}>
@@ -4464,8 +4466,43 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           </button>
         ))}
       </div>
+      )}
+
+      {/* ═══ DUPLICATE PATIENT BLOCKER ═══ */}
+      {duplicateWarning && !dbPatientId && (
+        <div style={{ background:"white", borderRadius:12, border:"3px solid #dc2626", padding:20, marginBottom:12, textAlign:"center" }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🚫</div>
+          <div style={{ fontSize:16, fontWeight:800, color:"#dc2626", marginBottom:6 }}>Patient File Already Exists</div>
+          <div style={{ fontSize:13, color:"#1e293b", marginBottom:4 }}>
+            A patient with this {duplicateWarning.file_no ? "file number" : "phone number"} is already in the system:
+          </div>
+          <div style={{ background:"#fef2f2", borderRadius:8, padding:12, marginBottom:12, border:"1.5px solid #fecaca" }}>
+            <div style={{ fontSize:15, fontWeight:800, color:"#1e293b" }}>{duplicateWarning.name}</div>
+            <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>
+              {duplicateWarning.file_no ? `File: ${duplicateWarning.file_no}` : ""}{duplicateWarning.file_no && duplicateWarning.phone ? " · " : ""}{duplicateWarning.phone ? `Phone: ${duplicateWarning.phone}` : ""}
+              {duplicateWarning.age ? ` · ${duplicateWarning.age}Y/${(duplicateWarning.sex||"?").charAt(0)}` : ""}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+            <button onClick={() => {
+              loadPatientDB({ id:duplicateWarning.id, name:duplicateWarning.name, phone:duplicateWarning.phone, file_no:duplicateWarning.file_no, age:duplicateWarning.age, sex:duplicateWarning.sex });
+              setDuplicateWarning(null);
+            }} style={{ padding:"12px 24px", background:"linear-gradient(135deg,#2563eb,#1e40af)", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", boxShadow:"0 2px 8px rgba(37,99,235,.3)" }}>
+              📂 Load Existing Patient
+            </button>
+            <button onClick={() => { newPatient(); }}
+              style={{ padding:"12px 24px", background:"white", color:"#059669", border:"2px solid #059669", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer" }}>
+              + Start Fresh (New Patient)
+            </button>
+          </div>
+          <div style={{ fontSize:11, color:"#94a3b8", marginTop:10 }}>
+            "Load Existing Patient" will open their full record. "Start Fresh" will clear the form for a new patient.
+          </div>
+        </div>
+      )}
 
       {/* ═══ VISIT ACTIVE BANNER ═══ */}
+      {!(duplicateWarning && !dbPatientId) && <>
       {visitActive && (
         <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 12px", marginBottom:8, background:"linear-gradient(135deg,#059669,#10b981)", borderRadius:8, color:"white" }}>
           <div style={{ width:8, height:8, borderRadius:"50%", background:"white", animation:"pulse 1.5s infinite" }} />
@@ -11025,6 +11062,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           )}
         </div>
       )}
+
+      </>}
 
     </div>
   );
