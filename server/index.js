@@ -1380,6 +1380,70 @@ app.delete("/api/appointments/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// ============ PATIENT MESSAGES ============
+
+// GET all messages for a patient (thread)
+app.get("/api/patients/:id/messages", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM patient_messages WHERE patient_id=$1 ORDER BY created_at ASC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST a new message (doctor reply)
+app.post("/api/patients/:id/messages", async (req, res) => {
+  try {
+    const { message, sender_name, direction } = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO patient_messages (patient_id, direction, message, sender_name)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.params.id, direction || 'doctor_to_patient', message, sender_name || 'Dr. Bhansali']
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT mark message as read
+app.put("/api/messages/:id/read", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE patient_messages SET is_read=true, read_at=NOW() WHERE id=$1 RETURNING *`,
+      [req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET inbox — all unread patient messages across all patients (for dashboard)
+app.get("/api/messages/inbox", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT pm.*, p.name as patient_name, p.file_no as file_no
+       FROM patient_messages pm
+       JOIN patients p ON p.id = pm.patient_id
+       WHERE pm.direction = 'patient_to_doctor'
+       ORDER BY pm.is_read ASC, pm.created_at DESC
+       LIMIT 50`
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET unread count (for badge)
+app.get("/api/messages/unread-count", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*) as count FROM patient_messages 
+       WHERE direction='patient_to_doctor' AND is_read=false`
+    );
+    res.json({ count: parseInt(rows[0].count) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============ SERVE FRONTEND ============
 const distPath = path.join(__dirname, "..", "dist");
 app.use(express.static(distPath));

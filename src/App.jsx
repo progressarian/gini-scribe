@@ -887,6 +887,12 @@ export default function GiniScribe() {
   const [saveStatus, setSaveStatus] = useState("");
   const [duplicateWarning, setDuplicateWarning] = useState(null); // {patient_id, name, file_no, phone}
   const [dbPatientId, setDbPatientId] = useState(null); // DB id of current patient
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [inbox, setInbox] = useState([]);
+  const [activeThread, setActiveThread] = useState(null);
+  const [threadMessages, setThreadMessages] = useState([]);
+  const [replyText, setReplyText] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
   // History entry form
   const emptyHistory = { visit_date:"", visit_type:"OPD", doctor_name:"", specialty:"", vitals:{bp_sys:"",bp_dia:"",weight:"",height:""},
     diagnoses:[{id:"",label:"",status:"New"}], medications:[{name:"",dose:"",frequency:"",timing:""}],
@@ -1531,6 +1537,51 @@ export default function GiniScribe() {
     setTodayApptLoading(false);
   };
   useEffect(() => { fetchTodayAppointments(); }, []);
+
+  const fetchInbox = async () => {
+    try {
+      const [inboxResp, countResp] = await Promise.all([
+        fetch(`${API_URL}/api/messages/inbox`),
+        fetch(`${API_URL}/api/messages/unread-count`)
+      ]);
+      if (inboxResp.ok) setInbox(await inboxResp.json());
+      if (countResp.ok) { const d = await countResp.json(); setUnreadCount(d.count || 0); }
+    } catch(e) { console.log("Inbox fetch error:", e); }
+  };
+
+  const fetchThread = async (patientId) => {
+    try {
+      const resp = await fetch(`${API_URL}/api/patients/${patientId}/messages`);
+      if (resp.ok) setThreadMessages(await resp.json());
+    } catch(e) {}
+  };
+
+  const sendReply = async () => {
+    if (!replyText.trim() || !activeThread) return;
+    setSendingReply(true);
+    try {
+      await fetch(`${API_URL}/api/patients/${activeThread.patient_id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: replyText, direction: "doctor_to_patient", sender_name: "Dr. Bhansali" })
+      });
+      setReplyText("");
+      fetchThread(activeThread.patient_id);
+      fetchInbox();
+    } catch(e) {}
+    setSendingReply(false);
+  };
+
+  const markRead = async (msgId) => {
+    try {
+      await fetch(`${API_URL}/api/messages/${msgId}/read`, { method: "PUT" });
+      fetchInbox();
+    } catch(e) {}
+  };
+
+  useEffect(() => { fetchInbox(); }, []);
+  // Poll every 30 seconds for new messages
+  useEffect(() => { const t = setInterval(fetchInbox, 30000); return () => clearInterval(t); }, []);
 
   // Verify auth session on mount
   useEffect(() => {
@@ -3818,6 +3869,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"plan", label:"📄 Plan", show:keySet && !isLabRole, badge:hasNewReports },
     { id:"docs", label:"📎 Docs", show:keySet && (!!dbPatientId || !!patient.name) },
     { id:"labportal", label:"🔬 Upload", show:keySet && !!API_URL && isLabRole },
+    { id:"messages", label:"💬 Messages", show:keySet, badge:unreadCount > 0 },
     { id:"history", label:"📜 Hx", show:keySet && !isLabRole && (!!dbPatientId || !!patient.name) },
     { id:"outcomes", label:"📊", show:keySet && !isLabRole && !!dbPatientId },
     { id:"ai", label:"🤖 AI", show:keySet && !isLabRole },
@@ -4941,6 +4993,26 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </button>
             ))}
           </div>
+
+          {/* Unread Messages Widget */}
+          {unreadCount > 0 && (
+            <div style={{ marginTop:14, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:14 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#92400e" }}>💬 Patient Messages <span style={{ background:"#dc2626", color:"white", borderRadius:10, padding:"2px 7px", fontSize:11, marginLeft:6 }}>{unreadCount}</span></div>
+                <button onClick={()=>setTab("messages")} style={{ fontSize:11, color:"#2563eb", background:"none", border:"none", cursor:"pointer", fontWeight:600 }}>View All →</button>
+              </div>
+              {inbox.filter(m=>!m.is_read).slice(0,3).map((m,i) => (
+                <div key={i} onClick={()=>{ setActiveThread(m); fetchThread(m.patient_id); markRead(m.id); setTab("messages"); }}
+                  style={{ background:"white", borderRadius:8, padding:"8px 10px", marginBottom:6, cursor:"pointer", borderLeft:"3px solid #f59e0b" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#1e293b" }}>{m.patient_name}</span>
+                    <span style={{ fontSize:10, color:"#94a3b8" }}>{new Date(m.created_at).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span>
+                  </div>
+                  <div style={{ fontSize:11, color:"#475569", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.message}</div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Recent Visits */}
           {pfd?.consultations?.length > 0 && (
@@ -8985,6 +9057,126 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       )}
 
       {/* ===== LAB PORTAL ===== */}
+      {tab==="messages" && (
+        <div>
+          <div style={{ fontSize:17, fontWeight:800, color:"#1e293b", marginBottom:14 }}>💬 Patient Messages</div>
+
+          {/* Inbox / Thread toggle */}
+          {!activeThread ? (
+            <div>
+              {/* All messages inbox */}
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                <div style={{ flex:1, background:"#f8fafc", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#64748b" }}>
+                  {inbox.length === 0 ? "No messages yet" : `${inbox.filter(m=>!m.is_read&&m.direction==="patient_to_doctor").length} unread · ${inbox.length} total`}
+                </div>
+                <button onClick={fetchInbox} style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8, padding:"6px 12px", fontSize:12, color:"#2563eb", fontWeight:600, cursor:"pointer" }}>↻ Refresh</button>
+              </div>
+
+              {inbox.length === 0 && (
+                <div style={{ textAlign:"center", padding:40, color:"#94a3b8" }}>
+                  <div style={{ fontSize:40, marginBottom:8 }}>📭</div>
+                  <div style={{ fontSize:14 }}>No patient messages yet</div>
+                  <div style={{ fontSize:12, marginTop:4 }}>Messages sent from the MyHealth Genie app will appear here</div>
+                </div>
+              )}
+
+              {/* Group by patient */}
+              {Object.entries(
+                inbox.reduce((acc, m) => {
+                  const key = m.patient_id;
+                  if (!acc[key]) acc[key] = { patient_name: m.patient_name, file_no: m.file_no, patient_id: m.patient_id, messages: [] };
+                  acc[key].messages.push(m);
+                  return acc;
+                }, {})
+              ).map(([pid, group]) => {
+                const unread = group.messages.filter(m=>!m.is_read&&m.direction==="patient_to_doctor").length;
+                const last = group.messages[group.messages.length-1];
+                return (
+                  <div key={pid} onClick={()=>{ setActiveThread(group); fetchThread(pid); group.messages.filter(m=>!m.is_read).forEach(m=>markRead(m.id)); }}
+                    style={{ background:"white", borderRadius:12, padding:14, marginBottom:8, cursor:"pointer", border:`1px solid ${unread>0?"#fde68a":"#f1f5f9"}`, borderLeft:`4px solid ${unread>0?"#f59e0b":"#e2e8f0"}`, transition:"all .15s" }}
+                    onMouseEnter={e=>e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,.08)"}
+                    onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <div style={{ width:36, height:36, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#60a5fa)", display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:14 }}>
+                          {(group.patient_name||"?").charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{group.patient_name}</div>
+                          {group.file_no && <div style={{ fontSize:10, color:"#94a3b8" }}>File: {group.file_no}</div>}
+                        </div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        {unread > 0 && <div style={{ background:"#dc2626", color:"white", borderRadius:10, padding:"2px 7px", fontSize:11, fontWeight:700, marginBottom:3 }}>{unread} new</div>}
+                        <div style={{ fontSize:10, color:"#94a3b8" }}>{new Date(last.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize:11, color:"#64748b", marginTop:8, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {last.direction==="doctor_to_patient" ? "You: " : ""}{last.message}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Thread view */
+            <div>
+              <button onClick={()=>{ setActiveThread(null); setThreadMessages([]); setReplyText(""); fetchInbox(); }}
+                style={{ background:"none", border:"none", color:"#2563eb", fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:12, display:"flex", alignItems:"center", gap:4 }}>
+                ← Back to Inbox
+              </button>
+
+              {/* Patient header */}
+              <div style={{ background:"linear-gradient(135deg,#1e293b,#334155)", borderRadius:12, padding:12, color:"white", marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ width:40, height:40, borderRadius:"50%", background:"linear-gradient(135deg,#3b82f6,#60a5fa)", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:16 }}>
+                  {(activeThread.patient_name||"?").charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div style={{ fontSize:15, fontWeight:700 }}>{activeThread.patient_name}</div>
+                  {activeThread.file_no && <div style={{ fontSize:11, opacity:.7 }}>File: {activeThread.file_no}</div>}
+                </div>
+              </div>
+
+              {/* Messages thread */}
+              <div style={{ maxHeight:420, overflowY:"auto", marginBottom:12, display:"flex", flexDirection:"column", gap:8 }}>
+                {threadMessages.length === 0 && <div style={{ textAlign:"center", color:"#94a3b8", padding:20, fontSize:12 }}>No messages in this thread</div>}
+                {threadMessages.map((m,i) => {
+                  const isDoctor = m.direction === "doctor_to_patient";
+                  return (
+                    <div key={i} style={{ display:"flex", justifyContent:isDoctor?"flex-end":"flex-start" }}>
+                      <div style={{ maxWidth:"75%", background:isDoctor?"#2563eb":"#f1f5f9", color:isDoctor?"white":"#1e293b", borderRadius:isDoctor?"14px 14px 4px 14px":"14px 14px 14px 4px", padding:"10px 14px" }}>
+                        <div style={{ fontSize:12 }}>{m.message}</div>
+                        <div style={{ fontSize:9, opacity:.6, marginTop:4, textAlign:"right" }}>
+                          {m.sender_name || (isDoctor?"Dr. Bhansali":"Patient")} · {new Date(m.created_at).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Reply box */}
+              <div style={{ background:"#f8fafc", borderRadius:12, padding:12, border:"1px solid #e2e8f0" }}>
+                <textarea
+                  value={replyText}
+                  onChange={e=>setReplyText(e.target.value)}
+                  onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendReply(); }}}
+                  placeholder="Type a reply... (Enter to send)"
+                  style={{ width:"100%", minHeight:70, border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 10px", fontSize:13, resize:"vertical", fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}
+                />
+                <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8, gap:8 }}>
+                  <button onClick={()=>setReplyText("")} style={{ background:"none", border:"1px solid #e2e8f0", borderRadius:8, padding:"7px 14px", fontSize:12, cursor:"pointer", color:"#64748b" }}>Clear</button>
+                  <button onClick={sendReply} disabled={!replyText.trim()||sendingReply}
+                    style={{ background:replyText.trim()?"#2563eb":"#94a3b8", color:"white", border:"none", borderRadius:8, padding:"7px 18px", fontSize:13, fontWeight:700, cursor:replyText.trim()?"pointer":"not-allowed" }}>
+                    {sendingReply ? "Sending..." : "Send Reply ✉️"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab==="labportal" && (
         <div>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
