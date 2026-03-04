@@ -3195,50 +3195,89 @@ ${parts.join("\n")}`;
     });
 
     const slots = [
-      { id:"morning", label:"🌅 Morning", time:"7:00 AM", match: t => /morn|wake|empty.?stomach|OD(?!\s*HS)/i.test(t) && !/before.*break|30.*min/i.test(t) },
+      { id:"morning",     label:"🌅 Morning",                time:"7:00 AM",  match: t => /\b(morning|wake|6.?am|7.?am|8.?am|9.?am)\b/i.test(t) && !/before.*break|30.*min/i.test(t) },
       { id:"beforeBreak", label:"🔅 Before Breakfast (30 min)", time:"7:30 AM", match: t => /before.*break|30.*min.*before|empty.*stomach.*break|before.*meal.*morn/i.test(t) },
-      { id:"afterBreak", label:"🍳 After Breakfast", time:"8:30 AM", match: t => /after.*break|after.*meal.*morn|BD|TDS/i.test(t) && !/before/i.test(t) },
-      { id:"afterLunch", label:"🍛 After Lunch", time:"1:30 PM", match: t => /after.*lunch|lunch|afternoon|BD.*after|TDS/i.test(t) },
-      { id:"evening", label:"🌆 Evening", time:"5:00 PM", match: t => /evening|5.*pm|SOS|as.*needed|repeat|fever/i.test(t) },
-      { id:"afterDinner", label:"🍽️ After Dinner", time:"8:30 PM", match: t => /after.*dinner|after.*meal.*night|BD/i.test(t) },
-      { id:"bedtime", label:"🌙 Night / Bedtime", time:"10:00 PM", match: t => /night|HS|bedtime|bed|10.*pm|with.*milk|at.*bed/i.test(t) },
-      { id:"asDirected", label:"📋 As Directed", time:"", match: () => false },
+      { id:"afterBreak",  label:"🍳 After Breakfast",         time:"8:30 AM",  match: t => /after.*break|after.*meal.*morn/i.test(t) && !/before/i.test(t) },
+      { id:"afterLunch",  label:"🍛 After Lunch",             time:"1:30 PM",  match: t => /after.*lunch|lunch|afternoon|1.*pm|2.*pm/i.test(t) },
+      { id:"evening",     label:"🌆 Evening",                 time:"5:00 PM",  match: t => /\b(evening|5.?pm|SOS|as.?needed|repeat|fever)\b/i.test(t) },
+      { id:"afterDinner", label:"🍽️ After Dinner",           time:"8:30 PM",  match: t => /after.*dinner|after.*meal.*night/i.test(t) },
+      { id:"bedtime",     label:"🌙 Night / Bedtime",         time:"10:00 PM", match: t => /\b(night|HS|bedtime|bed|8.?pm|9.?pm|10.?pm|11.?pm|with.*milk|at.*bed)\b/i.test(t) },
+      { id:"asDirected",  label:"📋 As Directed",             time:"",         match: () => false },
     ];
 
-    // Drug-specific overrides: statins always at bedtime
-    const BEDTIME_DRUGS = /atorva|rosuvasta|atchol|lipitor|crestor|statin|simva|pravasta|fluvasta/i;
+    // Helper: extract explicit clock time from timing string e.g. "8AM", "10 PM", "9:00 PM"
+    const getExplicitSlot = (timing) => {
+      const s = (timing || "").toLowerCase();
+      // Match patterns like "8am", "10 pm", "8:00 am", "9pm"
+      const m = s.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+      if (!m) return null;
+      let hr = parseInt(m[1]);
+      const min = parseInt(m[2] || "0");
+      const ampm = m[3].toLowerCase();
+      if (ampm === "pm" && hr !== 12) hr += 12;
+      if (ampm === "am" && hr === 12) hr = 0;
+      // Map hour to slot
+      if (hr >= 5 && hr < 10 && !/before.*break|30.*min/i.test(s)) return "morning";
+      if (hr >= 10 && hr < 14) return "morning"; // 10am-1pm still morning/late morning
+      if (hr >= 14 && hr < 17) return "afterLunch";
+      if (hr >= 17 && hr < 19) return "evening";
+      if (hr >= 19 && hr <= 23) return "bedtime"; // 7PM onwards = night
+      return null;
+    };
 
     const schedule = slots.map(s => ({...s, meds: []}));
     dedupedMeds.forEach(m => {
-      const t = `${m.timing||""} ${m.frequency||""}`.trim();
-      const drugName = (m.name||"").toUpperCase();
+      const timing = (m.timing || "").trim();
+      const freq = (m.frequency || "").trim();
+      const t = `${timing} ${freq}`.trim();
       let placed = false;
-      // Drug-specific override: statins always bedtime
-      if (BEDTIME_DRUGS.test(drugName)) {
-        schedule.find(s=>s.id==="bedtime")?.meds.push(m);
+
+      // 1. Explicit time in timing string takes highest priority (8AM, 10PM etc.)
+      const explicitSlot = getExplicitSlot(timing);
+      if (explicitSlot) {
+        schedule.find(s => s.id === explicitSlot)?.meds.push(m);
         placed = true;
       }
-      // BD = morning + night/after dinner
-      else if (/BD/i.test(t) && !/TDS/i.test(t)) {
+
+      // 2. Before breakfast / 30 min before
+      if (!placed && /before.*break|30.*min.*before|before.*meal.*morn/i.test(t)) {
+        schedule.find(s=>s.id==="beforeBreak")?.meds.push(m);
+        placed = true;
+      }
+
+      // 3. BD with before breakfast and dinner (e.g. DIAMICRON)
+      if (!placed && /BD/i.test(freq) && /before.*break|30.*min/i.test(timing)) {
+        schedule.find(s=>s.id==="beforeBreak")?.meds.push(m);
+        // Also add before dinner slot — use afterDinner as proxy
+        schedule.find(s=>s.id==="afterDinner")?.meds.push({...m, _slot:"Before Dinner"});
+        placed = true;
+      }
+
+      // 4. BD (twice daily) = after breakfast + after dinner
+      if (!placed && /\bBD\b/i.test(freq) && !/TDS/i.test(freq)) {
         schedule.find(s=>s.id==="afterBreak")?.meds.push(m);
         schedule.find(s=>s.id==="afterDinner")?.meds.push(m);
         placed = true;
       }
-      // TDS = morning + afternoon + night
-      else if (/TDS/i.test(t)) {
+
+      // 5. TDS = after breakfast + after lunch + after dinner
+      if (!placed && /\bTDS\b/i.test(freq)) {
         schedule.find(s=>s.id==="afterBreak")?.meds.push(m);
         schedule.find(s=>s.id==="afterLunch")?.meds.push(m);
         schedule.find(s=>s.id==="afterDinner")?.meds.push(m);
         placed = true;
       }
+
+      // 6. Keyword matching on full timing string
       if (!placed) {
         for (const slot of schedule) {
-          if (slot.match(t)) { slot.meds.push(m); placed = true; break; }
+          if (slot.match(timing)) { slot.meds.push(m); placed = true; break; }
         }
       }
+
+      // 7. Fallback: OD with no specific time = morning, else As Directed
       if (!placed) {
-        // Default: OD = morning
-        if (/OD/i.test(t)) schedule.find(s=>s.id==="morning")?.meds.push(m);
+        if (/\bOD\b/i.test(freq) || /\bOD\b/i.test(timing)) schedule.find(s=>s.id==="morning")?.meds.push(m);
         else schedule.find(s=>s.id==="asDirected")?.meds.push(m);
       }
     });
