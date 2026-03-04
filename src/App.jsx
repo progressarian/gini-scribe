@@ -3186,12 +3186,20 @@ ${parts.join("\n")}`;
       ...planMeds.map(m => ({...m, prescriber: conName || "Gini", isGini: true})),
       ...externalMeds.filter(m => medRecon[m.name] !== "stop" && medRecon[m.name] !== "hold")
     ];
-    // Deduplicate by name (prefer Gini version)
-    const seen = new Set();
+    // Deduplicate by name+timing (not just name — BD meds appear in two slots with different timings)
+    // Prefer Gini version over external when name matches exactly
+    const seenExact = new Set();
     const dedupedMeds = [];
-    allActiveMeds.forEach(m => {
+    // First pass: add all Gini meds
+    allActiveMeds.filter(m => m.isGini).forEach(m => {
       const key = (m.name||"").toUpperCase().replace(/\s+/g,"");
-      if (!seen.has(key)) { seen.add(key); dedupedMeds.push(m); }
+      seenExact.add(key);
+      dedupedMeds.push(m);
+    });
+    // Second pass: add external meds only if not already covered by Gini
+    allActiveMeds.filter(m => !m.isGini).forEach(m => {
+      const key = (m.name||"").toUpperCase().replace(/\s+/g,"");
+      if (!seenExact.has(key)) { seenExact.add(key); dedupedMeds.push(m); }
     });
 
     const slots = [
@@ -8867,7 +8875,7 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               <div style={{ fontSize:28, marginBottom:8 }}>📎</div>
               <div style={{ fontSize:13, fontWeight:600 }}>Load a patient first</div>
             </div>
-          ) : !pfd?.documents?.length ? (
+          ) : (!pfd?.documents?.length && !(pfd?.consultations?.length > 0)) ? (
             <div>
               <div style={{ textAlign:"center", padding:20, color:"#94a3b8", marginBottom:12 }}>
                 <div style={{ fontSize:22, marginBottom:4 }}>📂</div>
@@ -8949,9 +8957,40 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
           ) : (
             <div>
-              {/* Group documents by type */}
+              {/* Group documents by type — includes synth prescriptions from consultations */}
               {(() => {
-                const docs = pfd?.documents || [];
+                // Synthesize prescription docs from consultations that have con_data but no document
+                const docConsultIds = new Set((pfd?.documents||[]).map(d=>d.consultation_id).filter(Boolean));
+                const synthRx = (pfd?.consultations||[])
+                  .filter(c => c.con_data && !docConsultIds.has(c.id) && (c.con_data.medications_confirmed||[]).length > 0)
+                  .map(c => {
+                    const cd = c.con_data;
+                    const vd = c.visit_date ? new Date(String(c.visit_date).slice(0,10)+'T12:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '';
+                    return {
+                      id: `consult_rx_${c.id}`,
+                      doc_type: 'prescription',
+                      title: `Prescription — ${c.con_name||'Dr. Bhansali'} — ${vd}`,
+                      doc_date: c.visit_date,
+                      source: 'consultation',
+                      extracted_data: {
+                        doctor: c.con_name||'Dr. Bhansali',
+                        mo: c.mo_name||null,
+                        diagnoses: cd.diagnoses||[],
+                        chief_complaints: cd.chief_complaints||[],
+                        medications: (cd.medications_confirmed||[]).map(m=>({
+                          name:m.name, dose:m.dose, frequency:m.frequency,
+                          timing:m.timing, route:m.route||'Oral',
+                          composition:m.composition, forDiagnosis:m.forDiagnosis||[], isNew:m.isNew||false
+                        })),
+                        goals: cd.goals||[],
+                        diet_lifestyle: cd.diet_lifestyle||[],
+                        assessment_summary: cd.assessment_summary||null,
+                        follow_up: cd.follow_up||null,
+                      }
+                    };
+                  });
+                const docs = [...(pfd?.documents||[]), ...synthRx]
+                  .sort((a,b) => new Date(b.doc_date||0) - new Date(a.doc_date||0));
                 const groups = {};
                 docs.forEach(d => {
                   const cat = ["lab_report","Blood Test","Thyroid Panel","Lipid Profile","HbA1c","CBC","Urine","Kidney Function","Liver Function"].includes(d.doc_type)
