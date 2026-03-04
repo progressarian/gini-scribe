@@ -231,7 +231,7 @@ app.get("/api/patients/:id", async (req, res) => {
     const patient = await pool.query("SELECT * FROM patients WHERE id=$1", [id]);
     if (!patient.rows[0]) return res.status(404).json({ error: "Not found" });
 
-    const [consultations, vitals, meds, labs, diagnoses, docs, goals] = await Promise.all([
+    const [consultations, vitals, meds, labs, diagnoses, docs, goals, consultRx] = await Promise.all([
       pool.query("SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC", [id]),
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
       // Return medications from each doctor's LATEST consultation only (supersedes previous)
@@ -256,6 +256,7 @@ app.get("/api/patients/:id", async (req, res) => {
       pool.query(`SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
         WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`, [id]),
       pool.query("SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, consultation_id, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC", [id]),
+      pool.query(`SELECT id, visit_date, con_name, mo_name, con_data FROM consultations WHERE patient_id=$1 AND con_data IS NOT NULL AND id NOT IN (SELECT consultation_id FROM documents WHERE patient_id=$1 AND consultation_id IS NOT NULL) ORDER BY visit_date DESC`, [id]),
       pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [id]),
     ]);
 
@@ -268,6 +269,51 @@ app.get("/api/patients/:id", async (req, res) => {
       return true;
     });
 
+    // Synthesize prescription docs from Dr. Bhansali consultations with no document row
+    const synthDocs = (consultRx.rows || [])
+      .filter(c => c.con_data && (c.con_data.medications_confirmed || []).length > 0)
+      .map(c => {
+        const cd = c.con_data;
+        const visitDate = c.visit_date ? new Date(c.visit_date.toString().slice(0,10)+'T12:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '';
+        return {
+          id: `consult_rx_${c.id}`,
+          doc_type: 'prescription',
+          title: `Prescription — ${c.con_name || 'Dr. Bhansali'} — ${visitDate}`,
+          file_name: null,
+          doc_date: c.visit_date,
+          source: 'consultation',
+          notes: null,
+          storage_path: null,
+          consultation_id: c.id,
+          created_at: c.visit_date,
+          extracted_data: {
+            doctor: c.con_name || 'Dr. Bhansali',
+            mo: c.mo_name || null,
+            date: c.visit_date,
+            diagnoses: cd.diagnoses || [],
+            chief_complaints: cd.chief_complaints || [],
+            medications: (cd.medications_confirmed || []).map(m => ({
+              name: m.name, dose: m.dose, frequency: m.frequency,
+              timing: m.timing, route: m.route || 'Oral',
+              composition: m.composition, forDiagnosis: m.forDiagnosis || [],
+              isNew: m.isNew || false,
+            })),
+            goals: cd.goals || [],
+            diet_lifestyle: cd.diet_lifestyle || [],
+            assessment_summary: cd.assessment_summary || null,
+            follow_up: cd.follow_up || null,
+            investigations_ordered: cd.investigations_to_order || [],
+          }
+        };
+      });
+
+    // Merge and sort all docs by date newest first
+    const allDocs = [...docs.rows, ...synthDocs].sort((a, b) => {
+      const da = a.doc_date ? new Date(a.doc_date) : new Date(0);
+      const db = b.doc_date ? new Date(b.doc_date) : new Date(0);
+      return db - da;
+    });
+
     res.json({
       ...patient.rows[0],
       consultations: uniqueConsultations,
@@ -275,7 +321,7 @@ app.get("/api/patients/:id", async (req, res) => {
       medications: meds.rows,
       lab_results: labs.rows,
       diagnoses: diagnoses.rows,
-      documents: docs.rows,
+      documents: allDocs,
       goals: goals.rows,
     });
   } catch (e) { console.error("Patient detail error:", e.message); res.status(500).json({ error: e.message }); }
@@ -1377,70 +1423,6 @@ app.delete("/api/appointments/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM appointments WHERE id=$1", [req.params.id]);
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-
-// ============ PATIENT MESSAGES ============
-
-// GET all messages for a patient (thread)
-app.get("/api/patients/:id/messages", async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT * FROM patient_messages WHERE patient_id=$1 ORDER BY created_at ASC`,
-      [req.params.id]
-    );
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST a new message (doctor reply)
-app.post("/api/patients/:id/messages", async (req, res) => {
-  try {
-    const { message, sender_name, direction } = req.body;
-    const { rows } = await pool.query(
-      `INSERT INTO patient_messages (patient_id, direction, message, sender_name)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [req.params.id, direction || 'doctor_to_patient', message, sender_name || 'Dr. Bhansali']
-    );
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// PUT mark message as read
-app.put("/api/messages/:id/read", async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `UPDATE patient_messages SET is_read=true, read_at=NOW() WHERE id=$1 RETURNING *`,
-      [req.params.id]
-    );
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET inbox — all unread patient messages across all patients (for dashboard)
-app.get("/api/messages/inbox", async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT pm.*, p.name as patient_name, p.file_no as file_no
-       FROM patient_messages pm
-       JOIN patients p ON p.id = pm.patient_id
-       WHERE pm.direction = 'patient_to_doctor'
-       ORDER BY pm.is_read ASC, pm.created_at DESC
-       LIMIT 50`
-    );
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET unread count (for badge)
-app.get("/api/messages/unread-count", async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT COUNT(*) as count FROM patient_messages 
-       WHERE direction='patient_to_doctor' AND is_read=false`
-    );
-    res.json({ count: parseInt(rows[0].count) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
