@@ -3208,6 +3208,7 @@ ${parts.join("\n")}`;
       { id:"afterBreak",  label:"🍳 After Breakfast",         time:"8:30 AM",  match: t => /after.*break|after.*meal.*morn/i.test(t) && !/before/i.test(t) },
       { id:"afterLunch",  label:"🍛 After Lunch",             time:"1:30 PM",  match: t => /after.*lunch|lunch|afternoon|1.*pm|2.*pm/i.test(t) },
       { id:"evening",     label:"🌆 Evening",                 time:"5:00 PM",  match: t => /\b(evening|5.?pm|SOS|as.?needed|repeat|fever)\b/i.test(t) },
+      { id:"beforeDinner", label:"🌅 Before Dinner (30 min)",    time:"7:30 PM",  match: t => /before.*dinner|30.*min.*before.*dinner/i.test(t) },
       { id:"afterDinner", label:"🍽️ After Dinner",           time:"8:30 PM",  match: t => /after.*dinner|after.*meal.*night/i.test(t) },
       { id:"bedtime",     label:"🌙 Night / Bedtime",         time:"10:00 PM", match: t => /\b(night|HS|bedtime|bed|8.?pm|9.?pm|10.?pm|11.?pm|with.*milk|at.*bed)\b/i.test(t) },
       { id:"asDirected",  label:"📋 As Directed",             time:"",         match: () => false },
@@ -3247,17 +3248,16 @@ ${parts.join("\n")}`;
         placed = true;
       }
 
-      // 2. Before breakfast / 30 min before
-      if (!placed && /before.*break|30.*min.*before|before.*meal.*morn/i.test(t)) {
+      // 2. BD with before breakfast AND dinner (e.g. DIAMICRON XR MEX) — must check BEFORE generic before-breakfast
+      if (!placed && /\bBD\b/i.test(freq) && /before.*break/i.test(timing) && /dinner|evening|night/i.test(timing)) {
         schedule.find(s=>s.id==="beforeBreak")?.meds.push(m);
+        schedule.find(s=>s.id==="beforeDinner")?.meds.push(m);
         placed = true;
       }
 
-      // 3. BD with before breakfast and dinner (e.g. DIAMICRON)
-      if (!placed && /BD/i.test(freq) && /before.*break|30.*min/i.test(timing)) {
+      // 3. Before breakfast only / 30 min before (OD)
+      if (!placed && /before.*break|30.*min.*before|before.*meal.*morn/i.test(t)) {
         schedule.find(s=>s.id==="beforeBreak")?.meds.push(m);
-        // Also add before dinner slot — use afterDinner as proxy
-        schedule.find(s=>s.id==="afterDinner")?.meds.push({...m, _slot:"Before Dinner"});
         placed = true;
       }
 
