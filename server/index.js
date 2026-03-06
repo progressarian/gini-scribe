@@ -1426,6 +1426,133 @@ app.delete("/api/appointments/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ============ PATIENT MESSAGES (MHG ↔ Scribe) ============
+
+// GET /api/messages/inbox — all patient messages grouped by patient
+app.get("/api/messages/inbox", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        ac.id, ac.patient_id::text, ac.direction, ac.alert_type,
+        ac.title, ac.message, ac.status, ac.sender_name, ac.created_at,
+        p.name AS patient_name, p.file_no,
+        CASE WHEN ac.status = 'read' THEN true ELSE false END AS is_read
+      FROM alert_channel ac
+      LEFT JOIN patients p ON p.id = ac.patient_id::integer
+      WHERE ac.direction = 'genie_to_scribe' 
+        AND ac.alert_type = 'patient_message'
+      ORDER BY ac.created_at DESC
+      LIMIT 200
+    `);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/messages/unread-count
+app.get("/api/messages/unread-count", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT COUNT(*) AS count 
+      FROM alert_channel 
+      WHERE direction = 'genie_to_scribe' 
+        AND alert_type = 'patient_message'
+        AND (status IS NULL OR status != 'read')
+    `);
+    res.json({ count: parseInt(rows[0].count) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/patients/:id/messages — full thread for one patient
+app.get("/api/patients/:id/messages", async (req, res) => {
+  try {
+    const pid = req.params.id;
+    // Get patient messages (inbound from MHG)
+    const { rows: inbound } = await pool.query(`
+      SELECT 
+        id, direction, message, sender_name, title, created_at, status,
+        'patient_to_doctor' AS msg_direction
+      FROM alert_channel
+      WHERE patient_id::text = $1
+        AND direction = 'genie_to_scribe'
+        AND alert_type = 'patient_message'
+      ORDER BY created_at ASC
+    `, [pid]);
+
+    // Get doctor replies (outbound to MHG)
+    const { rows: outbound } = await pool.query(`
+      SELECT 
+        id, direction, message, sender_name, title, created_at, status,
+        'doctor_to_patient' AS msg_direction
+      FROM alert_channel
+      WHERE patient_id::text = $1
+        AND direction = 'scribe_to_genie'
+        AND alert_type = 'doctor_reply'
+      ORDER BY created_at ASC
+    `, [pid]);
+
+    // Merge and sort by time
+    const all = [...inbound, ...outbound]
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(m => ({
+        ...m,
+        direction: m.msg_direction, // rename for frontend compatibility
+      }));
+
+    res.json(all);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/patients/:id/messages — doctor sends reply → writes to alert_channel for MHG sync
+app.post("/api/patients/:id/messages", async (req, res) => {
+  try {
+    const pid = req.params.id;
+    const { message, sender_name = "Dr. Bhansali", direction } = req.body;
+    if (!message?.trim()) return res.status(400).json({ error: "Message required" });
+
+    // Get patient info
+    const { rows: pts } = await pool.query(
+      `SELECT id, name, file_no FROM patients WHERE id = $1`, [pid]
+    );
+    const patient = pts[0];
+
+    // Write doctor reply to alert_channel with direction=scribe_to_genie
+    // The scribe-sync Edge Function will pick this up and write to MHG
+    const { rows } = await pool.query(`
+      INSERT INTO alert_channel 
+        (patient_id, direction, alert_type, title, message, sender_name, sender_role, status, created_at)
+      VALUES ($1, 'scribe_to_genie', 'doctor_reply', $2, $3, $4, 'doctor', 'unread', NOW())
+      RETURNING *
+    `, [
+      pid,
+      `Reply from ${sender_name}`,
+      message.trim(),
+      sender_name,
+    ]);
+
+    // Mark all inbound messages from this patient as read
+    await pool.query(`
+      UPDATE alert_channel 
+      SET status = 'read', read_at = NOW()
+      WHERE patient_id::text = $1
+        AND direction = 'genie_to_scribe'
+        AND (status IS NULL OR status != 'read')
+    `, [pid]);
+
+    res.json({ success: true, message: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/messages/:id/read — mark message as read
+app.put("/api/messages/:id/read", async (req, res) => {
+  try {
+    await pool.query(
+      `UPDATE alert_channel SET status='read', read_at=NOW() WHERE id=$1`,
+      [req.params.id]
+    );
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============ SERVE FRONTEND ============
 const distPath = path.join(__dirname, "..", "dist");
 app.use(express.static(distPath));
