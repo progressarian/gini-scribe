@@ -1612,7 +1612,7 @@ export default function GiniScribe() {
         // Auto-set names based on role
         if (data.doctor.role === "mo") setMoName(data.doctor.short_name);
         else if (data.doctor.role === "lab" || data.doctor.role === "nurse" || data.doctor.role === "tech") setTab("labportal");
-        else setConName(data.doctor.short_name);
+        else { setConName(data.doctor.short_name); setKeySet(true); setTab("home"); }
       } else {
         setLoginError(data.error || "Login failed");
       }
@@ -3896,7 +3896,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
   
   const TABS = [
     { id:"setup", label:"⚙️", show:!keySet },
-    { id:"dashboard", label:"🏠 Dashboard", show:keySet && (!!dbPatientId || !!patient.name) },
+    { id:"home", label:"🏠 Home", show:keySet },
+    { id:"dashboard", label:"📋 Patient", show:keySet && (!!dbPatientId || !!patient.name) },
     { id:"quick", label:"⚡ Quick", show:keySet && !isLabRole && !visitActive },
     { id:"patient", label:"👤", show:keySet && !visitActive },
     // Follow-up visit workflow (when patient has previous consultations)
@@ -4633,6 +4634,185 @@ Write ONLY the summary paragraph, no headers or formatting.`;
           <button onClick={()=>{if(dgKey.length>10||whisperKey.length>10){setKeySet(true);setTab("patient");}}} style={{ width:"100%", background:(dgKey.length>10||whisperKey.length>10)?"#059669":"#94a3b8", color:"white", border:"none", padding:"12px", borderRadius:8, fontSize:14, fontWeight:700, cursor:(dgKey.length>10||whisperKey.length>10)?"pointer":"not-allowed" }}>
             {dgKey.length>10||whisperKey.length>10?"✅ Start":"Enter at least one key"}
           </button>
+        </div>
+      )}
+
+      {/* ===== SCRIBE HOME DASHBOARD ===== */}
+      {tab==="home" && (
+        <div style={{ paddingBottom:16 }}>
+
+          {/* Welcome bar */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+            <div>
+              <div style={{ fontSize:17, fontWeight:800, color:"#1e293b" }}>
+                {(() => {
+                  const h = new Date().getHours();
+                  const greeting = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+                  return `${greeting}${currentDoctor ? `, ${currentDoctor.short_name || currentDoctor.name}` : ""}`;
+                })()}
+              </div>
+              <div style={{ fontSize:11, color:"#64748b", marginTop:1 }}>
+                {new Date().toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}
+              </div>
+            </div>
+            <button onClick={()=>{ fetchTodayAppointments(); fetchInbox(); }}
+              style={{ background:"#f1f5f9", border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 12px", fontSize:11, fontWeight:700, color:"#475569", cursor:"pointer" }}>
+              ↻ Refresh
+            </button>
+          </div>
+
+          {/* Stats Strip */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+            {[
+              { label:"Seen Today", value: todayAppointments.filter(a=>a.status==="completed").length, icon:"✅", color:"#059669", bg:"#f0fdf4", border:"#bbf7d0" },
+              { label:"Total Appointments", value: todayAppointments.length, icon:"📅", color:"#2563eb", bg:"#eff6ff", border:"#bfdbfe" },
+              { label:"Unread Messages", value: unreadCount, icon:"💬", color: unreadCount>0?"#dc2626":"#64748b", bg: unreadCount>0?"#fef2f2":"#f8fafc", border: unreadCount>0?"#fecaca":"#e2e8f0" },
+            ].map(s => (
+              <div key={s.label} style={{ background:s.bg, border:`1.5px solid ${s.border}`, borderRadius:10, padding:"12px 10px", textAlign:"center" }}>
+                <div style={{ fontSize:20, marginBottom:2 }}>{s.icon}</div>
+                <div style={{ fontSize:22, fontWeight:900, color:s.color, lineHeight:1 }}>{s.value}</div>
+                <div style={{ fontSize:9, fontWeight:700, color:"#64748b", marginTop:3, textTransform:"uppercase", letterSpacing:"0.03em" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Quick Actions */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+            {[
+              { label:"Book Appointment", icon:"📅", color:"#1e293b", action:()=>{ setEditApptId(null); setBookForm({ dt:new Date().toISOString().split("T")[0], tm:"", ty:"OPD", sp:"", doc:currentDoctor?.name||"", notes:"", labPickup:"hospital", labTests:[] }); setShowBooking(true); setShowSearch(true); } },
+              { label:"New Patient", icon:"👤", color:"#059669", action:()=>{ newPatient(); setTab("patient"); } },
+              { label:"Search Patient", icon:"🔍", color:"#2563eb", action:()=>{ openSearch(); } },
+            ].map(a => (
+              <button key={a.label} onClick={a.action}
+                style={{ background:"white", border:`2px solid ${a.color}20`, borderRadius:10, padding:"12px 8px", cursor:"pointer",
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                  boxShadow:"0 1px 4px rgba(0,0,0,.05)", transition:"all .15s" }}
+                onMouseEnter={e=>{ e.currentTarget.style.background=`${a.color}08`; e.currentTarget.style.borderColor=`${a.color}50`; }}
+                onMouseLeave={e=>{ e.currentTarget.style.background="white"; e.currentTarget.style.borderColor=`${a.color}20`; }}>
+                <span style={{ fontSize:20 }}>{a.icon}</span>
+                <span style={{ fontSize:10, fontWeight:800, color:a.color, textAlign:"center", lineHeight:1.2 }}>{a.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Two-column panel: Appointments + Messages */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+
+            {/* Today's Appointments */}
+            <div style={{ background:"white", border:"1.5px solid #e2e8f0", borderRadius:12, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,.04)" }}>
+              <div style={{ background:"#1e293b", padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ fontSize:12, fontWeight:800, color:"white", letterSpacing:"-0.01em" }}>📅 TODAY'S APPOINTMENTS</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,.6)", fontWeight:600 }}>{todayAppointments.length} total</div>
+              </div>
+              {todayApptLoading ? (
+                <div style={{ padding:20, textAlign:"center", color:"#94a3b8", fontSize:12 }}>Loading...</div>
+              ) : todayAppointments.length === 0 ? (
+                <div style={{ padding:24, textAlign:"center" }}>
+                  <div style={{ fontSize:28, marginBottom:6 }}>📭</div>
+                  <div style={{ fontSize:12, color:"#94a3b8", fontWeight:600 }}>No appointments today</div>
+                  <button onClick={()=>{ setEditApptId(null); setBookForm({ dt:new Date().toISOString().split("T")[0], tm:"", ty:"OPD", sp:"", doc:"", notes:"", labPickup:"hospital", labTests:[] }); setShowBooking(true); setShowSearch(true); }}
+                    style={{ marginTop:10, background:"#1e293b", color:"white", border:"none", borderRadius:6, padding:"6px 14px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                    + Book First Appointment
+                  </button>
+                </div>
+              ) : (
+                <div style={{ maxHeight:380, overflowY:"auto" }}>
+                  {todayAppointments.map((a, i) => {
+                    const statusColor = a.status==="completed" ? "#059669" : a.status==="cancelled" ? "#dc2626" : "#2563eb";
+                    const statusBg = a.status==="completed" ? "#f0fdf4" : a.status==="cancelled" ? "#fef2f2" : "#eff6ff";
+                    return (
+                      <div key={a.id}
+                        onClick={()=>{ if(a.patient_id) { loadPatientDB({ id:a.patient_id, name:a.patient_name, file_no:a.file_no, phone:a.phone, age:a.age, sex:a.sex }); } }}
+                        style={{ padding:"10px 14px", borderBottom:i<todayAppointments.length-1?"1px solid #f1f5f9":"none",
+                          cursor:a.patient_id?"pointer":"default", transition:"background .1s" }}
+                        onMouseEnter={e=>{ if(a.patient_id) e.currentTarget.style.background="#f8fafc"; }}
+                        onMouseLeave={e=>{ e.currentTarget.style.background="white"; }}>
+                        <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
+                          <div style={{ fontSize:11, fontWeight:800, color:"#475569", minWidth:38, marginTop:1, fontVariantNumeric:"tabular-nums" }}>
+                            {a.time_slot || "—"}
+                          </div>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:12, fontWeight:800, color:"#1e293b", marginBottom:1 }}>{a.patient_name || "—"}</div>
+                            <div style={{ fontSize:10, color:"#64748b" }}>
+                              {a.visit_type || "OPD"}{a.doctor_name ? ` · ${a.doctor_name}` : ""}
+                              {a.age ? ` · ${a.age}Y/${(a.sex||"?").charAt(0)}` : ""}
+                            </div>
+                          </div>
+                          <span style={{ fontSize:9, fontWeight:700, padding:"2px 7px", borderRadius:4, background:statusBg, color:statusColor, whiteSpace:"nowrap", flexShrink:0 }}>
+                            {a.status==="completed" ? "✓ Done" : a.status==="cancelled" ? "✕ Canc" : "● Sched"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Messages Panel */}
+            <div style={{ background:"white", border:`1.5px solid ${unreadCount>0?"#fecaca":"#e2e8f0"}`, borderRadius:12, overflow:"hidden", boxShadow:unreadCount>0?"0 2px 8px rgba(220,38,38,.08)":"0 2px 8px rgba(0,0,0,.04)" }}>
+              <div style={{ background: unreadCount>0 ? "linear-gradient(135deg,#1e293b,#7c3aed)" : "#1e293b", padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ fontSize:12, fontWeight:800, color:"white", letterSpacing:"-0.01em", display:"flex", alignItems:"center", gap:6 }}>
+                  💬 PATIENT MESSAGES
+                  {unreadCount > 0 && (
+                    <span style={{ background:"#dc2626", color:"white", borderRadius:10, padding:"1px 7px", fontSize:10, fontWeight:900 }}>
+                      {unreadCount}
+                    </span>
+                  )}
+                </div>
+                <button onClick={()=>setTab("messages")}
+                  style={{ background:"rgba(255,255,255,.15)", border:"none", borderRadius:5, padding:"3px 9px", fontSize:10, fontWeight:700, color:"white", cursor:"pointer" }}>
+                  View All →
+                </button>
+              </div>
+              {inbox.length === 0 ? (
+                <div style={{ padding:24, textAlign:"center" }}>
+                  <div style={{ fontSize:28, marginBottom:6 }}>✉️</div>
+                  <div style={{ fontSize:12, color:"#94a3b8", fontWeight:600 }}>No messages yet</div>
+                  <div style={{ fontSize:10, color:"#cbd5e1", marginTop:3 }}>Patient messages from MHG appear here</div>
+                </div>
+              ) : (
+                <div style={{ maxHeight:380, overflowY:"auto" }}>
+                  {inbox.map((m, i) => {
+                    const isUnread = !m.is_read;
+                    const ts = m.sent_at ? (() => {
+                      const d = new Date(m.sent_at);
+                      const now = new Date();
+                      const diff = (now - d) / 1000;
+                      if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+                      if (diff < 86400) return d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+                      return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+                    })() : "";
+                    return (
+                      <div key={m.id}
+                        onClick={()=>{ setActiveThread(m); fetchThread(m.patient_id); markRead(m.id); setTab("messages"); }}
+                        style={{ padding:"10px 14px", borderBottom:i<inbox.length-1?"1px solid #f1f5f9":"none",
+                          cursor:"pointer", background: isUnread?"#fefce8":"white", transition:"background .1s" }}
+                        onMouseEnter={e=>{ e.currentTarget.style.background=isUnread?"#fef9c3":"#f8fafc"; }}
+                        onMouseLeave={e=>{ e.currentTarget.style.background=isUnread?"#fefce8":"white"; }}>
+                        <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
+                          <div style={{ width:32, height:32, borderRadius:"50%", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:12, flexShrink:0 }}>
+                            {(m.patient_name||"?").charAt(0).toUpperCase()}
+                          </div>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:4, marginBottom:2 }}>
+                              <span style={{ fontSize:12, fontWeight: isUnread?800:700, color:"#1e293b" }}>{m.patient_name || m.sender_name || "Patient"}</span>
+                              {isUnread && <span style={{ width:6, height:6, borderRadius:"50%", background:"#dc2626", flexShrink:0 }} />}
+                            </div>
+                            <div style={{ fontSize:11, color:"#64748b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", fontWeight: isUnread?600:400 }}>
+                              {m.message || ""}
+                            </div>
+                          </div>
+                          <div style={{ fontSize:9, color:"#94a3b8", whiteSpace:"nowrap", marginTop:2, fontWeight:600 }}>{ts}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+          </div>
         </div>
       )}
 
