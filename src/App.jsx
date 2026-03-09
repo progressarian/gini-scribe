@@ -863,6 +863,9 @@ export default function GiniScribe() {
   // Clinical Intelligence Report state
   const [ciData, setCiData] = useState(null);
   const [ciLoading, setCiLoading] = useState(false);
+  const [patientCI, setPatientCI] = useState(null);
+  const [patientCILoading, setPatientCILoading] = useState(false);
+  const [patientCIExpanded, setPatientCIExpanded] = useState(true);
   const [ciPeriod, setCiPeriod] = useState("month");
   const [ciExpandedCr, setCiExpandedCr] = useState(null);
   const [ciExpandedRx, setCiExpandedRx] = useState(null);
@@ -3383,6 +3386,150 @@ ${parts.join("\n")}`;
   const [conPasteText, setConPasteText] = useState("");
   const [conSourceMode, setConSourceMode] = useState("merge"); // "own" | "merge" — merge includes AI shadow context
   const [planCopied, setPlanCopied] = useState(false);
+
+  // ── Clinical Intelligence helpers ──
+  const buildCISnapshot = function() {
+    var rawText = ((conPasteText || "") + " " + (conTranscript || "") + " " + (moTranscript || "") + " " + (fuConNotes || "")).toUpperCase();
+    var findLab = function(keywords) {
+      for (var ki = 0; ki < keywords.length; ki++) {
+        var kw = keywords[ki].toUpperCase();
+        var idx = rawText.indexOf(kw);
+        if (idx === -1) continue;
+        var after = rawText.slice(idx + kw.length, idx + kw.length + 25);
+        var nm = after.match(/[:\s]*([0-9]+\.?[0-9]*)/);
+        if (nm) return parseFloat(nm[1]);
+      }
+      return undefined;
+    };
+    var labTests = (moData && moData.investigations) ? moData.investigations : [];
+    // Also pull from labData.panels (uploaded lab reports) — uses test_name/result fields
+    var labPanelTests = [];
+    if (labData && labData.panels) {
+      labData.panels.forEach(function(p) {
+        (p.tests || []).forEach(function(t) {
+          labPanelTests.push({ test: t.test_name, value: t.result_text || t.result });
+        });
+      });
+    }
+    var structLab = function(names) {
+      for (var ni = 0; ni < names.length; ni++) {
+        var n = names[ni].toUpperCase();
+        // Check moData.investigations first
+        for (var li = 0; li < labTests.length; li++) {
+          if ((labTests[li].test || "").toUpperCase().indexOf(n) !== -1) return parseFloat(labTests[li].value);
+        }
+        // Then check labData.panels
+        for (var pi = 0; pi < labPanelTests.length; pi++) {
+          if ((labPanelTests[pi].test || "").toUpperCase().indexOf(n) !== -1) return parseFloat(labPanelTests[pi].value);
+        }
+      }
+      return undefined;
+    };
+    var getLab = function(sn, tk) {
+      var sv = structLab(sn);
+      if (sv !== undefined && !isNaN(sv)) return sv;
+      return findLab(tk || sn);
+    };
+    var medNames = [];
+    if (moData && moData.previous_medications) moData.previous_medications.forEach(function(m) { if (m.name) medNames.push(m.name); });
+    if (conData && conData.medications_confirmed) conData.medications_confirmed.forEach(function(m) { if (m.name) medNames.push(m.name); });
+    if (fuNewMeds) fuNewMeds.forEach(function(m) { if (m.name) medNames.push(m.name); });
+    var planSrc = (conPasteText || conTranscript || "");
+    planSrc.split("\n").forEach(function(line) {
+      var t = line.trim();
+      var prefix = t.slice(0, 4).toUpperCase();
+      if (t.length > 4 && (prefix === "TAB " || prefix === "CAP " || prefix === "INJ ")) {
+        var name = t.slice(0, 50);
+        if (medNames.indexOf(name) === -1) medNames.push(name);
+      }
+    });
+    var diagLabels = ((moData && moData.diagnoses) ? moData.diagnoses : []).map(function(d) { return d.label || d; }).join(" ");
+    var complicationLabels = ((moData && moData.complications) ? moData.complications : []).map(function(c) { return (c.name || "") + " " + (c.detail || ""); }).join(" ");
+    var assessLabels = (assessDx || []).map(function(d) { return d.label || d; }).join(" ");
+    var dxAll = (diagLabels + " " + complicationLabels + " " + assessLabels + " " + rawText).toUpperCase();
+    var has = function(terms) { return terms.some(function(t) { return dxAll.indexOf(t.toUpperCase()) !== -1; }); };
+    var comorbidities = [];
+    if (has(["CAD", "CORONARY", "STENT", "CABG"])) comorbidities.push("CAD");
+    if (has(["CVA", "STROKE"]) && dxAll.indexOf("CVA-") === -1) comorbidities.push("post-CVA");
+    if (has(["HEART FAILURE", "HFREF"])) comorbidities.push("HFrEF");
+    if (has(["HYPERTENSION", "HTN"])) comorbidities.push("hypertension");
+    if (has(["MASLD", "MASH", "NAFLD", "FATTY LIVER"])) comorbidities.push("MASLD");
+    if (has(["NEUROPATHY"])) comorbidities.push("neuropathy");
+    if (has(["NEPHROPATHY", "CKD"])) comorbidities.push("nephropathy");
+    if (has(["RETINOPATHY"])) comorbidities.push("retinopathy");
+    if (has(["HYPOTHYROID", "HASHIMOTO"])) comorbidities.push("hypothyroidism");
+    if (has(["OBESITY", "ADIPOSITY"])) comorbidities.push("obesity");
+    if (has(["RBBB", "BRADYCARDIA"])) comorbidities.push("cardiac-conduction");
+    return {
+      age: patient.age ? parseInt(patient.age) : undefined,
+      sex: patient.sex || undefined,
+      bmi: vitals.bmi ? parseFloat(vitals.bmi) : undefined,
+      weight: vitals.weight ? parseFloat(vitals.weight) : undefined,
+      bp_systolic: vitals.bp_sys ? parseInt(vitals.bp_sys) : undefined,
+      bp_diastolic: vitals.bp_dia ? parseInt(vitals.bp_dia) : undefined,
+      a1c:        getLab(["HBA1C", "HB A1C", "GLYCATED"], ["HBA1C", "HB A1C", "A1C"]),
+      egfr:       getLab(["EGFR", "GFR"], ["EGFR", "GFR"]),
+      uacr:       getLab(["UACR", "ACR"], ["UACR", "ACR"]),
+      ldl:        getLab(["LDL"], ["LDL"]),
+      tg:         getLab(["TRIGLYCERIDE", "TG"], ["TG", "TRIGLYCERIDE"]),
+      hb:         getLab(["HAEMOGLOBIN", "HEMOGLOBIN"], ["HAEMOGLOBIN", "HEMOGLOBIN"]),
+      tsh:        getLab(["TSH"], ["TSH"]),
+      potassium:  getLab(["POTASSIUM", "SERUM K"], ["POTASSIUM", " K:"]),
+      alt:        getLab(["ALT", "SGPT"], ["ALT", "SGPT"]),
+      ast:        getLab(["AST", "SGOT"], ["AST", "SGOT"]),
+      creatinine: getLab(["CREATININE", "CREAT"], ["CREATININE", "CREAT"]),
+      vit_d:      getLab(["VITAMIN D", "VIT D", "25-OH"], ["VIT D", "VITAMIN D"]),
+      comorbidities: comorbidities,
+      current_medications: [],
+      current_medication_names: medNames,
+    };
+  };
+
+  var runPatientCI = function() {
+    if (tab !== "fu_gen" && tab !== "consultant") return;
+    setPatientCILoading(true);
+    var snapshot = buildCISnapshot();
+    fetch(
+      "https://vuukipgdegewpwucdgxa.supabase.co/functions/v1/clinical-intelligence",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1dWtpcGdkZWdld3B3dWNkZ3hhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExNTkwMjgsImV4cCI6MjA4NjczNTAyOH0.QWWHZwmcSE6ajVE2-UD8dqL10FrJqjCwEhIGgRTvIk8",
+        },
+        body: JSON.stringify({
+          patient_id: patient.fileNo || ("VISIT-" + Date.now()),
+          snapshot: snapshot,
+          doctor_name: conName,
+        }),
+      }
+    ).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.protocols_matched !== undefined) setPatientCI(data);
+      setPatientCILoading(false);
+    }).catch(function(e) {
+      console.error("CI error:", e);
+      setPatientCILoading(false);
+    });
+  };
+
+  useEffect(function() {
+    if (tab !== "fu_gen" && tab !== "consultant") return;
+    runPatientCI();
+  }, [tab]);
+
+  useEffect(function() {
+    if (tab !== "fu_gen" && tab !== "consultant") return;
+    if (!conData && !moData) return;
+    runPatientCI();
+  }, [conData, moData]);
+
+  useEffect(function() {
+    if (tab !== "fu_gen" && tab !== "consultant") return;
+    if (!conPasteText && !conTranscript) return;
+    var t = setTimeout(function() { runPatientCI(); }, 2000);
+    return function() { clearTimeout(t); };
+  }, [conPasteText, conTranscript]);
+
 
   // Load last prescription into consultant transcript
   const copyLastRx = () => {
@@ -6721,6 +6868,75 @@ Write ONLY the summary paragraph, no headers or formatting.`;
             </div>
             <span style={{ fontSize:10, opacity:.6 }}>Step 5/5</span>
           </div>
+
+          {(patientCILoading || patientCI) && (
+            <div className="no-print" style={{ marginBottom:10, border:"2px solid " + (patientCI && patientCI.safety_flags && patientCI.safety_flags.length > 0 ? "#dc2626" : "#2563eb"), borderRadius:10, overflow:"hidden" }}>
+              <div onClick={function(){setPatientCIExpanded(function(e){return !e;});}} style={{ cursor:"pointer", background: patientCI && patientCI.safety_flags && patientCI.safety_flags.length > 0 ? "linear-gradient(135deg,#dc2626,#b91c1c)" : "linear-gradient(135deg,#1e40af,#1d4ed8)", color:"white", padding:"7px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:13 }}>{"🧠"}</span>
+                <span style={{ fontWeight:800, fontSize:12, flex:1 }}>
+                  {"CLINICAL INTELLIGENCE"}
+                  {patientCI && patientCI.safety_flags && patientCI.safety_flags.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:6, fontSize:10 }}>{"⚠️ " + patientCI.safety_flags.length + " Safety"}</span>}
+                  {patientCI && patientCI.prescription_gaps && patientCI.prescription_gaps.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:4, fontSize:10 }}>{"💊 " + patientCI.prescription_gaps.length + " Gap"}</span>}
+                  {patientCI && patientCI.recommendations && patientCI.recommendations.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:4, fontSize:10 }}>{"💡 " + patientCI.recommendations.length + " Rec"}</span>}
+                </span>
+                {patientCI && <span style={{ fontSize:9, opacity:.8 }}>{patientCI.phenotype_detected || "unclassified"}</span>}
+                <button onClick={function(e){e.stopPropagation();runPatientCI();}} style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", borderRadius:4, padding:"1px 7px", fontSize:10, cursor:"pointer", fontWeight:700 }}>{"↺"}</button>
+                <span style={{ fontSize:10, opacity:.8 }}>{patientCIExpanded ? "▲" : "▼"}</span>
+              </div>
+              {patientCILoading && <div style={{ padding:"10px 14px", fontSize:11, color:"#64748b", background:"#f8fafc" }}>{"⏳ Analysing against 27 clinical protocols..."}</div>}
+              {patientCI && patientCIExpanded && !patientCILoading && (
+                <div style={{ background:"#fafafa", padding:"8px 10px", maxHeight:380, overflowY:"auto" }}>
+                  {patientCI.safety_flags && patientCI.safety_flags.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⚠️ SAFETY FLAGS"}</div>
+                      {patientCI.safety_flags.map(function(f,i) { return (
+                        <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                          <div style={{ fontWeight:700, color:"#dc2626" }}>{f.title.replace("SAFETY HARD STOP: ","").replace("SAFETY: ","")}</div>
+                          {f.dose_notes && <div style={{ color:"#7f1d1d", marginTop:2, lineHeight:1.4 }}>{f.dose_notes}</div>}
+                          <div style={{ color:"#94a3b8", fontSize:9, marginTop:2 }}>{f.evidence}</div>
+                        </div>
+                      ); })}
+                    </div>
+                  )}
+                  {patientCI.prescription_gaps && patientCI.prescription_gaps.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#1d4ed8", marginBottom:3 }}>{"💊 CONSIDER ADDING"}</div>
+                      {patientCI.prescription_gaps.map(function(g,i) { return (
+                        <div key={i} style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                          <div style={{ fontWeight:700, color:"#1d4ed8" }}>{g.missing_drug_class}</div>
+                          <div style={{ color:"#1e3a5f", fontSize:9, marginTop:1 }}>{g.reason}</div>
+                          <div style={{ color:"#94a3b8", fontSize:9, marginTop:1 }}>{g.evidence}</div>
+                        </div>
+                      ); })}
+                    </div>
+                  )}
+                  {patientCI.recommendations && patientCI.recommendations.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#059669", marginBottom:3 }}>{"💡 RECOMMENDATIONS"}</div>
+                      {patientCI.recommendations.map(function(r,i) { return (
+                        <div key={i} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                          <div style={{ fontWeight:700, color:"#065f46" }}>{r.title}</div>
+                          {r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>}
+                          {r.recommended_drugs && r.recommended_drugs.length > 0 && <div style={{ color:"#059669", fontSize:9, marginTop:2, fontWeight:600 }}>{"→ " + r.recommended_drugs.slice(0,2).join(" · ")}</div>}
+                        </div>
+                      ); })}
+                    </div>
+                  )}
+                  {patientCI.monitoring && patientCI.monitoring.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#7c3aed", marginBottom:3 }}>{"📋 MONITORING"}</div>
+                      {patientCI.monitoring.map(function(m,i) { return (
+                        <div key={i} style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                          <div style={{ fontWeight:700, color:"#5b21b6" }}>{m.title}</div>
+                          {m.dose_notes && <div style={{ color:"#4c1d95", fontSize:9, marginTop:1 }}>{m.dose_notes}</div>}
+                        </div>
+                      ); })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 4 PATH OPTIONS */}
           {!fuPlanSource && (
