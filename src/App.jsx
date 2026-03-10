@@ -6875,9 +6875,9 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                 <span style={{ fontSize:13 }}>{"🧠"}</span>
                 <span style={{ fontWeight:800, fontSize:12, flex:1 }}>
                   {"CLINICAL INTELLIGENCE"}
-                  {patientCI && patientCI.safety_flags && patientCI.safety_flags.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:6, fontSize:10 }}>{"⚠️ " + patientCI.safety_flags.length + " Safety"}</span>}
+                  {patientCI && patientCI.recommendations && patientCI.recommendations.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:6, fontSize:10 }}>{"💡 " + patientCI.recommendations.length + " Rec"}</span>}
                   {patientCI && patientCI.prescription_gaps && patientCI.prescription_gaps.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:4, fontSize:10 }}>{"💊 " + patientCI.prescription_gaps.length + " Gap"}</span>}
-                  {patientCI && patientCI.recommendations && patientCI.recommendations.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:4, fontSize:10 }}>{"💡 " + patientCI.recommendations.length + " Rec"}</span>}
+                  {patientCI && patientCI.safety_flags && patientCI.safety_flags.length > 0 && <span style={{ background:"rgba(255,255,255,.25)", borderRadius:4, padding:"0 6px", marginLeft:4, fontSize:10 }}>{"⚠️ " + patientCI.safety_flags.length + " Safety"}</span>}
                 </span>
                 {patientCI && <span style={{ fontSize:9, opacity:.8 }}>{patientCI.phenotype_detected || "unclassified"}</span>}
                 <button onClick={function(e){e.stopPropagation();runPatientCI();}} style={{ background:"rgba(255,255,255,.2)", border:"none", color:"white", borderRadius:4, padding:"1px 7px", fontSize:10, cursor:"pointer", fontWeight:700 }}>{"↺"}</button>
@@ -6886,14 +6886,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {patientCILoading && <div style={{ padding:"10px 14px", fontSize:11, color:"#64748b", background:"#f8fafc" }}>{"⏳ Analysing against 27 clinical protocols..."}</div>}
               {patientCI && patientCIExpanded && !patientCILoading && (
                 <div style={{ background:"#fafafa", padding:"8px 10px", maxHeight:380, overflowY:"auto" }}>
-                  {patientCI.safety_flags && patientCI.safety_flags.length > 0 && (
+                  {patientCI.recommendations && patientCI.recommendations.length > 0 && (
                     <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⚠️ SAFETY FLAGS"}</div>
-                      {patientCI.safety_flags.map(function(f,i) { return (
-                        <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
-                          <div style={{ fontWeight:700, color:"#dc2626" }}>{f.title.replace("SAFETY HARD STOP: ","").replace("SAFETY: ","")}</div>
-                          {f.dose_notes && <div style={{ color:"#7f1d1d", marginTop:2, lineHeight:1.4 }}>{f.dose_notes}</div>}
-                          <div style={{ color:"#94a3b8", fontSize:9, marginTop:2 }}>{f.evidence}</div>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#059669", marginBottom:3 }}>{"💡 RECOMMENDATIONS"}</div>
+                      {patientCI.recommendations.map(function(r,i) { return (
+                        <div key={i} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                          <div style={{ fontWeight:700, color:"#065f46" }}>{r.title}</div>
+                          {r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>}
+                          {r.recommended_drugs && r.recommended_drugs.length > 0 && <div style={{ color:"#059669", fontSize:9, marginTop:2, fontWeight:600 }}>{"→ " + r.recommended_drugs.slice(0,2).join(" · ")}</div>}
                         </div>
                       ); })}
                     </div>
@@ -6910,14 +6910,14 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       ); })}
                     </div>
                   )}
-                  {patientCI.recommendations && patientCI.recommendations.length > 0 && (
+                  {patientCI.safety_flags && patientCI.safety_flags.length > 0 && (
                     <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#059669", marginBottom:3 }}>{"💡 RECOMMENDATIONS"}</div>
-                      {patientCI.recommendations.map(function(r,i) { return (
-                        <div key={i} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
-                          <div style={{ fontWeight:700, color:"#065f46" }}>{r.title}</div>
-                          {r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>}
-                          {r.recommended_drugs && r.recommended_drugs.length > 0 && <div style={{ color:"#059669", fontSize:9, marginTop:2, fontWeight:600 }}>{"→ " + r.recommended_drugs.slice(0,2).join(" · ")}</div>}
+                      <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⚠️ SAFETY FLAGS"}</div>
+                      {patientCI.safety_flags.map(function(f,i) { return (
+                        <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                          <div style={{ fontWeight:700, color:"#dc2626" }}>{f.title.replace("SAFETY HARD STOP: ","").replace("SAFETY: ","")}</div>
+                          {f.dose_notes && <div style={{ color:"#7f1d1d", marginTop:2, lineHeight:1.4 }}>{f.dose_notes}</div>}
+                          <div style={{ color:"#94a3b8", fontSize:9, marginTop:2 }}>{f.evidence}</div>
                         </div>
                       ); })}
                     </div>
