@@ -6892,8 +6892,18 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       {patientCI.recommendations.map(function(r,i) { return (
                         <div key={i} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
                           <div style={{ fontWeight:700, color:"#065f46" }}>{r.title}</div>
-                          {r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>}
-                          {r.recommended_drugs && r.recommended_drugs.length > 0 && <div style={{ color:"#059669", fontSize:9, marginTop:2, fontWeight:600 }}>{"→ " + r.recommended_drugs.slice(0,2).join(" · ")}</div>}
+                          {r.formulary_match ? (
+                            <div style={{ marginTop:4, background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"4px 7px" }}>
+                              <div style={{ fontWeight:800, color:"#14532d", fontSize:11 }}>{r.formulary_match.brand} — {r.formulary_match.formulation}</div>
+                              <div style={{ color:"#166534", fontSize:9, marginTop:1 }}>{"▶ Start: " + r.formulary_match.starting_dose}</div>
+                              {r.formulary_match.uptitration && <div style={{ color:"#166534", fontSize:9 }}>{"↑ " + r.formulary_match.uptitration}</div>}
+                              {r.formulary_match.timing && <div style={{ color:"#15803d", fontSize:9 }}>{"🕐 " + r.formulary_match.timing}</div>}
+                              {r.formulary_match.substitute_with && <div style={{ color:"#92400e", fontSize:9, marginTop:2 }}>{"⚡ If not tolerated: " + r.formulary_match.substitute_with}</div>}
+                            </div>
+                          ) : (
+                            r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>
+                          )}
+                          {r.recommended_drugs && r.recommended_drugs.length > 0 && !r.formulary_match && <div style={{ color:"#059669", fontSize:9, marginTop:2, fontWeight:600 }}>{"→ " + r.recommended_drugs.slice(0,2).join(" · ")}</div>}
                         </div>
                       ); })}
                     </div>
