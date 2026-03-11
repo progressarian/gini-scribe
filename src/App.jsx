@@ -6885,97 +6885,153 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               </div>
               {patientCILoading && <div style={{ padding:"10px 14px", fontSize:11, color:"#64748b", background:"#f8fafc" }}>{"⏳ Analysing against 27 clinical protocols..."}</div>}
               {patientCI && patientCIExpanded && !patientCILoading && (
-                <div style={{ background:"#fafafa", padding:"8px 10px", maxHeight:380, overflowY:"auto" }}>
+                <div style={{ background:"#fafafa", padding:"8px 10px", maxHeight:500, overflowY:"auto" }}>
 
-                  {/* ── ALREADY ON section ── */}
-                  {patientCI.snapshot && patientCI.snapshot.current_medication_names && patientCI.snapshot.current_medication_names.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#0369a1", marginBottom:3 }}>{"✅ ALREADY ON"}</div>
-                      <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, padding:"5px 8px" }}>
-                        {patientCI.snapshot.current_medication_names.map(function(med, i) {
+                  {/* ── Helper: clean raw med name to short label ── */}
+                  {(function() {
+                    window._ciCleanMed = function(raw) {
+                      var n = (raw || "").replace(/^(TAB|CAP|INJ|SYR|SUS|TAB\.)\s+/i, "").trim();
+                      n = n.replace(/\s+(ONCE|TWICE|THREE|DAILY|OD|BD|TDS|QID|AT\s+\d|\d+\s*MG\s+(?:ONCE|TWICE|DAILY)|FOR\s+\d|THEN|MORNING|NIGHT|BEDTIME|AFTER|BEFORE|WITH|WITHOUT|EMPTY).*/i, "");
+                      return n.length > 30 ? n.slice(0, 28) + "…" : n;
+                    };
+                    window._ciDrugClass = function(name) {
+                      var u = (name || "").toUpperCase();
+                      if (u.indexOf("GLYCOMET") !== -1 || u.indexOf("METFORMIN") !== -1 || u.indexOf("GLUCONORM") !== -1) return "Metformin";
+                      if (u.indexOf("THYRONORM") !== -1 || u.indexOf("ELTROXIN") !== -1 || u.indexOf("LEVOTHYROX") !== -1) return "Thyroid";
+                      if (u.indexOf("LIPITAS") !== -1 || u.indexOf("LIPICARD") !== -1 || u.indexOf("ATORVA") !== -1 || u.indexOf("ROZAVEL") !== -1 || u.indexOf("ROSUVAS") !== -1) return "Statin";
+                      if (u.indexOf("TRICOR") !== -1 || u.indexOf("FENOLIP") !== -1 || u.indexOf("FENOFIBRATE") !== -1) return "Fibrate";
+                      if (u.indexOf("DAPLO") !== -1 || u.indexOf("FORXIGA") !== -1 || u.indexOf("JARDIANCE") !== -1) return "SGLT2i";
+                      if (u.indexOf("JANUVIA") !== -1 || u.indexOf("TRAJENTA") !== -1 || u.indexOf("SITACIP") !== -1 || u.indexOf("LINAXA") !== -1) return "DPP4i";
+                      if (u.indexOf("OZEMPIC") !== -1 || u.indexOf("WEGOVY") !== -1 || u.indexOf("RYBELSUS") !== -1 || u.indexOf("MOUNJARO") !== -1) return "GLP1";
+                      if (u.indexOf("TRESIBA") !== -1 || u.indexOf("RYZODEG") !== -1 || u.indexOf("LANTUS") !== -1 || u.indexOf("BASALOG") !== -1) return "Insulin";
+                      if (u.indexOf("TELMA") !== -1 || u.indexOf("TELMISARTAN") !== -1) return "ARB";
+                      if (u.indexOf("AMLODIPINE") !== -1 || u.indexOf("AMLONG") !== -1) return "CCB";
+                      if (u.indexOf("DIAMICRON") !== -1 || u.indexOf("GLIZID") !== -1 || u.indexOf("GLICLAZIDE") !== -1) return "SU";
+                      if (u.indexOf("LUMIA") !== -1 || u.indexOf("CALCIROL") !== -1 || u.indexOf("CHOLECALC") !== -1 || u.indexOf("UPRISE") !== -1) return "VitD";
+                      return null;
+                    };
+                    return null;
+                  })()}
+
+                  {/* ── TREATMENT PLAN REVIEW — main section ── */}
+                  <div style={{ fontSize:9, fontWeight:800, color:"#1e40af", marginBottom:6, letterSpacing:.5 }}>{"📋 TREATMENT PLAN REVIEW"}</div>
+
+                  {/* Render each protocol as a diagnosis block */}
+                  {(function() {
+                    var snap = patientCI.snapshot || {};
+                    var rawMeds = snap.current_medication_names || [];
+                    var contraClasses = (snap.drug_history || []).filter(function(d){ return d.contraindicated; }).map(function(d){ return (d.drug_class||"").toUpperCase(); });
+
+                    // Build set of drug classes already on
+                    var onClasses = new Set();
+                    rawMeds.forEach(function(m) {
+                      var cls = window._ciDrugClass(m);
+                      if (cls) onClasses.add(cls);
+                    });
+
+                    var allProtocols = (patientCI.recommendations || []).concat(patientCI.monitoring || []);
+                    var safetyProtocols = patientCI.safety_flags || [];
+
+                    return (
+                      <div>
+                        {/* Each recommendation protocol = one diagnosis block */}
+                        {allProtocols.map(function(r, i) {
+                          var fm = r.formulary_match;
+                          var drugClass = fm ? (fm.drug_class || "") : "";
+                          var isOnMed = onClasses.has(drugClass) ||
+                            rawMeds.some(function(m){ return (m||"").toUpperCase().indexOf((fm && fm.brand ? fm.brand.split(" ")[0].toUpperCase() : "XXXXX")) !== -1; });
+                          var isMonitoring = r.protocol_id && (r.protocol_id.indexOf("MICRO-") === 0 || r.protocol_id.indexOf("MON-") === 0) && !fm;
+
                           return (
-                            <span key={i} style={{ display:"inline-block", background:"#e0f2fe", border:"1px solid #7dd3fc", borderRadius:4, padding:"2px 7px", fontSize:9, fontWeight:600, color:"#075985", marginRight:4, marginBottom:3 }}>
-                              {"💊 " + med}
-                            </span>
+                            <div key={i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:7, padding:"6px 9px", marginBottom:5, fontSize:10 }}>
+                              {/* Diagnosis / protocol name */}
+                              <div style={{ fontWeight:700, color:"#1e293b", fontSize:10, marginBottom:3 }}>{r.title}</div>
+
+                              {/* Drug status block */}
+                              {fm ? (
+                                isOnMed ? (
+                                  /* Already prescribed — no change */
+                                  <div style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:5, padding:"4px 8px" }}>
+                                    <span style={{ fontSize:13 }}>{"✅"}</span>
+                                    <div>
+                                      <div style={{ fontWeight:700, color:"#166534", fontSize:10 }}>{fm.brand}</div>
+                                      <div style={{ color:"#15803d", fontSize:9 }}>{"Already prescribed — no change needed"}</div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* Missing — recommend adding */
+                                  <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:5, padding:"5px 8px" }}>
+                                    <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:3 }}>
+                                      <span style={{ fontSize:11, fontWeight:800, color:"#1d4ed8" }}>{"➕ ADD:"}</span>
+                                      <span style={{ fontWeight:800, color:"#1e40af", fontSize:11 }}>{fm.brand}</span>
+                                      <span style={{ color:"#3b82f6", fontSize:9 }}>{" — " + fm.formulation}</span>
+                                    </div>
+                                    <div style={{ color:"#1e3a5f", fontSize:9 }}>{"▶ " + fm.starting_dose}</div>
+                                    {fm.uptitration && <div style={{ color:"#1e3a5f", fontSize:9 }}>{"↑ " + fm.uptitration}</div>}
+                                    {fm.timing && <div style={{ color:"#1e40af", fontSize:9 }}>{"🕐 " + fm.timing}</div>}
+                                    {fm.substitute_with && <div style={{ color:"#92400e", fontSize:9, marginTop:2 }}>{"⚡ If not tolerated: " + fm.substitute_with}</div>}
+                                  </div>
+                                )
+                              ) : (
+                                /* No formulary card — monitoring or reasoning card */
+                                r.dose_notes && <div style={{ color:"#475569", fontSize:9, lineHeight:1.5, marginTop:2 }}>{r.dose_notes}</div>
+                              )}
+                            </div>
                           );
                         })}
-                      </div>
-                    </div>
-                  )}
 
-                  {/* ── CONTRAINDICATED section ── */}
-                  {patientCI.snapshot && patientCI.snapshot.drug_history && patientCI.snapshot.drug_history.filter(function(d){return d.contraindicated;}).length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⛔ CONTRAINDICATED"}</div>
-                      {patientCI.snapshot.drug_history.filter(function(d){return d.contraindicated;}).map(function(d, i) {
-                        return (
-                          <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"4px 8px", marginBottom:3, fontSize:10 }}>
-                            <span style={{ fontWeight:800, color:"#dc2626" }}>{d.drug_class}</span>
-                            {d.brand && <span style={{ color:"#991b1b", fontSize:9 }}>{" (" + d.brand + ")"}</span>}
-                            {d.stopped_reason && <div style={{ color:"#7f1d1d", fontSize:9, marginTop:1 }}>{"Reason: " + d.stopped_reason}</div>}
+                        {/* Contraindicated classes */}
+                        {contraClasses.length > 0 && (
+                          <div style={{ marginBottom:5 }}>
+                            {(snap.drug_history || []).filter(function(d){ return d.contraindicated; }).map(function(d, i) {
+                              return (
+                                <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:7, padding:"5px 9px", marginBottom:4, fontSize:10 }}>
+                                  <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                                    <span>{"⛔"}</span>
+                                    <span style={{ fontWeight:800, color:"#dc2626" }}>{d.drug_class}</span>
+                                    {d.brand && <span style={{ color:"#991b1b", fontSize:9 }}>{"(" + d.brand + ")"}</span>}
+                                    <span style={{ fontSize:9, color:"#991b1b", fontWeight:600 }}>{"— CONTRAINDICATED"}</span>
+                                  </div>
+                                  {d.stopped_reason && <div style={{ color:"#7f1d1d", fontSize:9, marginTop:2 }}>{d.stopped_reason}</div>}
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        )}
 
-                  {patientCI.recommendations && patientCI.recommendations.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#059669", marginBottom:3 }}>{"💡 RECOMMENDATIONS"}</div>
-                      {patientCI.recommendations.map(function(r,i) { return (
-                        <div key={i} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
-                          <div style={{ fontWeight:700, color:"#065f46" }}>{r.title}</div>
-                          {r.formulary_match ? (
-                            <div style={{ marginTop:4, background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"4px 7px" }}>
-                              <div style={{ fontWeight:800, color:"#14532d", fontSize:11 }}>{r.formulary_match.brand} — {r.formulary_match.formulation}</div>
-                              <div style={{ color:"#166534", fontSize:9, marginTop:1 }}>{"▶ Start: " + r.formulary_match.starting_dose}</div>
-                              {r.formulary_match.uptitration && <div style={{ color:"#166534", fontSize:9 }}>{"↑ " + r.formulary_match.uptitration}</div>}
-                              {r.formulary_match.timing && <div style={{ color:"#15803d", fontSize:9 }}>{"🕐 " + r.formulary_match.timing}</div>}
-                              {r.formulary_match.substitute_with && <div style={{ color:"#92400e", fontSize:9, marginTop:2 }}>{"⚡ If not tolerated: " + r.formulary_match.substitute_with}</div>}
+                        {/* Current medications confirmed */}
+                        {rawMeds.length > 0 && (
+                          <div style={{ marginBottom:5 }}>
+                            <div style={{ fontSize:9, fontWeight:800, color:"#0369a1", marginBottom:3 }}>{"💊 CURRENT MEDICATIONS"}</div>
+                            <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, padding:"5px 8px" }}>
+                              {rawMeds.map(function(med, i) {
+                                return (
+                                  <div key={i} style={{ fontSize:9, color:"#075985", padding:"1px 0" }}>
+                                    {"• " + window._ciCleanMed(med)}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          ) : (
-                            r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>
-                          )}
-                          {r.recommended_drugs && r.recommended_drugs.length > 0 && !r.formulary_match && <div style={{ color:"#059669", fontSize:9, marginTop:2, fontWeight:600 }}>{"→ " + r.recommended_drugs.slice(0,2).join(" · ")}</div>}
-                        </div>
-                      ); })}
-                    </div>
-                  )}
-                  {patientCI.prescription_gaps && patientCI.prescription_gaps.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#1d4ed8", marginBottom:3 }}>{"💊 CONSIDER ADDING"}</div>
-                      {patientCI.prescription_gaps.map(function(g,i) { return (
-                        <div key={i} style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
-                          <div style={{ fontWeight:700, color:"#1d4ed8" }}>{g.missing_drug_class}</div>
-                          <div style={{ color:"#1e3a5f", fontSize:9, marginTop:1 }}>{g.reason}</div>
-                          <div style={{ color:"#94a3b8", fontSize:9, marginTop:1 }}>{g.evidence}</div>
-                        </div>
-                      ); })}
-                    </div>
-                  )}
-                  {patientCI.safety_flags && patientCI.safety_flags.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⚠️ SAFETY FLAGS"}</div>
-                      {patientCI.safety_flags.map(function(f,i) { return (
-                        <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
-                          <div style={{ fontWeight:700, color:"#dc2626" }}>{f.title.replace("SAFETY HARD STOP: ","").replace("SAFETY: ","")}</div>
-                          {f.dose_notes && <div style={{ color:"#7f1d1d", marginTop:2, lineHeight:1.4 }}>{f.dose_notes}</div>}
-                          <div style={{ color:"#94a3b8", fontSize:9, marginTop:2 }}>{f.evidence}</div>
-                        </div>
-                      ); })}
-                    </div>
-                  )}
-                  {patientCI.monitoring && patientCI.monitoring.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:9, fontWeight:800, color:"#7c3aed", marginBottom:3 }}>{"📋 MONITORING"}</div>
-                      {patientCI.monitoring.map(function(m,i) { return (
-                        <div key={i} style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
-                          <div style={{ fontWeight:700, color:"#5b21b6" }}>{m.title}</div>
-                          {m.dose_notes && <div style={{ color:"#4c1d95", fontSize:9, marginTop:1 }}>{m.dose_notes}</div>}
-                        </div>
-                      ); })}
-                    </div>
-                  )}
+                          </div>
+                        )}
+
+                        {/* Safety flags */}
+                        {safetyProtocols.length > 0 && (
+                          <div style={{ marginBottom:5 }}>
+                            <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⚠️ SAFETY FLAGS"}</div>
+                            {safetyProtocols.map(function(f, i) {
+                              return (
+                                <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                                  <div style={{ fontWeight:700, color:"#dc2626" }}>{f.title.replace("SAFETY HARD STOP: ","").replace("SAFETY: ","")}</div>
+                                  {f.dose_notes && <div style={{ color:"#7f1d1d", marginTop:2, fontSize:9, lineHeight:1.4 }}>{f.dose_notes}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
