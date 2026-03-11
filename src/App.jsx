@@ -6890,9 +6890,11 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                   {/* ── Helper: clean raw med name to short label ── */}
                   {(function() {
                     window._ciCleanMed = function(raw) {
-                      var n = (raw || "").replace(/^(TAB|CAP|INJ|SYR|SUS|TAB\.)\s+/i, "").trim();
-                      n = n.replace(/\s+(ONCE|TWICE|THREE|DAILY|OD|BD|TDS|QID|AT\s+\d|\d+\s*MG\s+(?:ONCE|TWICE|DAILY)|FOR\s+\d|THEN|MORNING|NIGHT|BEDTIME|AFTER|BEFORE|WITH|WITHOUT|EMPTY).*/i, "");
-                      return n.length > 30 ? n.slice(0, 28) + "…" : n;
+                      // Strip TAB/CAP prefix, keep name + dose, cut at timing/frequency
+                      var n = (raw || "").replace(/^(TAB|CAP|INJ|SYR|TABS?|CAPS?)[\. ]+/i, "").trim();
+                      // Cut at frequency/timing words but keep dose numbers before them
+                      n = n.replace(/[\s,]+(ONCE DAILY|TWICE DAILY|THREE TIMES|DAILY|OD|BD|TDS|QID|AT [0-9]|FOR [0-9]|THEN[,]?|ON AWAK|MORNING|NIGHT|BEDTIME|EMPTY STOMACH|AFTER MEALS|BEFORE MEALS|WITH MEALS|MIN BEFORE|MIN AFTER).*/i, "").trim();
+                      return n.length > 35 ? n.slice(0, 33) + "…" : n;
                     };
                     window._ciDrugClass = function(name) {
                       var u = (name || "").toUpperCase();
@@ -6950,14 +6952,22 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                               {/* Drug status block */}
                               {fm ? (
                                 isOnMed ? (
-                                  /* Already prescribed — no change */
-                                  <div style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:5, padding:"4px 8px" }}>
-                                    <span style={{ fontSize:13 }}>{"✅"}</span>
-                                    <div>
-                                      <div style={{ fontWeight:700, color:"#166534", fontSize:10 }}>{fm.brand}</div>
-                                      <div style={{ color:"#15803d", fontSize:9 }}>{"Already prescribed — no change needed"}</div>
-                                    </div>
-                                  </div>
+                                  /* Already prescribed — show actual prescribed med name + dose */
+                                  (function() {
+                                    var brandKey = (fm.brand || "").split(" ")[0].toUpperCase();
+                                    var actualMed = rawMeds.find(function(m){
+                                      return (m||"").toUpperCase().indexOf(brandKey) !== -1;
+                                    });
+                                    return (
+                                      <div style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:5, padding:"4px 8px" }}>
+                                        <span style={{ fontSize:13 }}>{"✅"}</span>
+                                        <div>
+                                          <div style={{ fontWeight:700, color:"#166534", fontSize:10 }}>{actualMed ? window._ciCleanMed(actualMed) : fm.brand}</div>
+                                          <div style={{ color:"#15803d", fontSize:9 }}>{"Already prescribed — no change needed"}</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()
                                 ) : (
                                   /* Missing — recommend adding */
                                   <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:5, padding:"5px 8px" }}>
@@ -6979,6 +6989,47 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                             </div>
                           );
                         })}
+
+                        {/* ── Continuation meds — drugs not covered by any protocol but currently prescribed ── */}
+                        {(function() {
+                          var CONT_CLASSES = [
+                            { keywords: ["GLYCOMET","METFORMIN","GLUCONORM"], label: "Glucose management — Metformin", color: "#065f46", bg: "#f0fdf4", border: "#bbf7d0" },
+                            { keywords: ["SILODAL","TAMSULOSIN","URIBID","NITROFURANTOIN"], label: "Urology / Symptom management", color: "#1e3a5f", bg: "#f0f9ff", border: "#bae6fd" },
+                          ];
+                          var blocks = [];
+                          CONT_CLASSES.forEach(function(cls) {
+                            var match = rawMeds.find(function(m) {
+                              return cls.keywords.some(function(k){ return (m||"").toUpperCase().indexOf(k) !== -1; });
+                            });
+                            if (match) {
+                              // Only show if NOT already covered by a protocol recommendation above
+                              var alreadyCovered = allProtocols.some(function(r) {
+                                return r.formulary_match && cls.keywords.some(function(k){
+                                  return (r.formulary_match.brand||"").toUpperCase().indexOf(k) !== -1 ||
+                                         (r.formulary_match.drug_class||"").toUpperCase().indexOf(k) !== -1;
+                                });
+                              });
+                              if (!alreadyCovered) {
+                                blocks.push({ label: cls.label, med: match, color: cls.color, bg: cls.bg, border: cls.border });
+                              }
+                            }
+                          });
+                          if (blocks.length === 0) return null;
+                          return blocks.map(function(b, i) {
+                            return (
+                              <div key={"cont-" + i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:7, padding:"6px 9px", marginBottom:5, fontSize:10 }}>
+                                <div style={{ fontWeight:700, color:"#1e293b", fontSize:10, marginBottom:3 }}>{b.label}</div>
+                                <div style={{ display:"flex", alignItems:"center", gap:6, background:b.bg, border:"1px solid " + b.border, borderRadius:5, padding:"4px 8px" }}>
+                                  <span style={{ fontSize:13 }}>{"✅"}</span>
+                                  <div>
+                                    <div style={{ fontWeight:700, color:b.color, fontSize:10 }}>{window._ciCleanMed(b.med)}</div>
+                                    <div style={{ color:b.color, fontSize:9, opacity:.8 }}>{"Already prescribed — no change needed"}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
 
                         {/* Contraindicated classes */}
                         {contraClasses.length > 0 && (
