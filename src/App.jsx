@@ -2086,6 +2086,8 @@ export default function GiniScribe() {
       }
     }
     setLoading(p=>({...p,lab:false}));
+    // Refresh CI panel with newly uploaded labs
+    if (tab === "fu_gen" || tab === "consultant") runPatientCI();
   };
 
   // Imaging upload handler
@@ -3411,6 +3413,16 @@ ${parts.join("\n")}`;
         });
       });
     }
+    // Pull from patientFullData.lab_results (DB-stored labs) — most recent value per test
+    var dbLabTests = [];
+    if (patientFullData && patientFullData.lab_results) {
+      var sortedDbLabs = [...patientFullData.lab_results].sort(function(a,b) {
+        return new Date(b.test_date||0) - new Date(a.test_date||0);
+      });
+      sortedDbLabs.forEach(function(t) {
+        dbLabTests.push({ test: t.test_name, value: t.result });
+      });
+    }
     var structLab = function(names) {
       for (var ni = 0; ni < names.length; ni++) {
         var n = names[ni].toUpperCase();
@@ -3421,6 +3433,10 @@ ${parts.join("\n")}`;
         // Then check labData.panels
         for (var pi = 0; pi < labPanelTests.length; pi++) {
           if ((labPanelTests[pi].test || "").toUpperCase().indexOf(n) !== -1) return parseFloat(labPanelTests[pi].value);
+        }
+        // Then check patientFullData.lab_results (DB)
+        for (var di = 0; di < dbLabTests.length; di++) {
+          if ((dbLabTests[di].test || "").toUpperCase().indexOf(n) !== -1) return parseFloat(dbLabTests[di].value);
         }
       }
       return undefined;
@@ -3529,6 +3545,13 @@ ${parts.join("\n")}`;
     var t = setTimeout(function() { runPatientCI(); }, 2000);
     return function() { clearTimeout(t); };
   }, [conPasteText, conTranscript]);
+
+  // Re-run CI when patientFullData updates (e.g. labs inserted mid-visit)
+  useEffect(function() {
+    if (tab !== "fu_gen" && tab !== "consultant") return;
+    if (!patientFullData) return;
+    runPatientCI();
+  }, [patientFullData]);
 
 
   // Load last prescription into consultant transcript
