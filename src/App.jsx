@@ -3472,11 +3472,11 @@ ${parts.join("\n")}`;
       uacr:       getLab(["UACR", "ACR"], ["UACR", "ACR"]),
       ldl:        getLab(["LDL"], ["LDL"]),
       tg:         getLab(["TRIGLYCERIDE", "TG"], ["TG", "TRIGLYCERIDE"]),
-      hb:         getLab(["HAEMOGLOBIN", "HEMOGLOBIN"], ["HAEMOGLOBIN", "HEMOGLOBIN"]),
+      // hb/alt/ast intentionally omitted — DB values are authoritative, free-text parsing too error-prone
+      // (e.g. "ALT/AST Ratio" matches ALT, "HbA1c" matches Hb)
       tsh:        getLab(["TSH"], ["TSH"]),
       potassium:  getLab(["POTASSIUM", "SERUM K"], ["POTASSIUM", " K:"]),
-      alt:        getLab(["ALT", "SGPT"], ["ALT", "SGPT"]),
-      ast:        getLab(["AST", "SGOT"], ["AST", "SGOT"]),
+      // alt/ast: removed — see above
       creatinine: getLab(["CREATININE", "CREAT"], ["CREATININE", "CREAT"]),
       vit_d:      getLab(["VITAMIN D", "VIT D", "25-OH"], ["VIT D", "VITAMIN D"]),
       comorbidities: comorbidities,
@@ -6935,11 +6935,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                     var PROTOCOL_ORDER = [
                       "THYR-HYPO-01","THYR-SUBCLIN-01",                          // 1. Thyroid
                       "GLY-PRE-01","GLY-STD-01","GLY-STD-02","GLY-STD-02B",      // 2. Glycaemic
-                      "GLY-A1C-HIGH-01","GLY-MASLD-01","GLY-THYR-01",
+                      "GLY-A1C-HIGH-01","GLY-THYR-01",
                       "LIP-STD-01","LIP-CVD-01","LIP-HDL-01","LIP-TG-01",        // 3. Lipids
                       "BP-DIAB-MICRO-01","BP-STEP2-01","BP-STEP3-01",            // 4. BP / Cardiovascular
                       "REN-G2-01","REN-EARLY-01","REN-CKD-01",                   // 5. Renal
-                      "MICRO-VITD-01","MICRO-B12-01","ANA-IRON-01",              // 6. Supplements / Deficiencies
+                      "MICRO-VITD-01","MICRO-B12-01","ANA-IRON-01",              // 6. Supplements
+                      "GLY-MASLD-01",                                             // 7. GLP-1 (MASLD)
                     ];
                     // Protocols without a drug card (no formulary_match) = screening/monitoring
                     var recs = (patientCI.recommendations || []).filter(function(r){ return r.formulary_match; });
