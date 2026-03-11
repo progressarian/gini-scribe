@@ -6990,42 +6990,53 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                           );
                         })}
 
-                        {/* ── Continuation meds — drugs not covered by any protocol but currently prescribed ── */}
+                        {/* ── Continuation meds — always show these drug classes if patient is on them ── */}
                         {(function() {
-                          var CONT_CLASSES = [
-                            { keywords: ["GLYCOMET","METFORMIN","GLUCONORM"], label: "Glucose management — Metformin", color: "#065f46", bg: "#f0fdf4", border: "#bbf7d0" },
-                            { keywords: ["SILODAL","TAMSULOSIN","URIBID","NITROFURANTOIN"], label: "Urology / Symptom management", color: "#1e3a5f", bg: "#f0f9ff", border: "#bae6fd" },
+                          var CONT_DEFS = [
+                            {
+                              keys: ["GLYCOMET","METFORMIN","GLUCONORM","OBIMET"],
+                              label: "Glycaemic management — Metformin",
+                              color: "#065f46", bg: "#f0fdf4", border: "#bbf7d0"
+                            },
+                            {
+                              keys: ["LIPITAS","ATORVASTATIN","ROZAVEL","ROSUVAS","ATCHOL","CRESTOR","FENOFIBRATE","TRICOR","LIPICURE"],
+                              label: "Lipid management",
+                              color: "#1e3a5f", bg: "#f0f9ff", border: "#bae6fd"
+                            },
                           ];
                           var blocks = [];
-                          CONT_CLASSES.forEach(function(cls) {
-                            var match = rawMeds.find(function(m) {
-                              return cls.keywords.some(function(k){ return (m||"").toUpperCase().indexOf(k) !== -1; });
+                          CONT_DEFS.forEach(function(def) {
+                            // Find all meds matching this class
+                            var matched = rawMeds.filter(function(m) {
+                              var u = (m||"").toUpperCase();
+                              return def.keys.some(function(k){ return u.indexOf(k) !== -1; });
                             });
-                            if (match) {
-                              // Only show if NOT already covered by a protocol recommendation above
-                              var alreadyCovered = allProtocols.some(function(r) {
-                                return r.formulary_match && cls.keywords.some(function(k){
-                                  return (r.formulary_match.brand||"").toUpperCase().indexOf(k) !== -1 ||
-                                         (r.formulary_match.drug_class||"").toUpperCase().indexOf(k) !== -1;
-                                });
-                              });
-                              if (!alreadyCovered) {
-                                blocks.push({ label: cls.label, med: match, color: cls.color, bg: cls.bg, border: cls.border });
-                              }
-                            }
+                            if (matched.length === 0) return;
+                            // Skip if already shown as "already prescribed" in a protocol card above
+                            var shownInProtocol = (patientCI.recommendations||[]).some(function(r) {
+                              if (!r.formulary_match) return false;
+                              var brand = (r.formulary_match.brand||"").toUpperCase();
+                              return def.keys.some(function(k){ return brand.indexOf(k) !== -1; });
+                            });
+                            if (shownInProtocol) return;
+                            blocks.push({ label: def.label, meds: matched, color: def.color, bg: def.bg, border: def.border });
                           });
                           if (blocks.length === 0) return null;
-                          return blocks.map(function(b, i) {
+                          return blocks.map(function(b, bi) {
                             return (
-                              <div key={"cont-" + i} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:7, padding:"6px 9px", marginBottom:5, fontSize:10 }}>
+                              <div key={"cont-"+bi} style={{ background:"white", border:"1px solid #e2e8f0", borderRadius:7, padding:"6px 9px", marginBottom:5, fontSize:10 }}>
                                 <div style={{ fontWeight:700, color:"#1e293b", fontSize:10, marginBottom:3 }}>{b.label}</div>
-                                <div style={{ display:"flex", alignItems:"center", gap:6, background:b.bg, border:"1px solid " + b.border, borderRadius:5, padding:"4px 8px" }}>
-                                  <span style={{ fontSize:13 }}>{"✅"}</span>
-                                  <div>
-                                    <div style={{ fontWeight:700, color:b.color, fontSize:10 }}>{window._ciCleanMed(b.med)}</div>
-                                    <div style={{ color:b.color, fontSize:9, opacity:.8 }}>{"Already prescribed — no change needed"}</div>
-                                  </div>
-                                </div>
+                                {b.meds.map(function(med, mi) {
+                                  return (
+                                    <div key={mi} style={{ display:"flex", alignItems:"center", gap:6, background:b.bg, border:"1px solid "+b.border, borderRadius:5, padding:"4px 8px", marginBottom: mi < b.meds.length-1 ? 3 : 0 }}>
+                                      <span style={{ fontSize:13 }}>{"✅"}</span>
+                                      <div>
+                                        <div style={{ fontWeight:700, color:b.color, fontSize:10 }}>{window._ciCleanMed(med)}</div>
+                                        <div style={{ color:b.color, fontSize:9, opacity:.8 }}>{"Already prescribed — no change needed"}</div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             );
                           });
