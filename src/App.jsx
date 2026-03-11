@@ -6886,6 +6886,39 @@ Write ONLY the summary paragraph, no headers or formatting.`;
               {patientCILoading && <div style={{ padding:"10px 14px", fontSize:11, color:"#64748b", background:"#f8fafc" }}>{"⏳ Analysing against 27 clinical protocols..."}</div>}
               {patientCI && patientCIExpanded && !patientCILoading && (
                 <div style={{ background:"#fafafa", padding:"8px 10px", maxHeight:380, overflowY:"auto" }}>
+
+                  {/* ── ALREADY ON section ── */}
+                  {patientCI.snapshot && patientCI.snapshot.current_medication_names && patientCI.snapshot.current_medication_names.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#0369a1", marginBottom:3 }}>{"✅ ALREADY ON"}</div>
+                      <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:6, padding:"5px 8px" }}>
+                        {patientCI.snapshot.current_medication_names.map(function(med, i) {
+                          return (
+                            <span key={i} style={{ display:"inline-block", background:"#e0f2fe", border:"1px solid #7dd3fc", borderRadius:4, padding:"2px 7px", fontSize:9, fontWeight:600, color:"#075985", marginRight:4, marginBottom:3 }}>
+                              {"💊 " + med}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── CONTRAINDICATED section ── */}
+                  {patientCI.snapshot && patientCI.snapshot.drug_history && patientCI.snapshot.drug_history.filter(function(d){return d.contraindicated;}).length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:"#dc2626", marginBottom:3 }}>{"⛔ CONTRAINDICATED"}</div>
+                      {patientCI.snapshot.drug_history.filter(function(d){return d.contraindicated;}).map(function(d, i) {
+                        return (
+                          <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"4px 8px", marginBottom:3, fontSize:10 }}>
+                            <span style={{ fontWeight:800, color:"#dc2626" }}>{d.drug_class}</span>
+                            {d.brand && <span style={{ color:"#991b1b", fontSize:9 }}>{" (" + d.brand + ")"}</span>}
+                            {d.stopped_reason && <div style={{ color:"#7f1d1d", fontSize:9, marginTop:1 }}>{"Reason: " + d.stopped_reason}</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {patientCI.recommendations && patientCI.recommendations.length > 0 && (
                     <div style={{ marginBottom:8 }}>
                       <div style={{ fontSize:9, fontWeight:800, color:"#059669", marginBottom:3 }}>{"💡 RECOMMENDATIONS"}</div>
@@ -6893,23 +6926,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                         <div key={i} style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
                           <div style={{ fontWeight:700, color:"#065f46" }}>{r.title}</div>
                           {r.formulary_match ? (
-                            <div>
-                              <div style={{ marginTop:4, background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"4px 7px" }}>
-                                <div style={{ fontWeight:800, color:"#14532d", fontSize:11 }}>{r.formulary_match.brand} — {r.formulary_match.formulation}</div>
-                                <div style={{ color:"#166534", fontSize:9, marginTop:1 }}>{"▶ Start: " + r.formulary_match.starting_dose}</div>
-                                {r.formulary_match.uptitration && <div style={{ color:"#166534", fontSize:9 }}>{"↑ " + r.formulary_match.uptitration}</div>}
-                                {r.formulary_match.timing && <div style={{ color:"#15803d", fontSize:9 }}>{"🕐 " + r.formulary_match.timing}</div>}
-                                {r.formulary_match.substitute_with && <div style={{ color:"#92400e", fontSize:9, marginTop:2 }}>{"⚡ If not tolerated: " + r.formulary_match.substitute_with}</div>}
-                              </div>
-                              {r.secondary_formulary_matches && r.secondary_formulary_matches.map(function(fm,si) { return (
-                                <div key={si} style={{ marginTop:3, background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"4px 7px" }}>
-                                  <div style={{ fontWeight:800, color:"#14532d", fontSize:11 }}>{fm.brand} — {fm.formulation}</div>
-                                  <div style={{ color:"#166534", fontSize:9, marginTop:1 }}>{"▶ Start: " + fm.starting_dose}</div>
-                                  {fm.uptitration && <div style={{ color:"#166534", fontSize:9 }}>{"↑ " + fm.uptitration}</div>}
-                                  {fm.timing && <div style={{ color:"#15803d", fontSize:9 }}>{"🕐 " + fm.timing}</div>}
-                                  {fm.substitute_with && <div style={{ color:"#92400e", fontSize:9, marginTop:2 }}>{"⚡ If not tolerated: " + fm.substitute_with}</div>}
-                                </div>
-                              ); })}
+                            <div style={{ marginTop:4, background:"#dcfce7", border:"1px solid #86efac", borderRadius:4, padding:"4px 7px" }}>
+                              <div style={{ fontWeight:800, color:"#14532d", fontSize:11 }}>{r.formulary_match.brand} — {r.formulary_match.formulation}</div>
+                              <div style={{ color:"#166534", fontSize:9, marginTop:1 }}>{"▶ Start: " + r.formulary_match.starting_dose}</div>
+                              {r.formulary_match.uptitration && <div style={{ color:"#166534", fontSize:9 }}>{"↑ " + r.formulary_match.uptitration}</div>}
+                              {r.formulary_match.timing && <div style={{ color:"#15803d", fontSize:9 }}>{"🕐 " + r.formulary_match.timing}</div>}
+                              {r.formulary_match.substitute_with && <div style={{ color:"#92400e", fontSize:9, marginTop:2 }}>{"⚡ If not tolerated: " + r.formulary_match.substitute_with}</div>}
                             </div>
                           ) : (
                             r.dose_notes && <div style={{ color:"#064e3b", marginTop:2, lineHeight:1.4 }}>{r.dose_notes}</div>
