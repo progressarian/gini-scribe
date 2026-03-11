@@ -6931,7 +6931,31 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                       if (cls) onClasses.add(cls);
                     });
 
-                    var allProtocols = (patientCI.recommendations || []).concat(patientCI.monitoring || []);
+                    // Globally accepted prescription order
+                    var PROTOCOL_ORDER = [
+                      "THYR-HYPO-01","THYR-SUBCLIN-01",                          // 1. Thyroid
+                      "GLY-PRE-01","GLY-STD-01","GLY-STD-02","GLY-STD-02B",      // 2. Glycaemic
+                      "GLY-A1C-HIGH-01","GLY-MASLD-01","GLY-THYR-01",
+                      "LIP-STD-01","LIP-CVD-01","LIP-HDL-01","LIP-TG-01",        // 3. Lipids
+                      "BP-DIAB-MICRO-01","BP-STEP2-01","BP-STEP3-01",            // 4. BP / Cardiovascular
+                      "REN-G2-01","REN-EARLY-01","REN-CKD-01",                   // 5. Renal
+                      "MICRO-VITD-01","MICRO-B12-01","ANA-IRON-01",              // 6. Supplements / Deficiencies
+                    ];
+                    // Protocols without a drug card (no formulary_match) = screening/monitoring
+                    var recs = (patientCI.recommendations || []).filter(function(r){ return r.formulary_match; });
+                    var screeningCards = (patientCI.recommendations || []).filter(function(r){ return !r.formulary_match; });
+                    var monitoringCards = patientCI.monitoring || [];
+
+                    // Sort recs by PROTOCOL_ORDER
+                    recs = recs.slice().sort(function(a, b) {
+                      var ai = PROTOCOL_ORDER.indexOf(a.protocol_id);
+                      var bi = PROTOCOL_ORDER.indexOf(b.protocol_id);
+                      if (ai === -1) ai = 999;
+                      if (bi === -1) bi = 999;
+                      return ai - bi;
+                    });
+
+                    var allProtocols = recs;
                     var safetyProtocols = patientCI.safety_flags || [];
 
                     return (
@@ -7086,6 +7110,21 @@ Write ONLY the summary paragraph, no headers or formatting.`;
                                 <div key={i} style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
                                   <div style={{ fontWeight:700, color:"#dc2626" }}>{f.title.replace("SAFETY HARD STOP: ","").replace("SAFETY: ","")}</div>
                                   {f.dose_notes && <div style={{ color:"#7f1d1d", marginTop:2, fontSize:9, lineHeight:1.4 }}>{f.dose_notes}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Screening & Monitoring — separate section at bottom */}
+                        {(screeningCards.length > 0 || monitoringCards.length > 0) && (
+                          <div style={{ marginTop:6 }}>
+                            <div style={{ fontSize:9, fontWeight:800, color:"#7c3aed", marginBottom:4, letterSpacing:.5 }}>{"🔍 SCREENING & MONITORING"}</div>
+                            {screeningCards.concat(monitoringCards).map(function(m, i) {
+                              return (
+                                <div key={"scr-"+i} style={{ background:"#faf5ff", border:"1px solid #e9d5ff", borderRadius:6, padding:"5px 8px", marginBottom:3, fontSize:10 }}>
+                                  <div style={{ fontWeight:700, color:"#5b21b6", fontSize:10 }}>{m.title}</div>
+                                  {m.dose_notes && <div style={{ color:"#4c1d95", fontSize:9, marginTop:1, lineHeight:1.4 }}>{m.dose_notes}</div>}
                                 </div>
                               );
                             })}
