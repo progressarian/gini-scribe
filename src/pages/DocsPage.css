@@ -1,0 +1,346 @@
+.docs__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 10px;
+}
+.docs__empty {
+  text-align: center;
+  padding: 30px;
+  color: #94a3b8;
+}
+.docs__empty-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+.docs__empty-text {
+  font-size: 13px;
+  font-weight: 600;
+}
+.docs__no-docs {
+  text-align: center;
+  padding: 20px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}
+.docs__no-docs-icon {
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+.docs__no-docs-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+.docs__no-docs-hint {
+  font-size: 10px;
+  margin-top: 2px;
+}
+.docs__section {
+  margin-bottom: 12px;
+}
+.docs__section-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #1e293b;
+  padding: 6px 0;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 6px;
+}
+.docs__section-title--purple {
+  border-bottom-color: #7c3aed;
+}
+.docs__section-title--green {
+  border-bottom-color: #059669;
+}
+.docs__section-title--amber {
+  border-bottom-color: #f59e0b;
+}
+.docs__section-title--blue {
+  border-bottom-color: #2563eb;
+}
+.docs__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  border: 1px solid #e2e8f0;
+}
+.docs__table-head {
+  background: #f8fafc;
+}
+.docs__table-th {
+  padding: 4px 8px;
+  font-weight: 700;
+  font-size: 10px;
+}
+.docs__table-th--left {
+  text-align: left;
+}
+.docs__table-th--right {
+  text-align: right;
+}
+.docs__table-th--center {
+  text-align: center;
+}
+.docs__table-row {
+  border-bottom: 1px solid #f1f5f9;
+}
+.docs__table-cell {
+  padding: 3px 8px;
+}
+.docs__table-cell--name {
+  font-weight: 600;
+}
+.docs__table-cell--result {
+  text-align: right;
+  font-weight: 700;
+}
+.docs__table-cell--flag {
+  text-align: center;
+  font-size: 9px;
+}
+.docs__table-cell--ref {
+  font-size: 9px;
+  color: #94a3b8;
+}
+.docs__table-cell--date {
+  text-align: right;
+  font-size: 9px;
+  color: #64748b;
+}
+.docs__med-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.docs__med-name {
+  font-size: 11px;
+  font-weight: 700;
+  flex: 1;
+}
+.docs__med-dose {
+  font-size: 10px;
+  color: #475569;
+}
+.docs__med-freq {
+  font-size: 10px;
+  color: #2563eb;
+}
+.docs__med-new {
+  font-size: 9px;
+  color: #94a3b8;
+}
+.docs__dx-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.docs__dx-chip {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.docs__dx-status {
+  font-size: 9px;
+  font-weight: 400;
+}
+.docs__visit-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.docs__visit-date {
+  font-weight: 700;
+  color: #2563eb;
+  min-width: 80px;
+}
+.docs__visit-type {
+  color: #64748b;
+}
+.docs__visit-doctor {
+  flex: 1;
+}
+.docs__visit-status {
+  font-size: 9px;
+  font-weight: 600;
+}
+.docs__doc-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 6px;
+  background: white;
+}
+.docs__doc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.docs__doc-title {
+  font-size: 12px;
+}
+.docs__doc-filename {
+  font-size: 9px;
+  color: #94a3b8;
+  margin-left: 6px;
+}
+.docs__doc-date-area {
+  text-align: right;
+}
+.docs__doc-date {
+  font-size: 10px;
+  font-weight: 600;
+  color: #2563eb;
+}
+.docs__doc-source {
+  font-size: 8px;
+  color: #94a3b8;
+}
+.docs__doc-data {
+  margin-top: 4px;
+}
+.docs__panel-block {
+  margin-bottom: 4px;
+}
+.docs__panel-name {
+  font-size: 9px;
+  font-weight: 700;
+  color: #7c3aed;
+  background: #faf5ff;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.docs__panel-tests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.docs__panel-test {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.docs__imaging-data {
+  margin-top: 4px;
+}
+.docs__imaging-impression {
+  font-size: 11px;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 3px 8px;
+  background: #f0f9ff;
+  border-radius: 4px;
+  margin-bottom: 3px;
+}
+.docs__imaging-findings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.docs__imaging-finding {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.docs__doc-notes {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 3px;
+}
+.docs__doc-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.docs__btn--view {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.docs__btn--plan {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.docs__plan {
+  margin-top: 6px;
+  border: 1px solid #d1fae5;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f0fdf4;
+  font-size: 11px;
+}
+.docs__plan-summary {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+.docs__plan-section {
+  margin-bottom: 6px;
+}
+.docs__plan-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 2px;
+}
+.docs__plan-dx-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.docs__plan-dx-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.docs__plan-med-row {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.docs__plan-med-name {
+  flex: 1;
+  font-weight: 700;
+}
+.docs__plan-med-detail {
+  color: #64748b;
+}
+.docs__plan-goal {
+  font-size: 10px;
+  padding: 1px 0;
+}
+.docs__plan-diet {
+  font-size: 10px;
+  padding: 1px 0;
+}
+.docs__plan-followup {
+  font-size: 10px;
+  font-weight: 600;
+  color: #2563eb;
+  margin-top: 4px;
+}
+.docs__plan-doctor {
+  font-size: 9px;
+  color: #94a3b8;
+  margin-top: 4px;
+}

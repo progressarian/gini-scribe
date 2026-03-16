@@ -1,0 +1,111 @@
+.quick__header {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+  color: white;
+}
+.quick__title {
+  font-size: 15px;
+  font-weight: 800;
+  margin-bottom: 3px;
+}
+.quick__desc {
+  font-size: 11px;
+  opacity: 0.85;
+}
+.quick__loading {
+  text-align: center;
+  padding: 20px;
+}
+.quick__loading-icon {
+  font-size: 28px;
+  animation: pulse 1s infinite;
+}
+.quick__loading-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+  margin-top: 4px;
+}
+.quick__loading-hint {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+.quick__loading-badges {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+.quick__loading-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.quick__loading-badge--extract {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #059669;
+}
+.quick__loading-badge--plan {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #2563eb;
+}
+.quick__error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 8px;
+}
+.quick__error-text {
+  font-size: 11px;
+  color: #dc2626;
+  font-weight: 600;
+}
+.quick__transcript {
+  margin-top: 8px;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+}
+.quick__transcript-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.quick__transcript-text {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.6;
+}
+.quick__tips {
+  margin-top: 12px;
+  padding: 10px;
+  background: #fefce8;
+  border-radius: 8px;
+  border: 1px solid #fef08a;
+}
+.quick__tips-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #854d0e;
+  margin-bottom: 3px;
+}
+.quick__tips-text {
+  font-size: 10px;
+  color: #92400e;
+  line-height: 1.6;
+}
+.quick__footer {
+  margin-top: 8px;
+  font-size: 10px;
+  color: #94a3b8;
+  text-align: center;
+}

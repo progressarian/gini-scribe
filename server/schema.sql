@@ -213,6 +213,20 @@ CREATE TABLE IF NOT EXISTS complications (
 );
 CREATE INDEX idx_complications_patient ON complications(patient_id);
 
+-- ============ ACTIVE VISITS ============
+-- Tracks which doctor currently has an active visit open (survives page refresh)
+CREATE TABLE IF NOT EXISTS active_visits (
+  id              SERIAL PRIMARY KEY,
+  doctor_id       INTEGER REFERENCES doctors(id),
+  doctor_name     TEXT NOT NULL,
+  patient_id      INTEGER REFERENCES patients(id),
+  appointment_id  INTEGER REFERENCES appointments(id),
+  visit_type      TEXT DEFAULT 'new',  -- 'new' or 'followup'
+  route           TEXT,                -- current route e.g. '/intake', '/fu-load'
+  started_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_active_visits_doctor ON active_visits(doctor_id);
+
 -- ============ VIEWS for common queries ============
 
 -- Latest vitals per patient

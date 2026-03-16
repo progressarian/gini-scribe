@@ -1,12 +1,26 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
-import Companion from './Companion'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { RouterProvider } from "react-router-dom";
+import router from "./router";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { ToastProvider } from "./components/Toast";
+import "./styles/global.css";
 
-// Simple path-based routing — no react-router needed
-const path = window.location.pathname;
-const isCompanion = path.startsWith('/companion');
+// Global unhandled promise rejection handler
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("Unhandled promise rejection:", e.reason);
+  e.preventDefault();
+});
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  isCompanion ? <Companion /> : <App />
-)
+// Global error handler
+window.addEventListener("error", (e) => {
+  console.error("Uncaught error:", e.error);
+});
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>
+  </ErrorBoundary>,
+);

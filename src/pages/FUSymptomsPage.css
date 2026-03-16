@@ -1,0 +1,261 @@
+.fu-symptoms__header {
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fu-symptoms__header-icon {
+  font-size: 16px;
+}
+.fu-symptoms__header-info {
+  flex: 1;
+}
+.fu-symptoms__header-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+.fu-symptoms__header-sub {
+  font-size: 10px;
+  opacity: 0.85;
+}
+.fu-symptoms__header-step {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.fu-symptoms__card {
+  background: white;
+  border-radius: 10px;
+  padding: 12px;
+  border: 2px solid #e2e8f0;
+  margin-bottom: 10px;
+}
+
+.fu-symptoms__assess-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.fu-symptoms__assess-label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.fu-symptoms__assess-opts {
+  display: flex;
+  gap: 4px;
+}
+
+.fu-symptoms__assess-btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.fu-symptoms__complaints-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.fu-symptoms__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.fu-symptoms__chip {
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fu-symptoms__chip--active {
+  border: 1.5px solid #2563eb;
+  background: #2563eb;
+  color: white;
+}
+
+.fu-symptoms__chip--inactive {
+  border: 1.5px solid #e2e8f0;
+  background: white;
+  color: #475569;
+}
+
+.fu-symptoms__add-complaint {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.fu-symptoms__complaint-input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.fu-symptoms__complaint-add-btn {
+  padding: 8px 14px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fu-symptoms__challenges-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.fu-symptoms__challenges-textarea {
+  width: 100%;
+  font-size: 13px;
+  padding: 10px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  resize: vertical;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.fu-symptoms__extras-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.fu-symptoms__extra-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.fu-symptoms__extra-title--amber {
+  color: #92400e;
+}
+.fu-symptoms__extra-title--red {
+  color: #dc2626;
+}
+
+.fu-symptoms__ext-med-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #fef3c7;
+  border-radius: 6px;
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fu-symptoms__ext-med-name {
+  flex: 1;
+}
+.fu-symptoms__ext-med-doctor {
+  color: #64748b;
+}
+
+.fu-symptoms__ext-med-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #dc2626;
+  font-size: 12px;
+  padding: 0;
+}
+
+.fu-symptoms__ext-med-add {
+  display: flex;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.fu-symptoms__ext-med-input {
+  padding: 5px 8px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.fu-symptoms__ext-med-input--name {
+  flex: 2;
+}
+.fu-symptoms__ext-med-input--dose {
+  flex: 1;
+}
+
+.fu-symptoms__ext-med-submit {
+  padding: 5px 10px;
+  background: #f59e0b;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.fu-symptoms__condition-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #fee2e2;
+  border-radius: 6px;
+  margin-bottom: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fu-symptoms__condition-name {
+  flex: 1;
+}
+
+.fu-symptoms__condition-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #dc2626;
+  font-size: 12px;
+  padding: 0;
+}
+
+.fu-symptoms__condition-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 5px;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+.fu-symptoms__next-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}

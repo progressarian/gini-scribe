@@ -1,0 +1,299 @@
+.fu-edit__header {
+  background: linear-gradient(135deg, #059669, #10b981);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fu-edit__header-icon {
+  font-size: 16px;
+}
+.fu-edit__header-info {
+  flex: 1;
+}
+.fu-edit__header-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+.fu-edit__header-sub {
+  font-size: 10px;
+  opacity: 0.85;
+}
+.fu-edit__header-step {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.fu-edit__med-table {
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid #e2e8f0;
+  margin-bottom: 10px;
+}
+
+.fu-edit__med-header {
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+}
+
+.fu-edit__med-title {
+  font-size: 13px;
+  font-weight: 800;
+  flex: 1;
+}
+
+.fu-edit__med-add-btn {
+  font-size: 11px;
+  padding: 4px 12px;
+  background: #059669;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fu-edit__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.fu-edit__table-head {
+  background: #fafbfc;
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.fu-edit__table-cell {
+  padding: 5px 8px;
+}
+.fu-edit__table-cell--center {
+  text-align: center;
+}
+.fu-edit__table-cell--body {
+  padding: 6px 8px;
+}
+
+.fu-edit__med-row {
+  border-bottom: 1px solid #f1f5f9;
+}
+.fu-edit__med-row--stopped {
+  opacity: 0.35;
+  background: #fef2f2;
+}
+.fu-edit__med-row--modified {
+  background: #fffbeb;
+}
+.fu-edit__med-row--new {
+  background: #f0fdf4;
+  border-bottom: 1px solid #bbf7d0;
+}
+.fu-edit__med-row--ext-header {
+  background: #f0f9ff;
+}
+.fu-edit__med-row--ext {
+  background: #f0f9ff;
+  border-bottom: 1px solid #e0f2fe;
+}
+
+.fu-edit__med-name {
+  font-weight: 700;
+}
+.fu-edit__med-name--stopped {
+  text-decoration: line-through;
+}
+.fu-edit__med-modified-icon {
+  font-size: 8px;
+  color: #d97706;
+  margin-left: 4px;
+}
+
+.fu-edit__med-input {
+  width: 100%;
+  padding: 3px 5px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  box-sizing: border-box;
+}
+
+.fu-edit__med-input--new {
+  border-color: #bbf7d0;
+  font-weight: 700;
+}
+
+.fu-edit__med-input--ext {
+  border-color: #bae6fd;
+}
+
+.fu-edit__med-freq-input {
+  width: 50px;
+  padding: 3px 5px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+.fu-edit__med-freq-input--new {
+  border-color: #bbf7d0;
+}
+.fu-edit__med-freq-input--ext {
+  border-color: #bae6fd;
+}
+
+.fu-edit__med-dx {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.fu-edit__med-action-btn {
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.fu-edit__med-action-btn--stop {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.fu-edit__med-action-btn--continue {
+  background: #f0fdf4;
+  color: #059669;
+}
+
+.fu-edit__new-badge {
+  font-size: 8px;
+  background: #f0fdf4;
+  color: #059669;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.fu-edit__new-remove-btn {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.fu-edit__ext-section-header {
+  padding: 6px 8px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #0369a1;
+  border-bottom: 1px solid #bae6fd;
+}
+
+.fu-edit__ext-prescriber {
+  font-size: 8px;
+  color: #0369a1;
+  font-weight: 400;
+}
+
+.fu-edit__goals {
+  background: white;
+  border-radius: 10px;
+  padding: 12px;
+  border: 2px solid #e2e8f0;
+  margin-bottom: 10px;
+}
+
+.fu-edit__goals-title {
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.fu-edit__goals-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.fu-edit__goal-card {
+  padding: 6px 8px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1.5px solid #e2e8f0;
+}
+
+.fu-edit__goal-name {
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 3px;
+}
+
+.fu-edit__goal-target-row {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.fu-edit__goal-target-label {
+  font-size: 9px;
+  color: #64748b;
+}
+
+.fu-edit__goal-target-input {
+  flex: 1;
+  padding: 3px 5px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fu-edit__changes-summary {
+  padding: 8px 12px;
+  background: #fffbeb;
+  border-radius: 8px;
+  border: 1.5px solid #fde68a;
+  margin-bottom: 10px;
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.fu-edit__changes-modified {
+  font-weight: 700;
+  color: #d97706;
+}
+.fu-edit__changes-stopped {
+  font-weight: 700;
+  color: #dc2626;
+}
+.fu-edit__changes-new {
+  font-weight: 700;
+  color: #059669;
+}
+
+.fu-edit__next-btn {
+  width: 100%;
+  background: #1e293b;
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}

@@ -1,0 +1,86 @@
+.history__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 10px;
+}
+.history__mode-toggle {
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 10px;
+}
+.history__mode-btn {
+  flex: 1;
+  padding: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+.history__mode-btn--active {
+  background: #1e293b;
+  color: white;
+}
+.history__mode-btn--inactive {
+  background: white;
+  color: #64748b;
+}
+.history__visit-card {
+  background: white;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.history__visit-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.history__visit-date {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2563eb;
+  min-width: 80px;
+}
+.history__visit-info {
+  flex: 1;
+}
+.history__visit-doctor {
+  font-size: 12px;
+  font-weight: 700;
+}
+.history__visit-type {
+  font-size: 10px;
+  color: #64748b;
+}
+.history__visit-status {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.history__visit-arrow {
+  font-size: 10px;
+  color: #94a3b8;
+}
+.history__visit-body {
+  padding: 10px 14px;
+  border-top: 1px solid #f1f5f9;
+}
+.history__empty {
+  text-align: center;
+  padding: 30px;
+  color: #94a3b8;
+}
+.history__empty-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+.history__empty-text {
+  font-size: 13px;
+  font-weight: 600;
+}

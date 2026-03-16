@@ -1,0 +1,121 @@
+/* ============ LOGIN SCREEN ============ */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.login-card {
+  background: white;
+  border-radius: 20px;
+  padding: 36px 32px;
+  width: 360px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.login-logo {
+  width: 52px;
+  height: 52px;
+  background: #1e293b;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 900;
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+.login-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.login-subtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.login-field {
+  margin-bottom: 14px;
+}
+
+.login-field--pin {
+  margin-bottom: 18px;
+}
+
+.login-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.login-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 13px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.login-pin {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 18px;
+  letter-spacing: 8px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.login-error {
+  font-size: 11px;
+  color: #dc2626;
+  text-align: center;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 12px;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.login-btn--loading {
+  background: #94a3b8;
+  cursor: wait;
+}
+
+.login-btn--ready {
+  background: #1e293b;
+  cursor: pointer;
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 12px;
+  font-size: 10px;
+  color: #94a3b8;
+}
