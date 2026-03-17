@@ -682,7 +682,9 @@ export default function DashboardPage() {
                   color: "#1e293b",
                 }}
               >
-                <option value="" disabled>Select Specialty</option>
+                <option value="" disabled>
+                  Select Specialty
+                </option>
                 {[
                   "Endocrinology",
                   "Cardiology",
@@ -716,7 +718,9 @@ export default function DashboardPage() {
                   color: "#1e293b",
                 }}
               >
-                <option value="" disabled>Select Doctor *</option>
+                <option value="" disabled>
+                  Select Doctor *
+                </option>
                 {doctorsList.map((d) => (
                   <option key={d.id} value={d.short_name || d.name}>
                     {d.name}
@@ -929,99 +933,154 @@ export default function DashboardPage() {
           >
             UPCOMING APPOINTMENTS
           </div>
-          {appointments.map((a) => (
-            <div
-              key={a.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "8px 10px",
-                borderRadius: 8,
-                marginBottom: 4,
-                background: a.ty === "Lab" ? "#f0fdf4" : "#f8fafc",
-                border: `1px solid ${a.ty === "Lab" ? "#bbf7d0" : "#e2e8f0"}`,
-              }}
-            >
+          {appointments.map((a) => {
+            const st = a.st || "scheduled";
+            const isDone = st === "completed" || st === "in-progress";
+            const isCancelled = st === "cancelled";
+            const isNoShow = st === "no_show";
+            const statusColor =
+              st === "completed"
+                ? "#059669"
+                : st === "in-progress"
+                  ? "#d97706"
+                  : st === "cancelled"
+                    ? "#dc2626"
+                    : st === "no_show"
+                      ? "#6b7280"
+                      : "#2563eb";
+            const statusBg =
+              st === "completed"
+                ? "#f0fdf4"
+                : st === "in-progress"
+                  ? "#fffbeb"
+                  : st === "cancelled"
+                    ? "#fef2f2"
+                    : st === "no_show"
+                      ? "#f3f4f6"
+                      : "#eff6ff";
+            const statusLabel =
+              st === "completed"
+                ? "\u2713 Done"
+                : st === "in-progress"
+                  ? "\u25b6 In Progress"
+                  : st === "cancelled"
+                    ? "\u2715 Cancelled"
+                    : st === "no_show"
+                      ? "No Show"
+                      : "\u25cf Scheduled";
+            return (
               <div
+                key={a.id}
                 style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  background: a.ty === "Lab" ? "#059669" : a.ty === "OPD" ? "#3b82f6" : "#f59e0b",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  marginBottom: 4,
+                  background: a.ty === "Lab" ? "#f0fdf4" : "#f8fafc",
+                  border: `1px solid ${a.ty === "Lab" ? "#bbf7d0" : "#e2e8f0"}`,
+                  opacity: isCancelled || isNoShow ? 0.6 : 1,
                 }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>
-                  {a.ty} {a.sp ? `— ${a.sp}` : ""}
-                </div>
-                <div style={{ fontSize: 10, color: "#64748b" }}>
-                  {a.doc}
-                  {a.notes ? ` · ${a.notes}` : ""}
-                </div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 11, fontWeight: 700 }}>
-                  {a.dt
-                    ? new Date(a.dt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
-                    : "TBD"}
-                </div>
-                {a.tm && <div style={{ fontSize: 9, color: "#64748b" }}>{a.tm}</div>}
-              </div>
-              <div style={{ display: "flex", gap: 3 }}>
-                <button
-                  onClick={() => openBooking(a)}
-                  title="Edit"
+              >
+                <div
                   style={{
-                    padding: "3px 6px",
-                    background: "#eff6ff",
-                    color: "#2563eb",
-                    border: "none",
-                    borderRadius: 4,
-                    fontSize: 10,
-                    cursor: "pointer",
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: a.ty === "Lab" ? "#059669" : a.ty === "OPD" ? "#3b82f6" : "#f59e0b",
+                  }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>
+                    {a.ty} {a.sp ? `— ${a.sp}` : ""}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#64748b" }}>
+                    {a.doc}
+                    {a.notes ? ` · ${a.notes}` : ""}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    padding: "2px 8px",
+                    borderRadius: 6,
+                    fontSize: 9,
                     fontWeight: 700,
+                    background: statusBg,
+                    color: statusColor,
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  ✏️
-                </button>
-                <button
-                  onClick={() => cancelAppt(a.id)}
-                  title="Cancel"
-                  style={{
-                    padding: "3px 6px",
-                    background: "#fef2f2",
-                    color: "#dc2626",
-                    border: "none",
-                    borderRadius: 4,
-                    fontSize: 10,
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  ✕
-                </button>
-                {a.ty !== "Lab" && (
-                  <button
-                    onClick={() => startVisit(a.id, { dbPatientId })}
-                    title="Start Visit"
-                    style={{
-                      padding: "3px 8px",
-                      background: "#059669",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 4,
-                      fontSize: 10,
-                      cursor: "pointer",
-                      fontWeight: 700,
-                    }}
-                  >
-                    ▶ Start
-                  </button>
+                  {statusLabel}
+                </span>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>
+                    {a.dt
+                      ? new Date(a.dt).toLocaleDateString("en-IN", {
+                          day: "2-digit",
+                          month: "short",
+                        })
+                      : "TBD"}
+                  </div>
+                  {a.tm && <div style={{ fontSize: 9, color: "#64748b" }}>{a.tm}</div>}
+                </div>
+                {!isDone && !isCancelled && !isNoShow && (
+                  <div style={{ display: "flex", gap: 3 }}>
+                    <button
+                      onClick={() => openBooking(a)}
+                      title="Edit"
+                      style={{
+                        padding: "3px 6px",
+                        background: "#eff6ff",
+                        color: "#2563eb",
+                        border: "none",
+                        borderRadius: 4,
+                        fontSize: 10,
+                        cursor: "pointer",
+                        fontWeight: 700,
+                      }}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => cancelAppt(a.id)}
+                      title="Cancel"
+                      style={{
+                        padding: "3px 6px",
+                        background: "#fef2f2",
+                        color: "#dc2626",
+                        border: "none",
+                        borderRadius: 4,
+                        fontSize: 10,
+                        cursor: "pointer",
+                        fontWeight: 700,
+                      }}
+                    >
+                      ✕
+                    </button>
+                    {a.ty !== "Lab" && (
+                      <button
+                        onClick={() => startVisit(a.id, { dbPatientId })}
+                        title="Start Visit"
+                        style={{
+                          padding: "3px 8px",
+                          background: "#059669",
+                          color: "white",
+                          border: "none",
+                          borderRadius: 4,
+                          fontSize: 10,
+                          cursor: "pointer",
+                          fontWeight: 700,
+                        }}
+                      >
+                        ▶ Start
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

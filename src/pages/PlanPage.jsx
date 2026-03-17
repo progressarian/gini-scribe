@@ -1,5 +1,6 @@
 import "./PlanPage.css";
 import { useNavigate } from "react-router-dom";
+import { toast } from "../stores/uiStore";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useClinicalStore from "../stores/clinicalStore";
@@ -24,6 +25,7 @@ export default function PlanPage() {
   const moName = useAuthStore((s) => s.moName);
   const conName = useAuthStore((s) => s.conName);
   const patient = usePatientStore((s) => s.patient);
+  const dbPatientId = usePatientStore((s) => s.dbPatientId);
   const pfd = usePatientStore((s) => s.getPfd());
   const vitals = useVitalsStore((s) => s.vitals);
   const conTranscript = useClinicalStore((s) => s.conTranscript);
@@ -72,16 +74,29 @@ export default function PlanPage() {
   const removeMonitor = usePlanStore((s) => s.removeMonitor);
   const removeDiag = usePlanStore((s) => s.removeDiag);
   const handlePrintPlan = usePlanStore((s) => s.handlePrintPlan);
+  const planEdits = usePlanStore((s) => s.planEdits);
+  const currentDoctor = useAuthStore((s) => s.currentDoctor);
   const buildMedicineSchedule = usePlanStore((s) => s.buildMedicineSchedule);
-  const planDiags = usePlanStore((s) => s.planDiags);
-  const planMeds = usePlanStore((s) => s.planMeds);
-  const planGoals = usePlanStore((s) => s.planGoals);
-  const planLifestyle = usePlanStore((s) => s.planLifestyle);
-  const planMonitors = usePlanStore((s) => s.planMonitors);
-  const planFuture = usePlanStore((s) => s.planFuture);
-  const allMeds = usePlanStore((s) => s.allMeds);
-  const externalMeds = usePlanStore((s) => s.externalMeds);
-  const externalMedsByDoctor = usePlanStore((s) => s.externalMedsByDoctor);
+  const getPlanDiags = usePlanStore((s) => s.getPlanDiags);
+  const getPlanMeds = usePlanStore((s) => s.getPlanMeds);
+  const getPlanGoals = usePlanStore((s) => s.getPlanGoals);
+  const getPlanLifestyle = usePlanStore((s) => s.getPlanLifestyle);
+  const getPlanMonitors = usePlanStore((s) => s.getPlanMonitors);
+  const getPlanFuture = usePlanStore((s) => s.getPlanFuture);
+  const getAllMeds = usePlanStore((s) => s.getAllMeds);
+  const getExternalMeds = usePlanStore((s) => s.getExternalMeds);
+  const getExternalMedsByDoctor = usePlanStore((s) => s.getExternalMedsByDoctor);
+  const clarifications = usePlanStore((s) => s.clarifications);
+
+  const allMeds = getAllMeds(conData, moData, clarifications);
+  const planDiags = getPlanDiags(moData);
+  const planMeds = getPlanMeds(allMeds);
+  const planGoals = getPlanGoals(conData);
+  const planLifestyle = getPlanLifestyle(conData);
+  const planMonitors = getPlanMonitors(conData);
+  const planFuture = getPlanFuture(conData);
+  const externalMeds = getExternalMeds(pfd, moData, conData, conName);
+  const externalMedsByDoctor = getExternalMedsByDoctor(pfd);
   const loading = useUiStore((s) => s.loading);
   const rxReview = useRxReviewStore((s) => s.rxReview);
   const setRxReview = useRxReviewStore((s) => s.setRxReview);
@@ -302,7 +317,7 @@ export default function PlanPage() {
         )}
         <button
           className="no-print"
-          onClick={runRxReview}
+          onClick={() => runRxReview(patient, vitals, moData, conData, pfd)}
           disabled={rxReviewLoading}
           style={{
             background: rxReview ? "#7c3aed" : "linear-gradient(135deg,#7c3aed,#2563eb)",
@@ -321,7 +336,16 @@ export default function PlanPage() {
         <div style={{ flex: 1 }} />
         <button
           className="no-print"
-          onClick={copyPlanToClipboard}
+          onClick={() =>
+            copyPlanToClipboard({
+              planDiags,
+              planMeds,
+              planGoals,
+              planLifestyle,
+              planMonitors,
+              getPlan,
+            })
+          }
           style={{
             background: planCopied ? "#059669" : "#f1f5f9",
             color: planCopied ? "white" : "#475569",
@@ -336,7 +360,19 @@ export default function PlanPage() {
           {planCopied ? "✅ Copied!" : "📋 Copy Rx"}
         </button>
         <button
-          onClick={handlePrintPlan}
+          onClick={() =>
+            handlePrintPlan(
+              dbPatientId,
+              conData,
+              moData,
+              patient,
+              vitals,
+              planEdits,
+              pfd,
+              conName,
+              currentDoctor,
+            )
+          }
           style={{
             background: "#1e293b",
             color: "white",
@@ -618,7 +654,7 @@ export default function PlanPage() {
                   )}
 
                   <button
-                    onClick={saveRxFeedback}
+                    onClick={() => saveRxFeedback(dbPatientId, pfd, conData, moData, conName)}
                     disabled={rxFbSaving}
                     style={{
                       width: "100%",
@@ -901,7 +937,7 @@ export default function PlanPage() {
                         className="no-print"
                         onClick={() => {
                           const t = prompt("Add complaint");
-                          if (t) addComplaintToPlan(t);
+                          if (t) addComplaintToPlan(t, moData, setMoData);
                         }}
                         style={{
                           fontSize: 11,
@@ -1115,7 +1151,7 @@ export default function PlanPage() {
                     const current = prompt("Current value") || "";
                     const target = prompt("Target value") || "";
                     const timeline = prompt("Timeline (e.g., 3 months)") || "";
-                    addGoalToPlan({ marker, current, target, timeline });
+                    addGoalToPlan({ marker, current, target, timeline }, conData, setConData);
                   }}
                   style={{
                     marginTop: 6,
@@ -1175,7 +1211,9 @@ export default function PlanPage() {
                           <td style={{ padding: "4px 8px" }}>
                             <EditText
                               value={m.name}
-                              onChange={(v) => editMedField(m, "name", v)}
+                              onChange={(v) =>
+                                editMedField(m, "name", v, conData, setConData, moData, setMoData)
+                              }
                               style={{ fontWeight: 700 }}
                             />
                             {m._matched && (
@@ -1207,14 +1245,18 @@ export default function PlanPage() {
                           <td style={{ padding: "4px 8px", textAlign: "center" }}>
                             <EditText
                               value={m.dose || ""}
-                              onChange={(v) => editMedField(m, "dose", v)}
+                              onChange={(v) =>
+                                editMedField(m, "dose", v, conData, setConData, moData, setMoData)
+                              }
                               style={{ fontWeight: 600 }}
                             />
                           </td>
                           <td style={{ padding: "4px 8px", textAlign: "center" }}>
                             <EditText
                               value={m.timing || m.frequency || ""}
-                              onChange={(v) => editMedField(m, "timing", v)}
+                              onChange={(v) =>
+                                editMedField(m, "timing", v, conData, setConData, moData, setMoData)
+                              }
                               style={{ fontSize: 10, fontWeight: 600, color: "#1e40af" }}
                             />
                           </td>
@@ -1311,14 +1353,18 @@ export default function PlanPage() {
                     <button
                       onClick={() => {
                         if (planAddMed.name.trim()) {
-                          addMedToPlan({
-                            name: planAddMed.name.toUpperCase(),
-                            dose: planAddMed.dose,
-                            frequency: planAddMed.frequency,
-                            timing: planAddMed.timing,
-                            isNew: true,
-                            route: "Oral",
-                          });
+                          addMedToPlan(
+                            {
+                              name: planAddMed.name.toUpperCase(),
+                              dose: planAddMed.dose,
+                              frequency: planAddMed.frequency,
+                              timing: planAddMed.timing,
+                              isNew: true,
+                              route: "Oral",
+                            },
+                            conData,
+                            setConData,
+                          );
                           setPlanAddMed({ name: "", dose: "", frequency: "OD", timing: "Morning" });
                         }
                       }}
@@ -1403,7 +1449,7 @@ export default function PlanPage() {
                     onClick={() => {
                       const recon = {};
                       externalMeds.forEach((m) => {
-                        if (!medRecon[m.name]) recon[m.name] = "continue";
+                        recon[m.name] = "continue";
                       });
                       setMedRecon((prev) => ({ ...prev, ...recon }));
                     }}
@@ -1471,6 +1517,12 @@ export default function PlanPage() {
                           ? existing.split("📋 Medication Reconciliation:")[0].trim()
                           : existing;
                         editPlan("summary", cleaned + reconTag + summary);
+                        toast("Medication reconciliation added to Summary section", "success");
+                      } else {
+                        toast(
+                          "No medication decisions to add. Use Continue/Hold/Stop buttons on individual medications first.",
+                          "warn",
+                        );
                       }
                     }}
                     style={{
@@ -1787,7 +1839,12 @@ export default function PlanPage() {
                 </button>
                 {showMedCard &&
                   (() => {
-                    const schedule = buildMedicineSchedule();
+                    const schedule = buildMedicineSchedule(
+                      planMeds,
+                      externalMeds,
+                      medRecon,
+                      conName,
+                    );
                     const totalMeds =
                       planMeds.length +
                       externalMeds.filter((m) => medRecon[m.name] !== "stop").length;
@@ -2196,7 +2253,9 @@ export default function PlanPage() {
                           •{" "}
                           <EditText
                             value={l}
-                            onChange={(v) => editLifestyleField(l, "advice", v)}
+                            onChange={(v) =>
+                              editLifestyleField(l, "advice", v, conData, setConData)
+                            }
                             style={{ fontSize: 11 }}
                           />
                         </div>
@@ -2204,7 +2263,9 @@ export default function PlanPage() {
                         <div style={{ flex: 1 }}>
                           <EditText
                             value={l.advice}
-                            onChange={(v) => editLifestyleField(l, "advice", v)}
+                            onChange={(v) =>
+                              editLifestyleField(l, "advice", v, conData, setConData)
+                            }
                             style={{ fontWeight: 700, fontSize: 11 }}
                           />
                           {l.detail ? (
@@ -2213,7 +2274,9 @@ export default function PlanPage() {
                               —{" "}
                               <EditText
                                 value={l.detail}
-                                onChange={(v) => editLifestyleField(l, "detail", v)}
+                                onChange={(v) =>
+                                  editLifestyleField(l, "detail", v, conData, setConData)
+                                }
                                 style={{ fontSize: 11 }}
                               />
                             </span>
@@ -2258,12 +2321,16 @@ export default function PlanPage() {
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && planAddText.trim()) {
-                          addLifestyleToPlan({
-                            advice: planAddText,
-                            detail: "",
-                            category: "Exercise",
-                            helps: [],
-                          });
+                          addLifestyleToPlan(
+                            {
+                              advice: planAddText,
+                              detail: "",
+                              category: "Exercise",
+                              helps: [],
+                            },
+                            conData,
+                            setConData,
+                          );
                           setPlanAddText("");
                           setPlanAddMode(null);
                         }
@@ -2287,12 +2354,16 @@ export default function PlanPage() {
                     <button
                       onClick={() => {
                         if (planAddText.trim()) {
-                          addLifestyleToPlan({
-                            advice: planAddText,
-                            detail: "",
-                            category: document.getElementById("planAddCat").value,
-                            helps: [],
-                          });
+                          addLifestyleToPlan(
+                            {
+                              advice: planAddText,
+                              detail: "",
+                              category: document.getElementById("planAddCat").value,
+                              helps: [],
+                            },
+                            conData,
+                            setConData,
+                          );
                           setPlanAddText("");
                           setPlanAddMode(null);
                         }

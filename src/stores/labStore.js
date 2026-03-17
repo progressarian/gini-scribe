@@ -3,6 +3,7 @@ import api from "../services/api.js";
 import { normalizeTestName } from "../config/labNormalization.js";
 import { extractLab, extractImaging, convertHeicToJpeg, isHeic } from "../services/extraction.js";
 import useAuthStore from "./authStore.js";
+import { toast } from "./uiStore.js";
 
 const useLabStore = create((set, get) => ({
   // ── state ──
@@ -265,7 +266,7 @@ const useLabStore = create((set, get) => ({
   saveAllIntakeReports: async (pid) => {
     const patientId = pid;
     if (!patientId) {
-      alert("Search or create patient first");
+      toast("Search or create patient first", "warn");
       return;
     }
     const unsaved = get().intakeReports.filter((r) => r.data && !r.saved);

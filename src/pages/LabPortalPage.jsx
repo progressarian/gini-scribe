@@ -1,5 +1,6 @@
 import "./LabPortalPage.css";
 import { useNavigate } from "react-router-dom";
+import { toast } from "../stores/uiStore.js";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useLabPortalStore from "../stores/labPortalStore.js";
@@ -24,9 +25,9 @@ export default function LabPortalPage() {
     try {
       const resp = await api.get(`/api/documents/${documentId}/file-url`);
       if (resp.data.url) window.open(resp.data.url, "_blank");
-      else alert("No file attached to this document");
+      else toast("No file attached to this document", "warn");
     } catch (e) {
-      alert("Failed to load file: " + (e.response?.data?.error || e.message));
+      toast("Failed to load file: " + (e.response?.data?.error || e.message), "error");
     }
   };
 

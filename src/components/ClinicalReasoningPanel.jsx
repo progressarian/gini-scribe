@@ -1,5 +1,6 @@
 import useRxReviewStore from "../stores/rxReviewStore";
 import usePatientStore from "../stores/patientStore";
+import useAuthStore from "../stores/authStore";
 import { CONDITIONS_LIST } from "../config/conditions";
 
 const REASONING_TAGS = [
@@ -15,6 +16,11 @@ const REASONING_TAGS = [
 
 export default function ClinicalReasoningPanel() {
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
+  const patientFullData = usePatientStore((s) => s.patientFullData);
+  const patient = usePatientStore((s) => s.patient);
+  const conName = useAuthStore((s) => s.conName);
+  const dgKey = useAuthStore((s) => s.dgKey);
+  const whisperKey = useAuthStore((s) => s.whisperKey);
   const crExpanded = useRxReviewStore((s) => s.crExpanded);
   const crText = useRxReviewStore((s) => s.crText);
   const crCondition = useRxReviewStore((s) => s.crCondition);
@@ -211,7 +217,16 @@ export default function ClinicalReasoningPanel() {
           {/* Save button */}
           {!crSaved ? (
             <button
-              onClick={saveClinicalReasoning}
+              onClick={() =>
+                saveClinicalReasoning(
+                  dbPatientId,
+                  patientFullData,
+                  patient,
+                  conName,
+                  dgKey,
+                  whisperKey,
+                )
+              }
               disabled={crSaving || (!crText && !crAudioBlob)}
               style={{
                 width: "100%",

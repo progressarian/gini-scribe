@@ -4,6 +4,14 @@ import { callClaude } from "../services/api.js";
 import { PATIENT_VOICE_PROMPT } from "../config/prompts.js";
 import useUiStore from "./uiStore.js";
 import useVitalsStore from "./vitalsStore.js";
+import useVisitStore from "./visitStore.js";
+import useClinicalStore from "./clinicalStore.js";
+import usePlanStore from "./planStore.js";
+import useExamStore from "./examStore.js";
+import useLabStore from "./labStore.js";
+import useHistoryStore from "./historyStore.js";
+import useRxReviewStore from "./rxReviewStore.js";
+import useChatStore from "./chatStore.js";
 
 let dupCheckTimer = null;
 
@@ -210,6 +218,22 @@ const usePatientStore = create((set, get) => ({
     useUiStore.getState().clearSearch();
     useUiStore.getState().setSaveStatus("");
     localStorage.removeItem("gini_scribe_session");
+    // Clear visit mode in frontend (DB record persists for later restore)
+    useVisitStore.setState({
+      visitActive: false,
+      visitId: null,
+      visitPatientId: null,
+      activeApptId: null,
+      visitStatus: null,
+    });
+    // Reset all clinical stores
+    useClinicalStore.getState().resetClinical();
+    usePlanStore.getState().resetPlanEdits();
+    useExamStore.getState().resetExam();
+    useLabStore.getState().resetLab();
+    useRxReviewStore.getState().resetRxReview();
+    useHistoryStore.getState().setHistoryList([]);
+    useChatStore.getState().resetChat();
     if (setTab) setTab("patient");
   },
 
@@ -218,9 +242,15 @@ const usePatientStore = create((set, get) => ({
     const p = record.patient || {};
     set({ patient: p });
     // Set vitals in vitals store
-
     useVitalsStore.getState().setVitals(record.vitals || {});
-
+    // Reset all clinical stores
+    useClinicalStore.getState().resetClinical();
+    usePlanStore.getState().resetPlanEdits();
+    useExamStore.getState().resetExam();
+    useLabStore.getState().resetLab();
+    useRxReviewStore.getState().resetRxReview();
+    useHistoryStore.getState().setHistoryList([]);
+    useChatStore.getState().resetChat();
     useUiStore.getState().setShowSearch(false);
     if (setTab) setTab("patient");
     // Try to find this patient in the DB by name or phone
@@ -264,10 +294,16 @@ const usePatientStore = create((set, get) => ({
     });
     if (dbRecord.id) sessionStorage.setItem("gini_active_patient", String(dbRecord.id));
     // Reset vitals store
-
     useVitalsStore.getState().resetVitals();
+    // Reset all clinical stores
+    useClinicalStore.getState().resetClinical();
+    usePlanStore.getState().resetPlanEdits();
+    useExamStore.getState().resetExam();
+    useLabStore.getState().resetLab();
+    useRxReviewStore.getState().resetRxReview();
+    useHistoryStore.getState().setHistoryList([]);
+    useChatStore.getState().resetChat();
     // Reset UI store
-
     useUiStore.getState().setErrors({});
     useUiStore.getState().setShowSearch(false);
     // Load full patient record
@@ -308,6 +344,8 @@ const usePatientStore = create((set, get) => ({
         if (toast) toast("Failed to load patient record");
       }
     }
+    // Sync visit state from backend — show visit mode only if this patient actually has an in-progress visit
+    await useVisitStore.getState().syncVisitForPatient(dbRecord.id);
     if (setTab) setTab("dashboard");
   },
 

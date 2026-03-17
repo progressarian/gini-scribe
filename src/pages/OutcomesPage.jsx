@@ -242,7 +242,7 @@ export default function OutcomesPage() {
                 </span>
               </div>
               <button
-                onClick={generateHealthSummary}
+                onClick={() => generateHealthSummary(patient, pfd)}
                 disabled={summaryLoading}
                 style={{
                   fontSize: 11,

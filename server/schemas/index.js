@@ -186,10 +186,7 @@ export const appointmentCreateSchema = z.object({
   appointment_date: z
     .string({ required_error: "appointment_date is required" })
     .min(1, "Date is required")
-    .refine(
-      (v) => v >= new Date().toISOString().split("T")[0],
-      "Cannot book for a past date",
-    ),
+    .refine((v) => v >= new Date().toISOString().split("T")[0], "Cannot book for a past date"),
   time_slot: optStr,
   visit_type: z.enum(["OPD", "IPD", "Telehealth", "Follow-up", "Lab"]).optional().default("OPD"),
   notes: optStr,
@@ -200,7 +197,10 @@ export const appointmentUpdateSchema = z.object({
   appointment_date: optDate,
   time_slot: optStr,
   visit_type: optStr,
-  status: z.enum(["scheduled", "in-progress", "completed", "cancelled", "no_show"]).optional().nullable(),
+  status: z
+    .enum(["scheduled", "in-progress", "completed", "cancelled", "no_show"])
+    .optional()
+    .nullable(),
   notes: optStr,
 });
 

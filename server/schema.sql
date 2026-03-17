@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS active_visits (
   patient_id      INTEGER REFERENCES patients(id),
   appointment_id  INTEGER REFERENCES appointments(id),
   visit_type      TEXT DEFAULT 'new',  -- 'new' or 'followup'
+  status          TEXT DEFAULT 'scheduled', -- 'scheduled','in-progress','completed','cancelled','no_show'
   route           TEXT,                -- current route e.g. '/intake', '/fu-load'
   started_at      TIMESTAMPTZ DEFAULT NOW()
 );

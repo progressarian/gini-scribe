@@ -1,7 +1,24 @@
 import { create } from "zustand";
 import api from "../services/api.js";
+import usePatientStore from "./patientStore.js";
+import useVitalsStore from "./vitalsStore.js";
+import useClinicalStore from "./clinicalStore.js";
+import usePlanStore from "./planStore.js";
+import useAuthStore from "./authStore.js";
+import useLabStore from "./labStore.js";
 
 let searchTimer = null;
+let _toastFn = null;
+
+// Global toast — callable from stores, components, anywhere
+export const toast = (message, type = "success", duration = 4000) => {
+  if (_toastFn) _toastFn(message, type, duration);
+};
+
+// Called once from App to wire up the React toast context
+export const setToastFn = (fn) => {
+  _toastFn = fn;
+};
 
 const useUiStore = create((set, get) => ({
   // ── state ──
@@ -134,10 +151,11 @@ const useUiStore = create((set, get) => ({
 
   // ── initFind: called when FindPage mounts ──
   initFind: async () => {
-    const { searchPeriod, searchDoctor } = get();
+    const { searchQuery, searchPeriod, searchDoctor } = get();
     set({ searchLoading: true });
     try {
       const params = new URLSearchParams({ limit: "30", page: "1" });
+      if (searchQuery && searchQuery.length >= 2) params.set("q", searchQuery);
       if (searchPeriod) params.set("period", searchPeriod);
       if (searchDoctor) params.set("doctor", searchDoctor);
       const [pResp, sResp] = await Promise.all([
@@ -157,6 +175,89 @@ const useUiStore = create((set, get) => ({
       /* silent */
     }
     set({ searchLoading: false });
+  },
+
+  // ── saveConsultation: persist patient + vitals + clinical data ──
+  saveConsultation: async () => {
+    const { patient, dbPatientId, savePatient, setPatientFullData } = usePatientStore.getState();
+    if (!patient.name?.trim()) return;
+
+    set({ saveStatus: "Saving..." });
+
+    try {
+      // 1. Ensure patient is saved in DB
+      let patientId = dbPatientId;
+      if (!patientId) {
+        const result = await savePatient();
+        if (result.error) {
+          set({ saveStatus: "Save failed" });
+          setTimeout(() => set({ saveStatus: "" }), 3000);
+          return;
+        }
+        patientId = result.data?.id;
+      }
+
+      // 2. Gather clinical data from stores
+      const vitals = useVitalsStore.getState().vitals;
+      const { moData, conData, moTranscript, conTranscript, quickTranscript } =
+        useClinicalStore.getState();
+      const { planEdits } = usePlanStore.getState();
+      const currentDoctor = useAuthStore.getState().currentDoctor;
+
+      // 3. Save consultation to backend
+      const payload = {
+        patient: {
+          name: patient.name,
+          phone: patient.phone || null,
+          age: patient.age || null,
+          sex: patient.sex || null,
+          fileNo: patient.fileNo || null,
+          abhaId: patient.abhaId || null,
+          healthId: patient.healthId || null,
+          aadhaar: patient.aadhaar || null,
+          govtId: patient.govtId || null,
+          govtIdType: patient.govtIdType || null,
+          dob: patient.dob || null,
+          address: patient.address || null,
+        },
+        vitals: vitals || {},
+        moData: moData || null,
+        conData: conData || null,
+        moTranscript: moTranscript || null,
+        conTranscript: conTranscript || null,
+        quickTranscript: quickTranscript || null,
+        moName: currentDoctor?.name || null,
+        conName: currentDoctor?.name || null,
+        planEdits: planEdits || {},
+        moDoctorId: currentDoctor?.doctor_id || null,
+        conDoctorId: currentDoctor?.doctor_id || null,
+        visitDate: new Date().toISOString().split("T")[0],
+      };
+
+      await api.post("/api/consultations", payload);
+
+      // 4. Save any unsaved intake reports
+      try {
+        await useLabStore.getState().saveAllIntakeReports(patientId);
+      } catch {
+        /* non-critical */
+      }
+
+      // 5. Refresh patient full data
+      try {
+        const { data: full } = await api.get(`/api/patients/${patientId}`);
+        setPatientFullData(full);
+      } catch {
+        /* non-critical */
+      }
+
+      set({ saveStatus: "Saved", draftSaved: "" });
+      setTimeout(() => set({ saveStatus: "" }), 3000);
+    } catch (e) {
+      console.error("Save consultation failed:", e);
+      set({ saveStatus: "Save failed" });
+      setTimeout(() => set({ saveStatus: "" }), 3000);
+    }
   },
 }));
 

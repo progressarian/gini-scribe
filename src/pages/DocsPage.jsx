@@ -1,4 +1,5 @@
 import "./DocsPage.css";
+import { toast } from "../stores/uiStore";
 import usePatientStore from "../stores/patientStore";
 import useLabPortalStore from "../stores/labPortalStore";
 import { ts } from "../config/constants.js";
@@ -14,9 +15,9 @@ export default function DocsPage() {
     try {
       const resp = await api.get(`/api/documents/${documentId}/file-url`);
       if (resp.data.url) window.open(resp.data.url, "_blank");
-      else alert("No file attached to this document");
+      else toast("No file attached to this document", "warn");
     } catch (e) {
-      alert("Failed to load file: " + (e.response?.data?.error || e.message));
+      toast("Failed to load file: " + (e.response?.data?.error || e.message), "error");
     }
   };
 

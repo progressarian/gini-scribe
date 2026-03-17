@@ -3,6 +3,9 @@ import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
 import Companion from "./Companion";
+import HomeScreen from "./companion/HomeScreen";
+import PatientScreen from "./companion/PatientScreen";
+import CaptureScreen from "./companion/CaptureScreen";
 import HomePage from "./pages/HomePage";
 import DashboardPage from "./pages/DashboardPage";
 import QuickPage from "./pages/QuickPage";
@@ -33,12 +36,21 @@ import FindPage from "./pages/FindPage";
 const router = createBrowserRouter([
   // Public routes
   { path: "/login", element: <LoginPage /> },
-  { path: "/companion", element: <Companion /> },
 
   // Protected routes (require login)
   {
     element: <ProtectedRoute />,
     children: [
+      // Companion — own layout, no AppLayout
+      {
+        path: "/companion",
+        element: <Companion />,
+        children: [
+          { index: true, element: <HomeScreen /> },
+          { path: "record/:id", element: <PatientScreen /> },
+          { path: "capture/:id", element: <CaptureScreen /> },
+        ],
+      },
       {
         element: <AppLayout />,
         children: [

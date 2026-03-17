@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useClinicalStore from "../stores/clinicalStore";
@@ -55,6 +55,8 @@ export default function IntakePage() {
   const loading = useUiStore((s) => s.loading);
   const errors = useUiStore((s) => s.errors);
   const clearErr = useUiStore((s) => s.clearErr);
+  const saveDraft = useVisitStore((s) => s.saveDraft);
+  const [continuing, setContinuing] = useState(false);
 
   return (
     <div>
@@ -1832,8 +1834,19 @@ export default function IntakePage() {
         )}
       </div>
 
-      <button onClick={() => navigate("/history-clinical")} className="intake__next-btn">
-        Next: Clinical History →
+      <button
+        disabled={continuing}
+        onClick={async () => {
+          setContinuing(true);
+          try {
+            await saveDraft();
+          } catch {}
+          setContinuing(false);
+          navigate("/history-clinical");
+        }}
+        className="intake__next-btn"
+      >
+        {continuing ? "Saving..." : "Next: Clinical History →"}
       </button>
     </div>
   );

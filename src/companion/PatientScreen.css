@@ -1,0 +1,297 @@
+.patient__header {
+  background: linear-gradient(135deg, #1e293b, #334155);
+  color: white;
+  padding: 10px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.patient__header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.patient__back {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.patient__header-info {
+  flex: 1;
+}
+
+.patient__header-name {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.patient__header-details {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.patient__capture-btn {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.patient__tabs {
+  display: flex;
+  margin-top: 8px;
+  gap: 2px;
+}
+
+.patient__tab {
+  flex: 1;
+  padding: 6px;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.patient__tab--active {
+  background: white;
+  color: #1e293b;
+}
+
+.patient__loading {
+  text-align: center;
+  padding: 30px;
+}
+
+.patient__loading-icon {
+  font-size: 24px;
+  animation: companion-pulse 1s infinite;
+}
+
+.patient__body {
+  padding: 12px;
+}
+
+/* Records tab */
+.patient__empty {
+  text-align: center;
+  padding: 30px;
+  color: #94a3b8;
+}
+
+.patient__empty-icon {
+  font-size: 28px;
+}
+
+.patient__empty-text {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.patient__empty-btn {
+  margin-top: 8px;
+  padding: 8px 16px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.patient__empty-inline {
+  padding: 20px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.patient__doc-card {
+  padding: 8px 10px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.patient__doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.patient__doc-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.patient__doc-info {
+  flex: 1;
+}
+
+.patient__doc-title {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.patient__doc-meta {
+  font-size: 9px;
+  color: #64748b;
+}
+
+.patient__doc-badges {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.patient__doc-badge {
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.patient__doc-badge--med {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.patient__doc-badge--lab {
+  background: #dcfce7;
+  color: #059669;
+}
+
+.patient__doc-badge--dx {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.patient__doc-view-btn {
+  font-size: 9px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Medications tab */
+.patient__section-title {
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.patient__table {
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.patient__med-row {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 11px;
+}
+
+.patient__med-header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.patient__med-name {
+  font-weight: 700;
+}
+
+.patient__med-source {
+  font-size: 9px;
+  color: #7c3aed;
+}
+
+.patient__med-details {
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* Labs tab */
+.patient__lab-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 11px;
+}
+
+.patient__lab-name {
+  font-weight: 600;
+}
+
+.patient__lab-date {
+  font-size: 9px;
+  color: #94a3b8;
+  margin-left: 4px;
+}
+
+.patient__lab-result {
+  font-weight: 700;
+}
+
+.patient__lab-unit {
+  color: #94a3b8;
+  margin-left: 3px;
+}
+
+/* Visits tab */
+.patient__visit-card {
+  padding: 8px 10px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid;
+}
+
+.patient__visit-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.patient__visit-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.patient__visit-meta {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.patient__visit-status {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  align-self: flex-start;
+}

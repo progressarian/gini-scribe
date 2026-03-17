@@ -1,11 +1,15 @@
 import { create } from "zustand";
 import api from "../services/api.js";
+import useVitalsStore from "./vitalsStore.js";
+import useLabStore from "./labStore.js";
 
 const useVisitStore = create((set, get) => ({
   // ── state ──
   visitActive: false,
   visitId: null,
+  visitPatientId: null, // tracks which patient the current visit belongs to
   activeApptId: null,
+  visitStatus: null, // 'scheduled','in-progress','completed','cancelled','no_show'
   complaints: [],
   complaintText: "",
   fuChecks: {
@@ -51,6 +55,7 @@ const useVisitStore = create((set, get) => ({
   // ── simple setters ──
   setVisitActive: (val) => set({ visitActive: val }),
   setVisitId: (val) => set({ visitId: val }),
+  setVisitStatus: (val) => set({ visitStatus: val }),
   setComplaints: (valOrFn) => {
     if (typeof valOrFn === "function") {
       set((state) => ({ complaints: valOrFn(state.complaints) }));
@@ -146,7 +151,9 @@ const useVisitStore = create((set, get) => ({
     set({
       visitActive: true,
       visitId,
+      visitPatientId: dbPatientId || null,
       activeApptId: apptId || null,
+      visitStatus: "in-progress",
       complaints: [],
       complaintText: "",
     });
@@ -177,6 +184,7 @@ const useVisitStore = create((set, get) => ({
         patient_id: dbPatientId || null,
         appointment_id: typeof apptId === "number" ? apptId : null,
         visit_type: visitType,
+        status: "in-progress",
         route: targetRoute,
       })
       .catch(() => {
@@ -186,21 +194,25 @@ const useVisitStore = create((set, get) => ({
   },
 
   endVisit: (markCompleted) => {
+    const { visitPatientId } = get();
     set({
       visitActive: false,
       visitId: null,
+      visitPatientId: null,
       activeApptId: null,
+      visitStatus: markCompleted ? "completed" : "cancelled",
     });
-    // Clear from DB (fire-and-forget)
-    api
-      .delete(`/api/active-visit${markCompleted ? "?markCompleted=1" : ""}`)
-      .catch(() => {
-        /* non-critical */
-      });
+    // Clear from DB — target this specific patient's visit
+    const params = new URLSearchParams();
+    if (markCompleted) params.set("markCompleted", "1");
+    if (visitPatientId) params.set("patient_id", visitPatientId);
+    api.delete(`/api/active-visit?${params}`).catch(() => {
+      /* non-critical */
+    });
     // Caller should navigate("/")
   },
 
-  // Restore active visit from DB on page load
+  // Restore active visit from DB on page load (most recent in-progress visit)
   restoreVisit: async () => {
     try {
       const { data: av } = await api.get("/api/active-visit");
@@ -208,8 +220,12 @@ const useVisitStore = create((set, get) => ({
       set({
         visitActive: true,
         visitId: av.id?.toString() || Date.now().toString(),
+        visitPatientId: av.patient_id || null,
         activeApptId: av.appointment_id || null,
+        visitStatus: av.status || "in-progress",
       });
+      // Restore any saved step data (vitals, fuChecks, etc.)
+      if (av.step_data) get().restoreDraft(av.step_data);
       // Return the visit data so the caller can restore patient + navigate
       return av;
     } catch {
@@ -219,9 +235,137 @@ const useVisitStore = create((set, get) => ({
 
   // Update the current route in DB (so refresh lands on the right page)
   updateVisitRoute: (route) => {
-    api.put("/api/active-visit", { route }).catch(() => {
+    const { visitPatientId } = get();
+    api.put("/api/active-visit", { route, patient_id: visitPatientId }).catch(() => {
       /* non-critical */
     });
+  },
+
+  // Update the visit status
+  updateVisitStatus: (status) => {
+    const { visitPatientId } = get();
+    set({ visitStatus: status });
+    api.put("/api/active-visit", { status, patient_id: visitPatientId }).catch(() => {
+      /* non-critical */
+    });
+  },
+
+  // Save draft of all FU step data to the active_visit record in DB.
+  // Called on each "Continue" button so data survives page refresh.
+  saveDraft: async () => {
+    const {
+      visitPatientId,
+      fuChecks,
+      complaints,
+      fuExtMeds,
+      fuNewConditions,
+      fuMedEdits,
+      fuNewMeds,
+      fuAbnormalActions,
+      fuConNotes,
+      fuMoNotes,
+      fuPlanGenerated,
+      fuPlanSource,
+      complaintText,
+    } = get();
+    if (!visitPatientId) return;
+
+    const vitals = useVitalsStore.getState().vitals;
+    const { labData, intakeReports } = useLabStore.getState();
+
+    const stepData = {
+      vitals,
+      labData,
+      // Strip base64 from reports to keep payload small
+      intakeReports: (intakeReports || []).map(({ base64, ...rest }) => rest),
+      fuChecks,
+      complaints,
+      complaintText,
+      fuExtMeds,
+      fuNewConditions,
+      fuMedEdits,
+      fuNewMeds,
+      fuAbnormalActions,
+      fuConNotes,
+      fuMoNotes,
+      fuPlanGenerated,
+      fuPlanSource,
+    };
+
+    try {
+      await api.put("/api/active-visit", { step_data: stepData, patient_id: visitPatientId });
+    } catch {
+      /* non-critical */
+    }
+  },
+
+  // Restore draft data from an active_visit's step_data into the appropriate stores.
+  restoreDraft: (stepData) => {
+    if (!stepData || typeof stepData !== "object" || Object.keys(stepData).length === 0) return;
+
+    // Restore vitals
+    if (stepData.vitals && Object.values(stepData.vitals).some(Boolean)) {
+      useVitalsStore.getState().setVitals(stepData.vitals);
+    }
+    // Restore lab data
+    if (stepData.labData) {
+      useLabStore.getState().setLabData(stepData.labData);
+    }
+    if (stepData.intakeReports?.length) {
+      useLabStore.getState().setIntakeReports(stepData.intakeReports);
+    }
+    // Restore visit store FU state
+    const patch = {};
+    if (stepData.fuChecks) patch.fuChecks = stepData.fuChecks;
+    if (stepData.complaints) patch.complaints = stepData.complaints;
+    if (stepData.complaintText) patch.complaintText = stepData.complaintText;
+    if (stepData.fuExtMeds) patch.fuExtMeds = stepData.fuExtMeds;
+    if (stepData.fuNewConditions) patch.fuNewConditions = stepData.fuNewConditions;
+    if (stepData.fuMedEdits) patch.fuMedEdits = stepData.fuMedEdits;
+    if (stepData.fuNewMeds) patch.fuNewMeds = stepData.fuNewMeds;
+    if (stepData.fuAbnormalActions) patch.fuAbnormalActions = stepData.fuAbnormalActions;
+    if (stepData.fuConNotes) patch.fuConNotes = stepData.fuConNotes;
+    if (stepData.fuMoNotes) patch.fuMoNotes = stepData.fuMoNotes;
+    if (stepData.fuPlanGenerated) patch.fuPlanGenerated = stepData.fuPlanGenerated;
+    if (stepData.fuPlanSource) patch.fuPlanSource = stepData.fuPlanSource;
+    if (Object.keys(patch).length) set(patch);
+  },
+
+  // Sync visit state from backend when switching patients.
+  // Queries the backend for an in-progress visit for THIS specific patient.
+  // Multiple patients can have concurrent in-progress visits.
+  syncVisitForPatient: async (pid) => {
+    const clearVisit = {
+      visitActive: false,
+      visitId: null,
+      visitPatientId: null,
+      activeApptId: null,
+      visitStatus: null,
+    };
+    if (!pid) {
+      set(clearVisit);
+      return null;
+    }
+    try {
+      const { data: av } = await api.get(`/api/active-visit?patient_id=${pid}`);
+      if (av && av.status === "in-progress") {
+        set({
+          visitActive: true,
+          visitId: av.id?.toString() || Date.now().toString(),
+          visitPatientId: Number(pid),
+          activeApptId: av.appointment_id || null,
+          visitStatus: av.status,
+        });
+        // Restore any saved step data
+        if (av.step_data) get().restoreDraft(av.step_data);
+        return av;
+      }
+      set(clearVisit);
+      return null;
+    } catch {
+      set(clearVisit);
+      return null;
+    }
   },
 
   // Booking
@@ -355,7 +499,9 @@ const useVisitStore = create((set, get) => ({
     set({
       visitActive: false,
       visitId: null,
+      visitPatientId: null,
       activeApptId: null,
+      visitStatus: null,
       complaints: [],
       complaintText: "",
       fuChecks: {

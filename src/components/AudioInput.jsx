@@ -17,6 +17,7 @@ export default function AudioInput({ onTranscript, dgKey, whisperKey, label, col
   const [lang, setLang] = useState("en");
   const [engine, setEngine] = useState(dgKey ? "deepgram" : "whisper");
   const [useCleanup, setUseCleanup] = useState(true);
+  const [using, setUsing] = useState(false);
   const mediaRec = useRef(null);
   const chunks = useRef([]);
   const audioBlob = useRef(null);
@@ -452,12 +453,19 @@ export default function AudioInput({ onTranscript, dgKey, whisperKey, label, col
             className="audio-input__transcript-area"
           />
           <button
-            onClick={() => {
-              if (transcript) onTranscript(transcript);
+            onClick={async () => {
+              if (transcript && !using) {
+                setUsing(true);
+                try {
+                  await onTranscript(transcript);
+                } catch {}
+                setUsing(false);
+              }
             }}
+            disabled={using}
             className="audio-input__use-btn"
           >
-            {"\u2705"} Use This
+            {using ? "\u23F3 Processing..." : "\u2705 Use This"}
           </button>
         </div>
       )}

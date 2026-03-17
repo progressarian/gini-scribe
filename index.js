@@ -117,15 +117,26 @@ app.get("/api/doctors", async (req, res) => {
   }
 });
 
-// Login with PIN
+// Login with PIN (bcrypt)
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { doctor_id, pin } = req.body;
+    const { default: bcrypt } = await import("bcrypt");
     const doc = await pool.query(
-      "SELECT * FROM doctors WHERE id=$1 AND pin=$2 AND is_active=true",
-      [doctor_id, pin],
+      "SELECT * FROM doctors WHERE id=$1 AND is_active=true",
+      [doctor_id],
     );
     if (doc.rows.length === 0) return res.status(401).json({ error: "Invalid PIN" });
+
+    const doctor = doc.rows[0];
+    // Support both bcrypt hash and legacy plain-text pin
+    let pinValid = false;
+    if (doctor.pin && doctor.pin.startsWith("$2")) {
+      pinValid = await bcrypt.compare(pin, doctor.pin);
+    } else {
+      pinValid = doctor.pin === pin;
+    }
+    if (!pinValid) return res.status(401).json({ error: "Invalid PIN" });
 
     // Generate token
     const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -140,7 +151,7 @@ app.post("/api/auth/login", async (req, res) => {
       [doctor_id, JSON.stringify({ ip: req.ip })],
     );
 
-    res.json({ token, doctor: doc.rows[0] });
+    res.json({ token, doctor });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -487,25 +498,31 @@ app.post("/api/consultations", async (req, res) => {
     }
 
     const vDate = n(visitDate) || null;
-    const con = await client.query(
-      `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
-       VALUES ($1,COALESCE($2::date, CURRENT_DATE),$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12) RETURNING id`,
-      [
-        patientId,
-        vDate,
-        n(moName),
-        n(conName),
-        n(moTranscript),
-        n(conTranscript),
-        n(quickTranscript),
-        safeJson(moData),
-        safeJson(conData),
-        safeJson(planEdits),
-        int(moDoctorId),
-        int(conDoctorId),
-      ],
-    );
-    const consultationId = con.rows[0].id;
+    const effectiveDate = vDate || new Date().toISOString().split("T")[0];
+
+    let consultationId;
+    {
+      // Always create a new consultation row
+      const con = await client.query(
+        `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
+         VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12) RETURNING id`,
+        [
+          patientId,
+          effectiveDate,
+          n(moName),
+          n(conName),
+          n(moTranscript),
+          n(conTranscript),
+          n(quickTranscript),
+          safeJson(moData),
+          safeJson(conData),
+          safeJson(planEdits),
+          int(moDoctorId),
+          int(conDoctorId),
+        ],
+      );
+      consultationId = con.rows[0].id;
+    }
 
     // Audit log
     const doctorId = req.doctor?.doctor_id || int(conDoctorId) || int(moDoctorId);
@@ -548,7 +565,8 @@ app.post("/api/consultations", async (req, res) => {
     for (const d of moData?.diagnoses || []) {
       if (d?.id && d?.label) {
         await client.query(
-          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET consultation_id = EXCLUDED.consultation_id, label = EXCLUDED.label, status = EXCLUDED.status, updated_at = NOW()`,
           [patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || "New"],
         );
       }
@@ -1281,7 +1299,13 @@ app.post("/api/patients/:id/history", async (req, res) => {
     for (const d of diagnoses || []) {
       if (d && (d.id || d.label)) {
         await client.query(
-          "INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)",
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
+             consultation_id = EXCLUDED.consultation_id,
+             label = EXCLUDED.label,
+             status = EXCLUDED.status,
+             updated_at = NOW()`,
           [
             patientId,
             cid,

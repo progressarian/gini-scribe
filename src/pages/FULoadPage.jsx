@@ -1,21 +1,26 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useVitalsStore from "../stores/vitalsStore.js";
 import useLabStore from "../stores/labStore.js";
 import useClinicalStore from "../stores/clinicalStore.js";
+import useVisitStore from "../stores/visitStore.js";
+import useUiStore from "../stores/uiStore.js";
 import { extractLab, extractImaging } from "../services/extraction.js";
 import AudioInput from "../components/AudioInput.jsx";
 import "./FULoadPage.css";
 
 export default function FULoadPage() {
   const navigate = useNavigate();
+  const [continuing, setContinuing] = useState(false);
   const { dgKey, whisperKey, conName } = useAuthStore();
   const { patient, dbPatientId, getPfd } = usePatientStore();
   const { vitals, setVitals, voiceFillVitals } = useVitalsStore();
   const { labData, setLabData, intakeReports, setIntakeReports, saveAllIntakeReports } =
     useLabStore();
   const { conData } = useClinicalStore();
+  const saveDraft = useVisitStore((s) => s.saveDraft);
 
   const pfd = getPfd();
 
@@ -51,32 +56,48 @@ export default function FULoadPage() {
         />
         <div className="fu-load__vitals-grid">
           {[
-            { k: "bp_sys", l: "BP Sys" },
-            { k: "bp_dia", l: "BP Dia" },
-            { k: "pulse", l: "Pulse" },
-            { k: "spo2", l: "SpO2" },
-            { k: "weight", l: "Weight" },
-            { k: "height", l: "Height" },
-            { k: "temp", l: "Temp" },
-            { k: "waist", l: "Waist" },
-          ].map((v) => (
-            <div key={v.k}>
-              <label className="fu-load__vital-label">{v.l}</label>
-              <input
-                value={vitals[v.k] || ""}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setVitals((p) => {
-                    const n = { ...p, [v.k]: val };
-                    if (n.weight && n.height)
-                      n.bmi = (parseFloat(n.weight) / (parseFloat(n.height) / 100) ** 2).toFixed(1);
-                    return n;
-                  });
-                }}
-                className="fu-load__vital-input"
-              />
-            </div>
-          ))}
+            { k: "bp_sys", l: "BP Sys", min: 60, max: 260, unit: "mmHg" },
+            { k: "bp_dia", l: "BP Dia", min: 30, max: 160, unit: "mmHg" },
+            { k: "pulse", l: "Pulse", min: 30, max: 220, unit: "bpm" },
+            { k: "spo2", l: "SpO2", min: 50, max: 100, unit: "%" },
+            { k: "weight", l: "Weight", min: 1, max: 300, unit: "kg" },
+            { k: "height", l: "Height", min: 30, max: 250, unit: "cm" },
+            { k: "temp", l: "Temp", min: 90, max: 110, unit: "°F" },
+            { k: "waist", l: "Waist", min: 30, max: 200, unit: "cm" },
+          ].map((v) => {
+            const val = vitals[v.k] || "";
+            const num = parseFloat(val);
+            const outOfRange = val && !isNaN(num) && (num < v.min || num > v.max);
+            return (
+              <div key={v.k}>
+                <label className="fu-load__vital-label">{v.l}</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={val}
+                  placeholder={`${v.min}–${v.max}`}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setVitals((p) => {
+                      const n = { ...p, [v.k]: raw };
+                      if (n.weight && n.height)
+                        n.bmi = (parseFloat(n.weight) / (parseFloat(n.height) / 100) ** 2).toFixed(
+                          1,
+                        );
+                      return n;
+                    });
+                  }}
+                  className="fu-load__vital-input"
+                  style={outOfRange ? { borderColor: "#ef4444", background: "#fef2f2" } : {}}
+                />
+                {outOfRange && (
+                  <div style={{ fontSize: 10, color: "#ef4444", marginTop: 2 }}>
+                    {num < v.min ? `Min ${v.min}${v.unit}` : `Max ${v.max}${v.unit}`}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         {vitals.bmi && (
           <div
@@ -323,8 +344,21 @@ export default function FULoadPage() {
         );
       })()}
 
-      <button onClick={() => navigate("/fu-review")} className="fu-load__continue-btn">
-        Continue to Review →
+      <button
+        disabled={continuing}
+        onClick={async () => {
+          setContinuing(true);
+          try {
+            await saveDraft();
+          } catch {
+            /* continue anyway */
+          }
+          setContinuing(false);
+          navigate("/fu-review");
+        }}
+        className="fu-load__continue-btn"
+      >
+        {continuing ? "Saving..." : "Continue to Review →"}
       </button>
     </div>
   );

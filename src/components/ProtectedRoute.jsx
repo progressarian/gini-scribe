@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import { Navigate, Outlet, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useNavigate, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useVisitStore from "../stores/visitStore";
 
 export default function ProtectedRoute() {
   const navigate = useNavigate();
+  const location = useLocation();
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
   const authReady = useAuthStore((s) => s.authReady);
   const initAuth = useAuthStore((s) => s.initAuth);
@@ -36,8 +37,8 @@ export default function ProtectedRoute() {
             age: av.age || "",
             sex: av.sex || "",
           });
-          // Navigate to the route they were on
-          if (av.route) navigate(av.route, { replace: true });
+          // Navigate to the route they were on, unless user is already on a specific page
+          if (av.route && location.pathname === "/") navigate(av.route, { replace: true });
         } else if (!dbPatientId) {
           // No active visit — just restore patient from session
           restorePatient();
@@ -47,6 +48,6 @@ export default function ProtectedRoute() {
   }, [authReady, currentDoctor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!authReady) return null;
-  if (!currentDoctor) return <Navigate to="/login" replace />;
+  if (!currentDoctor) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   return <Outlet />;
 }

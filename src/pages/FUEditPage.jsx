@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import usePatientStore from "../stores/patientStore.js";
 import useClinicalStore from "../stores/clinicalStore.js";
 import useVisitStore from "../stores/visitStore.js";
+import useUiStore from "../stores/uiStore.js";
 import "./FUEditPage.css";
 
 export default function FUEditPage() {
   const navigate = useNavigate();
+  const [continuing, setContinuing] = useState(false);
   const { patient, getPfd } = usePatientStore();
   const { conData } = useClinicalStore();
-  const { fuMedEdits, setFuMedEdits, fuNewMeds, setFuNewMeds } = useVisitStore();
+  const { fuMedEdits, setFuMedEdits, fuNewMeds, setFuNewMeds, saveDraft } = useVisitStore();
 
   const pfd = getPfd();
 
@@ -347,8 +350,19 @@ export default function FUEditPage() {
         );
       })()}
 
-      <button onClick={() => navigate("/fu-symptoms")} className="fu-edit__next-btn">
-        Next: Symptoms →
+      <button
+        disabled={continuing}
+        onClick={async () => {
+          setContinuing(true);
+          try {
+            await saveDraft();
+          } catch {}
+          setContinuing(false);
+          navigate("/fu-symptoms");
+        }}
+        className="fu-edit__next-btn"
+      >
+        {continuing ? "Saving..." : "Next: Symptoms →"}
       </button>
     </div>
   );

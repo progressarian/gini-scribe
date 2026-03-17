@@ -36,10 +36,7 @@ export default function CIPage() {
             ].map(([v, l]) => (
               <button
                 key={v}
-                onClick={() => {
-                  setCiPeriod(v);
-                  loadCIReport(v);
-                }}
+                onClick={() => setCiPeriod(v)}
                 className="ci__period-btn"
                 style={{
                   background: ciPeriod === v ? "#0f172a" : "white",

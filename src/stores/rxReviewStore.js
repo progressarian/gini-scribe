@@ -2,6 +2,7 @@ import { create } from "zustand";
 import api from "../services/api.js";
 import { sa, ts } from "../config/constants.js";
 import useAuthStore from "./authStore.js";
+import { toast } from "./uiStore.js";
 
 const useRxReviewStore = create((set, get) => ({
   // ── Rx Review state ──
@@ -58,6 +59,30 @@ const useRxReviewStore = create((set, get) => ({
   setRxFbSeverity: (val) => set({ rxFbSeverity: val }),
   setRxFbSaving: (val) => set({ rxFbSaving: val }),
   setRxFbSaved: (val) => set({ rxFbSaved: val }),
+
+  resetRxReview: () =>
+    set({
+      rxReview: null,
+      rxReviewLoading: false,
+      crExpanded: false,
+      crText: "",
+      crCondition: "",
+      crTags: [],
+      crSaving: false,
+      crSaved: null,
+      crRecording: false,
+      crAudioBlob: null,
+      crAudioUrl: null,
+      crTranscribing: false,
+      rxFbAgreement: null,
+      rxFbText: "",
+      rxFbCorrect: "",
+      rxFbReason: "",
+      rxFbTags: [],
+      rxFbSeverity: null,
+      rxFbSaving: false,
+      rxFbSaved: null,
+    }),
 
   // ── actions ──
 
@@ -173,7 +198,7 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
       const resp = await api.post(url, body);
       const saved = resp.data;
       if (saved.error) {
-        alert("Save failed: " + saved.error);
+        toast("Save failed: " + saved.error, "error");
         set({ crSaving: false });
         return;
       }
@@ -199,7 +224,7 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
         reader.readAsDataURL(crAudioBlob);
       }
     } catch (e) {
-      alert("Save failed: " + (e.response?.data?.error || e.message));
+      toast("Save failed: " + (e.response?.data?.error || e.message), "error");
     }
     set({ crSaving: false });
   },
@@ -244,7 +269,7 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
       rec.start(250);
       set({ crRecording: true });
     } catch (e) {
-      alert("Microphone access denied");
+      toast("Microphone access denied", "error");
     }
   },
 
@@ -291,7 +316,7 @@ Example: [{"type":"warning","category":"Medication","text":"No statin prescribed
       const resp = await api.post(`/api/consultations/${conId}/rx-feedback`, body);
       set({ rxFbSaved: resp.data });
     } catch (e) {
-      alert("Save failed: " + (e.response?.data?.error || e.message));
+      toast("Save failed: " + (e.response?.data?.error || e.message), "error");
     }
     set({ rxFbSaving: false });
   },

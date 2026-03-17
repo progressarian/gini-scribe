@@ -587,12 +587,15 @@ router.get("/reports/clinical-intelligence", async (req, res) => {
       ),
     ]);
 
+    const crDateFilter = dateFilter.replace("created_at", "cr.created_at");
+    const rfDateFilter = dateFilter.replace("created_at", "rf.created_at");
+
     const reasoningFeed = await pool.query(
-      `SELECT cr.*, p.name as patient_name, p.file_no FROM clinical_reasoning cr JOIN patients p ON p.id=cr.patient_id ${dateFilter ? "WHERE 1=1 " + dateFilter : ""} ORDER BY cr.created_at DESC LIMIT 50`,
+      `SELECT cr.*, p.name as patient_name, p.file_no FROM clinical_reasoning cr JOIN patients p ON p.id=cr.patient_id ${crDateFilter ? "WHERE 1=1 " + crDateFilter : ""} ORDER BY cr.created_at DESC LIMIT 50`,
     );
 
     const rxFeed = await pool.query(
-      `SELECT rf.*, p.name as patient_name, p.file_no FROM rx_review_feedback rf JOIN patients p ON p.id=rf.patient_id ${dateFilter ? "WHERE 1=1 " + dateFilter : ""} ORDER BY rf.created_at DESC LIMIT 50`,
+      `SELECT rf.*, p.name as patient_name, p.file_no FROM rx_review_feedback rf JOIN patients p ON p.id=rf.patient_id ${rfDateFilter ? "WHERE 1=1 " + rfDateFilter : ""} ORDER BY rf.created_at DESC LIMIT 50`,
     );
 
     res.json({

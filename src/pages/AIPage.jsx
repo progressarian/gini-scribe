@@ -29,13 +29,13 @@ export default function AIPage() {
             value={aiInput}
             onChange={(e) => setAiInput(e.target.value)}
             placeholder="e.g., Drug interactions check, ADA guidelines for this HbA1c..."
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendAiMessage()}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendAiMessage(patient)}
             className="ai-page__input"
             onFocus={(e) => (e.target.style.borderColor = "#7c3aed")}
             onBlur={(e) => (e.target.style.borderColor = "#e9d5ff")}
           />
           <button
-            onClick={sendAiMessage}
+            onClick={() => sendAiMessage(patient)}
             disabled={aiLoading || !aiInput.trim()}
             className={`ai-page__send-btn ${aiLoading ? "ai-page__send-btn--loading" : "ai-page__send-btn--active"}`}
           >

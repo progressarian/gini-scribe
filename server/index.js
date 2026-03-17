@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { authMiddleware, requireAuth } from "./middleware/auth.js";
+import { ipLimiter, userLimiter } from "./middleware/rateLimit.js";
 import authRoutes from "./routes/auth.js";
 import patientRoutes from "./routes/patients.js";
 import consultationRoutes from "./routes/consultations.js";
@@ -22,6 +23,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.set("trust proxy", 1); // trust first proxy (Railway/Render) for accurate IP
 app.use(cors());
 
 // Route-aware body size limits — only upload/transcript routes get large limits
@@ -50,6 +52,10 @@ app.use((req, res, next) => {
 // Auth middleware (attaches req.doctor if valid token, blocks unauthenticated on protected routes)
 app.use(authMiddleware);
 app.use(requireAuth);
+
+// Rate limiting — IP-based for unauthenticated, user-based for authenticated
+app.use("/api", ipLimiter);
+app.use("/api", userLimiter);
 
 // Routes
 app.use("/api", authRoutes);

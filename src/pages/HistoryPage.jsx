@@ -1,6 +1,7 @@
 import "./HistoryPage.css";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
+import useReportsStore from "../stores/reportsStore";
 import useHistoryStore from "../stores/historyStore";
 import AudioInput from "../components/AudioInput.jsx";
 
@@ -10,9 +11,14 @@ export default function HistoryPage() {
   const doctorsList = useAuthStore((s) => s.doctorsList);
   const patient = usePatientStore((s) => s.patient);
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
+  const setPatientFullData = usePatientStore((s) => s.setPatientFullData);
+  const patientFullData = usePatientStore((s) => s.patientFullData);
+  const fetchOutcomes = useReportsStore((s) => s.fetchOutcomes);
   const historyForm = useHistoryStore((s) => s.historyForm);
   const setHistoryForm = useHistoryStore((s) => s.setHistoryForm);
-  const historyList = useHistoryStore((s) => s.historyList);
+  const storeHistoryList = useHistoryStore((s) => s.historyList);
+  const historyList =
+    storeHistoryList.length > 0 ? storeHistoryList : patientFullData?.consultations || [];
   const historySaving = useHistoryStore((s) => s.historySaving);
   const rxText = useHistoryStore((s) => s.rxText);
   const setRxText = useHistoryStore((s) => s.setRxText);
@@ -620,7 +626,7 @@ export default function HistoryPage() {
                 </button>
                 {bulkVisits.length > 0 && !bulkSaving && (
                   <button
-                    onClick={saveBulkVisits}
+                    onClick={() => saveBulkVisits(dbPatientId, setPatientFullData, fetchOutcomes)}
                     disabled={!dbPatientId}
                     style={{
                       padding: "8px 16px",
@@ -1265,7 +1271,7 @@ export default function HistoryPage() {
           {/* Save button - hidden in bulk mode */}
           {hxMode !== "bulk" && (
             <button
-              onClick={saveHistoryEntry}
+              onClick={() => saveHistoryEntry(dbPatientId, setPatientFullData, fetchOutcomes)}
               disabled={historySaving || !historyForm.visit_date}
               style={{
                 marginTop: 8,

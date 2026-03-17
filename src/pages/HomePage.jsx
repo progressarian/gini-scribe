@@ -218,7 +218,9 @@ export default function HomePage() {
                       ? "#dc2626"
                       : a.status === "in-progress"
                         ? "#d97706"
-                        : "#2563eb";
+                        : a.status === "no_show"
+                          ? "#6b7280"
+                          : "#2563eb";
                 const statusBg =
                   a.status === "completed"
                     ? "#f0fdf4"
@@ -226,7 +228,9 @@ export default function HomePage() {
                       ? "#fef2f2"
                       : a.status === "in-progress"
                         ? "#fffbeb"
-                        : "#eff6ff";
+                        : a.status === "no_show"
+                          ? "#f3f4f6"
+                          : "#eff6ff";
                 return (
                   <div
                     key={a.id}
@@ -274,7 +278,9 @@ export default function HomePage() {
                             ? "\u2715 Canc"
                             : a.status === "in-progress"
                               ? "\u25b6 In Visit"
-                              : "\u25cf Sched"}
+                              : a.status === "no_show"
+                                ? "No Show"
+                                : "\u25cf Sched"}
                       </span>
                     </div>
                   </div>

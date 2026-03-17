@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import "./LoginPage.css";
 
@@ -17,6 +17,8 @@ const ROLE_GROUPS = [
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from;
   const {
     currentDoctor,
     authReady,
@@ -38,23 +40,20 @@ export default function LoginPage() {
     fetchDoctorsList();
   }, [authReady, initAuth, fetchDoctorsList]);
 
-  // If already logged in, redirect to home
+  const getDefaultRoute = (role) =>
+    role === "lab" || role === "nurse" || role === "tech" ? "/lab-portal" : "/";
+
+  // If already logged in, redirect to intended page or home
   useEffect(() => {
     if (authReady && currentDoctor) {
-      const role = currentDoctor.role;
-      navigate(role === "lab" || role === "nurse" || role === "tech" ? "/lab-portal" : "/", {
-        replace: true,
-      });
+      navigate(from || getDefaultRoute(currentDoctor.role), { replace: true });
     }
-  }, [authReady, currentDoctor, navigate]);
+  }, [authReady, currentDoctor, navigate, from]);
 
   const onLogin = async () => {
     const doctor = await handleLogin();
     if (doctor) {
-      const role = doctor.role;
-      navigate(role === "lab" || role === "nurse" || role === "tech" ? "/lab-portal" : "/", {
-        replace: true,
-      });
+      navigate(from || getDefaultRoute(doctor.role), { replace: true });
     }
   };
 

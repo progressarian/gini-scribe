@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useVisitStore from "../stores/visitStore";
-import useUiStore from "../stores/uiStore";
+import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
 import "../styles/App.css";
@@ -78,7 +78,7 @@ export default function AppLayout() {
   const handleLogout = useAuthStore((s) => s.handleLogout);
   const { patient, dbPatientId, duplicateWarning, setDuplicateWarning, loadPatientDB, newPatient } =
     usePatientStore();
-  const { visitActive, endVisit, updateVisitRoute } = useVisitStore();
+  const { visitActive, endVisit, updateVisitRoute, saveDraft } = useVisitStore();
   const { saveStatus, draftSaved, saveConsultation } = useUiStore();
   const { unreadCount } = useMessagingStore();
 
@@ -188,19 +188,26 @@ export default function AppLayout() {
             🔍 Find
           </button>
           {patient.name && (
-            <button onClick={saveConsultation} className="header__save-btn">
-              💾 Save
+            <button
+              onClick={() => {
+                saveDraft();
+                toast("Draft saved", "success", 2000);
+              }}
+              className="header__save-btn"
+            >
+              💾 Draft
             </button>
           )}
           {patient.name && (
             <button
-              onClick={() => {
+              onClick={async () => {
+                await saveConsultation();
                 newPatient();
-                navigate("/");
+                navigate("/patient");
               }}
               className="header__new-btn"
             >
-              + New
+              💾 Save & New
             </button>
           )}
           <button onClick={onLogout} className="header__logout-btn">
@@ -294,15 +301,16 @@ export default function AppLayout() {
           </span>
           <button
             onClick={() => {
-              saveConsultation();
+              saveDraft();
+              toast("Draft saved", "success", 2000);
             }}
             className="visit-banner__btn"
           >
-            💾 Save
+            💾 Draft
           </button>
           <button
-            onClick={() => {
-              saveConsultation();
+            onClick={async () => {
+              await saveConsultation();
               endVisit(true);
               localStorage.removeItem(STORAGE_KEY);
               navigate("/");
@@ -312,8 +320,10 @@ export default function AppLayout() {
             💾 Save & End
           </button>
           <button
-            onClick={() => {
-              endVisit(false);
+            onClick={async () => {
+              await saveConsultation();
+              endVisit(true);
+              localStorage.removeItem(STORAGE_KEY);
               navigate("/");
             }}
             className="visit-banner__btn visit-banner__btn--end"

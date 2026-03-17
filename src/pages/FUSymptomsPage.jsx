@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useVisitStore from "../stores/visitStore.js";
+import useUiStore from "../stores/uiStore.js";
 import { COMPLAINT_CHIPS } from "../config/chips.js";
 import "./FUSymptomsPage.css";
 
 export default function FUSymptomsPage() {
   const navigate = useNavigate();
+  const [continuing, setContinuing] = useState(false);
   const {
     complaints,
     setComplaints,
@@ -16,6 +19,7 @@ export default function FUSymptomsPage() {
     setFuExtMeds,
     fuNewConditions,
     setFuNewConditions,
+    saveDraft,
   } = useVisitStore();
 
   const toggleChip = (arr, setFn, val) => {
@@ -102,6 +106,23 @@ export default function FUSymptomsPage() {
             </button>
           ))}
         </div>
+        {complaints.filter((c) => !COMPLAINT_CHIPS.includes(c)).length > 0 && (
+          <div className="fu-symptoms__custom-complaints">
+            {complaints
+              .filter((c) => !COMPLAINT_CHIPS.includes(c))
+              .map((c, i) => (
+                <span key={i} className="fu-symptoms__custom-complaint">
+                  {c}
+                  <button
+                    onClick={() => setComplaints((p) => p.filter((x) => x !== c))}
+                    className="fu-symptoms__custom-complaint-remove"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+          </div>
+        )}
         <div className="fu-symptoms__add-complaint">
           <input
             value={complaintText}
@@ -124,7 +145,7 @@ export default function FUSymptomsPage() {
             }}
             className="fu-symptoms__complaint-add-btn"
           >
-            +
+            + Add
           </button>
         </div>
 
@@ -207,23 +228,48 @@ export default function FUSymptomsPage() {
                 </button>
               </div>
             ))}
-            <input
-              id="fuNewCond2"
-              placeholder="e.g. Hyperuricemia"
-              className="fu-symptoms__condition-input"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && e.target.value.trim()) {
-                  setFuNewConditions((p) => [...p, e.target.value.trim()]);
-                  e.target.value = "";
-                }
-              }}
-            />
+            <div className="fu-symptoms__condition-add">
+              <input
+                id="fuNewCond2"
+                placeholder="e.g. Hyperuricemia"
+                className="fu-symptoms__condition-add-input"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && e.target.value.trim()) {
+                    setFuNewConditions((p) => [...p, e.target.value.trim()]);
+                    e.target.value = "";
+                  }
+                }}
+              />
+              <button
+                onClick={() => {
+                  const el = document.getElementById("fuNewCond2");
+                  if (el.value.trim()) {
+                    setFuNewConditions((p) => [...p, el.value.trim()]);
+                    el.value = "";
+                  }
+                }}
+                className="fu-symptoms__condition-add-btn"
+              >
+                + Add
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <button onClick={() => navigate("/fu-gen")} className="fu-symptoms__next-btn">
-        Next: Create Plan →
+      <button
+        disabled={continuing}
+        onClick={async () => {
+          setContinuing(true);
+          try {
+            await saveDraft();
+          } catch {}
+          setContinuing(false);
+          navigate("/fu-gen");
+        }}
+        className="fu-symptoms__next-btn"
+      >
+        {continuing ? "Saving..." : "Next: Create Plan →"}
       </button>
     </div>
   );

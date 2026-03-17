@@ -1,19 +1,27 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useLabStore from "../stores/labStore.js";
 import useClinicalStore from "../stores/clinicalStore.js";
 import useVisitStore from "../stores/visitStore.js";
+import useUiStore from "../stores/uiStore.js";
 import "./FUReviewPage.css";
 
 export default function FUReviewPage() {
   const navigate = useNavigate();
+  const [continuing, setContinuing] = useState(false);
   const { conName } = useAuthStore();
   const { patient, getPfd } = usePatientStore();
   const { labData } = useLabStore();
   const { conData } = useClinicalStore();
-  const { fuShowLastSummary, setFuShowLastSummary, fuAbnormalActions, setFuAbnormalActions } =
-    useVisitStore();
+  const {
+    fuShowLastSummary,
+    setFuShowLastSummary,
+    fuAbnormalActions,
+    setFuAbnormalActions,
+    saveDraft,
+  } = useVisitStore();
 
   const pfd = getPfd();
 
@@ -452,8 +460,19 @@ export default function FUReviewPage() {
           );
         })()}
 
-      <button onClick={() => navigate("/fu-edit")} className="fu-review__next-btn">
-        Next: Edit Plan →
+      <button
+        disabled={continuing}
+        onClick={async () => {
+          setContinuing(true);
+          try {
+            await saveDraft();
+          } catch {}
+          setContinuing(false);
+          navigate("/fu-edit");
+        }}
+        className="fu-review__next-btn"
+      >
+        {continuing ? "Saving..." : "Next: Edit Plan →"}
       </button>
     </div>
   );

@@ -301,7 +301,9 @@ export default function FindPage() {
                 color: bookForm.doc ? "#1e293b" : "#94a3b8",
               }}
             >
-              <option value="" disabled>Select Doctor *</option>
+              <option value="" disabled>
+                Select Doctor *
+              </option>
               {doctorsList.map((d) => (
                 <option key={d.id} value={d.short_name || d.name}>
                   {d.name}
@@ -348,9 +350,10 @@ export default function FindPage() {
                   if (errs.dt === "past") missing.push("Date cannot be in the past");
                   else if (errs.dt) missing.push("Date");
                   if (errs.doc) missing.push("Doctor");
-                  errs.msg = errs.dt === "past"
-                    ? "Date cannot be in the past"
-                    : `Please fill: ${missing.join(", ")}`;
+                  errs.msg =
+                    errs.dt === "past"
+                      ? "Date cannot be in the past"
+                      : `Please fill: ${missing.join(", ")}`;
                   setBookErrors(errs);
                   return;
                 }
@@ -393,9 +396,7 @@ export default function FindPage() {
       {!searchQuery && (
         <div style={{ marginBottom: 12 }}>
           <div className="find__appts-header">
-            <div className="find__appts-title">
-              Today's Appointments ({todayApptTotal})
-            </div>
+            <div className="find__appts-title">Today's Appointments ({todayApptTotal})</div>
             <button onClick={fetchTodayAppointments} className="find__appts-refresh">
               ↻
             </button>
@@ -426,12 +427,43 @@ export default function FindPage() {
               }}
             >
               {todayAppointments.map((a) => {
-                const done = a.status === "completed" || a.status === "in-progress";
-                const cancelled = a.status === "cancelled";
+                const st = a.status || "scheduled";
+                const isCompleted = st === "completed";
+                const isInProgress = st === "in-progress";
+                const isCancelled = st === "cancelled";
+                const isNoShow = st === "no_show";
+                const isDone = isCompleted || isInProgress;
+                const statusColor = isCompleted
+                  ? "#059669"
+                  : isInProgress
+                    ? "#d97706"
+                    : isCancelled
+                      ? "#dc2626"
+                      : isNoShow
+                        ? "#6b7280"
+                        : "#2563eb";
+                const statusBg = isCompleted
+                  ? "#f0fdf4"
+                  : isInProgress
+                    ? "#fffbeb"
+                    : isCancelled
+                      ? "#fef2f2"
+                      : isNoShow
+                        ? "#f3f4f6"
+                        : "#eff6ff";
+                const statusLabel = isCompleted
+                  ? "Done"
+                  : isInProgress
+                    ? "In Progress"
+                    : isCancelled
+                      ? "Cancelled"
+                      : isNoShow
+                        ? "No Show"
+                        : "Scheduled";
                 return (
                   <div
                     key={a.id}
-                    className={`find__appt ${done ? "find__appt--done" : ""}`}
+                    className={`find__appt ${isDone ? "find__appt--done" : ""}`}
                     onClick={() => {
                       if (a.patient_id) {
                         loadPatientDB({
@@ -461,19 +493,12 @@ export default function FindPage() {
                         {a.doctor_name || ""}
                       </div>
                     </div>
-                    {done ? (
+                    {isDone || isCancelled || isNoShow ? (
                       <span
                         className="find__appt-status"
-                        style={{ background: "#f0fdf4", color: "#059669" }}
+                        style={{ background: statusBg, color: statusColor }}
                       >
-                        Done
-                      </span>
-                    ) : cancelled ? (
-                      <span
-                        className="find__appt-status"
-                        style={{ background: "#fef2f2", color: "#dc2626" }}
-                      >
-                        Cancelled
+                        {statusLabel}
                       </span>
                     ) : (
                       <div className="find__appt-action-btns">
@@ -536,7 +561,10 @@ export default function FindPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} className="find__patient" style={{ cursor: "default" }}>
-              <div className="shimmer" style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0 }} />
+              <div
+                className="shimmer"
+                style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0 }}
+              />
               <div className="find__patient-info">
                 <div className="find__patient-name-row">
                   <div className="shimmer" style={{ width: 90, height: 13, borderRadius: 4 }} />
@@ -545,9 +573,30 @@ export default function FindPage() {
                 </div>
               </div>
               <div className="find__patient-stats">
-                <div className="shimmer" style={{ width: 48, height: 11, borderRadius: 3, marginLeft: "auto" }} />
-                <div className="shimmer" style={{ width: 58, height: 9, borderRadius: 3, marginTop: 3, marginLeft: "auto" }} />
-                <div className="shimmer" style={{ width: 64, height: 9, borderRadius: 3, marginTop: 3, marginLeft: "auto" }} />
+                <div
+                  className="shimmer"
+                  style={{ width: 48, height: 11, borderRadius: 3, marginLeft: "auto" }}
+                />
+                <div
+                  className="shimmer"
+                  style={{
+                    width: 58,
+                    height: 9,
+                    borderRadius: 3,
+                    marginTop: 3,
+                    marginLeft: "auto",
+                  }}
+                />
+                <div
+                  className="shimmer"
+                  style={{
+                    width: 64,
+                    height: 9,
+                    borderRadius: 3,
+                    marginTop: 3,
+                    marginLeft: "auto",
+                  }}
+                />
               </div>
             </div>
           ))}
@@ -571,9 +620,7 @@ export default function FindPage() {
                 navigate("/dashboard");
               }}
             >
-              <div className="find__patient-avatar">
-                {(r.name || "?").charAt(0).toUpperCase()}
-              </div>
+              <div className="find__patient-avatar">{(r.name || "?").charAt(0).toUpperCase()}</div>
               <div className="find__patient-info">
                 <div className="find__patient-name-row">
                   <span className="find__patient-name">{r.name}</span>
@@ -582,9 +629,7 @@ export default function FindPage() {
                   </span>
                   {r.file_no && <span className="find__patient-fileno">{r.file_no}</span>}
                 </div>
-                {r.diagnosis_labels && (
-                  <div className="find__patient-dx">{r.diagnosis_labels}</div>
-                )}
+                {r.diagnosis_labels && <div className="find__patient-dx">{r.diagnosis_labels}</div>}
                 {r.phone && <div className="find__patient-phone">{r.phone}</div>}
               </div>
               <div className="find__patient-stats">
@@ -612,18 +657,51 @@ export default function FindPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 6 }}>
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="find__patient" style={{ cursor: "default" }}>
-                    <div className="shimmer" style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0 }} />
+                    <div
+                      className="shimmer"
+                      style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0 }}
+                    />
                     <div className="find__patient-info">
                       <div className="find__patient-name-row">
-                        <div className="shimmer" style={{ width: 90, height: 13, borderRadius: 4 }} />
-                        <div className="shimmer" style={{ width: 36, height: 14, borderRadius: 4 }} />
-                        <div className="shimmer" style={{ width: 54, height: 10, borderRadius: 3 }} />
+                        <div
+                          className="shimmer"
+                          style={{ width: 90, height: 13, borderRadius: 4 }}
+                        />
+                        <div
+                          className="shimmer"
+                          style={{ width: 36, height: 14, borderRadius: 4 }}
+                        />
+                        <div
+                          className="shimmer"
+                          style={{ width: 54, height: 10, borderRadius: 3 }}
+                        />
                       </div>
                     </div>
                     <div className="find__patient-stats">
-                      <div className="shimmer" style={{ width: 48, height: 11, borderRadius: 3, marginLeft: "auto" }} />
-                      <div className="shimmer" style={{ width: 58, height: 9, borderRadius: 3, marginTop: 3, marginLeft: "auto" }} />
-                      <div className="shimmer" style={{ width: 64, height: 9, borderRadius: 3, marginTop: 3, marginLeft: "auto" }} />
+                      <div
+                        className="shimmer"
+                        style={{ width: 48, height: 11, borderRadius: 3, marginLeft: "auto" }}
+                      />
+                      <div
+                        className="shimmer"
+                        style={{
+                          width: 58,
+                          height: 9,
+                          borderRadius: 3,
+                          marginTop: 3,
+                          marginLeft: "auto",
+                        }}
+                      />
+                      <div
+                        className="shimmer"
+                        style={{
+                          width: 64,
+                          height: 9,
+                          borderRadius: 3,
+                          marginTop: 3,
+                          marginLeft: "auto",
+                        }}
+                      />
                     </div>
                   </div>
                 ))}

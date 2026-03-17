@@ -1,0 +1,283 @@
+import "./PatientScreen.css";
+import { useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { docCategories, fDate } from "./constants";
+import api from "../services/api.js";
+import useCompanionStore from "../stores/companionStore";
+
+const tabs = [
+  ["records", "📎 Docs"],
+  ["rx", "💊 Meds"],
+  ["labs", "🔬 Labs"],
+  ["visits", "📜 Visits"],
+];
+
+export default function PatientScreen() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { patientData, patientTab, loading, setPatientTab, loadPatientData, selectedPatient } =
+    useCompanionStore();
+
+  useEffect(() => {
+    if (id) loadPatientData(parseInt(id));
+  }, [id]);
+
+  const patient = selectedPatient || patientData;
+
+  if (!patient && !loading) {
+    return (
+      <div className="patient__loading">
+        <div className="patient__loading-icon">⏳</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="patient__header">
+        <div className="patient__header-row">
+          <button onClick={() => navigate("/companion")} className="patient__back">
+            ←
+          </button>
+          {patient && (
+            <div className="patient__header-info">
+              <div className="patient__header-name">{patient.name}</div>
+              <div className="patient__header-details">
+                {patient.age}Y/{patient.sex?.[0]} • {patient.file_no}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={() => navigate(`/companion/capture/${id}`)}
+            className="patient__capture-btn"
+          >
+            📸 Capture
+          </button>
+        </div>
+        <div className="patient__tabs">
+          {tabs.map(([tabId, label]) => (
+            <button
+              key={tabId}
+              onClick={() => setPatientTab(tabId)}
+              className={`patient__tab ${patientTab === tabId ? "patient__tab--active" : ""}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && (
+        <div className="patient__loading">
+          <div className="patient__loading-icon">⏳</div>
+        </div>
+      )}
+
+      {!loading && patientData && (
+        <div className="patient__body">
+          {patientTab === "records" && (
+            <RecordsTab
+              patientData={patientData}
+              onCapture={() => navigate(`/companion/capture/${id}`)}
+            />
+          )}
+          {patientTab === "rx" && <MedicationsTab patientData={patientData} />}
+          {patientTab === "labs" && <LabsTab patientData={patientData} />}
+          {patientTab === "visits" && <VisitsTab patientData={patientData} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecordsTab({ patientData, onCapture }) {
+  const docs = patientData.documents || [];
+
+  if (docs.length === 0) {
+    return (
+      <div className="patient__empty">
+        <div className="patient__empty-icon">📎</div>
+        <div className="patient__empty-text">No documents yet</div>
+        <button onClick={onCapture} className="patient__empty-btn">
+          📸 Capture
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {docs.map((doc) => {
+        const cat = docCategories.find((c) => c.id === doc.doc_type) || {
+          label: "📄",
+          color: "#64748b",
+        };
+        const ext = doc.extracted_data
+          ? typeof doc.extracted_data === "string"
+            ? (() => {
+                try {
+                  return JSON.parse(doc.extracted_data);
+                } catch (e) {
+                  return null;
+                }
+              })()
+            : doc.extracted_data
+          : null;
+
+        return (
+          <div key={doc.id} className="patient__doc-card">
+            <div className="patient__doc-row">
+              <div className="patient__doc-icon" style={{ background: cat.color + "15" }}>
+                {cat.label?.split(" ")[0]}
+              </div>
+              <div className="patient__doc-info">
+                <div className="patient__doc-title">{doc.title || doc.doc_type}</div>
+                <div className="patient__doc-meta">
+                  {doc.source} • {fDate(doc.doc_date)}
+                </div>
+                {ext && (
+                  <div className="patient__doc-badges">
+                    {ext.medications?.length > 0 && (
+                      <span className="patient__doc-badge patient__doc-badge--med">
+                        💊{ext.medications.length}
+                      </span>
+                    )}
+                    {ext.labs?.length > 0 && (
+                      <span className="patient__doc-badge patient__doc-badge--lab">
+                        🔬{ext.labs.length}
+                      </span>
+                    )}
+                    {ext.diagnoses?.length > 0 && (
+                      <span className="patient__doc-badge patient__doc-badge--dx">
+                        🏥{ext.diagnoses.length}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {doc.storage_path && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await api.get(`/api/documents/${doc.id}/file-url`);
+                      if (r.data.url) window.open(r.data.url, "_blank");
+                    } catch (e) {}
+                  }}
+                  className="patient__doc-view-btn"
+                >
+                  View
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MedicationsTab({ patientData }) {
+  const activeMeds = (patientData.medications || []).filter((m) => m.is_active);
+
+  return (
+    <div>
+      <div className="patient__section-title">💊 Active Medications</div>
+      {activeMeds.length === 0 ? (
+        <div className="patient__empty-inline">No active medications</div>
+      ) : (
+        <div className="patient__table">
+          {activeMeds.map((m, i) => {
+            const con =
+              (patientData.consultations || []).find((c) => c.id === m.consultation_id) || {};
+            return (
+              <div key={i} className="patient__med-row">
+                <div className="patient__med-header">
+                  <span className="patient__med-name">{m.name}</span>
+                  <span className="patient__med-source">{con.con_name || ""}</span>
+                </div>
+                <div className="patient__med-details">
+                  {m.dose} {m.frequency} {m.timing}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LabsTab({ patientData }) {
+  const labs = patientData.lab_results || [];
+
+  return (
+    <div>
+      <div className="patient__section-title">🔬 Lab Results</div>
+      {labs.length === 0 ? (
+        <div className="patient__empty-inline">No lab results</div>
+      ) : (
+        <div className="patient__table">
+          {labs.slice(0, 40).map((l, i) => (
+            <div key={i} className="patient__lab-row">
+              <div>
+                <span className="patient__lab-name">{l.test_name}</span>
+                <span className="patient__lab-date">{fDate(l.test_date)}</span>
+              </div>
+              <span>
+                <span
+                  className="patient__lab-result"
+                  style={{
+                    color: l.flag === "HIGH" ? "#dc2626" : l.flag === "LOW" ? "#f59e0b" : "#059669",
+                  }}
+                >
+                  {l.result}
+                </span>
+                <span className="patient__lab-unit">{l.unit}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VisitsTab({ patientData }) {
+  const visits = patientData.consultations || [];
+
+  if (visits.length === 0) {
+    return <div className="patient__empty-inline">No visits</div>;
+  }
+
+  const statusColor = (status) => {
+    if (status === "completed") return { bg: "#dcfce7", color: "#059669", border: "#059669" };
+    if (status === "historical") return { bg: "#f3e8ff", color: "#7c3aed", border: "#7c3aed" };
+    return { bg: "#fef3c7", color: "#f59e0b", border: "#f59e0b" };
+  };
+
+  return (
+    <div>
+      {visits.map((con, i) => {
+        const sc = statusColor(con.status);
+        return (
+          <div key={i} className="patient__visit-card" style={{ borderLeftColor: sc.border }}>
+            <div className="patient__visit-row">
+              <div>
+                <div className="patient__visit-name">{con.con_name || con.mo_name || "—"}</div>
+                <div className="patient__visit-meta">
+                  {fDate(con.visit_date)} • {con.visit_type || "OPD"}
+                </div>
+              </div>
+              <span
+                className="patient__visit-status"
+                style={{ background: sc.bg, color: sc.color }}
+              >
+                {con.status}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

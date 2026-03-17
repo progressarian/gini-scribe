@@ -3,9 +3,12 @@ import { AI_CHAT_SYSTEM } from "../config/prompts.js";
 
 export async function aiChat(messages, patientContext) {
   try {
+    const ctxString =
+      patientContext && typeof patientContext === "object"
+        ? JSON.stringify(patientContext, null, 2)
+        : patientContext;
     const systemPrompt =
-      AI_CHAT_SYSTEM +
-      (patientContext ? `\n\nPATIENT DATA:\n${patientContext}` : "\n\nNo patient loaded.");
+      AI_CHAT_SYSTEM + (ctxString ? `\n\nPATIENT DATA:\n${ctxString}` : "\n\nNo patient loaded.");
     const { data: d } = await api.post("/api/ai/complete", {
       messages,
       system: systemPrompt,

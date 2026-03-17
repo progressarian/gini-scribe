@@ -101,25 +101,31 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     }
 
     const vDate = n(visitDate) || null;
-    const con = await client.query(
-      `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
-       VALUES ($1,COALESCE($2::date, CURRENT_DATE),$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12) RETURNING id`,
-      [
-        patientId,
-        vDate,
-        n(moName),
-        n(conName),
-        n(moTranscript),
-        n(conTranscript),
-        n(quickTranscript),
-        safeJson(moData),
-        safeJson(conData),
-        safeJson(planEdits),
-        int(moDoctorId),
-        int(conDoctorId),
-      ],
-    );
-    const consultationId = con.rows[0].id;
+    const effectiveDate = vDate || new Date().toISOString().split("T")[0];
+
+    let consultationId;
+    {
+      // Always create a new consultation row
+      const con = await client.query(
+        `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
+         VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12) RETURNING id`,
+        [
+          patientId,
+          effectiveDate,
+          n(moName),
+          n(conName),
+          n(moTranscript),
+          n(conTranscript),
+          n(quickTranscript),
+          safeJson(moData),
+          safeJson(conData),
+          safeJson(planEdits),
+          int(moDoctorId),
+          int(conDoctorId),
+        ],
+      );
+      consultationId = con.rows[0].id;
+    }
 
     // Audit log
     const doctorId = req.doctor?.doctor_id || int(conDoctorId) || int(moDoctorId);
@@ -162,7 +168,8 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     for (const d of moData?.diagnoses || []) {
       if (d?.id && d?.label) {
         await client.query(
-          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET consultation_id = EXCLUDED.consultation_id, label = EXCLUDED.label, status = EXCLUDED.status, updated_at = NOW()`,
           [patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || "New"],
         );
       }
@@ -387,7 +394,13 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     for (const d of diagnoses || []) {
       if (d && (d.id || d.label)) {
         await client.query(
-          "INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)",
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
+             consultation_id = EXCLUDED.consultation_id,
+             label = EXCLUDED.label,
+             status = EXCLUDED.status,
+             updated_at = NOW()`,
           [
             patientId,
             cid,
@@ -439,7 +452,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     res.json({ success: true, consultation_id: cid });
   } catch (e) {
     await client.query("ROLLBACK");
-    console.error("❌ History save error:", e.message);
+    console.error("❌ History save error:", e.message, e.detail || "");
     handleError(res, e, "Consultation");
   } finally {
     client.release();

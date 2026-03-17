@@ -66,7 +66,20 @@ const usePlanStore = create((set, get) => ({
     return planEdits[key] !== undefined ? planEdits[key] : fallback;
   },
 
-  resetPlanEdits: () => set({ planHidden: new Set(), planEdits: {} }),
+  resetPlanEdits: () =>
+    set({
+      planHidden: new Set(),
+      planEdits: {},
+      clarifications: {},
+      medRecon: {},
+      medReconReasons: {},
+      showMedCard: false,
+      nextVisitDate: "",
+      planAddMode: null,
+      planAddText: "",
+      planAddMed: { name: "", dose: "", frequency: "OD", timing: "Morning" },
+      planCopied: false,
+    }),
 
   editMedField: (medObj, field, value, conData, setConData, moData, setMoData) => {
     // Find in conData.medications_confirmed or moData.previous_medications

@@ -151,9 +151,7 @@ export default function PatientPage() {
       )}
 
       <details className="patient-page__ids">
-        <summary className="patient-page__ids-summary">
-          Health & Government IDs (optional)
-        </summary>
+        <summary className="patient-page__ids-summary">Health & Government IDs (optional)</summary>
         <div className="patient-page__ids-grid">
           <div>
             <label className="patient-page__label">ABHA ID</label>
