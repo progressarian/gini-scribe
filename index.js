@@ -7,9 +7,9 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 let syncVisitToGenie = null;
 try {
-  syncVisitToGenie = require("./genie-sync.js").syncVisitToGenie;
+  syncVisitToGenie = require("./genie-sync.cjs").syncVisitToGenie;
 } catch (e) {
-  console.log("genie-sync.js not found — Genie sync disabled");
+  console.log("genie-sync.cjs not found — Genie sync disabled");
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -122,10 +122,9 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { doctor_id, pin } = req.body;
     const { default: bcrypt } = await import("bcrypt");
-    const doc = await pool.query(
-      "SELECT * FROM doctors WHERE id=$1 AND is_active=true",
-      [doctor_id],
-    );
+    const doc = await pool.query("SELECT * FROM doctors WHERE id=$1 AND is_active=true", [
+      doctor_id,
+    ]);
     if (doc.rows.length === 0) return res.status(401).json({ error: "Invalid PIN" });
 
     const doctor = doc.rows[0];

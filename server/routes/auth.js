@@ -57,10 +57,9 @@ router.get("/doctors", async (req, res) => {
 router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res) => {
   try {
     const { doctor_id, pin } = req.body;
-    const doc = await pool.query(
-      "SELECT * FROM doctors WHERE id=$1 AND is_active=true",
-      [doctor_id],
-    );
+    const doc = await pool.query("SELECT * FROM doctors WHERE id=$1 AND is_active=true", [
+      doctor_id,
+    ]);
     if (doc.rows.length === 0) return res.status(401).json({ error: "Invalid PIN" });
 
     const doctor = doc.rows[0];
@@ -139,7 +138,15 @@ router.post("/doctors", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO doctors (name, short_name, specialty, role, pin, phone, license_no)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, name, short_name, specialty, role`,
-      [name, short_name || null, specialty || null, role || "mo", pinHash, phone || null, license_no || null],
+      [
+        name,
+        short_name || null,
+        specialty || null,
+        role || "mo",
+        pinHash,
+        phone || null,
+        license_no || null,
+      ],
     );
     res.json(result.rows[0]);
   } catch (e) {

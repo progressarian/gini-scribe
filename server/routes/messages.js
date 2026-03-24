@@ -1,120 +1,134 @@
 import { Router } from "express";
-import pool from "../config/db.js";
+import { createRequire } from "module";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import { messageCreateSchema } from "../schemas/index.js";
 
+const require = createRequire(import.meta.url);
+let getMessagesFromGenie = null;
+let sendReplyToGenie = null;
+let getThreadFromGenie = null;
+let markMessageReadInGenie = null;
+try {
+  const genie = require("../genie-sync.cjs");
+  getMessagesFromGenie = genie.getMessagesFromGenie;
+  sendReplyToGenie = genie.sendReplyToGenie;
+  getThreadFromGenie = genie.getThreadFromGenie;
+  markMessageReadInGenie = genie.markMessageReadInGenie;
+} catch {
+  console.log("genie-sync.cjs not loaded — message sync disabled");
+}
+
 const router = Router();
 
-// Inbox — latest message per patient, unread first (paginated)
+// Inbox — latest message per patient from Supabase, unread first
+router.get("/messages/from-genie", async (req, res) => {
+  try {
+    if (!getMessagesFromGenie) return res.json({ data: [], total: 0 });
+    const messages = await getMessagesFromGenie(null);
+    const grouped = {};
+    for (const m of messages) {
+      if (!grouped[m.patient_id]) grouped[m.patient_id] = [];
+      grouped[m.patient_id].push(m);
+    }
+    const inbox = Object.entries(grouped).map(([pid, msgs]) => {
+      const latest = msgs[0];
+      const unread = msgs.filter((m) => !m.is_read).length;
+      return {
+        ...latest,
+        patient_id: pid,
+        patient_name: latest.sender_name || "Patient",
+        unread_count: unread,
+        direction: "outbound",
+      };
+    });
+    inbox.sort((a, b) => {
+      if (a.unread_count > 0 && b.unread_count === 0) return -1;
+      if (a.unread_count === 0 && b.unread_count > 0) return 1;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+    res.json({ data: inbox, total: inbox.length });
+  } catch (e) {
+    handleError(res, e, "Messages inbox");
+  }
+});
+
+// Backward-compatible inbox endpoint
 router.get("/messages/inbox", async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
-    const offset = (page - 1) * limit;
-
-    // Get total thread count for pagination metadata
-    const countResult = await pool.query(
-      "SELECT COUNT(DISTINCT patient_id)::int AS total FROM patient_messages WHERE sender='patient'",
-    );
-    const total = countResult.rows[0]?.total || 0;
-
-    const { rows } = await pool.query(`
-      SELECT DISTINCT ON (pm.patient_id)
-        pm.id, pm.patient_id, pm.sender, pm.sender_name, pm.message,
-        pm.created_at AS sent_at, pm.is_read, pm.direction AS source,
-        COALESCE(p.name, pm.sender_name, 'Unknown Patient') AS patient_name,
-        p.file_no, p.phone, p.age, p.sex
-      FROM patient_messages pm
-      LEFT JOIN patients p ON p.id = pm.patient_id
-      WHERE pm.sender = 'patient'
-      ORDER BY pm.patient_id, pm.created_at DESC
-    `);
-    rows.sort((a, b) => {
-      if (!a.is_read && b.is_read) return -1;
-      if (a.is_read && !b.is_read) return 1;
-      return new Date(b.sent_at) - new Date(a.sent_at);
+    if (!getMessagesFromGenie) return res.json({ data: [], total: 0, page: 1, totalPages: 1 });
+    const messages = await getMessagesFromGenie(null);
+    const grouped = {};
+    for (const m of messages) {
+      if (!grouped[m.patient_id]) grouped[m.patient_id] = [];
+      grouped[m.patient_id].push(m);
+    }
+    const inbox = Object.entries(grouped).map(([pid, msgs]) => {
+      const latest = msgs[0];
+      const unread = msgs.filter((m) => !m.is_read).length;
+      return {
+        ...latest,
+        patient_id: pid,
+        patient_name: latest.sender_name || "Patient",
+        unread_count: unread,
+        direction: "outbound",
+      };
     });
-
-    const paginated = rows.slice(offset, offset + limit);
-    res.json({
-      data: paginated,
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
+    inbox.sort((a, b) => {
+      if (a.unread_count > 0 && b.unread_count === 0) return -1;
+      if (a.unread_count === 0 && b.unread_count > 0) return 1;
+      return new Date(b.created_at) - new Date(a.created_at);
     });
+    res.json({ data: inbox, total: inbox.length, page: 1, totalPages: 1 });
   } catch (e) {
     handleError(res, e, "Inbox");
   }
 });
 
-// Unread count
+// Unread count from Supabase
 router.get("/messages/unread-count", async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      "SELECT COUNT(*)::int AS count FROM patient_messages WHERE sender='patient' AND (is_read IS NULL OR is_read = false)",
-    );
-    res.json({ count: rows[0]?.count || 0 });
+    if (!getMessagesFromGenie) return res.json({ count: 0 });
+    const messages = await getMessagesFromGenie(null);
+    const count = messages.filter((m) => !m.is_read).length;
+    res.json({ count });
   } catch (e) {
     handleError(res, e, "Unread count");
   }
 });
 
-// Mark message as read
+// Mark message as read in Supabase
 router.put("/messages/:id/read", async (req, res) => {
   try {
-    await pool.query("UPDATE patient_messages SET is_read = true WHERE id = $1", [req.params.id]);
-    res.json({ success: true });
+    if (!markMessageReadInGenie) return res.json({ success: false });
+    const success = await markMessageReadInGenie(req.params.id);
+    res.json({ success });
   } catch (e) {
     handleError(res, e, "Mark read");
   }
 });
 
-// Full conversation thread for a patient
+// Full conversation thread for a patient (both directions from Supabase)
 router.get("/patients/:id/messages", async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT pm.*, pm.created_at AS sent_at, pm.direction AS source,
-              COALESCE(p.name, pm.sender_name) AS patient_name
-       FROM patient_messages pm
-       LEFT JOIN patients p ON p.id = pm.patient_id
-       WHERE pm.patient_id = $1
-       ORDER BY pm.created_at ASC`,
-      [req.params.id],
-    );
-    res.json(rows);
+    if (!getThreadFromGenie) return res.json([]);
+    const data = await getThreadFromGenie(req.params.id);
+    res.json(data);
   } catch (e) {
     handleError(res, e, "Messages thread");
   }
 });
 
-// Doctor sends a reply
+// Doctor sends a reply — writes to Supabase patient_messages
 router.post("/patients/:id/messages", validate(messageCreateSchema), async (req, res) => {
   try {
     const { message, sender_name } = req.body;
+    if (!sendReplyToGenie) return res.status(400).json({ error: "Genie sync not configured" });
     const patientId = req.params.id;
     const doctorName = sender_name || "Dr. Bhansali";
-
-    const { rows: msgRows } = await pool.query(
-      `INSERT INTO patient_messages (patient_id, sender, sender_name, direction, message, is_read, created_at)
-       VALUES ($1, 'doctor', $2, 'outbound', $3, true, NOW())
-       RETURNING *, created_at AS sent_at, direction AS source`,
-      [patientId, doctorName, message],
-    );
-
-    // Also write to alert_channel for scribe-sync delivery
-    try {
-      await pool.query(
-        `INSERT INTO alert_channel (patient_id, direction, alert_type, title, message, sender_name, sender_role, status, created_at)
-         VALUES ($1, 'scribe_to_genie', 'doctor_reply', $2, $3, $4, 'doctor', 'unread', NOW())`,
-        [String(patientId), `Message from ${doctorName}`, message, doctorName],
-      );
-    } catch (alertErr) {
-      console.log("alert_channel insert skipped (table may not exist):", alertErr.message);
-    }
-
-    res.json(msgRows[0]);
+    const reply = await sendReplyToGenie(patientId, message, doctorName);
+    if (!reply) return res.status(500).json({ error: "Failed to send reply" });
+    res.json(reply);
   } catch (e) {
     handleError(res, e, "Send message");
   }

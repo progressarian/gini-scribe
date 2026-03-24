@@ -40,14 +40,17 @@ router.get("/patients/:id/labs", async (req, res) => {
 router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) => {
   try {
     const { test_name, result, unit, flag, ref_range, test_date, consultation_id } = req.body;
+    const numericResult = num(result);
+    const resultText = numericResult === null && result ? String(result) : null;
     const r = await pool.query(
-      `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, ref_range, test_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, result_text, unit, flag, ref_range, test_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [
         req.params.id,
         n(consultation_id),
         test_name,
-        result,
+        numericResult,
+        resultText,
         n(unit),
         n(flag) || "N",
         n(ref_range),

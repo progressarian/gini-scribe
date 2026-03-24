@@ -193,4 +193,86 @@ async function getAlertsFromGenie(giniPatientId = null) {
   return data || [];
 }
 
-module.exports = { syncVisitToGenie, sendAlertToGenie, getAlertsFromGenie };
+/**
+ * Get patient messages FROM Genie (patient → doctor)
+ */
+async function getMessagesFromGenie(giniPatientId = null) {
+  const db = getGenieDb();
+  if (!db) return [];
+
+  let query = db
+    .from('patient_messages')
+    .select('*')
+    .eq('direction', 'outbound')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (giniPatientId) {
+    query = query.eq('patient_id', String(giniPatientId));
+  }
+
+  const { data, error } = await query;
+  if (error) { console.error('[Genie Messages] Error:', error.message); return []; }
+  return data || [];
+}
+
+/**
+ * Send doctor reply to patient via Supabase patient_messages
+ */
+async function sendReplyToGenie(patientId, message, senderName) {
+  const db = getGenieDb();
+  if (!db) return null;
+
+  const { data, error } = await db
+    .from('patient_messages')
+    .insert({
+      patient_id: String(patientId),
+      direction: 'inbound',
+      message,
+      sender_name: senderName || 'Dr. Bhansali',
+      is_read: false,
+    })
+    .select()
+    .single();
+
+  if (error) { console.error('[Genie Reply] Error:', error.message); return null; }
+  return data;
+}
+
+/**
+ * Get full message thread for a patient (both directions)
+ */
+async function getThreadFromGenie(patientId) {
+  const db = getGenieDb();
+  if (!db) return [];
+
+  const { data, error } = await db
+    .from('patient_messages')
+    .select('*')
+    .eq('patient_id', String(patientId))
+    .order('created_at', { ascending: true });
+
+  if (error) { console.error('[Genie Thread] Error:', error.message); return []; }
+  return data || [];
+}
+
+/**
+ * Mark a message as read in Supabase
+ */
+async function markMessageReadInGenie(messageId) {
+  const db = getGenieDb();
+  if (!db) return false;
+
+  const { error } = await db
+    .from('patient_messages')
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq('id', messageId);
+
+  if (error) { console.error('[Genie MarkRead] Error:', error.message); return false; }
+  return true;
+}
+
+module.exports = {
+  syncVisitToGenie, sendAlertToGenie, getAlertsFromGenie,
+  getMessagesFromGenie, sendReplyToGenie, getThreadFromGenie, markMessageReadInGenie,
+};

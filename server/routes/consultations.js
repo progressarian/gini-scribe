@@ -10,7 +10,7 @@ import { consultationCreateSchema, historyCreateSchema } from "../schemas/index.
 const require = createRequire(import.meta.url);
 let syncVisitToGenie = null;
 try {
-  syncVisitToGenie = require("../genie-sync.js").syncVisitToGenie;
+  syncVisitToGenie = require("../genie-sync.cjs").syncVisitToGenie;
 } catch (e) {
   console.log("genie-sync.js not found — Genie sync disabled");
 }
@@ -317,12 +317,15 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       lifestyle: conData?.diet_lifestyle || [],
       self_monitoring: conData?.self_monitoring || [],
       follow_up: conData?.follow_up || null,
+      follow_up_date: conData?.follow_up?.date || conData?.follow_up_date || null,
+      follow_up_instructions: conData?.follow_up?.notes || conData?.follow_up?.instructions || null,
       chief_complaints: moData?.chief_complaints || [],
       summary: conData?.assessment_summary || null,
     };
     const doctorInfo = { con_name: conName, mo_name: moName };
+    const syncPatient = { ...patient, id: patientId, file_no: patient.fileNo };
     if (syncVisitToGenie)
-      syncVisitToGenie(visit, patient, doctorInfo)
+      syncVisitToGenie(visit, syncPatient, doctorInfo)
         .then((r) => {
           if (r) console.log("📱 Genie sync:", r);
         })

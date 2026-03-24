@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
@@ -7,6 +7,7 @@ import useLabStore from "../stores/labStore.js";
 import useClinicalStore from "../stores/clinicalStore.js";
 import useVisitStore from "../stores/visitStore.js";
 import useUiStore from "../stores/uiStore.js";
+import useAlertStore from "../stores/alertStore.js";
 import { extractLab, extractImaging } from "../services/extraction.js";
 import AudioInput from "../components/AudioInput.jsx";
 import "./FULoadPage.css";
@@ -16,7 +17,12 @@ export default function FULoadPage() {
   const [continuing, setContinuing] = useState(false);
   const { dgKey, whisperKey, conName } = useAuthStore();
   const { patient, dbPatientId, getPfd } = usePatientStore();
+  const { patientAlerts, patientAlertsLoading, fetchPatientAlerts } = useAlertStore();
   const { vitals, setVitals, voiceFillVitals } = useVitalsStore();
+
+  useEffect(() => {
+    if (dbPatientId) fetchPatientAlerts(dbPatientId);
+  }, [dbPatientId, fetchPatientAlerts]);
   const { labData, setLabData, intakeReports, setIntakeReports, saveAllIntakeReports } =
     useLabStore();
   const { conData } = useClinicalStore();
@@ -42,6 +48,58 @@ export default function FULoadPage() {
         </div>
         <span className="fu-load__header-step">Step 1/5</span>
       </div>
+
+      {/* Patient Concerns from Mobile App */}
+      {patientAlertsLoading ? (
+        <div style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 13 }}>
+          Loading patient alerts...
+        </div>
+      ) : (
+        patientAlerts.length > 0 && (
+          <div
+            style={{
+              margin: "0 0 12px",
+              padding: "10px 14px",
+              background: "#fffbeb",
+              border: "1.5px solid #fde68a",
+              borderRadius: 10,
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 6 }}>
+              {"\ud83d\udce2"} Patient Concerns from App ({patientAlerts.length})
+            </div>
+            {patientAlerts.slice(0, 5).map((a) => (
+              <div
+                key={a.id}
+                style={{
+                  padding: "6px 0",
+                  borderBottom: "1px solid #fef3c7",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: "#78350f" }}>
+                    {a.title || a.alert_type}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#92400e" }}>{a.message}</div>
+                </div>
+                <div
+                  style={{ fontSize: 11, color: "#b45309", whiteSpace: "nowrap", marginLeft: 8 }}
+                >
+                  {a.created_at
+                    ? new Date(a.created_at).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                      })
+                    : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
 
       {/* Vitals */}
       <div className="fu-load__section">
@@ -299,7 +357,7 @@ export default function FULoadPage() {
             )}
             {intakeReports.some((r) => r.data && !r.saved) && dbPatientId && (
               <button
-                onClick={saveAllIntakeReports}
+                onClick={() => saveAllIntakeReports(dbPatientId)}
                 disabled={intakeReports.some((r) => r.saving)}
                 className={`fu-load__save-reports-btn ${intakeReports.some((r) => r.saving) ? "fu-load__save-reports-btn--loading" : "fu-load__save-reports-btn--active"}`}
               >

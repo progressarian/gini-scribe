@@ -1,17 +1,20 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import usePatientStore from "../stores/patientStore.js";
 import useMessagingStore from "../stores/messagingStore.js";
+import useAlertStore from "../stores/alertStore.js";
 import Shimmer from "../components/Shimmer.jsx";
 import "./MessagesPage.css";
 
 export default function MessagesPage() {
-  const { patient } = usePatientStore();
+  const [showAlertForm, setShowAlertForm] = useState(false);
+  const [alertTitle, setAlertTitle] = useState("");
+  const [alertMessage, setAlertMessage] = useState("");
+  const [alertType, setAlertType] = useState("doctor_note");
+  const { sendAlert, sendingAlert } = useAlertStore();
+  const { patient, dbPatientId } = usePatientStore();
   const {
     inbox,
     inboxLoading,
-    inboxPage,
-    inboxTotalPages,
-    inboxLoadingMore,
     activeThread,
     setActiveThread,
     threadMessages,
@@ -21,7 +24,6 @@ export default function MessagesPage() {
     setReplyText,
     sendingReply,
     fetchInbox,
-    loadMoreInbox,
     fetchThread,
     sendReply,
     markRead,
@@ -33,7 +35,123 @@ export default function MessagesPage() {
 
   return (
     <div>
-      <div className="messages__title">💬 Patient Messages</div>
+      <div className="messages__title">{"\ud83d\udcac"} Patient Messages</div>
+
+      {/* Send Alert to current patient */}
+      {dbPatientId && patient?.name && (
+        <div
+          style={{
+            margin: "0 0 12px",
+            padding: "10px 14px",
+            background: "#fffbeb",
+            border: "1.5px solid #fde68a",
+            borderRadius: 10,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: showAlertForm ? 8 : 0,
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>
+              {"\ud83d\udce2"} Send Alert to {patient.name}
+            </div>
+            <button
+              onClick={() => setShowAlertForm((v) => !v)}
+              style={{
+                padding: "4px 12px",
+                borderRadius: 6,
+                border: "none",
+                cursor: "pointer",
+                background: showAlertForm ? "#92400e" : "#d97706",
+                color: "white",
+                fontWeight: 600,
+                fontSize: 12,
+              }}
+            >
+              {showAlertForm ? "Cancel" : "New Alert"}
+            </button>
+          </div>
+          {showAlertForm && (
+            <div>
+              <select
+                value={alertType}
+                onChange={(e) => setAlertType(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  marginBottom: 6,
+                  borderRadius: 6,
+                  border: "1px solid #fde68a",
+                  fontSize: 13,
+                }}
+              >
+                <option value="doctor_note">Doctor Note</option>
+                <option value="reminder">Reminder</option>
+                <option value="lab_ready">Lab Results Ready</option>
+                <option value="prescription_ready">Prescription Ready</option>
+                <option value="follow_up">Follow-up Reminder</option>
+              </select>
+              <input
+                value={alertTitle}
+                onChange={(e) => setAlertTitle(e.target.value)}
+                placeholder="Alert title..."
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  marginBottom: 6,
+                  borderRadius: 6,
+                  border: "1px solid #fde68a",
+                  fontSize: 13,
+                  boxSizing: "border-box",
+                }}
+              />
+              <textarea
+                value={alertMessage}
+                onChange={(e) => setAlertMessage(e.target.value)}
+                placeholder="Alert message..."
+                rows={2}
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  marginBottom: 8,
+                  borderRadius: 6,
+                  border: "1px solid #fde68a",
+                  fontSize: 13,
+                  resize: "vertical",
+                  boxSizing: "border-box",
+                }}
+              />
+              <button
+                disabled={!alertTitle.trim() || !alertMessage.trim() || sendingAlert}
+                onClick={async () => {
+                  const result = await sendAlert(dbPatientId, alertTitle, alertMessage, alertType);
+                  if (result?.success) {
+                    setAlertTitle("");
+                    setAlertMessage("");
+                    setShowAlertForm(false);
+                  }
+                }}
+                style={{
+                  padding: "6px 16px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  background: alertTitle.trim() && alertMessage.trim() ? "#d97706" : "#e5e7eb",
+                  color: alertTitle.trim() && alertMessage.trim() ? "white" : "#9ca3af",
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}
+              >
+                {sendingAlert ? "Sending..." : "Send Alert \ud83d\udce2"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {!activeThread ? (
         <div>
@@ -41,7 +159,7 @@ export default function MessagesPage() {
             <div className="messages__inbox-info">
               {inbox.length === 0
                 ? "No messages yet"
-                : `${inbox.filter((m) => !m.is_read && m.direction === "patient_to_doctor").length} unread · ${inbox.length} total`}
+                : `${inbox.filter((m) => !m.is_read && m.direction === "outbound").length} unread · ${inbox.length} total`}
             </div>
             <button onClick={fetchInbox} className="messages__refresh-btn">
               ↻ Refresh
@@ -78,7 +196,7 @@ export default function MessagesPage() {
               }, {}),
             ).map(([pid, group]) => {
               const unread = group.messages.filter(
-                (m) => !m.is_read && m.direction === "patient_to_doctor",
+                (m) => !m.is_read && m.direction === "outbound",
               ).length;
               const last = group.messages[group.messages.length - 1];
               return (
@@ -122,27 +240,12 @@ export default function MessagesPage() {
                     </div>
                   </div>
                   <div className="messages__thread-preview">
-                    {last.direction === "doctor_to_patient" ? "You: " : ""}
+                    {last.direction === "inbound" ? "You: " : ""}
                     {last.message}
                   </div>
                 </div>
               );
             })}
-
-          {!inboxLoading && inboxPage < inboxTotalPages && (
-            <div style={{ textAlign: "center", padding: 12 }}>
-              <button
-                onClick={loadMoreInbox}
-                disabled={inboxLoadingMore}
-                className="messages__refresh-btn"
-                style={{ width: "100%" }}
-              >
-                {inboxLoadingMore
-                  ? "Loading..."
-                  : `Load More (Page ${inboxPage}/${inboxTotalPages})`}
-              </button>
-            </div>
-          )}
         </div>
       ) : (
         <div>
@@ -180,7 +283,7 @@ export default function MessagesPage() {
             ) : null}
             {!threadLoading &&
               threadMessages.map((m, i) => {
-                const isDoctor = m.direction === "doctor_to_patient";
+                const isDoctor = m.direction === "inbound";
                 return (
                   <div
                     key={i}
@@ -225,9 +328,105 @@ export default function MessagesPage() {
                 disabled={!replyText.trim() || sendingReply}
                 className={`messages__send-btn ${replyText.trim() ? "messages__send-btn--active" : "messages__send-btn--disabled"}`}
               >
-                {sendingReply ? "Sending..." : "Send Reply ✉️"}
+                {sendingReply ? "Sending..." : "Send Reply \u2709\ufe0f"}
+              </button>
+              <button
+                onClick={() => setShowAlertForm((v) => !v)}
+                className="messages__send-btn messages__send-btn--active"
+                style={{ background: showAlertForm ? "#92400e" : "#d97706" }}
+              >
+                {showAlertForm ? "Cancel Alert" : "\ud83d\udce2 Send Alert"}
               </button>
             </div>
+
+            {showAlertForm && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: 12,
+                  background: "#fffbeb",
+                  border: "1.5px solid #fde68a",
+                  borderRadius: 8,
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8 }}>
+                  Send Alert to Patient's App
+                </div>
+                <select
+                  value={alertType}
+                  onChange={(e) => setAlertType(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "6px 8px",
+                    marginBottom: 6,
+                    borderRadius: 6,
+                    border: "1px solid #fde68a",
+                    fontSize: 13,
+                  }}
+                >
+                  <option value="doctor_note">Doctor Note</option>
+                  <option value="reminder">Reminder</option>
+                  <option value="lab_ready">Lab Results Ready</option>
+                  <option value="prescription_ready">Prescription Ready</option>
+                  <option value="follow_up">Follow-up Reminder</option>
+                </select>
+                <input
+                  value={alertTitle}
+                  onChange={(e) => setAlertTitle(e.target.value)}
+                  placeholder="Alert title..."
+                  style={{
+                    width: "100%",
+                    padding: "6px 8px",
+                    marginBottom: 6,
+                    borderRadius: 6,
+                    border: "1px solid #fde68a",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                  }}
+                />
+                <textarea
+                  value={alertMessage}
+                  onChange={(e) => setAlertMessage(e.target.value)}
+                  placeholder="Alert message..."
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    padding: "6px 8px",
+                    marginBottom: 8,
+                    borderRadius: 6,
+                    border: "1px solid #fde68a",
+                    fontSize: 13,
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  disabled={!alertTitle.trim() || !alertMessage.trim() || sendingAlert}
+                  onClick={async () => {
+                    const pid = activeThread?.patient_id || dbPatientId;
+                    if (!pid) return;
+                    const result = await sendAlert(pid, alertTitle, alertMessage, alertType);
+                    if (result?.success) {
+                      setAlertTitle("");
+                      setAlertMessage("");
+                      setShowAlertForm(false);
+                    }
+                  }}
+                  style={{
+                    padding: "6px 16px",
+                    borderRadius: 6,
+                    border: "none",
+                    cursor: "pointer",
+                    background: alertTitle.trim() && alertMessage.trim() ? "#d97706" : "#e5e7eb",
+                    color: alertTitle.trim() && alertMessage.trim() ? "white" : "#9ca3af",
+                    fontWeight: 600,
+                    fontSize: 13,
+                  }}
+                >
+                  {sendingAlert ? "Sending..." : "Send Alert \ud83d\udce2"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

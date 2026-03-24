@@ -6,9 +6,6 @@ const useMessagingStore = create((set, get) => ({
   unreadCount: 0,
   inbox: [],
   inboxLoading: false,
-  inboxPage: 1,
-  inboxTotalPages: 1,
-  inboxLoadingMore: false,
   activeThread: null,
   threadMessages: [],
   threadLoading: false,
@@ -29,38 +26,18 @@ const useMessagingStore = create((set, get) => ({
     set({ inboxLoading: true });
     try {
       const [inboxResp, countResp] = await Promise.all([
-        api.get("/api/messages/inbox?page=1&limit=30"),
+        api.get("/api/messages/from-genie"),
         api.get("/api/messages/unread-count"),
       ]);
       const res = inboxResp.data;
       set({
         inbox: res.data || res,
-        inboxPage: res.page || 1,
-        inboxTotalPages: res.totalPages || 1,
         unreadCount: countResp.data.count || 0,
       });
     } catch (e) {
-      console.warn("Failed to load messages");
+      console.warn("Failed to load messages:", e.message);
     }
     set({ inboxLoading: false });
-  },
-
-  loadMoreInbox: async () => {
-    const { inboxPage, inboxTotalPages } = get();
-    if (inboxPage >= inboxTotalPages) return;
-    const nextPage = inboxPage + 1;
-    set({ inboxLoadingMore: true });
-    try {
-      const { data: res } = await api.get(`/api/messages/inbox?page=${nextPage}&limit=30`);
-      set((s) => ({
-        inbox: [...s.inbox, ...(res.data || [])],
-        inboxPage: res.page || nextPage,
-        inboxTotalPages: res.totalPages || s.inboxTotalPages,
-      }));
-    } catch (e) {
-      console.warn("Failed to load more messages");
-    }
-    set({ inboxLoadingMore: false });
   },
 
   fetchThread: async (patientId) => {
@@ -69,7 +46,7 @@ const useMessagingStore = create((set, get) => ({
       const { data } = await api.get(`/api/patients/${patientId}/messages`);
       set({ threadMessages: data });
     } catch (e) {
-      console.warn("Failed to load conversation");
+      console.warn("Failed to load conversation:", e.message);
     }
     set({ threadLoading: false });
   },
@@ -81,14 +58,13 @@ const useMessagingStore = create((set, get) => ({
     try {
       await api.post(`/api/patients/${activeThread.patient_id}/messages`, {
         message: replyText,
-        direction: "doctor_to_patient",
         sender_name: "Dr. Bhansali",
       });
       set({ replyText: "" });
       get().fetchThread(activeThread.patient_id);
       get().fetchInbox();
     } catch (e) {
-      console.warn("Failed to send reply");
+      console.warn("Failed to send reply:", e.message);
     }
     set({ sendingReply: false });
   },
@@ -98,7 +74,7 @@ const useMessagingStore = create((set, get) => ({
       await api.put(`/api/messages/${msgId}/read`);
       get().fetchInbox();
     } catch (e) {
-      console.warn("Failed to mark message as read");
+      console.warn("Failed to mark message as read:", e.message);
     }
   },
 }));

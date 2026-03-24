@@ -5,6 +5,7 @@ import usePatientStore from "../stores/patientStore.js";
 import useVisitStore from "../stores/visitStore.js";
 import useUiStore from "../stores/uiStore.js";
 import useMessagingStore from "../stores/messagingStore.js";
+import useAlertStore from "../stores/alertStore.js";
 import Shimmer from "../components/Shimmer.jsx";
 import "./HomePage.css";
 
@@ -25,11 +26,13 @@ export default function HomePage() {
   const { setShowSearch } = useUiStore();
   const { unreadCount, inbox, inboxLoading, setActiveThread, fetchInbox, fetchThread, markRead } =
     useMessagingStore();
+  const { alerts, alertsLoading, fetchAlerts } = useAlertStore();
 
   useEffect(() => {
     fetchTodayAppointments();
     fetchInbox();
-  }, [fetchTodayAppointments, fetchInbox]);
+    fetchAlerts();
+  }, [fetchTodayAppointments, fetchInbox, fetchAlerts]);
 
   return (
     <div className="home">
@@ -56,6 +59,7 @@ export default function HomePage() {
           onClick={() => {
             fetchTodayAppointments();
             fetchInbox();
+            fetchAlerts();
           }}
           className="home__refresh-btn"
         >
@@ -89,6 +93,14 @@ export default function HomePage() {
             color: unreadCount > 0 ? "#dc2626" : "#64748b",
             bg: unreadCount > 0 ? "#fef2f2" : "#f8fafc",
             border: unreadCount > 0 ? "#fecaca" : "#e2e8f0",
+          },
+          {
+            label: "Patient Alerts",
+            value: alerts.length,
+            icon: "\ud83d\udce2",
+            color: alerts.length > 0 ? "#d97706" : "#64748b",
+            bg: alerts.length > 0 ? "#fffbeb" : "#f8fafc",
+            border: alerts.length > 0 ? "#fde68a" : "#e2e8f0",
           },
         ].map((s) => (
           <div
@@ -382,6 +394,96 @@ export default function HomePage() {
                         >
                           {m.message || ""}
                         </div>
+                      </div>
+                      <div className="home__msg-time">{ts}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Patient Alerts Panel */}
+        <div
+          className="home__panel"
+          style={{
+            border: `1.5px solid ${alerts.length > 0 ? "#fde68a" : "#e2e8f0"}`,
+            boxShadow:
+              alerts.length > 0 ? "0 2px 8px rgba(217,119,6,.08)" : "0 2px 8px rgba(0,0,0,.04)",
+          }}
+        >
+          <div
+            className="home__panel-header"
+            style={{
+              background: alerts.length > 0 ? "linear-gradient(135deg,#1e293b,#d97706)" : "#1e293b",
+            }}
+          >
+            <div className="home__msg-header-title">
+              <span className="home__panel-title">{"\ud83d\udce2"} PATIENT ALERTS</span>
+              {alerts.length > 0 && (
+                <span className="home__msg-badge" style={{ background: "#d97706" }}>
+                  {alerts.length}
+                </span>
+              )}
+            </div>
+            <button onClick={fetchAlerts} className="home__msg-view-all-btn">
+              Refresh
+            </button>
+          </div>
+          {alertsLoading ? (
+            <div style={{ padding: 14 }}>
+              <Shimmer type="list" count={3} />
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="home__panel-empty">
+              <div className="home__panel-empty-icon">{"\u2705"}</div>
+              <div className="home__panel-empty-text">No patient alerts</div>
+              <div className="home__panel-empty-hint">
+                Alerts from MyHealth Genie app appear here
+              </div>
+            </div>
+          ) : (
+            <div className="home__panel-scroll">
+              {alerts.slice(0, 10).map((a, i) => {
+                const ts = a.created_at
+                  ? (() => {
+                      const d = new Date(a.created_at);
+                      const now = new Date();
+                      const diff = (now - d) / 1000;
+                      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                      if (diff < 86400)
+                        return d.toLocaleTimeString("en-IN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        });
+                      return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+                    })()
+                  : "";
+                return (
+                  <div
+                    key={a.id}
+                    className="home__msg-item"
+                    style={{
+                      borderBottom:
+                        i < Math.min(alerts.length, 10) - 1 ? "1px solid #f1f5f9" : "none",
+                      background: a.status === "unread" ? "#fffbeb" : "white",
+                    }}
+                  >
+                    <div className="home__msg-row">
+                      <div
+                        className="home__msg-avatar"
+                        style={{ background: "#d97706", color: "white" }}
+                      >
+                        {a.alert_type === "symptom" ? "!" : a.alert_type === "vital" ? "V" : "A"}
+                      </div>
+                      <div className="home__msg-content">
+                        <div className="home__msg-name-row">
+                          <span className="home__msg-name" style={{ fontWeight: 700 }}>
+                            {a.title || a.alert_type || "Alert"}
+                          </span>
+                        </div>
+                        <div className="home__msg-preview">{a.message || ""}</div>
                       </div>
                       <div className="home__msg-time">{ts}</div>
                     </div>

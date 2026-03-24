@@ -201,7 +201,7 @@ const useUiStore = create((set, get) => ({
       const vitals = useVitalsStore.getState().vitals;
       const { moData, conData, moTranscript, conTranscript, quickTranscript } =
         useClinicalStore.getState();
-      const { planEdits } = usePlanStore.getState();
+      const { planEdits, nextVisitDate } = usePlanStore.getState();
       const currentDoctor = useAuthStore.getState().currentDoctor;
 
       // 3. Save consultation to backend
@@ -222,7 +222,17 @@ const useUiStore = create((set, get) => ({
         },
         vitals: vitals || {},
         moData: moData || null,
-        conData: conData || null,
+        conData: conData
+          ? {
+              ...conData,
+              follow_up: {
+                ...(conData.follow_up || {}),
+                date: nextVisitDate || conData?.follow_up?.date || null,
+              },
+            }
+          : nextVisitDate
+            ? { follow_up: { date: nextVisitDate } }
+            : null,
         moTranscript: moTranscript || null,
         conTranscript: conTranscript || null,
         quickTranscript: quickTranscript || null,
