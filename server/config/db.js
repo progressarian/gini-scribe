@@ -1,5 +1,9 @@
 import pg from "pg";
 
+// Return DATE columns as plain strings ("2024-03-15") instead of JS Date objects
+// This prevents timezone-related off-by-one day issues on the frontend
+pg.types.setTypeParser(1082, (val) => val); // 1082 = DATE type OID
+
 const dbUrl = process.env.DATABASE_URL || "";
 const isInternal = dbUrl.includes(".railway.internal");
 const isLocal = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");

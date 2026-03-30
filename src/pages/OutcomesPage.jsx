@@ -2177,7 +2177,8 @@ export default function OutcomesPage() {
               );
               const fmtD = (d) => {
                 if (!d) return "";
-                const x = new Date(d);
+                const s = String(d);
+                const x = s.length === 10 ? new Date(s + "T12:00:00") : new Date(s);
                 const m = [
                   "Jan",
                   "Feb",

@@ -36,10 +36,13 @@ CREATE INDEX idx_patients_name ON patients(name);
 CREATE TABLE IF NOT EXISTS doctors (
   id            SERIAL PRIMARY KEY,
   name          TEXT NOT NULL,
+  short_name    TEXT,                -- Short display name
   role          TEXT DEFAULT 'MO',  -- 'MO','Consultant','Surgeon'
-  speciality    TEXT,
+  specialty     TEXT,
   license_no    TEXT,
   phone         TEXT,
+  pin           TEXT,                -- bcrypt-hashed PIN for login
+  is_active     BOOLEAN DEFAULT TRUE,
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -151,13 +154,15 @@ CREATE TABLE IF NOT EXISTS lab_results (
   flag            TEXT,                -- 'HIGH','LOW',null
   ref_range       TEXT,                -- '0.4-4.0'
   is_critical     BOOLEAN DEFAULT FALSE,
-  source          TEXT DEFAULT 'lab',  -- 'lab','manual','scribe'
+  source          TEXT DEFAULT 'lab',  -- 'lab','manual','scribe','import','vitals_sheet'
+  canonical_name  TEXT,                -- Normalized test name for reliable querying
   notes           TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_labs_patient ON lab_results(patient_id);
 CREATE INDEX idx_labs_test ON lab_results(patient_id, test_name);
 CREATE INDEX idx_labs_date ON lab_results(test_date);
+CREATE INDEX idx_lab_canonical ON lab_results(patient_id, canonical_name);
 
 -- ============ DOCUMENTS / REPORTS ============
 -- Uploaded PDFs, images, previous prescriptions
@@ -276,3 +281,145 @@ CREATE TRIGGER trg_patients_updated BEFORE UPDATE ON patients FOR EACH ROW EXECU
 CREATE TRIGGER trg_consultations_updated BEFORE UPDATE ON consultations FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 CREATE TRIGGER trg_diagnoses_updated BEFORE UPDATE ON diagnoses FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 CREATE TRIGGER trg_goals_updated BEFORE UPDATE ON goals FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+CREATE TABLE IF NOT EXISTS patient_vitals_log (
+    id              SERIAL PRIMARY KEY,
+    patient_id      INTEGER NOT NULL REFERENCES patients(id),
+    genie_id        TEXT,                -- Genie Supabase row UUID (for dedup)
+    recorded_date   DATE NOT NULL,
+    reading_time    TEXT,
+    bp_systolic     REAL,
+    bp_diastolic    REAL,
+    rbs             REAL,
+    meal_type       TEXT,                -- Fasting/After breakfast/Random etc.
+    weight_kg       REAL,
+    pulse           REAL,
+    spo2            REAL,
+    body_fat        REAL,
+    muscle_mass     REAL,
+    bmi             REAL,
+    waist           REAL,
+    source          TEXT DEFAULT 'genie',
+    synced_at       TIMESTAMPTZ DEFAULT NOW(),
+    created_at      TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pvl_genie 
+ON patient_vitals_log(genie_id) 
+WHERE genie_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pvl_patient 
+ON patient_vitals_log(patient_id);
+
+CREATE INDEX IF NOT EXISTS idx_pvl_date 
+ON patient_vitals_log(patient_id, recorded_date);
+
+CREATE TABLE IF NOT EXISTS patient_activity_log (
+    id                SERIAL PRIMARY KEY,
+    patient_id        INTEGER NOT NULL REFERENCES patients(id),
+    genie_id          TEXT,
+    activity_type     TEXT NOT NULL,      -- Exercise, Sleep, Mood, Body
+    value             TEXT,
+    value2            TEXT,
+    context           TEXT,
+    duration_minutes  REAL,
+    mood_score        REAL,
+    log_date          DATE NOT NULL,
+    log_time          TEXT,
+    source            TEXT DEFAULT 'genie',
+    synced_at         TIMESTAMPTZ DEFAULT NOW(),
+    created_at        TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pal_genie 
+ON patient_activity_log(genie_id) 
+WHERE genie_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pal_patient 
+ON patient_activity_log(patient_id);
+
+CREATE INDEX IF NOT EXISTS idx_pal_date 
+ON patient_activity_log(patient_id, log_date);
+
+
+
+CREATE TABLE IF NOT EXISTS patient_symptom_log (
+    id                SERIAL PRIMARY KEY,
+    patient_id        INTEGER NOT NULL REFERENCES patients(id),
+    genie_id          TEXT,
+    symptom           TEXT NOT NULL,
+    severity          REAL,                -- 1-10
+    body_area         TEXT,
+    context           TEXT,
+    notes             TEXT,
+    follow_up_needed  BOOLEAN DEFAULT FALSE,
+    log_date          DATE NOT NULL,
+    log_time          TEXT,
+    source            TEXT DEFAULT 'genie',
+    synced_at         TIMESTAMPTZ DEFAULT NOW(),
+    created_at        TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_psl_genie 
+ON patient_symptom_log(genie_id) 
+WHERE genie_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_psl_patient 
+ON patient_symptom_log(patient_id);
+
+CREATE INDEX IF NOT EXISTS idx_psl_date 
+ON patient_symptom_log(patient_id, log_date);
+
+
+
+CREATE TABLE IF NOT EXISTS patient_med_log (
+    id                   SERIAL PRIMARY KEY,
+    patient_id           INTEGER NOT NULL REFERENCES patients(id),
+    genie_id             TEXT,
+    medication_name      TEXT,        -- Denormalized med name (from Genie join)
+    medication_dose      TEXT,
+    genie_medication_id  TEXT,        -- Genie's medication UUID
+    log_date             DATE NOT NULL,
+    dose_time            TEXT,
+    status               TEXT,        -- 'taken'
+    source               TEXT DEFAULT 'genie',
+    synced_at            TIMESTAMPTZ DEFAULT NOW(),
+    created_at           TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pml_genie 
+ON patient_med_log(genie_id) 
+WHERE genie_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pml_patient 
+ON patient_med_log(patient_id);
+
+CREATE INDEX IF NOT EXISTS idx_pml_date 
+ON patient_med_log(patient_id, log_date);
+
+
+CREATE TABLE IF NOT EXISTS patient_meal_log (
+    id            SERIAL PRIMARY KEY,
+    patient_id    INTEGER NOT NULL REFERENCES patients(id),
+    genie_id      TEXT,
+    meal_type     TEXT,        -- breakfast, lunch, snack, dinner
+    description   TEXT,
+    calories      REAL,
+    protein_g     REAL,
+    carbs_g       REAL,
+    fat_g         REAL,
+    log_date      DATE NOT NULL,
+    source        TEXT DEFAULT 'genie',
+    synced_at     TIMESTAMPTZ DEFAULT NOW(),
+    created_at    TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pmeal_genie 
+ON patient_meal_log(genie_id) 
+WHERE genie_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pmeal_patient 
+ON patient_meal_log(patient_id);
+
+CREATE INDEX IF NOT EXISTS idx_pmeal_date 
+ON patient_meal_log(patient_id, log_date);

@@ -21,8 +21,16 @@ router.get("/patients/:id/outcomes", async (req, res) => {
       vf = "AND recorded_at > NOW() - INTERVAL '1 year'";
     }
 
-    const labQ = (names) =>
-      `SELECT result, test_date, test_name FROM lab_results WHERE patient_id=$1 AND LOWER(test_name) IN (${names.map((_, i) => `LOWER($${i + 2})`).join(",")}) ${df} ORDER BY test_date, created_at DESC`;
+    // Use canonical_name for reliable matching; fall back to test_name for un-normalized rows
+    const labQ = (canonical) =>
+      `SELECT result, test_date, test_name FROM lab_results
+       WHERE patient_id=$1 AND (canonical_name=$2 OR test_name=$2) ${df}
+       ORDER BY test_date, created_at DESC`;
+
+    const vitalQ = (col) =>
+      `SELECT DISTINCT ON (recorded_at::date) ${col}, recorded_at::date as date
+       FROM vitals WHERE patient_id=$1 AND ${col} IS NOT NULL ${vf}
+       ORDER BY recorded_at::date, recorded_at DESC`;
 
     const [
       hba1c,
@@ -52,183 +60,43 @@ router.get("/patients/:id/outcomes", async (req, res) => {
       height,
       bmi,
     ] = await Promise.all([
-      pool.query(
-        labQ(["HbA1c", "Glycated Hemoglobin", "Glycated Haemoglobin", "A1c", "Hemoglobin A1c"]),
-        [id, "HbA1c", "Glycated Hemoglobin", "Glycated Haemoglobin", "A1c", "Hemoglobin A1c"],
-      ),
-      pool.query(
-        labQ([
-          "FBS",
-          "FPG",
-          "Fasting Glucose",
-          "Fasting Blood Sugar",
-          "Fasting Plasma Glucose",
-          "FBG",
-          "Blood Sugar Fasting",
-        ]),
-        [
-          id,
-          "FBS",
-          "FPG",
-          "Fasting Glucose",
-          "Fasting Blood Sugar",
-          "Fasting Plasma Glucose",
-          "FBG",
-          "Blood Sugar Fasting",
-        ],
-      ),
-      pool.query(labQ(["LDL", "LDL Cholesterol", "LDL-C", "LDL Cholesterol (Direct)"]), [
-        id,
-        "LDL",
-        "LDL Cholesterol",
-        "LDL-C",
-        "LDL Cholesterol (Direct)",
-      ]),
-      pool.query(labQ(["Triglycerides", "TG", "Triglyceride", "Serum Triglycerides"]), [
-        id,
-        "Triglycerides",
-        "TG",
-        "Triglyceride",
-        "Serum Triglycerides",
-      ]),
-      pool.query(labQ(["HDL", "HDL Cholesterol", "HDL-C", "HDL Cholesterol (Direct)"]), [
-        id,
-        "HDL",
-        "HDL Cholesterol",
-        "HDL-C",
-        "HDL Cholesterol (Direct)",
-      ]),
-      pool.query(labQ(["Creatinine", "Serum Creatinine", "S. Creatinine"]), [
-        id,
-        "Creatinine",
-        "Serum Creatinine",
-        "S. Creatinine",
-      ]),
-      pool.query(labQ(["eGFR", "GFR", "Estimated GFR"]), [id, "eGFR", "GFR", "Estimated GFR"]),
-      pool.query(
-        labQ(["UACR", "Urine Albumin Creatinine Ratio", "Microalbumin", "Urine Microalbumin"]),
-        [id, "UACR", "Urine Albumin Creatinine Ratio", "Microalbumin", "Urine Microalbumin"],
-      ),
-      pool.query(labQ(["TSH", "Thyroid Stimulating Hormone", "TSH Ultrasensitive"]), [
-        id,
-        "TSH",
-        "Thyroid Stimulating Hormone",
-        "TSH Ultrasensitive",
-      ]),
-      pool.query(
-        labQ([
-          "PPBS",
-          "PP",
-          "PPG",
-          "PP Glucose",
-          "Post Prandial",
-          "Post Prandial Glucose",
-          "Post Prandial Blood Sugar",
-        ]),
-        [
-          id,
-          "PPBS",
-          "PP",
-          "PPG",
-          "PP Glucose",
-          "Post Prandial",
-          "Post Prandial Glucose",
-          "Post Prandial Blood Sugar",
-        ],
-      ),
-      pool.query(labQ(["SGPT (ALT)", "SGPT", "ALT", "Alanine Aminotransferase"]), [
-        id,
-        "SGPT (ALT)",
-        "SGPT",
-        "ALT",
-        "Alanine Aminotransferase",
-      ]),
-      pool.query(labQ(["SGOT (AST)", "SGOT", "AST", "Aspartate Aminotransferase"]), [
-        id,
-        "SGOT (AST)",
-        "SGOT",
-        "AST",
-        "Aspartate Aminotransferase",
-      ]),
-      pool.query(labQ(["ALP", "Alkaline Phosphatase"]), [id, "ALP", "Alkaline Phosphatase"]),
-      pool.query(labQ(["Non-HDL", "Non HDL", "NonHDL", "Non-HDL Cholesterol"]), [
-        id,
-        "Non-HDL",
-        "Non HDL",
-        "NonHDL",
-        "Non-HDL Cholesterol",
-      ]),
-      pool.query(
-        labQ([
-          "Vitamin D",
-          "25-OH Vitamin D",
-          "Vit D",
-          "Vitamin D3",
-          "25(OH) Vitamin D",
-          "25 Hydroxy Vitamin D",
-        ]),
-        [
-          id,
-          "Vitamin D",
-          "25-OH Vitamin D",
-          "Vit D",
-          "Vitamin D3",
-          "25(OH) Vitamin D",
-          "25 Hydroxy Vitamin D",
-        ],
-      ),
-      pool.query(labQ(["Vitamin B12", "Vit B12", "B12", "Cyanocobalamin"]), [
-        id,
-        "Vitamin B12",
-        "Vit B12",
-        "B12",
-        "Cyanocobalamin",
-      ]),
-      pool.query(labQ(["Ferritin", "Serum Ferritin"]), [id, "Ferritin", "Serum Ferritin"]),
-      pool.query(labQ(["CRP", "C-Reactive Protein", "hs-CRP"]), [
-        id,
-        "CRP",
-        "C-Reactive Protein",
-        "hs-CRP",
-      ]),
+      pool.query(labQ("HbA1c"), [id, "HbA1c"]),
+      pool.query(labQ("FBS"), [id, "FBS"]),
+      pool.query(labQ("LDL"), [id, "LDL"]),
+      pool.query(labQ("Triglycerides"), [id, "Triglycerides"]),
+      pool.query(labQ("HDL"), [id, "HDL"]),
+      pool.query(labQ("Creatinine"), [id, "Creatinine"]),
+      pool.query(labQ("eGFR"), [id, "eGFR"]),
+      pool.query(labQ("UACR"), [id, "UACR"]),
+      pool.query(labQ("TSH"), [id, "TSH"]),
+      pool.query(labQ("PPBS"), [id, "PPBS"]),
+      pool.query(labQ("SGPT (ALT)"), [id, "SGPT (ALT)"]),
+      pool.query(labQ("SGOT (AST)"), [id, "SGOT (AST)"]),
+      pool.query(labQ("ALP"), [id, "ALP"]),
+      pool.query(labQ("Non-HDL"), [id, "Non-HDL"]),
+      pool.query(labQ("Vitamin D"), [id, "Vitamin D"]),
+      pool.query(labQ("Vitamin B12"), [id, "Vitamin B12"]),
+      pool.query(labQ("Ferritin"), [id, "Ferritin"]),
+      pool.query(labQ("CRP"), [id, "CRP"]),
       pool.query(
         `SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
         [id],
       ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) weight, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND weight IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) waist, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND waist IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) body_fat, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND body_fat IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) muscle_mass, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND muscle_mass IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) pulse, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND pulse IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) height, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND height IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (recorded_at::date) bmi, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bmi IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
-        [id],
-      ),
+      pool.query(vitalQ("weight"), [id]),
+      pool.query(vitalQ("waist"), [id]),
+      pool.query(vitalQ("body_fat"), [id]),
+      pool.query(vitalQ("muscle_mass"), [id]),
+      pool.query(vitalQ("pulse"), [id]),
+      pool.query(vitalQ("height"), [id]),
+      pool.query(vitalQ("bmi"), [id]),
     ]);
 
     const screenings = await pool.query(
-      `SELECT DISTINCT ON (test_name) test_name, result, unit, test_date, flag
-       FROM lab_results WHERE patient_id=$1 AND test_name IN ('VPT','ABI','Retinopathy','ECG','Doppler','DEXA','Ultrasound','X-Ray','MRI')
-       ORDER BY test_name, test_date DESC`,
+      `SELECT DISTINCT ON (COALESCE(canonical_name, test_name))
+         COALESCE(canonical_name, test_name) as test_name, result, unit, test_date, flag
+       FROM lab_results WHERE patient_id=$1
+         AND COALESCE(canonical_name, test_name) IN ('VPT','ABI','Retinopathy','ECG','Doppler','DEXA','Ultrasound','X-Ray','MRI')
+       ORDER BY COALESCE(canonical_name, test_name), test_date DESC`,
       [id],
     );
 

@@ -5,6 +5,12 @@ import { handleError } from "../utils/errorHandler.js";
 import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+let syncPatientLogsFromGenie;
+try {
+  syncPatientLogsFromGenie = require("../genie-sync.cjs").syncPatientLogsFromGenie;
+} catch {}
 
 const router = Router();
 
@@ -281,6 +287,15 @@ router.get("/patients/:id", async (req, res) => {
       documents: allDocs,
       goals: goals.rows,
     });
+
+    // Auto-sync patient logs from Genie in background
+    if (syncPatientLogsFromGenie) {
+      syncPatientLogsFromGenie(id, pool)
+        .then((r) => {
+          if (r?.counts) console.log(`📲 Auto-sync patient ${id}:`, r.counts);
+        })
+        .catch(() => {});
+    }
   } catch (e) {
     handleError(res, e, "Patient detail");
   }

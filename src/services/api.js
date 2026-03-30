@@ -9,6 +9,7 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+console.log("API_URL", API_URL);
 // Request interceptor: attach JWT token from localStorage
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("gini_auth_token");

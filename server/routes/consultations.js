@@ -15,6 +15,13 @@ try {
   console.log("genie-sync.js not found — Genie sync disabled");
 }
 
+let syncPatientLogsFromGenie = null;
+try {
+  syncPatientLogsFromGenie = require("../genie-sync.cjs").syncPatientLogsFromGenie;
+} catch (e) {
+  console.log("Genie reverse sync not available");
+}
+
 const router = Router();
 
 // Save consultation (full visit)
@@ -328,6 +335,14 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       syncVisitToGenie(visit, syncPatient, doctorInfo)
         .then((r) => {
           if (r) console.log("📱 Genie sync:", r);
+
+          if (syncPatientLogsFromGenie) {
+            syncPatientLogsFromGenie(patientId, pool)
+              .then((res) => {
+                if (res) console.log("📲 Genie logs sync:", res);
+              })
+              .catch((e) => console.log("Genie logs sync background:", e.message));
+          }
         })
         .catch((e) => console.log("Genie sync background:", e.message));
   } catch (e) {

@@ -19,6 +19,7 @@ import activeVisitRoutes from "./routes/active-visits.js";
 import messageRoutes from "./routes/messages.js";
 import aiRoutes from "./routes/ai.js";
 import alertRoutes from "./routes/alerts.js";
+import healthLogRoutes from "./routes/health-logs.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,6 +73,7 @@ app.use("/api", activeVisitRoutes);
 app.use("/api", messageRoutes);
 app.use("/api", aiRoutes);
 app.use("/api", alertRoutes);
+app.use("/api", healthLogRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
