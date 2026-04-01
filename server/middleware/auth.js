@@ -30,6 +30,8 @@ const PUBLIC_PATHS = [
   "/api/auth/logout",
   "/api/auth/me",
   "/api/convert-heic",
+  "/api/sync/healthray/full",
+  "/api/sync/healthray/today",
 ];
 
 export const requireAuth = (req, res, next) => {

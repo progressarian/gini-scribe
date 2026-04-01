@@ -22,6 +22,8 @@ import aiRoutes from "./routes/ai.js";
 import alertRoutes from "./routes/alerts.js";
 import healthLogRoutes from "./routes/health-logs.js";
 import visitRoutes from "./routes/visit.js";
+import syncRoutes from "./routes/sync.js";
+import { startCronJobs } from "./services/cron/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -79,6 +81,7 @@ app.use("/api", aiRoutes);
 app.use("/api", alertRoutes);
 app.use("/api", healthLogRoutes);
 app.use("/api", visitRoutes);
+app.use("/api", syncRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
@@ -89,4 +92,7 @@ app.get("*", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`);
+  startCronJobs();
+});
