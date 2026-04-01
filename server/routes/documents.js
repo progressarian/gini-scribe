@@ -200,4 +200,28 @@ router.get("/patients/:id/imaging", async (req, res) => {
   }
 });
 
+// Delete a document and its file from storage
+router.delete("/documents/:id", async (req, res) => {
+  try {
+    const doc = await pool.query("SELECT * FROM documents WHERE id=$1", [req.params.id]);
+    if (!doc.rows[0]) return res.status(404).json({ error: "Not found" });
+
+    // Delete file from Supabase Storage if it exists
+    if (doc.rows[0].storage_path && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      await fetch(
+        `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${doc.rows[0].storage_path}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+        },
+      ).catch(() => {}); // Don't fail if storage delete fails
+    }
+
+    await pool.query("DELETE FROM documents WHERE id=$1", [req.params.id]);
+    res.json({ success: true });
+  } catch (e) {
+    handleError(res, e, "Document delete");
+  }
+});
+
 export default router;

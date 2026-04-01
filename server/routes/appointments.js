@@ -49,10 +49,10 @@ router.get("/appointments", async (req, res) => {
   }
 });
 
-// Create appointment
+// Create appointment — auto-matches patient by file_no/phone if patient_id not provided
 router.post("/appointments", validate(appointmentCreateSchema), async (req, res) => {
   try {
-    const {
+    let {
       patient_id,
       patient_name,
       file_no,
@@ -62,20 +62,53 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
       time_slot,
       visit_type,
       notes,
+      category,
+      is_walkin,
     } = req.body;
+
+    // Auto-match or auto-create patient if patient_id not provided
+    if (!patient_id && patient_name) {
+      // Try to find existing patient by file_no or phone
+      if (file_no || phone) {
+        const match = await pool.query(
+          `SELECT id FROM patients
+            WHERE ($1::text IS NOT NULL AND file_no = $1)
+               OR ($2::text IS NOT NULL AND phone = $2)
+            ORDER BY (file_no = $1::text) DESC NULLS LAST
+            LIMIT 1`,
+          [file_no || null, phone || null],
+        );
+        if (match.rows[0]) {
+          patient_id = match.rows[0].id;
+        }
+      }
+
+      // No existing patient found — create one
+      if (!patient_id) {
+        const newPt = await pool.query(
+          `INSERT INTO patients (name, phone, file_no)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [patient_name, phone || null, file_no || null],
+        );
+        patient_id = newPt.rows[0].id;
+      }
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
         patient_id || null,
         patient_name,
         file_no || null,
         phone || null,
-        doctor_name,
+        doctor_name || null,
         appointment_date || new Date().toISOString().split("T")[0],
         time_slot || null,
         visit_type || "OPD",
         notes || null,
+        category || null,
+        is_walkin || false,
       ],
     );
     res.json(rows[0]);

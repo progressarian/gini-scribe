@@ -9,6 +9,17 @@ import Sparkline from "../components/Sparkline.jsx";
 import { fmtDate } from "../utils/helpers.js";
 import { DRUG_BIOMARKER_MAP, getMedsForBiomarker } from "../config/constants.js";
 
+const fmtCompliance = (c) => {
+  if (!c) return "";
+  if (typeof c === "string") return c;
+  if (typeof c === "object") {
+    const pct = c.medPct != null ? c.medPct : null;
+    if (pct !== null) return pct >= 90 ? "Good" : pct >= 70 ? "Moderate" : "Poor";
+    return "";
+  }
+  return String(c);
+};
+
 export default function OutcomesPage() {
   const patient = usePatientStore((s) => s.patient);
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
@@ -288,7 +299,7 @@ export default function OutcomesPage() {
                 const d = (v.visit_date || "").split("T")[0];
                 visitCtxByDate[d] = {
                   lifestyle: v.lifestyle || [],
-                  compliance: v.compliance || "",
+                  compliance: fmtCompliance(v.compliance),
                   symptoms: (v.symptoms || v.chief_complaints || []).filter(
                     (s) =>
                       ![
@@ -1217,7 +1228,7 @@ export default function OutcomesPage() {
                   diagChanges: visitDiagChanges[dateKey] || [],
                   newMeds: (visitNewMeds[dateKey] || []).slice(0, 6),
                   lifestyle: v.lifestyle || [],
-                  compliance: v.compliance || "",
+                  compliance: fmtCompliance(v.compliance),
                   symptoms: (v.symptoms || v.chief_complaints || []).filter(
                     (s) =>
                       ![

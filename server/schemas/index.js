@@ -182,14 +182,15 @@ export const appointmentCreateSchema = z.object({
   patient_name: z.string({ required_error: "patient_name is required" }).min(1),
   file_no: optStr,
   phone: optStr,
-  doctor_name: z.string({ required_error: "doctor_name is required" }).min(1),
+  doctor_name: optStr,
   appointment_date: z
     .string({ required_error: "appointment_date is required" })
-    .min(1, "Date is required")
-    .refine((v) => v >= new Date().toISOString().split("T")[0], "Cannot book for a past date"),
+    .min(1, "Date is required"),
   time_slot: optStr,
   visit_type: z.enum(["OPD", "IPD", "Telehealth", "Follow-up", "Lab"]).optional().default("OPD"),
   notes: optStr,
+  category: optStr,
+  is_walkin: optBool,
 });
 
 export const appointmentUpdateSchema = z.object({
