@@ -11,6 +11,26 @@ import useMessagingStore from "../stores/messagingStore";
 
 const today = () => new Date().toISOString().split("T")[0];
 
+// Flexible lab name matching — handles extracted report names vs display names
+const LAB_ALIASES = {
+  HbA1c: ["HbA1c", "Glycated Hemoglobin", "A1c"],
+  FBS: ["FBS", "Fasting Glucose", "Fasting Blood Sugar", "FPG", "FBG", "Fasting Plasma Glucose"],
+  Creatinine: ["Creatinine", "Cr"],
+  eGFR: ["eGFR"],
+  LDL: ["LDL"],
+  HDL: ["HDL"],
+  Triglycerides: ["Triglycerides", "TG"],
+  TSH: ["TSH"],
+  UACR: ["UACR", "Microalbumin"],
+  "Vitamin D": ["Vitamin D", "Vit D", "25-OH Vitamin D"],
+  "Vitamin B12": ["Vitamin B12", "Vit B12"],
+};
+const findLab = (labs, name) =>
+  labs.find((l) => {
+    const aliases = LAB_ALIASES[name] || [name];
+    return aliases.some((a) => l.test_name === a || l.canonical_name === a);
+  });
+
 const bookingSchema = z.object({
   dt: z
     .string()
@@ -137,21 +157,21 @@ export default function DashboardPage() {
           {(() => {
             const flags = [];
             const labs = pfd?.lab_results || [];
-            const hba1c = labs.find((l) => l.test_name === "HbA1c");
+            const hba1c = findLab(labs, "HbA1c");
             if (hba1c && parseFloat(hba1c.result) > 8)
               flags.push({
                 t: "🔴 HbA1c " + hba1c.result + "% — uncontrolled",
                 c: "#dc2626",
                 bg: "#fef2f2",
               });
-            const cr = labs.find((l) => l.test_name === "Creatinine" || l.test_name === "Cr");
+            const cr = findLab(labs, "Creatinine");
             if (cr && parseFloat(cr.result) > 1.3)
               flags.push({
                 t: "⚠️ Cr " + cr.result + " — renal concern",
                 c: "#92400e",
                 bg: "#fef3c7",
               });
-            const egfr = labs.find((l) => l.test_name === "eGFR");
+            const egfr = findLab(labs, "eGFR");
             if (egfr && parseFloat(egfr.result) < 60)
               flags.push({ t: "⚠️ eGFR " + egfr.result + " — CKD", c: "#92400e", bg: "#fef3c7" });
             return flags.length > 0 ? (
@@ -181,29 +201,27 @@ export default function DashboardPage() {
             const consults = pfd?.consultations || [];
             if (labs.length === 0) return null;
             const biomarkers = [];
-            const a1c = labs.find((l) => l.test_name === "HbA1c");
+            const a1c = findLab(labs, "HbA1c");
             if (a1c) {
               const val = parseFloat(a1c.result);
               biomarkers.push({ name: "HbA1c", val: `${val}%`, atTarget: val < 7, target: "<7%" });
             }
-            const fbg = labs.find(
-              (l) => l.test_name === "FBS" || l.test_name === "Fasting Glucose",
-            );
+            const fbg = findLab(labs, "FBS");
             if (fbg) {
               const val = parseFloat(fbg.result);
               biomarkers.push({ name: "FBG", val: `${val}`, atTarget: val < 110, target: "<110" });
             }
-            const egfr = labs.find((l) => l.test_name === "eGFR");
+            const egfr = findLab(labs, "eGFR");
             if (egfr) {
               const val = parseFloat(egfr.result);
               biomarkers.push({ name: "eGFR", val: `${val}`, atTarget: val >= 60, target: "≥60" });
             }
-            const ldl = labs.find((l) => l.test_name === "LDL");
+            const ldl = findLab(labs, "LDL");
             if (ldl) {
               const val = parseFloat(ldl.result);
               biomarkers.push({ name: "LDL", val: `${val}`, atTarget: val < 100, target: "<100" });
             }
-            const tsh = labs.find((l) => l.test_name === "TSH");
+            const tsh = findLab(labs, "TSH");
             if (tsh) {
               const val = parseFloat(tsh.result);
               biomarkers.push({
@@ -351,21 +369,29 @@ export default function DashboardPage() {
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                 {[
-                  "HbA1c",
-                  "FBS",
-                  "PPBS",
-                  "Creatinine",
-                  "eGFR",
-                  "LDL",
-                  "TSH",
-                  "Vit D",
-                  "Vit B12",
-                ].map((name) => {
-                  const lab = (pfd?.lab_results || []).find((l) => l.test_name === name);
+                  { display: "HbA1c", match: ["HbA1c", "Glycated Hemoglobin"] },
+                  {
+                    display: "FBS",
+                    match: ["FBS", "Fasting Glucose", "Fasting Blood Sugar", "FPG", "FBG"],
+                  },
+                  { display: "PPBS", match: ["PPBS", "Post Prandial Blood Sugar"] },
+                  { display: "Creatinine", match: ["Creatinine"] },
+                  { display: "eGFR", match: ["eGFR"] },
+                  { display: "LDL", match: ["LDL"] },
+                  { display: "HDL", match: ["HDL"] },
+                  { display: "TG", match: ["Triglycerides", "TG"] },
+                  { display: "TSH", match: ["TSH"] },
+                  { display: "UACR", match: ["UACR", "Microalbumin"] },
+                  { display: "Vit D", match: ["Vitamin D", "Vit D", "25-OH Vitamin D"] },
+                  { display: "Vit B12", match: ["Vitamin B12", "Vit B12"] },
+                ].map(({ display, match }) => {
+                  const lab = (pfd?.lab_results || []).find((l) =>
+                    match.some((m) => l.test_name === m || l.canonical_name === m),
+                  );
                   if (!lab) return null;
                   return (
                     <span
-                      key={name}
+                      key={display}
                       style={{
                         fontSize: 10,
                         padding: "2px 6px",
@@ -378,7 +404,7 @@ export default function DashboardPage() {
                         border: `1px solid ${lab.flag === "H" ? "#fecaca" : lab.flag === "L" ? "#bfdbfe" : "#bbf7d0"}`,
                       }}
                     >
-                      {name}: <b>{lab.result}</b>
+                      {display}: <b>{lab.result}</b>
                       {lab.unit ? " " + lab.unit : ""}{" "}
                       {lab.flag === "H" ? "↑" : lab.flag === "L" ? "↓" : ""}
                     </span>
@@ -387,6 +413,99 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+
+          {/* All Lab Results (from reports & manual) */}
+          {(pfd?.lab_results || []).length > 0 &&
+            (() => {
+              const allLabs = pfd.lab_results;
+              // Group by panel_name or source
+              const panels = {};
+              for (const l of allLabs) {
+                const pn = l.panel_name || "Other Tests";
+                if (!panels[pn]) panels[pn] = [];
+                panels[pn].push(l);
+              }
+              return (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", marginBottom: 4 }}>
+                    📋 ALL LAB RESULTS ({allLabs.length})
+                  </div>
+                  {Object.entries(panels).map(([panelName, tests]) => (
+                    <div key={panelName} style={{ marginBottom: 6 }}>
+                      <div
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: "#64748b",
+                          textTransform: "uppercase",
+                          letterSpacing: ".05em",
+                          marginBottom: 3,
+                        }}
+                      >
+                        {panelName}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+                        {tests.map((l, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              fontSize: 10,
+                              padding: "3px 6px",
+                              background:
+                                l.flag === "H"
+                                  ? "#fef2f2"
+                                  : l.flag === "L"
+                                    ? "#eff6ff"
+                                    : i % 2
+                                      ? "#f8fafc"
+                                      : "white",
+                              borderRadius: 3,
+                              border: l.flag
+                                ? `1px solid ${l.flag === "H" ? "#fecaca" : "#bfdbfe"}`
+                                : "none",
+                            }}
+                          >
+                            <span style={{ fontWeight: 600, color: "#374151" }}>{l.test_name}</span>
+                            <span>
+                              <b
+                                style={{
+                                  color:
+                                    l.flag === "H"
+                                      ? "#dc2626"
+                                      : l.flag === "L"
+                                        ? "#2563eb"
+                                        : "#059669",
+                                }}
+                              >
+                                {l.result}
+                                {l.result_text || ""}
+                              </b>
+                              <span style={{ color: "#94a3b8", fontSize: 9, marginLeft: 2 }}>
+                                {l.unit || ""}
+                              </span>
+                              {l.flag === "H" ? " ↑" : l.flag === "L" ? " ↓" : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {allLabs[0]?.test_date && (
+                    <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 3 }}>
+                      Latest:{" "}
+                      {new Date(allLabs[0].test_date).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
           {/* Medications — current plan + active external only */}
           {(pfd?.medications || []).length > 0 && (
@@ -506,8 +625,8 @@ export default function DashboardPage() {
             style={{ background: "#f0fdf4", borderRadius: 10, padding: 12, textAlign: "center" }}
           >
             <div style={{ fontSize: 22, fontWeight: 800, color: "#059669" }}>
-              {pfd?.lab_results?.find((l) => l.test_name === "HbA1c")?.result
-                ? `${pfd.lab_results.find((l) => l.test_name === "HbA1c").result}%`
+              {findLab(pfd?.lab_results || [], "HbA1c")?.result
+                ? `${findLab(pfd.lab_results, "HbA1c").result}%`
                 : "—"}
             </div>
             <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b" }}>Last HbA1c</div>
@@ -1351,43 +1470,143 @@ export default function DashboardPage() {
           >
             RECENT VISITS
           </div>
-          {pfd.consultations.slice(0, 5).map((c, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "8px 10px",
-                borderRadius: 8,
-                marginBottom: 4,
-                background: "#f8fafc",
-                border: "1px solid #f1f5f9",
-              }}
-            >
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", minWidth: 70 }}>
-                {new Date(String(c.visit_date).slice(0, 10) + "T12:00:00").toLocaleDateString(
-                  "en-IN",
-                  { day: "2-digit", month: "short", year: "2-digit" },
-                )}
-              </div>
-              <div style={{ flex: 1, fontSize: 11, color: "#64748b" }}>
-                {c.con_name || c.mo_name || "—"}
-              </div>
-              <span
+          {pfd.consultations.slice(0, 5).map((c, i) => {
+            const moData = c.mo_data || {};
+            const conData = c.con_data || {};
+            const diags = moData.diagnoses || [];
+            const meds = conData.medications_confirmed || moData.previous_medications || [];
+            const stoppedMeds = moData.stopped_medications || [];
+            const isOPD = c.visit_type === "OPD";
+            return (
+              <div
+                key={i}
                 style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: c.status === "completed" ? "#059669" : "#d97706",
-                  background: c.status === "completed" ? "#f0fdf4" : "#fefce8",
-                  padding: "2px 8px",
-                  borderRadius: 4,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  marginBottom: 4,
+                  background: "#f8fafc",
+                  border: "1px solid #f1f5f9",
                 }}
               >
-                {c.status || "completed"}
-              </span>
-            </div>
-          ))}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", minWidth: 70 }}>
+                    {new Date(String(c.visit_date).slice(0, 10) + "T12:00:00").toLocaleDateString(
+                      "en-IN",
+                      { day: "2-digit", month: "short", year: "2-digit" },
+                    )}
+                  </div>
+                  <div style={{ flex: 1, fontSize: 11, color: "#64748b" }}>
+                    {c.con_name || c.mo_name || "—"}
+                  </div>
+                  {isOPD && (
+                    <span
+                      style={{
+                        fontSize: 8,
+                        fontWeight: 700,
+                        background: "#eff6ff",
+                        color: "#2563eb",
+                        padding: "1px 5px",
+                        borderRadius: 3,
+                        border: "1px solid #bfdbfe",
+                      }}
+                    >
+                      OPD
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: c.status === "completed" ? "#059669" : "#d97706",
+                      background: c.status === "completed" ? "#f0fdf4" : "#fefce8",
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    {c.status || "completed"}
+                  </span>
+                </div>
+                {/* Diagnoses from this visit */}
+                {diags.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 5 }}>
+                    {diags.map((d, di) => (
+                      <span
+                        key={di}
+                        style={{
+                          fontSize: 9,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          fontWeight: 600,
+                          background:
+                            d.status === "Uncontrolled"
+                              ? "#fef2f2"
+                              : d.status === "New"
+                                ? "#fffbeb"
+                                : "#f0fdf4",
+                          color:
+                            d.status === "Uncontrolled"
+                              ? "#dc2626"
+                              : d.status === "New"
+                                ? "#d97706"
+                                : "#059669",
+                          border: `1px solid ${d.status === "Uncontrolled" ? "#fecaca" : d.status === "New" ? "#fde68a" : "#bbf7d0"}`,
+                        }}
+                      >
+                        {d.label || d.id}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* Medications from this visit */}
+                {meds.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+                    {meds.slice(0, 6).map((m, mi) => (
+                      <span
+                        key={mi}
+                        style={{
+                          fontSize: 9,
+                          padding: "1px 5px",
+                          borderRadius: 3,
+                          background: "#f0f9ff",
+                          color: "#1e40af",
+                          border: "1px solid #dbeafe",
+                        }}
+                      >
+                        💊 {m.name}
+                        {m.dose ? ` ${m.dose}` : ""}
+                      </span>
+                    ))}
+                    {meds.length > 6 && (
+                      <span style={{ fontSize: 9, color: "#94a3b8", padding: "1px 4px" }}>
+                        +{meds.length - 6} more
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* Stopped medications */}
+                {stoppedMeds.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 3 }}>
+                    {stoppedMeds.map((m, mi) => (
+                      <span
+                        key={mi}
+                        style={{
+                          fontSize: 9,
+                          padding: "1px 5px",
+                          borderRadius: 3,
+                          background: "#fef2f2",
+                          color: "#dc2626",
+                          border: "1px solid #fecaca",
+                          textDecoration: "line-through",
+                        }}
+                      >
+                        🚫 {m.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

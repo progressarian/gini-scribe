@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
+import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -981,6 +982,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
   // reports: { [typeId]: [{name, date, uploading, docId?, storagePath?}] }
   const [reports, setReports] = useState({});
   const [activeType, setActiveType] = useState(null);
+  const [expandedReports, setExpandedReports] = useState({});
   const fileRefs = useRef({});
 
   // Load previously uploaded docs from DB
@@ -993,24 +995,38 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
         const typeIds = REPORT_TYPES.map((t) => t.id);
         for (const doc of docs) {
           if (doc.doc_type === "prescription") continue; // handled by ComplianceTab
-          const typeId = typeIds.includes(doc.doc_type) ? doc.doc_type : doc.doc_type === "lab_report" ? "blood" : "other";
+          const typeId = typeIds.includes(doc.doc_type)
+            ? doc.doc_type
+            : doc.doc_type === "lab_report"
+              ? "blood"
+              : "other";
           if (!grouped[typeId]) grouped[typeId] = [];
           grouped[typeId].push({
+            id: doc.id,
             name: doc.file_name || doc.title,
             date: doc.doc_date
-              ? new Date(doc.doc_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
-              : new Date(doc.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+              ? new Date(doc.doc_date).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                })
+              : new Date(doc.created_at).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                }),
             uploading: false,
+            extracting: false,
+            extractedData: doc.extracted_data || null,
+            extractError: null,
             docId: doc.id,
             storagePath: doc.storage_path,
           });
         }
         setReports((prev) => {
           const merged = { ...grouped };
-          // Keep any currently-uploading entries from local state
+          // Keep any currently-uploading or extracting entries from local state
           for (const [k, entries] of Object.entries(prev)) {
-            const uploading = entries.filter((e) => e.uploading);
-            if (uploading.length) merged[k] = [...(merged[k] || []), ...uploading];
+            const active = entries.filter((e) => e.uploading || e.extracting);
+            if (active.length) merged[k] = [...(merged[k] || []), ...active];
           }
           return merged;
         });
@@ -1065,22 +1081,29 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
   const handleFileUpload = async (typeId, file) => {
     if (!file) return;
     const patientId = appt.patient_id;
+    const entryId = Date.now() + Math.random();
+
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const mediaType = file.type || "application/octet-stream";
+
     const entry = {
+      id: entryId,
       name: file.name,
       date: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
       uploading: true,
+      extracting: false,
+      extractedData: null,
+      extractError: null,
     };
     setReports((prev) => ({ ...prev, [typeId]: [...(prev[typeId] || []), entry] }));
 
     try {
       let uploadedDocId = null;
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const mediaType = file.type || "application/octet-stream";
 
       if (patientId) {
         const docResp = await apiFetch(`/api/patients/${patientId}/documents`, {
@@ -1102,27 +1125,143 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
         }
       }
 
+      // Mark upload done, start extraction
       setReports((prev) => ({
         ...prev,
         [typeId]: (prev[typeId] || []).map((r) =>
-          r.name === file.name && r.uploading ? { ...r, uploading: false, docId: uploadedDocId } : r,
+          r.id === entryId ? { ...r, uploading: false, docId: uploadedDocId, extracting: true } : r,
         ),
       }));
-      showToast(`✓ ${file.name} uploaded`);
+      showToast(`✓ ${file.name} uploaded — extracting data…`);
+
+      // Run AI extraction
+      const isLab = typeId === "blood" || typeId === "other";
+      const extractFn = isLab ? extractLab : extractImaging;
+      const { data: extractedData, error: extractError } = await extractFn(base64, mediaType);
+
+      setReports((prev) => ({
+        ...prev,
+        [typeId]: (prev[typeId] || []).map((r) =>
+          r.id === entryId ? { ...r, extracting: false, extractedData, extractError } : r,
+        ),
+      }));
+
+      if (extractedData) {
+        // Save extracted_data to document record
+        if (uploadedDocId) {
+          apiFetch(`/api/documents/${uploadedDocId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ extracted_data: extractedData }),
+          }).catch(() => {});
+        }
+
+        // Auto-populate lab values from extraction (only for lab reports)
+        if (isLab && extractedData.panels) {
+          const labMap = {};
+          for (const panel of extractedData.panels) {
+            for (const test of panel.tests) {
+              const tn = (test.test_name || "").toLowerCase().trim();
+              const val = test.result;
+              if (val == null || val === "") continue;
+              if (/hba1c|glycated|a1c/.test(tn)) labMap.hba1c = val;
+              else if (/^fbs$|fasting.*(glucose|blood|sugar|plasma)|^fpg$|^fbg$/.test(tn))
+                labMap.fg = val;
+              else if (/^ldl/.test(tn)) labMap.ldl = val;
+              else if (/triglyceride|^tg$/.test(tn)) labMap.tg = val;
+              else if (/uacr|microalbumin/.test(tn)) labMap.uacr = val;
+              else if (/creatinine/.test(tn) && !/clearance/.test(tn)) labMap.creatinine = val;
+              else if (/^tsh/.test(tn)) labMap.tsh = val;
+              else if (/^(hemoglobin|haemoglobin|hb)$/.test(tn)) labMap.hb = val;
+            }
+          }
+          // Only fill empty fields
+          setVals((prev) => {
+            const updated = { ...prev };
+            for (const [k, v] of Object.entries(labMap)) {
+              if (!updated[k] || updated[k] === "") updated[k] = String(v);
+            }
+            return updated;
+          });
+          const filled = Object.keys(labMap).length;
+          if (filled > 0)
+            showToast(`✓ Auto-filled ${filled} lab value${filled > 1 ? "s" : ""} from report`);
+        }
+
+        // For imaging, show summary
+        if (!isLab && extractedData.impression) {
+          showToast(`✓ Extracted: ${extractedData.report_type || "Imaging"} report`);
+        } else if (isLab) {
+          const testCount = (extractedData.panels || []).reduce((a, p) => a + p.tests.length, 0);
+          if (testCount > 0)
+            showToast(`✓ Extracted ${testCount} test${testCount > 1 ? "s" : ""} from report`);
+        }
+      } else if (extractError) {
+        showToast(`Extraction failed: ${extractError}`, "err");
+      }
     } catch (err) {
       setReports((prev) => ({
         ...prev,
-        [typeId]: (prev[typeId] || []).filter((r) => !(r.name === file.name && r.uploading)),
+        [typeId]: (prev[typeId] || []).filter((r) => r.id !== entryId),
       }));
       showToast(`Upload failed: ${err.message}`, "err");
     }
   };
 
-  const removeReport = (typeId, name, docId) => {
+  const removeReport = (typeId, name, docId, extractedData) => {
     setReports((prev) => ({
       ...prev,
       [typeId]: (prev[typeId] || []).filter((r) => r.name !== name),
     }));
+
+    // Clear lab values that were auto-filled from this report
+    if (extractedData?.panels) {
+      const keysToRemove = new Set();
+      for (const panel of extractedData.panels) {
+        for (const test of panel.tests) {
+          const tn = (test.test_name || "").toLowerCase().trim();
+          const val = test.result;
+          if (val == null || val === "") continue;
+          if (/hba1c|glycated|a1c/.test(tn)) keysToRemove.add("hba1c");
+          else if (/^fbs$|fasting.*(glucose|blood|sugar|plasma)|^fpg$|^fbg$/.test(tn))
+            keysToRemove.add("fg");
+          else if (/^ldl/.test(tn)) keysToRemove.add("ldl");
+          else if (/triglyceride|^tg$/.test(tn)) keysToRemove.add("tg");
+          else if (/uacr|microalbumin/.test(tn)) keysToRemove.add("uacr");
+          else if (/creatinine/.test(tn) && !/clearance/.test(tn)) keysToRemove.add("creatinine");
+          else if (/^tsh/.test(tn)) keysToRemove.add("tsh");
+          else if (/^(hemoglobin|haemoglobin|hb)$/.test(tn)) keysToRemove.add("hb");
+        }
+      }
+      if (keysToRemove.size > 0) {
+        // Only clear values that match what this report filled (compare current val to extracted val)
+        setVals((prev) => {
+          const updated = { ...prev };
+          for (const panel of extractedData.panels) {
+            for (const test of panel.tests) {
+              const tn = (test.test_name || "").toLowerCase().trim();
+              const val = test.result;
+              if (val == null || val === "") continue;
+              let key = null;
+              if (/hba1c|glycated|a1c/.test(tn)) key = "hba1c";
+              else if (/^fbs$|fasting.*(glucose|blood|sugar|plasma)|^fpg$|^fbg$/.test(tn))
+                key = "fg";
+              else if (/^ldl/.test(tn)) key = "ldl";
+              else if (/triglyceride|^tg$/.test(tn)) key = "tg";
+              else if (/uacr|microalbumin/.test(tn)) key = "uacr";
+              else if (/creatinine/.test(tn) && !/clearance/.test(tn)) key = "creatinine";
+              else if (/^tsh/.test(tn)) key = "tsh";
+              else if (/^(hemoglobin|haemoglobin|hb)$/.test(tn)) key = "hb";
+              if (key && updated[key] === String(val)) updated[key] = "";
+            }
+          }
+          return updated;
+        });
+        showToast(
+          `Cleared ${keysToRemove.size} lab value${keysToRemove.size > 1 ? "s" : ""} from removed report`,
+        );
+      }
+    }
+
     if (docId) {
       apiFetch(`/api/documents/${docId}`, { method: "DELETE" }).catch(() => {});
     }
@@ -1287,77 +1426,288 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {rpts.map((r, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 9,
-                          background: r.uploading ? BG : WH,
-                          border: `1px solid ${r.uploading ? BD : GNB}`,
-                          borderRadius: 7,
-                          padding: "8px 11px",
-                        }}
-                      >
-                        <span style={{ fontSize: 14 }}>{r.uploading ? "⏳" : "📋"}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: INK,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {r.name}
+                      <div key={r.id || i}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 9,
+                            background: r.uploading || r.extracting ? BG : WH,
+                            border: `1px solid ${r.uploading || r.extracting ? BD : r.extractedData ? SKB : GNB}`,
+                            borderRadius: r.extractedData ? "7px 7px 0 0" : 7,
+                            padding: "8px 11px",
+                          }}
+                        >
+                          <span style={{ fontSize: 14 }}>
+                            {r.uploading
+                              ? "⏳"
+                              : r.extracting
+                                ? "🔬"
+                                : r.extractedData
+                                  ? "✅"
+                                  : "📋"}
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: INK,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {r.name}
+                            </div>
+                            <div style={{ fontSize: 9, color: INK3 }}>
+                              {r.uploading
+                                ? "Uploading…"
+                                : r.extracting
+                                  ? "AI extracting data…"
+                                  : r.extractError
+                                    ? `Extraction failed: ${r.extractError}`
+                                    : r.extractedData
+                                      ? (() => {
+                                          const d = r.extractedData;
+                                          if (d.panels) {
+                                            const tc = d.panels.reduce(
+                                              (a, p) => a + p.tests.length,
+                                              0,
+                                            );
+                                            return `${r.date} · AI extracted ${tc} test${tc !== 1 ? "s" : ""}`;
+                                          }
+                                          if (d.report_type) return `${r.date} · ${d.report_type}`;
+                                          return r.date;
+                                        })()
+                                      : r.date}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 9, color: INK3 }}>
-                            {r.uploading ? "Uploading…" : r.date}
-                          </div>
+                          {r.extracting && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: SK,
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              Extracting…
+                            </span>
+                          )}
+                          {!r.uploading && !r.extracting && r.docId && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const resp = await apiFetch(`/api/documents/${r.docId}/file-url`);
+                                  const data = await resp.json();
+                                  if (data.url) window.open(data.url, "_blank");
+                                  else showToast("Could not get file URL", "err");
+                                } catch {
+                                  showToast("Failed to open file", "err");
+                                }
+                              }}
+                              style={{
+                                fontSize: 11,
+                                color: T,
+                                background: TL,
+                                border: `1px solid ${TB}`,
+                                cursor: "pointer",
+                                padding: "3px 8px",
+                                borderRadius: 5,
+                                fontWeight: 600,
+                                fontFamily: FB,
+                              }}
+                            >
+                              View
+                            </button>
+                          )}
+                          {!r.uploading && !r.extracting && (
+                            <button
+                              onClick={() =>
+                                removeReport(activeType, r.name, r.docId, r.extractedData)
+                              }
+                              style={{
+                                fontSize: 12,
+                                color: INK3,
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: "2px 6px",
+                                borderRadius: 4,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          )}
                         </div>
-                        {!r.uploading && r.docId && (
-                          <button
-                            onClick={async () => {
-                              try {
-                                const resp = await apiFetch(`/api/documents/${r.docId}/file-url`);
-                                const data = await resp.json();
-                                if (data.url) window.open(data.url, "_blank");
-                                else showToast("Could not get file URL", "err");
-                              } catch { showToast("Failed to open file", "err"); }
-                            }}
-                            style={{
-                              fontSize: 11,
-                              color: T,
-                              background: TL,
-                              border: `1px solid ${TB}`,
-                              cursor: "pointer",
-                              padding: "3px 8px",
-                              borderRadius: 5,
-                              fontWeight: 600,
-                              fontFamily: FB,
-                            }}
-                          >
-                            View
-                          </button>
-                        )}
-                        {!r.uploading && (
-                          <button
-                            onClick={() => removeReport(activeType, r.name, r.docId)}
-                            style={{
-                              fontSize: 12,
-                              color: INK3,
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              padding: "2px 6px",
-                              borderRadius: 4,
-                            }}
-                          >
-                            ✕
-                          </button>
-                        )}
+                        {/* Extracted data preview */}
+                        {r.extractedData &&
+                          (() => {
+                            const d = r.extractedData;
+                            // Lab report: show key test results
+                            if (d.panels && d.panels.length > 0) {
+                              const tests = d.panels
+                                .flatMap((p) => p.tests)
+                                .filter((t) => t.result != null);
+                              if (!tests.length) return null;
+                              return (
+                                <div
+                                  style={{
+                                    background: SKL,
+                                    border: `1px solid ${SKB}`,
+                                    borderTop: "none",
+                                    borderRadius: "0 0 7px 7px",
+                                    padding: "8px 11px",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: 700,
+                                      color: SK,
+                                      textTransform: "uppercase",
+                                      letterSpacing: ".08em",
+                                      marginBottom: 5,
+                                    }}
+                                  >
+                                    AI Extracted Results{d.lab_name ? ` — ${d.lab_name}` : ""}
+                                    {d.report_date ? ` · ${d.report_date}` : ""}
+                                  </div>
+                                  {(() => {
+                                    const rKey = r.id || r.name;
+                                    const isExpanded = expandedReports[rKey];
+                                    const shown = isExpanded ? tests : tests.slice(0, 12);
+                                    return (
+                                      <>
+                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                          {shown.map((t, ti) => (
+                                            <span
+                                              key={ti}
+                                              style={{
+                                                fontSize: 10,
+                                                padding: "2px 7px",
+                                                borderRadius: 5,
+                                                fontWeight: 600,
+                                                fontFamily: FM,
+                                                background:
+                                                  t.flag === "H" ? REL : t.flag === "L" ? AML : GNL,
+                                                color:
+                                                  t.flag === "H" ? RE : t.flag === "L" ? AM : GN,
+                                                border: `1px solid ${t.flag === "H" ? REB : t.flag === "L" ? AMB : GNB}`,
+                                              }}
+                                            >
+                                              {t.test_name}: {t.result}
+                                              {t.unit ? ` ${t.unit}` : ""}
+                                              {t.flag === "H" ? " ↑" : t.flag === "L" ? " ↓" : ""}
+                                            </span>
+                                          ))}
+                                        </div>
+                                        {tests.length > 12 && (
+                                          <button
+                                            onClick={() =>
+                                              setExpandedReports((p) => ({
+                                                ...p,
+                                                [rKey]: !isExpanded,
+                                              }))
+                                            }
+                                            style={{
+                                              fontSize: 10,
+                                              fontWeight: 600,
+                                              color: SK,
+                                              background: "none",
+                                              border: "none",
+                                              cursor: "pointer",
+                                              padding: "4px 0 0",
+                                              fontFamily: FB,
+                                            }}
+                                          >
+                                            {isExpanded
+                                              ? "Show less ↑"
+                                              : `+${tests.length - 12} more — Show all ↓`}
+                                          </button>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              );
+                            }
+                            // Imaging report: show findings
+                            if (d.report_type || d.findings) {
+                              return (
+                                <div
+                                  style={{
+                                    background: SKL,
+                                    border: `1px solid ${SKB}`,
+                                    borderTop: "none",
+                                    borderRadius: "0 0 7px 7px",
+                                    padding: "8px 11px",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: 700,
+                                      color: SK,
+                                      textTransform: "uppercase",
+                                      letterSpacing: ".08em",
+                                      marginBottom: 5,
+                                    }}
+                                  >
+                                    AI Extracted — {d.report_type || "Imaging"}
+                                    {d.date ? ` · ${d.date}` : ""}
+                                  </div>
+                                  {d.findings && d.findings.length > 0 && (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        flexWrap: "wrap",
+                                        gap: 4,
+                                        marginBottom: d.impression ? 4 : 0,
+                                      }}
+                                    >
+                                      {d.findings.slice(0, 8).map((f, fi) => (
+                                        <span
+                                          key={fi}
+                                          style={{
+                                            fontSize: 10,
+                                            padding: "2px 7px",
+                                            borderRadius: 5,
+                                            fontWeight: 500,
+                                            background:
+                                              f.interpretation === "Abnormal"
+                                                ? REL
+                                                : f.interpretation === "Borderline"
+                                                  ? AML
+                                                  : GNL,
+                                            color:
+                                              f.interpretation === "Abnormal"
+                                                ? RE
+                                                : f.interpretation === "Borderline"
+                                                  ? AM
+                                                  : GN,
+                                            border: `1px solid ${f.interpretation === "Abnormal" ? REB : f.interpretation === "Borderline" ? AMB : GNB}`,
+                                          }}
+                                        >
+                                          {f.parameter}: {f.value}
+                                          {f.unit ? ` ${f.unit}` : ""}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {d.impression && (
+                                    <div style={{ fontSize: 10, color: INK2, fontStyle: "italic" }}>
+                                      {d.impression.length > 120
+                                        ? d.impression.slice(0, 120) + "…"
+                                        : d.impression}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                       </div>
                     ))}
                   </div>
@@ -1760,12 +2110,15 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
               : new Date(d.created_at).toISOString().split("T")[0],
             fileName: d.file_name || d.title,
             uploading: false,
+            extracting: false,
+            extractedData: d.extracted_data || null,
+            extractError: null,
             docId: d.id,
             storagePath: d.storage_path,
           }));
         setPrescriptions((prev) => {
-          const uploading = prev.filter((p) => p.uploading);
-          return [...rxDocs, ...uploading];
+          const active = prev.filter((p) => p.uploading || p.extracting);
+          return [...rxDocs, ...active];
         });
       })
       .catch(() => {});
@@ -1779,25 +2132,31 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
   const handleRxFile = async (file) => {
     if (!file) return;
     const patientId = appt.patient_id;
+    const entryId = Date.now() + Math.random();
+
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const mediaType = file.type || "application/octet-stream";
+
     const entry = {
-      id: Date.now(),
+      id: entryId,
       doctorName: rxForm.doctorName,
       date: rxForm.date,
       fileName: file.name,
       uploading: true,
+      extracting: false,
+      extractedData: null,
+      extractError: null,
     };
     setPrescriptions((prev) => [...prev, entry]);
     setAddingRx(false);
 
     try {
       let uploadedDocId = null;
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target.result.split(",")[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const mediaType = file.type || "application/octet-stream";
 
       if (patientId) {
         const docResp = await apiFetch(`/api/patients/${patientId}/documents`, {
@@ -1821,18 +2180,54 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
         }
       }
 
+      // Mark upload done, start extraction
       setPrescriptions((prev) =>
-        prev.map((p) => (p.id === entry.id ? { ...p, uploading: false, docId: uploadedDocId } : p)),
+        prev.map((p) =>
+          p.id === entryId ? { ...p, uploading: false, docId: uploadedDocId, extracting: true } : p,
+        ),
       );
-      if (showToast) showToast(`✓ ${file.name} uploaded`);
+      if (showToast) showToast(`✓ ${file.name} uploaded — extracting medicines…`);
+
+      // Run AI extraction for prescription
+      const { data: extractedData, error: extractError } = await extractRx(base64, mediaType);
+
+      setPrescriptions((prev) =>
+        prev.map((p) =>
+          p.id === entryId ? { ...p, extracting: false, extractedData, extractError } : p,
+        ),
+      );
+
+      if (extractedData) {
+        // Save extracted_data to document record
+        if (uploadedDocId) {
+          apiFetch(`/api/documents/${uploadedDocId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ extracted_data: extractedData }),
+          }).catch(() => {});
+        }
+
+        const medCount = (extractedData.medications || []).length;
+        if (showToast)
+          showToast(
+            `✓ Extracted ${medCount} medicine${medCount !== 1 ? "s" : ""} from prescription`,
+          );
+      } else if (extractError) {
+        if (showToast) showToast(`Extraction failed: ${extractError}`, "err");
+      }
     } catch (err) {
-      setPrescriptions((prev) => prev.filter((p) => p.id !== entry.id));
+      setPrescriptions((prev) => prev.filter((p) => p.id !== entryId));
       if (showToast) showToast(`Upload failed: ${err.message}`, "err");
     }
   };
 
-  const removeRx = (id, docId) => {
+  const removeRx = (id, docId, extractedData) => {
     setPrescriptions((prev) => prev.filter((p) => p.id !== id));
+    const medCount = (extractedData?.medications || []).length;
+    if (medCount > 0 && showToast) {
+      showToast(
+        `Removed prescription — ${medCount} medicine${medCount !== 1 ? "s" : ""} will be excluded on next save`,
+      );
+    }
     if (docId) {
       apiFetch(`/api/documents/${docId}`, { method: "DELETE" }).catch(() => {});
     }
@@ -1851,9 +2246,28 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
         <div style={{ fontFamily: FD, fontSize: 17, color: INK }}>Medicine & Compliance</div>
         <div style={{ display: "flex", gap: 7 }}>
           <button
-            onClick={() =>
-              onSave({ medPct: parseInt(medPct), missed, diet, exercise, stress, notes })
-            }
+            onClick={() => {
+              const rxData = prescriptions.filter((p) => p.extractedData);
+              const allMeds = rxData.flatMap((p) => p.extractedData.medications || []);
+              const stoppedMeds = rxData.flatMap((p) => p.extractedData.stopped_medications || []);
+              const allDiags = rxData.flatMap((p) => p.extractedData.diagnoses || []);
+              // Deduplicate diagnoses by id
+              const diagMap = {};
+              for (const d of allDiags) {
+                if (d.id) diagMap[d.id] = d;
+              }
+              onSave({
+                medPct: parseInt(medPct),
+                missed,
+                diet,
+                exercise,
+                stress,
+                notes,
+                medications: allMeds,
+                stopped_medications: stoppedMeds,
+                diagnoses: Object.values(diagMap),
+              });
+            }}
             style={{
               padding: "7px 16px",
               borderRadius: 7,
@@ -1870,7 +2284,25 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
           </button>
           <button
             onClick={() => {
-              onSave({ medPct: parseInt(medPct), missed, diet, exercise, stress, notes });
+              const rxData = prescriptions.filter((p) => p.extractedData);
+              const allMeds = rxData.flatMap((p) => p.extractedData.medications || []);
+              const stoppedMeds = rxData.flatMap((p) => p.extractedData.stopped_medications || []);
+              const allDiags = rxData.flatMap((p) => p.extractedData.diagnoses || []);
+              const diagMap = {};
+              for (const d of allDiags) {
+                if (d.id) diagMap[d.id] = d;
+              }
+              onSave({
+                medPct: parseInt(medPct),
+                missed,
+                diet,
+                exercise,
+                stress,
+                notes,
+                medications: allMeds,
+                stopped_medications: stoppedMeds,
+                diagnoses: Object.values(diagMap),
+              });
               onContinue && onContinue();
             }}
             style={{
@@ -2037,79 +2469,252 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
         {prescriptions.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             {prescriptions.map((p) => (
-              <div
-                key={p.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  background: p.uploading ? BG : WH,
-                  border: `1px solid ${p.uploading ? BD : GNB}`,
-                  borderRadius: 8,
-                  padding: "10px 12px",
-                }}
-              >
-                <span style={{ fontSize: 22, flexShrink: 0 }}>{p.uploading ? "⏳" : "💊"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: INK,
-                      marginBottom: 2,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {p.fileName}
+              <div key={p.id}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    background: p.uploading || p.extracting ? BG : WH,
+                    border: `1px solid ${p.uploading || p.extracting ? BD : p.extractedData ? SKB : GNB}`,
+                    borderRadius: p.extractedData ? "8px 8px 0 0" : 8,
+                    padding: "10px 12px",
+                  }}
+                >
+                  <span style={{ fontSize: 22, flexShrink: 0 }}>
+                    {p.uploading ? "⏳" : p.extracting ? "🔬" : p.extractedData ? "✅" : "💊"}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: INK,
+                        marginBottom: 2,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {p.fileName}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: INK3 }}>
+                      {p.doctorName && <span>By {p.doctorName}</span>}
+                      <span>
+                        {p.uploading
+                          ? "Uploading…"
+                          : p.extracting
+                            ? "AI extracting medicines…"
+                            : p.extractError
+                              ? `Extraction failed`
+                              : p.extractedData
+                                ? `${fmtDate(p.date)} · ${(p.extractedData.medications || []).length} medicine${(p.extractedData.medications || []).length !== 1 ? "s" : ""} found`
+                                : fmtDate(p.date)}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 10, fontSize: 10, color: INK3 }}>
-                    {p.doctorName && <span>By {p.doctorName}</span>}
-                    <span>{p.uploading ? "Uploading…" : fmtDate(p.date)}</span>
-                  </div>
+                  {p.extracting && (
+                    <span
+                      style={{ fontSize: 10, color: SK, fontWeight: 600, whiteSpace: "nowrap" }}
+                    >
+                      Extracting…
+                    </span>
+                  )}
+                  {!p.uploading && !p.extracting && p.docId && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const resp = await apiFetch(`/api/documents/${p.docId}/file-url`);
+                          const data = await resp.json();
+                          if (data.url) window.open(data.url, "_blank");
+                          else if (showToast) showToast("Could not get file URL", "err");
+                        } catch {
+                          if (showToast) showToast("Failed to open file", "err");
+                        }
+                      }}
+                      style={{
+                        fontSize: 11,
+                        color: T,
+                        background: TL,
+                        border: `1px solid ${TB}`,
+                        cursor: "pointer",
+                        padding: "3px 8px",
+                        borderRadius: 5,
+                        fontWeight: 600,
+                        fontFamily: FB,
+                      }}
+                    >
+                      View
+                    </button>
+                  )}
+                  {!p.uploading && !p.extracting && (
+                    <button
+                      onClick={() => removeRx(p.id, p.docId, p.extractedData)}
+                      style={{
+                        fontSize: 12,
+                        color: INK3,
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
-                {!p.uploading && p.docId && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        const resp = await apiFetch(`/api/documents/${p.docId}/file-url`);
-                        const data = await resp.json();
-                        if (data.url) window.open(data.url, "_blank");
-                        else if (showToast) showToast("Could not get file URL", "err");
-                      } catch { if (showToast) showToast("Failed to open file", "err"); }
-                    }}
-                    style={{
-                      fontSize: 11,
-                      color: T,
-                      background: TL,
-                      border: `1px solid ${TB}`,
-                      cursor: "pointer",
-                      padding: "3px 8px",
-                      borderRadius: 5,
-                      fontWeight: 600,
-                      fontFamily: FB,
-                    }}
-                  >
-                    View
-                  </button>
-                )}
-                {!p.uploading && (
-                  <button
-                    onClick={() => removeRx(p.id, p.docId)}
-                    style={{
-                      fontSize: 12,
-                      color: INK3,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
+                {/* Extracted prescription data */}
+                {p.extractedData &&
+                  (() => {
+                    const rx = p.extractedData;
+                    const meds = rx.medications || [];
+                    const diags = rx.diagnoses || [];
+                    if (!meds.length && !diags.length) return null;
+                    return (
+                      <div
+                        style={{
+                          background: SKL,
+                          border: `1px solid ${SKB}`,
+                          borderTop: "none",
+                          borderRadius: "0 0 8px 8px",
+                          padding: "10px 12px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: SK,
+                            textTransform: "uppercase",
+                            letterSpacing: ".08em",
+                            marginBottom: 6,
+                          }}
+                        >
+                          AI Extracted{rx.doctor_name ? ` — ${rx.doctor_name}` : ""}
+                          {rx.visit_date ? ` · ${rx.visit_date}` : ""}
+                        </div>
+                        {diags.length > 0 && (
+                          <div
+                            style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}
+                          >
+                            {diags.map((d, di) => (
+                              <span
+                                key={di}
+                                style={{
+                                  fontSize: 10,
+                                  padding: "2px 7px",
+                                  borderRadius: 5,
+                                  fontWeight: 600,
+                                  background:
+                                    d.status === "Uncontrolled"
+                                      ? REL
+                                      : d.status === "New"
+                                        ? AML
+                                        : GNL,
+                                  color:
+                                    d.status === "Uncontrolled" ? RE : d.status === "New" ? AM : GN,
+                                  border: `1px solid ${d.status === "Uncontrolled" ? REB : d.status === "New" ? AMB : GNB}`,
+                                }}
+                              >
+                                {d.label || d.id}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {meds.length > 0 && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                            {meds.map((m, mi) => (
+                              <div
+                                key={mi}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  background: WH,
+                                  border: `1px solid ${BD}`,
+                                  borderRadius: 5,
+                                  padding: "5px 9px",
+                                }}
+                              >
+                                <span style={{ fontSize: 12 }}>💊</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: INK }}>
+                                    {m.name}
+                                  </span>
+                                  <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
+                                    {[m.dose, m.frequency, m.timing].filter(Boolean).join(" · ")}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(rx.stopped_medications || []).length > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 3,
+                              marginTop: 4,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                color: RE,
+                                textTransform: "uppercase",
+                                letterSpacing: ".06em",
+                              }}
+                            >
+                              Stopped / Omitted
+                            </div>
+                            {rx.stopped_medications.map((m, mi) => (
+                              <div
+                                key={mi}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  background: REL,
+                                  border: `1px solid ${REB}`,
+                                  borderRadius: 5,
+                                  padding: "5px 9px",
+                                }}
+                              >
+                                <span style={{ fontSize: 12 }}>🚫</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      color: RE,
+                                      textDecoration: "line-through",
+                                    }}
+                                  >
+                                    {m.name}
+                                  </span>
+                                  {m.reason && (
+                                    <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
+                                      — {m.reason}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {rx.advice && rx.advice.length > 0 && (
+                          <div
+                            style={{ fontSize: 10, color: INK2, marginTop: 5, fontStyle: "italic" }}
+                          >
+                            {rx.advice.join("; ")}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
               </div>
             ))}
           </div>
@@ -4721,18 +5326,40 @@ export default function OPD() {
       .then(updateLocal);
   const postBiomarkers = (id, data) =>
     apiFetch(`/api/appointments/${id}/biomarkers`, { method: "POST", body: JSON.stringify(data) })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Save failed");
+        return r.json();
+      })
       .then((d) => {
         updateLocal(d);
-        showToast("✓ Lab values saved");
-      });
+        const count = Object.entries(data).filter(
+          ([k, v]) => v != null && v !== "" && k !== "bp",
+        ).length;
+        showToast(`✓ Lab values saved — ${count} value${count !== 1 ? "s" : ""} synced to records`);
+      })
+      .catch(() => showToast("✗ Failed to save lab values — please retry", "err"));
   const postCompliance = (id, data) =>
     apiFetch(`/api/appointments/${id}/compliance`, { method: "POST", body: JSON.stringify(data) })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Save failed");
+        return r.json();
+      })
       .then((d) => {
         updateLocal(d);
-        showToast("✓ Compliance saved");
-      });
+        const medCount = (data.medications || []).length;
+        const diagCount = (data.diagnoses || []).length;
+        const stoppedCount = (data.stopped_medications || []).length;
+        const parts = [];
+        if (medCount > 0) parts.push(`${medCount} medicine${medCount !== 1 ? "s" : ""}`);
+        if (stoppedCount > 0) parts.push(`${stoppedCount} stopped`);
+        if (diagCount > 0) parts.push(`${diagCount} condition${diagCount !== 1 ? "s" : ""}`);
+        const msg =
+          parts.length > 0
+            ? `✓ Compliance saved — ${parts.join(", ")} synced`
+            : "✓ Compliance saved";
+        showToast(msg);
+      })
+      .catch(() => showToast("✗ Failed to save compliance — please retry", "err"));
   const patchCategoryDoc = (id, category, doctor_name) =>
     apiFetch(`/api/appointments/${id}`, {
       method: "PATCH",
@@ -4745,11 +5372,15 @@ export default function OPD() {
       });
   const postVitals = (id, data) =>
     apiFetch(`/api/appointments/${id}/vitals`, { method: "POST", body: JSON.stringify(data) })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Save failed");
+        return r.json();
+      })
       .then((d) => {
         updateLocal(d);
-        showToast("✓ Vitals saved");
-      });
+        showToast("✓ Vitals saved & synced to records");
+      })
+      .catch(() => showToast("✗ Failed to save vitals — please retry", "err"));
 
   // Unique doctors from appointments for filter
   const apptDoctors = [...new Set(appointments.map((a) => a.doctor_name).filter(Boolean))];

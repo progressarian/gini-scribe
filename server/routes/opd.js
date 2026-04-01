@@ -24,10 +24,167 @@ pool
 
   ALTER TABLE lab_results  ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
   ALTER TABLE vitals       ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
+  ALTER TABLE appointments ADD COLUMN IF NOT EXISTS opd_medications JSONB DEFAULT '[]'::jsonb;
+  ALTER TABLE appointments ADD COLUMN IF NOT EXISTS opd_diagnoses JSONB DEFAULT '[]'::jsonb;
+  ALTER TABLE appointments ADD COLUMN IF NOT EXISTS opd_stopped_medications JSONB DEFAULT '[]'::jsonb;
+  ALTER TABLE medications  ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
+  ALTER TABLE medications  ADD COLUMN IF NOT EXISTS source TEXT;
 `,
   )
-  .then(() => console.log("✅ OPD columns ready"))
+  .then(() => {
+    console.log("✅ OPD columns ready");
+    // Backfill existing OPD consultations with prescription data from documents
+    backfillOpdConsultations().catch((e) =>
+      console.log("OPD backfill:", e.message),
+    );
+  })
   .catch((e) => console.log("OPD migration:", e.message));
+
+async function backfillOpdConsultations() {
+  // Find OPD consultations with empty con_transcript
+  const { rows: emptyOpdVisits } = await pool.query(
+    `SELECT c.id, c.patient_id, c.visit_date, c.con_name, c.mo_data, c.con_data
+     FROM consultations c
+     WHERE c.visit_type = 'OPD'
+       AND (c.con_transcript IS NULL OR c.con_transcript = '')`,
+  );
+  if (!emptyOpdVisits.length) return;
+  console.log(`🔄 Backfilling ${emptyOpdVisits.length} OPD consultations...`);
+
+  for (const con of emptyOpdVisits) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Get prescription documents for this patient
+      const { rows: rxDocs } = await client.query(
+        `SELECT extracted_data FROM documents
+         WHERE patient_id = $1 AND source = 'opd_upload' AND doc_type = 'prescription'
+           AND extracted_data IS NOT NULL
+         ORDER BY doc_date DESC NULLS LAST, created_at DESC`,
+        [con.patient_id],
+      );
+
+      // Build transcript from prescription documents
+      const transcriptParts = [];
+      const allDiags = [];
+      const allMeds = [];
+      const allStopped = [];
+
+      for (const doc of rxDocs) {
+        const rx = doc.extracted_data || {};
+        const parts = [];
+        if (rx.diagnoses?.length) {
+          parts.push(
+            "DIAGNOSIS:\n" +
+              rx.diagnoses
+                .map((d) => `${d.label}${d.status ? ` (${d.status})` : ""}`)
+                .join("\n"),
+          );
+          for (const d of rx.diagnoses) {
+            if (d.id) allDiags.push(d);
+          }
+        }
+        if (rx.medications?.length) {
+          parts.push(
+            "TREATMENT:\n" +
+              rx.medications
+                .map(
+                  (m) =>
+                    `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+                )
+                .join("\n"),
+          );
+          allMeds.push(...rx.medications);
+        }
+        if (rx.stopped_medications?.length) {
+          parts.push(
+            "STOPPED:\n" +
+              rx.stopped_medications
+                .map((m) => `-${m.name}${m.reason ? " (" + m.reason + ")" : ""}`)
+                .join("\n"),
+          );
+          allStopped.push(...rx.stopped_medications);
+        }
+        if (rx.advice?.length) parts.push("ADVICE:\n" + rx.advice.join("\n"));
+        if (rx.follow_up) parts.push("FOLLOW UP: " + rx.follow_up);
+        if (rx.doctor_name)
+          transcriptParts.push(
+            `Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`,
+          );
+        if (parts.length) transcriptParts.push(parts.join("\n\n"));
+        transcriptParts.push("");
+      }
+
+      // Add biomarker/compliance notes from consultation data
+      const conDataBio = (con.con_data || {}).biomarkers || {};
+      const comp = (con.mo_data || {}).compliance || con.mo_data || {};
+      const bioLabels = { hba1c: "HbA1c", fg: "FPG", bpSys: "BP Sys", ldl: "LDL", tg: "TG", uacr: "UACR", weight: "Weight", creatinine: "Creatinine", tsh: "TSH", hb: "Hb" };
+      const bioLines = [];
+      for (const [k, v] of Object.entries(conDataBio)) {
+        if (v != null && v !== "" && bioLabels[k]) bioLines.push(`${bioLabels[k]}: ${v}`);
+      }
+      if (bioLines.length) transcriptParts.push("BIOMARKERS:\n" + bioLines.join("\n"));
+
+      const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
+      if (!conTranscript && !allDiags.length && !allMeds.length) {
+        await client.query("ROLLBACK");
+        continue;
+      }
+
+      // Deduplicate diagnoses
+      const diagMap = {};
+      for (const d of allDiags) {
+        if (d?.id) diagMap[d.id] = d;
+      }
+      const mergedDiags = Object.values(diagMap);
+
+      // Update consultation with prescription data
+      const moData = con.mo_data || {};
+      moData.diagnoses = mergedDiags;
+      moData.previous_medications = allMeds;
+      moData.stopped_medications = allStopped;
+      moData.chief_complaints = mergedDiags.map((d) => d.label);
+
+      const conData = con.con_data || {};
+      conData.medications_confirmed = allMeds;
+
+      await client.query(
+        `UPDATE consultations
+         SET mo_data = $2::jsonb, con_data = $3::jsonb, con_transcript = $4
+         WHERE id = $1`,
+        [con.id, JSON.stringify(moData), JSON.stringify(conData), conTranscript || null],
+      );
+
+      // Insert diagnoses
+      for (const d of mergedDiags) {
+        if (!d?.id || !d?.label) continue;
+        await client.query(
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
+             SET label = EXCLUDED.label, status = EXCLUDED.status, consultation_id = EXCLUDED.consultation_id`,
+          [con.patient_id, con.id, d.id, d.label, d.status || "Controlled"],
+        );
+      }
+
+      // Link documents
+      await client.query(
+        `UPDATE documents SET consultation_id = $1
+         WHERE patient_id = $2 AND source = 'opd_upload' AND consultation_id IS NULL`,
+        [con.id, con.patient_id],
+      );
+
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      console.log(`  Backfill err con ${con.id}:`, e.message);
+    } finally {
+      client.release();
+    }
+  }
+  console.log("✅ OPD backfill complete");
+}
 
 // ── Lab test mapping: OPD biomarker keys → lab_results fields ────────────────
 const LAB_MAP = {
@@ -92,7 +249,7 @@ router.get("/opd/appointments", async (req, res) => {
 router.get("/opd/patient-docs/:patientId", async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, doc_type, title, file_name, doc_date, source, notes, storage_path, created_at
+      `SELECT id, doc_type, title, file_name, doc_date, source, notes, storage_path, extracted_data, created_at
          FROM documents
         WHERE patient_id = $1 AND source = 'opd_upload'
         ORDER BY created_at DESC`,
@@ -141,10 +298,83 @@ router.patch("/appointments/:id", async (req, res) => {
       if (compliance.missed) notes.push(`Missed: ${compliance.missed}`);
       if (compliance.notes) notes.push(`Notes: ${compliance.notes}`);
 
+      const opdMeds = appt.opd_medications || [];
+      const opdDiags = appt.opd_diagnoses || [];
+      const opdStopped = appt.opd_stopped_medications || [];
+
+      // Build con_transcript from OPD prescription documents for "View Prescription"
+      const rxDocs = await client.query(
+        `SELECT extracted_data FROM documents
+         WHERE patient_id = $1 AND source = 'opd_upload' AND doc_type = 'prescription'
+           AND extracted_data IS NOT NULL
+         ORDER BY doc_date DESC NULLS LAST, created_at DESC`,
+        [appt.patient_id],
+      );
+      const transcriptParts = [];
+      for (const doc of rxDocs.rows) {
+        const rx = doc.extracted_data || {};
+        const parts = [];
+        if (rx.diagnoses?.length)
+          parts.push(
+            "DIAGNOSIS:\n" +
+              rx.diagnoses.map((d) => `${d.label}${d.status ? ` (${d.status})` : ""}`).join("\n"),
+          );
+        if (rx.medications?.length) {
+          parts.push(
+            "TREATMENT:\n" +
+              rx.medications
+                .map(
+                  (m) =>
+                    `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+                )
+                .join("\n"),
+          );
+        }
+        if (rx.stopped_medications?.length)
+          parts.push(
+            "STOPPED:\n" +
+              rx.stopped_medications
+                .map((m) => `-${m.name}${m.reason ? " (" + m.reason + ")" : ""}`)
+                .join("\n"),
+          );
+        if (rx.advice?.length) parts.push("ADVICE:\n" + rx.advice.join("\n"));
+        if (rx.follow_up) parts.push("FOLLOW UP: " + rx.follow_up);
+        if (rx.doctor_name)
+          transcriptParts.push(
+            `Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`,
+          );
+        if (parts.length) transcriptParts.push(parts.join("\n\n"));
+        transcriptParts.push(""); // blank line between prescriptions
+      }
+      // Add biomarker notes
+      if (Object.keys(biomarkers).length > 0) {
+        const bioLines = [];
+        const bioLabels = {
+          hba1c: "HbA1c",
+          fg: "FPG",
+          bpSys: "BP Sys",
+          bpDia: "BP Dia",
+          ldl: "LDL",
+          tg: "TG",
+          uacr: "UACR",
+          weight: "Weight",
+          waist: "Waist",
+          creatinine: "Creatinine",
+          tsh: "TSH",
+          hb: "Hb",
+        };
+        for (const [k, v] of Object.entries(biomarkers)) {
+          if (v != null && v !== "" && bioLabels[k]) bioLines.push(`${bioLabels[k]}: ${v}`);
+        }
+        if (bioLines.length) transcriptParts.push("BIOMARKERS:\n" + bioLines.join("\n"));
+      }
+      if (notes.length) transcriptParts.push("COMPLIANCE:\n" + notes.join("\n"));
+      const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
+
       const conRes = await client.query(
         `INSERT INTO consultations
-           (patient_id, visit_date, visit_type, con_name, status, mo_data, con_data)
-         VALUES ($1, $2, 'OPD', $3, 'completed', $4, $5)
+           (patient_id, visit_date, visit_type, con_name, status, mo_data, con_data, con_transcript)
+         VALUES ($1, $2, 'OPD', $3, 'completed', $4, $5, $6)
          RETURNING id`,
         [
           appt.patient_id,
@@ -154,16 +384,36 @@ router.patch("/appointments/:id", async (req, res) => {
             compliance,
             coordinator_notes: appt.coordinator_notes || [],
             category: appt.category,
+            diagnoses: opdDiags,
+            previous_medications: opdMeds,
+            stopped_medications: opdStopped,
+            chief_complaints: opdDiags.map((d) => d.label),
           }),
           JSON.stringify({
             biomarkers,
             opd_notes: notes.join("\n"),
+            medications_confirmed: opdMeds,
           }),
+          conTranscript || null,
         ],
       );
       const consultationId = conRes.rows[0].id;
 
-      // Link lab_results and vitals to this consultation
+      // ── Insert diagnoses into diagnoses table (like normal patient flow) ──
+      for (const d of opdDiags) {
+        if (!d?.id || !d?.label) continue;
+        await client.query(
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
+             SET label = EXCLUDED.label,
+                 status = EXCLUDED.status,
+                 consultation_id = EXCLUDED.consultation_id`,
+          [appt.patient_id, consultationId, d.id, d.label, d.status || "Controlled"],
+        );
+      }
+
+      // Link lab_results, vitals, and medications to this consultation
       await client.query(`UPDATE lab_results SET consultation_id = $1 WHERE appointment_id = $2`, [
         consultationId,
         appt.id,
@@ -172,6 +422,16 @@ router.patch("/appointments/:id", async (req, res) => {
         consultationId,
         appt.id,
       ]);
+      await client.query(`UPDATE medications SET consultation_id = $1 WHERE appointment_id = $2`, [
+        consultationId,
+        appt.id,
+      ]);
+
+      // Link OPD documents to this consultation
+      await client.query(
+        `UPDATE documents SET consultation_id = $1 WHERE patient_id = $2 AND source = 'opd_upload'  AND consultation_id IS NULL`,
+        [consultationId, appt.patient_id],
+      );
 
       // Store consultation_id on the appointment
       await client.query(`UPDATE appointments SET consultation_id = $1 WHERE id = $2`, [
@@ -273,20 +533,100 @@ router.post("/appointments/:id/biomarkers", async (req, res) => {
 
 // ── POST /api/appointments/:id/compliance ─────────────────────────────────────
 router.post("/appointments/:id/compliance", async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query("BEGIN");
+
+    const { medications, diagnoses, stopped_medications, ...complianceData } = req.body;
+
+    const { rows } = await client.query(
       `UPDATE appointments
           SET compliance = $2::jsonb,
+              opd_medications = $3::jsonb,
+              opd_diagnoses = $4::jsonb,
+              opd_stopped_medications = $5::jsonb,
               prep_steps = prep_steps || '{"compliance":true}'::jsonb,
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [req.params.id, JSON.stringify(req.body)],
+      [
+        req.params.id,
+        JSON.stringify(complianceData),
+        JSON.stringify(medications || []),
+        JSON.stringify(diagnoses || []),
+        JSON.stringify(stopped_medications || []),
+      ],
     );
-    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const appt = rows[0];
+
+    // ── Sync extracted medicines to medications table if patient exists ──
+    if (appt.patient_id) {
+      // Remove previous OPD medication entries for this appointment
+      await client.query(
+        `DELETE FROM medications WHERE patient_id = $1 AND source = 'opd'
+           AND appointment_id = $2`,
+        [appt.patient_id, appt.id],
+      );
+
+      // Insert active medicines
+      for (const m of medications || []) {
+        if (!m?.name) continue;
+        await client.query(
+          `INSERT INTO medications
+             (patient_id, appointment_id, name, composition, dose, frequency, timing, route, is_new, is_active, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'opd')`,
+          [
+            appt.patient_id,
+            appt.id,
+            (m.name || "").slice(0, 200),
+            (m.composition || "").slice(0, 200),
+            (m.dose || "").slice(0, 100),
+            (m.frequency || "").slice(0, 100),
+            (m.timing || "").slice(0, 100),
+            (m.route || "Oral").slice(0, 50),
+          ],
+        );
+      }
+
+      // Insert stopped/omitted medicines as inactive
+      for (const m of stopped_medications || []) {
+        if (!m?.name) continue;
+        await client.query(
+          `INSERT INTO medications
+             (patient_id, appointment_id, name, dose, is_new, is_active, source)
+           VALUES ($1, $2, $3, $4, false, false, 'opd')`,
+          [appt.patient_id, appt.id, (m.name || "").slice(0, 200), (m.reason || "").slice(0, 100)],
+        );
+      }
+
+      // ── Sync diagnoses to diagnoses table ──
+      if (Array.isArray(diagnoses) && diagnoses.length > 0) {
+        for (const d of diagnoses) {
+          if (!d?.id || !d?.label) continue;
+          await client.query(
+            `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
+               SET label = EXCLUDED.label,
+                   status = EXCLUDED.status`,
+            [appt.patient_id, d.id, d.label, d.status || "Controlled"],
+          );
+        }
+      }
+    }
+
+    await client.query("COMMIT");
     res.json(rows[0]);
   } catch (e) {
+    await client.query("ROLLBACK");
     handleError(res, e, "Compliance post");
+  } finally {
+    client.release();
   }
 });
 
@@ -349,6 +689,17 @@ router.post("/appointments/:id/vitals", async (req, res) => {
     handleError(res, e, "Vitals post");
   } finally {
     client.release();
+  }
+});
+
+// ── POST /api/opd/backfill — manually trigger backfill of OPD consultations ──
+router.post("/opd/backfill", async (req, res) => {
+  try {
+    await backfillOpdConsultations();
+    res.json({ success: true });
+  } catch (e) {
+    console.error("OPD backfill error:", e);
+    res.status(500).json({ error: e.message });
   }
 });
 

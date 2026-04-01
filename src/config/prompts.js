@@ -112,7 +112,8 @@ Return ONLY valid JSON, no backticks.
   "doctor_name":"string or null",
   "specialty":"string or null",
   "diagnoses":[{"id":"dm2","label":"Type 2 DM (since 2015)","status":"Controlled"}],
-  "medications":[{"name":"MEDICINE NAME","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night"}],
+  "medications":[{"name":"MEDICINE NAME","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","status":"active"}],
+  "stopped_medications":[{"name":"MEDICINE NAME","reason":"reason if mentioned"}],
   "vitals":{"bp_sys":null,"bp_dia":null,"weight":null,"height":null,"pulse":null},
   "advice":["string"],
   "follow_up":"string or null"
@@ -122,7 +123,8 @@ RULES:
 - Status: "Controlled","Uncontrolled","New" based on context
 - MEDICINE: Use EXACT brand names from prescription, capitalize properly
 - Extract ALL medicines even if partially readable
-- Parse Hindi/Punjabi terms: "sugar ki dawai"=diabetes medication, "BP ki goli"=antihypertensive
+- stopped_medications: medicines marked as stopped/omit/discontinue/band karo/tapering off
+- Parse Hindi/Punjabi terms: "sugar ki dawai"=diabetes medication, "BP ki goli"=antihypertensive, "band karo"=stop
 - If date not found, return null
 - Name must be in English/Roman script`;
 

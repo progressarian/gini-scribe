@@ -8,6 +8,116 @@ import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
 
 const router = Router();
 
+// ── DB migration: ensure document_id columns exist ──────────────────────────
+pool
+  .query(
+    `ALTER TABLE lab_results ADD COLUMN IF NOT EXISTS document_id INTEGER;
+   ALTER TABLE medications ADD COLUMN IF NOT EXISTS document_id INTEGER;`,
+  )
+  .catch(() => {});
+
+// ── Refresh OPD consultations when prescription data changes ────────────────
+async function refreshOpdConsultations(client, patientId) {
+  // Get ALL prescription documents for this patient
+  const { rows: rxDocs } = await client.query(
+    `SELECT extracted_data, doc_date, created_at FROM documents
+     WHERE patient_id = $1 AND source = 'opd_upload' AND doc_type = 'prescription'
+       AND extracted_data IS NOT NULL
+     ORDER BY doc_date DESC NULLS LAST, created_at DESC`,
+    [patientId],
+  );
+  if (!rxDocs.length) return;
+
+  // Aggregate all prescription data
+  const allDiags = [];
+  const allMeds = [];
+  const allStopped = [];
+  const transcriptParts = [];
+
+  for (const doc of rxDocs) {
+    const rx = doc.extracted_data || {};
+    const parts = [];
+    if (rx.diagnoses?.length) {
+      parts.push(
+        "DIAGNOSIS:\n" +
+          rx.diagnoses.map((d) => `${d.label}${d.status ? ` (${d.status})` : ""}`).join("\n"),
+      );
+      for (const d of rx.diagnoses) {
+        if (d.id) allDiags.push(d);
+      }
+    }
+    if (rx.medications?.length) {
+      parts.push(
+        "TREATMENT:\n" +
+          rx.medications
+            .map(
+              (m) =>
+                `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+            )
+            .join("\n"),
+      );
+      allMeds.push(...rx.medications);
+    }
+    if (rx.stopped_medications?.length) {
+      parts.push(
+        "STOPPED:\n" +
+          rx.stopped_medications
+            .map((m) => `-${m.name}${m.reason ? " (" + m.reason + ")" : ""}`)
+            .join("\n"),
+      );
+      allStopped.push(...rx.stopped_medications);
+    }
+    if (rx.advice?.length) parts.push("ADVICE:\n" + rx.advice.join("\n"));
+    if (rx.follow_up) parts.push("FOLLOW UP: " + rx.follow_up);
+    if (rx.doctor_name)
+      transcriptParts.push(`Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`);
+    if (parts.length) transcriptParts.push(parts.join("\n\n"));
+    transcriptParts.push("");
+  }
+
+  // Deduplicate diagnoses by id
+  const diagMap = {};
+  for (const d of allDiags) {
+    if (d?.id) diagMap[d.id] = d;
+  }
+  const mergedDiags = Object.values(diagMap);
+  const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
+
+  // Update ALL OPD consultations for this patient
+  const { rows: opdCons } = await client.query(
+    `SELECT id, mo_data, con_data FROM consultations
+     WHERE patient_id = $1 AND visit_type = 'OPD'`,
+    [patientId],
+  );
+
+  for (const con of opdCons) {
+    const moData = con.mo_data || {};
+    moData.diagnoses = mergedDiags;
+    moData.previous_medications = allMeds;
+    moData.stopped_medications = allStopped;
+    moData.chief_complaints = mergedDiags.map((d) => d.label);
+
+    const conData = con.con_data || {};
+    conData.medications_confirmed = allMeds;
+
+    await client.query(
+      `UPDATE consultations
+       SET mo_data = $2::jsonb, con_data = $3::jsonb, con_transcript = $4
+       WHERE id = $1`,
+      [con.id, JSON.stringify(moData), JSON.stringify(conData), conTranscript || null],
+    );
+  }
+
+  // Link unlinked documents to the latest consultation
+  if (opdCons.length) {
+    await client.query(
+      `UPDATE documents SET consultation_id = $1
+       WHERE patient_id = $2 AND source = 'opd_upload' AND consultation_id IS NULL`,
+      [opdCons[0].id, patientId],
+    );
+  }
+}
+
 // Save document metadata
 router.post("/patients/:id/documents", validate(documentCreateSchema), async (req, res) => {
   try {
@@ -200,6 +310,156 @@ router.get("/patients/:id/imaging", async (req, res) => {
   }
 });
 
+// Update a document (extracted_data, notes, etc.)
+// When extracted_data contains lab panels, syncs all tests to lab_results table
+router.patch("/documents/:id", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { extracted_data, notes } = req.body;
+    const sets = [];
+    const vals = [req.params.id];
+    let idx = 2;
+    if (extracted_data !== undefined) {
+      sets.push(`extracted_data = $${idx}::jsonb`);
+      vals.push(JSON.stringify(extracted_data));
+      idx++;
+    }
+    if (notes !== undefined) {
+      sets.push(`notes = $${idx}`);
+      vals.push(notes);
+      idx++;
+    }
+    if (!sets.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Nothing to update" });
+    }
+    const result = await client.query(
+      `UPDATE documents SET ${sets.join(", ")} WHERE id = $1 RETURNING *`,
+      vals,
+    );
+    if (!result.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const doc = result.rows[0];
+
+    // ── Sync extracted lab tests to lab_results table ──
+    if (extracted_data?.panels && doc.patient_id) {
+      // Remove previous entries synced from this document
+      await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);
+
+      const testDate =
+        extracted_data.report_date ||
+        extracted_data.collection_date ||
+        (doc.doc_date
+          ? new Date(doc.doc_date).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0]);
+
+      for (const panel of extracted_data.panels) {
+        for (const test of panel.tests || []) {
+          if (test.result == null && !test.result_text) continue;
+          const numResult = typeof test.result === "number" ? test.result : parseFloat(test.result);
+
+          await client.query(
+            `INSERT INTO lab_results
+               (patient_id, document_id, consultation_id, test_date, panel_name, test_name, canonical_name, result, result_text, unit, flag, ref_range, source)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'report_extract')`,
+            [
+              doc.patient_id,
+              doc.id,
+              doc.consultation_id || null,
+              testDate,
+              panel.panel_name || null,
+              test.test_name,
+              test.test_name,
+              isNaN(numResult) ? null : numResult,
+              test.result_text || null,
+              test.unit || null,
+              test.flag || null,
+              test.ref_range || null,
+            ],
+          );
+        }
+      }
+    }
+
+    // ── Sync extracted prescription data (diagnoses + medications) ──
+    if (doc.patient_id && extracted_data?.medications) {
+      // Add document_id columns to medications if not yet there
+      await client
+        .query(`ALTER TABLE medications ADD COLUMN IF NOT EXISTS document_id INTEGER`)
+        .catch(() => {});
+
+      // Remove previous entries synced from this document
+      await client.query(`DELETE FROM medications WHERE document_id = $1`, [doc.id]);
+
+      const rxDate =
+        extracted_data.visit_date ||
+        (doc.doc_date
+          ? new Date(doc.doc_date).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0]);
+
+      for (const m of extracted_data.medications || []) {
+        if (!m?.name) continue;
+        await client.query(
+          `INSERT INTO medications
+             (patient_id, document_id, consultation_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)`,
+          [
+            doc.patient_id,
+            doc.id,
+            doc.consultation_id || null,
+            (m.name || "").slice(0, 200),
+            (m.dose || "").slice(0, 100),
+            (m.frequency || "").slice(0, 100),
+            (m.timing || "").slice(0, 100),
+            (m.route || "Oral").slice(0, 50),
+            rxDate,
+          ],
+        );
+      }
+
+      // Sync stopped medications as inactive
+      for (const m of extracted_data.stopped_medications || []) {
+        if (!m?.name) continue;
+        await client.query(
+          `INSERT INTO medications
+             (patient_id, document_id, consultation_id, name, is_new, is_active, source, started_date)
+           VALUES ($1, $2, $3, $4, false, false, 'report_extract', $5)`,
+          [doc.patient_id, doc.id, doc.consultation_id || null, (m.name || "").slice(0, 200), rxDate],
+        );
+      }
+
+      // Sync diagnoses
+      for (const d of extracted_data.diagnoses || []) {
+        if (!d?.id || !d?.label) continue;
+        await client.query(
+          `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
+             SET label = EXCLUDED.label,
+                 status = EXCLUDED.status`,
+          [doc.patient_id, d.id, d.label, d.status || "Controlled"],
+        );
+      }
+
+      // ── Refresh OPD consultations with latest prescription data ──
+      await refreshOpdConsultations(client, doc.patient_id);
+    }
+
+    await client.query("COMMIT");
+    res.json(doc);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    handleError(res, e, "Document patch");
+  } finally {
+    client.release();
+  }
+});
+
 // Delete a document and its file from storage
 router.delete("/documents/:id", async (req, res) => {
   try {
@@ -217,7 +477,27 @@ router.delete("/documents/:id", async (req, res) => {
       ).catch(() => {}); // Don't fail if storage delete fails
     }
 
+    const deletedDoc = doc.rows[0];
+
+    // Remove synced records linked to this document
+    await pool.query("DELETE FROM lab_results WHERE document_id=$1", [req.params.id]);
+    await pool.query("DELETE FROM medications WHERE document_id=$1", [req.params.id]);
     await pool.query("DELETE FROM documents WHERE id=$1", [req.params.id]);
+
+    // Refresh OPD consultations with remaining prescription data
+    if (deletedDoc.patient_id && deletedDoc.doc_type === "prescription") {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await refreshOpdConsultations(client, deletedDoc.patient_id);
+        await client.query("COMMIT");
+      } catch (e2) {
+        await client.query("ROLLBACK");
+      } finally {
+        client.release();
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     handleError(res, e, "Document delete");

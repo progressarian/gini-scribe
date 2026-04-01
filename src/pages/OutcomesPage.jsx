@@ -1204,11 +1204,16 @@ export default function OutcomesPage() {
                 if (!exists) visitDiagChanges[key].push({ label: d.label, status: d.status });
               });
               const visitNewMeds = {};
+              const visitAllMeds = {};
               (outcomesData.med_timeline || []).forEach((m) => {
-                if (!m.is_new) return;
                 const key = (m.visit_date || "").split("T")[0];
-                if (!visitNewMeds[key]) visitNewMeds[key] = [];
                 const name = m.pharmacy_match || m.name;
+                // Track all meds per visit
+                if (!visitAllMeds[key]) visitAllMeds[key] = [];
+                if (!visitAllMeds[key].includes(name)) visitAllMeds[key].push(name);
+                // Track new meds separately
+                if (!m.is_new) return;
+                if (!visitNewMeds[key]) visitNewMeds[key] = [];
                 if (!visitNewMeds[key].includes(name)) visitNewMeds[key].push(name);
               });
 
@@ -1218,6 +1223,25 @@ export default function OutcomesPage() {
                 if (v.mo_name) allDoctors.add(v.mo_name);
                 if (!v.visit_date) return;
                 const dateKey = v.visit_date.split("T")[0];
+                // Merge diagChanges from diagnosis_journey + OPD visit mo_data diagnoses
+                const diagsFromVisit = (v.diagnoses || []).map((d) => ({
+                  label: d.label,
+                  status: d.status,
+                }));
+                const allDiagChanges = [...(visitDiagChanges[dateKey] || [])];
+                for (const d of diagsFromVisit) {
+                  if (!allDiagChanges.find((x) => x.label === d.label)) allDiagChanges.push(d);
+                }
+
+                // Collect meds: from med_timeline (all meds, not just new), then fallback to medications_confirmed JSON
+                let visitMedNames = (visitAllMeds[dateKey] || []).slice(0);
+                if (visitMedNames.length === 0 && v.medications_confirmed) {
+                  for (const m of v.medications_confirmed) {
+                    const name = m.pharmacy_match || m.name;
+                    if (name && !visitMedNames.includes(name)) visitMedNames.push(name);
+                  }
+                }
+
                 events.push({
                   date: dateKey,
                   type: "visit",
@@ -1225,8 +1249,9 @@ export default function OutcomesPage() {
                   label: `${v.status === "historical" ? "Historical " : ""}${v.visit_type || "OPD"} Visit`,
                   doctor: v.con_name || v.mo_name || "",
                   summary: v.summary || "",
-                  diagChanges: visitDiagChanges[dateKey] || [],
-                  newMeds: (visitNewMeds[dateKey] || []).slice(0, 6),
+                  diagChanges: allDiagChanges,
+                  newMeds: visitMedNames.slice(0, 8),
+                  stoppedMeds: (v.stopped_medications || []).map((m) => m.name).filter(Boolean),
                   lifestyle: v.lifestyle || [],
                   compliance: fmtCompliance(v.compliance),
                   symptoms: (v.symptoms || v.chief_complaints || []).filter(
@@ -1751,6 +1776,30 @@ export default function OutcomesPage() {
                                     }}
                                   >
                                     💊 {m}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {isVisit && ev.stoppedMeds?.length > 0 && (
+                              <div
+                                style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}
+                              >
+                                {ev.stoppedMeds.map((m, mi) => (
+                                  <span
+                                    key={mi}
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: 600,
+                                      padding: "2px 6px",
+                                      borderRadius: 8,
+                                      background: "#fef2f2",
+                                      color: "#dc2626",
+                                      border: "1px solid #fecaca",
+                                      textDecoration: "line-through",
+                                    }}
+                                  >
+                                    🚫 {m}
                                   </span>
                                 ))}
                               </div>

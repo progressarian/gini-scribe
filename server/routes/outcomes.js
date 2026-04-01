@@ -101,16 +101,20 @@ router.get("/patients/:id/outcomes", async (req, res) => {
     );
 
     const diagJourney = await pool.query(
-      `SELECT d.diagnosis_id, d.label, d.status, c.visit_date, c.con_name, c.mo_name
-       FROM diagnoses d JOIN consultations c ON c.id = d.consultation_id
-       WHERE d.patient_id=$1 ORDER BY d.diagnosis_id, c.visit_date`,
+      `SELECT d.diagnosis_id, d.label, d.status,
+              COALESCE(c.visit_date, d.created_at::date) AS visit_date,
+              c.con_name, c.mo_name
+       FROM diagnoses d LEFT JOIN consultations c ON c.id = d.consultation_id
+       WHERE d.patient_id=$1 ORDER BY d.diagnosis_id, visit_date`,
       [id],
     );
 
     const medTimeline = await pool.query(
-      `SELECT m.name, m.dose, m.frequency, m.timing, m.is_active, m.is_new, m.started_date, c.visit_date, m.pharmacy_match
-       FROM medications m JOIN consultations c ON c.id = m.consultation_id
-       WHERE m.patient_id=$1 ORDER BY UPPER(m.name), c.visit_date`,
+      `SELECT m.name, m.dose, m.frequency, m.timing, m.is_active, m.is_new, m.started_date,
+              COALESCE(c.visit_date, m.created_at::date) AS visit_date,
+              m.pharmacy_match, m.source
+       FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
+       WHERE m.patient_id=$1 ORDER BY UPPER(m.name), visit_date`,
       [id],
     );
 
@@ -119,6 +123,8 @@ router.get("/patients/:id/outcomes", async (req, res) => {
        mo_data->'history' as history, mo_data->'complications' as complications,
        mo_data->'symptoms' as symptoms, mo_data->'compliance' as compliance,
        mo_data->'chief_complaints' as chief_complaints,
+       mo_data->'diagnoses' as diagnoses,
+       mo_data->'stopped_medications' as stopped_medications,
        con_data->'diet_lifestyle' as lifestyle, con_data->'self_monitoring' as monitoring,
        con_data->'assessment_summary' as summary,
        con_data->'medications_confirmed' as medications_confirmed,
