@@ -662,7 +662,180 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
     ready = isReady(appt);
   const ps = appt.prep_steps || {},
     bio = appt.biomarkers || {},
-    comp = appt.compliance || {};
+    comp = appt.compliance || {},
+    vitals = appt.opd_vitals || {};
+
+  // Check if this appointment has HealthRay synced data
+  const hasRayData = !!appt.healthray_id;
+
+  const VitalChip = ({ label, value }) =>
+    value ? (
+      <span
+        style={{
+          display: "inline-block",
+          padding: "4px 10px",
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 500,
+          fontFamily: FM,
+          background: "#e8f5e9",
+          color: "#2e7d32",
+          border: "1px solid #c8e6c9",
+        }}
+      >
+        {label}: {value}
+      </span>
+    ) : null;
+
+  // ── HealthRay synced appointment view ──
+  if (hasRayData) {
+    return (
+      <div>
+        {/* Appointment info banner */}
+        <div
+          style={{
+            borderRadius: 9,
+            padding: "13px 16px",
+            marginBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 13,
+            background: "#e3f2fd",
+            border: "1px solid #90caf9",
+            boxShadow: SH,
+          }}
+        >
+          <div style={{ fontSize: 22, flexShrink: 0 }}>📋</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1565c0", marginBottom: 2 }}>
+              {bio.reason || appt.visit_type || "OPD"}{" "}
+              {bio.appointmentNumber ? `· ${bio.appointmentNumber}` : ""}
+            </div>
+            <div style={{ fontSize: 11, color: INK3 }}>
+              {appt.doctor_name} {bio.rmo ? ` | RMO: ${bio.rmo}` : ""}
+            </div>
+          </div>
+          <span
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              fontSize: 11,
+              fontWeight: 600,
+              background: appt.status === "completed" ? GNL : AML,
+              color: appt.status === "completed" ? GN : AM,
+              border: `1px solid ${appt.status === "completed" ? GNB : AMB}`,
+            }}
+          >
+            {appt.status === "completed" ? "Checkout" : appt.status}
+          </span>
+        </div>
+
+        {/* Vitals */}
+        {(vitals.weight || vitals.height) && (
+          <div
+            style={{
+              background: WH,
+              border: `1px solid ${BD}`,
+              borderRadius: 10,
+              padding: 14,
+              marginBottom: 12,
+              boxShadow: SH,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, color: INK, marginBottom: 10 }}>
+              VITALS
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <VitalChip label="Height" value={vitals.height ? `${vitals.height} cm` : null} />
+              <VitalChip label="Weight" value={vitals.weight ? `${vitals.weight} kg` : null} />
+              <VitalChip label="BMI" value={vitals.bmi ? vitals.bmi.toFixed(2) : null} />
+              <VitalChip
+                label="BP"
+                value={vitals.bpSys ? `${vitals.bpSys}/${vitals.bpDia}` : null}
+              />
+              <VitalChip label="SpO2" value={vitals.spo2} />
+              <VitalChip label="Waist" value={vitals.waist ? `${vitals.waist} cm` : null} />
+              <VitalChip label="Body Fat" value={vitals.bodyFat ? `${vitals.bodyFat}%` : null} />
+            </div>
+          </div>
+        )}
+
+        {/* Follow-up */}
+        {bio.followup && (
+          <div
+            style={{
+              background: WH,
+              border: `1px solid ${BD}`,
+              borderRadius: 10,
+              padding: 14,
+              marginBottom: 12,
+              boxShadow: SH,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, color: INK }}>FOLLOW UP:</div>
+            <span
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                background: "#fff3e0",
+                color: "#e65100",
+                border: "1px solid #ffcc80",
+              }}
+            >
+              {bio.followup}
+            </span>
+          </div>
+        )}
+
+        {/* Notes */}
+        {appt.notes && (
+          <div
+            style={{
+              background: WH,
+              border: `1px solid ${BD}`,
+              borderRadius: 10,
+              padding: 14,
+              marginBottom: 12,
+              boxShadow: SH,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, color: INK, marginBottom: 6 }}>
+              APPOINTMENT INFO
+            </div>
+            <div style={{ fontSize: 12, color: INK3, lineHeight: 1.6 }}>{appt.notes}</div>
+          </div>
+        )}
+
+        {/* Check In button */}
+        {appt.status !== "checkedin" && appt.status !== "seen" && appt.status !== "completed" && (
+          <button
+            onClick={onCheckIn}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              background: SK,
+              color: "#fff",
+              border: "none",
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            ✓ Check In Patient
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // ── Default prep workflow (non-synced appointments) ──
   const steps = [
     {
       k: "biomarkers",
@@ -993,13 +1166,23 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
         const typeIds = REPORT_TYPES.map((t) => t.id);
         for (const doc of docs) {
           if (doc.doc_type === "prescription") continue; // handled by ComplianceTab
-          const typeId = typeIds.includes(doc.doc_type) ? doc.doc_type : doc.doc_type === "lab_report" ? "blood" : "other";
+          const typeId = typeIds.includes(doc.doc_type)
+            ? doc.doc_type
+            : doc.doc_type === "lab_report"
+              ? "blood"
+              : "other";
           if (!grouped[typeId]) grouped[typeId] = [];
           grouped[typeId].push({
             name: doc.file_name || doc.title,
             date: doc.doc_date
-              ? new Date(doc.doc_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
-              : new Date(doc.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+              ? new Date(doc.doc_date).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                })
+              : new Date(doc.created_at).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                }),
             uploading: false,
             docId: doc.id,
             storagePath: doc.storage_path,
@@ -1105,7 +1288,9 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
       setReports((prev) => ({
         ...prev,
         [typeId]: (prev[typeId] || []).map((r) =>
-          r.name === file.name && r.uploading ? { ...r, uploading: false, docId: uploadedDocId } : r,
+          r.name === file.name && r.uploading
+            ? { ...r, uploading: false, docId: uploadedDocId }
+            : r,
         ),
       }));
       showToast(`✓ ${file.name} uploaded`);
@@ -1325,7 +1510,9 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                 const data = await resp.json();
                                 if (data.url) window.open(data.url, "_blank");
                                 else showToast("Could not get file URL", "err");
-                              } catch { showToast("Failed to open file", "err"); }
+                              } catch {
+                                showToast("Failed to open file", "err");
+                              }
                             }}
                             style={{
                               fontSize: 11,
@@ -2077,7 +2264,9 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                         const data = await resp.json();
                         if (data.url) window.open(data.url, "_blank");
                         else if (showToast) showToast("Could not get file URL", "err");
-                      } catch { if (showToast) showToast("Failed to open file", "err"); }
+                      } catch {
+                        if (showToast) showToast("Failed to open file", "err");
+                      }
                     }}
                     style={{
                       fontSize: 11,

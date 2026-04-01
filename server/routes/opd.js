@@ -79,7 +79,7 @@ router.get("/opd/appointments", async (req, res) => {
          FROM appointments a
          LEFT JOIN patients p ON p.id = a.patient_id
         WHERE a.appointment_date = $1
-        ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC`,
+        ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
       [date],
     );
     res.json(rows);
