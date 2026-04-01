@@ -1,0 +1,265 @@
+.hx-clinical__header {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hx-clinical__header-icon {
+  font-size: 16px;
+}
+.hx-clinical__header-info {
+  flex: 1;
+}
+.hx-clinical__header-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+.hx-clinical__header-sub {
+  font-size: 10px;
+  opacity: 0.8;
+}
+.hx-clinical__header-step {
+  font-size: 10px;
+  opacity: 0.6;
+}
+.hx-clinical__section {
+  margin-bottom: 14px;
+}
+.hx-clinical__section-title {
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.hx-clinical__search {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+.hx-clinical__dx-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.hx-clinical__dx-chip {
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.hx-clinical__ai-suggestions {
+  padding: 8px;
+  background: #faf5ff;
+  border: 1.5px solid #c4b5fd;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.hx-clinical__ai-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #7c3aed;
+  margin-bottom: 4px;
+}
+.hx-clinical__condition-card {
+  background: white;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.hx-clinical__condition-header {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hx-clinical__condition-icon {
+  font-size: 16px;
+}
+.hx-clinical__condition-name {
+  font-size: 13px;
+  font-weight: 800;
+}
+.hx-clinical__condition-remove {
+  font-size: 9px;
+  color: #dc2626;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+}
+.hx-clinical__biomarkers {
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+}
+.hx-clinical__biomarker-title {
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+.hx-clinical__biomarker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hx-clinical__questions {
+  padding: 12px;
+}
+.hx-clinical__questions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.hx-clinical__question-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 3px;
+}
+.hx-clinical__question-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+.hx-clinical__question-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+.hx-clinical__multi-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.hx-clinical__allergy-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.hx-clinical__allergy-input-row {
+  display: flex;
+  gap: 4px;
+}
+.hx-clinical__surgery-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.hx-clinical__surgery-input-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.hx-clinical__surgery-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.hx-clinical__surgery-name {
+  font-weight: 700;
+  min-width: 120px;
+}
+.hx-clinical__surgery-year-input {
+  width: 50px;
+  padding: 3px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.hx-clinical__surgery-hospital-input {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.hx-clinical__surgery-remove {
+  color: #dc2626;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 10px;
+}
+.hx-clinical__family-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.hx-clinical__family-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+.hx-clinical__missing-tests {
+  margin-bottom: 14px;
+  padding: 10px;
+  background: #fffbeb;
+  border: 1.5px solid #fde68a;
+  border-radius: 8px;
+}
+.hx-clinical__missing-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #92400e;
+  margin-bottom: 4px;
+}
+.hx-clinical__missing-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.hx-clinical__nav {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.hx-clinical__back-btn {
+  flex: 1;
+  background: #94a3b8;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hx-clinical__next-btn {
+  flex: 2;
+  background: #1e293b;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -1,0 +1,27 @@
+/* ============ KEYFRAMES ============ */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ============ PRINT ============ */
+@media print {
+  button,
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
+/* ============ EDITABLE HOVER ============ */
+.editable-hover:hover {
+  border-bottom-color: #3b82f6 !important;
+  background: #eff6ff;
+}

@@ -1,0 +1,175 @@
+/* ── Shimmer skeleton loading ── */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 100%
+  );
+  animation: shimmer-slide 1.4s ease-in-out infinite;
+}
+@keyframes shimmer-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ── Lines ── */
+.shimmer-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.shimmer-line {
+  height: 12px;
+}
+.shimmer-line:nth-child(odd) {
+  width: 90%;
+}
+.shimmer-line:nth-child(even) {
+  width: 65%;
+}
+
+/* ── List items ── */
+.shimmer-list {
+  display: flex;
+  flex-direction: column;
+}
+.shimmer-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.shimmer-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.shimmer-list-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.shimmer-list-title {
+  height: 12px;
+  width: 55%;
+}
+.shimmer-list-sub {
+  height: 10px;
+  width: 80%;
+}
+.shimmer-list-badge {
+  width: 48px;
+  height: 20px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Stat cards ── */
+.shimmer-stats {
+  display: flex;
+  gap: 10px;
+}
+.shimmer-stat-card {
+  flex: 1;
+  padding: 14px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+}
+.shimmer-stat-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+.shimmer-stat-value {
+  width: 50%;
+  height: 22px;
+  border-radius: 4px;
+}
+.shimmer-stat-label {
+  width: 70%;
+  height: 10px;
+  border-radius: 4px;
+}
+
+/* ── Cards (for reports / CI panels) ── */
+.shimmer-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.shimmer-card {
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.shimmer-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.shimmer-card-title {
+  height: 14px;
+  width: 40%;
+}
+.shimmer-card-tag {
+  height: 20px;
+  width: 60px;
+  border-radius: 10px;
+}
+.shimmer-card-body {
+  height: 10px;
+  width: 95%;
+}
+.shimmer-card-body2 {
+  height: 10px;
+  width: 70%;
+}
+
+/* ── Table rows ── */
+.shimmer-table {
+  display: flex;
+  flex-direction: column;
+}
+.shimmer-table-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.shimmer-table-cell {
+  height: 12px;
+  border-radius: 4px;
+}
+.shimmer-table-cell:nth-child(1) {
+  width: 25%;
+}
+.shimmer-table-cell:nth-child(2) {
+  flex: 1;
+}
+.shimmer-table-cell:nth-child(3) {
+  width: 15%;
+}

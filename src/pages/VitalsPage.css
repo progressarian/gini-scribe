@@ -1,0 +1,284 @@
+.vitals__layout {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.vitals__col {
+  flex: 1;
+}
+.vitals__section-title {
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.vitals__section-title--purple {
+  color: #7c3aed;
+}
+.vitals__section-title--blue {
+  color: #0369a1;
+}
+.vitals__filling {
+  text-align: center;
+  padding: 3px;
+  font-size: 10px;
+  color: #ea580c;
+}
+.vitals__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5px;
+  margin-top: 6px;
+}
+.vitals__label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #64748b;
+}
+.vitals__input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  box-sizing: border-box;
+}
+.vitals__input--disabled {
+  background: #f0fdf4;
+}
+.vitals__lab-upload {
+  border: 2px dashed #c4b5fd;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  cursor: pointer;
+  background: #faf5ff;
+}
+.vitals__lab-upload-icon {
+  font-size: 22px;
+}
+.vitals__lab-upload-text {
+  font-weight: 600;
+  color: #7c3aed;
+  font-size: 12px;
+}
+.vitals__lab-file-name {
+  color: #7c3aed;
+  font-weight: 600;
+  font-size: 12px;
+}
+.vitals__extract-btn {
+  margin-top: 4px;
+  width: 100%;
+  color: white;
+  border: none;
+  padding: 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.vitals__extract-btn--active {
+  background: #7c3aed;
+  cursor: pointer;
+}
+.vitals__extract-btn--loading {
+  background: #94a3b8;
+  cursor: wait;
+}
+.vitals__lab-mismatch {
+  margin-top: 3px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 10px;
+  color: #dc2626;
+}
+.vitals__lab-success {
+  margin-top: 3px;
+  color: #059669;
+  font-weight: 600;
+  font-size: 11px;
+}
+.vitals__panel {
+  margin-top: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.vitals__panel-header {
+  background: #7c3aed;
+  color: white;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.vitals__panel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.vitals__panel-cell {
+  padding: 2px 8px;
+}
+.vitals__panel-cell--right {
+  text-align: right;
+  font-weight: 700;
+}
+.vitals__panel-cell--center {
+  text-align: center;
+  font-size: 9px;
+}
+.vitals__imaging {
+  margin-top: 14px;
+  border-top: 2px solid #e2e8f0;
+  padding-top: 10px;
+}
+.vitals__imaging-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.vitals__imaging-type-label {
+  padding: 5px 10px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #0369a1;
+  cursor: pointer;
+  display: inline-block;
+}
+.vitals__imaging-file {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.vitals__imaging-file--extracted {
+  background: #f0fdf4;
+}
+.vitals__imaging-file--default {
+  background: #fafafa;
+}
+.vitals__imaging-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vitals__imaging-file-type {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0369a1;
+}
+.vitals__imaging-file-name {
+  font-size: 10px;
+  color: #94a3b8;
+}
+.vitals__imaging-extract-btn {
+  background: #0369a1;
+  color: white;
+  border: none;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.vitals__imaging-extracting {
+  font-size: 10px;
+  color: #0369a1;
+  font-weight: 600;
+}
+.vitals__imaging-extracted {
+  font-size: 10px;
+  color: #059669;
+  font-weight: 700;
+}
+.vitals__imaging-remove-btn {
+  background: #fef2f2;
+  color: #dc2626;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  cursor: pointer;
+}
+.vitals__imaging-error {
+  font-size: 10px;
+  color: #dc2626;
+  margin-top: 3px;
+}
+.vitals__imaging-impression {
+  font-size: 11px;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 4px 8px;
+  background: #f0f9ff;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.vitals__imaging-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+.vitals__imaging-table-head {
+  background: #0369a1;
+  color: white;
+}
+.vitals__imaging-table-th {
+  padding: 3px 6px;
+  text-align: left;
+}
+.vitals__imaging-table-th--right {
+  text-align: right;
+}
+.vitals__imaging-table-th--center {
+  text-align: center;
+}
+.vitals__imaging-table-cell {
+  padding: 2px 6px;
+}
+.vitals__imaging-table-cell--right {
+  text-align: right;
+}
+.vitals__imaging-table-cell--center {
+  text-align: center;
+}
+.vitals__imaging-table-cell--name {
+  font-weight: 600;
+}
+.vitals__imaging-status-badge {
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 700;
+  color: white;
+}
+.vitals__imaging-table-cell--detail {
+  font-size: 9px;
+  color: #64748b;
+}
+.vitals__imaging-recommendations {
+  font-size: 10px;
+  color: #7c3aed;
+  margin-top: 3px;
+  font-style: italic;
+}
+.vitals__next-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: #1e293b;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}

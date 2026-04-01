@@ -1,0 +1,978 @@
+/* ============ APP LAYOUT ============ */
+.app {
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8px 12px;
+  background: #fff;
+  min-height: 100vh;
+}
+
+/* ============ HEADER ============ */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #1e293b;
+}
+
+.header__brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header__logo {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #1e293b, #334155);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.header__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+  line-height: 1.1;
+}
+
+.header__doctor {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.header__spacer {
+  flex: 1;
+}
+
+.header__draft {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.header__save-status {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.header__save-status--success {
+  color: #059669;
+}
+
+.header__save-status--pending {
+  color: #f59e0b;
+}
+
+.header__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.header__find-btn {
+  border: 1px solid #cbd5e1;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.15s;
+}
+
+.header__find-btn--active {
+  background: #1e293b;
+  color: white;
+}
+
+.header__find-btn--inactive {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.header__save-btn {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
+  transition: all 0.15s;
+}
+
+.header__new-btn {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.3);
+  transition: all 0.15s;
+}
+
+.header__logout-btn {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ============ DUPLICATE WARNING BANNER ============ */
+.dup-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: #fef2f2;
+  border-bottom: 3px solid #dc2626;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
+}
+
+.dup-banner__icon {
+  font-size: 20px;
+}
+
+.dup-banner__content {
+  flex: 1;
+}
+
+.dup-banner__title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #dc2626;
+}
+
+.dup-banner__details {
+  font-size: 12px;
+  color: #7f1d1d;
+  margin-top: 2px;
+}
+
+.dup-banner__hint {
+  font-size: 11px;
+  color: #991b1b;
+  margin-top: 2px;
+}
+
+.dup-banner__load-btn {
+  padding: 8px 16px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dup-banner__dismiss-btn {
+  padding: 8px 12px;
+  background: white;
+  color: #dc2626;
+  border: 1.5px solid #fecaca;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ============ PATIENT BAR ============ */
+.patient-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #eff6ff, #f0fdf4);
+  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+}
+
+.patient-bar__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1e40af);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.patient-bar__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.patient-bar__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.patient-bar__age {
+  font-size: 11px;
+  color: #64748b;
+  margin-left: 6px;
+}
+
+.patient-bar__fileno {
+  font-size: 10px;
+  color: #2563eb;
+  font-weight: 600;
+  margin-left: 6px;
+  background: #dbeafe;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.patient-bar__phone {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: 6px;
+}
+
+.patient-bar__db-id {
+  font-size: 9px;
+  color: #059669;
+  font-weight: 600;
+  background: #dcfce7;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ============ SEARCH OVERLAY ============ */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  background: #f8fafc;
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.search-header {
+  padding: 12px 16px;
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.search-header__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.search-header__back-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #475569;
+}
+
+.search-header__title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.search-header__book-btn {
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.search-header__spacer {
+  flex: 1;
+}
+
+.search-stats {
+  display: flex;
+  gap: 8px;
+}
+
+.search-stat {
+  text-align: center;
+}
+
+.search-stat__val {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.search-stat__label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 15px;
+  box-sizing: border-box;
+  outline: none;
+  background: #f8fafc;
+}
+
+.search-filters {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.search-filter-btn {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.search-filter-btn--active {
+  border: 2px solid #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.search-filter-btn--inactive {
+  border: 1px solid #e2e8f0;
+  background: white;
+  color: #64748b;
+}
+
+.search-doctor-select {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+}
+
+.search-results {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 16px;
+}
+
+/* ============ TODAY'S APPOINTMENTS ============ */
+.today-appts__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.today-appts__title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e40af;
+}
+
+.today-appts__refresh-btn {
+  font-size: 10px;
+  padding: 4px 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.today-appt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 4px;
+  transition: all 0.15s;
+}
+
+.today-appt--completed {
+  background: #f0fdf4;
+  border: 1.5px solid #bbf7d0;
+}
+
+.today-appt--cancelled {
+  opacity: 0.5;
+}
+
+.today-appt--pending {
+  background: white;
+  border: 1.5px solid #e2e8f0;
+}
+
+.today-appt__time {
+  width: 55px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.today-appt__time-val {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.today-appt__time-val--completed {
+  color: #059669;
+}
+
+.today-appt__time-val--pending {
+  color: #1e40af;
+}
+
+.today-appt__type {
+  font-size: 8px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.today-appt__patient {
+  flex: 1;
+  min-width: 0;
+}
+
+.today-appt__patient-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-appt__patient-details {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.today-appt__doctor {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6d28d9;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.today-appt__status {
+  flex-shrink: 0;
+}
+
+.today-appt__done-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: #f0fdf4;
+  color: #059669;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #bbf7d0;
+}
+
+.today-appt__cancelled-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: #fef2f2;
+  color: #dc2626;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.today-appt__action-btns {
+  display: flex;
+  gap: 3px;
+}
+
+.today-appt__check-btn {
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  background: #f0fdf4;
+  color: #059669;
+}
+
+.today-appt__cancel-btn {
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.today-appts__empty {
+  text-align: center;
+  padding: 16px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+/* ============ QUICK BOOK ============ */
+.quick-book {
+  background: white;
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.quick-book__header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.quick-book__title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e40af;
+}
+
+.quick-book__close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.quick-book__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.quick-book__label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.quick-book__input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.quick-book__type-btns {
+  display: flex;
+  gap: 3px;
+}
+
+.quick-book__type-btn {
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quick-book__type-btn--active {
+  border: 1.5px solid #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.quick-book__type-btn--inactive {
+  border: 1.5px solid #e2e8f0;
+  background: white;
+  color: #64748b;
+}
+
+.quick-book__doctor-field {
+  margin-bottom: 8px;
+}
+
+.quick-book__doctor-select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.quick-book__submit-btn {
+  width: 100%;
+  padding: 10px;
+  background: #059669;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ============ PATIENT LIST ============ */
+.patient-list__count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  padding: 8px 4px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.patient-list__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+  transition: all 0.15s;
+  background: white;
+  margin-top: 4px;
+}
+
+.patient-list__avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1e40af);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.patient-list__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.patient-list__name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.patient-list__name {
+  font-size: 15px;
+  color: #1e293b;
+}
+
+.patient-list__age {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.patient-list__fileno {
+  font-size: 11px;
+  color: #2563eb;
+  font-weight: 600;
+  background: #eff6ff;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.patient-list__diagnosis {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-list__phone {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 1px;
+}
+
+.patient-list__stats {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.patient-list__visits {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.patient-list__last-visit {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.patient-list__last-doctor {
+  font-size: 10px;
+  color: #059669;
+  font-weight: 600;
+}
+
+.patient-list__empty {
+  text-align: center;
+  padding: 40px;
+  color: #94a3b8;
+}
+
+.patient-list__empty-icon {
+  font-size: 40px;
+  margin-bottom: 8px;
+}
+
+.patient-list__empty-text {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.patient-list__empty-hint {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* ============ TABS ============ */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  position: relative;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-btn--active {
+  background: #1e293b;
+  color: white;
+}
+
+.tab-btn--active-quick {
+  background: #dc2626;
+  color: white;
+}
+
+.tab-btn--inactive {
+  background: white;
+  color: #64748b;
+}
+
+.tab-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 1px solid white;
+}
+
+/* ============ DUPLICATE BLOCKER ============ */
+.dup-blocker {
+  background: white;
+  border-radius: 12px;
+  border: 3px solid #dc2626;
+  padding: 20px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.dup-blocker__icon {
+  font-size: 40px;
+  margin-bottom: 8px;
+}
+
+.dup-blocker__title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #dc2626;
+  margin-bottom: 6px;
+}
+
+.dup-blocker__text {
+  font-size: 13px;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.dup-blocker__card {
+  background: #fef2f2;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1.5px solid #fecaca;
+}
+
+.dup-blocker__card-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.dup-blocker__card-details {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.dup-blocker__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.dup-blocker__load-btn {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.dup-blocker__fresh-btn {
+  padding: 12px 24px;
+  background: white;
+  color: #059669;
+  border: 2px solid #059669;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dup-blocker__hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 10px;
+}
+
+/* ============ VISIT ACTIVE BANNER ============ */
+.visit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #059669, #10b981);
+  border-radius: 8px;
+  color: white;
+}
+
+.visit-banner__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+  animation: pulse 1.5s infinite;
+}
+
+.visit-banner__text {
+  font-size: 12px;
+  font-weight: 800;
+  flex: 1;
+}
+
+.visit-banner__btn {
+  background: rgba(255, 255, 255, 0.3);
+  border: none;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.visit-banner__btn--save-end {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.visit-banner__btn--end {
+  background: rgba(255, 255, 255, 0.15);
+  padding: 4px 8px;
+}

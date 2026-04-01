@@ -1,0 +1,367 @@
+.audio-input {
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.audio-input--recording {
+  border: 2px solid #ef4444;
+  background: #fef2f2;
+}
+
+.audio-input--cleaning {
+  border: 2px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.audio-input--default {
+  border: 2px solid #e2e8f0;
+  background: white;
+}
+
+.audio-input--compact {
+  padding: 8px;
+}
+
+.audio-input--full {
+  padding: 12px;
+}
+
+.audio-input__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.audio-input__label {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.audio-input__label--compact {
+  font-size: 11px;
+}
+
+.audio-input__label--full {
+  font-size: 13px;
+}
+
+.audio-input__controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.audio-input__engine-toggle {
+  display: flex;
+  gap: 1px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px;
+}
+
+.audio-input__engine-btn {
+  padding: 1px 5px;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 3px;
+  cursor: pointer;
+  border: none;
+}
+
+.audio-input__engine-btn--active {
+  background: #1e293b;
+  color: white;
+}
+
+.audio-input__engine-btn--inactive {
+  background: transparent;
+  color: #94a3b8;
+}
+
+.audio-input__cleanup-btn {
+  padding: 1px 5px;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 3px;
+  cursor: pointer;
+  border: none;
+}
+
+.audio-input__cleanup-btn--on {
+  background: #059669;
+  color: white;
+}
+
+.audio-input__cleanup-btn--off {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.audio-input__lang-group {
+  display: flex;
+  gap: 1px;
+}
+
+.audio-input__lang-btn {
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.audio-input__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.audio-input__record-btn {
+  flex: 1;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audio-input__record-btn--compact {
+  padding: 6px;
+  font-size: 11px;
+}
+
+.audio-input__record-btn--full {
+  padding: 10px;
+  font-size: 13px;
+}
+
+.audio-input__upload-btn {
+  flex: 1;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audio-input__upload-btn--compact {
+  padding: 6px;
+  font-size: 11px;
+}
+
+.audio-input__upload-btn--full {
+  padding: 10px;
+  font-size: 13px;
+}
+
+.audio-input__file-input {
+  display: none;
+}
+
+.audio-input__paste-area {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  color: #64748b;
+}
+
+.audio-input__paste-area--compact {
+  min-height: 30px;
+}
+
+.audio-input__paste-area--full {
+  min-height: 44px;
+}
+
+.audio-input__recording-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.audio-input__timer {
+  font-size: 18px;
+  font-weight: 800;
+  color: #dc2626;
+}
+
+.audio-input__pulse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dc2626;
+  margin-right: 6px;
+  animation: pulse 1s infinite;
+}
+
+.audio-input__stop-btn {
+  background: #1e293b;
+  color: white;
+  border: none;
+  padding: 6px 20px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audio-input__live-text {
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+  min-height: 40px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.audio-input__cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: #dc2626;
+  margin-left: 2px;
+  animation: pulse 0.5s infinite;
+}
+
+.audio-input__listening {
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+  padding: 6px;
+}
+
+.audio-input__cleaning {
+  text-align: center;
+  padding: 10px;
+}
+
+.audio-input__cleaning-icon {
+  font-size: 14px;
+  animation: pulse 1s infinite;
+}
+
+.audio-input__cleaning-text {
+  font-size: 11px;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.audio-input__recorded-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.audio-input__audio-player {
+  flex: 1;
+  height: 30px;
+}
+
+.audio-input__clear-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.audio-input__transcribe-btn {
+  width: 100%;
+  color: white;
+  border: none;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audio-input__transcribing {
+  text-align: center;
+  padding: 10px;
+}
+
+.audio-input__transcribing-icon {
+  font-size: 18px;
+  animation: pulse 1s infinite;
+}
+
+.audio-input__transcribing-text {
+  font-size: 11px;
+  color: #475569;
+}
+
+.audio-input__done-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.audio-input__done-label {
+  color: #059669;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.audio-input__redo-btn {
+  margin-left: auto;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.audio-input__transcript-area {
+  width: 100%;
+  min-height: 100px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.6;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.audio-input__use-btn {
+  margin-top: 3px;
+  width: 100%;
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audio-input__error {
+  margin-top: 4px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #dc2626;
+}

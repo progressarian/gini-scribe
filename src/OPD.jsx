@@ -1406,7 +1406,7 @@ export default function OPD() {
 
   const fetchAppts=useCallback(()=>{
     setLoading(true)
-    apiFetch(`/api/appointments?date=${date}`).then(r=>r.json())
+    apiFetch(`/api/opd/appointments?date=${date}`).then(r=>r.json())
       .then(d=>{setAppointments(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
   },[date])
 

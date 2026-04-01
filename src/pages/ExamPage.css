@@ -1,0 +1,190 @@
+.exam__header {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.exam__header-icon {
+  font-size: 16px;
+}
+.exam__header-info {
+  flex: 1;
+}
+.exam__header-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+.exam__header-sub {
+  font-size: 10px;
+  opacity: 0.8;
+}
+.exam__header-step {
+  font-size: 10px;
+  opacity: 0.6;
+}
+.exam__specialty-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.exam__specialty-btn {
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.exam__specialty-btn--active {
+  border: 1.5px solid #f59e0b;
+  background: #fef3c7;
+  color: #92400e;
+}
+.exam__specialty-btn--inactive {
+  border: 1.5px solid #e2e8f0;
+  background: white;
+  color: #64748b;
+}
+.exam__spacer {
+  flex: 1;
+}
+.exam__all-nad-btn {
+  padding: 5px 12px;
+  background: #059669;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.exam__section {
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 3px;
+  overflow: hidden;
+}
+.exam__section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.exam__section-header--finding {
+  background: #fffbeb;
+}
+.exam__section-icon {
+  font-size: 14px;
+}
+.exam__section-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.exam__nad-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #dcfce7;
+  color: #059669;
+  font-weight: 700;
+}
+.exam__finding-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 700;
+}
+.exam__nad-btn {
+  font-size: 9px;
+  border: none;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.exam__nad-btn--active {
+  background: #059669;
+  color: white;
+}
+.exam__nad-btn--inactive {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.exam__section-arrow {
+  font-size: 10px;
+  color: #94a3b8;
+}
+.exam__findings {
+  padding: 6px 10px 10px;
+  border-top: 1px solid #f1f5f9;
+}
+.exam__findings-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.exam__finding-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.exam__finding-btn--active {
+  border: 1.5px solid #f59e0b;
+  background: #fef3c7;
+  color: #92400e;
+}
+.exam__finding-btn--inactive {
+  border: 1.5px solid #e2e8f0;
+  background: white;
+  color: #64748b;
+}
+.exam__notes {
+  margin-top: 8px;
+}
+.exam__notes-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.exam__nav {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.exam__back-btn {
+  flex: 1;
+  background: #94a3b8;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.exam__next-btn {
+  flex: 2;
+  background: #1e293b;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}

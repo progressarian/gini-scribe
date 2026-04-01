@@ -1,0 +1,338 @@
+.lab-portal__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.lab-portal__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0369a1;
+}
+.lab-portal__spacer {
+  flex: 1;
+}
+.lab-portal__user-badge {
+  font-size: 10px;
+  background: #f0f9ff;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.lab-portal__find-patient {
+  text-align: center;
+  padding: 20px;
+}
+.lab-portal__find-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+.lab-portal__find-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+.lab-portal__find-hint {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 10px;
+}
+.lab-portal__find-btn {
+  background: #0369a1;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lab-portal__patient-bar {
+  background: linear-gradient(135deg, #0369a1, #0284c7);
+  color: white;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lab-portal__patient-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 16px;
+}
+.lab-portal__patient-info {
+  flex: 1;
+}
+.lab-portal__patient-name {
+  font-size: 14px;
+  font-weight: 800;
+}
+.lab-portal__patient-details {
+  font-size: 10px;
+  opacity: 0.8;
+}
+.lab-portal__change-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lab-portal__date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.lab-portal__date-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+}
+.lab-portal__date-input {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.lab-portal__today-btn {
+  font-size: 9px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #1e40af;
+  font-weight: 600;
+}
+.lab-portal__upload-section {
+  margin-bottom: 8px;
+}
+.lab-portal__upload-section--imaging {
+  margin-bottom: 10px;
+}
+.lab-portal__upload-title {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.lab-portal__upload-title--lab {
+  color: #7c3aed;
+}
+.lab-portal__upload-title--imaging {
+  color: #0369a1;
+}
+.lab-portal__upload-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.lab-portal__upload-label--lab {
+  padding: 6px 12px;
+  background: #faf5ff;
+  border: 1px solid #d8b4fe;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7c3aed;
+  cursor: pointer;
+}
+.lab-portal__upload-label--imaging {
+  padding: 6px 12px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0369a1;
+  cursor: pointer;
+}
+.lab-portal__hidden-input {
+  display: none;
+}
+.lab-portal__files-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 8px;
+  margin-bottom: 6px;
+}
+.lab-portal__files-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+}
+.lab-portal__extract-all-btn {
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  color: white;
+  border: none;
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lab-portal__file-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 6px;
+}
+.lab-portal__file-card--saved {
+  background: #f0fdf4;
+}
+.lab-portal__file-card--error {
+  background: #fef2f2;
+}
+.lab-portal__file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lab-portal__file-type {
+  font-size: 12px;
+  font-weight: 700;
+}
+.lab-portal__file-type--lab {
+  color: #7c3aed;
+}
+.lab-portal__file-type--imaging {
+  color: #0369a1;
+}
+.lab-portal__file-name {
+  font-size: 10px;
+  color: #94a3b8;
+}
+.lab-portal__file-date {
+  font-size: 9px;
+  color: #64748b;
+}
+.lab-portal__file-extract-btn {
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lab-portal__file-extracting {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f59e0b;
+}
+.lab-portal__file-saved {
+  font-size: 11px;
+  font-weight: 700;
+  color: #059669;
+}
+.lab-portal__file-error {
+  font-size: 10px;
+  color: #dc2626;
+}
+.lab-portal__file-remove-btn {
+  background: #fef2f2;
+  color: #dc2626;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  cursor: pointer;
+}
+.lab-portal__panel {
+  margin-top: 4px;
+}
+.lab-portal__panel-name {
+  font-size: 9px;
+  font-weight: 700;
+  color: #7c3aed;
+}
+.lab-portal__panel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  margin-top: 2px;
+}
+.lab-portal__panel-cell {
+  padding: 2px 6px;
+}
+.lab-portal__panel-cell--result {
+  padding: 2px 6px;
+  text-align: right;
+  font-weight: 700;
+}
+.lab-portal__panel-cell--ref {
+  padding: 2px 6px;
+  font-size: 9px;
+  color: #94a3b8;
+}
+.lab-portal__panel-cell--flag {
+  padding: 2px 6px;
+  text-align: center;
+  font-size: 9px;
+}
+.lab-portal__imaging-data {
+  margin-top: 4px;
+}
+.lab-portal__imaging-impression {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  background: #f0f9ff;
+  border-radius: 4px;
+}
+.lab-portal__prev-docs {
+  margin-top: 12px;
+  border-top: 2px solid #e2e8f0;
+  padding-top: 8px;
+}
+.lab-portal__prev-docs-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.lab-portal__prev-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 11px;
+}
+.lab-portal__prev-doc-title {
+  flex: 1;
+}
+.lab-portal__prev-doc-date {
+  font-size: 9px;
+  color: #64748b;
+}
+.lab-portal__prev-doc-view-btn {
+  font-size: 8px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.lab-portal__prev-doc-source {
+  font-size: 8px;
+  color: #94a3b8;
+}

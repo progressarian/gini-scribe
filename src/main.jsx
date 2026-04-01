@@ -1,14 +1,38 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
-import Companion from './Companion'
-import OPD from './OPD'
+import React, { useEffect } from "react";
+import ReactDOM from "react-dom/client";
+import { RouterProvider } from "react-router-dom";
+import router from "./router";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { ToastProvider, useToast } from "./components/Toast";
+import { setToastFn } from "./stores/uiStore";
+import "./styles/global.css";
 
-// Simple path-based routing — no react-router needed
-const path = window.location.pathname;
-const isCompanion = path.startsWith('/companion');
-const isOPD = path.startsWith('/opd');
+// Global unhandled promise rejection handler
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("Unhandled promise rejection:", e.reason);
+  e.preventDefault();
+});
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  isCompanion ? <Companion /> : isOPD ? <OPD /> : <App />
-)
+// Global error handler
+window.addEventListener("error", (e) => {
+  console.error("Uncaught error:", e.error);
+});
+
+// Bridge: wires the React toast context to the global toast function
+function ToastBridge({ children }) {
+  const addToast = useToast();
+  useEffect(() => {
+    setToastFn(addToast);
+  }, [addToast]);
+  return children;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <ToastProvider>
+      <ToastBridge>
+        <RouterProvider router={router} />
+      </ToastBridge>
+    </ToastProvider>
+  </ErrorBoundary>,
+);

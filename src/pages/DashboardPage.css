@@ -1,0 +1,162 @@
+.dashboard__patient-card {
+  background: linear-gradient(135deg, #1e293b, #334155);
+  border-radius: 14px;
+  padding: 20px;
+  color: white;
+  margin-bottom: 12px;
+}
+.dashboard__patient-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dashboard__patient-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #60a5fa);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.dashboard__patient-info {
+  flex: 1;
+}
+.dashboard__patient-name {
+  font-size: 20px;
+  font-weight: 800;
+}
+.dashboard__patient-details {
+  font-size: 13px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+.dashboard__patient-phone {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 1px;
+}
+.dashboard__edit-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dashboard__new-badge {
+  margin-left: 6px;
+  background: #f59e0b;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.dashboard__brief {
+  background: linear-gradient(135deg, #f0f9ff, #faf5ff);
+  border-radius: 12px;
+  border: 2px solid #c7d2fe;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.dashboard__brief-summary {
+  font-size: 11px;
+  color: #374151;
+  line-height: 1.7;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e9d5ff;
+  margin-bottom: 10px;
+}
+.dashboard__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.dashboard__section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #6d28d9;
+  margin-bottom: 4px;
+}
+.dashboard__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dashboard__stat {
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+}
+.dashboard__stat-value {
+  font-size: 22px;
+  font-weight: 800;
+}
+.dashboard__stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+}
+.dashboard__workflow-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.dashboard__workflow-btn {
+  border-radius: 10px;
+  padding: 12px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+.dashboard__workflow-icon {
+  font-size: 22px;
+}
+.dashboard__workflow-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.2;
+}
+.dashboard__workflow-desc {
+  font-size: 9px;
+  text-align: center;
+  line-height: 1.3;
+}
+.dashboard__appt-panel {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.dashboard__appt-header {
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.dashboard__appt-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: white;
+}
+.dashboard__booking {
+  background: white;
+  border-radius: 12px;
+  border: 2px solid #2563eb;
+  padding: 16px;
+  margin-bottom: 12px;
+}

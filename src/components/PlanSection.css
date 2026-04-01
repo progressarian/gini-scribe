@@ -1,0 +1,49 @@
+.plan-block {
+  margin-bottom: 14px;
+  position: relative;
+}
+
+.plan-block--hidden {
+  margin-bottom: 4px;
+  opacity: 0.4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.plan-block__hidden-icon {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.plan-block__hidden-title {
+  font-size: 10px;
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.plan-block__header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 3px;
+  margin-bottom: 6px;
+}
+
+.plan-block__title {
+  font-size: 12px;
+  font-weight: 800;
+  flex: 1;
+}
+
+.plan-block__hide-btn {
+  background: #fee2e2;
+  border: none;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  cursor: pointer;
+  color: #dc2626;
+  font-weight: 700;
+}

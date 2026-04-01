@@ -1,0 +1,67 @@
+.fu-gen__header {
+  background: linear-gradient(135deg, #059669, #10b981);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fu-gen__header-icon {
+  font-size: 16px;
+}
+.fu-gen__header-info {
+  flex: 1;
+}
+.fu-gen__header-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+.fu-gen__header-sub {
+  font-size: 10px;
+  opacity: 0.85;
+}
+.fu-gen__header-step {
+  font-size: 10px;
+  opacity: 0.6;
+}
+.fu-gen__section {
+  margin-bottom: 10px;
+}
+.fu-gen__section-title {
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.fu-gen__gen-btn {
+  width: 100%;
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.fu-gen__gen-btn--active {
+  background: linear-gradient(135deg, #059669, #10b981);
+}
+.fu-gen__gen-btn--loading {
+  background: #94a3b8;
+  cursor: wait;
+}
+.fu-gen__loading {
+  text-align: center;
+  padding: 20px;
+}
+.fu-gen__loading-icon {
+  font-size: 28px;
+  animation: pulse 1s infinite;
+}
+.fu-gen__loading-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: #059669;
+  margin-top: 4px;
+}
