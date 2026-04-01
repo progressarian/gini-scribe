@@ -83,14 +83,35 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
         }
       }
 
-      // No existing patient found — create one
+      // No existing patient found — create one with auto-generated file_no
       if (!patient_id) {
-        const newPt = await pool.query(
-          `INSERT INTO patients (name, phone, file_no)
-           VALUES ($1, $2, $3) RETURNING id`,
-          [patient_name, phone || null, file_no || null],
-        );
-        patient_id = newPt.rows[0].id;
+        let autoFileNo = file_no || null;
+        if (!autoFileNo) {
+          const seq = await pool.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(file_no FROM 'GNI-([0-9]+)') AS INTEGER)), 0) + 1 AS next
+             FROM patients WHERE file_no ~ '^GNI-[0-9]+$'`,
+          );
+          autoFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
+        }
+        try {
+          const newPt = await pool.query(
+            `INSERT INTO patients (name, phone, file_no)
+             VALUES ($1, $2, $3) RETURNING id, file_no`,
+            [patient_name, phone || null, autoFileNo],
+          );
+          patient_id = newPt.rows[0].id;
+          file_no = newPt.rows[0].file_no;
+        } catch (dupErr) {
+          // Duplicate file_no or phone — link to existing patient instead
+          const existing = await pool.query(
+            `SELECT id, file_no FROM patients WHERE file_no = $1 OR phone = $2 LIMIT 1`,
+            [autoFileNo, phone || null],
+          );
+          if (existing.rows[0]) {
+            patient_id = existing.rows[0].id;
+            file_no = existing.rows[0].file_no;
+          }
+        }
       }
     }
 

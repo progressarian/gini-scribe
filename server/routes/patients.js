@@ -315,6 +315,15 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       existing = (await pool.query("SELECT id FROM patients WHERE abha_id=$1", [p.abha_id]))
         .rows[0];
 
+    // Auto-generate file_no if not provided and creating a new patient
+    if (!existing && !n(p.file_no)) {
+      const seq = await pool.query(
+        `SELECT COALESCE(MAX(CAST(SUBSTRING(file_no FROM 'GNI-([0-9]+)') AS INTEGER)), 0) + 1 AS next
+         FROM patients WHERE file_no ~ '^GNI-[0-9]+$'`,
+      );
+      p.file_no = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
+    }
+
     if (existing) {
       const result = await pool.query(
         `UPDATE patients SET name=COALESCE($2,name), dob=COALESCE($3,dob), age=COALESCE($4,age),
