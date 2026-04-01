@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from "express";
 import cors from "cors";
 import pg from "pg";
@@ -37,6 +38,38 @@ const pool = new pg.Pool({
 });
 
 console.log("📦 DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
+
+// ─── OPD: create + migrate appointments table ───────────────
+pool.query(`
+  CREATE TABLE IF NOT EXISTS appointments (
+    id               SERIAL PRIMARY KEY,
+    patient_id       INTEGER REFERENCES patients(id) ON DELETE SET NULL,
+    patient_name     TEXT NOT NULL,
+    file_no          TEXT,
+    phone            TEXT,
+    doctor_name      TEXT,
+    appointment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    time_slot        TEXT,
+    visit_type       TEXT DEFAULT 'OPD',
+    status           TEXT DEFAULT 'pending',
+    notes            TEXT,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+  )
+`).then(() => pool.query(`
+  ALTER TABLE appointments
+    ADD COLUMN IF NOT EXISTS prep_steps JSONB DEFAULT '{"biomarkers":false,"compliance":false,"categorized":false,"assigned":false}'::jsonb,
+    ADD COLUMN IF NOT EXISTS biomarkers JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS compliance JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS category TEXT,
+    ADD COLUMN IF NOT EXISTS coordinator_notes JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS opd_vitals JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS is_walkin BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS age INTEGER,
+    ADD COLUMN IF NOT EXISTS sex TEXT,
+    ADD COLUMN IF NOT EXISTS visit_count INTEGER DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS last_visit_date DATE
+`)).then(() => console.log("✅ OPD appointments table ready")).catch(e => console.log("OPD migration note:", e.message));
 
 const n = v => (v === "" || v === undefined || v === null) ? null : v;
 const num = v => { const x = parseFloat(v); return isNaN(x) ? null : x; };
@@ -1395,11 +1428,11 @@ app.get("/api/appointments", async (req, res) => {
 
 app.post("/api/appointments", async (req, res) => {
   try {
-    const { patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes } = req.body;
+    const { patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin } = req.body;
     const { rows } = await pool.query(
-      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [patient_id||null, patient_name, file_no||null, phone||null, doctor_name, appointment_date||new Date().toISOString().split("T")[0], time_slot||null, visit_type||'OPD', notes||null]
+      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [patient_id||null, patient_name, file_no||null, phone||null, doctor_name||null, appointment_date||new Date().toISOString().split("T")[0], time_slot||null, visit_type||'OPD', notes||null, category||null, is_walkin||false]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1522,6 +1555,89 @@ app.post("/api/patients/:id/messages", async (req, res) => {
     console.error("Send message error:", e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ============ OPD ENDPOINTS ============
+
+// PATCH /api/appointments/:id — update status, category, doctor_name
+app.patch("/api/appointments/:id", async (req, res) => {
+  try {
+    const { status, category, doctor_name } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE appointments SET
+         status       = COALESCE($2, status),
+         category     = COALESCE($3, category),
+         doctor_name  = COALESCE($4, doctor_name),
+         updated_at   = NOW()
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, status || null, category || null, doctor_name || null]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /api/appointments/:id/prep — mark a single prep step done/undone
+app.patch("/api/appointments/:id/prep", async (req, res) => {
+  try {
+    const { step, value } = req.body;
+    const valid = ["biomarkers", "compliance", "categorized", "assigned"];
+    if (!valid.includes(step)) return res.status(400).json({ error: "Invalid step" });
+    const patch = JSON.stringify({ [step]: value !== false });
+    const { rows } = await pool.query(
+      `UPDATE appointments SET
+         prep_steps = COALESCE(prep_steps, '{}'::jsonb) || $2::jsonb,
+         updated_at = NOW()
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, patch]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/appointments/:id/biomarkers — save biomarker values
+app.post("/api/appointments/:id/biomarkers", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE appointments SET
+         biomarkers = $2::jsonb,
+         prep_steps = COALESCE(prep_steps, '{}'::jsonb) || '{"biomarkers":true}'::jsonb,
+         updated_at = NOW()
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, JSON.stringify(req.body)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/appointments/:id/vitals — save post-check-in vitals
+app.post("/api/appointments/:id/vitals", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE appointments SET opd_vitals=$2::jsonb, updated_at=NOW() WHERE id=$1 RETURNING *`,
+      [req.params.id, JSON.stringify(req.body)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/appointments/:id/compliance — save compliance data
+app.post("/api/appointments/:id/compliance", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE appointments SET
+         compliance = $2::jsonb,
+         prep_steps = COALESCE(prep_steps, '{}'::jsonb) || '{"compliance":true}'::jsonb,
+         updated_at = NOW()
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, JSON.stringify(req.body)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============ SERVE FRONTEND ============

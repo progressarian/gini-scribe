@@ -4092,7 +4092,8 @@ Write ONLY the summary paragraph, no headers or formatting.`;
     { id:"outcomes", label:"📊", show:keySet && !isLabRole && !!dbPatientId },
     { id:"ai", label:"🤖 AI", show:keySet && !isLabRole },
     { id:"reports", label:"📊 Reports", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") },
-    { id:"ci", label:"🧠 CI", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") }
+    { id:"ci", label:"🧠 CI", show:keySet && !!API_URL && (currentDoctor?.role==="admin"||currentDoctor?.role==="consultant") },
+    { id:"opd", label:"🏥 OPD", show:keySet && !isLabRole, link:"/opd" }
   ];
 
   // New reports banner for MO/Con/Plan tabs
@@ -4730,10 +4731,12 @@ Write ONLY the summary paragraph, no headers or formatting.`;
       {!(duplicateWarning && !dbPatientId) && (
       <div style={{ display:"flex", gap:0, marginBottom:10, borderRadius:8, overflow:"hidden", border:"1px solid #e2e8f0" }}>
         {TABS.filter(t=>t.show!==false).map(t => (
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"8px 4px", fontSize:11, fontWeight:700, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b", position:"relative", letterSpacing:"-0.01em" }}>
-            {t.label}
-            {t.badge && tab!==t.id && <span style={{ position:"absolute", top:2, right:2, width:7, height:7, borderRadius:"50%", background:"#f59e0b", border:"1px solid white" }} />}
-          </button>
+          t.link
+            ? <a key={t.id} href={t.link} style={{ flex:1, padding:"8px 4px", fontSize:11, fontWeight:700, cursor:"pointer", border:"none", background:"white", color:"#64748b", textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", letterSpacing:"-0.01em" }}>{t.label}</a>
+            : <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, padding:"8px 4px", fontSize:11, fontWeight:700, cursor:"pointer", border:"none", background:tab===t.id?(t.id==="quick"?"#dc2626":"#1e293b"):"white", color:tab===t.id?"white":"#64748b", position:"relative", letterSpacing:"-0.01em" }}>
+                {t.label}
+                {t.badge && tab!==t.id && <span style={{ position:"absolute", top:2, right:2, width:7, height:7, borderRadius:"50%", background:"#f59e0b", border:"1px solid white" }} />}
+              </button>
         ))}
       </div>
       )}
