@@ -307,7 +307,7 @@ async function resolveGeniePatientId(giniPatientId) {
       .from("patients")
       .select("id")
       .eq("gini_patient_id", String(giniPatientId))
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error("[Genie Resolve Patient] Error:", error.message);

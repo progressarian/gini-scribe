@@ -1,310 +1,77 @@
-import pool from "../../config/db.js";
+// ── HealthRay → Gini Scribe sync orchestrator ──────────────────────────────
 
-const HEALTHRAY_BASE = "https://node.healthray.com/api/v1";
-const HEALTHRAY_LOGIN_URL = "https://node.healthray.com/api/v2/users/sign_in";
-const ORG_ID = process.env.HEALTHRAY_ORG_ID || "1528";
+import {
+  fetchDoctors,
+  fetchAppointments,
+  fetchClinicalNotes,
+  fetchMedicalRecords,
+  fetchPreviousAppointmentData,
+} from "../healthray/client.js";
+import { extractClinicalText, parseClinicalWithAI } from "../healthray/parser.js";
+import {
+  calcAge,
+  buildName,
+  mapGender,
+  mapVisitType,
+  mapStatus,
+  extractTimeSlot,
+  toISTDate,
+  mapLabsToBiomarkers,
+  buildCompliance,
+} from "../healthray/mappers.js";
+import {
+  ensureSyncColumns,
+  findAppointment,
+  findAppointmentWithNotes,
+  upsertPatient,
+  syncDoctors,
+  upsertAppointment,
+  syncLabResults,
+  syncMedications,
+  syncDocuments,
+} from "../healthray/db.js";
+import { createLogger } from "../logger.js";
+const { log, error } = createLogger("HealthRay Sync");
 
-// ── Session state — refreshed automatically on 401 ─────────────────────────
-let sessionCookie = process.env.HEALTHRAY_SESSION || "";
-
-// ── Ensure sync columns exist ───────────────────────────────────────────────
-let columnsReady = false;
-async function ensureSyncColumns() {
-  if (columnsReady) return;
-  await pool.query(`
-    ALTER TABLE appointments
-      ADD COLUMN IF NOT EXISTS healthray_id TEXT;
-    ALTER TABLE doctors
-      ADD COLUMN IF NOT EXISTS healthray_id INTEGER;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_healthray
-      ON appointments(healthray_id) WHERE healthray_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_healthray
-      ON doctors(healthray_id) WHERE healthray_id IS NOT NULL;
-  `);
-  columnsReady = true;
-}
-
-// ── Auto-login to HealthRay and get fresh session cookie ────────────────────
-async function healthrayLogin() {
-  const mobile = process.env.HEALTHRAY_MOBILE;
-  const password = process.env.HEALTHRAY_PASSWORD;
-  const captcha = process.env.HEALTHRAY_CAPTCHA;
-
-  if (!mobile || !password || !captcha) {
-    throw new Error(
-      "HealthRay login credentials missing — set HEALTHRAY_MOBILE, HEALTHRAY_PASSWORD, HEALTHRAY_CAPTCHA in .env",
-    );
-  }
-
-  console.log("[HealthRay Auth] Session expired, logging in...");
-
-  const res = await fetch(HEALTHRAY_LOGIN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      captchaToken: captcha,
-      user: {
-        mobile_no: mobile,
-        password: password,
-        platform: "Web",
-        user_type: "Doctor",
-      },
-    }),
-  });
-
-  const setCookie = res.headers.get("set-cookie") || "";
-  const match = setCookie.match(/connect\.sid=([^;]+)/);
-  if (!match) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`HealthRay login failed: ${body.message || "no session cookie returned"}`);
-  }
-
-  sessionCookie = match[1];
-  console.log("[HealthRay Auth] Login successful, new session obtained");
-  return sessionCookie;
-}
-
-// ── Cookie-based fetch with auto-relogin on 401 ────────────────────────────
-async function healthrayFetch(path, isRetry = false) {
-  if (!sessionCookie) {
-    await healthrayLogin();
-  }
-
-  const res = await fetch(`${HEALTHRAY_BASE}${path}`, {
-    headers: { Cookie: `connect.sid=${sessionCookie}` },
-  });
-
-  const json = await res.json();
-
-  if (json.status === 401 && !isRetry) {
-    await healthrayLogin();
-    return healthrayFetch(path, true);
-  }
-
-  if (json.status === 401) {
-    throw new Error("HealthRay auth failed after re-login — check credentials in .env");
-  }
-  if (json.status !== 200) {
-    throw new Error(`HealthRay API error: ${json.message}`);
-  }
-  return json.data;
-}
-
-// ── API calls ───────────────────────────────────────────────────────────────
-function fetchDoctors() {
-  return healthrayFetch(`/organization/get_doctors/${ORG_ID}`);
-}
-
-function fetchAppointments(doctorId, date, page = 1, perPage = 100) {
-  return healthrayFetch(
-    `/appointment/data?organization_id=${ORG_ID}&doctor_id=${doctorId}&app_date_time=${date}T00:00:00&page=${page}&per_page=${perPage}`,
-  );
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-function calcAge(birthDateStr) {
-  if (!birthDateStr) return null;
-  const [dd, mm, yyyy] = birthDateStr.split("-").map(Number);
-  if (!dd || !mm || !yyyy) return null;
-  const born = new Date(yyyy, mm - 1, dd);
-  const now = new Date();
-  let age = now.getFullYear() - born.getFullYear();
-  if (
-    now.getMonth() < born.getMonth() ||
-    (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())
-  ) {
-    age--;
-  }
-  return age > 0 ? age : null;
-}
-
-function buildName(fm) {
-  if (!fm) return "Unknown";
-  const parts = [fm.first_name, fm.middle_name, fm.last_name].filter(
-    (p) => p && p !== "None" && p !== "." && p !== null,
-  );
-  return parts.join(" ").replace(/\s+/g, " ").trim() || "Unknown";
-}
-
-function mapGender(gender) {
-  if (!gender) return null;
-  const g = gender.toLowerCase();
-  if (g === "male") return "Male";
-  if (g === "female") return "Female";
-  return "Other";
-}
-
-function mapVisitType(reason) {
-  if (!reason) return "OPD";
-  const r = reason.toLowerCase();
-  if (r.includes("follow")) return "Follow-Up";
-  if (r.includes("new") || r.includes("first")) return "New Patient";
-  if (r.includes("online") || r.includes("tele")) return "Tele";
-  return "OPD";
-}
-
-function mapStatus(rayStatus) {
-  if (!rayStatus) return "scheduled";
-  const s = rayStatus.toLowerCase();
-  if (s === "checkout" || s === "completed") return "completed";
-  if (s === "engaged" || s === "in-progress") return "in-progress";
-  if (s === "cancelled" || s === "canceled") return "cancelled";
-  if (s === "no_show" || s === "noshow") return "no_show";
-  return "scheduled";
-}
-
-function extractTimeSlot(appDateTime) {
-  if (!appDateTime) return null;
-  const d = new Date(appDateTime);
-  // Convert UTC → IST (+5:30)
-  const istMs = d.getTime() + 5.5 * 60 * 60 * 1000;
-  const ist = new Date(istMs);
-  const h = ist.getUTCHours().toString().padStart(2, "0");
-  const m = ist.getUTCMinutes().toString().padStart(2, "0");
-  return `${h}:${m}`;
-}
-
-// ── Sync HealthRay doctors → local doctors table ────────────────────────────
-async function syncDoctors(rayDoctors) {
-  const mapping = new Map();
-
-  for (const rd of rayDoctors) {
-    if (rd.is_deactivated) continue;
-
-    const hrid = rd.id;
-    const rayName = rd.doctor_name;
-    const specialty = rd.specialty_name || null;
-    const phone = rd.mobile_no || null;
-
-    let local = await pool.query(`SELECT id, name FROM doctors WHERE healthray_id = $1`, [hrid]);
-
-    if (!local.rows[0] && phone) {
-      local = await pool.query(`SELECT id, name FROM doctors WHERE phone = $1`, [phone]);
-    }
-
-    if (!local.rows[0]) {
-      const stripped = rayName
-        .replace(/^Dr\.?\s*/i, "")
-        .trim()
-        .toLowerCase();
-      local = await pool.query(
-        `SELECT id, name FROM doctors
-         WHERE LOWER(REPLACE(name, 'Dr. ', '')) ILIKE $1
-            OR LOWER(short_name) ILIKE $1
-         LIMIT 1`,
-        [`%${stripped}%`],
-      );
-    }
-
-    if (local.rows[0]) {
-      await pool.query(
-        `UPDATE doctors SET healthray_id = $2, specialty = COALESCE(specialty, $3) WHERE id = $1`,
-        [local.rows[0].id, hrid, specialty],
-      );
-      mapping.set(hrid, local.rows[0].name);
-    } else {
-      const res = await pool.query(
-        `INSERT INTO doctors (name, specialty, phone, role, healthray_id, is_active)
-         VALUES ($1, $2, $3, 'consultant', $4, true)
-         ON CONFLICT DO NOTHING
-         RETURNING id, name`,
-        [rayName, specialty, phone, hrid],
-      );
-      if (res.rows[0]) {
-        mapping.set(hrid, res.rows[0].name);
-        console.log(`[HealthRay Sync] New doctor created: ${rayName}`);
-      } else {
-        mapping.set(hrid, rayName);
-      }
-    }
-  }
-
-  return mapping;
-}
-
-// ── Upsert patient from appointment data ────────────────────────────────────
-async function upsertPatient(appt) {
+// ── Build patient data from HealthRay appointment ───────────────────────────
+function buildPatientData(appt) {
   const fm = appt.family_member || {};
   const pat = appt.patient || {};
-  const name = buildName(fm);
-  const phone = pat.mobile_no || null;
-  const sex = mapGender(fm.gender);
-  const age = calcAge(fm.birth_date);
-  const fileNo = appt.patient_case_id || null;
-  const address = appt.address?.address1 || null;
 
-  const existing = await pool.query(
-    `SELECT id, file_no FROM patients
-     WHERE ($1::text IS NOT NULL AND file_no = $1)
-        OR ($2::text IS NOT NULL AND phone = $2)
-     ORDER BY (file_no = $1::text) DESC NULLS LAST
-     LIMIT 1`,
-    [fileNo, phone],
-  );
+  const addr = pat.address || appt.address || {};
+  const addressParts = [
+    addr.house_no,
+    addr.street_address,
+    addr.address1,
+    addr.city,
+    addr.state,
+    addr.zipcode,
+  ].filter((p) => p && p !== "null");
 
-  if (existing.rows[0]) {
-    await pool.query(
-      `UPDATE patients SET
-        age = COALESCE(age, $2),
-        sex = COALESCE(sex, $3),
-        address = COALESCE(address, $4),
-        file_no = COALESCE(file_no, $5),
-        updated_at = NOW()
-       WHERE id = $1`,
-      [existing.rows[0].id, age, sex, address, fileNo],
-    );
-    return existing.rows[0].id;
+  let dob = null;
+  if (fm.birth_date) {
+    const [dd, mm, yyyy] = fm.birth_date.split("-").map(Number);
+    if (dd && mm && yyyy)
+      dob = `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
   }
 
-  try {
-    const res = await pool.query(
-      `INSERT INTO patients (name, phone, file_no, age, sex, address)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [name, phone, fileNo, age, sex, address],
-    );
-    return res.rows[0].id;
-  } catch (e) {
-    if (e.code === "23505") {
-      const dup = await pool.query(
-        `SELECT id FROM patients WHERE phone = $1 OR file_no = $2 LIMIT 1`,
-        [phone, fileNo],
-      );
-      return dup.rows[0]?.id || null;
-    }
-    throw e;
-  }
+  return {
+    name: buildName(fm),
+    phone: pat.mobile_no || null,
+    fileNo: appt.patient_case_id || null,
+    sex: mapGender(fm.gender),
+    age: calcAge(fm.birth_date),
+    address: addressParts.length > 0 ? addressParts.join(", ") : null,
+    dob,
+    email: pat.email || null,
+    bloodGroup: fm.blood_group || null,
+    abhaId: fm.abha_health_number || null,
+    healthId: fm.healthray_id || null,
+  };
 }
 
-// ── Sync a single appointment from HealthRay ────────────────────────────────
-async function syncAppointment(appt, localDoctorName) {
-  const healthrayId = String(appt.id);
-
-  // Skip if already synced
-  const exists = await pool.query(`SELECT id FROM appointments WHERE healthray_id = $1`, [
-    healthrayId,
-  ]);
-  if (exists.rows[0]) return { skipped: true, id: exists.rows[0].id };
-
-  const fm = appt.family_member || {};
-  const pat = appt.patient || {};
-  const name = appt.patient_name || buildName(fm);
-  const phone = pat.mobile_no || null;
-  const fileNo = appt.patient_case_id || null;
-  const sex = mapGender(fm.gender);
-  const age = calcAge(fm.birth_date);
-  const apptDate = appt.app_date_time
-    ? appt.app_date_time.split("T")[0]
-    : new Date().toISOString().split("T")[0];
-  const timeSlot = extractTimeSlot(appt.app_date_time);
-  const visitType = mapVisitType(appt.reason);
-  const status = mapStatus(appt.status);
-  const isWalkin = appt.tag === "Walk-in" || appt.booking_type === "Walk-in";
-  const notes = [appt.reason, appt.rmo_doctor ? `RMO: ${appt.rmo_doctor}` : null]
-    .filter(Boolean)
-    .join(" | ");
-
-  // Parse weight/height from HealthRay JSON strings
+// ── Build vitals & biomarkers from appointment data ─────────────────────────
+function buildVitalsAndBiomarkers(appt) {
   let weight = null,
     height = null,
     bmi = null;
@@ -316,13 +83,11 @@ async function syncAppointment(appt, localDoctorName) {
   } catch {}
   if (weight && height) bmi = +(weight / (height / 100) ** 2).toFixed(2);
 
-  // Build vitals JSONB
   const opdVitals = {};
   if (weight) opdVitals.weight = weight;
   if (height) opdVitals.height = height;
   if (bmi) opdVitals.bmi = bmi;
 
-  // Build biomarkers JSONB with follow-up and RMO
   const biomarkers = {};
   if (appt.followup_days) biomarkers.followup = appt.followup_days.split("T")[0];
   if (appt.rmo_doctor) biomarkers.rmo = appt.rmo_doctor;
@@ -331,93 +96,269 @@ async function syncAppointment(appt, localDoctorName) {
   if (appt.engaged_start) biomarkers.engagedStart = appt.engaged_start;
   if (appt.engaged_end) biomarkers.engagedEnd = appt.engaged_end;
   if (appt.appointment_number) biomarkers.appointmentNumber = appt.appointment_number;
+  if (weight) biomarkers.weight = weight;
 
-  // Upsert patient
-  const patientId = await upsertPatient(appt);
-
-  const { rows } = await pool.query(
-    `INSERT INTO appointments
-       (patient_id, patient_name, file_no, phone, doctor_name,
-        appointment_date, time_slot, visit_type, status, is_walkin,
-        age, sex, notes, healthray_id, opd_vitals, biomarkers)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb)
-     RETURNING id`,
-    [
-      patientId,
-      name,
-      fileNo,
-      phone,
-      localDoctorName,
-      apptDate,
-      timeSlot,
-      visitType,
-      status,
-      isWalkin,
-      age,
-      sex,
-      notes,
-      healthrayId,
-      JSON.stringify(opdVitals),
-      JSON.stringify(biomarkers),
-    ],
-  );
-
-  return { skipped: false, id: rows[0].id };
+  return { opdVitals, biomarkers };
 }
 
-// ── Main sync: today's appointments across all doctors ──────────────────────
-export async function syncWalkingAppointments() {
+// ── Fetch clinical text — handles show_previous_appointment fallback ────────
+async function fetchClinicalText(appt, healthrayId, doctorId) {
+  const clinicalData = await fetchClinicalNotes(healthrayId, doctorId);
+  if (!clinicalData || !Array.isArray(clinicalData)) return null;
+
+  const selCount = clinicalData.reduce(
+    (sum, m) =>
+      sum + (m.categories || []).reduce((s, c) => s + (c.topics?.selected?.length || 0), 0),
+    0,
+  );
+
+  // If 0 selected topics and show_previous_appointment, get from previous appointment
+  let effectiveData = clinicalData;
+  if (selCount === 0 && appt.show_previous_appointment) {
+    const patientHrId = appt.patient?.id || appt.self_user_id;
+    if (patientHrId) {
+      try {
+        const prevData = await fetchPreviousAppointmentData(healthrayId, patientHrId, doctorId);
+        if (prevData?.[0]?.menus?.length > 0) {
+          log(
+            "Enrich",
+            `${healthrayId}: Using previous appointment data (${prevData[0].menus.length} menus)`,
+          );
+          effectiveData = prevData[0].menus;
+        }
+      } catch {}
+    }
+    // DB fallback
+    if (effectiveData === clinicalData) {
+      const fileNo = appt.patient_case_id;
+      const phone = appt.patient?.mobile_no;
+      if (fileNo || phone) {
+        const { rows } = await findAppointmentWithNotes(fileNo, phone, healthrayId);
+        if (rows?.[0]?.healthray_id) {
+          try {
+            const prevNotes = await fetchClinicalNotes(rows[0].healthray_id, doctorId);
+            const prevSel = (prevNotes || []).reduce(
+              (sum, m) =>
+                sum +
+                (m.categories || []).reduce((s, c) => s + (c.topics?.selected?.length || 0), 0),
+              0,
+            );
+            if (prevSel > 0) {
+              log("Enrich", `${healthrayId}: Using DB previous appt ${rows[0].healthray_id}`);
+              effectiveData = prevNotes;
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  const sections = extractClinicalText(effectiveData);
+  return Object.values(sections).join("\n\n---\n\n");
+}
+
+// ── Sync documents for an appointment ───────────────────────────────────────
+async function syncAppointmentDocs(healthrayId, patientId, apptDate) {
+  try {
+    const records = await fetchMedicalRecords(healthrayId);
+    if (records?.length > 0) await syncDocuments(patientId, records, apptDate);
+  } catch {}
+}
+
+// ── Sync a single appointment ───────────────────────────────────────────────
+async function syncAppointment(appt, localDoctorName) {
+  const healthrayId = String(appt.id);
+  const doctorId = appt.doctor_id || appt.doctor?.id;
+  const existing = await findAppointment(healthrayId);
+  const apptDate = toISTDate(appt.app_date_time);
+  const status = mapStatus(appt.status);
+  const isCompleted = status === "completed";
+
+  // ── FAST PATH: completed appointment with notes — only sync new docs ──
+  // Completed appointments won't get new clinical notes, so skip re-enrichment
+  if (existing && isCompleted && existing.healthray_clinical_notes) {
+    if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+    return { skipped: true, id: existing.id };
+  }
+
+  // ── Build patient & vitals ──
+  const patientData = buildPatientData(appt);
+  const patientId = await upsertPatient(patientData);
+  const { opdVitals, biomarkers } = buildVitalsAndBiomarkers(appt);
+
+  // ── Fetch clinical text ──
+  // API calls: 1 fetchClinicalNotes + (maybe 1 fetchPreviousAppointmentData if show_previous)
+  let clinical = {
+    clinicalRaw: null,
+    parsedClinical: null,
+    healthrayDiagnoses: [],
+    healthrayMedications: [],
+    healthrayLabs: [],
+    healthrayAdvice: null,
+  };
+
+  if (doctorId) {
+    try {
+      const rawText = await fetchClinicalText(appt, healthrayId, doctorId);
+
+      if (rawText && rawText.trim().length > 20) {
+        // Skip AI if text unchanged
+        if (rawText === (existing?.healthray_clinical_notes || "")) {
+          await syncAppointmentDocs(healthrayId, patientId, apptDate);
+          return { skipped: true, id: existing.id };
+        }
+
+        // Parse with AI
+        const parsed = await parseClinicalWithAI(rawText);
+        clinical.clinicalRaw = rawText;
+
+        if (parsed) {
+          clinical.parsedClinical = parsed;
+          clinical.healthrayDiagnoses = parsed.diagnoses || [];
+          clinical.healthrayMedications = parsed.medications || [];
+          clinical.healthrayLabs = parsed.labs || [];
+          clinical.healthrayAdvice = parsed.advice || null;
+
+          // Merge vitals
+          const v = parsed.vitals || {};
+          if (v.height && !opdVitals.height) opdVitals.height = v.height;
+          if (v.weight && !opdVitals.weight) opdVitals.weight = v.weight;
+          if (v.bmi && !opdVitals.bmi) opdVitals.bmi = v.bmi;
+          if (v.bpSys) opdVitals.bpSys = v.bpSys;
+          if (v.bpDia) opdVitals.bpDia = v.bpDia;
+          if (v.waist) opdVitals.waist = v.waist;
+          if (v.bodyFat) opdVitals.bodyFat = v.bodyFat;
+
+          if (opdVitals.weight) biomarkers.weight = opdVitals.weight;
+          if (opdVitals.waist) biomarkers.waist = opdVitals.waist;
+          if (opdVitals.bpSys) biomarkers.bpSys = opdVitals.bpSys;
+          if (opdVitals.bpDia) biomarkers.bpDia = opdVitals.bpDia;
+
+          mapLabsToBiomarkers(clinical.healthrayLabs, biomarkers);
+
+          log(
+            "Enrich",
+            `${healthrayId}: ${clinical.healthrayDiagnoses.length} dx, ${clinical.healthrayLabs.length} labs, ${clinical.healthrayMedications.length} meds`,
+          );
+        }
+      }
+    } catch (e) {
+      error("Enrich", `${healthrayId}: ${e.message}`);
+    }
+  }
+
+  // ── Build compliance ──
+  const compliance = buildCompliance(
+    clinical.parsedClinical,
+    clinical.healthrayMedications,
+    clinical.healthrayAdvice,
+  );
+  if (Object.keys(compliance).length > 0) {
+    log("Compliance", `${healthrayId}: ${Object.keys(compliance).join(",")}`);
+  }
+
+  // ── Save appointment ──
+  const localApptId = await upsertAppointment(existing?.id || null, {
+    patientId,
+    name: appt.patient_name || patientData.name,
+    fileNo: patientData.fileNo,
+    phone: patientData.phone,
+    localDoctorName,
+    apptDate,
+    timeSlot: extractTimeSlot(appt.app_date_time),
+    visitType: mapVisitType(appt.reason),
+    status,
+    isWalkin: appt.tag === "Walk-in" || appt.booking_type === "Walk-in",
+    age: patientData.age,
+    sex: patientData.sex,
+    notes: [appt.reason, appt.rmo_doctor ? `RMO: ${appt.rmo_doctor}` : null]
+      .filter(Boolean)
+      .join(" | "),
+    healthrayId,
+    opdVitals,
+    biomarkers,
+    compliance,
+    clinicalRaw: clinical.clinicalRaw,
+    healthrayDiagnoses: clinical.healthrayDiagnoses,
+    healthrayMedications: clinical.healthrayMedications,
+    healthrayLabs: clinical.healthrayLabs,
+    healthrayAdvice: clinical.healthrayAdvice,
+  });
+
+  // ── Sync to normalized tables + documents ──
+  await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
+  await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
+  await syncAppointmentDocs(healthrayId, patientId, apptDate);
+
+  return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };
+}
+
+// ── Run sync for a given date ───────────────────────────────────────────────
+async function runSync(date) {
   const startTime = Date.now();
-  const today = new Date().toISOString().split("T")[0];
-  console.log(`[HealthRay Sync] Starting appointment sync for ${today}...`);
+  log("Sync", `Starting for ${date}...`);
 
   try {
     await ensureSyncColumns();
 
     const rayDoctors = await fetchDoctors();
     const doctorMap = await syncDoctors(rayDoctors);
-    console.log(`[HealthRay Sync] ${doctorMap.size} doctors mapped`);
+    log("Sync", `${doctorMap.size} doctors mapped`);
 
-    let totalCreated = 0;
-    let totalSkipped = 0;
-    let totalErrors = 0;
+    let totalCreated = 0,
+      totalSkipped = 0,
+      totalEnriched = 0,
+      totalErrors = 0;
 
     for (const doc of rayDoctors) {
       if (doc.is_deactivated) continue;
 
       const localName = doctorMap.get(doc.id) || doc.doctor_name;
       try {
-        const appointments = await fetchAppointments(doc.id, today);
+        const appointments = await fetchAppointments(doc.id, date);
         if (!appointments || appointments.length === 0) continue;
 
-        console.log(`[HealthRay Sync] ${localName}: ${appointments.length} appointments`);
+        log("Sync", `${localName}: ${appointments.length} appointments`);
 
         for (const appt of appointments) {
           try {
             const result = await syncAppointment(appt, localName);
             if (result.skipped) totalSkipped++;
-            else totalCreated++;
+            else {
+              totalCreated++;
+              if (result.enriched) totalEnriched++;
+            }
           } catch (e) {
             totalErrors++;
-            console.error(`[HealthRay Sync] Error syncing appt ${appt.id}:`, e.message);
+            error("Sync", `Appt ${appt.id}: ${e.message}`);
           }
         }
       } catch (e) {
-        console.error(`[HealthRay Sync] Error for ${localName}:`, e.message);
+        error("Sync", `${localName}: ${e.message}`);
       }
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(
-      `[HealthRay Sync] Done in ${elapsed}s — created: ${totalCreated}, skipped: ${totalSkipped}, errors: ${totalErrors}`,
+    log(
+      "Sync",
+      `Done ${date} in ${elapsed}s — created: ${totalCreated}, enriched: ${totalEnriched}, skipped: ${totalSkipped}, errors: ${totalErrors}`,
     );
 
-    return { totalCreated, totalSkipped, totalErrors };
+    return { date, totalCreated, totalEnriched, totalSkipped, totalErrors };
   } catch (e) {
-    console.error(`[HealthRay Sync] Fatal error:`, e.message);
+    error("Sync", `Fatal: ${e.message}`);
     throw e;
   }
 }
 
-// ── Alias for cron (same as main sync — always today) ───────────────────────
+// ── Public API ──────────────────────────────────────────────────────────────
+
+export function syncWalkingAppointmentsByDate(date) {
+  return runSync(date);
+}
+
+export function syncWalkingAppointments() {
+  return runSync(toISTDate(new Date().toISOString()));
+}
+
 export const syncTodayWalkingAppointments = syncWalkingAppointments;
