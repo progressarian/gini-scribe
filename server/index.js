@@ -23,7 +23,7 @@ import alertRoutes from "./routes/alerts.js";
 import healthLogRoutes from "./routes/health-logs.js";
 import syncRoutes from "./routes/sync.js";
 import { startCronJobs } from "./services/cron/index.js";
-import { startSheetsCron } from "./services/cron/sheetsSync.js";
+// import { startSheetsCron } from "./services/cron/sheetsSync.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -96,5 +96,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`);
   startCronJobs();
-  startSheetsCron();
+  // startSheetsCron();
 });
