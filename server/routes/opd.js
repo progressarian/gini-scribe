@@ -36,6 +36,26 @@ pool
     console.log("✅ OPD columns ready");
     // Backfill existing OPD consultations with prescription data from documents
     backfillOpdConsultations().catch((e) => console.log("OPD backfill:", e.message));
+    // One-time patch: copy weight/waist/BP from opd_vitals into biomarkers for Labs tab
+    pool
+      .query(
+        `
+      UPDATE appointments
+      SET biomarkers = biomarkers
+        || CASE WHEN opd_vitals->>'weight' IS NOT NULL THEN jsonb_build_object('weight', (opd_vitals->>'weight')::numeric) ELSE '{}'::jsonb END
+        || CASE WHEN opd_vitals->>'waist' IS NOT NULL THEN jsonb_build_object('waist', (opd_vitals->>'waist')::numeric) ELSE '{}'::jsonb END
+        || CASE WHEN opd_vitals->>'bpSys' IS NOT NULL THEN jsonb_build_object('bpSys', (opd_vitals->>'bpSys')::numeric) ELSE '{}'::jsonb END
+        || CASE WHEN opd_vitals->>'bpDia' IS NOT NULL THEN jsonb_build_object('bpDia', (opd_vitals->>'bpDia')::numeric) ELSE '{}'::jsonb END
+      WHERE healthray_id IS NOT NULL
+        AND opd_vitals != '{}'::jsonb
+        AND (biomarkers->>'weight' IS NULL OR biomarkers->>'waist' IS NULL OR biomarkers->>'bpSys' IS NULL)
+    `,
+      )
+      .then((r) => {
+        if (r.rowCount > 0)
+          console.log(`✅ Patched ${r.rowCount} appointments: vitals → biomarkers`);
+      })
+      .catch(() => {});
   })
   .catch((e) => console.log("OPD migration:", e.message));
 
@@ -235,7 +255,7 @@ router.get("/opd/appointments", async (req, res) => {
          FROM appointments a
          LEFT JOIN patients p ON p.id = a.patient_id
         WHERE a.appointment_date = $1
-        ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC`,
+        ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
       [date],
     );
     res.json(rows);
@@ -250,7 +270,7 @@ router.get("/opd/patient-docs/:patientId", async (req, res) => {
     const { rows } = await pool.query(
       `SELECT id, doc_type, title, file_name, doc_date, source, notes, storage_path, extracted_data, created_at
          FROM documents
-        WHERE patient_id = $1 AND source = 'opd_upload'
+        WHERE patient_id = $1 AND source IN ('opd_upload', 'healthray')
         ORDER BY created_at DESC`,
       [req.params.patientId],
     );

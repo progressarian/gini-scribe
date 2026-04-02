@@ -22,6 +22,9 @@ import aiRoutes from "./routes/ai.js";
 import alertRoutes from "./routes/alerts.js";
 import healthLogRoutes from "./routes/health-logs.js";
 import visitRoutes from "./routes/visit.js";
+import syncRoutes from "./routes/sync.js";
+import { startCronJobs } from "./services/cron/index.js";
+// import { startSheetsCron } from "./services/cron/sheetsSync.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,6 +56,9 @@ app.use((req, res, next) => {
   const limit = isLarge ? "50mb" : isMedium ? "5mb" : "1mb";
   express.json({ limit })(req, res, next);
 });
+
+// Sync routes (no auth — internal/admin)
+app.use("/api", syncRoutes);
 
 // Auth middleware (attaches req.doctor if valid token, blocks unauthenticated on protected routes)
 app.use(authMiddleware);
@@ -89,4 +95,8 @@ app.get("*", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`);
+  startCronJobs();
+  // startSheetsCron();
+});
