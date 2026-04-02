@@ -20,7 +20,8 @@ pool
     ADD COLUMN IF NOT EXISTS sex            TEXT,
     ADD COLUMN IF NOT EXISTS visit_count    INTEGER DEFAULT 1,
     ADD COLUMN IF NOT EXISTS last_visit_date DATE,
-    ADD COLUMN IF NOT EXISTS consultation_id INTEGER;
+    ADD COLUMN IF NOT EXISTS consultation_id INTEGER,
+    ADD COLUMN IF NOT EXISTS checked_in_at  TIMESTAMPTZ;
 
   ALTER TABLE lab_results  ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
   ALTER TABLE vitals       ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
@@ -34,9 +35,7 @@ pool
   .then(() => {
     console.log("✅ OPD columns ready");
     // Backfill existing OPD consultations with prescription data from documents
-    backfillOpdConsultations().catch((e) =>
-      console.log("OPD backfill:", e.message),
-    );
+    backfillOpdConsultations().catch((e) => console.log("OPD backfill:", e.message));
   })
   .catch((e) => console.log("OPD migration:", e.message));
 
@@ -77,9 +76,7 @@ async function backfillOpdConsultations() {
         if (rx.diagnoses?.length) {
           parts.push(
             "DIAGNOSIS:\n" +
-              rx.diagnoses
-                .map((d) => `${d.label}${d.status ? ` (${d.status})` : ""}`)
-                .join("\n"),
+              rx.diagnoses.map((d) => `${d.label}${d.status ? ` (${d.status})` : ""}`).join("\n"),
           );
           for (const d of rx.diagnoses) {
             if (d.id) allDiags.push(d);
@@ -119,7 +116,18 @@ async function backfillOpdConsultations() {
       // Add biomarker/compliance notes from consultation data
       const conDataBio = (con.con_data || {}).biomarkers || {};
       const comp = (con.mo_data || {}).compliance || con.mo_data || {};
-      const bioLabels = { hba1c: "HbA1c", fg: "FPG", bpSys: "BP Sys", ldl: "LDL", tg: "TG", uacr: "UACR", weight: "Weight", creatinine: "Creatinine", tsh: "TSH", hb: "Hb" };
+      const bioLabels = {
+        hba1c: "HbA1c",
+        fg: "FPG",
+        bpSys: "BP Sys",
+        ldl: "LDL",
+        tg: "TG",
+        uacr: "UACR",
+        weight: "Weight",
+        creatinine: "Creatinine",
+        tsh: "TSH",
+        hb: "Hb",
+      };
       const bioLines = [];
       for (const [k, v] of Object.entries(conDataBio)) {
         if (v != null && v !== "" && bioLabels[k]) bioLines.push(`${bioLabels[k]}: ${v}`);
@@ -271,10 +279,14 @@ router.patch("/appointments/:id", async (req, res) => {
 
     const { rows } = await client.query(
       `UPDATE appointments
-          SET status      = COALESCE($2, status),
-              category    = COALESCE($3, category),
-              doctor_name = COALESCE($4, doctor_name),
-              updated_at  = NOW()
+          SET status        = COALESCE($2, status),
+              category      = COALESCE($3, category),
+              doctor_name   = COALESCE($4, doctor_name),
+              checked_in_at = CASE
+                                WHEN $2 = 'checkedin' AND checked_in_at IS NULL THEN NOW()
+                                ELSE checked_in_at
+                              END,
+              updated_at    = NOW()
         WHERE id = $1
         RETURNING *`,
       [req.params.id, status || null, category || null, doctor_name || null],
@@ -298,9 +310,26 @@ router.patch("/appointments/:id", async (req, res) => {
       if (compliance.missed) notes.push(`Missed: ${compliance.missed}`);
       if (compliance.notes) notes.push(`Notes: ${compliance.notes}`);
 
-      const opdMeds = appt.opd_medications || [];
-      const opdDiags = appt.opd_diagnoses || [];
-      const opdStopped = appt.opd_stopped_medications || [];
+      // Read current truth from tables (not stale JSONB on appointment)
+      const liveMedsR = await client.query(
+        `SELECT name, dose, frequency, timing, route, is_active FROM medications
+         WHERE patient_id = $1 AND is_active = true ORDER BY created_at DESC`,
+        [appt.patient_id],
+      );
+      const liveStoppedR = await client.query(
+        `SELECT name, dose, stop_reason FROM medications
+         WHERE patient_id = $1 AND is_active = false AND stopped_date >= CURRENT_DATE - INTERVAL '30 days'
+         ORDER BY stopped_date DESC`,
+        [appt.patient_id],
+      );
+      const liveDiagsR = await client.query(
+        `SELECT diagnosis_id AS id, label, status FROM diagnoses
+         WHERE patient_id = $1 AND is_active != false ORDER BY created_at DESC`,
+        [appt.patient_id],
+      );
+      const opdMeds = liveMedsR.rows;
+      const opdDiags = liveDiagsR.rows;
+      const opdStopped = liveStoppedR.rows;
 
       // Build con_transcript from OPD prescription documents for "View Prescription"
       const rxDocs = await client.query(
@@ -399,21 +428,18 @@ router.patch("/appointments/:id", async (req, res) => {
       );
       const consultationId = conRes.rows[0].id;
 
-      // ── Insert diagnoses into diagnoses table (like normal patient flow) ──
-      for (const d of opdDiags) {
-        if (!d?.id || !d?.label) continue;
-        await client.query(
-          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
-             SET label = EXCLUDED.label,
-                 status = EXCLUDED.status,
-                 consultation_id = EXCLUDED.consultation_id`,
-          [appt.patient_id, consultationId, d.id, d.label, d.status || "Controlled"],
-        );
-      }
+      // ── Link all patient records to this consultation ──
+      // Tables are the single source of truth — OPD prep AND visit page both write
+      // directly to them, so we just link (don't re-insert from stale JSONB).
 
-      // Link lab_results, vitals, and medications to this consultation
+      // Link diagnoses that don't have a consultation yet
+      await client.query(
+        `UPDATE diagnoses SET consultation_id = $1
+         WHERE patient_id = $2 AND (consultation_id IS NULL OR consultation_id = $1)`,
+        [consultationId, appt.patient_id],
+      );
+
+      // Link lab_results, vitals, medications by appointment_id
       await client.query(`UPDATE lab_results SET consultation_id = $1 WHERE appointment_id = $2`, [
         consultationId,
         appt.id,
@@ -426,19 +452,46 @@ router.patch("/appointments/:id", async (req, res) => {
         consultationId,
         appt.id,
       ]);
-
-      // Link OPD documents to this consultation
+      // Also link medications that were edited during the visit (may not have appointment_id)
       await client.query(
-        `UPDATE documents SET consultation_id = $1 WHERE patient_id = $2 AND source = 'opd_upload'  AND consultation_id IS NULL`,
+        `UPDATE medications SET consultation_id = $1
+         WHERE patient_id = $2 AND is_active = true AND consultation_id IS NULL`,
         [consultationId, appt.patient_id],
       );
 
-      // Store consultation_id on the appointment
-      await client.query(`UPDATE appointments SET consultation_id = $1 WHERE id = $2`, [
-        consultationId,
-        appt.id,
-      ]);
+      // Link OPD documents to this consultation
+      await client.query(
+        `UPDATE documents SET consultation_id = $1 WHERE patient_id = $2 AND source = 'opd_upload' AND consultation_id IS NULL`,
+        [consultationId, appt.patient_id],
+      );
+      // Also link documents uploaded during the visit
+      await client.query(
+        `UPDATE documents SET consultation_id = $1
+         WHERE patient_id = $2 AND consultation_id IS NULL AND created_at > $3`,
+        [consultationId, appt.patient_id, appt.checked_in_at || appt.created_at],
+      );
+
+      // Store consultation_id on the appointment AND sync live table data back to JSONB
+      // so OPD page always shows current state (not stale prep data)
+      await client.query(
+        `UPDATE appointments SET
+           consultation_id = $1,
+           opd_medications = $2::jsonb,
+           opd_diagnoses = $3::jsonb,
+           opd_stopped_medications = $4::jsonb
+         WHERE id = $5`,
+        [
+          consultationId,
+          JSON.stringify(opdMeds),
+          JSON.stringify(opdDiags),
+          JSON.stringify(opdStopped),
+          appt.id,
+        ],
+      );
       appt.consultation_id = consultationId;
+      appt.opd_medications = opdMeds;
+      appt.opd_diagnoses = opdDiags;
+      appt.opd_stopped_medications = opdStopped;
     }
 
     await client.query("COMMIT");
@@ -573,13 +626,22 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         [appt.patient_id, appt.id],
       );
 
-      // Insert active medicines
+      // Insert active medicines (upsert — update if same drug already active)
       for (const m of medications || []) {
         if (!m?.name) continue;
         await client.query(
           `INSERT INTO medications
              (patient_id, appointment_id, name, composition, dose, frequency, timing, route, is_new, is_active, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'opd')`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'opd')
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+           DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
+             composition = COALESCE(EXCLUDED.composition, medications.composition),
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+             timing = COALESCE(EXCLUDED.timing, medications.timing),
+             route = COALESCE(EXCLUDED.route, medications.route),
+             source = EXCLUDED.source,
+             updated_at = NOW()`,
           [
             appt.patient_id,
             appt.id,
@@ -599,7 +661,12 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         await client.query(
           `INSERT INTO medications
              (patient_id, appointment_id, name, dose, is_new, is_active, source)
-           VALUES ($1, $2, $3, $4, false, false, 'opd')`,
+           VALUES ($1, $2, $3, $4, false, false, 'opd')
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+           DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             source = EXCLUDED.source,
+             updated_at = NOW()`,
           [appt.patient_id, appt.id, (m.name || "").slice(0, 200), (m.reason || "").slice(0, 100)],
         );
       }

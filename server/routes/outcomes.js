@@ -119,17 +119,20 @@ router.get("/patients/:id/outcomes", async (req, res) => {
     );
 
     const visits = await pool.query(
-      `SELECT id, visit_date, visit_type, mo_name, con_name, status,
-       mo_data->'history' as history, mo_data->'complications' as complications,
-       mo_data->'symptoms' as symptoms, mo_data->'compliance' as compliance,
-       mo_data->'chief_complaints' as chief_complaints,
-       mo_data->'diagnoses' as diagnoses,
-       mo_data->'stopped_medications' as stopped_medications,
-       con_data->'diet_lifestyle' as lifestyle, con_data->'self_monitoring' as monitoring,
-       con_data->'assessment_summary' as summary,
-       con_data->'medications_confirmed' as medications_confirmed,
-       con_transcript
-       FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC`,
+      `SELECT c.id, c.visit_date, c.visit_type, c.mo_name, c.con_name, c.status,
+       c.mo_data->'history' as history, c.mo_data->'complications' as complications,
+       c.mo_data->'symptoms' as symptoms, c.mo_data->'compliance' as compliance,
+       c.mo_data->'chief_complaints' as chief_complaints,
+       c.mo_data->'diagnoses' as diagnoses,
+       c.mo_data->'stopped_medications' as stopped_medications,
+       c.con_data->'diet_lifestyle' as lifestyle, c.con_data->'self_monitoring' as monitoring,
+       c.con_data->'assessment_summary' as summary,
+       -- Live medications from table (not stale JSONB snapshot)
+       (SELECT json_agg(json_build_object('name', m.name, 'dose', m.dose, 'frequency', m.frequency,
+          'timing', m.timing, 'pharmacy_match', m.pharmacy_match, 'is_active', m.is_active))
+        FROM medications m WHERE m.consultation_id = c.id) as medications_confirmed,
+       c.con_transcript
+       FROM consultations c WHERE c.patient_id=$1 ORDER BY c.visit_date DESC`,
       [id],
     );
 

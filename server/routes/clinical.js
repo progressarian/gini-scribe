@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { n, num } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
+import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { labCreateSchema } from "../schemas/index.js";
 
@@ -43,12 +44,13 @@ router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) =>
     const numericResult = num(result);
     const resultText = numericResult === null && result ? String(result) : null;
     const r = await pool.query(
-      `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, result_text, unit, flag, ref_range, test_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, result_text, unit, flag, ref_range, test_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [
         req.params.id,
         n(consultation_id),
         test_name,
+        getCanonical(test_name),
         numericResult,
         resultText,
         n(unit),

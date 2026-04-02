@@ -3,6 +3,7 @@ import pool from "../config/db.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
+import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
 
@@ -70,7 +71,9 @@ async function refreshOpdConsultations(client, patientId) {
     if (rx.advice?.length) parts.push("ADVICE:\n" + rx.advice.join("\n"));
     if (rx.follow_up) parts.push("FOLLOW UP: " + rx.follow_up);
     if (rx.doctor_name)
-      transcriptParts.push(`Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`);
+      transcriptParts.push(
+        `Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`,
+      );
     if (parts.length) transcriptParts.push(parts.join("\n\n"));
     transcriptParts.push("");
   }
@@ -374,7 +377,7 @@ router.patch("/documents/:id", async (req, res) => {
               testDate,
               panel.panel_name || null,
               test.test_name,
-              test.test_name,
+              getCanonical(test.test_name) || test.test_name,
               isNaN(numResult) ? null : numResult,
               test.result_text || null,
               test.unit || null,
@@ -407,7 +410,17 @@ router.patch("/documents/:id", async (req, res) => {
         await client.query(
           `INSERT INTO medications
              (patient_id, document_id, consultation_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+           DO UPDATE SET document_id = EXCLUDED.document_id,
+             consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+             timing = COALESCE(EXCLUDED.timing, medications.timing),
+             route = COALESCE(EXCLUDED.route, medications.route),
+             source = EXCLUDED.source,
+             started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+             updated_at = NOW()`,
           [
             doc.patient_id,
             doc.id,
@@ -428,8 +441,19 @@ router.patch("/documents/:id", async (req, res) => {
         await client.query(
           `INSERT INTO medications
              (patient_id, document_id, consultation_id, name, is_new, is_active, source, started_date)
-           VALUES ($1, $2, $3, $4, false, false, 'report_extract', $5)`,
-          [doc.patient_id, doc.id, doc.consultation_id || null, (m.name || "").slice(0, 200), rxDate],
+           VALUES ($1, $2, $3, $4, false, false, 'report_extract', $5)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+           DO UPDATE SET document_id = EXCLUDED.document_id,
+             consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
+             source = EXCLUDED.source,
+             updated_at = NOW()`,
+          [
+            doc.patient_id,
+            doc.id,
+            doc.consultation_id || null,
+            (m.name || "").slice(0, 200),
+            rxDate,
+          ],
         );
       }
 

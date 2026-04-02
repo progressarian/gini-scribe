@@ -24,4 +24,5 @@ export const ROUTE_MAP = {
   ai: "/ai",
   reports: "/reports",
   ci: "/ci",
+  visit: "/visit",
 };

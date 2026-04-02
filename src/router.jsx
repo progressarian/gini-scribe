@@ -33,6 +33,7 @@ import ReportsPage from "./pages/ReportsPage";
 import CIPage from "./pages/CIPage";
 import FindPage from "./pages/FindPage";
 import OPD from "./OPD";
+import VisitPage from "./pages/VisitPage";
 
 const router = createBrowserRouter([
   // Public routes
@@ -88,6 +89,8 @@ const router = createBrowserRouter([
           { path: "/ci", element: <CIPage /> },
           // OPD Manager
           { path: "/opd", element: <OPD /> },
+          // Visit view
+          { path: "/visit", element: <VisitPage /> },
         ],
       },
     ],

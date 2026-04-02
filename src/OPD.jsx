@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
+import usePatientStore from "./stores/patientStore.js";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -142,9 +144,32 @@ function isReady(a) {
 
 function statusSty(s) {
   if (s === "seen") return { dot: "#22c55e", label: "Seen", bg: GNL, color: GN };
+  if (s === "in_visit") return { dot: "#8b5cf6", label: "In Visit", bg: "#f5f3ff", color: "#7c3aed" };
   if (s === "checkedin") return { dot: SK, label: "Checked In", bg: SKL, color: SK };
   if (s === "prepped") return { dot: T, label: "Ready", bg: TL, color: T };
   return { dot: BD2, label: "Pending", bg: BG, color: INK3 };
+}
+
+// ── Wait timer: minutes since check-in ──
+function WaitTime({ checkedInAt }) {
+  const [mins, setMins] = React.useState(0);
+  React.useEffect(() => {
+    if (!checkedInAt) return;
+    const calc = () => Math.max(0, Math.floor((Date.now() - new Date(checkedInAt).getTime()) / 60000));
+    setMins(calc());
+    const id = setInterval(() => setMins(calc()), 30000);
+    return () => clearInterval(id);
+  }, [checkedInAt]);
+  if (!checkedInAt) return null;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  const color = mins >= 45 ? RE : mins >= 20 ? AM : GN;
+  return (
+    <span style={{ fontFamily: FM, fontSize: 10, fontWeight: 600, color, marginLeft: 4 }}>
+      ⏱ {label}
+    </span>
+  );
 }
 
 function fmtDate(d) {
@@ -301,7 +326,7 @@ function ApptRow({ a, sel, onSelect }) {
         borderBottom: `1px solid rgba(0,0,0,.04)`,
         cursor: "pointer",
         alignItems: "flex-start",
-        opacity: a.status === "seen" ? 0.6 : 1,
+        opacity: a.status === "seen" ? 0.6 : a.status === "in_visit" ? 0.85 : 1,
         background: isSel ? TL : "transparent",
         borderLeft: isSel ? `3px solid ${T}` : "3px solid transparent",
         transition: "background .1s",
@@ -432,9 +457,15 @@ function ApptRow({ a, sel, onSelect }) {
             borderRadius: 4,
             background: ss.bg,
             color: ss.color,
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
           }}
         >
           {ss.label}
+          {(a.status === "checkedin" || a.status === "in_visit") && (
+            <WaitTime checkedInAt={a.checked_in_at} />
+          )}
         </span>
         <div style={{ display: "flex", gap: 2 }}>
           {["biomarkers", "compliance", "categorized", "assigned"].map((k) => (
@@ -456,7 +487,7 @@ function ApptRow({ a, sel, onSelect }) {
 // ══════════════════════════════════════════════════════════════
 function DocSection({ docName, appts, selAppt, onSelect }) {
   const [open, setOpen] = useState(true);
-  const seen = appts.filter((a) => a.status === "seen").length;
+  const seen = appts.filter((a) => a.status === "seen" || a.status === "in_visit").length;
   const initials =
     docName
       .replace(/^Dr\.\s*/i, "")
@@ -558,10 +589,10 @@ function EmptyState({ onNew, onImport, stats }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 11,
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: 9,
           width: "100%",
-          maxWidth: 520,
+          maxWidth: 680,
           marginBottom: 24,
         }}
       >
@@ -569,6 +600,7 @@ function EmptyState({ onNew, onImport, stats }) {
           { ico: "📋", val: stats.total, l: "Total", c: INK },
           { ico: "⏳", val: stats.pending, l: "Pending", c: stats.pending ? AM : INK3 },
           { ico: "🔵", val: stats.checkedin, l: "Checked In", c: stats.checkedin ? SK : INK3 },
+          { ico: "🩺", val: stats.in_visit, l: "In Visit", c: stats.in_visit ? "#7c3aed" : INK3 },
           { ico: "✅", val: stats.seen, l: "Seen", c: stats.seen ? GN : INK3 },
         ].map((s) => (
           <div
@@ -737,7 +769,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
               : "Complete remaining steps before the visit."}
           </div>
         </div>
-        {ready && appt.status !== "checkedin" && appt.status !== "seen" && (
+        {ready && appt.status !== "checkedin" && appt.status !== "in_visit" && appt.status !== "seen" && (
           <button
             onClick={onCheckIn}
             style={{
@@ -3146,6 +3178,7 @@ function CheckInTab({ appt, onCheckIn, onMarkSeen }) {
     { t: `Doctor: ${appt.doctor_name || "Not assigned"}`, done: ps.assigned },
   ];
   const isCI = appt.status === "checkedin",
+    isIV = appt.status === "in_visit",
     isSeen = appt.status === "seen";
 
   return (
@@ -3159,36 +3192,40 @@ function CheckInTab({ appt, onCheckIn, onMarkSeen }) {
           alignItems: "center",
           gap: 13,
           boxShadow: SH,
-          background: isCI ? SKL : isSeen ? GNL : ready ? GNL : AML,
-          border: `1px solid ${isCI ? SKB : isSeen ? GNB : ready ? GNB : AMB}`,
+          background: isIV ? "#f5f3ff" : isCI ? SKL : isSeen ? GNL : ready ? GNL : AML,
+          border: `1px solid ${isIV ? "rgba(124,58,237,.2)" : isCI ? SKB : isSeen ? GNB : ready ? GNB : AMB}`,
         }}
       >
-        <div style={{ fontSize: 26 }}>{isCI ? "🔵" : isSeen ? "✅" : ready ? "✅" : "⏳"}</div>
+        <div style={{ fontSize: 26 }}>{isIV ? "🩺" : isCI ? "🔵" : isSeen ? "✅" : ready ? "✅" : "⏳"}</div>
         <div>
           <div
             style={{
               fontSize: 13,
               fontWeight: 600,
               marginBottom: 3,
-              color: isCI ? SK : isSeen ? GN : ready ? GN : AM,
+              color: isIV ? "#7c3aed" : isCI ? SK : isSeen ? GN : ready ? GN : AM,
             }}
           >
-            {isCI
-              ? "Patient checked in — awaiting doctor"
-              : isSeen
-                ? "Visit completed"
-                : ready
-                  ? "Ready to check in"
-                  : "Complete prep steps first"}
+            {isIV
+              ? "Doctor is seeing the patient"
+              : isCI
+                ? "Patient checked in — ready to start visit"
+                : isSeen
+                  ? "Visit completed"
+                  : ready
+                    ? "Ready to check in"
+                    : "Complete prep steps first"}
           </div>
-          <div style={{ fontSize: 11, color: INK3, lineHeight: 1.5 }}>
-            {isCI
-              ? "Patient is in the waiting area. Record vitals in the Vitals tab."
-              : isSeen
-                ? "This appointment has been completed."
-                : ready
-                  ? "All steps done. Check in when patient arrives."
-                  : "All 4 prep steps must be completed."}
+          <div style={{ fontSize: 11, color: INK3, lineHeight: 1.5, display: "flex", alignItems: "center", gap: 6 }}>
+            {isIV
+              ? <>Visit in progress. End visit from the visit page.<WaitTime checkedInAt={appt.checked_in_at} /></>
+              : isCI
+                ? <>Waiting for doctor.<WaitTime checkedInAt={appt.checked_in_at} /></>
+                : isSeen
+                  ? "This appointment has been completed."
+                  : ready
+                    ? "All steps done. Check in when patient arrives."
+                    : "All 4 prep steps must be completed."}
           </div>
         </div>
       </div>
@@ -3239,7 +3276,7 @@ function CheckInTab({ appt, onCheckIn, onMarkSeen }) {
           ))}
         </div>
       </div>
-      {!isSeen && (
+      {!isSeen && !isIV && (
         <div style={{ display: "flex", gap: 9 }}>
           {!isCI && (
             <button
@@ -3275,7 +3312,7 @@ function CheckInTab({ appt, onCheckIn, onMarkSeen }) {
                 fontFamily: FB,
               }}
             >
-              ✅ Mark as Seen
+              🩺 Start Visit
             </button>
           )}
         </div>
@@ -3293,7 +3330,23 @@ function CheckInTab({ appt, onCheckIn, onMarkSeen }) {
             fontWeight: 500,
           }}
         >
-          📏 Patient is checked in — go to <strong>Vitals</strong> tab to record clinic measurements
+          📏 Patient is checked in — record <strong>Vitals</strong> then click <strong>Start Visit</strong> when doctor is ready
+        </div>
+      )}
+      {isIV && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: "10px 14px",
+            background: "#f5f3ff",
+            border: "1px solid rgba(124,58,237,.2)",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "#7c3aed",
+            fontWeight: 500,
+          }}
+        >
+          🩺 Visit in progress — the doctor will end the visit from the visit page
         </div>
       )}
     </div>
@@ -3317,9 +3370,11 @@ function PatientDetail({
   allAppts,
   showToast,
 }) {
+  const navigate = useNavigate();
+  const setDbPatientId = usePatientStore((s) => s.setDbPatientId);
   const ps = appt.prep_steps || {},
     ss = statusSty(appt.status);
-  const showVitals = appt.status === "checkedin" || appt.status === "seen";
+  const showVitals = appt.status === "checkedin" || appt.status === "in_visit" || appt.status === "seen";
   const STEPS = [
     { k: "biomarkers", l: "Labs" },
     { k: "compliance", l: "Compliance" },
@@ -3456,7 +3511,7 @@ function PatientDetail({
                 📱 WhatsApp
               </a>
             )}
-            {appt.status !== "checkedin" && appt.status !== "seen" && isReady(appt) && (
+            {appt.status !== "checkedin" && appt.status !== "in_visit" && appt.status !== "seen" && isReady(appt) && (
               <button
                 onClick={() => onPatchStatus(appt.id, "checkedin")}
                 style={{
@@ -3476,7 +3531,15 @@ function PatientDetail({
             )}
             {appt.status === "checkedin" && (
               <button
-                onClick={() => onPatchStatus(appt.id, "seen")}
+                onClick={async () => {
+                  if (appt.patient_id) {
+                    await onPatchStatus(appt.id, "in_visit");
+                    sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                    setDbPatientId(appt.patient_id);
+                    sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                    navigate("/visit");
+                  }
+                }}
                 style={{
                   padding: "7px 13px",
                   borderRadius: 7,
@@ -3489,11 +3552,17 @@ function PatientDetail({
                   fontFamily: FB,
                 }}
               >
-                ✅ Mark Seen
+                🩺 Start Visit
               </button>
             )}
-            <a
-              href="/"
+            <button
+              onClick={() => {
+                if (appt.patient_id) {
+                  setDbPatientId(appt.patient_id);
+                  sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                  navigate("/visit");
+                }
+              }}
               style={{
                 padding: "7px 13px",
                 borderRadius: 7,
@@ -3502,11 +3571,12 @@ function PatientDetail({
                 background: BG,
                 border: `1px solid ${BD}`,
                 color: INK2,
-                textDecoration: "none",
+                cursor: "pointer",
+                fontFamily: FB,
               }}
             >
               🩺 Open Scribe
-            </a>
+            </button>
           </div>
         </div>
         {/* Step bar */}
@@ -3633,7 +3703,15 @@ function PatientDetail({
           <CheckInTab
             appt={appt}
             onCheckIn={() => onPatchStatus(appt.id, "checkedin")}
-            onMarkSeen={() => onPatchStatus(appt.id, "seen")}
+            onMarkSeen={async () => {
+              if (appt.patient_id) {
+                await onPatchStatus(appt.id, "in_visit");
+                sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                setDbPatientId(appt.patient_id);
+                sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                navigate("/visit");
+              }
+            }}
           />
         )}
         {activeTab === "vitals" && showVitals && (
@@ -5389,8 +5467,9 @@ export default function OPD() {
   const filtered = appointments.filter((a) => {
     if (filterStatus === "pending" && a.status && a.status !== "pending") return false;
     if (filterStatus === "checkedin" && a.status !== "checkedin") return false;
+    if (filterStatus === "in_visit" && a.status !== "in_visit") return false;
     if (filterStatus === "seen" && a.status !== "seen") return false;
-    if (filterStatus === "ready" && (!isReady(a) || ["checkedin", "seen"].includes(a.status)))
+    if (filterStatus === "ready" && (!isReady(a) || ["checkedin", "in_visit", "seen"].includes(a.status)))
       return false;
     if (filterDoc !== "all" && a.doctor_name !== filterDoc) return false;
     if (filterCat === "complex" && a.category !== "complex") return false;
@@ -5411,6 +5490,7 @@ export default function OPD() {
     total: appointments.length,
     pending: appointments.filter((a) => !a.status || a.status === "pending").length,
     checkedin: appointments.filter((a) => a.status === "checkedin").length,
+    in_visit: appointments.filter((a) => a.status === "in_visit").length,
     seen: appointments.filter((a) => a.status === "seen").length,
   };
 
@@ -5595,6 +5675,7 @@ export default function OPD() {
             ["pending", "Pending"],
             ["ready", "Ready"],
             ["checkedin", "Checked In"],
+            ["in_visit", "In Visit"],
             ["seen", "Seen"],
           ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
           <div style={{ width: 1, height: 18, background: BD, margin: "0 8px" }} />
@@ -5602,7 +5683,10 @@ export default function OPD() {
             {stats.pending} pending
           </span>
           <span style={{ fontFamily: FM, fontSize: 11, color: SK, fontWeight: 500, marginLeft: 8 }}>
-            {stats.checkedin} checked in
+            {stats.checkedin} waiting
+          </span>
+          <span style={{ fontFamily: FM, fontSize: 11, color: "#7c3aed", fontWeight: 500, marginLeft: 8 }}>
+            {stats.in_visit} in visit
           </span>
           <span style={{ fontFamily: FM, fontSize: 11, color: GN, fontWeight: 500, marginLeft: 8 }}>
             {stats.seen} seen

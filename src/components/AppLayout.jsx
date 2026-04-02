@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { path: "/find", label: "🔍 Find", show: () => true },
   { path: "/opd", label: "🏥 OPD", show: () => true },
   { path: "/dashboard", label: "📋 Patient", show: (s) => s.hasPatient },
+  { path: "/visit", label: "👁 Visit", show: (s) => s.hasPatient },
   { path: "/quick", label: "⚡ Quick", show: (s) => !s.isLabRole && !s.visitActive },
   { path: "/patient", label: "👤", show: (s) => !s.visitActive },
   // Follow-up visit workflow

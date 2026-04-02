@@ -21,6 +21,7 @@ import messageRoutes from "./routes/messages.js";
 import aiRoutes from "./routes/ai.js";
 import alertRoutes from "./routes/alerts.js";
 import healthLogRoutes from "./routes/health-logs.js";
+import visitRoutes from "./routes/visit.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,9 +42,10 @@ app.use((req, res, next) => {
     p === "/api/convert-heic" ||
     p.startsWith("/api/ai/");
 
-  // 5MB: AI-extracted documents, reasoning text, rx-feedback, history import
+  // 5MB: AI-extracted documents, reasoning text, rx-feedback, history import, visit doc uploads
   const isMedium =
     p.includes("/documents") ||
+    p.includes("/document") ||
     p.includes("/reasoning") ||
     p.includes("/rx-feedback") ||
     p.includes("/history");
@@ -76,6 +78,7 @@ app.use("/api", messageRoutes);
 app.use("/api", aiRoutes);
 app.use("/api", alertRoutes);
 app.use("/api", healthLogRoutes);
+app.use("/api", visitRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");

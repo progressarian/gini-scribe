@@ -1,0 +1,1866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gini Scribe — Pawan Kumar · Visit #12</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Sans',system-ui,sans-serif;background:#eef0f6;color:#1a1f2e;font-size:14px;-webkit-font-smoothing:antialiased;line-height:1.5}
+:root{
+  --sb:#131a2b;--sb2:#1c2640;--sb3:#222f4a;--sbb:rgba(255,255,255,0.07);
+  --sbtext:#dde4f0;--sbmuted:#5a6a85;--sbsub:#8899b4;
+  --primary:#4466f5;--pri-lt:#eef1fe;--pri-bd:#c5d0fb;
+  --green:#12b981;--grn-lt:#edfaf5;--grn-bd:#a7f0d0;
+  --amber:#f59e0b;--amb-lt:#fffbeb;--amb-bd:#fcd34d;
+  --red:#ef4444;--red-lt:#fef2f2;--red-bd:#fecaca;
+  --purple:#8b5cf6;--pur-lt:#f5f3ff;--pur-bd:#ddd6fe;
+  --teal:#0ea5e9;--teal-lt:#f0f9ff;--teal-bd:#bae6fd;
+  --bg:#eef0f6;--card:#ffffff;--border:#e4e9f2;--border2:#d0d8e8;
+  --text:#1a1f2e;--t2:#374151;--t3:#6b7280;--t4:#9ca3af;
+  --sh:0 1px 3px rgba(0,0,0,0.07);--sh2:0 4px 14px rgba(0,0,0,0.09);--sh3:0 12px 32px rgba(0,0,0,0.14);
+  --r:10px;--rs:8px
+}
+/* ── LAYOUT ── */
+.app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+/* ════ TOPBAR ════ */
+.topbar{height:52px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0;box-shadow:var(--sh)}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#4466f5,#7c3aed);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:white;flex-shrink:0;letter-spacing:-0.5px}
+.sep{width:1px;height:20px;background:var(--border);flex-shrink:0}
+.ptinfo .ptname{font-size:15px;font-weight:800;color:var(--text);letter-spacing:-0.3px;display:flex;align-items:center;gap:8px}
+.ptinfo .ptmeta{font-size:12px;color:var(--t3);display:flex;align-items:center;gap:6px;margin-top:1px}
+.allergy{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
+.vpill{font-size:11px;font-weight:700;padding:3px 11px;border-radius:20px;background:var(--grn-lt);color:var(--green);border:1px solid var(--grn-bd);display:flex;align-items:center;gap:4px;flex-shrink:0}
+/* Clock block */
+.clock-block{display:flex;flex-direction:column;align-items:flex-end;flex-shrink:0;padding:0 2px}
+.clock-time{font-size:14px;font-weight:700;color:var(--text);font-family:'DM Mono',monospace;letter-spacing:0.5px}
+.clock-date{font-size:10px;color:var(--t3);font-weight:500}
+.elapsed{font-size:11px;font-weight:700;color:var(--amber);background:var(--amb-lt);border:1px solid var(--amb-bd);padding:3px 9px;border-radius:20px;flex-shrink:0;display:flex;align-items:center;gap:4px}
+.tbr{margin-left:auto;display:flex;gap:6px;align-items:center}
+.btn{height:32px;padding:0 13px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:12px;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:5px;transition:all .12s;font-family:'DM Sans',sans-serif;white-space:nowrap}
+.btn:hover{background:var(--bg);border-color:var(--border2)}
+.btn-p{height:32px;padding:0 16px;border-radius:8px;border:none;background:var(--primary);cursor:pointer;font-size:12px;font-weight:700;color:white;display:flex;align-items:center;gap:5px;transition:all .12s;font-family:'DM Sans',sans-serif}
+.btn-p:hover{background:#3355e0;box-shadow:0 3px 10px rgba(68,102,245,0.3)}
+
+/* ════ PATIENT SUMMARY STRIP ════ */
+.summary-strip{height:46px;background:linear-gradient(90deg,#1a1f2e,#1c2640);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;padding:0 14px;gap:0;flex-shrink:0;overflow-x:auto}
+.summary-strip::-webkit-scrollbar{height:0}
+.ss-item{display:flex;align-items:center;gap:6px;padding:0 14px;border-right:1px solid rgba(255,255,255,0.08);flex-shrink:0}
+.ss-item:first-child{padding-left:4px}
+.ss-label{font-size:9px;font-weight:700;color:#5a6a85;text-transform:uppercase;letter-spacing:.6px}
+.ss-val{font-size:13px;font-weight:700;color:#dde4f0;display:flex;align-items:center;gap:5px}
+.ss-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.ss-g{background:rgba(18,185,129,.15);color:#34d399}
+.ss-a{background:rgba(245,158,11,.15);color:#fbbf24}
+.ss-r{background:rgba(239,68,68,.15);color:#f87171}
+.ss-b{background:rgba(68,102,245,.15);color:#818cf8}
+.ss-p{background:rgba(139,92,246,.15);color:#c4b5fd}
+.ss-sep{width:1px;height:26px;background:rgba(255,255,255,0.07);flex-shrink:0}
+.regimen-tags{display:flex;gap:4px}
+.reg-tag{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(68,102,245,.12);color:#818cf8;border:1px solid rgba(68,102,245,.2);white-space:nowrap}
+
+/* ════ BODY ════ */
+.bodywrap{flex:1;display:flex;overflow:hidden}
+
+/* ════ DARK SIDEBAR ════ */
+.sidebar{width:226px;background:var(--sb);flex-shrink:0;display:flex;flex-direction:column;overflow:hidden}
+.sb-hd{padding:9px 13px 7px;border-bottom:1px solid var(--sbb);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.sb-lbl{font-size:9px;font-weight:700;color:var(--sbmuted);letter-spacing:.8px;text-transform:uppercase}
+.sb-v{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(68,102,245,.18);color:#818cf8}
+.sb-scroll{flex:1;overflow-y:auto;padding:8px 10px 16px}
+.sb-scroll::-webkit-scrollbar{width:2px}
+.sb-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1)}
+.sbsec{margin-bottom:13px}
+.sbsec-title{font-size:9px;font-weight:700;color:var(--sbmuted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.sbsec-title::after{content:'';flex:1;height:1px;background:var(--sbb)}
+.vgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.vbox{background:var(--sb2);border:1px solid var(--sbb);border-radius:7px;padding:5px 7px;text-align:center}
+.vval{font-size:14px;font-weight:700;color:var(--sbtext);line-height:1.1}
+.vlbl{font-size:9px;color:var(--sbmuted);margin-top:2px}
+.sdx{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:6px;background:var(--sb2);border:1px solid var(--sbb);margin-bottom:3px}
+.sdx-nm{font-size:12px;font-weight:600;color:var(--sbtext)}
+.sdx-sub{font-size:10px;color:var(--sbmuted);margin-top:1px}
+.spill{font-size:8px;font-weight:700;padding:2px 6px;border-radius:20px;white-space:nowrap;flex-shrink:0}
+.sp-imp{background:rgba(18,185,129,.15);color:#34d399}
+.sp-ctrl{background:rgba(18,185,129,.12);color:#34d399}
+.sp-mon{background:rgba(148,163,184,.12);color:#94a3b8}
+.sp-rev{background:rgba(245,158,11,.15);color:#fbbf24}
+.smed{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--sb2);border:1px solid var(--sbb);margin-bottom:3px}
+.smed-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.smed-nm{font-size:12px;font-weight:600;color:var(--sbtext);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.smed-dose{font-size:10px;color:var(--sbmuted)}
+.smed-for{font-size:9px;color:#6677dd;margin-top:1px}
+.salert{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:6px;border:1px solid rgba(245,158,11,.2);background:rgba(245,158,11,.06);margin-bottom:3px;cursor:pointer}
+.salert.red{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}
+.salert-txt{font-size:11px;color:#fbbf24;font-weight:600}
+.salert.red .salert-txt{color:#f87171}
+.salert-sub{font-size:9px;color:var(--sbmuted)}
+
+/* ════ MAIN ════ */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.stabs{height:40px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:2px;flex-shrink:0}
+.stab{height:32px;padding:0 12px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;color:var(--t3);display:flex;align-items:center;gap:4px;transition:all .12s;white-space:nowrap;border:1px solid transparent}
+.stab:hover{color:var(--t2);background:var(--bg)}
+.stab.on{color:var(--primary);background:var(--pri-lt);border-color:var(--pri-bd);font-weight:700}
+.tbadge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:20px;background:var(--primary);color:white}
+.tbadge.am{background:var(--amber)}
+.stabs-r{margin-left:auto;display:flex;align-items:center;gap:7px}
+.jnav{height:38px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:3px;flex-shrink:0}
+.jlbl{font-size:9px;font-weight:700;color:var(--t4);letter-spacing:.6px;text-transform:uppercase;margin-right:4px;flex-shrink:0}
+.jbtn{height:26px;padding:0 11px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--t3);background:transparent;border:1px solid transparent;transition:all .12s;white-space:nowrap;font-family:'DM Sans',sans-serif}
+.jbtn:hover,.jbtn.on{color:var(--primary);background:var(--pri-lt);border-color:var(--pri-bd)}
+.jdiv{width:1px;height:14px;background:var(--border);margin:0 2px;flex-shrink:0}
+.ai-btn{margin-left:auto;height:28px;padding:0 14px;border-radius:20px;background:linear-gradient(135deg,#4466f5,#7c3aed);color:white;border:none;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;box-shadow:0 2px 8px rgba(68,102,245,.25);transition:all .12s;flex-shrink:0}
+.ai-btn:hover{box-shadow:0 4px 14px rgba(68,102,245,.38);transform:translateY(-1px)}
+.scrl{flex:1;overflow-y:auto;padding:14px}
+.scrl::-webkit-scrollbar{width:4px}
+.scrl::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ── SECTION CARDS ── */
+.sc{background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin-bottom:13px;box-shadow:var(--sh);overflow:hidden}
+.sch{padding:11px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.sct{font-size:13px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:7px}
+.sci{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.ic-b{background:var(--pri-lt)}.ic-g{background:var(--grn-lt)}.ic-a{background:var(--amb-lt)}.ic-p{background:var(--pur-lt)}.ic-t{background:var(--teal-lt)}
+.scb{padding:13px 15px}
+.subsec{font-size:10px;font-weight:700;color:var(--t4);letter-spacing:.6px;text-transform:uppercase;margin:0 0 8px;padding:0 1px}
+
+/* ── BIOMARKERS ── */
+.bmg{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:11px}
+.bmc{border:1px solid var(--border);border-radius:var(--rs);padding:10px 12px;border-left-width:3px;transition:all .12s}
+.bmc:hover{box-shadow:var(--sh);border-right-color:var(--border2)}
+.bmc.imp{border-left-color:var(--green)}.bmc.wrn{border-left-color:var(--amber)}.bmc.bad{border-left-color:var(--red)}.bmc.ok{border-left-color:var(--pri-bd)}
+.bml{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.3px;margin-bottom:4px}
+.bmvr{display:flex;align-items:baseline;gap:5px;margin-bottom:3px}
+.bmv{font-size:22px;font-weight:800;color:var(--text);letter-spacing:-0.5px;line-height:1}
+.bmu{font-size:11px;color:var(--t3);font-weight:500}
+.bmtr{font-size:10px;font-weight:700;display:flex;align-items:center;gap:3px;margin-bottom:4px}
+.td{color:var(--green)}.tu{color:var(--red)}.ts{color:var(--amber)}
+.sparkline{width:100%;height:24px;margin:3px 0 5px}
+.bmgr{display:flex;align-items:center;justify-content:space-between;padding-top:5px;border-top:1px solid var(--border)}
+.bmgl{font-size:9px;color:var(--t4);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.bmgv{font-size:10px;font-weight:700;color:var(--t3)}
+.oob{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:var(--rs);background:var(--amb-lt);border:1px solid var(--amb-bd);margin-bottom:6px}
+.oob-nm{font-size:12px;font-weight:700;color:#92400e}
+.oob-sub{font-size:11px;color:#b45309;margin-top:1px}
+
+/* ── BUTTONS ── */
+.bx{height:24px;padding:0 10px;border-radius:6px;cursor:pointer;font-size:10px;font-weight:700;border:1px solid;font-family:'DM Sans',sans-serif;transition:all .11s}
+.bx-p{color:var(--primary);border-color:var(--pri-bd);background:var(--pri-lt)}.bx-p:hover{background:#e0e7ff}
+.bx-a{color:#92400e;border-color:var(--amb-bd);background:var(--amb-lt)}.bx-a:hover{background:#fef3c7}
+.bx-r{color:var(--red);border-color:var(--red-bd);background:var(--red-lt)}.bx-r:hover{background:#fee2e2}
+.bx-g{color:#065f46;border-color:var(--grn-bd);background:var(--grn-lt)}.bx-g:hover{background:#d1fae5}
+.bx-n{color:var(--t3);border-color:var(--border);background:var(--bg)}.bx-n:hover{background:var(--border)}
+
+/* ── SYMPTOMS/DX ── */
+.syg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.syi{border:1px solid var(--border);border-radius:var(--rs);padding:9px 11px;display:flex;align-items:center;gap:8px}
+.sy-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sy-nm{font-size:13px;font-weight:600;color:var(--text)}
+.sy-meta{font-size:11px;color:var(--t3);margin-top:1px}
+.sy-sel{font-size:11px;font-weight:600;padding:3px 7px;border-radius:6px;border:1px solid var(--border2);background:var(--bg);color:var(--t2);cursor:pointer;font-family:'DM Sans',sans-serif;outline:none;flex-shrink:0}
+.dxi{border:1px solid var(--border);border-radius:var(--rs);padding:10px 13px;margin-bottom:8px;display:flex;align-items:center;gap:9px}
+.dxi-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.dxi-ttl{font-size:13px;font-weight:600;color:var(--text)}
+.dxi-sub{font-size:11px;color:var(--t3);margin-top:2px}
+.addr{display:flex;align-items:center;gap:7px;padding:8px 11px;border:1.5px dashed var(--border2);border-radius:var(--rs);cursor:pointer;transition:all .12s}
+.addr:hover{border-color:var(--primary);background:var(--pri-lt)}
+.addr-lbl{font-size:12px;color:var(--t3);font-weight:500}
+.addr:hover .addr-lbl{color:var(--primary)}
+
+/* ── MEDS TABLE ── */
+.mth{display:grid;grid-template-columns:2fr 0.9fr 1.3fr 0.9fr 1.1fr;padding:6px 12px;background:var(--bg);border-radius:7px;margin-bottom:6px;gap:6px}
+.mthl{font-size:9px;font-weight:700;color:var(--t4);letter-spacing:.5px;text-transform:uppercase}
+.mtr{display:grid;grid-template-columns:2fr 0.9fr 1.3fr 0.9fr 1.1fr;padding:9px 12px;border:1px solid var(--border);border-radius:var(--rs);margin-bottom:5px;gap:6px;align-items:center;transition:all .12s}
+.mtr:hover{border-color:var(--border2);box-shadow:var(--sh)}
+.mtr.stp{opacity:.5}
+.mmain{display:flex;align-items:center;gap:8px}
+.mdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mbrand{font-size:13px;font-weight:700;color:var(--text)}
+.mgen{font-size:10px;color:var(--t3);margin-top:1px}
+.mtd{font-size:12px;color:var(--t2);font-weight:500;line-height:1.4}
+.mfor{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--pri-lt);color:var(--primary);border:1px solid var(--pri-bd);display:inline-block}
+.macts{display:flex;gap:4px}
+.ma{height:24px;padding:0 9px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700;border:1px solid;font-family:'DM Sans',sans-serif;transition:all .11s}
+.ma-e{color:var(--primary);border-color:var(--pri-bd);background:var(--pri-lt)}.ma-e:hover{background:#e0e7ff}
+.ma-s{color:var(--red);border-color:var(--red-bd);background:var(--red-lt)}.ma-s:hover{background:#fee2e2}
+.ma-p{color:var(--amber);border-color:var(--amb-bd);background:var(--amb-lt)}.ma-p:hover{background:#fef3c7}
+.ma-r{color:var(--green);border-color:var(--grn-bd);background:var(--grn-lt)}.ma-r:hover{background:#d1fae5}
+.stp-lbl{font-size:10px;font-weight:700;color:var(--t4);letter-spacing:.5px;text-transform:uppercase;margin:10px 0 7px;display:flex;align-items:center;gap:7px;cursor:pointer;border-top:1px dashed var(--border);padding-top:10px}
+.stp-lbl::after{content:'';flex:1;height:1px;background:var(--border)}
+.stoptag{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--red-lt);color:var(--red);border:1px solid var(--red-bd)}
+
+/* ── PLAN ── */
+.plg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.plc{border:1px solid var(--border);border-radius:var(--rs);padding:12px}
+.plct{font-size:11px;font-weight:700;color:var(--text);margin-bottom:9px;display:flex;align-items:center;gap:5px}
+.ti{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)}
+.ti:last-of-type{border-bottom:none}
+.ti-nm{font-size:12px;color:var(--t2);font-weight:500;flex:1}
+.urg{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px}
+.u-r{background:var(--bg);color:var(--t3);border:1px solid var(--border)}
+.u-u{background:var(--red-lt);color:var(--red);border:1px solid var(--red-bd)}
+.u-n{background:var(--pri-lt);color:var(--primary);border:1px solid var(--pri-bd)}
+.refi{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--rs);margin-bottom:5px}
+.ref-av{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#4466f5,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:white;flex-shrink:0}
+.ref-nm{font-size:12px;font-weight:600;color:var(--text)}
+.ref-sp{font-size:10px;color:var(--t3)}
+.ref-wy{font-size:10px;color:var(--primary);font-weight:500;margin-top:1px}
+.nv-row{display:flex;align-items:center;justify-content:space-between;padding:10px 13px;background:var(--grn-lt);border:1px solid var(--grn-bd);border-radius:var(--rs)}
+.nv-date{font-size:14px;font-weight:800;color:#047857}
+
+/* ── CHANGES CARD ── */
+.chg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.chg-sec-lbl{font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px}
+.chg-line{font-size:12px;color:var(--t2);line-height:2}
+
+/* ── SUMMARY CARD ── */
+.sumcard{background:linear-gradient(135deg,var(--pri-lt),var(--pur-lt));border:1px solid var(--pri-bd);border-radius:var(--rs);padding:14px 16px}
+.sum-title{font-size:12px;font-weight:800;color:var(--primary);margin-bottom:10px;letter-spacing:.2px;text-transform:uppercase}
+.sum-row{display:grid;grid-template-columns:110px 1fr;gap:8px;margin-bottom:7px;align-items:baseline}
+.sum-k{font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px}
+.sum-v{font-size:12px;color:var(--t2);line-height:1.5}
+.sum-acts{display:flex;gap:8px;margin-top:13px;padding-top:11px;border-top:1px solid var(--pri-bd)}
+
+/* ── MODALS ── */
+.mo{position:fixed;inset:0;background:rgba(8,12,22,.54);display:none;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(4px)}
+.mo.open{display:flex}
+.mbox{background:var(--card);border-radius:14px;box-shadow:var(--sh3);padding:22px 24px;width:420px;max-width:92vw;max-height:90vh;overflow-y:auto}
+.mbox::-webkit-scrollbar{width:3px}
+.mbox::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.mttl{font-size:15px;font-weight:800;color:var(--text);margin-bottom:15px}
+.mf{margin-bottom:13px}
+.ml{font-size:10px;font-weight:700;color:var(--t3);display:block;margin-bottom:5px;letter-spacing:.4px;text-transform:uppercase}
+.mi{width:100%;height:38px;padding:0 11px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;transition:border-color .12s}
+.mi:focus{border-color:var(--primary)}
+.ms{width:100%;height:38px;padding:0 11px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;cursor:pointer}
+.mta{width:100%;padding:9px 11px;border-radius:8px;min-height:65px;border:1.5px solid var(--border);background:var(--bg);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;transition:border-color .12s}
+.mta:focus{border-color:var(--primary)}
+.macts{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+/* Time pills multi-select */
+.time-pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.time-pills label{cursor:pointer}
+.time-pills input[type="checkbox"]{display:none}
+.time-pills span{font-size:11px;font-weight:600;padding:5px 11px;border-radius:20px;border:1px solid var(--border2);color:var(--t3);background:var(--bg);transition:all .12s;display:block}
+.time-pills input:checked+span{background:var(--primary);color:white;border-color:var(--primary)}
+.time-pills label:hover span{border-color:var(--primary);color:var(--primary);background:var(--pri-lt)}
+/* Datalists */
+input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+
+/* ── AI PANEL ── */
+.aip{position:fixed;right:-375px;top:52px;bottom:0;width:365px;background:var(--card);border-left:1px solid var(--border);z-index:50;transition:right .22s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,.08)}
+.aip.open{right:0}
+.aip-hd{padding:12px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:linear-gradient(135deg,var(--pri-lt),var(--pur-lt))}
+.aip-ttl{font-size:14px;font-weight:800;color:var(--primary);display:flex;align-items:center;gap:7px}
+.aim{flex:1;overflow-y:auto;padding:13px}
+.aim::-webkit-scrollbar{width:3px}
+.aim-msg{padding:10px 13px;border-radius:10px;margin-bottom:9px;font-size:12px;line-height:1.6;max-width:93%}
+.aim-msg.ai{background:linear-gradient(135deg,var(--pri-lt),var(--pur-lt));border:1px solid var(--pri-bd);color:var(--t2)}
+.aim-msg.usr{background:var(--primary);color:white;margin-left:auto}
+.aisugg{padding:6px 13px;display:flex;flex-wrap:wrap;gap:4px;border-top:1px solid var(--border)}
+.aichip{font-size:10px;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid var(--pri-bd);color:var(--primary);background:var(--pri-lt);cursor:pointer;transition:all .11s}
+.aichip:hover{background:#e0e7ff}
+.ai-ir{padding:11px 13px;border-top:1px solid var(--border);display:flex;gap:7px;flex-shrink:0}
+.ai-in{flex:1;height:36px;padding:0 11px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none}
+.ai-in:focus{border-color:var(--primary)}
+.ai-snd{width:36px;height:36px;border-radius:8px;background:var(--primary);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;transition:all .12s;font-family:'DM Sans',sans-serif}
+.ai-snd:hover{background:#3355e0}
+
+/* ── PANELS ── */
+.panel{display:none;flex-direction:column;flex:1;overflow:hidden}
+.panel.on{display:flex}
+.panel-body{flex:1;overflow-y:auto;padding:14px}
+.panel-body::-webkit-scrollbar{width:4px}
+.panel-body::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ── NOTICE BARS ── */
+.noticebar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--rs);margin-top:9px}
+.noticebar.pri{background:var(--pri-lt);border:1px solid var(--pri-bd)}
+.noticebar.red{background:var(--red-lt);border:1px solid var(--red-bd)}
+.noticebar.amb{background:var(--amb-lt);border:1px solid var(--amb-bd)}
+.noticebar.grn{background:var(--grn-lt);border:1px solid var(--grn-bd)}
+.ni{font-size:12px;font-weight:500}
+.ni.pri{color:var(--primary)}.ni.amb{color:#92400e}.ni.grn{color:#065f46}
+
+/* ── NOTE FIELD ── */
+textarea.nf{width:100%;padding:9px 11px;border-radius:var(--rs);min-height:60px;border:1.5px solid var(--border);background:var(--bg);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical}
+textarea.nf:focus{border-color:var(--primary)}
+
+/* ── LABS TAB SPECIFIC ── */
+.report-card{border:1px solid var(--border);border-radius:var(--rs);padding:12px 14px;margin-bottom:9px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all .12s}
+.report-card:hover{border-color:var(--border2);box-shadow:var(--sh)}
+.report-icon{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.ri-b{background:var(--teal-lt)}.ri-r{background:#fff0f5}.ri-g{background:var(--grn-lt)}.ri-o{background:var(--amb-lt)}
+.report-nm{font-size:13px;font-weight:700;color:var(--text)}
+.report-dt{font-size:11px;color:var(--t3);margin-top:2px}
+.report-status{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;flex-shrink:0}
+.rs-ok{background:var(--grn-lt);color:var(--green);border:1px solid var(--grn-bd)}
+.rs-ab{background:var(--amb-lt);color:var(--amber);border:1px solid var(--amb-bd)}
+.rs-new{background:var(--pri-lt);color:var(--primary);border:1px solid var(--pri-bd)}
+
+/* ── VISIT HISTORY TIMELINE ── */
+.visit-line{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.visit-line:last-child{border-bottom:none}
+.vl-dot{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:white;flex-shrink:0;background:linear-gradient(135deg,#4466f5,#7c3aed)}
+.vl-dot.grn{background:linear-gradient(135deg,var(--green),#059669)}
+.vl-dot.amb{background:linear-gradient(135deg,var(--amber),#d97706)}
+.vl-date{font-size:11px;font-weight:700;color:var(--t3);margin-bottom:3px}
+.vl-ttl{font-size:13px;font-weight:700;color:var(--text)}
+.vl-sub{font-size:11px;color:var(--t3);margin-top:2px}
+.vl-pills{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+.vl-pill{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--bg);color:var(--t3);border:1px solid var(--border)}
+.vl-pill.g{background:var(--grn-lt);color:var(--green);border-color:var(--grn-bd)}
+.vl-pill.a{background:var(--amb-lt);color:var(--amber);border-color:var(--amb-bd)}
+.vl-pill.r{background:var(--red-lt);color:var(--red);border-color:var(--red-bd)}
+.vl-pill.b{background:var(--pri-lt);color:var(--primary);border-color:var(--pri-bd)}
+
+/* ── MESSAGES ── */
+.msg-bubble{padding:10px 13px;border-radius:10px;margin-bottom:8px;max-width:85%;font-size:12px;line-height:1.6}
+.msg-bubble.patient{background:var(--bg);border:1px solid var(--border);color:var(--t2)}
+.msg-bubble.team{background:var(--primary);color:white;margin-left:auto;border-radius:10px 10px 2px 10px}
+.msg-bubble.unread{background:var(--amb-lt);border:1px solid var(--amb-bd);color:#92400e}
+.msg-meta{font-size:10px;color:var(--t4);margin-top:3px}
+.msg-meta.patient{text-align:left}.msg-meta.team{text-align:right}
+
+/* ── LOGGED DATA ── */
+.log-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.log-card{border:1px solid var(--border);border-radius:var(--rs);padding:13px;text-align:center}
+.log-val{font-size:24px;font-weight:800;color:var(--text);letter-spacing:-0.5px}
+.log-lbl{font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+.log-sub{font-size:11px;color:var(--t4);margin-top:2px}
+
+/* ── INSULIN TITRATION ── */
+.tit-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border:1px solid var(--border);border-radius:var(--rs);overflow:hidden;margin-bottom:14px}
+.tit-cell{padding:12px;text-align:center;border-right:1px solid var(--border)}
+.tit-cell:last-child{border-right:none}
+.tit-range{font-size:12px;font-weight:700;color:var(--t2);margin-bottom:5px}
+.tit-action{font-size:14px;font-weight:800;margin-bottom:4px}
+.tit-sub{font-size:10px;color:var(--t3)}
+.tit-low{background:#fef2f2}.tit-ok{background:var(--grn-lt)}.tit-high{background:var(--amb-lt)}
+.titcalc{background:var(--bg);border:1px solid var(--border);border-radius:var(--rs);padding:14px}
+
+/* ════ PRINT CSS ════ */
+@media print{
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  .sidebar,.stabs,.jnav,.topbar,.mo,.aip,.macts,.bx,.addr,.ai-btn,.btn,.btn-p,.ma,.summary-strip,.jnav,.noticebar,.stp-lbl,#stp-section{display:none!important}
+  .bodywrap{display:block!important}
+  .main{overflow:visible!important;display:block!important}
+  .panel.on{display:block!important;overflow:visible!important}
+  .scrl{overflow:visible!important;padding:0!important}
+  .sc{display:none!important}
+  #rx-print{display:block!important}
+  body{font-size:12px;overflow:visible;height:auto}
+  .app{height:auto;overflow:visible}
+}
+/* Print Prescription */
+#rx-print{display:none}
+@media print{
+  #rx-print{display:block;font-family:'DM Sans',sans-serif;max-width:780px;margin:0 auto;padding:10px 20px}
+}
+.rx-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:2px solid #4466f5;margin-bottom:14px}
+.rx-logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#4466f5,#7c3aed);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:17px;color:white}
+.rx-hosp-name{font-size:16px;font-weight:900;color:#1a1f2e;letter-spacing:-0.3px}
+.rx-hosp-sub{font-size:11px;color:#6b7280;margin-top:1px}
+.rx-dr-name{font-size:13px;font-weight:800;color:#4466f5;text-align:right}
+.rx-dr-cred{font-size:10px;color:#6b7280;text-align:right;margin-top:1px}
+.rx-phase{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;background:#eef1fe;color:#4466f5;border:1px solid #c5d0fb;margin-bottom:14px}
+.rx-pt-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;background:#f8f9fc;border-radius:9px;padding:10px 14px;margin-bottom:14px;border:1px solid #e4e9f2}
+.rx-pt-field{display:flex;flex-direction:column;gap:1px}
+.rx-pt-lbl{font-size:9px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px}
+.rx-pt-val{font-size:12px;font-weight:700;color:#1a1f2e}
+.rx-sec-title{font-size:11px;font-weight:800;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin:12px 0 7px;padding:5px 0;border-bottom:1px solid #e4e9f2}
+/* Journey table */
+.rx-journey{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+.rx-jc{text-align:center;padding:7px 5px;border-radius:7px;border:1px solid #e4e9f2;background:#fafbff}
+.rx-jc-lbl{font-size:8px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.4px}
+.rx-jc-val{font-size:15px;font-weight:800;color:#1a1f2e;margin:2px 0}
+.rx-jc-arrow{font-size:10px;font-weight:700}
+/* Dx list */
+.rx-dx{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+.rx-dx-tag{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;background:#f0f2f7;color:#374151;border:1px solid #e4e9f2}
+/* Biomarkers mini table */
+.rx-bm-table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px}
+.rx-bm-table th{background:#f0f2f7;color:#6b7280;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:5px 10px;text-align:left}
+.rx-bm-table td{padding:5px 10px;border-bottom:1px solid #e4e9f2}
+.rx-bm-table tr:last-child td{border-bottom:none}
+.rx-ok{color:#12b981;font-weight:700}.rx-ab{color:#ef4444;font-weight:700}.rx-wrn{color:#f59e0b;font-weight:700}
+/* Med list */
+.rx-med-row{display:grid;grid-template-columns:2fr 1fr 1.5fr 1fr;gap:8px;padding:7px 10px;border-bottom:1px solid #e4e9f2;font-size:11px;align-items:center}
+.rx-med-row:last-child{border-bottom:none}
+.rx-med-row.head{background:#f0f2f7;font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;border-radius:6px 6px 0 0}
+.rx-med-nm{font-weight:700;color:#1a1f2e;font-size:12px}
+.rx-med-gen{font-size:10px;color:#6b7280}
+/* Instructions */
+.rx-inst{background:#f8f9fc;border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:11px}
+.rx-inst-title{font-size:10px;font-weight:800;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.rx-inst ol,.rx-inst ul{padding-left:16px;display:flex;flex-direction:column;gap:3px;color:#374151}
+/* Side effects */
+.rx-se{background:#fff7ed;border:1px solid #fed7aa;border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:11px;color:#92400e}
+.rx-se-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+/* Followup footer */
+.rx-footer{margin-top:16px;padding-top:12px;border-top:2px solid #e4e9f2;display:flex;align-items:center;justify-content:space-between}
+.rx-next{font-size:13px;font-weight:800;color:#4466f5}
+.rx-footer-contact{font-size:10px;color:#9ca3af;text-align:right}
+/* Vital signs box */
+.rx-vitals{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:12px}
+.rx-vbox{text-align:center;padding:5px 4px;background:#f8f9fc;border-radius:6px;border:1px solid #e4e9f2}
+.rx-vv{font-size:13px;font-weight:800;color:#1a1f2e}
+.rx-vl{font-size:8px;color:#9ca3af;margin-top:1px;font-weight:600;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ════ TOPBAR ════ -->
+<div class="topbar">
+  <div class="logo">G</div>
+  <div class="sep"></div>
+  <div class="ptinfo">
+    <div class="ptname">
+      Pawan Kumar
+      <span style="font-size:12px;font-weight:400;color:var(--t3)">59M · ID #P-15300</span>
+    </div>
+    <div class="ptmeta">
+      <span>Dr. Anil Bhansali</span>
+      <span>·</span><span>Visit #12</span>
+      <span>·</span><span>📅 13 Feb 2026</span>
+      <span class="allergy">No known drug allergies</span>
+    </div>
+  </div>
+  <div class="vpill" style="margin-left:12px">🟢 Checked In · Vitals done</div>
+  <div class="sep"></div>
+  <div class="clock-block">
+    <div class="clock-time" id="live-time">06:29 PM</div>
+    <div class="clock-date" id="live-date">Fri, 13 Feb 2026</div>
+  </div>
+  <div class="elapsed">⏱ In clinic: <span id="elapsed">18 min</span></div>
+  <div class="tbr">
+    <button class="btn" onclick="openM('quick-fill')" style="border-color:var(--pri-bd);color:var(--primary);background:var(--pri-lt)">🪄 Quick Fill</button>
+    <button class="btn" onclick="toggleAI()">✦ Gini AI</button>
+    <button class="btn" onclick="showPrint()">🖨 Print Rx</button>
+    <button class="btn-p" onclick="endVisit()">✓ End Visit</button>
+  </div>
+</div>
+
+<!-- ════ PATIENT SUMMARY STRIP ════ -->
+<div class="summary-strip">
+  <div class="ss-item">
+    <div><div class="ss-label">With Gini</div><div class="ss-val">2+ Years <span class="ss-badge ss-b">Since Oct 2023</span></div></div>
+  </div>
+  <div class="ss-item">
+    <div><div class="ss-label">Visits</div><div class="ss-val">12 visits <span class="ss-badge ss-g">Continuous Care</span></div></div>
+  </div>
+  <div class="ss-item">
+    <div><div class="ss-label">Care Phase</div><div class="ss-val">🏆 <span class="ss-badge ss-p">Phase 3 — Continuous Care</span></div></div>
+  </div>
+  <div class="ss-sep"></div>
+  <div class="ss-item">
+    <div><div class="ss-label">HbA1c — Since 1st Visit</div><div class="ss-val">7.6 → 6.3% <span class="ss-badge ss-g">↓ 17% (May 25 → Today)</span></div></div>
+  </div>
+  <div class="ss-item">
+    <div><div class="ss-label">Weight — Since Last Visit</div><div class="ss-val">94 → 95.1 kg <span class="ss-badge ss-a">↑ 1.1 kg since Jul 25</span></div></div>
+  </div>
+  <div class="ss-item">
+    <div><div class="ss-label">TSH — Today</div><div class="ss-val">7.86 µIU/mL <span class="ss-badge ss-a">↑ Elevated · Goal &lt;4.5</span></div></div>
+  </div>
+  <div class="ss-item">
+    <div><div class="ss-label">BP — Today</div><div class="ss-val">143/84 <span class="ss-badge ss-a">↑ Review (Last: 112/81)</span></div></div>
+  </div>
+  <div class="ss-sep"></div>
+  <div class="ss-item">
+    <div><div class="ss-label">Current Regimen</div>
+    <div class="regimen-tags">
+      <span class="reg-tag">GLP-1/GIP (Mounjaro)</span>
+      <span class="reg-tag">Ryzodeg Insulin</span>
+      <span class="reg-tag">SGLT2+Met (Cospiaq)</span>
+      <span class="reg-tag">SU+Met (Glizid MXR)</span>
+    </div></div>
+  </div>
+</div>
+
+<!-- ════ BODY ════ -->
+<div class="bodywrap">
+
+  <!-- ════ DARK SIDEBAR ════ -->
+  <div class="sidebar">
+    <div class="sb-hd"><span class="sb-lbl">Patient Snapshot</span><span class="sb-v">V12</span></div>
+    <div class="sb-scroll">
+      <div class="sbsec">
+        <div class="sbsec-title">Today's Vitals</div>
+        <div class="vgrid">
+          <div class="vbox"><div class="vval">143<span style="font-size:9px;color:var(--sbmuted)">/84</span></div><div class="vlbl">BP mmHg</div></div>
+          <div class="vbox"><div class="vval">96</div><div class="vlbl">HR bpm</div></div>
+          <div class="vbox"><div class="vval">95.15<span style="font-size:9px;color:var(--sbmuted)">kg</span></div><div class="vlbl">Weight</div></div>
+          <div class="vbox"><div class="vval">32.47</div><div class="vlbl">BMI</div></div>
+        </div>
+        <div style="margin-top:5px;background:var(--sb2);border:1px solid var(--sbb);border-radius:6px;padding:5px 8px;display:flex;justify-content:space-between">
+          <div style="text-align:center"><div class="vval" style="font-size:12px">171 cm</div><div class="vlbl">Height</div></div>
+          <div style="text-align:center"><div class="vval" style="font-size:12px">32 kg/m²</div><div class="vlbl">BMI Class</div></div>
+          <div style="text-align:center"><div class="vval" style="font-size:12px">111 cm</div><div class="vlbl">Waist</div></div>
+        </div>
+      </div>
+      <div class="sbsec">
+        <div class="sbsec-title">Diagnoses (7)</div>
+        <div class="sdx"><div><div class="sdx-nm">Type 2 Diabetes</div><div class="sdx-sub">Since 2018 · HbA1c 6.3%</div></div><span class="spill sp-ctrl">Controlled</span></div>
+        <div class="sdx"><div><div class="sdx-nm">Hypertension</div><div class="sdx-sub">BP 143/84</div></div><span class="spill sp-rev">Review</span></div>
+        <div class="sdx"><div><div class="sdx-nm">MASLD+</div><div class="sdx-sub">Metabolic fatty liver</div></div><span class="spill sp-mon">Monitor</span></div>
+        <div class="sdx"><div><div class="sdx-nm">Overactive Bladder</div><div class="sdx-sub">Ongoing</div></div><span class="spill sp-mon">Monitor</span></div>
+        <div class="sdx"><div><div class="sdx-nm">Dyslipidemia</div><div class="sdx-sub">LDL 30.46 ✓</div></div><span class="spill sp-ctrl">Controlled</span></div>
+        <div class="sdx"><div><div class="sdx-nm">Subclinical Hypothyroid</div><div class="sdx-sub">TSH 7.86 ↑</div></div><span class="spill sp-rev">Review</span></div>
+        <div class="sdx"><div><div class="sdx-nm">Hashimoto's Thyroiditis</div><div class="sdx-sub">Anti-TPO needed</div></div><span class="spill sp-mon">Monitor</span></div>
+      </div>
+      <div class="sbsec">
+        <div class="sbsec-title">Active Meds (8)</div>
+        <div class="smed"><div class="smed-dot" style="background:#7c3aed"></div><div><div class="smed-nm">Inj Mounjaro 5mg</div><div class="smed-dose">SC weekly · 9 PM</div><div class="smed-for">GLP-1/GIP · Weight + Sugar</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#4466f5"></div><div><div class="smed-nm">Inj Ryzodeg 24U</div><div class="smed-dose">SC OD · 30 min before dinner</div><div class="smed-for">Insulin · Sugar</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#0ea5e9"></div><div><div class="smed-nm">Cospiaq M 25/1gm</div><div class="smed-dose">30 min before breakfast</div><div class="smed-for">SGLT2+Met · Sugar</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#12b981"></div><div><div class="smed-nm">Glizid MXR 60+500mg</div><div class="smed-dose">BD · Before B'fast + Dinner</div><div class="smed-for">SU+Met · Sugar</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#f59e0b"></div><div><div class="smed-nm">Telma 40mg</div><div class="smed-dose">OD · 8 AM</div><div class="smed-for">ARB · BP</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#f87171"></div><div><div class="smed-nm">Metolar XR 25mg</div><div class="smed-dose">OD · 8 PM</div><div class="smed-for">Beta-blocker · BP/HR</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#a78bfa"></div><div><div class="smed-nm">Atchol 20mg</div><div class="smed-dose">OD · 10 PM</div><div class="smed-for">Statin · Cholesterol</div></div></div>
+        <div class="smed"><div class="smed-dot" style="background:#fbbf24"></div><div><div class="smed-nm">Aktiv D 60K IU</div><div class="smed-dose">Once in 14 days · Bedtime</div><div class="smed-for">Vitamin D</div></div></div>
+      </div>
+      <div class="sbsec">
+        <div class="sbsec-title">Flags</div>
+        <div class="salert" onclick="document.getElementById('sec-thyroid').scrollIntoView({behavior:'smooth'})">
+          <span style="font-size:13px">⚠️</span><div><div class="salert-txt">TSH 7.86 µIU/mL</div><div class="salert-sub">Elevated · Target &lt;4.5 · Review Thyronorm dose</div></div>
+        </div>
+        <div class="salert" onclick="">
+          <span style="font-size:13px">⚠️</span><div><div class="salert-txt">Weight ↑ 1.15 kg</div><div class="salert-sub">94 → 95.15 kg since Jul 2025</div></div>
+        </div>
+        <div class="salert red">
+          <span style="font-size:13px">❗</span><div><div class="salert-txt">HR 96 bpm</div><div class="salert-sub">Elevated · Increase Metolar?</div></div>
+        </div>
+        <div class="salert">
+          <span style="font-size:13px">📋</span><div><div class="salert-txt">Anti-TPO, Anti-TG pending</div><div class="salert-sub">Lab tests not yet done</div></div>
+        </div>
+      </div>
+    </div>
+  </div><!-- end sidebar -->
+
+  <!-- ════ MAIN ════ -->
+  <div class="main">
+    <div class="stabs">
+      <div class="stab on" onclick="stab('visit',this)">📋 Visit</div>
+      <div class="stab" onclick="stab('labs',this)">🧪 Labs <span class="tbadge">4</span></div>
+      <div class="stab" onclick="stab('exam',this)">🩺 Exam</div>
+      <div class="stab" onclick="stab('history',this)">📅 History</div>
+      <div class="stab" onclick="stab('messages',this)">💬 Messages <span class="tbadge am">2</span></div>
+      <div class="stab" onclick="stab('docs',this)">📁 Docs <span class="tbadge">6</span></div>
+      <div class="stab" onclick="stab('medcard',this)">💊 Med Card</div>
+      <div class="stab" onclick="stab('logdata',this)">📊 Logged Data</div>
+      <div class="stabs-r">
+        <span style="font-size:10px;font-weight:700;color:var(--green);background:var(--grn-lt);padding:3px 10px;border-radius:20px;border:1px solid var(--grn-bd)">↓ Improving — Continuous Care</span>
+      </div>
+    </div>
+
+    <!-- ═══ VISIT PANEL ═══ -->
+    <div id="panel-visit" class="panel on">
+      <div class="jnav">
+        <span class="jlbl">Jump to</span>
+        <button class="jbtn on" onclick="jmp('biomarkers',this)">📊 Biomarkers</button>
+        <button class="jbtn" onclick="jmp('symptoms',this)">🩹 Symptoms</button>
+        <button class="jbtn" onclick="jmp('diagnoses',this)">🏷 Diagnoses</button>
+        <button class="jbtn" onclick="jmp('medications',this)">💊 Medications</button>
+        <button class="jbtn" onclick="jmp('plan',this)">📝 Plan</button>
+        <button class="jbtn" onclick="jmp('summary',this)">📄 Summary</button>
+        <div class="jdiv"></div>
+        <button class="jbtn" onclick="jmp('changes',this)" style="color:var(--green)">✏️ This Visit</button>
+        <button class="ai-btn" onclick="toggleAI()">✦ Gini AI</button>
+      </div>
+      <div class="scrl" id="vscrl">
+
+        <!-- BIOMARKERS -->
+        <div class="sc" id="biomarkers">
+          <div class="sch">
+            <div class="sct"><div class="sci ic-b">📊</div>Biomarkers &amp; Lab Values</div>
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="font-size:11px;color:var(--t3);font-weight:500">Updated: 13 Feb 2026</span>
+              <button class="bx bx-p" onclick="openM('add-lab')">+ Add Value</button>
+            </div>
+          </div>
+          <div class="scb">
+            <div class="subsec">Diabetes Markers</div>
+            <div class="bmg">
+              <div class="bmc imp">
+                <div class="bml">HbA1c</div>
+                <div class="bmvr"><span class="bmv">6.3</span><span class="bmu">%</span></div>
+                <div class="bmtr td">▼ From 7.6% in 9 months</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,20 25,17 50,13 75,8 100,4" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="4" r="2.5" fill="#12b981"/><text x="0" y="23" font-size="7" fill="#9ca3af" font-family="DM Sans">7.6</text><text x="83" y="23" font-size="7" fill="#12b981" font-family="DM Sans">6.3</text></svg>
+                <div class="bmgr"><span class="bmgl">Goal</span><span class="bmgv">&lt;7.0%</span></div>
+              </div>
+              <div class="bmc imp">
+                <div class="bml">Fasting Blood Sugar</div>
+                <div class="bmvr"><span class="bmv">92.6</span><span class="bmu">mg/dL</span></div>
+                <div class="bmtr td">▼ From 150 in 9 months</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,20 25,16 50,11 75,7 100,3" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="3" r="2.5" fill="#12b981"/><text x="0" y="23" font-size="7" fill="#9ca3af" font-family="DM Sans">150</text><text x="82" y="23" font-size="7" fill="#12b981" font-family="DM Sans">92.6</text></svg>
+                <div class="bmgr"><span class="bmgl">Goal</span><span class="bmgv">&lt;100</span></div>
+              </div>
+              <div class="bmc ok">
+                <div class="bml">No Hypoglycemia</div>
+                <div class="bmvr"><span class="bmv" style="font-size:16px;color:var(--green)">✓ None</span></div>
+                <div class="bmtr td">No GMI reported</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,12 25,12 50,12 75,12 100,12" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="12" r="2.5" fill="#12b981"/></svg>
+                <div class="bmgr"><span class="bmgl">Status</span><span class="bmgv" style="color:var(--green)">Safe ✓</span></div>
+              </div>
+              <div class="bmc ok">
+                <div class="bml">HOMA-IR (last: May 2025)</div>
+                <div class="bmvr"><span class="bmv">11.5</span><span class="bmu">IR</span></div>
+                <div class="bmtr ts">→ Insulin resistant</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,8 25,10 50,12 75,13 100,13" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="13" r="2.5" fill="#f59e0b"/></svg>
+                <div class="bmgr"><span class="bmgl">Normal</span><span class="bmgv">&lt;2.5</span></div>
+              </div>
+            </div>
+            <div class="subsec" style="margin-top:4px">Lipids / Kidney / Thyroid</div>
+            <div class="bmg">
+              <div class="bmc ok">
+                <div class="bml">LDL Cholesterol</div>
+                <div class="bmvr"><span class="bmv">30.5</span><span class="bmu">mg/dL</span></div>
+                <div class="bmtr td">✓ Well at goal</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,16 25,14 50,10 75,7 100,5" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="5" r="2.5" fill="#12b981"/></svg>
+                <div class="bmgr"><span class="bmgl">Goal</span><span class="bmgv">&lt;70</span></div>
+              </div>
+              <div class="bmc wrn">
+                <div class="bml">Triglycerides</div>
+                <div class="bmvr"><span class="bmv">159.7</span><span class="bmu">mg/dL</span></div>
+                <div class="bmtr ts">→ Borderline</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,10 25,11 50,12 75,13 100,12" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="12" r="2.5" fill="#f59e0b"/></svg>
+                <div class="bmgr"><span class="bmgl">Goal</span><span class="bmgv">&lt;150</span></div>
+              </div>
+              <div class="bmc ok">
+                <div class="bml">Creatinine / eGFR</div>
+                <div class="bmvr"><span class="bmv">0.9</span><span class="bmu">mg/dL</span></div>
+                <div class="bmtr td">✓ eGFR 88.7 (G2)</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,12 25,11 50,12 75,11 100,12" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="12" r="2.5" fill="#12b981"/></svg>
+                <div class="bmgr"><span class="bmgl">Normal</span><span class="bmgv">&lt;1.2</span></div>
+              </div>
+              <div class="bmc bad" id="sec-thyroid">
+                <div class="bml">TSH (Thyroid)</div>
+                <div class="bmvr"><span class="bmv" style="color:var(--red)">7.86</span><span class="bmu">µIU/mL</span></div>
+                <div class="bmtr tu">↑ Elevated (needs review)</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,16 25,14 50,12 75,14 100,18" stroke="#ef4444" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="18" r="2.5" fill="#ef4444"/></svg>
+                <div class="bmgr"><span class="bmgl">Goal</span><span class="bmgv">&lt;4.5</span></div>
+              </div>
+            </div>
+            <div class="subsec" style="margin-top:4px">Body Composition / Haematology</div>
+            <div class="bmg">
+              <div class="bmc wrn">
+                <div class="bml">Weight</div>
+                <div class="bmvr"><span class="bmv">95.1</span><span class="bmu">kg</span></div>
+                <div class="bmtr tu">↑ +1.1 kg since Jul 2025</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,16 25,12 50,8 75,10 100,12" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="12" r="2.5" fill="#f59e0b"/></svg>
+                <div class="bmgr"><span class="bmgl">Target</span><span class="bmgv">&lt;90 kg</span></div>
+              </div>
+              <div class="bmc ok">
+                <div class="bml">Body Fat %</div>
+                <div class="bmvr"><span class="bmv">33.3</span><span class="bmu">%</span></div>
+                <div class="bmtr td">▼ From 34.9% (May 2025)</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,20 25,16 50,10 75,9 100,8" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="8" r="2.5" fill="#12b981"/></svg>
+                <div class="bmgr"><span class="bmgl">Target</span><span class="bmgv">&lt;25%</span></div>
+              </div>
+              <div class="bmc wrn">
+                <div class="bml">Haemoglobin</div>
+                <div class="bmvr"><span class="bmv">12.5</span><span class="bmu">g/dL</span></div>
+                <div class="bmtr ts">→ Borderline low</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,14 25,16 50,15 75,14 100,13" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="13" r="2.5" fill="#f59e0b"/></svg>
+                <div class="bmgr"><span class="bmgl">Normal</span><span class="bmgv">13–17</span></div>
+              </div>
+              <div class="bmc ok">
+                <div class="bml">Waist Circumference</div>
+                <div class="bmvr"><span class="bmv">111</span><span class="bmu">cm</span></div>
+                <div class="bmtr td">▼ From 121 cm (May 2025)</div>
+                <svg class="sparkline" viewBox="0 0 100 24" fill="none"><polyline points="0,20 25,14 50,10 75,9 100,8" stroke="#12b981" stroke-width="1.5" fill="none" opacity=".5"/><circle cx="100" cy="8" r="2.5" fill="#12b981"/></svg>
+                <div class="bmgr"><span class="bmgl">Target</span><span class="bmgv">&lt;90 cm</span></div>
+              </div>
+            </div>
+            <div class="noticebar amb">
+              <span>⚠️</span>
+              <span class="ni amb">TSH elevated at 7.86 — check Anti-TPO, Anti-TG; consider adjusting Thyronorm dose. Weight has crept up 1.1 kg since July — review dietary adherence. <a href="#" style="font-weight:700;color:var(--amber)" onclick="toggleAI();return false">Ask Gini AI →</a></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYMPTOMS -->
+        <div class="sc" id="symptoms">
+          <div class="sch">
+            <div class="sct"><div class="sci ic-a">🩹</div>Symptoms &amp; Concerns</div>
+            <button class="bx bx-p" onclick="openM('add-symptom')">+ Add Symptom</button>
+          </div>
+          <div class="scb">
+            <div class="subsec">Active / Historical — Update Status</div>
+            <div class="syg">
+              <div class="syi">
+                <div class="sy-dot" style="background:var(--green)"></div>
+                <div style="flex:1"><div class="sy-nm">Nausea (Mounjaro side effect)</div><div class="sy-meta">Initial dose · Resolved with 5mg</div></div>
+                <select class="sy-sel" style="color:var(--green)"><option selected>Resolved ✓</option><option>Mild</option><option>Still present</option><option>Got worse</option></select>
+              </div>
+              <div class="syi">
+                <div class="sy-dot" style="background:var(--amber)"></div>
+                <div style="flex:1"><div class="sy-nm">Bloating &amp; acidity</div><div class="sy-meta">On 7.5mg dose · Dose reduced to 5mg</div></div>
+                <select class="sy-sel"><option selected>Improving</option><option>Mild</option><option>Resolved ✓</option><option>Still present</option></select>
+              </div>
+              <div class="syi">
+                <div class="sy-dot" style="background:var(--amber)"></div>
+                <div style="flex:1"><div class="sy-nm">Urinary urgency</div><div class="sy-meta">Since Dec 2023 · Ongoing</div></div>
+                <select class="sy-sel"><option>Mild</option><option selected>Improving</option><option>Still present</option><option>Resolved ✓</option></select>
+              </div>
+              <div class="syi">
+                <div class="sy-dot" style="background:var(--green)"></div>
+                <div style="flex:1"><div class="sy-nm">Appetite reduction</div><div class="sy-meta">On Mounjaro · Helpful for weight</div></div>
+                <select class="sy-sel" style="color:var(--green)"><option selected>Controlled</option><option>None</option><option>Resolved ✓</option></select>
+              </div>
+            </div>
+            <div class="addr" onclick="openM('add-symptom')"><span style="font-size:16px;color:var(--t3)">+</span><span class="addr-lbl">Add new symptom or concern for this visit</span></div>
+          </div>
+        </div>
+
+        <!-- DIAGNOSES -->
+        <div class="sc" id="diagnoses">
+          <div class="sch"><div class="sct"><div class="sci ic-p">🏷</div>Diagnoses</div><button class="bx bx-p" onclick="openM('add-dx')">+ Add Diagnosis</button></div>
+          <div class="scb">
+            <div class="dxi"><div class="dxi-dot" style="background:var(--green)"></div><div style="flex:1"><div class="dxi-ttl">Type 2 Diabetes Mellitus (T2DM)</div><div class="dxi-sub">ICD: E11 · Diagnosed 2018, Age of onset 51 · HbA1c 6.3% — CONTROLLED · Intensive program</div><div class="dx-note-saved" id="note-t2dm" style="display:none;font-size:11px;color:var(--primary);background:var(--pri-lt);border:1px solid var(--pri-bd);border-radius:5px;padding:4px 8px;margin-top:5px"></div></div><select class="sy-sel" style="font-size:12px;height:29px;padding:0 8px"><option selected>Controlled ✓</option><option>Improving</option><option>Uncontrolled</option><option>Monitoring</option></select><button class="bx bx-p" style="margin-left:5px" onclick="openDxNote('t2dm','Type 2 Diabetes Mellitus')">Note</button></div>
+            <div class="dxi"><div class="dxi-dot" style="background:var(--amber)"></div><div style="flex:1"><div class="dxi-ttl">Essential Hypertension</div><div class="dxi-sub">ICD: I10 · BP 143/84 today · HR 96 elevated · Telma 40 + Metolar XR on board</div><div class="dx-note-saved" id="note-htn" style="display:none;font-size:11px;color:var(--primary);background:var(--pri-lt);border:1px solid var(--pri-bd);border-radius:5px;padding:4px 8px;margin-top:5px"></div></div><select class="sy-sel" style="font-size:12px;height:29px;padding:0 8px"><option>Improving</option><option selected>Review ⚠</option><option>Controlled</option><option>Uncontrolled</option></select><button class="bx bx-p" style="margin-left:5px" onclick="openDxNote('htn','Essential Hypertension')">Note</button></div>
+            <div class="dxi"><div class="dxi-dot" style="background:var(--t3)"></div><div style="flex:1"><div class="dxi-ttl">MASLD+ (Metabolic-associated Steatotic Liver Disease)</div><div class="dxi-sub">ICD: K76.0 · LFTs not checked today · Weight loss positive for MASLD</div><div class="dx-note-saved" id="note-masld" style="display:none;font-size:11px;color:var(--primary);background:var(--pri-lt);border:1px solid var(--pri-bd);border-radius:5px;padding:4px 8px;margin-top:5px"></div></div><select class="sy-sel" style="font-size:12px;height:29px;padding:0 8px"><option>Improving</option><option selected>Monitoring</option><option>Stable</option></select><button class="bx bx-p" style="margin-left:5px" onclick="openDxNote('masld','MASLD+')">Note</button></div>
+            <div class="dxi"><div class="dxi-dot" style="background:var(--amber)"></div><div style="flex:1"><div class="dxi-ttl">Subclinical Hypothyroidism + Hashimoto's Thyroiditis</div><div class="dxi-sub">TSH 7.86 (elevated) · T4 8.76 (normal) · Anti-TPO, Anti-TG: pending</div><div class="dx-note-saved" id="note-thyroid" style="display:none;font-size:11px;color:var(--primary);background:var(--pri-lt);border:1px solid var(--pri-bd);border-radius:5px;padding:4px 8px;margin-top:5px"></div></div><select class="sy-sel" style="font-size:12px;height:29px;padding:0 8px"><option selected>Review ⚠</option><option>Controlled</option><option>Monitoring</option></select><button class="bx bx-p" style="margin-left:5px" onclick="openDxNote('thyroid','Subclinical Hypothyroidism')">Note</button></div>
+            <div class="dxi"><div class="dxi-dot" style="background:var(--green)"></div><div style="flex:1"><div class="dxi-ttl">Dyslipidemia</div><div class="dxi-sub">LDL 30.46 (excellent) · TG 159.7 borderline · Atchol 20mg effective</div><div class="dx-note-saved" id="note-dyslip" style="display:none;font-size:11px;color:var(--primary);background:var(--pri-lt);border:1px solid var(--pri-bd);border-radius:5px;padding:4px 8px;margin-top:5px"></div></div><select class="sy-sel" style="font-size:12px;height:29px;padding:0 8px"><option selected>Controlled ✓</option><option>Monitoring</option></select><button class="bx bx-p" style="margin-left:5px" onclick="openDxNote('dyslip','Dyslipidemia')">Note</button></div>
+            <div class="addr" onclick="openM('add-dx')"><span style="font-size:16px;color:var(--t3)">+</span><span class="addr-lbl">Add new diagnosis</span></div>
+          </div>
+        </div>
+
+        <!-- MEDICATIONS -->
+        <div class="sc" id="medications">
+          <div class="sch"><div class="sct"><div class="sci ic-g">💊</div>Medications</div>
+            <div style="display:flex;gap:6px"><button class="bx bx-n" onclick="toggleStopped()">Stopped Meds</button><button class="bx bx-p" onclick="openM('add-med')">+ Add Medicine</button></div>
+          </div>
+          <div class="scb">
+            <div class="mth"><span class="mthl">Medicine</span><span class="mthl">Dose</span><span class="mthl">Timing & Instructions</span><span class="mthl">For / Since</span><span class="mthl">Actions</span></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#7c3aed"></div><div><div class="mbrand">Inj Mounjaro (Tirzepatide)</div><div class="mgen">GLP-1/GIP dual agonist · S/C injection</div></div></div><div class="mtd">5 mg</div><div class="mtd">Once weekly<br><span style="font-size:10px;color:var(--t3)">Every Saturday 9 PM · Rotate sites</span></div><div><span class="mfor" style="background:var(--pur-lt);color:var(--purple);border-color:var(--pur-bd)">DM+Wt</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Jun 2025</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#4466f5"></div><div><div class="mbrand">Inj Ryzodeg 24U</div><div class="mgen">Insulin Degludec+Aspart · Basal+Prandial</div></div></div><div class="mtd">24 Units</div><div class="mtd">Once daily<br><span style="font-size:10px;color:var(--t3)">30 min before dinner · Increase 2U if post-dinner &gt;150</span></div><div><span class="mfor">T2DM</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Jul 2023</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button><button class="ma ma-p">Pause</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#0ea5e9"></div><div><div class="mbrand">Cospiaq M 25/1gm</div><div class="mgen">Empagliflozin 25mg + Metformin 1gm</div></div></div><div class="mtd">25/1gm</div><div class="mtd">Once daily<br><span style="font-size:10px;color:var(--t3)">30 min before breakfast · Do not crush</span></div><div><span class="mfor">T2DM</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since May 2025</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#12b981"></div><div><div class="mbrand">Glizid MXR 60+500mg</div><div class="mgen">Gliclazide MR 60mg + Metformin 500mg</div></div></div><div class="mtd">60+500mg</div><div class="mtd" style="line-height:1.7"><span style="font-size:10px;font-weight:700;color:var(--primary)">Morning:</span> <span style="font-size:10px;color:var(--t3)">30 min before breakfast · With water</span><br><span style="font-size:10px;font-weight:700;color:var(--purple)">Evening:</span> <span style="font-size:10px;color:var(--t3)">30 min before dinner · With water</span></div><div><span class="mfor">T2DM</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Oct 2023</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#f59e0b"></div><div><div class="mbrand">Tab Telma 40mg</div><div class="mgen">Telmisartan 40mg · ARB</div></div></div><div class="mtd">40 mg</div><div class="mtd">Once daily<br><span style="font-size:10px;color:var(--t3)">8 AM · Can take with or without food</span></div><div><span class="mfor" style="background:var(--amb-lt);color:var(--amber);border-color:var(--amb-bd)">HTN</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Jun 2025</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#f87171"></div><div><div class="mbrand">Tab Metolar XR 25mg</div><div class="mgen">Metoprolol succinate 25mg · Beta-blocker</div></div></div><div class="mtd">25 mg</div><div class="mtd">Once daily<br><span style="font-size:10px;color:var(--t3)">8 PM · Do not crush/chew XR</span></div><div><span class="mfor" style="background:var(--amb-lt);color:var(--amber);border-color:var(--amb-bd)">HTN/HR</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Jul 2025</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#a78bfa"></div><div><div class="mbrand">Tab Atchol 20mg</div><div class="mgen">Atorvastatin 20mg · Statin</div></div></div><div class="mtd">20 mg</div><div class="mtd">Once daily<br><span style="font-size:10px;color:var(--t3)">10 PM · After dinner</span></div><div><span class="mfor" style="background:var(--pur-lt);color:var(--purple);border-color:var(--pur-bd)">Lipids</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Oct 2023</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button><button class="ma ma-s" onclick="openM('stop-med')">Stop</button></div></div>
+            <div class="mtr"><div class="mmain"><div class="mdot" style="background:#fbbf24"></div><div><div class="mbrand">Aktiv D 60K IU</div><div class="mgen">Cholecalciferol 60,000 IU · Vitamin D</div></div></div><div class="mtd">60K IU</div><div class="mtd">Once in 14 days<br><span style="font-size:10px;color:var(--t3)">Bedtime · Must take with milk</span></div><div><span class="mfor" style="background:#fef9c3;color:#ca8a04;border-color:#fde047">Vit D</span><div style="font-size:9px;color:var(--t4);margin-top:3px">Since Aug 2024</div></div><div class="macts"><button class="ma ma-e" onclick="openM('edit-med')">Edit</button></div></div>
+            <div id="stp-section" style="display:none">
+              <div class="stp-lbl" onclick="toggleStopped()">Stopped Medications</div>
+              <div class="mtr stp"><div class="mmain"><div class="mdot" style="background:var(--t4)"></div><div><div class="mbrand">Tab Rybelsus 14mg</div><div class="mgen">Semaglutide (oral) 14mg</div></div></div><div class="mtd">14 mg</div><div class="mtd">Was once daily</div><div><span class="stoptag">Stopped</span><div style="font-size:9px;color:var(--t3);margin-top:2px">Severe side effects + no weight loss</div></div><div class="macts"><button class="ma ma-r">Restart?</button></div></div>
+              <div class="mtr stp"><div class="mmain"><div class="mdot" style="background:var(--t4)"></div><div><div class="mbrand">Tab Atchol F</div><div class="mgen">Atorvastatin + Fenofibrate combination</div></div></div><div class="mtd">—</div><div class="mtd">Was OD</div><div><span class="stoptag">Stopped</span><div style="font-size:9px;color:var(--t3);margin-top:2px">Skin rash side effect</div></div><div class="macts"><button class="ma ma-r">Restart?</button></div></div>
+            </div>
+            <div class="addr" style="margin-top:9px" onclick="openM('add-med')"><span style="font-size:16px;color:var(--t3)">+</span><span class="addr-lbl">Add new medicine — type to search</span></div>
+            <div class="noticebar amb" style="margin-top:9px">
+              <span>💡</span><span class="ni amb">HR 96 bpm today — consider increasing Metolar XR to 50mg. TSH elevated — check if patient is taking Thyronorm. If not prescribed, add now. <a href="#" onclick="toggleAI();return false" style="font-weight:700;color:var(--amber)">Ask Gini AI →</a></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- PLAN -->
+        <div class="sc" id="plan">
+          <div class="sch"><div class="sct"><div class="sci ic-b">📝</div>Plan for This Visit</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn" onclick="openM('add-template')">📋 Templates</button>
+              <button class="bx bx-p" onclick="openM('add-referral')">+ Referral</button>
+            </div>
+          </div>
+          <div class="scb">
+            <div class="plg">
+              <div class="plc">
+                <div class="plct">🧪 Tests Ordered</div>
+                <div class="ti"><span class="ti-nm">Anti-TPO + Anti-TG</span><span class="urg u-u">Urgent</span></div>
+                <div class="ti"><span class="ti-nm">Fasting TFTs (TSH, T3, T4)</span><span class="urg u-u">Urgent</span></div>
+                <div class="ti"><span class="ti-nm">Fasting Plasma Insulin + C-Peptide</span><span class="urg u-n">Next visit</span></div>
+                <div class="ti"><span class="ti-nm">HbA1c + FPG</span><span class="urg u-n">Next visit</span></div>
+                <div class="ti"><span class="ti-nm">Lipid Profile full</span><span class="urg u-n">Next visit</span></div>
+                <div class="ti"><span class="ti-nm">Urine ACR (microalbuminuria)</span><span class="urg u-n">Next visit</span></div>
+                <div class="ti"><span class="ti-nm">KFT + LFT</span><span class="urg u-r">3 months</span></div>
+                <div class="addr" style="margin-top:6px;padding:5px 9px"><span style="font-size:13px;color:var(--t3)">+</span><span class="addr-lbl" style="font-size:11px">Add test</span></div>
+              </div>
+              <div class="plc">
+                <div class="plct">👨‍⚕️ Referrals</div>
+                <div class="refi"><div class="ref-av">EN</div><div style="flex:1"><div class="ref-nm">Endocrinology team review</div><div class="ref-sp">Thyroid management · Internal</div><div class="ref-wy">Subclinical hypothyroidism + Hashimoto's — consider Thyronorm prescription</div></div></div>
+                <div class="addr" style="margin-top:5px;padding:5px 9px" onclick="openM('add-referral')"><span style="font-size:13px;color:var(--t3)">+</span><span class="addr-lbl" style="font-size:11px">Add referral</span></div>
+                <div style="margin-top:10px">
+                  <div class="plct">🏃 Lifestyle Instructions</div>
+                  <div style="font-size:12px;color:var(--t2);line-height:1.9">
+                    🍽️ Diet: <strong>1,000 kcal/day · 60g protein</strong><br>
+                    👣 Steps: <strong>10,000 steps daily</strong><br>
+                    💉 Ryzodeg: Increase by <strong>2U</strong> if post-dinner BG >150
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="subsec">Templates &amp; Patient Instructions</div>
+            <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
+              <button class="btn" onclick="openM('insulin-guide')">📌 Insulin Titration Guide</button>
+              <button class="btn">🥗 1000 kcal Diet Plan</button>
+              <button class="btn">💉 Mounjaro Injection Guide</button>
+              <button class="btn">🩸 Blood Sugar Log Sheet</button>
+              <button class="btn">📋 Fasting Lab Instructions</button>
+            </div>
+            <div class="subsec">Doctor's Note</div>
+            <textarea class="nf" style="margin-bottom:12px">Patient on Intensive Diabetes Management Program, Phase 3. HbA1c 6.3% — excellent control. Weight crept up 1.1 kg — reinforce diet. TSH 7.86 elevated — review thyroid management and prescribe Thyronorm if not already on it. HR 96 — consider increasing Metolar. Continue Mounjaro 5mg. Do not escalate to 7.5mg until next visit labs reviewed.</textarea>
+            <div class="nv-row">
+              <div>
+                <div style="font-size:9px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:.5px">Next Visit Scheduled</div>
+                <div class="nv-date">Friday, 27 March 2026</div>
+              </div>
+              <div style="display:flex;gap:7px">
+                <button class="bx bx-g">Change Date</button>
+                <button class="bx bx-p">Send Reminder via WhatsApp</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CHANGES -->
+        <div class="sc" id="changes" style="border:2px solid var(--pri-lt)">
+          <div class="sch" style="background:var(--pri-lt)">
+            <div class="sct" style="color:var(--primary)"><div class="sci" style="background:var(--primary);color:white">✏️</div>Changes Made This Visit</div>
+            <span style="font-size:11px;color:var(--primary);font-weight:600">Auto-updates as you make changes above</span>
+          </div>
+          <div class="scb">
+            <div class="chg-grid">
+              <div><div class="chg-sec-lbl">Diagnosis Updates</div><div class="chg-line"><span style="color:var(--green)">✓</span> T2DM — Controlled<br><span style="color:var(--amber)">⚠</span> HTN — Review (HR 96)<br><span style="color:var(--amber)">⚠</span> Thyroid — Review (TSH 7.86)</div></div>
+              <div><div class="chg-sec-lbl">Medication Changes</div><div class="chg-line"><span style="color:var(--green)">✓</span> All 8 meds continued<br><span style="color:var(--amber)">○</span> Mounjaro: 5mg maintained<br><span style="color:var(--primary)">?</span> Metolar: consider ↑ to 50mg</div></div>
+              <div><div class="chg-sec-lbl">Tests &amp; Plan</div><div class="chg-line"><span style="color:var(--red)">+</span> Anti-TPO + Anti-TG (urgent)<br><span style="color:var(--red)">+</span> TFTs fasting (urgent)<br><span style="color:var(--primary)">+</span> 6 tests ordered next visit</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUMMARY -->
+        <div class="sc" id="summary">
+          <div class="sch"><div class="sct"><div class="sci ic-b">📄</div>Visit Summary &amp; Print</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn" onclick="showPrint()">🖨 Print Rx</button>
+              <button class="btn" onclick="stab('medcard',document.querySelectorAll('.stab')[6])">💊 Print Med Card</button>
+              <button class="btn">📱 Send via WhatsApp</button>
+            </div>
+          </div>
+          <div class="scb">
+            <div class="sumcard">
+              <div class="sum-title">Gini Advanced Care Hospital · Intensive Diabetes Management Program · Visit Summary — 13 Feb 2026</div>
+              <div class="sum-row"><span class="sum-k">Patient</span><span class="sum-v">Pawan Kumar, 59M · ID: P-15300 · Dr. Anil Bhansali, DM Endocrinology</span></div>
+              <div class="sum-row"><span class="sum-k">Program</span><span class="sum-v">Intensive Diabetes Management Program · Phase 3 — Continuous Care · Visit #12</span></div>
+              <div class="sum-row"><span class="sum-k">Diagnoses</span><span class="sum-v">T2DM (Controlled), HTN (Review), MASLD+ (Monitor), Subclinical Hypothyroid (Review), Dyslipidemia (Controlled)</span></div>
+              <div class="sum-row"><span class="sum-k">Key Markers</span><span class="sum-v">HbA1c 6.3% ✓ (from 7.6%), FPG 92.6 ✓, LDL 30.5 ✓, BP 143/84, TSH 7.86 ↑, Weight 95.1kg ↑ 1kg</span></div>
+              <div class="sum-row"><span class="sum-k">Medications</span><span class="sum-v">Mounjaro 5mg weekly · Ryzodeg 24U before dinner · Cospiaq M 25/1gm · Glizid MXR BD · Telma 40 · Metolar XR 25 · Atchol 20 · Aktiv D</span></div>
+              <div class="sum-row"><span class="sum-k">Tests Urgent</span><span class="sum-v">Anti-TPO, Anti-TG, Fasting TFTs (collect 8–9 AM fasting, off antidiabetic meds 24h prior)</span></div>
+              <div class="sum-row"><span class="sum-k">Next Visit</span><span class="sum-v">Friday, 27 March 2026 · Program Specialist follow-up</span></div>
+              <div class="sum-acts">
+                <button class="btn-p" onclick="endVisit()">✓ Complete &amp; Save Visit</button>
+                <button class="btn" onclick="showPrint()">Print Full Prescription</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:28px"></div>
+      </div><!-- end scrl -->
+
+      <!-- Print prescription (only renders on print) -->
+      <div id="rx-print">
+        <div class="rx-header">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="rx-logo">G</div>
+            <div><div class="rx-hosp-name">GINI ADVANCED CARE HOSPITAL</div><div class="rx-hosp-sub">Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab · 01724120100 · +91 8146320100</div></div>
+          </div>
+          <div><div class="rx-dr-name">Dr. Anil Bhansali</div><div class="rx-dr-cred">DM - Endocrinology, PGIMER Chandigarh<br>Reg. No. PMC-XXXX · 700+ Research Papers</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <div class="rx-phase">🏆 INTENSIVE DIABETES MANAGEMENT PROGRAM &nbsp;·&nbsp; Phase 3 — Continuous Care &nbsp;·&nbsp; Visit #12</div>
+        </div>
+        <div class="rx-pt-row">
+          <div class="rx-pt-field"><div class="rx-pt-lbl">Patient Name</div><div class="rx-pt-val">Pawan Kumar</div></div>
+          <div class="rx-pt-field"><div class="rx-pt-lbl">Age / Sex</div><div class="rx-pt-val">59 Years / Male</div></div>
+          <div class="rx-pt-field"><div class="rx-pt-lbl">Patient ID</div><div class="rx-pt-val">P_15300</div></div>
+          <div class="rx-pt-field"><div class="rx-pt-lbl">Date</div><div class="rx-pt-val">13 February 2026</div></div>
+        </div>
+        <div class="rx-vitals">
+          <div class="rx-vbox"><div class="rx-vv">171 cm</div><div class="rx-vl">Height</div></div>
+          <div class="rx-vbox"><div class="rx-vv">95.15 kg</div><div class="rx-vl">Weight</div></div>
+          <div class="rx-vbox"><div class="rx-vv">32.47</div><div class="rx-vl">BMI</div></div>
+          <div class="rx-vbox"><div class="rx-vv">143/84</div><div class="rx-vl">BP (Sitting)</div></div>
+          <div class="rx-vbox"><div class="rx-vv">96/min</div><div class="rx-vl">Heart Rate</div></div>
+          <div class="rx-vbox"><div class="rx-vv">111 cm</div><div class="rx-vl">Waist</div></div>
+        </div>
+        <div class="rx-sec-title">Patient Journey — Key Markers Trend</div>
+        <div class="rx-journey">
+          <div class="rx-jc"><div class="rx-jc-lbl">With Gini</div><div class="rx-jc-val">2+ yrs</div><div class="rx-jc-arrow" style="color:var(--primary)">12 visits</div></div>
+          <div class="rx-jc"><div class="rx-jc-lbl">HbA1c</div><div class="rx-jc-val">6.3%</div><div class="rx-jc-arrow" style="color:var(--green)">↓ from 7.6%</div></div>
+          <div class="rx-jc"><div class="rx-jc-lbl">Weight</div><div class="rx-jc-val">95.1 kg</div><div class="rx-jc-arrow" style="color:var(--amber)">↑ 1.1 kg</div></div>
+          <div class="rx-jc"><div class="rx-jc-lbl">Waist</div><div class="rx-jc-val">111 cm</div><div class="rx-jc-arrow" style="color:var(--green)">↓ from 121</div></div>
+          <div class="rx-jc"><div class="rx-jc-lbl">Body Fat</div><div class="rx-jc-val">33.3%</div><div class="rx-jc-arrow" style="color:var(--green)">↓ from 34.9%</div></div>
+        </div>
+        <div class="rx-sec-title">Diagnoses</div>
+        <div class="rx-dx">
+          <span class="rx-dx-tag">✓ Type 2 DM (Since 2018)</span>
+          <span class="rx-dx-tag">⚠ Essential Hypertension</span>
+          <span class="rx-dx-tag">○ MASLD+</span>
+          <span class="rx-dx-tag">⚠ Subclinical Hypothyroidism</span>
+          <span class="rx-dx-tag">○ Hashimoto's Thyroiditis</span>
+          <span class="rx-dx-tag">○ Overactive Bladder</span>
+          <span class="rx-dx-tag">✓ Dyslipidemia (Controlled)</span>
+        </div>
+        <div class="rx-sec-title">Today's Key Biomarkers</div>
+        <table class="rx-bm-table">
+          <tr><th>Test</th><th>Today</th><th>Previous</th><th>Goal</th><th>Status</th></tr>
+          <tr><td>HbA1c</td><td><b>6.3%</b></td><td>6.7% (Nov 25)</td><td>&lt;7.0%</td><td class="rx-ok">✓ At Goal</td></tr>
+          <tr><td>Fasting Blood Sugar</td><td><b>92.6 mg/dL</b></td><td>78 (Nov 25)</td><td>&lt;100</td><td class="rx-ok">✓ At Goal</td></tr>
+          <tr><td>LDL Cholesterol</td><td><b>30.46 mg/dL</b></td><td>30 (Nov 25)</td><td>&lt;70</td><td class="rx-ok">✓ Excellent</td></tr>
+          <tr><td>Triglycerides</td><td><b>159.7 mg/dL</b></td><td>161 (Nov 25)</td><td>&lt;150</td><td class="rx-wrn">⚠ Borderline</td></tr>
+          <tr><td>Creatinine / eGFR</td><td><b>0.9 / 88.7</b></td><td>0.8 / 101</td><td>eGFR &gt;60</td><td class="rx-ok">✓ Normal</td></tr>
+          <tr><td>TSH</td><td><b>7.86 µIU/mL</b></td><td>4.7 (May 25)</td><td>&lt;4.5</td><td class="rx-ab">↑ Review</td></tr>
+          <tr><td>Haemoglobin</td><td><b>12.5 g/dL</b></td><td>12.7 (Nov 25)</td><td>13–17</td><td class="rx-wrn">⚠ Low</td></tr>
+        </table>
+        <div class="rx-sec-title">Medications</div>
+        <div style="border:1px solid #e4e9f2;border-radius:8px;overflow:hidden;margin-bottom:12px">
+          <div class="rx-med-row head"><span>MEDICINE (BRAND / GENERIC)</span><span>DOSE</span><span>WHEN TO TAKE</span><span>FOR</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Inj Mounjaro (Tirzepatide)</div><div class="rx-med-gen">GLP-1/GIP Dual Agonist · SC Injection</div></div><span>5 mg</span><span>Once weekly · Saturday 9 PM SC<br><i style="font-size:10px;color:#6b7280">Rotate injection sites weekly</i></span><span>Weight + Sugar</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Inj Ryzodeg 24 Units</div><div class="rx-med-gen">Insulin Degludec + Aspart · SC Injection</div></div><span>24 Units</span><span>Once daily · 30 min before dinner<br><i style="font-size:10px;color:#6b7280">Increase by 2U if post-dinner >150</i></span><span>Blood Sugar</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Tab Cospiaq M 25/1gm</div><div class="rx-med-gen">Empagliflozin 25mg + Metformin 1gm</div></div><span>25/1gm</span><span>Once daily · 30 min before breakfast</span><span>Blood Sugar</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Tab Glizid MXR 60+500mg</div><div class="rx-med-gen">Gliclazide MR 60 + Metformin 500mg</div></div><span>60+500mg</span><span>Twice daily · 30 min before breakfast &amp; before dinner</span><span>Blood Sugar</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Tab Telma 40mg</div><div class="rx-med-gen">Telmisartan 40mg</div></div><span>40 mg</span><span>Once daily · 8 AM</span><span>Blood Pressure</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Tab Metolar XR 25mg</div><div class="rx-med-gen">Metoprolol Succinate 25mg</div></div><span>25 mg</span><span>Once daily · 8 PM</span><span>BP / Heart Rate</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Tab Atchol 20mg</div><div class="rx-med-gen">Atorvastatin 20mg</div></div><span>20 mg</span><span>Once daily · 10 PM</span><span>Cholesterol</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Tab Aktiv D 60K IU</div><div class="rx-med-gen">Cholecalciferol 60,000 IU</div></div><span>60K IU</span><span>Once in 14 days · Bedtime with milk</span><span>Vitamin D</span></div>
+          <div class="rx-med-row"><div><div class="rx-med-nm">Cap Pan DSR (SOS)</div><div class="rx-med-gen">Pantoprazole + Domperidone</div></div><span>1 cap</span><span>SOS only · If nausea/acidity</span><span>Side effects</span></div>
+        </div>
+        <div class="rx-se">
+          <div class="rx-se-title">⚠ Mounjaro Side Effect Management</div>
+          <div>Nausea/Vomiting: Small bland meals · Amla candy · Tab Emset + Tab Rantac on Day 2 &amp; 3 of injection day · Diarrhoea: Tab Roko · Constipation: Increase fluids &amp; fibre · Injection site: Rotate weekly</div>
+        </div>
+        <div class="rx-inst">
+          <div class="rx-inst-title">📋 Fasting Lab Instructions (for next visit)</div>
+          <ol><li>Off all antidiabetic medications 24 hours before · Do NOT take any antidiabetic medicine the day before</li><li>Nothing to eat/drink after 10 PM the previous night</li><li>Collect sample between 8 AM – 9 AM</li><li>Avoid alcohol the previous night</li><li>No exercise, morning walk, or stairs on sample collection day</li></ol>
+        </div>
+        <div class="rx-inst">
+          <div class="rx-inst-title">🥗 Lifestyle Instructions</div>
+          <ul><li>Diet: 1,000 kcal per day · 60g protein · Avoid refined flour, sugar, and excess fat</li><li>Exercise: 10,000 steps daily · No gym on injection day</li><li>Insulin: Increase Ryzodeg by 2 units every 3 days if post-dinner blood sugar &gt;150 mg/dL</li></ul>
+        </div>
+        <!-- Insulin Titration in Print -->
+        <div style="background:#f8f9fc;border:1px solid #e4e9f2;border-radius:7px;padding:11px 14px;margin-bottom:10px;page-break-inside:avoid">
+          <div style="font-size:10px;font-weight:800;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:9px">📌 Insulin Titration Guide — Inj Ryzodeg (Current Dose: 24 Units)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:7px">
+            <tr>
+              <th style="background:#fef2f2;padding:6px 10px;text-align:center;border:1px solid #e4e9f2;color:#dc2626;font-weight:700">Post-Dinner BG &lt; 80 mg/dL</th>
+              <th style="background:#ecfdf5;padding:6px 10px;text-align:center;border:1px solid #e4e9f2;color:#16a34a;font-weight:700">Post-Dinner BG 80–150 mg/dL</th>
+              <th style="background:#fffbeb;padding:6px 10px;text-align:center;border:1px solid #e4e9f2;color:#d97706;font-weight:700">Post-Dinner BG &gt; 150 mg/dL</th>
+            </tr>
+            <tr>
+              <td style="padding:7px 10px;text-align:center;border:1px solid #e4e9f2;font-weight:700;color:#dc2626">⬇ Reduce by 4 Units<br><span style="font-weight:400;color:#6b7280">New dose: 20U · Call clinic</span></td>
+              <td style="padding:7px 10px;text-align:center;border:1px solid #e4e9f2;font-weight:700;color:#16a34a">✓ Maintain Dose<br><span style="font-weight:400;color:#6b7280">Continue 24U · No change</span></td>
+              <td style="padding:7px 10px;text-align:center;border:1px solid #e4e9f2;font-weight:700;color:#d97706">⬆ Add 2 Units<br><span style="font-weight:400;color:#6b7280">New dose: 26U · Wait 3 days before next increase</span></td>
+            </tr>
+          </table>
+          <div style="font-size:10px;color:#6b7280">⚠ Never increase by more than 2 units at a time · If any hypoglycaemia symptoms — reduce by 4 units immediately and call clinic · Check post-dinner BG 2 hours after dinner</div>
+        </div>
+        <div class="rx-footer">
+          <div><div style="font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Next Visit</div><div class="rx-next">📅 Friday, 27 March 2026</div><div style="font-size:10px;color:#6b7280;margin-top:2px">Advice: Anti-TPO · Anti-TG · Fasting TFTs on next lab draw</div></div>
+          <div class="rx-footer-contact">Gini Advanced Care Hospital<br>Shivalik Hospital, 2nd Floor, Sector 69, Mohali<br>📞 01724120100 · WhatsApp: +91 8146320100<br>🌐 ginihealth.com</div>
+        </div>
+      </div><!-- end rx-print -->
+
+    </div><!-- end visit panel -->
+
+    <!-- ═══ LABS TAB ═══ -->
+    <div id="panel-labs" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-b">🩸</div>Blood Reports</div><button class="bx bx-p" onclick="openM('upload-report')">+ Upload Report</button></div>
+          <div class="scb">
+            <div class="report-card"><div class="report-icon ri-b">🧪</div><div style="flex:1"><div class="report-nm">Lipid Profile + HbA1c + KFT + TFT</div><div class="report-dt">13 Feb 2026 · Dr. Bhansali · Fasting sample</div></div><span class="report-status rs-new">Latest</span></div>
+            <div class="report-card"><div class="report-icon ri-b">🧪</div><div style="flex:1"><div class="report-nm">HbA1c + FBG + CRT + TFT + Lipid</div><div class="report-dt">13 Nov 2025 · HbA1c 6.7 · LDL 30</div></div><span class="report-status rs-ok">Normal</span></div>
+            <div class="report-card"><div class="report-icon ri-b">🧪</div><div style="flex:1"><div class="report-nm">Full panel — HbA1c 6.9 · LDL 41.3</div><div class="report-dt">13 Aug 2025 · Including FPI, C-Peptide, HOMA-IR</div></div><span class="report-status rs-ok">Normal</span></div>
+            <div class="report-card"><div class="report-icon ri-b">🧪</div><div style="flex:1"><div class="report-nm">Full panel — HbA1c 7.6 · FPI 32.8</div><div class="report-dt">7 May 2025 · HOMA-IR 11.53 (High) · C-Peptide 7.7</div></div><span class="report-status rs-ab">2 Abnormal</span></div>
+          </div>
+        </div>
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-t">🩻</div>Radiology Reports</div><button class="bx bx-p" onclick="openM('upload-report')">+ Upload</button></div>
+          <div class="scb">
+            <div class="report-card"><div class="report-icon ri-r" style="background:#fff0f5">🫀</div><div style="flex:1"><div class="report-nm">Echocardiogram (2D Echo)</div><div class="report-dt">Aug 2025 · Mild LV diastolic dysfunction · EF 55%</div></div><span class="report-status rs-ab">Review</span></div>
+            <div class="report-card"><div class="report-icon ri-r" style="background:#f0fff4">🫁</div><div style="flex:1"><div class="report-nm">Ultrasound Abdomen</div><div class="report-dt">Jan 2025 · Fatty liver grade 2 · MASLD confirmed</div></div><span class="report-status rs-ab">1 Finding</span></div>
+            <div class="addr"><span style="font-size:14px;color:var(--t3)">+</span><span class="addr-lbl">Upload new radiology report</span></div>
+          </div>
+        </div>
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-g">🦶</div>ABI (Ankle-Brachial Index) — Peripheral Vascular</div><button class="bx bx-p">+ New Test</button></div>
+          <div class="scb">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px;text-align:center">
+                <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Left Leg — ABI</div>
+                <div style="font-size:28px;font-weight:800;color:var(--green)">1.08</div>
+                <div style="font-size:11px;color:var(--t3);margin-top:3px">Normal (0.9–1.3) · Last: Mar 2025</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px;text-align:center">
+                <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Right Leg — ABI</div>
+                <div style="font-size:28px;font-weight:800;color:var(--green)">1.10</div>
+                <div style="font-size:11px;color:var(--t3);margin-top:3px">Normal (0.9–1.3) · Last: Mar 2025</div>
+              </div>
+            </div>
+            <div class="noticebar grn" style="margin-top:10px"><span>✓</span><span class="ni grn">No peripheral artery disease detected. Repeat ABI annually as part of diabetic foot screening.</span></div>
+          </div>
+        </div>
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-a">🦶</div>VPT (Vibration Perception Threshold) — Neuropathy</div><button class="bx bx-p">+ New Test</button></div>
+          <div class="scb">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px;text-align:center">
+                <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Left Great Toe — VPT</div>
+                <div style="font-size:28px;font-weight:800;color:var(--amber)">18 V</div>
+                <div style="font-size:11px;color:var(--t3);margin-top:3px">Borderline (Normal &lt;15V) · Last: Mar 2025</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px;text-align:center">
+                <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Right Great Toe — VPT</div>
+                <div style="font-size:28px;font-weight:800;color:var(--amber)">16 V</div>
+                <div style="font-size:11px;color:var(--t3);margin-top:3px">Borderline (&lt;15V normal) · Last: Mar 2025</div>
+              </div>
+            </div>
+            <div class="noticebar amb" style="margin-top:10px"><span>⚠️</span><span class="ni amb">Borderline VPT — early diabetic peripheral neuropathy possible. Repeat in 6 months. Advise foot care education.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ EXAM TAB ═══ -->
+    <div id="panel-exam" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-g">🩺</div>Physical Exam · Visit #12 · 13 Feb 2026</div><button class="bx bx-p">+ Record Exam</button></div>
+          <div class="scb">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px">❤️ Cardiovascular</div>
+                <div style="font-size:12px;color:var(--t2);line-height:2">S1 S2 heard · No murmur<br>No pedal oedema<br>Pulse: Regular, 96/min<br>BP Sitting: 143/84 · Standing: 112/80</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px">🫁 Respiratory</div>
+                <div style="font-size:12px;color:var(--t2);line-height:2">Clear breath sounds bilaterally<br>No wheeze, no crepitations<br>SpO2: 98% on room air<br>Respiratory rate: 16/min</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px">🫃 Abdomen</div>
+                <div style="font-size:12px;color:var(--t2);line-height:2">Soft, non-tender<br>Liver slightly enlarged (MASLD)<br>No free fluid<br>Bowel sounds normal</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px">🦶 Diabetic Foot</div>
+                <div style="font-size:12px;color:var(--t2);line-height:2">No ulcers · No callus<br>Monofilament: Intact bilaterally<br>VPT: 18V left, 16V right (borderline)<br>ABI: 1.08 / 1.10 (normal)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-a">📏</div>Anthropometry History</div></div>
+          <div class="scb">
+            <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+              <tr style="background:var(--bg)"><th style="padding:7px 12px;text-align:left;font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase;letter-spacing:.5px">Date</th><th style="padding:7px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase">Weight</th><th style="padding:7px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase">BMI</th><th style="padding:7px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase">Waist</th><th style="padding:7px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase">Body Fat %</th><th style="padding:7px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--t4);text-transform:uppercase">BP</th></tr>
+              <tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 12px;font-weight:700;color:var(--primary)">13 Feb 2026</td><td style="padding:7px 12px;text-align:center">95.15 kg</td><td style="padding:7px 12px;text-align:center">32.47</td><td style="padding:7px 12px;text-align:center">111 cm</td><td style="padding:7px 12px;text-align:center">33.3%</td><td style="padding:7px 12px;text-align:center">143/84</td></tr>
+              <tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 12px">9 Jul 2025</td><td style="padding:7px 12px;text-align:center">94.3 kg</td><td style="padding:7px 12px;text-align:center">30.7</td><td style="padding:7px 12px;text-align:center">111 cm</td><td style="padding:7px 12px;text-align:center">33.3%</td><td style="padding:7px 12px;text-align:center">119/74</td></tr>
+              <tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 12px">9 Jun 2025</td><td style="padding:7px 12px;text-align:center">94.0 kg</td><td style="padding:7px 12px;text-align:center">30.7</td><td style="padding:7px 12px;text-align:center">111 cm</td><td style="padding:7px 12px;text-align:center">33.7%</td><td style="padding:7px 12px;text-align:center">112/81</td></tr>
+              <tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 12px">7 May 2025</td><td style="padding:7px 12px;text-align:center">98.7 kg</td><td style="padding:7px 12px;text-align:center">—</td><td style="padding:7px 12px;text-align:center">121 cm</td><td style="padding:7px 12px;text-align:center">34.9%</td><td style="padding:7px 12px;text-align:center">123/98</td></tr>
+            </table></div>
+            <div class="noticebar grn" style="margin-top:10px"><span>✓</span><span class="ni grn">10 cm reduction in waist and 4.5% body fat reduction since May 2025 — significant progress. Recent weight regain needs dietary review.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ HISTORY TAB ═══ -->
+    <div id="panel-history" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-b">📅</div>Visit History — 12 Visits</div></div>
+          <div class="scb">
+            <div class="visit-line"><div class="vl-dot">12</div><div style="flex:1"><div class="vl-date">13 Feb 2026 — TODAY</div><div class="vl-ttl">Phase 3 · Continuous Care · Dr. Bhansali</div><div class="vl-sub">HbA1c 6.3% ✓ · TSH 7.86 elevated · Weight 95.1kg ↑</div><div class="vl-pills"><span class="vl-pill g">HbA1c 6.3% ✓</span><span class="vl-pill a">TSH ↑</span><span class="vl-pill a">Weight ↑</span><span class="vl-pill b">Mounjaro 5mg</span></div></div></div>
+            <div class="visit-line"><div class="vl-dot grn">11</div><div style="flex:1"><div class="vl-date">13 Nov 2025</div><div class="vl-ttl">Follow-up · Dr. Bhansali</div><div class="vl-sub">HbA1c 6.7% · Dose reduced: Mounjaro 7.5mg → 5mg (bloating/acidity)</div><div class="vl-pills"><span class="vl-pill g">HbA1c 6.7%</span><span class="vl-pill r">Dose reduced</span><span class="vl-pill a">Bloating side effect</span></div></div></div>
+            <div class="visit-line"><div class="vl-dot amb">10</div><div style="flex:1"><div class="vl-date">13 Aug 2025</div><div class="vl-ttl">Follow-up · Dr. Bhansali</div><div class="vl-sub">HbA1c 6.9% · FBG 93 · TSH 4.8 (normal) · Mounjaro 5mg → advised 7.5mg</div><div class="vl-pills"><span class="vl-pill g">HbA1c 6.9%</span><span class="vl-pill b">Mounjaro escalation</span></div></div></div>
+            <div class="visit-line"><div class="vl-dot amb">9</div><div style="flex:1"><div class="vl-date">9 Jul 2025</div><div class="vl-ttl">Follow-up · Dr. Bhansali</div><div class="vl-sub">Weight 94.3kg · BP 119/74 · Completed Mounjaro 5mg (3 inj) · HR 102 → Added Metolar XR 25mg</div><div class="vl-pills"><span class="vl-pill g">Weight ↓</span><span class="vl-pill b">Metolar XR added</span><span class="vl-pill a">HR 102</span></div></div></div>
+            <div class="visit-line"><div class="vl-dot">8</div><div style="flex:1"><div class="vl-date">9 Jun 2025</div><div class="vl-ttl">Follow-up · Dr. Bhansali</div><div class="vl-sub">Mounjaro 2.5mg → 5mg · Weight 94kg · FBG 110-120 · Nausea initially resolved</div><div class="vl-pills"><span class="vl-pill g">Weight ↓ 4kg</span><span class="vl-pill b">Mounjaro ↑ 5mg</span></div></div></div>
+            <div class="visit-line"><div class="vl-dot">7</div><div style="flex:1"><div class="vl-date">7 May 2025</div><div class="vl-ttl">Assessment · Dr. Bhansali</div><div class="vl-sub">HbA1c 7.6% · Weight 98.7kg · HOMA-IR 11.53 (insulin resistant) · Started Mounjaro 2.5mg</div><div class="vl-pills"><span class="vl-pill a">HbA1c 7.6%</span><span class="vl-pill r">HOMA-IR 11.53</span><span class="vl-pill b">Mounjaro started</span></div></div></div>
+            <div class="visit-line"><div class="vl-dot">6</div><div style="flex:1"><div class="vl-date">31 Jul 2023</div><div class="vl-ttl">Early visit · Dr. Bhansali</div><div class="vl-sub">Rybelsus 14mg stopped (severe side effects, no weight loss with 7mg). Ryzodeg started.</div><div class="vl-pills"><span class="vl-pill r">Rybelsus stopped</span><span class="vl-pill b">Ryzodeg started</span></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MESSAGES TAB ═══ -->
+    <div id="panel-messages" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-p">💬</div>Messages &amp; WhatsApp Logs</div><button class="bx bx-p">Log Call</button></div>
+          <div class="scb" style="max-width:600px">
+            <div style="font-size:10px;font-weight:700;color:var(--t4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px">23 Jan 2026</div>
+            <div class="msg-bubble patient">
+              <strong>Pawan Kumar</strong><br>Doctor sahib, meri body mein kuch dard ho raha hai after mounjaro injection. Kya yeh normal hai?
+              <div class="msg-meta patient">WhatsApp · 23 Jan 2026 · 9:42 PM</div>
+            </div>
+            <div class="msg-bubble team">
+              Pawan ji, injection site par mild discomfort normal hoti hai pehle few hours. Agar pain zyada ho ya skin red/swollen ho, toh photo bhejein. Agle din theek ho jaega.
+              <div class="msg-meta team">Care Team (via WATI) · 23 Jan 2026 · 10:05 PM</div>
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--t4);letter-spacing:.5px;text-transform:uppercase;margin:12px 0 10px">7 Feb 2026 — UNREAD ⚠</div>
+            <div class="msg-bubble unread">
+              <strong>Pawan Kumar (Unread)</strong><br>Mera weight thoda badh gaya hai last month se. 94 se 95 kg ho gaya. Koi alag cheez khayi nahi. Kya Mounjaro ki dose badhai jaaye?
+              <div class="msg-meta patient">WhatsApp · 7 Feb 2026 · 3:15 PM · UNREAD</div>
+            </div>
+            <div style="font-size:10px;font-weight:700;color:var(--t4);letter-spacing:.5px;text-transform:uppercase;margin:12px 0 10px">11 Feb 2026 — UNREAD ⚠</div>
+            <div class="msg-bubble unread">
+              <strong>Pawan Kumar (Unread)</strong><br>Kal hospital aane ka schedule hai. Blood test ke liye kya pehle se kuch khana band karna hai?
+              <div class="msg-meta patient">WhatsApp · 11 Feb 2026 · 8:22 PM · UNREAD</div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:7px">
+              <input class="mi" style="flex:1;height:36px" placeholder="Type reply...">
+              <button class="btn-p" style="height:36px">Send via WhatsApp</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ DOCS TAB ═══ -->
+    <div id="panel-docs" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-b">📁</div>Documents &amp; Files</div><button class="bx bx-p">+ Upload Document</button></div>
+          <div class="scb">
+            <div class="subsec">Prescriptions</div>
+            <div class="report-card"><div class="report-icon ri-b">📄</div><div style="flex:1"><div class="report-nm">Prescription — Visit #12</div><div class="report-dt">13 Feb 2026 · Dr. Bhansali · PDF · Auto-generated</div></div><button class="bx bx-p">View PDF</button></div>
+            <div class="report-card"><div class="report-icon ri-b">📄</div><div style="flex:1"><div class="report-nm">Prescription — Visit #11</div><div class="report-dt">13 Nov 2025 · Dr. Bhansali · PDF</div></div><button class="bx bx-n">View</button></div>
+            <div class="subsec" style="margin-top:10px">Lab Reports (Uploaded)</div>
+            <div class="report-card"><div class="report-icon ri-g">🧪</div><div style="flex:1"><div class="report-nm">Lipid Panel + TFT + HbA1c — Feb 2026</div><div class="report-dt">Uploaded 13 Feb 2026 · External Lab</div></div><span class="report-status rs-ok">Reviewed</span></div>
+            <div class="report-card"><div class="report-icon ri-g">🧪</div><div style="flex:1"><div class="report-nm">HbA1c + KFT + LFT — Nov 2025</div><div class="report-dt">Uploaded 13 Nov 2025</div></div><span class="report-status rs-ok">Reviewed</span></div>
+            <div class="subsec" style="margin-top:10px">Radiology &amp; Specialist Reports</div>
+            <div class="report-card"><div class="report-icon ri-r" style="background:#fff0f5">🫀</div><div style="flex:1"><div class="report-nm">Echocardiogram Report</div><div class="report-dt">Aug 2025 · Mild diastolic dysfunction · Dr. Sharma, Cardiology</div></div><span class="report-status rs-ab">Finding</span></div>
+            <div class="report-card"><div class="report-icon ri-r" style="background:#f0fff4">🫁</div><div style="flex:1"><div class="report-nm">USG Abdomen Report</div><div class="report-dt">Jan 2025 · Fatty liver grade 2</div></div><span class="report-status rs-ab">Finding</span></div>
+            <div class="addr" style="margin-top:6px"><span style="font-size:15px;color:var(--t3)">+</span><span class="addr-lbl">Upload a new document or report</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MED CARD TAB ═══ -->
+    <div id="panel-medcard" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-g">💊</div>Medicine Card — Patient Language</div><button class="btn" onclick="window.print()">🖨 Print Card</button></div>
+          <div class="scb">
+            <div style="font-size:13px;font-weight:600;color:var(--t2);margin-bottom:14px">Pawan ji, apni dawaiyan roz iss tarah leni hain:</div>
+            <div class="mc-mg" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:var(--pri-lt);border-radius:6px;display:inline-block">🌅 Khaane se pehle (Before Breakfast)</div>
+              <div class="mtr" style="margin-top:5px"><div class="mmain"><div class="mdot" style="background:#12b981"></div><div><div class="mbrand">Glizid MXR (Gliclazide+Metformin)</div><div class="mgen">Sugar control karti hai — khaana khaane se thodi der pehle leni hai</div></div></div><div class="mtd">1 tablet</div><div class="mtd">Roz subah</div><div><span class="mfor">Sugar</span></div><div></div></div>
+              <div class="mtr"><div class="mmain"><div class="mdot" style="background:#0ea5e9"></div><div><div class="mbrand">Cospiaq M (Empagliflozin+Metformin)</div><div class="mgen">Sugar aur weight dono control karta hai</div></div></div><div class="mtd">1 tablet</div><div class="mtd">Roz subah</div><div><span class="mfor">Sugar</span></div><div></div></div>
+            </div>
+            <div class="mc-mg" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:var(--amb-lt);border-radius:6px;display:inline-block">🌄 Subah 8 Baje (8 AM)</div>
+              <div class="mtr" style="margin-top:5px"><div class="mmain"><div class="mdot" style="background:#f59e0b"></div><div><div class="mbrand">Telma 40 (Telmisartan)</div><div class="mgen">BP control karti hai</div></div></div><div class="mtd">1 tablet</div><div class="mtd">Roz subah 8 AM</div><div><span class="mfor">BP</span></div><div></div></div>
+            </div>
+            <div class="mc-mg" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;display:inline-block">🍽️ Dinner se pehle (Before Dinner)</div>
+              <div class="mtr" style="margin-top:5px"><div class="mmain"><div class="mdot" style="background:#4466f5"></div><div><div class="mbrand">Inj Ryzodeg 24 Units</div><div class="mgen">Insulin injection · Dinner se 30 minute pehle · Pet ke neeche ke hisse mein</div></div></div><div class="mtd">24 Units</div><div class="mtd">Roz dinner se pehle</div><div><span class="mfor">Sugar</span></div><div></div></div>
+              <div class="mtr"><div class="mmain"><div class="mdot" style="background:#12b981"></div><div><div class="mbrand">Glizid MXR (Sham ki dose)</div><div class="mgen">Doosri dose — dinner se pehle</div></div></div><div class="mtd">1 tablet</div><div class="mtd">Roz sham</div><div><span class="mfor">Sugar</span></div><div></div></div>
+            </div>
+            <div class="mc-mg" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;display:inline-block">🌙 Raat 8 PM</div>
+              <div class="mtr" style="margin-top:5px"><div class="mmain"><div class="mdot" style="background:#f87171"></div><div><div class="mbrand">Metolar XR 25 (Metoprolol)</div><div class="mgen">Dil ki speed aur BP control karta hai</div></div></div><div class="mtd">1 tablet</div><div class="mtd">Roz raat 8 PM</div><div><span class="mfor">BP</span></div><div></div></div>
+            </div>
+            <div class="mc-mg" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:var(--pur-lt);border-radius:6px;display:inline-block">🌟 Raat 10 PM</div>
+              <div class="mtr" style="margin-top:5px"><div class="mmain"><div class="mdot" style="background:#a78bfa"></div><div><div class="mbrand">Atchol 20 (Atorvastatin)</div><div class="mgen">Cholesterol ghata ta hai — raat ko lena zyada asar karta hai</div></div></div><div class="mtd">1 tablet</div><div class="mtd">Roz raat 10 PM</div><div><span class="mfor">Cholesterol</span></div><div></div></div>
+            </div>
+            <div class="mc-mg" style="margin-bottom:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:var(--pur-lt);border-radius:6px;display:inline-block">📅 Har Shaniwar (Every Saturday) 9 PM</div>
+              <div class="mtr" style="margin-top:5px"><div class="mmain"><div class="mdot" style="background:#7c3aed"></div><div><div class="mbrand">Inj Mounjaro 5mg (Tirzepatide)</div><div class="mgen">Weight kam karna aur sugar control karna — weekly injection pet mein</div></div></div><div class="mtd">5 mg inj</div><div class="mtd">Har shaniwar raat 9</div><div><span class="mfor">Weight+Sugar</span></div><div></div></div>
+            </div>
+            <div class="noticebar pri"><span>📞</span><span class="ni pri">Koi problem ho? Gini Health se contact karein: +91 8146320100 (WhatsApp available)</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ LOGGED DATA TAB ═══ -->
+    <div id="panel-logdata" class="panel">
+      <div class="panel-body">
+        <div class="sc">
+          <div class="sch"><div class="sct"><div class="sci ic-b">📊</div>Patient App Data — Last 30 Days</div><button class="bx bx-p">View All Data</button></div>
+          <div class="scb">
+            <div class="log-grid">
+              <div class="log-card"><div class="log-val" style="color:var(--green)">87%</div><div class="log-lbl">Medication Adherence</div><div class="log-sub">26/30 days logged</div></div>
+              <div class="log-card"><div class="log-val" style="color:var(--amber)">8,240</div><div class="log-lbl">Avg Daily Steps</div><div class="log-sub">Target: 10,000</div></div>
+              <div class="log-card"><div class="log-val" style="color:var(--green)">6.4 <span style="font-size:14px">mmol</span></div><div class="log-lbl">Avg Fasting Sugar</div><div class="log-sub">Self-reported readings</div></div>
+            </div>
+            <div class="subsec">Blood Sugar Readings — Self-Logged</div>
+            <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:10px">
+              <svg viewBox="0 0 500 100" width="100%" style="max-height:100px" fill="none">
+                <!-- Background lines -->
+                <line x1="0" y1="30" x2="500" y2="30" stroke="#e4e9f2" stroke-width="1" stroke-dasharray="4,4"/>
+                <line x1="0" y1="60" x2="500" y2="60" stroke="#e4e9f2" stroke-width="1" stroke-dasharray="4,4"/>
+                <line x1="0" y1="80" x2="500" y2="80" stroke="#e4e9f2" stroke-width="1"/>
+                <!-- FBG values around 92-110 range -->
+                <polyline points="20,60 60,55 100,58 140,50 180,56 220,52 260,58 300,54 340,52 380,56 420,50 460,54 500,53" stroke="#4466f5" stroke-width="2" fill="none"/>
+                <!-- Post meal around 130-160 -->
+                <polyline points="20,40 60,38 100,42 140,36 180,40 220,38 260,44 300,40 340,38 380,42 420,36 460,40 500,38" stroke="#12b981" stroke-width="2" fill="none" stroke-dasharray="4,3"/>
+                <!-- Labels -->
+                <text x="4" y="28" font-size="9" fill="#9ca3af">180</text>
+                <text x="4" y="58" font-size="9" fill="#9ca3af">110</text>
+                <text x="4" y="78" font-size="9" fill="#9ca3af">80</text>
+                <text x="420" y="95" font-size="9" fill="#4466f5">FBG</text>
+                <text x="460" y="95" font-size="9" fill="#12b981">PP</text>
+              </svg>
+              <div style="font-size:10px;color:var(--t3);text-align:center;margin-top:4px">Fasting and post-meal sugar trends — last 30 days</div>
+            </div>
+            <div class="subsec">Weight Log — Self Reported</div>
+            <div style="border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:10px">
+              <svg viewBox="0 0 500 80" width="100%" style="max-height:80px" fill="none">
+                <line x1="0" y1="40" x2="500" y2="40" stroke="#e4e9f2" stroke-width="1" stroke-dasharray="4,4"/>
+                <polyline points="20,50 80,48 140,46 200,44 260,44 320,45 380,46 440,48 500,49" stroke="#f59e0b" stroke-width="2" fill="none"/>
+                <text x="4" y="38" font-size="9" fill="#9ca3af">94kg</text>
+                <text x="4" y="65" font-size="9" fill="#9ca3af">90kg</text>
+                <circle cx="500" cy="49" r="3.5" fill="#f59e0b"/>
+                <text x="455" y="43" font-size="9" fill="#f59e0b">95.1 kg</text>
+              </svg>
+              <div style="font-size:10px;color:var(--t3);text-align:center;margin-top:4px">Slight upward trend in weight last 6 weeks</div>
+            </div>
+            <div class="noticebar amb"><span>⚠️</span><span class="ni amb">Patient averaging 8,240 steps (target 10,000). Encourage daily activity. Weight trend upward — dietary review recommended this visit.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end main -->
+</div><!-- end bodywrap -->
+</div><!-- end app -->
+
+<!-- ════ MODALS ════ -->
+
+<!-- Stop Med -->
+<div class="mo" id="mo-stop-med">
+  <div class="mbox"><div class="mttl">🛑 Stop Medication</div>
+    <div style="font-size:13px;font-weight:600;color:var(--t2);margin-bottom:14px">Stopping: <strong>Inj Mounjaro 5mg</strong></div>
+    <div class="mf"><label class="ml">Reason for stopping *</label>
+      <select class="ms"><option value="">Select reason...</option><option>Side effect</option><option>Adverse reaction</option><option>Patient requested</option><option>Course completed</option><option>Replaced by better drug</option><option>Cost / availability</option><option>Not effective</option><option>Doctor's clinical decision</option></select>
+    </div>
+    <div class="mf"><label class="ml">Notes (optional)</label><textarea class="mta" placeholder="Any additional notes..."></textarea></div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-stop-med')">Cancel</button><button class="btn-p" style="background:var(--red)" onclick="closeM('mo-stop-med')">Stop Medication</button></div>
+  </div>
+</div>
+
+<!-- Edit Med -->
+<div class="mo" id="mo-edit-med">
+  <div class="mbox"><div class="mttl">✏️ Edit Medication</div>
+    <div style="font-size:13px;font-weight:600;color:var(--t2);margin-bottom:14px">Editing: <strong>Inj Ryzodeg</strong></div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Dosage</label><input class="mi" value="24 Units" placeholder="e.g. 24 Units"></div>
+      <div class="mf"><label class="ml">Frequency</label><select class="ms"><option selected>Once daily (OD)</option><option>Twice daily (BD)</option><option>Three times (TDS)</option><option>Once weekly</option><option>As needed (SOS)</option></select></div>
+    </div>
+    <div class="mf"><label class="ml">When to take — select all that apply</label>
+      <div class="time-pills">
+        <label><input type="checkbox"><span>Fasting (empty stomach)</span></label>
+        <label><input type="checkbox"><span>Before breakfast</span></label>
+        <label><input type="checkbox"><span>After breakfast</span></label>
+        <label><input type="checkbox"><span>Before lunch</span></label>
+        <label><input type="checkbox"><span>After lunch</span></label>
+        <label><input type="checkbox" checked><span>Before dinner</span></label>
+        <label><input type="checkbox"><span>After dinner</span></label>
+        <label><input type="checkbox"><span>At bedtime</span></label>
+        <label><input type="checkbox"><span>With milk</span></label>
+        <label><input type="checkbox"><span>As needed (SOS)</span></label>
+      </div>
+    </div>
+    <div class="mf"><label class="ml">Reason for change</label><textarea class="mta" placeholder="e.g. Increasing dose based on BG readings..." style="min-height:50px"></textarea></div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-edit-med')">Cancel</button><button class="btn-p" onclick="closeM('mo-edit-med')">Save Changes</button></div>
+  </div>
+</div>
+
+<!-- Add Med -->
+<div class="mo" id="mo-add-med">
+  <div class="mbox" style="width:460px"><div class="mttl">💊 Add New Medicine</div>
+    <div class="mf"><label class="ml">Medicine name (type to search)</label>
+      <input class="mi" list="drug-list" placeholder="e.g. Metformin, Insulin Glargine, Jardiance...">
+      <datalist id="drug-list">
+        <option value="Metformin 500mg (Glycomet)">
+        <option value="Metformin 1000mg (Glycomet G)">
+        <option value="Glimepiride 1mg (Amaryl 1)">
+        <option value="Glimepiride 2mg (Amaryl 2)">
+        <option value="Sitagliptin 50mg (Januvia)">
+        <option value="Vildagliptin 50mg (Galvus)">
+        <option value="Empagliflozin 10mg (Jardiance)">
+        <option value="Dapagliflozin 10mg (Forxiga)">
+        <option value="Canagliflozin 100mg (Invokana)">
+        <option value="Tirzepatide 5mg Inj (Mounjaro)">
+        <option value="Tirzepatide 7.5mg Inj (Mounjaro)">
+        <option value="Semaglutide 1mg Inj (Ozempic)">
+        <option value="Semaglutide 14mg Tab (Rybelsus)">
+        <option value="Insulin Glargine 10U Inj (Lantus)">
+        <option value="Insulin Degludec+Aspart (Ryzodeg)">
+        <option value="Telmisartan 40mg (Telma)">
+        <option value="Telmisartan 80mg">
+        <option value="Amlodipine 5mg">
+        <option value="Metoprolol Succinate 25mg (Metolar XR)">
+        <option value="Atorvastatin 20mg (Atchol / Atorva)">
+        <option value="Rosuvastatin 10mg (Rozavel)">
+        <option value="Levothyroxine 25mcg (Thyronorm)">
+        <option value="Levothyroxine 50mcg (Thyronorm)">
+        <option value="Levothyroxine 75mcg (Thyronorm)">
+        <option value="Vitamin D 60000 IU (Aktiv D)">
+        <option value="Solifenacin 5mg (Vesicare) — Overactive bladder">
+        <option value="Allopurinol 100mg">
+        <option value="Pantoprazole 40mg (Pan DSR)">
+      </datalist>
+    </div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Dosage</label><input class="mi" placeholder="e.g. 500 mg, 24 Units"></div>
+      <div class="mf"><label class="ml">Frequency</label><select class="ms" id="add-freq" onchange="toggleDualDose('add')"><option>Once daily (OD)</option><option>Twice daily (BD)</option><option>Three times (TDS)</option><option>Once weekly</option><option>Once in 14 days</option><option>As needed (SOS)</option></select></div>
+    </div>
+    <div class="mf"><label class="ml">When to take — select all that apply</label>
+      <div class="time-pills">
+        <label><input type="checkbox"><span>Fasting</span></label>
+        <label><input type="checkbox"><span>Before breakfast</span></label>
+        <label><input type="checkbox"><span>After breakfast</span></label>
+        <label><input type="checkbox"><span>Before lunch</span></label>
+        <label><input type="checkbox"><span>After lunch</span></label>
+        <label><input type="checkbox"><span>Before dinner</span></label>
+        <label><input type="checkbox"><span>After dinner</span></label>
+        <label><input type="checkbox"><span>At bedtime</span></label>
+        <label><input type="checkbox"><span>With milk</span></label>
+        <label><input type="checkbox"><span>SOS only</span></label>
+      </div>
+    </div>
+    <!-- Dual dose instructions, visible when BD selected -->
+    <div id="add-dual-dose" style="display:none;border:1px solid var(--pri-bd);border-radius:var(--rs);padding:11px 13px;background:var(--pri-lt);margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;color:var(--primary);margin-bottom:9px;text-transform:uppercase;letter-spacing:.5px">📋 Dual Dose Instructions (BD)</div>
+      <div class="g2">
+        <div class="mf"><label class="ml">🌅 Morning Dose — Time</label><input class="mi" placeholder="e.g. 8:00 AM, Before breakfast"></div>
+        <div class="mf"><label class="ml">Morning Instructions</label><input class="mi" placeholder="e.g. 30 min before breakfast with water"></div>
+      </div>
+      <div class="g2">
+        <div class="mf"><label class="ml">🌆 Evening Dose — Time</label><input class="mi" placeholder="e.g. 8:00 PM, Before dinner"></div>
+        <div class="mf"><label class="ml">Evening Instructions</label><input class="mi" placeholder="e.g. 30 min before dinner with water"></div>
+      </div>
+    </div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Prescribed for</label><select class="ms"><option>Type 2 Diabetes</option><option>Essential Hypertension</option><option>Dyslipidemia</option><option>MASLD</option><option>Hypothyroidism</option><option>Overactive Bladder</option><option>Other</option></select></div>
+      <div class="mf"><label class="ml">Prescribed since (date)</label><input class="mi" type="date" placeholder="When was this started?"></div>
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-add-med')">Cancel</button><button class="btn-p" onclick="closeM('mo-add-med')">Add Medicine</button></div>
+  </div>
+</div>
+
+<!-- Add Symptom -->
+<div class="mo" id="mo-add-symptom">
+  <div class="mbox"><div class="mttl">🩹 Add Symptom / Concern</div>
+    <div class="mf"><label class="ml">Symptom or concern (type to search)</label>
+      <input class="mi" list="sy-list" placeholder="e.g. Nausea, Burning feet, Swelling...">
+      <datalist id="sy-list">
+        <option value="Excessive thirst (polydipsia)">
+        <option value="Frequent urination (polyuria)">
+        <option value="Fatigue and low energy">
+        <option value="Blurred vision">
+        <option value="Nausea or vomiting">
+        <option value="Bloating or acidity">
+        <option value="Numbness or tingling in feet">
+        <option value="Burning sensation in feet">
+        <option value="Swelling in feet (pedal oedema)">
+        <option value="Weight gain">
+        <option value="Weight loss">
+        <option value="Reduced appetite">
+        <option value="Urinary urgency">
+        <option value="Urinary frequency">
+        <option value="Injection site reaction">
+        <option value="Constipation">
+        <option value="Diarrhoea">
+        <option value="Headache">
+        <option value="Dizziness (low BP on standing)">
+        <option value="Low blood sugar episode (hypoglycaemia)">
+      </datalist>
+    </div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Since when</label><input class="mi" type="date"></div>
+      <div class="mf"><label class="ml">Severity</label><select class="ms"><option>Mild</option><option>Moderate</option><option>Severe</option></select></div>
+    </div>
+    <div class="mf"><label class="ml">Related to</label>
+      <select class="ms"><option>Type 2 Diabetes</option><option>Hypertension</option><option>Medication side effect (Mounjaro)</option><option>Medication side effect (Insulin)</option><option>Thyroid condition</option><option>Not linked to current diagnosis</option></select>
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-add-symptom')">Cancel</button><button class="btn-p" onclick="closeM('mo-add-symptom')">Add Symptom</button></div>
+  </div>
+</div>
+
+<!-- Add Diagnosis -->
+<div class="mo" id="mo-add-dx">
+  <div class="mbox"><div class="mttl">🏷 Add Diagnosis</div>
+    <div class="mf"><label class="ml">Diagnosis name (type to search)</label>
+      <input class="mi" list="dx-list" placeholder="e.g. Hyperuricemia, Sleep Apnoea...">
+      <datalist id="dx-list">
+        <option value="Type 2 Diabetes Mellitus (T2DM) — ICD E11">
+        <option value="Type 1 Diabetes Mellitus — ICD E10">
+        <option value="Prediabetes / Impaired Glucose Tolerance">
+        <option value="Essential Hypertension — ICD I10">
+        <option value="Dyslipidemia — ICD E78.5">
+        <option value="MASLD (Metabolic-associated Steatotic Liver Disease)">
+        <option value="Subclinical Hypothyroidism">
+        <option value="Hypothyroidism — ICD E03.9">
+        <option value="Hashimoto's Thyroiditis — ICD E06.3">
+        <option value="Hyperuricemia / Gout">
+        <option value="Overactive Bladder — ICD N32.81">
+        <option value="Obesity Class 1 (BMI 30–35)">
+        <option value="Metabolic Syndrome">
+        <option value="Vitamin D Deficiency — ICD E55.9">
+        <option value="Vitamin B12 Deficiency">
+        <option value="Obstructive Sleep Apnoea">
+        <option value="Non-alcoholic Fatty Liver Disease (NAFLD)">
+        <option value="Diabetic Peripheral Neuropathy">
+        <option value="Diabetic Retinopathy">
+        <option value="Diabetic Nephropathy (CKD G2)">
+      </datalist>
+    </div>
+    <div class="g2">
+      <div class="mf"><label class="ml">ICD Code (optional)</label><input class="mi" placeholder="e.g. E11, I10..."></div>
+      <div class="mf"><label class="ml">Status</label><select class="ms"><option>New</option><option>Active</option><option>Monitoring</option></select></div>
+    </div>
+    <div class="mf"><label class="ml">Notes</label><textarea class="mta" style="min-height:50px" placeholder="Relevant findings, linked lab values..."></textarea></div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-add-dx')">Cancel</button><button class="btn-p" onclick="closeM('mo-add-dx')">Add Diagnosis</button></div>
+  </div>
+</div>
+
+<!-- Add Lab -->
+<div class="mo" id="mo-add-lab">
+  <div class="mbox"><div class="mttl">🧪 Add Lab Value</div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Test name</label><input class="mi" placeholder="e.g. TSH, Uric Acid..."></div>
+      <div class="mf"><label class="ml">Value</label><input class="mi" placeholder="e.g. 6.4"></div>
+    </div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Unit</label><input class="mi" placeholder="e.g. µIU/mL, mg/dL"></div>
+      <div class="mf"><label class="ml">Date of test</label><input class="mi" type="date"></div>
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-add-lab')">Cancel</button><button class="btn-p" onclick="closeM('mo-add-lab')">Add Value</button></div>
+  </div>
+</div>
+
+<!-- Add Referral -->
+<div class="mo" id="mo-add-referral">
+  <div class="mbox"><div class="mttl">👨‍⚕️ Add Referral</div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Doctor name</label><input class="mi" placeholder="e.g. Dr. Sharma"></div>
+      <div class="mf"><label class="ml">Speciality</label><input class="mi" list="spec-list" placeholder="e.g. Cardiology">
+        <datalist id="spec-list"><option value="Cardiology"><option value="Nephrology"><option value="Ophthalmology"><option value="Urology"><option value="Gastroenterology"><option value="Orthopedics"><option value="Physiotherapy"><option value="Dietetics"><option value="Podiatry"></datalist>
+      </div>
+    </div>
+    <div class="mf"><label class="ml">Reason for referral</label><textarea class="mta" style="min-height:55px" placeholder="Why is this referral needed?"></textarea></div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-add-referral')">Cancel</button><button class="btn-p" onclick="closeM('mo-add-referral')">Add Referral</button></div>
+  </div>
+</div>
+
+<!-- Templates -->
+<div class="mo" id="mo-add-template">
+  <div class="mbox" style="width:460px"><div class="mttl">📋 Add Template</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="dxi" style="cursor:pointer" onclick="openM('insulin-guide');closeM('mo-add-template')"><div class="dxi-dot" style="background:var(--primary)"></div><div><div class="dxi-ttl">📌 Insulin Titration Guide (Ryzodeg)</div><div class="dxi-sub">Dose adjustment rules based on post-dinner blood sugar</div></div></div>
+      <div class="dxi" style="cursor:pointer" onclick="closeM('mo-add-template')"><div class="dxi-dot" style="background:var(--purple)"></div><div><div class="dxi-ttl">💉 Mounjaro Injection Guide</div><div class="dxi-sub">Injection sites, technique, weekly rotation, side effect management</div></div></div>
+      <div class="dxi" style="cursor:pointer" onclick="closeM('mo-add-template')"><div class="dxi-dot" style="background:var(--green)"></div><div><div class="dxi-ttl">🥗 1,000 kcal Diet Plan</div><div class="dxi-sub">Meal plan with 60g protein, food list in Hindi/Punjabi</div></div></div>
+      <div class="dxi" style="cursor:pointer" onclick="closeM('mo-add-template')"><div class="dxi-dot" style="background:var(--amber)"></div><div><div class="dxi-ttl">📋 Fasting Lab Instructions</div><div class="dxi-sub">Off meds 24h, nothing after 10PM, sample 8–9 AM</div></div></div>
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-add-template')">Close</button></div>
+  </div>
+</div>
+
+<!-- ════ INSULIN TITRATION GUIDE ════ -->
+<div class="mo" id="mo-insulin-guide">
+  <div class="mbox" style="width:520px">
+    <div class="mttl">📌 Insulin Titration Guide — Ryzodeg</div>
+    <div style="background:var(--pri-lt);border:1px solid var(--pri-bd);border-radius:var(--rs);padding:10px 14px;margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">CURRENT DOSE</div>
+      <div style="font-size:22px;font-weight:800;color:var(--primary);margin-top:2px">24 Units <span style="font-size:13px;font-weight:500;color:var(--t3)">subcutaneous · 30 min before dinner</span></div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Titration Rule — Based on Post-Dinner Blood Sugar (2 hrs after dinner)</div>
+    <div class="tit-row">
+      <div class="tit-cell tit-low"><div class="tit-range">Blood Sugar<br>&lt; 80 mg/dL</div><div class="tit-action" style="color:var(--red)">⬇ Reduce 4 Units</div><div class="tit-sub">Call doctor<br>immediately</div></div>
+      <div class="tit-cell tit-ok"><div class="tit-range">Blood Sugar<br>80–150 mg/dL</div><div class="tit-action" style="color:var(--green)">✓ Maintain</div><div class="tit-sub">Continue<br>same dose</div></div>
+      <div class="tit-cell tit-high"><div class="tit-range">Blood Sugar<br>&gt; 150 mg/dL</div><div class="tit-action" style="color:var(--amber)">⬆ Add 2 Units</div><div class="tit-sub">Wait 3 days<br>before next increase</div></div>
+    </div>
+    <div class="titcalc">
+      <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px">🔢 Quick Dose Calculator</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:12px;color:var(--t2);font-weight:600;flex-shrink:0">Today's post-dinner BG:</span>
+        <input class="mi" id="bg-input" type="number" style="width:100px;height:34px" placeholder="e.g. 165" oninput="calcDose()">
+        <span style="font-size:12px;color:var(--t3)">mg/dL</span>
+      </div>
+      <div id="dose-result" style="font-size:13px;font-weight:700;color:var(--t2);padding:9px 12px;background:var(--bg);border-radius:7px;min-height:38px">Enter a blood sugar reading above to see recommendation</div>
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:var(--t3);line-height:1.8">
+      ⚠️ <strong>Important:</strong> Never increase insulin more than 2 units at a time · Wait 3 days before each increase · If BG &lt;80 or any hypoglycemia symptoms — reduce by 4 units and call the clinic
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-insulin-guide')">Close</button><button class="btn-p" onclick="closeM('mo-insulin-guide')">Send to Patient</button></div>
+  </div>
+</div>
+
+<!-- End Visit -->
+<div class="mo" id="mo-end-visit">
+  <div class="mbox" style="width:430px"><div class="mttl">✅ Complete &amp; Save Visit #12</div>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:14px;line-height:1.6">Finalise Visit #12 for <strong>Pawan Kumar</strong>. Summary will be sent to patient via WhatsApp.</div>
+    <div style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:12px">
+      <div class="mf" style="margin-bottom:10px"><label class="ml">Visit classification</label>
+        <select class="ms"><option>Improving — Continuous Care</option><option>Maintaining (Stable) — Routine follow-up</option><option>Stable — Routine follow-up</option><option>Worsening — Needs attention</option><option>Complex — Dr. Bhansali only</option></select>
+      </div>
+      <div class="mf" style="margin-bottom:10px"><label class="ml">Assign next visit to</label>
+        <select class="ms"><option>Dr. Bhansali (complex/VIP)</option><option selected>Dr. R. Mehta — Program Specialist</option><option>Dr. S. Kumar — Program Specialist</option></select>
+      </div>
+      <div class="mf" style="margin-bottom:0"><label class="ml">Next Visit Date</label>
+        <input class="mi" type="date" value="2026-03-27" style="height:36px">
+      </div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--green);padding:8px 12px;background:var(--grn-lt);border-radius:8px;border:1px solid var(--grn-bd)">
+      ✓ HbA1c well controlled — Phase 3 Continuous Care · Next visit: Dr. Mehta (Program Specialist)
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-end-visit')">Back</button><button class="btn-p" onclick="closeM('mo-end-visit')">Save &amp; Complete</button></div>
+  </div>
+</div>
+
+<!-- ════ QUICK FILL MODAL ════ -->
+<div class="mo" id="mo-quick-fill">
+  <div class="mbox" style="width:560px">
+    <div class="mttl">🪄 Quick Fill — Paste or Type Freely</div>
+    <div style="font-size:12px;color:var(--t3);margin-bottom:12px;line-height:1.7">Type or paste notes in plain language. The system will detect vitals, medicines, next appointment, and tests automatically.<br>
+    <span style="color:var(--primary);font-weight:600">Example:</span> <em>"weight 95.2 kg, bp 138/82, hr 88, add daplo M 5/500 twice day before breakfast and dinner, next appointment May 15 2026 with hba1c ldl"</em></div>
+    <textarea id="qf-input" class="nf" style="min-height:110px;font-size:13px;border-color:var(--pri-bd)" placeholder="Type vitals, medication changes, next visit date, tests ordered..."></textarea>
+    <button class="btn-p" style="margin:10px 0;width:100%;height:38px;font-size:13px;border-radius:8px" onclick="parseQuickFill()">✦ Parse &amp; Preview</button>
+    <div id="qf-results" style="display:none">
+      <div style="font-size:10px;font-weight:700;color:var(--t4);letter-spacing:.6px;text-transform:uppercase;margin-bottom:9px">Detected — Review &amp; Confirm</div>
+      <div id="qf-vitals-section" style="display:none;border:1px solid var(--grn-bd);border-radius:var(--rs);padding:11px 13px;background:var(--grn-lt);margin-bottom:9px">
+        <div style="font-size:10px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📏 Vitals Detected</div>
+        <div id="qf-vitals-preview" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div>
+      </div>
+      <div id="qf-meds-section" style="display:none;border:1px solid var(--pri-bd);border-radius:var(--rs);padding:11px 13px;background:var(--pri-lt);margin-bottom:9px">
+        <div style="font-size:10px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💊 Medicines Detected</div>
+        <div id="qf-meds-preview"></div>
+      </div>
+      <div id="qf-appt-section" style="display:none;border:1px solid var(--amb-bd);border-radius:var(--rs);padding:11px 13px;background:var(--amb-lt);margin-bottom:9px">
+        <div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📅 Next Appointment</div>
+        <div id="qf-appt-preview" style="font-size:13px;font-weight:600;color:#92400e"></div>
+      </div>
+      <div id="qf-tests-section" style="display:none;border:1px solid var(--pur-bd);border-radius:var(--rs);padding:11px 13px;background:var(--pur-lt);margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧪 Tests Detected</div>
+        <div id="qf-tests-preview" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+      </div>
+      <div class="macts"><button class="btn" onclick="closeM('mo-quick-fill')">Cancel</button><button class="btn-p" onclick="applyQuickFill()">✓ Apply All Changes</button></div>
+    </div>
+    <div id="qf-empty" style="display:none;padding:12px;text-align:center;color:var(--t3);font-size:12px">No vitals, medicines, or appointments detected. Try rephrasing — see the example above.</div>
+  </div>
+</div>
+
+<!-- ════ UPLOAD REPORT MODAL ════ -->
+<div class="mo" id="mo-upload-report">
+  <div class="mbox" style="width:440px">
+    <div class="mttl">📎 Upload Lab / Radiology Report</div>
+    <div class="mf"><label class="ml">Report Type *</label>
+      <select class="ms" id="upload-type" onchange="updateUploadHint()">
+        <option value="">— Select report type —</option>
+        <option value="blood">🩸 Blood Report (HbA1c, Lipids, TFT, KFT etc.)</option>
+        <option value="radiology">🩻 Radiology (X-Ray, USG, Echo, MRI, CT)</option>
+        <option value="abi">🦶 ABI — Ankle-Brachial Index</option>
+        <option value="vpt">🦶 VPT — Vibration Perception Threshold</option>
+        <option value="ecg">❤️ ECG / Holter</option>
+        <option value="urine">🫧 Urine Report (ACR, Routine, Culture)</option>
+        <option value="other">📄 Other</option>
+      </select>
+    </div>
+    <div id="upload-hint" style="font-size:11px;color:var(--t3);padding:6px 9px;background:var(--bg);border-radius:6px;margin-bottom:10px;display:none"></div>
+    <div class="g2">
+      <div class="mf"><label class="ml">Lab / Report Date *</label><input class="mi" type="date" id="upload-date"></div>
+      <div class="mf"><label class="ml">Lab / Hospital Name</label><input class="mi" placeholder="e.g. SRL Diagnostics, PGIMER"></div>
+    </div>
+    <div class="mf"><label class="ml">Notes (optional)</label><textarea class="mta" style="min-height:50px" placeholder="Key findings, abnormal values to highlight..."></textarea></div>
+    <div style="border:2px dashed var(--border2);border-radius:var(--rs);padding:22px;text-align:center;cursor:pointer;transition:all .12s;margin-bottom:14px" id="upload-drop" onclick="document.getElementById('upload-file').click()" ondragover="event.preventDefault();this.style.borderColor='var(--primary)'" ondragleave="this.style.borderColor='var(--border2)'">
+      <div style="font-size:24px;margin-bottom:6px">📁</div>
+      <div style="font-size:13px;font-weight:700;color:var(--t2)">Click to select or drag &amp; drop file</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:3px">PDF, JPG, PNG · Max 10 MB</div>
+      <div id="upload-fname" style="font-size:12px;font-weight:700;color:var(--primary);margin-top:7px;display:none"></div>
+    </div>
+    <input type="file" id="upload-file" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="showFileName()">
+    <div class="macts"><button class="btn" onclick="closeM('mo-upload-report')">Cancel</button><button class="btn-p" onclick="closeM('mo-upload-report')">Upload Report</button></div>
+  </div>
+</div>
+
+<!-- ════ DIAGNOSIS NOTE MODAL ════ -->
+<div class="mo" id="mo-dx-note">
+  <div class="mbox" style="width:420px">
+    <div class="mttl" id="dx-note-title">📝 Note — Diagnosis</div>
+    <input type="hidden" id="dx-note-id">
+    <div class="mf"><label class="ml">Clinical note / observation for this visit</label>
+      <textarea class="mta" id="dx-note-text" style="min-height:90px" placeholder="e.g. TSH trending up — consider Thyronorm. Will review at next visit after Anti-TPO results."></textarea>
+    </div>
+    <div class="mf"><label class="ml">Action flag</label>
+      <select class="ms" id="dx-note-flag">
+        <option value="">— No flag —</option>
+        <option value="review">⚠ Review needed at next visit</option>
+        <option value="urgent">❗ Urgent action this visit</option>
+        <option value="resolved">✓ Issue resolved</option>
+        <option value="refer">👨‍⚕️ Referral to be arranged</option>
+      </select>
+    </div>
+    <div class="macts"><button class="btn" onclick="closeM('mo-dx-note')">Cancel</button><button class="btn-p" onclick="saveDxNote()">Save Note</button></div>
+  </div>
+</div>
+
+<!-- ════ AI PANEL ════ -->
+<div class="aip" id="aip">
+  <div class="aip-hd"><div class="aip-ttl">✦ Gini AI — Dr. Bhansali's Assistant</div><button class="btn" onclick="toggleAI()" style="height:26px;padding:0 9px;font-size:11px">✕ Close</button></div>
+  <div class="aim" id="aim">
+    <div class="aim-msg ai">
+      <strong>Visit #12 — Pawan Kumar Summary</strong><br><br>
+      HbA1c excellent at 6.3% (from 7.6% in 9 months) ✓<br>FPG 92.6 — at goal ✓<br><br>
+      <strong>⚠ Flag 1 — TSH elevated:</strong> 7.86 µIU/mL (goal &lt;4.5). Anti-TPO and Anti-TG pending. Consider prescribing Thyronorm if not already started.<br><br>
+      <strong>⚠ Flag 2 — Weight crept up:</strong> 94 → 95.1 kg since July 2025. Review dietary adherence. Mounjaro still at 5mg — may consider 7.5mg escalation once TSH controlled.<br><br>
+      <strong>⚠ Flag 3 — HR 96 bpm:</strong> Consider increasing Metolar XR to 50mg.
+    </div>
+  </div>
+  <div class="aisugg">
+    <div class="aichip" onclick="sendAI('Should I prescribe Thyronorm for TSH 7.86?')">Thyronorm advice</div>
+    <div class="aichip" onclick="sendAI('Why has weight increased despite Mounjaro?')">Weight gain review</div>
+    <div class="aichip" onclick="sendAI('Is it safe to increase Mounjaro to 7.5mg?')">Escalate Mounjaro?</div>
+    <div class="aichip" onclick="sendAI('Ryzodeg titration guidance for this patient')">Insulin titration</div>
+    <div class="aichip" onclick="sendAI('Any drug interactions to check?')">Drug interactions</div>
+  </div>
+  <div class="ai-ir">
+    <input class="ai-in" id="ai-in" placeholder="Ask anything about this patient..." onkeydown="if(event.key==='Enter')sendAI()">
+    <button class="ai-snd" onclick="sendAI()">→</button>
+  </div>
+</div>
+
+<script>
+/* ── TAB SWITCHING ── */
+function stab(name,el){
+  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  el.classList.add('on');
+  const p=document.getElementById('panel-'+name);
+  if(p)p.classList.add('on');
+}
+/* ── JUMP NAV ── */
+function jmp(id,el){
+  document.querySelectorAll('.jbtn').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  const t=document.getElementById(id);
+  if(t){const s=document.getElementById('vscrl');s.scrollTo({top:t.offsetTop-16,behavior:'smooth'});}
+}
+/* ── MODALS ── */
+function openM(id){const m=document.getElementById('mo-'+id);if(m)m.classList.add('open');}
+function closeM(id){const m=document.getElementById(id);if(m)m.classList.remove('open');}
+document.querySelectorAll('.mo').forEach(o=>{o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');});});
+/* ── STOPPED MEDS ── */
+function toggleStopped(){const s=document.getElementById('stp-section');s.style.display=s.style.display==='none'?'block':'none';}
+/* ── AI PANEL ── */
+function toggleAI(){document.getElementById('aip').classList.toggle('open');}
+/* ── LIVE CLOCK ── */
+const checkin=new Date(Date.now()-18*60000);
+function updateClock(){
+  const n=new Date();
+  const elapsed=Math.floor((n-checkin)/60000);
+  const hrs=n.getHours();
+  const mins=String(n.getMinutes()).padStart(2,'0');
+  const ampm=hrs>=12?'PM':'AM';
+  const h12=hrs%12||12;
+  const el=document.getElementById('live-time');
+  const ed=document.getElementById('elapsed');
+  if(el)el.textContent=`${h12}:${mins} ${ampm}`;
+  if(ed)ed.textContent=`${elapsed} min`;
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const eld=document.getElementById('live-date');
+  if(eld)eld.textContent=`${days[n.getDay()]}, ${n.getDate()} ${months[n.getMonth()]} ${n.getFullYear()}`;
+}
+setInterval(updateClock,1000);
+updateClock();
+/* ── AI CHAT ── */
+const aiR={
+  'Should I prescribe Thyronorm for TSH 7.86?':'TSH 7.86 with T4 8.76 (normal) = subclinical hypothyroidism + Hashimoto\'s. Standard approach: start <strong>Thyronorm 25–50 mcg</strong> OD empty stomach. Check Anti-TPO first to confirm Hashimoto\'s. Recheck TFTs in 6–8 weeks. Target TSH 1–2.5 for diabetic patients.',
+  'Why has weight increased despite Mounjaro?':'Possible reasons: <strong>1)</strong> Calorie creep — patient may have relaxed dietary adherence, <strong>2)</strong> Insulin dose increase causing weight gain (Ryzodeg), <strong>3)</strong> Hypothyroidism (TSH 7.86) slowing metabolism. Address TSH first — treating hypothyroidism alone may help 1–2 kg. Dietary review recommended this visit.',
+  'Is it safe to increase Mounjaro to 7.5mg?':'7.5mg is the next dose step. Previous attempt caused bloating/acidity at 7.5mg. Suggest: <strong>1)</strong> Stabilise TSH first (affects weight), <strong>2)</strong> Retry 7.5mg only after weight has started going down again. If repeating, advise Pan DSR on injection day and days 2–3.',
+  'Ryzodeg titration guidance for this patient':'For Pawan (current 24U): Post-dinner BG target 80–150 mg/dL. <strong>If >150:</strong> increase by 2U every 3 days. <strong>If <80:</strong> reduce by 4U immediately and call clinic. Max safe increase without review: 32–36U. At current FBG 92 — dose appears appropriate. No titration needed unless post-dinner readings above 150.',
+  'Any drug interactions to check?':'No major interactions detected. <strong>Note:</strong> SGLT2 (Cospiaq) + insulin combination — monitor for hypoglycaemia if reducing carbs. Metolar (beta-blocker) may mask hypoglycaemia symptoms — educate patient. Thyronorm (if added) — take 2 hours apart from antidiabetics and statins for absorption.'
+};
+function sendAI(prompt){
+  const inp=document.getElementById('ai-in');
+  const msg=prompt||inp.value.trim();
+  if(!msg)return;
+  const msgs=document.getElementById('aim');
+  msgs.innerHTML+=`<div class="aim-msg usr">${msg}</div>`;
+  inp.value='';
+  const r=aiR[msg]||'Based on the current clinical picture, I can provide a more specific recommendation. Could you clarify which aspect you\'d like me to analyse — medication, labs, or lifestyle?';
+  setTimeout(()=>{msgs.innerHTML+=`<div class="aim-msg ai">${r}</div>`;msgs.scrollTop=msgs.scrollHeight;},650);
+  msgs.scrollTop=msgs.scrollHeight;
+}
+/* ── END VISIT ── */
+function endVisit(){document.getElementById('mo-end-visit').classList.add('open');}
+/* ── SHOW PRINT ── */
+function showPrint(){
+  document.querySelectorAll('.sc').forEach(s=>s.style.display='none');
+  document.getElementById('rx-print').style.display='block';
+  setTimeout(()=>{
+    window.print();
+    document.querySelectorAll('.sc').forEach(s=>s.style.display='');
+    document.getElementById('rx-print').style.display='none';
+  },300);
+}
+/* ── INSULIN DOSE CALC ── */
+function calcDose(){
+  const bg=parseInt(document.getElementById('bg-input').value)||0;
+  const res=document.getElementById('dose-result');
+  if(!bg){res.textContent='Enter a blood sugar reading above to see recommendation';res.style.color='var(--t3)';return;}
+  if(bg<80){res.innerHTML='<span style="color:var(--red)">⬇ Reduce by 4 units → New dose: '+(24-4)+' units. Call clinic. Risk of hypoglycaemia.</span>';
+  }else if(bg<=150){res.innerHTML='<span style="color:var(--green)">✓ Blood sugar in target range. Maintain current dose: 24 units. No change needed.</span>';
+  }else{const add=2;res.innerHTML='<span style="color:var(--amber)">⬆ Blood sugar above 150. Increase by 2 units → New dose: '+(24+add)+' units. Wait 3 days before next increase. Check again.</span>';}
+}
+/* ── SCROLL SPY ── */
+document.getElementById('vscrl')?.addEventListener('scroll',function(){
+  const ids=['biomarkers','symptoms','diagnoses','medications','plan','changes','summary'];
+  const top=this.scrollTop+55;
+  let cur=ids[0];
+  ids.forEach(id=>{const el=document.getElementById(id);if(el&&el.offsetTop<=top)cur=id;});
+  document.querySelectorAll('.jbtn').forEach(b=>{
+    const t=b.textContent.toLowerCase();
+    b.classList.toggle('on',
+      (cur==='biomarkers'&&t.includes('bio'))||(cur==='symptoms'&&t.includes('sym'))||
+      (cur==='diagnoses'&&t.includes('diag'))||(cur==='medications'&&t.includes('med'))||
+      (cur==='plan'&&t.includes('plan'))||(cur==='changes'&&t.includes('visit'))||
+      (cur==='summary'&&t.includes('sum'))
+    );
+  });
+});
+/* ── DUAL DOSE TOGGLE ── */
+function toggleDualDose(prefix){
+  const freq=document.getElementById(prefix+'-freq')?.value||'';
+  const el=document.getElementById(prefix+'-dual-dose');
+  if(el)el.style.display=(freq.includes('BD')||freq.includes('Twice')||freq.includes('TDS'))?'block':'none';
+}
+/* ── DIAGNOSIS NOTE ── */
+function openDxNote(id,name){
+  document.getElementById('dx-note-title').textContent='📝 Note — '+name;
+  document.getElementById('dx-note-id').value=id;
+  const saved=window.dxNotes&&window.dxNotes[id]?window.dxNotes[id].text:'';
+  document.getElementById('dx-note-text').value=saved;
+  document.getElementById('mo-dx-note').classList.add('open');
+}
+function saveDxNote(){
+  const id=document.getElementById('dx-note-id').value;
+  const txt=document.getElementById('dx-note-text').value.trim();
+  const flag=document.getElementById('dx-note-flag').value;
+  if(!window.dxNotes)window.dxNotes={};
+  window.dxNotes[id]={text:txt,flag:flag};
+  const el=document.getElementById('note-'+id);
+  if(el){
+    if(txt){
+      const flagIcons={review:'⚠ ',urgent:'❗ ',resolved:'✓ ',refer:'👨‍⚕️ ','':''};
+      el.textContent=(flagIcons[flag]||'')+txt;
+      el.style.display='block';
+    }else{el.style.display='none';}
+  }
+  document.getElementById('mo-dx-note').classList.remove('open');
+}
+/* ── UPLOAD REPORT ── */
+const uploadHints={
+  blood:'Fasting blood reports (HbA1c, lipid, TFT, KFT). Ensure report date matches sample date.',
+  radiology:'Upload USG, Echo, X-Ray, MRI, or CT scan reports. Radiology number helps for tracking.',
+  abi:'ABI test measures blood flow in legs. Values 0.9–1.3 are normal. Upload form or photo.',
+  vpt:'VPT tests nerve sensitivity in feet. Values below 15V are normal. Upload form or result.',
+  ecg:'Upload ECG strip or Holter report PDF. Note if any arrhythmia was detected.',
+  urine:'Urine ACR, routine examination, or culture results. Important for kidney monitoring.',
+  other:'Upload any other clinical report or document related to this patient visit.'
+};
+function updateUploadHint(){
+  const t=document.getElementById('upload-type').value;
+  const h=document.getElementById('upload-hint');
+  if(t&&uploadHints[t]){h.textContent='💡 '+uploadHints[t];h.style.display='block';}
+  else h.style.display='none';
+}
+function showFileName(){
+  const f=document.getElementById('upload-file').files[0];
+  const el=document.getElementById('upload-fname');
+  if(f){el.textContent='📎 '+f.name+' ('+Math.round(f.size/1024)+' KB)';el.style.display='block';}
+}
+/* ── QUICK FILL PARSER ── */
+function parseQuickFill(){
+  const raw=document.getElementById('qf-input').value.toLowerCase();
+  const vitals={};
+  const meds=[];
+  let appt='';
+  const tests=[];
+  // Vitals
+  const wm=raw.match(/weight\s+(\d+\.?\d*)\s*kg?/i)||raw.match(/wt\s+(\d+\.?\d*)/i);
+  if(wm)vitals.weight=wm[1]+' kg';
+  const hm=raw.match(/height\s+(\d+\.?\d*)\s*cm?/i)||raw.match(/ht\s+(\d+\.?\d*)/i);
+  if(hm)vitals.height=hm[1]+' cm';
+  const bpm=raw.match(/bp\s+(\d+\/\d+)/i)||raw.match(/blood pressure\s+(\d+\/\d+)/i);
+  if(bpm)vitals.bp=bpm[1]+' mmHg';
+  const hrm=raw.match(/hr\s+(\d+)/i)||raw.match(/heart rate\s+(\d+)/i)||raw.match(/pulse\s+(\d+)/i);
+  if(hrm)vitals.hr=hrm[1]+' bpm';
+  const spm=raw.match(/spo2\s+(\d+)/i)||raw.match(/o2\s+(\d+)/i);
+  if(spm)vitals.spo2=spm[1]+'%';
+  const fbgm=raw.match(/fbg\s+(\d+\.?\d*)/i)||raw.match(/fasting\s+(\d+\.?\d*)/i)||raw.match(/fpg\s+(\d+\.?\d*)/i);
+  if(fbgm)vitals.fbg=fbgm[1]+' mg/dL';
+  // Medicines — look for "add [drug]"
+  const medMatches=raw.matchAll(/add\s+([a-z0-9\s\+\/\.]+?)(?:\s+(\d+\.?\d*\s*mg|\d+\.?\d*\s*mcg|\d+\/\d+\s*mg|\d+k?\s*iu|\d+\s*units?))?(?:\s+(once|twice|thrice|od|bd|tds|weekly|sos))?/gi);
+  for(const m of medMatches){
+    const name=(m[1]||'').trim().replace(/\s+/g,' ');
+    if(name.length>2)meds.push({name:name,dose:m[2]||'',freq:m[3]||''});
+  }
+  // Next appointment
+  const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11};
+  const apptm=raw.match(/next\s+(?:appointment|visit|follow.?up)?\s*(?:on\s+)?(\w+\s+\d{1,2}(?:\s*,?\s*\d{4})?)/i);
+  if(apptm)appt=apptm[1];
+  // Tests
+  const testKw=['hba1c','ldl','lipid','tft','tsh','kft','creatinine','uacr','cbp','cbc','hb','hemoglobin','fasting insulin','c-peptide','anti-tpo','vitamin d','vit d','b12','usg','echo','ecg','x-ray'];
+  testKw.forEach(t=>{if(raw.includes(t.toLowerCase()))tests.push(t.toUpperCase());});
+  // Show results
+  const hasData=Object.keys(vitals).length||meds.length||appt||tests.length;
+  document.getElementById('qf-results').style.display=hasData?'block':'none';
+  document.getElementById('qf-empty').style.display=hasData?'none':'block';
+  // Vitals
+  const vs=document.getElementById('qf-vitals-section');
+  const vp=document.getElementById('qf-vitals-preview');
+  if(Object.keys(vitals).length){
+    vs.style.display='block';
+    vp.innerHTML=Object.entries(vitals).map(([k,v])=>`<div style="background:white;border-radius:6px;padding:7px 10px;text-align:center;border:1px solid var(--grn-bd)"><div style="font-size:16px;font-weight:800;color:var(--green)">${v}</div><div style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-top:2px">${k}</div></div>`).join('');
+  }else vs.style.display='none';
+  // Meds
+  const ms2=document.getElementById('qf-meds-section');
+  const mp=document.getElementById('qf-meds-preview');
+  if(meds.length){
+    ms2.style.display='block';
+    mp.innerHTML=meds.map(m=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:white;border-radius:6px;border:1px solid var(--pri-bd);margin-bottom:5px"><span style="font-size:14px">💊</span><div><div style="font-size:12px;font-weight:700;color:var(--text)">${m.name}${m.dose?' · '+m.dose:''}</div>${m.freq?`<div style="font-size:10px;color:var(--t3)">${m.freq}</div>`:''}</div></div>`).join('');
+  }else ms2.style.display='none';
+  // Appointment
+  const as=document.getElementById('qf-appt-section');
+  const ap=document.getElementById('qf-appt-preview');
+  if(appt){as.style.display='block';ap.textContent='📅 Next visit: '+appt;}else as.style.display='none';
+  // Tests
+  const ts=document.getElementById('qf-tests-section');
+  const tp=document.getElementById('qf-tests-preview');
+  if(tests.length){
+    ts.style.display='block';
+    tp.innerHTML=tests.map(t=>`<span style="font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;background:var(--pur-lt);color:var(--purple);border:1px solid var(--pur-bd)">${t}</span>`).join('');
+  }else ts.style.display='none';
+  window._qfParsed={vitals,meds,appt,tests};
+}
+function applyQuickFill(){
+  // In production: wire to actual form fields. Here we show a confirmation toast.
+  const d=window._qfParsed||{};
+  const parts=[];
+  if(Object.keys(d.vitals||{}).length)parts.push(Object.keys(d.vitals).length+' vital(s) updated in sidebar');
+  if((d.meds||[]).length)parts.push(d.meds.length+' medicine(s) queued for review');
+  if(d.appt)parts.push('Next visit set: '+d.appt);
+  if((d.tests||[]).length)parts.push(d.tests.length+' test(s) added to plan');
+  closeM('mo-quick-fill');
+  showToast('✓ Applied: '+parts.join(' · '));
+}
+function showToast(msg){
+  let t=document.getElementById('toast');
+  if(!t){t=document.createElement('div');t.id='toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1f2e;color:white;padding:11px 22px;border-radius:30px;font-size:13px;font-weight:600;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.25);transition:opacity .3s;pointer-events:none';document.body.appendChild(t);}
+  t.textContent=msg;t.style.opacity='1';
+  clearTimeout(t._timer);t._timer=setTimeout(()=>{t.style.opacity='0';},3000);
+}
+</script>
+</body>
+</html>

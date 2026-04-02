@@ -3,6 +3,7 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 import { n, num, int, safeJson, t } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
+import { getCanonical } from "../utils/labCanonical.js";
 import { encryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { consultationCreateSchema, historyCreateSchema } from "../schemas/index.js";
@@ -185,7 +186,14 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       if (m?.name) {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_new, is_active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+           DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+             composition = COALESCE(EXCLUDED.composition, medications.composition),
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+             timing = COALESCE(EXCLUDED.timing, medications.timing),
+             updated_at = NOW()`,
           [
             patientId,
             consultationId,
@@ -203,7 +211,17 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       if (m?.name) {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+           DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+             pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
+             composition = COALESCE(EXCLUDED.composition, medications.composition),
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+             timing = COALESCE(EXCLUDED.timing, medications.timing),
+             route = COALESCE(EXCLUDED.route, medications.route),
+             is_new = EXCLUDED.is_new,
+             updated_at = NOW()`,
           [
             patientId,
             consultationId,
@@ -223,11 +241,12 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       if (inv?.test && num(inv.value) !== null && !inv.from_report) {
         const invDate = inv.date || vDate || null;
         await client.query(
-          `INSERT INTO lab_results (patient_id, consultation_id, test_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scribe',COALESCE($9::date, CURRENT_DATE))`,
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'scribe',COALESCE($10::date, CURRENT_DATE))`,
           [
             patientId,
             consultationId,
             t(inv.test, 200),
+            getCanonical(inv.test),
             num(inv.value),
             t(inv.unit, 50),
             t(inv.flag, 50),
@@ -431,8 +450,19 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     }
     for (const m of medications || []) {
       if (m?.name) {
+        const isActive = m.is_active !== false;
         await client.query(
-          "INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          `INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+           DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+             composition = COALESCE(EXCLUDED.composition, medications.composition),
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+             timing = COALESCE(EXCLUDED.timing, medications.timing),
+             is_active = EXCLUDED.is_active,
+             started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+             updated_at = NOW()`,
           [
             patientId,
             cid,
@@ -441,7 +471,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
             n(m.dose),
             n(m.frequency),
             n(m.timing),
-            m.is_active !== false,
+            isActive,
             n(m.started_date) || visit_date,
           ],
         );
@@ -450,12 +480,13 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     for (const l of labs || []) {
       if (l?.test_name) {
         await client.query(
-          "INSERT INTO lab_results (patient_id, consultation_id, test_date, test_name, result, unit, flag, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual')",
+          "INSERT INTO lab_results (patient_id, consultation_id, test_date, test_name, canonical_name, result, unit, flag, ref_range, source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'manual')",
           [
             patientId,
             cid,
             visit_date,
             l.test_name,
+            getCanonical(l.test_name),
             num(l.result),
             n(l.unit),
             n(l.flag),

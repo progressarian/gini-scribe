@@ -1,0 +1,8 @@
+export { default as AddLabModal } from "./AddLabModal";
+export { default as AddDiagnosisModal } from "./AddDiagnosisModal";
+export { default as DiagnosisNoteModal } from "./DiagnosisNoteModal";
+export { default as AddMedicationModal } from "./AddMedicationModal";
+export { default as EditMedicationModal } from "./EditMedicationModal";
+export { default as StopMedicationModal } from "./StopMedicationModal";
+export { default as AddReferralModal } from "./AddReferralModal";
+export { default as UploadReportModal } from "./UploadReportModal";
