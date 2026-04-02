@@ -8,9 +8,34 @@ const FLAGS = [
   { value: "refer", label: "👨‍⚕️ Referral to be arranged" },
 ];
 
+// Maps flag choice → diagnosis status value
+const FLAG_TO_STATUS = {
+  review: "Review",
+  urgent: "Uncontrolled",
+  resolved: "Resolved",
+};
+
+// Reverse: pre-select the flag that matches the current status
+const STATUS_TO_FLAG = {
+  Review: "review",
+  Uncontrolled: "urgent",
+  Resolved: "resolved",
+};
+
 const DiagnosisNoteModal = memo(function DiagnosisNoteModal({ diagnosis, onClose, onSubmit }) {
   const [notes, setNotes] = useState(diagnosis.notes || "");
-  const [flag, setFlag] = useState("");
+  const [flag, setFlag] = useState(STATUS_TO_FLAG[diagnosis.status] || "");
+
+  const handleSave = () => {
+    const trimmedNotes = notes.trim();
+    const status = FLAG_TO_STATUS[flag] || null;
+    // Nothing changed — don't hit the API
+    if (!trimmedNotes && !status) return onClose();
+    onSubmit({
+      notes: trimmedNotes || null, // null keeps existing notes via COALESCE
+      status,
+    });
+  };
 
   return (
     <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -28,7 +53,7 @@ const DiagnosisNoteModal = memo(function DiagnosisNoteModal({ diagnosis, onClose
         </div>
         <div className="macts">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn-p" onClick={() => onSubmit({ notes, flag })}>Save Note</button>
+          <button className="btn-p" onClick={handleSave}>Save Note</button>
         </div>
       </div>
     </div>

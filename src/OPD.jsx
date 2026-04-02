@@ -3708,6 +3708,7 @@ function PatientDetail({
                   if (appt.patient_id) {
                     await onPatchStatus(appt.id, "in_visit");
                     sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                    sessionStorage.setItem("gini_visit_start", appt.checked_in_at || new Date().toISOString());
                     setDbPatientId(appt.patient_id);
                     sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
                     navigate("/visit");

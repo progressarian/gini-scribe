@@ -20,6 +20,8 @@ export const LAB_ALIASES = {
   Weight: ["Weight"],
   "Body Fat": ["Body Fat", "Body Fat %"],
   Waist: ["Waist", "Waist Circumference"],
+  "HOMA-IR": ["HOMA-IR", "HOMA IR", "Homeostatic Model Assessment"],
+  Insulin: ["Insulin", "Fasting Insulin", "Serum Insulin"],
   UACR: ["UACR", "Urine ACR", "Microalbumin"],
   "Vitamin D": ["Vitamin D", "25-OH Vitamin D", "VIT D"],
   T3: ["T3", "Total T3", "TOTAL TRIIODOTHYRONINE"],

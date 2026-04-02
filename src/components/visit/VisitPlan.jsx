@@ -131,6 +131,14 @@ function openPrintWindow(html) {
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
 
+const DX_STATUS_ICON = (status) => {
+  if (!status) return { icon: "·", color: "var(--t3)" };
+  const s = status.toLowerCase();
+  if (s === "controlled" || s === "improving" || s === "resolved") return { icon: "✓", color: "var(--green)" };
+  if (s === "review" || s === "uncontrolled") return { icon: "⚠", color: "var(--amber)" };
+  return { icon: "·", color: "var(--t3)" };
+};
+
 const VisitPlan = memo(function VisitPlan({
   consultations,
   goals,
@@ -140,6 +148,7 @@ const VisitPlan = memo(function VisitPlan({
   doctor,
   activeDx,
   activeMeds,
+  stoppedMeds,
   latestVitals,
   summary,
   labResults,
@@ -147,6 +156,7 @@ const VisitPlan = memo(function VisitPlan({
   onAddReferral,
   onChangeFollowUp,
   onOpenTemplate,
+  onMedCardTab,
   referrals,
 }) {
   const latestCon = consultations[0]?.con_data;
@@ -218,6 +228,11 @@ const VisitPlan = memo(function VisitPlan({
     const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
     window.open(url, "_blank");
   }, [patient, doctor, followUp]);
+
+  // Changes: stopped meds this session
+  const stoppedThisVisit = (stoppedMeds || []).filter(
+    (m) => m.stopped_date && m.stopped_date.startsWith(new Date().toISOString().slice(0, 7))
+  );
 
   return (
     <>
@@ -361,6 +376,23 @@ const VisitPlan = memo(function VisitPlan({
         </div>
       </div>
 
+      {/* CHANGES MADE THIS VISIT — commented out
+      <div className="sc" id="changes" style={{ border: "2px solid var(--pri-lt)" }}>
+        <div className="sch" style={{ background: "var(--pri-lt)" }}>
+          <div className="sct" style={{ color: "var(--primary)" }}>
+            <div className="sci" style={{ background: "var(--primary)", color: "white" }}>✏️</div>
+            Changes Made This Visit
+          </div>
+          <span style={{ fontSize: 11, color: "var(--primary)", fontWeight: 600 }}>Auto-updates as you make changes above</span>
+        </div>
+        <div className="scb">
+          <div className="chg-grid">
+            ...
+          </div>
+        </div>
+      </div>
+      */}
+
       {/* SUMMARY */}
       <div className="sc" id="summary">
         <div className="sch">
@@ -369,7 +401,7 @@ const VisitPlan = memo(function VisitPlan({
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn" onClick={handlePrintRx}>🖨 Print Rx</button>
-            <button className="btn" onClick={handlePrintMedCard}>💊 Print Med Card</button>
+            <button className="btn" onClick={onMedCardTab}>💊 Print Med Card</button>
             <button className="btn" onClick={handleSendWhatsApp}>📱 Send via WhatsApp</button>
           </div>
         </div>

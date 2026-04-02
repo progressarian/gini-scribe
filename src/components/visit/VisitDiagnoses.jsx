@@ -38,7 +38,7 @@ const VisitDiagnoses = memo(function VisitDiagnoses({ activeDx, onAddDiagnosis, 
               </div>
               <select
                 className="sy-sel"
-                defaultValue={dx.status}
+                value={dx.status || ""}
                 style={{ fontSize: 12, height: 29, padding: "0 8px" }}
                 onChange={(e) => onUpdateDiagnosis?.(dx.id, { status: e.target.value })}
               >

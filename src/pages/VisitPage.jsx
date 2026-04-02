@@ -30,6 +30,62 @@ import {
 import { useVisitMutations } from "../hooks/useVisitMutations";
 
 // ── Tab definitions ──
+const SY_STATUS_OPTS = ["Mild", "Improving", "Still present", "Resolved ✓", "Controlled", "Got worse"];
+const syDotColor = (s) => {
+  if (!s) return "var(--t3)";
+  const v = s.toLowerCase();
+  if (v.includes("resolved") || v === "controlled") return "var(--green)";
+  return "var(--amber)";
+};
+
+function VisitSymptomsSection({ consultations }) {
+  const con = consultations[0]?.con_data;
+  const mo = consultations[0]?.mo_data;
+  const symptoms = con?.symptoms || con?.chief_complaints || mo?.symptoms || mo?.chief_complaints || [];
+  return (
+    <div className="sc" id="symptoms">
+      <div className="sch">
+        <div className="sct"><div className="sci ic-a">🩹</div>Symptoms &amp; Concerns</div>
+      </div>
+      <div className="scb">
+        {symptoms.length > 0 ? (
+          <>
+            <div className="subsec">Active / Historical — Update Status</div>
+            <div className="syg">
+              {symptoms.map((sy, i) => {
+                const name = typeof sy === "string" ? sy : sy.name || sy.symptom || sy.complaint || String(sy);
+                const meta = typeof sy === "object" ? (sy.notes || sy.meta || sy.duration || sy.since || "") : "";
+                const status = typeof sy === "object" ? (sy.status || "Mild") : "Mild";
+                return (
+                  <div key={i} className="syi">
+                    <div className="sy-dot" style={{ background: syDotColor(status) }} />
+                    <div style={{ flex: 1 }}>
+                      <div className="sy-nm">{name}</div>
+                      {meta && <div className="sy-meta">{meta}</div>}
+                    </div>
+                    <select className="sy-sel" defaultValue={status}
+                      style={{ color: syDotColor(status) === "var(--green)" ? "var(--green)" : undefined }}>
+                      {SY_STATUS_OPTS.map((o) => <option key={o}>{o}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--t3)", padding: 16, textAlign: "center" }}>
+            No symptoms or concerns recorded for this visit
+          </div>
+        )}
+        <div className="addr">
+          <span style={{ fontSize: 16, color: "var(--t3)" }}>+</span>
+          <span className="addr-lbl">Add new symptom or concern for this visit</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   { id: "visit", label: "📋 Visit" },
   { id: "labs", label: "🧪 Labs", badgeKey: "labs" },
@@ -43,6 +99,7 @@ const TABS = [
 
 const JUMP_SECTIONS = [
   { id: "biomarkers", label: "📊 Biomarkers" },
+  { id: "symptoms", label: "🩹 Symptoms" },
   { id: "diagnoses", label: "🏷 Diagnoses" },
   { id: "medications", label: "💊 Medications" },
   { id: "plan", label: "📝 Plan" },
@@ -60,6 +117,7 @@ export default function VisitPage() {
     const id = sessionStorage.getItem("gini_opd_appt_id");
     return id ? Number(id) : null;
   });
+  const [visitStart, setVisitStart] = useState(() => sessionStorage.getItem("gini_visit_start") || null);
   const hasActiveVisit = !!opdApptId;
 
   // ── UI state ──
@@ -75,10 +133,12 @@ export default function VisitPage() {
 
   // ── Redirect if no patient ──
   useEffect(() => {
-    if (!dbPatientId) {
+    const savedId = sessionStorage.getItem("gini_active_patient");
+    if (!dbPatientId && !savedId) {
       navigate("/");
       return;
     }
+    if (!dbPatientId) return; // restore in progress — wait
     (async () => {
       setLoading(true);
       try {
@@ -218,6 +278,7 @@ export default function VisitPage() {
         // non-critical — OPD will still show correct state on refresh
       }
       sessionStorage.removeItem("gini_opd_appt_id");
+      sessionStorage.removeItem("gini_visit_start");
     }
     endVisitAction(true);
     toast("Visit completed", "success");
@@ -295,6 +356,7 @@ export default function VisitPage() {
         onToggleAI={toggleAI}
         onEndVisit={hasActiveVisit ? openEndModal : null}
         onPrint={handlePrint}
+        visitStart={visitStart}
       />
 
       <VisitStrip
@@ -383,6 +445,7 @@ export default function VisitPage() {
                 onOpenAI={() => setAiOpen(true)}
                 onAddLab={() => setModal({ type: "addLab" })}
               />
+              {/* <VisitSymptomsSection consultations={consultations} /> */}
               <VisitDiagnoses
                 activeDx={activeDx}
                 onAddDiagnosis={() => setModal({ type: "addDiagnosis" })}
@@ -405,6 +468,7 @@ export default function VisitPage() {
                 doctor={doctor}
                 activeDx={activeDx}
                 activeMeds={uniqueActiveMeds}
+                stoppedMeds={uniqueStoppedMeds}
                 latestVitals={latestV}
                 summary={summary}
                 labResults={labResults}
@@ -413,6 +477,7 @@ export default function VisitPage() {
                 onAddReferral={() => setModal({ type: "addReferral" })}
                 onChangeFollowUp={() => setModal({ type: "changeFollowUp" })}
                 onOpenTemplate={(tpl) => setModal({ type: "template", data: tpl })}
+                onMedCardTab={() => setTab("medcard")}
               />
               <div style={{ height: 28 }} />
             </div>
