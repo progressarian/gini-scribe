@@ -1,4 +1,8 @@
-import { syncTodayWalkingAppointments, syncWalkingAppointments } from "./healthraySync.js";
+import {
+  syncTodayWalkingAppointments,
+  syncWalkingAppointments,
+  syncWalkingAppointmentsByDate,
+} from "./healthraySync.js";
 
 // ── Sync interval (every 5 minutes) ────────────────────────────────────────
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
@@ -33,4 +37,4 @@ export function stopCronJobs() {
 }
 
 // Manual trigger exports
-export { syncWalkingAppointments, syncTodayWalkingAppointments };
+export { syncWalkingAppointments, syncTodayWalkingAppointments, syncWalkingAppointmentsByDate };
