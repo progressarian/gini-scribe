@@ -1,7 +1,7 @@
 import { memo, useRef, useCallback } from "react";
 import { MED_COLORS } from "./helpers";
 
-const TIME_SLOTS = [
+export const TIME_SLOTS = [
   {
     key: "before_breakfast",
     label: "Khaane se pehle (Before Breakfast)",
@@ -30,7 +30,7 @@ const TIME_SLOTS = [
   { key: "weekly", label: "Weekly", emoji: "📅", colorVar: "--purple", bgCls: "pur-lt" },
 ];
 
-function getTimeSlot(med) {
+export function getTimeSlot(med) {
   const t = (med.timing || "").toLowerCase();
   const f = (med.frequency || "").toLowerCase();
   if (t.includes("before breakfast") || (t.includes("before food") && t.includes("morning")))
@@ -45,7 +45,7 @@ function getTimeSlot(med) {
   return "morning";
 }
 
-function buildPrintHTML(patient, grouped, slotsWithMeds, activeMeds) {
+export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMeds) {
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",
@@ -168,7 +168,7 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
   const slotsWithMeds = TIME_SLOTS.filter((s) => grouped[s.key]?.length > 0);
 
   const handlePrint = useCallback(() => {
-    const html = buildPrintHTML(patient, grouped, slotsWithMeds, activeMeds);
+    const html = buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMeds);
     const win = window.open("", "_blank");
     if (!win) return;
     win.document.write(html);

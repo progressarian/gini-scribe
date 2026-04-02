@@ -14,6 +14,7 @@ import VisitBiomarkers from "../components/visit/VisitBiomarkers";
 import VisitDiagnoses from "../components/visit/VisitDiagnoses";
 import VisitMedications from "../components/visit/VisitMedications";
 import VisitPlan from "../components/visit/VisitPlan";
+import VisitRxPrint from "../components/visit/VisitRxPrint";
 import VisitLabsPanel from "../components/visit/VisitLabsPanel";
 import VisitHistoryPanel from "../components/visit/VisitHistoryPanel";
 import VisitDocsPanel from "../components/visit/VisitDocsPanel";
@@ -24,7 +25,7 @@ import VisitEndModal from "../components/visit/VisitEndModal";
 import {
   AddLabModal, AddDiagnosisModal, DiagnosisNoteModal,
   AddMedicationModal, EditMedicationModal, StopMedicationModal,
-  AddReferralModal, UploadReportModal,
+  AddReferralModal, UploadReportModal, ChangeFollowUpModal, TemplateModal,
 } from "../components/visit/modals";
 import { useVisitMutations } from "../hooks/useVisitMutations";
 
@@ -265,6 +266,7 @@ export default function VisitPage() {
     labHistory,
     consultations,
     documents,
+    referrals,
     goals,
     loggedData,
     summary,
@@ -407,7 +409,10 @@ export default function VisitPage() {
                 summary={summary}
                 labResults={labResults}
                 onEndVisit={hasActiveVisit ? openEndModal : null}
+                referrals={referrals || []}
                 onAddReferral={() => setModal({ type: "addReferral" })}
+                onChangeFollowUp={() => setModal({ type: "changeFollowUp" })}
+                onOpenTemplate={(tpl) => setModal({ type: "template", data: tpl })}
               />
               <div style={{ height: 28 }} />
             </div>
@@ -712,6 +717,25 @@ export default function VisitPage() {
         </div>
       </div>
 
+      {/* ── Print Prescription (hidden on screen, shown on print) ── */}
+      <VisitRxPrint
+        patient={patient}
+        doctor={doctor}
+        summary={summary}
+        activeDx={activeDx}
+        activeMeds={uniqueActiveMeds}
+        stoppedMeds={uniqueStoppedMeds}
+        latestVitals={latestV}
+        prevVitals={prevV}
+        labResults={labResults}
+        labHistory={labHistory}
+        consultations={consultations}
+        goals={goals}
+        flags={flags}
+        doctorNote={doctorNote}
+        vitals={vitals}
+      />
+
       {/* ── AI Panel ── */}
       <VisitAIPanel
         open={aiOpen}
@@ -754,6 +778,12 @@ export default function VisitPage() {
       )}
       {modal?.type === "uploadReport" && (
         <UploadReportModal onClose={closeModal} onSubmit={async (d) => { const r = await mutations.uploadDocument(d); if (r.success) closeModal(); }} />
+      )}
+      {modal?.type === "changeFollowUp" && (
+        <ChangeFollowUpModal currentDate={consultations[0]?.con_data?.follow_up?.date || ""} onClose={closeModal} onSubmit={async (d) => { const r = await mutations.updateFollowUp(d); if (r.success) closeModal(); }} />
+      )}
+      {modal?.type === "template" && (
+        <TemplateModal templateKey={modal.data} patient={patient} onClose={closeModal} />
       )}
     </div>
   );

@@ -195,25 +195,16 @@ async function backfillOpdConsultations() {
 }
 
 // ── Lab test mapping: OPD biomarker keys → lab_results fields ────────────────
+// canonical values match getCanonical() output (proper case) for consistency
 const LAB_MAP = {
-  hba1c: { test_name: "HbA1c", panel: "Diabetes", unit: "%", canonical: "hba1c" },
-  fg: {
-    test_name: "Fasting Glucose",
-    panel: "Diabetes",
-    unit: "mg/dL",
-    canonical: "fasting_glucose",
-  },
-  ldl: { test_name: "LDL", panel: "Lipid Profile", unit: "mg/dL", canonical: "ldl" },
-  tg: {
-    test_name: "Triglycerides",
-    panel: "Lipid Profile",
-    unit: "mg/dL",
-    canonical: "triglycerides",
-  },
-  uacr: { test_name: "UACR", panel: "Renal", unit: "mg/g", canonical: "uacr" },
-  creatinine: { test_name: "Creatinine", panel: "Renal", unit: "mg/dL", canonical: "creatinine" },
-  tsh: { test_name: "TSH", panel: "Thyroid", unit: "mIU/L", canonical: "tsh" },
-  hb: { test_name: "Hemoglobin", panel: "CBC", unit: "g/dL", canonical: "hemoglobin" },
+  hba1c: { test_name: "HbA1c", panel: "Diabetes", unit: "%", canonical: "HbA1c" },
+  fg: { test_name: "Fasting Glucose", panel: "Diabetes", unit: "mg/dL", canonical: "FBS" },
+  ldl: { test_name: "LDL", panel: "Lipid Profile", unit: "mg/dL", canonical: "LDL" },
+  tg: { test_name: "Triglycerides", panel: "Lipid Profile", unit: "mg/dL", canonical: "Triglycerides" },
+  uacr: { test_name: "UACR", panel: "Renal", unit: "mg/g", canonical: "UACR" },
+  creatinine: { test_name: "Creatinine", panel: "Renal", unit: "mg/dL", canonical: "Creatinine" },
+  tsh: { test_name: "TSH", panel: "Thyroid", unit: "mIU/L", canonical: "TSH" },
+  hb: { test_name: "Hemoglobin", panel: "CBC", unit: "g/dL", canonical: "Haemoglobin" },
 };
 
 const num = (v) => {

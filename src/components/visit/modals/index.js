@@ -6,3 +6,5 @@ export { default as EditMedicationModal } from "./EditMedicationModal";
 export { default as StopMedicationModal } from "./StopMedicationModal";
 export { default as AddReferralModal } from "./AddReferralModal";
 export { default as UploadReportModal } from "./UploadReportModal";
+export { default as ChangeFollowUpModal } from "./ChangeFollowUpModal";
+export { default as TemplateModal } from "./TemplateModal";

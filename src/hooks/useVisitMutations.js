@@ -79,7 +79,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
 
   const addReferral = useCallback(async (data) => {
     try {
-      await api.post(`/api/visit/${patientId}/referral`, data);
+      await api.post(`/api/visit/${patientId}/referral`, { ...data, ...extra });
       toast("Referral added", "success");
       await refreshData();
       return { success: true };
@@ -101,5 +101,17 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     }
   }, [patientId, refreshData]);
 
-  return { addLab, addDiagnosis, updateDiagnosis, addMedication, editMedication, stopMedication, addReferral, uploadDocument };
+  const updateFollowUp = useCallback(async (data) => {
+    try {
+      await api.patch(`/api/visit/${patientId}/followup`, data);
+      toast("Follow-up date updated", "success");
+      await refreshData();
+      return { success: true };
+    } catch {
+      toast("Failed to update follow-up date", "error");
+      return { success: false };
+    }
+  }, [patientId, refreshData]);
+
+  return { addLab, addDiagnosis, updateDiagnosis, addMedication, editMedication, stopMedication, addReferral, uploadDocument, updateFollowUp };
 }

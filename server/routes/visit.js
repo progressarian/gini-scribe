@@ -7,12 +7,15 @@ import { getCanonical } from "../utils/labCanonical.js";
 
 const router = Router();
 
-// Ensure referrals table exists
+// Ensure referrals table exists (with appointment_id)
 pool.query(`CREATE TABLE IF NOT EXISTS referrals (
   id SERIAL PRIMARY KEY, patient_id INTEGER NOT NULL,
   doctor_name TEXT, speciality TEXT, reason TEXT,
+  appointment_id INTEGER,
   status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW()
 )`).catch(() => {});
+// Add appointment_id column if table already exists without it
+pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS appointment_id INTEGER`).catch(() => {});
 
 // GET /api/visit/:patientId — comprehensive visit-page data
 router.get("/visit/:patientId", async (req, res) => {
@@ -35,6 +38,7 @@ router.get("/visit/:patientId", async (req, res) => {
       symptomLogR,
       medLogR,
       mealLogR,
+      referralsR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -42,18 +46,24 @@ router.get("/visit/:patientId", async (req, res) => {
       // 2. All vitals (for history/trends)
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [pid]),
 
-      // 3. Active diagnoses (deduplicated — one per diagnosis_id, latest wins)
+      // 3. Diagnoses (deduplicated — one per diagnosis_id, latest wins — same as patients.js)
       pool.query(
         `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
-         WHERE patient_id=$1 ORDER BY diagnosis_id, updated_at DESC, created_at DESC`,
+         WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`,
         [pid],
       ),
 
-      // 4. Active medications (unique index prevents duplicates at DB level)
+      // 4. Active medications (same query as patients.js for consistency)
       pool.query(
-        `SELECT m.*, c.con_name AS prescriber, c.visit_date AS prescribed_date
+        `WITH latest_cons AS (
+           SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id
+           FROM consultations WHERE patient_id=$1
+           ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
+         )
+         SELECT m.*, c.con_name AS prescriber, c.visit_date AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = true
+           AND (m.consultation_id IN (SELECT id FROM latest_cons) OR m.consultation_id IS NULL)
          ORDER BY m.created_at DESC`,
         [pid],
       ),
@@ -131,6 +141,12 @@ router.get("/visit/:patientId", async (req, res) => {
          ORDER BY log_date DESC`,
         [pid],
       ),
+
+      // 15. Referrals
+      pool.query(
+        `SELECT * FROM referrals WHERE patient_id=$1 ORDER BY created_at DESC`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -201,6 +217,7 @@ router.get("/visit/:patientId", async (req, res) => {
       labLatest,
       consultations,
       documents: docsR.rows,
+      referrals: referralsR.rows,
       goals: goalsR.rows,
       loggedData: {
         vitals: vitalsLogR.rows,
@@ -359,11 +376,11 @@ router.post("/visit/:patientId/referral", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const { doctor_name, speciality, reason } = req.body;
+    const { doctor_name, speciality, reason, appointment_id } = req.body;
     if (!doctor_name || !speciality) return res.status(400).json({ error: "doctor_name and speciality required" });
     const r = await pool.query(
-      `INSERT INTO referrals (patient_id, doctor_name, speciality, reason) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [pid, t(doctor_name, 200), t(speciality, 100), t(reason, 1000)],
+      `INSERT INTO referrals (patient_id, doctor_name, speciality, reason, appointment_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [pid, t(doctor_name, 200), t(speciality, 100), t(reason, 1000), appointment_id || null],
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -412,6 +429,31 @@ router.post("/visit/:patientId/document", async (req, res) => {
     res.json(doc);
   } catch (e) {
     handleError(res, e, "Upload document");
+  }
+});
+
+// ── PATCH /visit/:patientId/followup — Update follow-up date on latest consultation ──
+router.patch("/visit/:patientId/followup", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { date, notes } = req.body;
+    if (!date) return res.status(400).json({ error: "date is required" });
+    const followUp = { date, notes: notes || null };
+    const r = await pool.query(
+      `UPDATE consultations
+       SET con_data = jsonb_set(COALESCE(con_data, '{}'::jsonb), '{follow_up}', $1::jsonb),
+           updated_at = NOW()
+       WHERE id = (
+         SELECT id FROM consultations WHERE patient_id = $2
+         ORDER BY visit_date DESC, created_at DESC LIMIT 1
+       ) RETURNING *`,
+      [JSON.stringify(followUp), pid],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: "No consultation found" });
+    res.json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Update follow-up");
   }
 });
 
