@@ -44,13 +44,27 @@ export async function findAppointmentWithNotes(fileNo, phone, excludeHealthrayId
   );
 }
 
-// ── Find existing appointment by healthray_id ───────────────────────────────
-export async function findAppointment(healthrayId) {
+// ── Find existing appointment by healthray_id, or by file_no + date (sheet import) ──
+export async function findAppointment(healthrayId, fileNo, apptDate) {
+  // First try exact healthray_id match
   const { rows } = await pool.query(
-    `SELECT id, patient_id, healthray_clinical_notes, compliance FROM appointments WHERE healthray_id = $1`,
+    `SELECT id, patient_id, healthray_clinical_notes, compliance, source FROM appointments WHERE healthray_id = $1`,
     [healthrayId],
   );
-  return rows[0] || null;
+  if (rows[0]) return rows[0];
+
+  // Then try matching a sheet-imported appointment by file_no + date
+  if (fileNo && apptDate) {
+    const { rows: sheetRows } = await pool.query(
+      `SELECT id, patient_id, healthray_clinical_notes, compliance, source FROM appointments
+       WHERE file_no = $1 AND appointment_date = $2 AND healthray_id IS NULL
+       LIMIT 1`,
+      [fileNo, apptDate],
+    );
+    if (sheetRows[0]) return sheetRows[0];
+  }
+
+  return null;
 }
 
 // ── Upsert patient ──────────────────────────────────────────────────────────
@@ -186,6 +200,18 @@ export async function upsertAppointment(existingId, data) {
   if (existingId) {
     const { rows } = await pool.query(
       `UPDATE appointments SET
+        patient_id = COALESCE($11, patient_id),
+        patient_name = COALESCE($12, patient_name),
+        phone = COALESCE($13, phone),
+        doctor_name = COALESCE($14, doctor_name),
+        time_slot = COALESCE($15, time_slot),
+        visit_type = COALESCE($16, visit_type),
+        is_walkin = COALESCE($17, is_walkin),
+        age = COALESCE($18, age),
+        sex = COALESCE($19, sex),
+        notes = COALESCE($20, notes),
+        healthray_id = COALESCE($21, healthray_id),
+        source = COALESCE(source, 'healthray'),
         opd_vitals = $2::jsonb, biomarkers = $3::jsonb, compliance = $10::jsonb,
         healthray_clinical_notes = $4, healthray_diagnoses = $5::jsonb,
         healthray_medications = $6::jsonb, healthray_labs = $7::jsonb,
@@ -202,6 +228,17 @@ export async function upsertAppointment(existingId, data) {
         healthrayAdvice,
         status,
         JSON.stringify(compliance),
+        patientId,
+        name,
+        phone,
+        localDoctorName,
+        timeSlot,
+        visitType,
+        isWalkin,
+        age,
+        sex,
+        notes,
+        healthrayId,
       ],
     );
     return rows[0].id;

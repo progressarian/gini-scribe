@@ -246,10 +246,15 @@ router.get("/opd/appointments", async (req, res) => {
               COALESCE(a.age, EXTRACT(YEAR FROM AGE(p.dob))::INTEGER, p.age) AS age,
               COALESCE(a.sex, p.sex) AS sex,
               COALESCE(
+                (SELECT COUNT(*) FROM consultations c
+                  WHERE c.patient_id = a.patient_id
+                    AND a.patient_id IS NOT NULL)
+                +
                 (SELECT COUNT(*) FROM appointments a2
                   WHERE a2.patient_id = a.patient_id
                     AND a2.patient_id IS NOT NULL
-                    AND a2.appointment_date <= a.appointment_date),
+                    AND a2.appointment_date <= a.appointment_date
+                    AND COALESCE(a2.status, 'scheduled') NOT IN ('cancelled', 'no_show')),
                 a.visit_count, 1
               )::INTEGER AS visit_count,
               (SELECT MAX(a3.appointment_date) FROM appointments a3

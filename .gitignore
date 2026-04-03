@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.env
 .vite/
+server/gini-ai-8fc66116e12e.json
+server/*.json

@@ -169,8 +169,9 @@ async function syncAppointmentDocs(healthrayId, patientId, apptDate) {
 async function syncAppointment(appt, localDoctorName) {
   const healthrayId = String(appt.id);
   const doctorId = appt.doctor_id || appt.doctor?.id;
-  const existing = await findAppointment(healthrayId);
   const apptDate = toISTDate(appt.app_date_time);
+  const fileNo = appt.patient_case_id || null;
+  const existing = await findAppointment(healthrayId, fileNo, apptDate);
   const status = mapStatus(appt.status);
   const isCompleted = status === "completed";
 
