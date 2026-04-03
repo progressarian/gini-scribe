@@ -1871,6 +1871,238 @@ textarea.nf:focus {
   margin-top: 2px;
 }
 
+/* ── LOGGED DATA — ENHANCED ── */
+.ld-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ld-section {
+  margin-bottom: 16px;
+}
+.ld-sub-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 8px 0 6px;
+}
+
+/* Tables */
+.ld-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.ld-tbl-head {
+  display: grid;
+  padding: 6px 12px;
+  background: var(--bg);
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.ld-tbl-row {
+  display: grid;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.ld-tbl-row:hover {
+  background: var(--bg);
+}
+.ld-vital-cols { grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.6fr 0.6fr 0.8fr; }
+.ld-med-cols { grid-template-columns: 1fr 1.5fr 1fr 0.8fr 0.7fr; }
+.ld-act-cols { grid-template-columns: 1fr 1.3fr 0.8fr 1.2fr; }
+.ld-meal-cols { grid-template-columns: 1fr 0.8fr 1.8fr 0.7fr 0.6fr 0.6fr 0.6fr; }
+
+/* Activity chips (sleep / mood) */
+.ld-act-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ld-act-chip {
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 70px;
+}
+.ld-act-dt {
+  font-size: 10px;
+  color: var(--t3);
+}
+.ld-act-val {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+/* Symptoms */
+.ld-symptom-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ld-symptom-item {
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 9px 11px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ld-sev-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.ld-symptom-note {
+  font-size: 11px;
+  color: var(--t2);
+  margin-top: 3px;
+  font-style: italic;
+}
+.ld-followup-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--amber);
+  margin-top: 3px;
+}
+
+/* Nutrition summary bar */
+.ld-nutr-bar {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.ld-nutr-item {
+  flex: 1;
+  padding: 10px 8px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ld-nutr-item:last-child { border-right: none; }
+.ld-nutr-val {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.3px;
+}
+.ld-nutr-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Alerts */
+.ld-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.noticebar.inf {
+  background: color-mix(in srgb, var(--blue) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 20%, transparent);
+  border-radius: var(--rs);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.ni.inf { color: var(--blue); }
+
+/* Empty state */
+.ld-empty {
+  font-size: 12px;
+  color: var(--t3);
+  padding: 12px 0;
+  text-align: center;
+}
+
+/* ── View All Data Modal ── */
+.ld-modal-wide {
+  width: 860px;
+  max-width: 95vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+.ld-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.ld-modal-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+  padding-bottom: 0;
+}
+.ld-mtab {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t3);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ld-mtab:hover { color: var(--text); }
+.ld-mtab.on {
+  color: var(--pri);
+  border-bottom-color: var(--pri);
+}
+.ld-mtab-count {
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--t3);
+}
+.ld-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.ld-modal-body::-webkit-scrollbar { width: 3px; }
+.ld-modal-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
 /* ── INSULIN TITRATION ── */
 .tit-row {
   display: grid;
@@ -2328,6 +2560,12 @@ textarea.nf:focus {
   .log-grid {
     grid-template-columns: repeat(3, 1fr);
   }
+  .ld-summary {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .ld-vital-cols { grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.6fr 0.6fr 0.8fr; }
+  .ld-meal-cols { grid-template-columns: 1fr 0.8fr 1.5fr 0.7fr 0.6fr 0.6fr 0.6fr; }
+  .ld-modal-wide { width: 760px; }
   .aip {
     width: 320px;
     right: -330px;
@@ -2539,6 +2777,19 @@ textarea.nf:focus {
   .log-val {
     font-size: 20px;
   }
+  .ld-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .ld-vital-cols { grid-template-columns: 1fr 1fr 1fr 0.8fr; }
+  .ld-vital-cols span:nth-child(5),
+  .ld-vital-cols span:nth-child(6) { display: none; }
+  .ld-meal-cols { grid-template-columns: 1fr 0.8fr 1.5fr 0.7fr; }
+  .ld-meal-cols span:nth-child(5),
+  .ld-meal-cols span:nth-child(6),
+  .ld-meal-cols span:nth-child(7) { display: none; }
+  .ld-modal-wide { width: 95vw; }
+  .ld-nutr-bar { flex-wrap: wrap; }
+  .ld-nutr-item { min-width: 60px; }
 
   /* -- Notice bar -- */
   .noticebar {
@@ -2642,6 +2893,13 @@ textarea.nf:focus {
   .log-grid {
     grid-template-columns: 1fr 1fr;
   }
+  .ld-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ld-vital-cols { grid-template-columns: 1fr 1fr 1fr; }
+  .ld-med-cols { grid-template-columns: 1fr 1.2fr 0.8fr; }
+  .ld-act-cols { grid-template-columns: 1fr 1.2fr 0.8fr; }
+  .ld-meal-cols { grid-template-columns: 1fr 0.8fr 1fr; }
   .scrl {
     padding: 8px;
   }

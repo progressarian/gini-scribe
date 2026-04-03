@@ -5,6 +5,11 @@ import {
   syncTodayWalkingAppointments,
   syncWalkingAppointmentsByDate,
 } from "../services/cron/index.js";
+import {
+  readSheetTab,
+  readUpcomingAppointments,
+} from "../services/sheets/reader.js";
+import { syncFromSheets } from "../services/cron/sheetsSync.js";
 
 const router = Router();
 
@@ -37,6 +42,40 @@ router.post("/sync/healthray/date", async (req, res) => {
     res.json({ success: true, ...result });
   } catch (e) {
     handleError(res, e, "HealthRay date sync");
+  }
+});
+
+// ── Google Sheets: import upcoming OPD appointments into DB ─────────────────
+
+// Manual trigger: import all 3 upcoming tabs into appointments table
+router.post("/sync/sheets/import", async (req, res) => {
+  try {
+    const result = await syncFromSheets();
+    res.json({ success: true, ...result });
+  } catch (e) {
+    handleError(res, e, "Sheets OPD import");
+  }
+});
+
+// Read all 3 upcoming tabs (Tomorrow, Day After, Day After + 1)
+router.get("/sync/sheets/upcoming", async (req, res) => {
+  try {
+    const data = await readUpcomingAppointments();
+    res.json({ success: true, tabs: data });
+  } catch (e) {
+    handleError(res, e, "Sheets upcoming read");
+  }
+});
+
+// Read a single tab by name (e.g. GET /api/sync/sheets/tab?name=Tomorrow)
+router.get("/sync/sheets/tab", async (req, res) => {
+  try {
+    const name = req.query.name;
+    if (!name) return res.status(400).json({ error: "name query param required" });
+    const data = await readSheetTab(name);
+    res.json({ success: true, tab: name, ...data });
+  } catch (e) {
+    handleError(res, e, "Sheets tab read");
   }
 });
 
