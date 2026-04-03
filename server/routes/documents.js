@@ -6,6 +6,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
+import { fetchMedicalRecords, healthrayFetchRaw } from "../services/healthray/client.js";
 
 const router = Router();
 
@@ -249,6 +250,77 @@ router.get("/documents/:id/file-url", async (req, res) => {
     res.json({ url, mime_type: doc.rows[0].mime_type, file_name: doc.rows[0].file_name });
   } catch (e) {
     handleError(res, e, "Document");
+  }
+});
+
+// Proxy document file for inline viewing in browser
+router.get("/documents/:id/view", async (req, res) => {
+  try {
+    const doc = await pool.query(
+      "SELECT storage_path, mime_type, file_name, source, notes, patient_id FROM documents WHERE id=$1",
+      [req.params.id],
+    );
+    if (!doc.rows[0]) return res.status(404).json({ error: "Document not found" });
+
+    const { storage_path, mime_type, file_name, source, notes, patient_id } = doc.rows[0];
+
+    // Supabase-stored files
+    if (storage_path && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const signResp = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${storage_path}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ expiresIn: 3600 }),
+        },
+      );
+      if (!signResp.ok) return res.status(500).json({ error: "Failed to generate URL" });
+      const signData = await signResp.json();
+      const signedPath = signData.signedURL || signData.signedUrl || signData.token;
+      const url = signedPath?.startsWith("http")
+        ? signedPath
+        : `${SUPABASE_URL}/storage/v1${signedPath}`;
+      const fileResp = await fetch(url);
+      if (!fileResp.ok) return res.status(502).json({ error: "Failed to fetch file" });
+      const contentType =
+        fileResp.headers.get("content-type") || mime_type || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `inline; filename="${file_name || "document"}"`);
+      return res.send(Buffer.from(await fileResp.arrayBuffer()));
+    }
+
+    // Healthray docs — use download API with session auth
+    if (source === "healthray" && notes) {
+      const recMatch = notes.match(/healthray_record:(\d+)/);
+      if (recMatch) {
+        const apptRow = await pool.query(
+          `SELECT healthray_id FROM appointments WHERE patient_id = $1 AND healthray_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+          [patient_id],
+        );
+        if (apptRow.rows[0]?.healthray_id) {
+          const records = await fetchMedicalRecords(apptRow.rows[0].healthray_id);
+          const rec = records?.find((r) => String(r.id) === recMatch[1]);
+          if (rec) {
+            const downloadPath = `/medical_records/download/${rec.id}?record_type=${encodeURIComponent(rec.record_type)}&medical_record_id=${rec.medical_record_id}`;
+            const fileResp = await healthrayFetchRaw(downloadPath);
+            if (!fileResp.ok)
+              return res.status(502).json({ error: "Failed to fetch file from HealthRay" });
+            const contentType =
+              fileResp.headers.get("content-type") || mime_type || "application/octet-stream";
+            res.setHeader("Content-Type", contentType);
+            res.setHeader("Content-Disposition", `inline; filename="${file_name || "document"}"`);
+            return res.send(Buffer.from(await fileResp.arrayBuffer()));
+          }
+        }
+      }
+    }
+
+    return res.status(404).json({ error: "No file attached" });
+  } catch (e) {
+    handleError(res, e, "Document view");
   }
 });
 

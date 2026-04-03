@@ -1709,10 +1709,16 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                             <button
                               onClick={async () => {
                                 try {
-                                  const resp = await apiFetch(`/api/documents/${r.docId}/file-url`);
-                                  const data = await resp.json();
-                                  if (data.url) window.open(data.url, "_blank");
-                                  else showToast("Could not get file URL", "err");
+                                  const resp = await apiFetchRaw(`/api/documents/${r.docId}/view`);
+                                  if (!resp.ok) {
+                                    showToast("Could not open file", "err");
+                                    return;
+                                  }
+                                  const contentType =
+                                    resp.headers.get("content-type") || "application/octet-stream";
+                                  const buf = await resp.arrayBuffer();
+                                  const blob = new Blob([buf], { type: contentType });
+                                  window.open(URL.createObjectURL(blob), "_blank");
                                 } catch {
                                   showToast("Failed to open file", "err");
                                 }

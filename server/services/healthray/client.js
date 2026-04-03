@@ -73,6 +73,28 @@ export async function healthrayFetch(path, isRetry = false) {
   return json.data;
 }
 
+// Raw fetch (for binary responses like file downloads)
+export async function healthrayFetchRaw(path, isRetry = false) {
+  if (!sessionCookie) {
+    await healthrayLogin();
+  }
+
+  const res = await fetch(`${HEALTHRAY_BASE}${path}`, {
+    headers: { Cookie: `connect.sid=${sessionCookie}` },
+  });
+
+  if (res.status === 401 && !isRetry) {
+    await healthrayLogin();
+    return healthrayFetchRaw(path, true);
+  }
+
+  if (res.status === 401) {
+    throw new Error("HealthRay auth failed after re-login — check credentials in .env");
+  }
+
+  return res;
+}
+
 // ── API endpoint wrappers ───────────────────────────────────────────────────
 
 export function fetchDoctors() {
