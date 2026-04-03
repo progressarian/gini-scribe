@@ -36,6 +36,7 @@ import {
   UploadReportModal,
   ChangeFollowUpModal,
   TemplateModal,
+  LabExtractionReviewModal,
 } from "../components/visit/modals";
 import { useVisitMutations } from "../hooks/useVisitMutations";
 
@@ -177,6 +178,7 @@ export default function VisitPage() {
   const [showEndModal, setShowEndModal] = useState(false);
   const [doctorNote, setDoctorNote] = useState("");
   const [modal, setModal] = useState(null); // { type, data? }
+  const [labExtractSaving, setLabExtractSaving] = useState(false);
   const scrollRef = useRef(null);
 
   // ── Redirect if no patient ──
@@ -1022,43 +1024,64 @@ export default function VisitPage() {
             const r = await mutations.uploadDocument(d);
             if (!r.success) return;
             closeModal();
-            // Auto-extract lab values for lab reports
+            // For lab reports with a file, extract and show review modal
             if (d.doc_type === "lab_report" && d.base64) {
-              toast("Extracting lab values...", "info");
+              toast("Extracting lab values...", "success");
               try {
                 const mediaType = d.fileName?.match(/\.pdf$/i)
                   ? "application/pdf"
                   : d.fileName?.match(/\.png$/i)
                     ? "image/png"
                     : "image/jpeg";
+                console.log("[LabExtract] Starting extraction", {
+                  fileName: d.fileName,
+                  mediaType,
+                });
                 const { data: extracted, error } = await extractLab(d.base64, mediaType);
-                if (error || !extracted?.panels?.length) {
-                  toast("Could not extract lab values from report", "warn");
+                console.log("[LabExtract] Result:", { extracted, error });
+                if (error) {
+                  toast(`Extraction error: ${error}`, "warn");
+                } else if (!extracted?.panels?.length) {
+                  toast("No lab values found in report", "warn");
                 } else {
-                  const effectiveDate = d.doc_date || null;
-                  let count = 0;
-                  for (const panel of extracted.panels) {
-                    for (const test of panel.tests || []) {
-                      await api
-                        .post(`/api/patients/${dbPatientId}/labs`, {
-                          test_name: normalizeTestName(test.test_name),
-                          result: String(test.result_text || test.result),
-                          unit: test.unit || "",
-                          flag: test.flag || "N",
-                          ref_range: test.ref_range || "",
-                          test_date: effectiveDate,
-                        })
-                        .catch(() => {});
-                      count++;
-                    }
-                  }
-                  await refreshData();
-                  toast(`${count} lab value${count !== 1 ? "s" : ""} extracted`, "success");
+                  setModal({ type: "labReview", data: { extracted, doc_date: d.doc_date } });
                 }
-              } catch {
-                toast("Lab extraction failed", "warn");
+              } catch (e) {
+                console.error("[LabExtract] Exception:", e);
+                toast(`Lab extraction failed: ${e.message}`, "warn");
               }
+            } else if (d.doc_type === "lab_report" && !d.base64) {
+              toast("No file attached — attach a file to extract lab values", "warn");
             }
+          }}
+        />
+      )}
+      {modal?.type === "labReview" && (
+        <LabExtractionReviewModal
+          extracted={modal.data.extracted}
+          doc_date={modal.data.doc_date}
+          saving={labExtractSaving}
+          onClose={closeModal}
+          onSave={async (tests, doc_date) => {
+            setLabExtractSaving(true);
+            let saved = 0;
+            for (const test of tests) {
+              await api
+                .post(`/api/patients/${dbPatientId}/labs`, {
+                  test_name: normalizeTestName(test.test_name),
+                  result: String(test.result_text || test.result),
+                  unit: test.unit || "",
+                  flag: test.flag || "N",
+                  ref_range: test.ref_range || "",
+                  test_date: doc_date || null,
+                })
+                .catch(() => {});
+              saved++;
+            }
+            await refreshData();
+            setLabExtractSaving(false);
+            closeModal();
+            toast(`${saved} lab value${saved !== 1 ? "s" : ""} saved`, "success");
           }}
         />
       )}

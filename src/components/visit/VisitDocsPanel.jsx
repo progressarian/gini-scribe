@@ -1,6 +1,7 @@
 import { memo, useCallback } from "react";
 import { fmtDate } from "./helpers";
 import api from "../../services/api";
+import { toast } from "../../stores/uiStore";
 
 const ICON_MAP = {
   lab_report: "🧪",
@@ -28,16 +29,19 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
   );
 
   const openDoc = useCallback(async (doc) => {
-    if (doc.storage_path) {
-      try {
-        const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
-        if (data.url) {
-          window.open(data.url, "_blank");
-          return;
-        }
-      } catch {
-        /* fall through */
+    if (!doc.storage_path) {
+      toast("No file attached to this document", "warn");
+      return;
+    }
+    try {
+      const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
+      if (data.url) {
+        window.open(data.url, "_blank");
+      } else {
+        toast("Could not get file link", "warn");
       }
+    } catch {
+      toast("Failed to open document", "error");
     }
   }, []);
 
