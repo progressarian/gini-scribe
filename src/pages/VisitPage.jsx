@@ -7,6 +7,9 @@ import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
 import { toast } from "../stores/uiStore";
 import { findLab, getLabVal, getLabHist, computeFlags, fmtDate } from "../components/visit/helpers";
+import { extractLab } from "../services/extraction";
+import { normalizeTestName } from "../config/labNormalization";
+import { EXAM_SECTIONS } from "../config/exam.js";
 import VisitTopbar from "../components/visit/VisitTopbar";
 import VisitStrip from "../components/visit/VisitStrip";
 import VisitSidebar from "../components/visit/VisitSidebar";
@@ -134,6 +137,21 @@ const JUMP_SECTIONS = [
   { id: "summary", label: "📄 Summary" },
 ];
 
+// Transform raw exam_data from DB into display-ready array
+function buildExamFindings(rawExam) {
+  if (!rawExam?.findings || typeof rawExam.findings !== "object") return null;
+  const result = [];
+  Object.values(EXAM_SECTIONS).forEach((sections) => {
+    sections.forEach((s) => {
+      const vals = rawExam.findings[s.id + "_v"] || [];
+      const nad = rawExam.findings[s.id + "_n"];
+      if (vals.length > 0) result.push({ icon: s.ic, system: s.l, findings: vals.join(", ") });
+      else if (nad) result.push({ icon: s.ic, system: s.l, findings: "NAD" });
+    });
+  });
+  return result.length ? result : null;
+}
+
 export default function VisitPage() {
   const navigate = useNavigate();
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
@@ -173,7 +191,7 @@ export default function VisitPage() {
       setLoading(true);
       try {
         const { data: d } = await api.get(`/api/visit/${dbPatientId}`);
-        setData(d);
+        setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
         if (d.consultations?.[0]?.con_data?.assessment_summary) {
           setDoctorNote(d.consultations[0].con_data.assessment_summary);
         }
@@ -188,7 +206,7 @@ export default function VisitPage() {
   const refreshData = useCallback(async () => {
     try {
       const { data: d } = await api.get(`/api/visit/${dbPatientId}`);
-      setData(d);
+      setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
     } catch {
       /* silent */
     }
@@ -249,6 +267,65 @@ export default function VisitPage() {
     flags.forEach((f) => aiParts.push(`\n${f.icon} ${f.text}`));
     const aiInitialMsg = aiParts.join("\n");
 
+    // Anthropometry: merge clinic vitals + Genie app vitals
+    const genieVitals = data.loggedData?.vitals || [];
+    const genieByDate = {};
+    genieVitals.forEach((g) => {
+      const d = String(g.recorded_date).slice(0, 10);
+      if (!genieByDate[d]) genieByDate[d] = g;
+    });
+    const anthropoRows = [
+      ...vitals.map((v) => {
+        const d = String(v.recorded_at).slice(0, 10);
+        const g = genieByDate[d] || {};
+        return {
+          date: v.recorded_at,
+          weight: v.weight || g.weight_kg || null,
+          bmi: v.bmi || g.bmi || null,
+          waist: g.waist || null,
+          body_fat: g.body_fat || null,
+          bp_sys: v.bp_sys || g.bp_systolic || null,
+          bp_dia: v.bp_dia || g.bp_diastolic || null,
+        };
+      }),
+    ];
+    const clinicDates = new Set(vitals.map((v) => String(v.recorded_at).slice(0, 10)));
+    genieVitals.forEach((g) => {
+      const d = String(g.recorded_date).slice(0, 10);
+      if (!clinicDates.has(d) && (g.waist || g.body_fat || g.weight_kg)) {
+        anthropoRows.push({
+          date: g.recorded_date,
+          weight: g.weight_kg || null,
+          bmi: g.bmi || null,
+          waist: g.waist || null,
+          body_fat: g.body_fat || null,
+          bp_sys: g.bp_systolic || null,
+          bp_dia: g.bp_diastolic || null,
+        });
+      }
+    });
+    anthropoRows.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const topRows = anthropoRows.slice(0, 6);
+
+    const withWaist = anthropoRows
+      .filter((r) => r.waist)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    const withFat = anthropoRows
+      .filter((r) => r.body_fat)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    const trendParts = [];
+    if (withWaist.length >= 2) {
+      const diff = (withWaist[0].waist - withWaist[withWaist.length - 1].waist).toFixed(1);
+      if (Math.abs(diff) >= 1)
+        trendParts.push(`${Math.abs(diff)} cm ${diff > 0 ? "reduction" : "increase"} in waist`);
+    }
+    if (withFat.length >= 2) {
+      const diff = (withFat[0].body_fat - withFat[withFat.length - 1].body_fat).toFixed(1);
+      if (Math.abs(diff) >= 0.5)
+        trendParts.push(`${Math.abs(diff)}% body fat ${diff > 0 ? "reduction" : "increase"}`);
+    }
+    const anthropoTrend = trendParts.length ? trendParts.join(" and ") : null;
+
     return {
       latestV,
       prevV,
@@ -260,6 +337,8 @@ export default function VisitPage() {
       aiInitialMsg,
       uniqueActiveMeds,
       uniqueStoppedMeds,
+      anthropoRows: topRows,
+      anthropoTrend,
     };
   }, [data]);
 
@@ -376,6 +455,8 @@ export default function VisitPage() {
     aiInitialMsg,
     uniqueActiveMeds,
     uniqueStoppedMeds,
+    anthropoRows,
+    anthropoTrend,
   } = derived;
 
   return (
@@ -530,7 +611,9 @@ export default function VisitPage() {
                   <div className="sct">
                     <div className="sci ic-g">🩺</div>Physical Exam · Visit #{summary.totalVisits}
                   </div>
-                  <button className="bx bx-p">+ Record Exam</button>
+                  <button className="bx bx-p" onClick={() => navigate("/exam")}>
+                    + Record Exam
+                  </button>
                 </div>
                 <div className="scb">
                   {data.examFindings ? (
@@ -651,7 +734,7 @@ export default function VisitPage() {
                 </div>
               </div>
               {/* Anthropometry History */}
-              {vitals?.length > 0 && (
+              {anthropoRows.length > 0 && (
                 <div className="sc">
                   <div className="sch">
                     <div className="sct">
@@ -682,8 +765,8 @@ export default function VisitPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {vitals.slice(0, 6).map((v, i) => (
-                            <tr key={v.id || i} style={{ borderBottom: "1px solid var(--border)" }}>
+                          {anthropoRows.map((v, i) => (
+                            <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                               <td
                                 style={{
                                   padding: "7px 12px",
@@ -691,7 +774,7 @@ export default function VisitPage() {
                                   color: i === 0 ? "var(--primary)" : "var(--text)",
                                 }}
                               >
-                                {fmtDate(v.recorded_at)}
+                                {fmtDate(v.date)}
                               </td>
                               <td style={{ padding: "7px 12px", textAlign: "center" }}>
                                 {v.weight ? `${v.weight} kg` : "—"}
@@ -713,6 +796,12 @@ export default function VisitPage() {
                         </tbody>
                       </table>
                     </div>
+                    {anthropoTrend && (
+                      <div className="noticebar grn" style={{ marginTop: 10 }}>
+                        <span>✓</span>
+                        <span className="ni grn">{anthropoTrend} since earliest record.</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -931,7 +1020,45 @@ export default function VisitPage() {
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.uploadDocument(d);
-            if (r.success) closeModal();
+            if (!r.success) return;
+            closeModal();
+            // Auto-extract lab values for lab reports
+            if (d.doc_type === "lab_report" && d.base64) {
+              toast("Extracting lab values...", "info");
+              try {
+                const mediaType = d.fileName?.match(/\.pdf$/i)
+                  ? "application/pdf"
+                  : d.fileName?.match(/\.png$/i)
+                    ? "image/png"
+                    : "image/jpeg";
+                const { data: extracted, error } = await extractLab(d.base64, mediaType);
+                if (error || !extracted?.panels?.length) {
+                  toast("Could not extract lab values from report", "warn");
+                } else {
+                  const effectiveDate = d.doc_date || null;
+                  let count = 0;
+                  for (const panel of extracted.panels) {
+                    for (const test of panel.tests || []) {
+                      await api
+                        .post(`/api/patients/${dbPatientId}/labs`, {
+                          test_name: normalizeTestName(test.test_name),
+                          result: String(test.result_text || test.result),
+                          unit: test.unit || "",
+                          flag: test.flag || "N",
+                          ref_range: test.ref_range || "",
+                          test_date: effectiveDate,
+                        })
+                        .catch(() => {});
+                      count++;
+                    }
+                  }
+                  await refreshData();
+                  toast(`${count} lab value${count !== 1 ? "s" : ""} extracted`, "success");
+                }
+              } catch {
+                toast("Lab extraction failed", "warn");
+              }
+            }
           }}
         />
       )}

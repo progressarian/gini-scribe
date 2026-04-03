@@ -5,10 +5,7 @@ import {
   syncTodayWalkingAppointments,
   syncWalkingAppointmentsByDate,
 } from "../services/cron/index.js";
-import {
-  readSheetTab,
-  readUpcomingAppointments,
-} from "../services/sheets/reader.js";
+import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reader.js";
 import { syncFromSheets } from "../services/cron/sheetsSync.js";
 
 const router = Router();

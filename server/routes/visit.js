@@ -90,7 +90,7 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 7. Consultations
       pool.query(
-        `SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data
+        `SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data, exam_data
          FROM consultations WHERE patient_id=$1
          ORDER BY visit_date DESC, created_at DESC`,
         [pid],

@@ -6,6 +6,7 @@ import useClinicalStore from "./clinicalStore.js";
 import usePlanStore from "./planStore.js";
 import useAuthStore from "./authStore.js";
 import useLabStore from "./labStore.js";
+import useExamStore from "./examStore.js";
 
 let searchTimer = null;
 let _toastFn = null;
@@ -201,6 +202,7 @@ const useUiStore = create((set, get) => ({
       const vitals = useVitalsStore.getState().vitals;
       const { moData, conData, moTranscript, conTranscript, quickTranscript } =
         useClinicalStore.getState();
+      const { examData, examNotes, getExamSummary } = useExamStore.getState();
       const { planEdits, nextVisitDate } = usePlanStore.getState();
       const currentDoctor = useAuthStore.getState().currentDoctor;
 
@@ -233,6 +235,9 @@ const useUiStore = create((set, get) => ({
           : nextVisitDate
             ? { follow_up: { date: nextVisitDate } }
             : null,
+        examData: Object.keys(examData || {}).length ? examData : null,
+        examNotes: examNotes || null,
+        examSummary: getExamSummary() || null,
         moTranscript: moTranscript || null,
         conTranscript: conTranscript || null,
         quickTranscript: quickTranscript || null,

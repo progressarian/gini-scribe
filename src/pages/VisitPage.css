@@ -1919,10 +1919,18 @@ textarea.nf:focus {
 .ld-tbl-row:hover {
   background: var(--bg);
 }
-.ld-vital-cols { grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.6fr 0.6fr 0.8fr; }
-.ld-med-cols { grid-template-columns: 1fr 1.5fr 1fr 0.8fr 0.7fr; }
-.ld-act-cols { grid-template-columns: 1fr 1.3fr 0.8fr 1.2fr; }
-.ld-meal-cols { grid-template-columns: 1fr 0.8fr 1.8fr 0.7fr 0.6fr 0.6fr 0.6fr; }
+.ld-vital-cols {
+  grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.6fr 0.6fr 0.8fr;
+}
+.ld-med-cols {
+  grid-template-columns: 1fr 1.5fr 1fr 0.8fr 0.7fr;
+}
+.ld-act-cols {
+  grid-template-columns: 1fr 1.3fr 0.8fr 1.2fr;
+}
+.ld-meal-cols {
+  grid-template-columns: 1fr 0.8fr 1.8fr 0.7fr 0.6fr 0.6fr 0.6fr;
+}
 
 /* Activity chips (sleep / mood) */
 .ld-act-grid {
@@ -2005,7 +2013,9 @@ textarea.nf:focus {
   flex-direction: column;
   gap: 2px;
 }
-.ld-nutr-item:last-child { border-right: none; }
+.ld-nutr-item:last-child {
+  border-right: none;
+}
 .ld-nutr-val {
   font-size: 17px;
   font-weight: 800;
@@ -2037,7 +2047,9 @@ textarea.nf:focus {
   gap: 8px;
   font-size: 12px;
 }
-.ni.inf { color: var(--blue); }
+.ni.inf {
+  color: var(--blue);
+}
 
 /* Empty state */
 .ld-empty {
@@ -2080,9 +2092,13 @@ textarea.nf:focus {
   display: flex;
   align-items: center;
   gap: 5px;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
-.ld-mtab:hover { color: var(--text); }
+.ld-mtab:hover {
+  color: var(--text);
+}
 .ld-mtab.on {
   color: var(--pri);
   border-bottom-color: var(--pri);
@@ -2100,8 +2116,13 @@ textarea.nf:focus {
   overflow-y: auto;
   min-height: 0;
 }
-.ld-modal-body::-webkit-scrollbar { width: 3px; }
-.ld-modal-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.ld-modal-body::-webkit-scrollbar {
+  width: 3px;
+}
+.ld-modal-body::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 2px;
+}
 
 /* ── INSULIN TITRATION ── */
 .tit-row {
@@ -2563,9 +2584,15 @@ textarea.nf:focus {
   .ld-summary {
     grid-template-columns: repeat(3, 1fr);
   }
-  .ld-vital-cols { grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.6fr 0.6fr 0.8fr; }
-  .ld-meal-cols { grid-template-columns: 1fr 0.8fr 1.5fr 0.7fr 0.6fr 0.6fr 0.6fr; }
-  .ld-modal-wide { width: 760px; }
+  .ld-vital-cols {
+    grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.6fr 0.6fr 0.8fr;
+  }
+  .ld-meal-cols {
+    grid-template-columns: 1fr 0.8fr 1.5fr 0.7fr 0.6fr 0.6fr 0.6fr;
+  }
+  .ld-modal-wide {
+    width: 760px;
+  }
   .aip {
     width: 320px;
     right: -330px;
@@ -2780,16 +2807,30 @@ textarea.nf:focus {
   .ld-summary {
     grid-template-columns: repeat(2, 1fr);
   }
-  .ld-vital-cols { grid-template-columns: 1fr 1fr 1fr 0.8fr; }
+  .ld-vital-cols {
+    grid-template-columns: 1fr 1fr 1fr 0.8fr;
+  }
   .ld-vital-cols span:nth-child(5),
-  .ld-vital-cols span:nth-child(6) { display: none; }
-  .ld-meal-cols { grid-template-columns: 1fr 0.8fr 1.5fr 0.7fr; }
+  .ld-vital-cols span:nth-child(6) {
+    display: none;
+  }
+  .ld-meal-cols {
+    grid-template-columns: 1fr 0.8fr 1.5fr 0.7fr;
+  }
   .ld-meal-cols span:nth-child(5),
   .ld-meal-cols span:nth-child(6),
-  .ld-meal-cols span:nth-child(7) { display: none; }
-  .ld-modal-wide { width: 95vw; }
-  .ld-nutr-bar { flex-wrap: wrap; }
-  .ld-nutr-item { min-width: 60px; }
+  .ld-meal-cols span:nth-child(7) {
+    display: none;
+  }
+  .ld-modal-wide {
+    width: 95vw;
+  }
+  .ld-nutr-bar {
+    flex-wrap: wrap;
+  }
+  .ld-nutr-item {
+    min-width: 60px;
+  }
 
   /* -- Notice bar -- */
   .noticebar {
@@ -2896,10 +2937,18 @@ textarea.nf:focus {
   .ld-summary {
     grid-template-columns: 1fr 1fr;
   }
-  .ld-vital-cols { grid-template-columns: 1fr 1fr 1fr; }
-  .ld-med-cols { grid-template-columns: 1fr 1.2fr 0.8fr; }
-  .ld-act-cols { grid-template-columns: 1fr 1.2fr 0.8fr; }
-  .ld-meal-cols { grid-template-columns: 1fr 0.8fr 1fr; }
+  .ld-vital-cols {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .ld-med-cols {
+    grid-template-columns: 1fr 1.2fr 0.8fr;
+  }
+  .ld-act-cols {
+    grid-template-columns: 1fr 1.2fr 0.8fr;
+  }
+  .ld-meal-cols {
+    grid-template-columns: 1fr 0.8fr 1fr;
+  }
   .scrl {
     padding: 8px;
   }

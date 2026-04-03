@@ -60,15 +60,14 @@ function SummaryCards({ vitals, activity, meds, meals, symptoms }) {
         <div className="log-sub">{medDays}/30 days logged</div>
       </div>
       <div className="log-card">
-        <div className="log-val" style={{ color: "var(--blue)" }}>{vitalsCount}</div>
+        <div className="log-val" style={{ color: "var(--blue)" }}>
+          {vitalsCount}
+        </div>
         <div className="log-lbl">Vitals Logged</div>
         <div className="log-sub">BP, Sugar, Weight etc.</div>
       </div>
       <div className="log-card">
-        <div
-          className="log-val"
-          style={{ color: exDays >= 5 ? "var(--green)" : "var(--amber)" }}
-        >
+        <div className="log-val" style={{ color: exDays >= 5 ? "var(--green)" : "var(--amber)" }}>
           {exDays}
         </div>
         <div className="log-lbl">Exercise Days</div>
@@ -97,7 +96,9 @@ function SummaryCards({ vitals, activity, meds, meals, symptoms }) {
         <div className="log-card">
           <div
             className="log-val"
-            style={{ color: avgMood >= 7 ? "var(--green)" : avgMood >= 4 ? "var(--amber)" : "var(--red)" }}
+            style={{
+              color: avgMood >= 7 ? "var(--green)" : avgMood >= 4 ? "var(--amber)" : "var(--red)",
+            }}
           >
             {avgMood}/10
           </div>
@@ -125,7 +126,12 @@ function VitalsTable({ vitals, limit }) {
       {rows.map((v, i) => (
         <div key={v.id || i} className="ld-tbl-row ld-vital-cols">
           <span>{fmtDate(v.recorded_date)}</span>
-          <span style={{ color: v.bp_systolic ? bpColor(v.bp_systolic, v.bp_diastolic) : "var(--t3)", fontWeight: v.bp_systolic ? 600 : 400 }}>
+          <span
+            style={{
+              color: v.bp_systolic ? bpColor(v.bp_systolic, v.bp_diastolic) : "var(--t3)",
+              fontWeight: v.bp_systolic ? 600 : 400,
+            }}
+          >
             {v.bp_systolic && v.bp_diastolic ? `${v.bp_systolic}/${v.bp_diastolic}` : "—"}
           </span>
           <span style={{ fontWeight: 700, color: v.rbs ? rbsColor(v.rbs) : "var(--t3)" }}>
@@ -233,7 +239,8 @@ function ActivitySection({ activity, limit }) {
                   <span
                     className="ld-act-val"
                     style={{
-                      color: score >= 7 ? "var(--green)" : score >= 4 ? "var(--amber)" : "var(--red)",
+                      color:
+                        score >= 7 ? "var(--green)" : score >= 4 ? "var(--amber)" : "var(--red)",
                     }}
                   >
                     {score}/10
@@ -258,14 +265,14 @@ function SymptomsSection({ symptoms, limit }) {
     <div className="ld-symptom-list">
       {rows.map((s, i) => (
         <div key={s.id || i} className="ld-symptom-item">
-          <div
-            className="sy-dot"
-            style={{ background: sevColor(s.severity) }}
-          />
+          <div className="sy-dot" style={{ background: sevColor(s.severity) }} />
           <div style={{ flex: 1 }}>
             <div className="sy-nm">
               {s.symptom}
-              <span className="ld-sev-badge" style={{ background: sevColor(s.severity), color: "#fff" }}>
+              <span
+                className="ld-sev-badge"
+                style={{ background: sevColor(s.severity), color: "#fff" }}
+              >
                 {sevLabel(s.severity)} ({s.severity}/10)
               </span>
             </div>
@@ -275,9 +282,7 @@ function SymptomsSection({ symptoms, limit }) {
               {s.context ? ` · ${s.context}` : ""}
             </div>
             {s.notes && <div className="ld-symptom-note">{s.notes}</div>}
-            {s.follow_up_needed && (
-              <div className="ld-followup-tag">Follow-up needed</div>
-            )}
+            {s.follow_up_needed && <div className="ld-followup-tag">Follow-up needed</div>}
           </div>
         </div>
       ))}
@@ -339,8 +344,12 @@ function ViewAllModal({ loggedData, onClose }) {
     <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mbox ld-modal-wide">
         <div className="ld-modal-header">
-          <div className="mttl" style={{ marginBottom: 0 }}>Patient App — All Logged Data</div>
-          <button className="bx bx-s" onClick={onClose}>Close</button>
+          <div className="mttl" style={{ marginBottom: 0 }}>
+            Patient App — All Logged Data
+          </div>
+          <button className="bx bx-s" onClick={onClose}>
+            Close
+          </button>
         </div>
 
         {/* Tab bar */}
@@ -355,7 +364,7 @@ function ViewAllModal({ loggedData, onClose }) {
               <span className="ld-mtab-count">
                 {t.id === "activity"
                   ? loggedData.activity?.length || 0
-                  : (loggedData[t.id]?.length || 0)}
+                  : loggedData[t.id]?.length || 0}
               </span>
             </button>
           ))}
@@ -420,24 +429,48 @@ const VisitLoggedData = memo(function VisitLoggedData({ loggedData }) {
     const a = [];
     const vitals = loggedData.vitals || [];
     const highBP = vitals.filter((v) => v.bp_systolic >= 140 || v.bp_diastolic >= 90);
-    if (highBP.length > 0) a.push({ type: "warn", msg: `${highBP.length} elevated BP reading(s) in last 60 days. Review medication.` });
+    if (highBP.length > 0)
+      a.push({
+        type: "warn",
+        msg: `${highBP.length} elevated BP reading(s) in last 60 days. Review medication.`,
+      });
 
     const highSugar = vitals.filter((v) => v.rbs > 180);
-    if (highSugar.length > 0) a.push({ type: "warn", msg: `${highSugar.length} blood sugar reading(s) above 180 mg/dL. Assess glycemic control.` });
+    if (highSugar.length > 0)
+      a.push({
+        type: "warn",
+        msg: `${highSugar.length} blood sugar reading(s) above 180 mg/dL. Assess glycemic control.`,
+      });
 
     const exercises = (loggedData.activity || []).filter((a) => a.activity_type === "Exercise");
     const exDays = new Set(exercises.map((e) => e.log_date)).size;
-    if (exDays < 3 && loggedData.activity?.length > 0) a.push({ type: "info", msg: `Only ${exDays} exercise day(s) in 30 days. Encourage daily activity.` });
+    if (exDays < 3 && loggedData.activity?.length > 0)
+      a.push({
+        type: "info",
+        msg: `Only ${exDays} exercise day(s) in 30 days. Encourage daily activity.`,
+      });
 
     const sleepLogs = (loggedData.activity || []).filter((a) => a.activity_type === "Sleep");
     const lowSleep = sleepLogs.filter((s) => parseFloat(s.value) < 6);
-    if (lowSleep.length >= 3) a.push({ type: "info", msg: `${lowSleep.length} nights with <6h sleep. Discuss sleep hygiene.` });
+    if (lowSleep.length >= 3)
+      a.push({
+        type: "info",
+        msg: `${lowSleep.length} nights with <6h sleep. Discuss sleep hygiene.`,
+      });
 
     const severeSymptoms = (loggedData.symptoms || []).filter((s) => s.severity > 6);
-    if (severeSymptoms.length > 0) a.push({ type: "warn", msg: `${severeSymptoms.length} severe symptom(s) reported. Review: ${severeSymptoms.map((s) => s.symptom).join(", ")}` });
+    if (severeSymptoms.length > 0)
+      a.push({
+        type: "warn",
+        msg: `${severeSymptoms.length} severe symptom(s) reported. Review: ${severeSymptoms.map((s) => s.symptom).join(", ")}`,
+      });
 
     const medDays = new Set((loggedData.meds || []).map((m) => m.log_date)).size;
-    if (loggedData.meds?.length > 0 && pct(medDays, 30) < 60) a.push({ type: "warn", msg: `Medication adherence is low (${pct(medDays, 30)}%). Discuss barriers.` });
+    if (loggedData.meds?.length > 0 && pct(medDays, 30) < 60)
+      a.push({
+        type: "warn",
+        msg: `Medication adherence is low (${pct(medDays, 30)}%). Discuss barriers.`,
+      });
 
     return a;
   }, [loggedData]);
@@ -538,7 +571,9 @@ const VisitLoggedData = memo(function VisitLoggedData({ loggedData }) {
                         <span className="ld-nutr-lbl">Fat</span>
                       </div>
                       <div className="ld-nutr-item">
-                        <span className="ld-nutr-val" style={{ color: "var(--t2)" }}>{nutritionSummary.days}</span>
+                        <span className="ld-nutr-val" style={{ color: "var(--t2)" }}>
+                          {nutritionSummary.days}
+                        </span>
                         <span className="ld-nutr-lbl">Days</span>
                       </div>
                     </div>

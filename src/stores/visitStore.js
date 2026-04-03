@@ -2,6 +2,7 @@ import { create } from "zustand";
 import api from "../services/api.js";
 import useVitalsStore from "./vitalsStore.js";
 import useLabStore from "./labStore.js";
+import useExamStore from "./examStore.js";
 
 const useVisitStore = create((set, get) => ({
   // ── state ──
@@ -272,12 +273,15 @@ const useVisitStore = create((set, get) => ({
 
     const vitals = useVitalsStore.getState().vitals;
     const { labData, intakeReports } = useLabStore.getState();
+    const { examData, examNotes } = useExamStore.getState();
 
     const stepData = {
       vitals,
       labData,
       // Strip base64 from reports to keep payload small
       intakeReports: (intakeReports || []).map(({ base64, ...rest }) => rest),
+      examData,
+      examNotes,
       fuChecks,
       complaints,
       complaintText,
@@ -329,6 +333,14 @@ const useVisitStore = create((set, get) => ({
     if (stepData.fuPlanGenerated) patch.fuPlanGenerated = stepData.fuPlanGenerated;
     if (stepData.fuPlanSource) patch.fuPlanSource = stepData.fuPlanSource;
     if (Object.keys(patch).length) set(patch);
+
+    // Restore exam state
+    if (stepData.examData && Object.keys(stepData.examData).length) {
+      useExamStore.getState().setExamData(stepData.examData);
+    }
+    if (stepData.examNotes) {
+      useExamStore.getState().setExamNotes(stepData.examNotes);
+    }
   },
 
   // Sync visit state from backend when switching patients.

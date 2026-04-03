@@ -26,7 +26,20 @@ function parseSheetDate(raw) {
   const slashMatch = s.match(/^(\d{1,2})\/([A-Za-z]+)\/(\d{4})$/);
   if (slashMatch) {
     const [, day, monStr, year] = slashMatch;
-    const months = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
+    const months = {
+      jan: "01",
+      feb: "02",
+      mar: "03",
+      apr: "04",
+      may: "05",
+      jun: "06",
+      jul: "07",
+      aug: "08",
+      sep: "09",
+      oct: "10",
+      nov: "11",
+      dec: "12",
+    };
     const mon = months[monStr.toLowerCase().slice(0, 3)];
     if (mon) return `${year}-${mon}-${day.padStart(2, "0")}`;
   }
@@ -54,8 +67,34 @@ function parseDOB(raw) {
   const dobMatch = s.match(/^(\d{1,2})\/([A-Za-z]+)\/(\d{4})$/);
   if (dobMatch) {
     const [, day, monStr, year] = dobMatch;
-    const monthNums = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
-    const monthIdx = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+    const monthNums = {
+      jan: "01",
+      feb: "02",
+      mar: "03",
+      apr: "04",
+      may: "05",
+      jun: "06",
+      jul: "07",
+      aug: "08",
+      sep: "09",
+      oct: "10",
+      nov: "11",
+      dec: "12",
+    };
+    const monthIdx = {
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11,
+    };
     const key = monStr.toLowerCase().slice(0, 3);
     const mon = monthNums[key];
     if (mon) {
@@ -133,11 +172,22 @@ async function importSheetPatient(patient, tabDate) {
 
   // Try file_no match first (most reliable), then phone
   const byFileNo = fileNo
-    ? await pool.query(`SELECT id, phone, address, email, dob, age, sex FROM patients WHERE file_no = $1`, [fileNo])
+    ? await pool.query(
+        `SELECT id, phone, address, email, dob, age, sex FROM patients WHERE file_no = $1`,
+        [fileNo],
+      )
     : { rows: [] };
 
-  const existingPatient = byFileNo.rows[0]
-    || (phone ? (await pool.query(`SELECT id, phone, address, email, dob, age, sex FROM patients WHERE phone = $1`, [phone])).rows[0] : null);
+  const existingPatient =
+    byFileNo.rows[0] ||
+    (phone
+      ? (
+          await pool.query(
+            `SELECT id, phone, address, email, dob, age, sex FROM patients WHERE phone = $1`,
+            [phone],
+          )
+        ).rows[0]
+      : null);
 
   if (existingPatient) {
     patientId = existingPatient.id;
@@ -148,18 +198,38 @@ async function importSheetPatient(patient, tabDate) {
     const values = [patientId];
     let idx = 2;
 
-    if (!p.phone && phone) { updates.push(`phone = $${idx++}`); values.push(phone); }
-    if (!p.address && address) { updates.push(`address = $${idx++}`); values.push(address); }
-    if (!p.email && email) { updates.push(`email = $${idx++}`); values.push(email); }
-    if (!p.dob && dob) { updates.push(`dob = $${idx++}::date`); values.push(dob); }
-    if (!p.age && age) { updates.push(`age = $${idx++}`); values.push(age); }
-    if (!p.sex && sex) { updates.push(`sex = $${idx++}`); values.push(sex); }
+    if (!p.phone && phone) {
+      updates.push(`phone = $${idx++}`);
+      values.push(phone);
+    }
+    if (!p.address && address) {
+      updates.push(`address = $${idx++}`);
+      values.push(address);
+    }
+    if (!p.email && email) {
+      updates.push(`email = $${idx++}`);
+      values.push(email);
+    }
+    if (!p.dob && dob) {
+      updates.push(`dob = $${idx++}::date`);
+      values.push(dob);
+    }
+    if (!p.age && age) {
+      updates.push(`age = $${idx++}`);
+      values.push(age);
+    }
+    if (!p.sex && sex) {
+      updates.push(`sex = $${idx++}`);
+      values.push(sex);
+    }
 
     if (updates.length > 0) {
-      await pool.query(
-        `UPDATE patients SET ${updates.join(", ")}, updated_at = NOW() WHERE id = $1`,
-        values,
-      ).catch(() => {}); // Ignore constraint errors on update (e.g. phone already taken)
+      await pool
+        .query(
+          `UPDATE patients SET ${updates.join(", ")}, updated_at = NOW() WHERE id = $1`,
+          values,
+        )
+        .catch(() => {}); // Ignore constraint errors on update (e.g. phone already taken)
     }
   } else {
     try {
@@ -244,7 +314,10 @@ export async function syncFromSheets() {
     await ensureSheetColumns();
     const tabsData = await readUpcomingAppointments();
 
-    let totalCreated = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0;
+    let totalCreated = 0,
+      totalUpdated = 0,
+      totalSkipped = 0,
+      totalErrors = 0;
 
     for (const [tabName, tabInfo] of Object.entries(tabsData)) {
       const { date: tabDateRaw, patients } = tabInfo;
@@ -255,7 +328,10 @@ export async function syncFromSheets() {
       for (const patient of patients) {
         try {
           const result = await importSheetPatient(patient, tabDate);
-          if (!result) { totalSkipped++; continue; }
+          if (!result) {
+            totalSkipped++;
+            continue;
+          }
           if (result.action === "created") totalCreated++;
           else if (result.action === "updated") totalUpdated++;
           else totalSkipped++;
@@ -267,7 +343,10 @@ export async function syncFromSheets() {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    log("Sync", `Done in ${elapsed}s — created: ${totalCreated}, updated: ${totalUpdated}, skipped: ${totalSkipped}, errors: ${totalErrors}`);
+    log(
+      "Sync",
+      `Done in ${elapsed}s — created: ${totalCreated}, updated: ${totalUpdated}, skipped: ${totalSkipped}, errors: ${totalErrors}`,
+    );
 
     return { totalCreated, totalUpdated, totalSkipped, totalErrors };
   } catch (e) {

@@ -37,9 +37,7 @@ function parseSheetRows(rows) {
   const date = (rows[1]?.[1] || rows[1]?.[0] || "").toString().trim() || null;
 
   // Row 2 is always the header row
-  const headers = (rows[2] || []).map((h) =>
-    (h || "").replace(/\n/g, " ").trim()
-  );
+  const headers = (rows[2] || []).map((h) => (h || "").replace(/\n/g, " ").trim());
 
   const patients = [];
   for (let i = 3; i < rows.length; i++) {

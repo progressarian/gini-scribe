@@ -25,6 +25,9 @@ try {
 
 const router = Router();
 
+// Idempotent migration — add exam_data column if not present
+pool.query(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS exam_data JSONB`).catch(() => {});
+
 // Save consultation (full visit)
 router.post("/consultations", validate(consultationCreateSchema), async (req, res) => {
   const client = await pool.connect();
@@ -44,6 +47,9 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       moDoctorId,
       conDoctorId,
       visitDate,
+      examData,
+      examNotes,
+      examSummary,
     } = req.body;
 
     let patientId,
@@ -114,9 +120,12 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     let consultationId;
     {
       // Always create a new consultation row
+      const examDataJson = examData
+        ? safeJson({ findings: examData, notes: examNotes || null, summary: examSummary || null })
+        : null;
       const con = await client.query(
-        `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id)
-         VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12) RETURNING id`,
+        `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id, exam_data)
+         VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12,$13) RETURNING id`,
         [
           patientId,
           effectiveDate,
@@ -130,6 +139,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
           safeJson(planEdits),
           int(moDoctorId),
           int(conDoctorId),
+          examDataJson,
         ],
       );
       consultationId = con.rows[0].id;
