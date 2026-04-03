@@ -90,7 +90,9 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500 }}>
             Updated: {fmtDate(today)}
           </span>
-          <button className="bx bx-p" onClick={onAddLab}>+ Add Value</button>
+          <button className="bx bx-p" onClick={onAddLab}>
+            + Add Value
+          </button>
         </div>
       </div>
       <div className="scb">

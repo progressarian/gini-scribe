@@ -7,8 +7,7 @@ const InClinicTimer = memo(function InClinicTimer({ startIso }) {
 
   useEffect(() => {
     if (!startIso) return;
-    const calc = () =>
-      Math.max(0, Math.floor((Date.now() - new Date(startIso).getTime()) / 60000));
+    const calc = () => Math.max(0, Math.floor((Date.now() - new Date(startIso).getTime()) / 60000));
     setMins(calc());
     const id = setInterval(() => setMins(calc()), 60000);
     return () => clearInterval(id);
@@ -132,7 +131,15 @@ const VisitTopbar = memo(function VisitTopbar({
             marginLeft: 12,
           }}
         >
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block" }} />
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: "#16a34a",
+              display: "inline-block",
+            }}
+          />
           Checked in{latestVitals ? " · Vitals done" : ""}
         </div>
       )}

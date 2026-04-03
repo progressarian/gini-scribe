@@ -2,8 +2,21 @@ import { memo, useCallback } from "react";
 import { fmtDate, fmtDateLong, getLabVal, MED_COLORS } from "./helpers";
 import { TIME_SLOTS, getTimeSlot, buildMedCardPrintHTML } from "./VisitMedCard";
 
-function buildRxHTML(patient, doctor, activeDx, activeMeds, consultations, latestVitals, doctorNote, summary) {
-  const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+function buildRxHTML(
+  patient,
+  doctor,
+  activeDx,
+  activeMeds,
+  consultations,
+  latestVitals,
+  doctorNote,
+  summary,
+) {
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
   const latestCon = consultations[0]?.con_data;
   const tests = latestCon?.investigations_to_order || latestCon?.tests_ordered || [];
   const followUp = latestCon?.follow_up;
@@ -51,7 +64,8 @@ function buildRxHTML(patient, doctor, activeDx, activeMeds, consultations, lates
   let vitalsHTML = "";
   if (latestVitals) {
     const parts = [];
-    if (latestVitals.bp_sys && latestVitals.bp_dia) parts.push(`BP: ${latestVitals.bp_sys}/${latestVitals.bp_dia} mmHg`);
+    if (latestVitals.bp_sys && latestVitals.bp_dia)
+      parts.push(`BP: ${latestVitals.bp_sys}/${latestVitals.bp_dia} mmHg`);
     if (latestVitals.pulse) parts.push(`Pulse: ${latestVitals.pulse} bpm`);
     if (latestVitals.weight) parts.push(`Weight: ${latestVitals.weight} kg`);
     if (latestVitals.bmi) parts.push(`BMI: ${latestVitals.bmi}`);
@@ -61,7 +75,10 @@ function buildRxHTML(patient, doctor, activeDx, activeMeds, consultations, lates
     }
   }
 
-  const dxHTML = activeDx.length > 0 ? activeDx.map((d) => `${d.label || d.diagnosis_id} (${d.status})`).join(", ") : "";
+  const dxHTML =
+    activeDx.length > 0
+      ? activeDx.map((d) => `${d.label || d.diagnosis_id} (${d.status})`).join(", ")
+      : "";
 
   let lifestyleHTML = "";
   if (lifestyle.length > 0) {
@@ -128,13 +145,17 @@ function openPrintWindow(html) {
   if (!win) return;
   win.document.write(html);
   win.document.close();
-  setTimeout(() => { win.focus(); win.print(); }, 300);
+  setTimeout(() => {
+    win.focus();
+    win.print();
+  }, 300);
 }
 
 const DX_STATUS_ICON = (status) => {
   if (!status) return { icon: "·", color: "var(--t3)" };
   const s = status.toLowerCase();
-  if (s === "controlled" || s === "improving" || s === "resolved") return { icon: "✓", color: "var(--green)" };
+  if (s === "controlled" || s === "improving" || s === "resolved")
+    return { icon: "✓", color: "var(--green)" };
   if (s === "review" || s === "uncontrolled") return { icon: "⚠", color: "var(--amber)" };
   return { icon: "·", color: "var(--t3)" };
 };
@@ -167,7 +188,16 @@ const VisitPlan = memo(function VisitPlan({
   const fbs = getLabVal(labResults, "FBS");
 
   const handlePrintRx = useCallback(() => {
-    const html = buildRxHTML(patient, doctor, activeDx, activeMeds, consultations, latestVitals, doctorNote, summary);
+    const html = buildRxHTML(
+      patient,
+      doctor,
+      activeDx,
+      activeMeds,
+      consultations,
+      latestVitals,
+      doctorNote,
+      summary,
+    );
     openPrintWindow(html);
   }, [patient, doctor, activeDx, activeMeds, consultations, latestVitals, doctorNote, summary]);
 
@@ -193,11 +223,15 @@ const VisitPlan = memo(function VisitPlan({
     if (activeMeds.length > 0) {
       lines.push(`\nMedications:`);
       activeMeds.forEach((m, i) => {
-        lines.push(`${i + 1}. ${m.name}${m.dose ? " — " + m.dose : ""}${m.frequency ? " · " + m.frequency : ""}${m.timing ? " · " + m.timing : ""}`);
+        lines.push(
+          `${i + 1}. ${m.name}${m.dose ? " — " + m.dose : ""}${m.frequency ? " · " + m.frequency : ""}${m.timing ? " · " + m.timing : ""}`,
+        );
       });
     }
     if (tests.length > 0) {
-      lines.push(`\nTests Ordered: ${tests.map((t) => typeof t === "string" ? t : t.name || t.test).join(", ")}`);
+      lines.push(
+        `\nTests Ordered: ${tests.map((t) => (typeof t === "string" ? t : t.name || t.test)).join(", ")}`,
+      );
     }
     if (followUp?.date) {
       lines.push(`\nFollow-up: ${fmtDateLong(followUp.date)}`);
@@ -231,7 +265,7 @@ const VisitPlan = memo(function VisitPlan({
 
   // Changes: stopped meds this session
   const stoppedThisVisit = (stoppedMeds || []).filter(
-    (m) => m.stopped_date && m.stopped_date.startsWith(new Date().toISOString().slice(0, 7))
+    (m) => m.stopped_date && m.stopped_date.startsWith(new Date().toISOString().slice(0, 7)),
   );
 
   return (
@@ -243,8 +277,12 @@ const VisitPlan = memo(function VisitPlan({
             <div className="sci ic-b">📝</div>Plan for This Visit
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn" onClick={() => onOpenTemplate("insulin_titration")}>📋 Templates</button>
-            <button className="bx bx-p" onClick={onAddReferral}>+ Referral</button>
+            <button className="btn" onClick={() => onOpenTemplate("insulin_titration")}>
+              📋 Templates
+            </button>
+            <button className="bx bx-p" onClick={onAddReferral}>
+              + Referral
+            </button>
           </div>
         </div>
         <div className="scb">
@@ -293,15 +331,41 @@ const VisitPlan = memo(function VisitPlan({
             <div style={{ marginBottom: 12 }}>
               <div className="subsec">Referrals</div>
               {referrals.map((ref) => (
-                <div key={ref.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, marginBottom: 4, fontSize: 12 }}>
+                <div
+                  key={ref.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "6px 10px",
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    marginBottom: 4,
+                    fontSize: 12,
+                  }}
+                >
                   <span style={{ fontWeight: 600, color: "var(--text)" }}>{ref.doctor_name}</span>
                   <span style={{ color: "var(--t3)" }}>·</span>
                   <span style={{ color: "var(--primary)" }}>{ref.speciality}</span>
-                  {ref.reason && <>
-                    <span style={{ color: "var(--t3)" }}>·</span>
-                    <span style={{ color: "var(--t2)", flex: 1 }}>{ref.reason}</span>
-                  </>}
-                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: ref.status === "pending" ? "var(--amb-lt)" : "var(--grn-lt)", color: ref.status === "pending" ? "var(--amber)" : "var(--green)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".3px" }}>
+                  {ref.reason && (
+                    <>
+                      <span style={{ color: "var(--t3)" }}>·</span>
+                      <span style={{ color: "var(--t2)", flex: 1 }}>{ref.reason}</span>
+                    </>
+                  )}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      padding: "2px 8px",
+                      borderRadius: 10,
+                      background: ref.status === "pending" ? "var(--amb-lt)" : "var(--grn-lt)",
+                      color: ref.status === "pending" ? "var(--amber)" : "var(--green)",
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: ".3px",
+                    }}
+                  >
                     {ref.status || "pending"}
                   </span>
                 </div>
@@ -311,11 +375,21 @@ const VisitPlan = memo(function VisitPlan({
 
           <div className="subsec">Templates &amp; Patient Instructions</div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 12 }}>
-            <button className="btn" onClick={() => onOpenTemplate("insulin_titration")}>📌 Insulin Titration Guide</button>
-            <button className="btn" onClick={() => onOpenTemplate("diet_1000kcal")}>🥗 1000 kcal Diet Plan</button>
-            <button className="btn" onClick={() => onOpenTemplate("mounjaro_guide")}>💉 Mounjaro Injection Guide</button>
-            <button className="btn" onClick={() => onOpenTemplate("blood_sugar_log")}>🩸 Blood Sugar Log Sheet</button>
-            <button className="btn" onClick={() => onOpenTemplate("fasting_lab")}>📋 Fasting Lab Instructions</button>
+            <button className="btn" onClick={() => onOpenTemplate("insulin_titration")}>
+              📌 Insulin Titration Guide
+            </button>
+            <button className="btn" onClick={() => onOpenTemplate("diet_1000kcal")}>
+              🥗 1000 kcal Diet Plan
+            </button>
+            <button className="btn" onClick={() => onOpenTemplate("mounjaro_guide")}>
+              💉 Mounjaro Injection Guide
+            </button>
+            <button className="btn" onClick={() => onOpenTemplate("blood_sugar_log")}>
+              🩸 Blood Sugar Log Sheet
+            </button>
+            <button className="btn" onClick={() => onOpenTemplate("fasting_lab")}>
+              📋 Fasting Lab Instructions
+            </button>
           </div>
           <div className="subsec">Doctor's Note</div>
           <textarea
@@ -369,8 +443,12 @@ const VisitPlan = memo(function VisitPlan({
               </div>
             </div>
             <div style={{ display: "flex", gap: 7 }}>
-              <button className="bx bx-g" onClick={onChangeFollowUp}>Change Date</button>
-              <button className="bx bx-p" onClick={handleSendReminder}>Send Reminder via WhatsApp</button>
+              <button className="bx bx-g" onClick={onChangeFollowUp}>
+                Change Date
+              </button>
+              <button className="bx bx-p" onClick={handleSendReminder}>
+                Send Reminder via WhatsApp
+              </button>
             </div>
           </div>
         </div>
@@ -400,9 +478,15 @@ const VisitPlan = memo(function VisitPlan({
             <div className="sci ic-b">📄</div>Visit Summary &amp; Print
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn" onClick={handlePrintRx}>🖨 Print Rx</button>
-            <button className="btn" onClick={onMedCardTab}>💊 Print Med Card</button>
-            <button className="btn" onClick={handleSendWhatsApp}>📱 Send via WhatsApp</button>
+            <button className="btn" onClick={handlePrintRx}>
+              🖨 Print Rx
+            </button>
+            <button className="btn" onClick={onMedCardTab}>
+              💊 Print Med Card
+            </button>
+            <button className="btn" onClick={handleSendWhatsApp}>
+              📱 Send via WhatsApp
+            </button>
           </div>
         </div>
         <div className="scb">
@@ -452,7 +536,9 @@ const VisitPlan = memo(function VisitPlan({
                   ✓ Complete &amp; Save Visit
                 </button>
               )}
-              <button className="btn" onClick={handlePrintRx}>Print Full Prescription</button>
+              <button className="btn" onClick={handlePrintRx}>
+                Print Full Prescription
+              </button>
             </div>
           </div>
         </div>

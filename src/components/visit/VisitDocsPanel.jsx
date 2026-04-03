@@ -83,7 +83,9 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
           <div className="sct">
             <div className="sci ic-b">📁</div>Documents &amp; Files
           </div>
-          <button className="bx bx-p" onClick={onUploadReport}>+ Upload Document</button>
+          <button className="bx bx-p" onClick={onUploadReport}>
+            + Upload Document
+          </button>
         </div>
         <div className="scb">
           {prescriptions.length > 0 && (
@@ -132,7 +134,6 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
           </div>
         </div>
       </div>
-
     </div>
   );
 });

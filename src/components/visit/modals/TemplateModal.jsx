@@ -5,165 +5,231 @@ const TEMPLATES = {
     title: "Insulin Titration Guide",
     emoji: "📌",
     content: [
-      { heading: "Fasting Blood Sugar (FBS) Based Titration", items: [
-        "FBS > 180 mg/dL → Increase dose by 4 units",
-        "FBS 130–180 mg/dL → Increase dose by 2 units",
-        "FBS 100–130 mg/dL → No change (maintain current dose)",
-        "FBS 70–100 mg/dL → Decrease dose by 2 units",
-        "FBS < 70 mg/dL → Decrease dose by 4 units & contact doctor",
-      ]},
-      { heading: "Important Instructions", items: [
-        "Check your fasting sugar every morning before breakfast",
-        "Adjust dose every 3 days based on above chart",
-        "Always keep sugar/glucose tablets with you",
-        "If sugar drops below 70 — eat 3 glucose tablets immediately",
-        "Do not skip meals after taking insulin",
-        "Store insulin in refrigerator (2–8°C), never freeze",
-      ]},
-      { heading: "When to Call Doctor", items: [
-        "Blood sugar stays above 250 mg/dL for 2 days",
-        "Blood sugar drops below 70 mg/dL more than once a week",
-        "You feel dizzy, shaky, or confused",
-        "You are unwell, vomiting, or unable to eat",
-      ]},
+      {
+        heading: "Fasting Blood Sugar (FBS) Based Titration",
+        items: [
+          "FBS > 180 mg/dL → Increase dose by 4 units",
+          "FBS 130–180 mg/dL → Increase dose by 2 units",
+          "FBS 100–130 mg/dL → No change (maintain current dose)",
+          "FBS 70–100 mg/dL → Decrease dose by 2 units",
+          "FBS < 70 mg/dL → Decrease dose by 4 units & contact doctor",
+        ],
+      },
+      {
+        heading: "Important Instructions",
+        items: [
+          "Check your fasting sugar every morning before breakfast",
+          "Adjust dose every 3 days based on above chart",
+          "Always keep sugar/glucose tablets with you",
+          "If sugar drops below 70 — eat 3 glucose tablets immediately",
+          "Do not skip meals after taking insulin",
+          "Store insulin in refrigerator (2–8°C), never freeze",
+        ],
+      },
+      {
+        heading: "When to Call Doctor",
+        items: [
+          "Blood sugar stays above 250 mg/dL for 2 days",
+          "Blood sugar drops below 70 mg/dL more than once a week",
+          "You feel dizzy, shaky, or confused",
+          "You are unwell, vomiting, or unable to eat",
+        ],
+      },
     ],
   },
   diet_1000kcal: {
     title: "1000 kcal Diet Plan",
     emoji: "🥗",
     content: [
-      { heading: "Early Morning (6:00–7:00 AM)", items: [
-        "1 glass warm water with lemon (no sugar)",
-        "5 soaked almonds + 1 walnut",
-      ]},
-      { heading: "Breakfast (8:00–9:00 AM)", items: [
-        "Option A: 1 moong dal cheela + mint chutney",
-        "Option B: 1 besan cheela + 1/2 cup curd",
-        "Option C: 1 egg white omelette (2 whites) + 1 multigrain roti",
-      ]},
-      { heading: "Mid-Morning (11:00 AM)", items: [
-        "1 small fruit (apple/guava/pear) OR 1 cup buttermilk",
-      ]},
-      { heading: "Lunch (1:00–2:00 PM)", items: [
-        "1 small multigrain roti + 1 bowl dal + 1 bowl sabzi (non-starchy)",
-        "1 small bowl salad (cucumber, tomato, onion)",
-        "Avoid: rice, potato, arbi, white bread",
-      ]},
-      { heading: "Evening Snack (4:00–5:00 PM)", items: [
-        "1 cup green tea (no sugar) + 1 small handful of roasted chana",
-      ]},
-      { heading: "Dinner (7:00–8:00 PM)", items: [
-        "1 bowl vegetable soup + 1 small multigrain roti + 1 bowl sabzi",
-        "OR: 1 bowl dal khichdi with vegetables",
-        "Finish dinner by 8 PM — no eating after dinner",
-      ]},
-      { heading: "General Rules", items: [
-        "Drink 8–10 glasses of water daily",
-        "No sugar, jaggery, honey, or sweetened drinks",
-        "No fruit juices — eat whole fruits only",
-        "Use only 2 teaspoons oil per day for cooking",
-        "Walk 30 minutes after dinner",
-      ]},
+      {
+        heading: "Early Morning (6:00–7:00 AM)",
+        items: ["1 glass warm water with lemon (no sugar)", "5 soaked almonds + 1 walnut"],
+      },
+      {
+        heading: "Breakfast (8:00–9:00 AM)",
+        items: [
+          "Option A: 1 moong dal cheela + mint chutney",
+          "Option B: 1 besan cheela + 1/2 cup curd",
+          "Option C: 1 egg white omelette (2 whites) + 1 multigrain roti",
+        ],
+      },
+      {
+        heading: "Mid-Morning (11:00 AM)",
+        items: ["1 small fruit (apple/guava/pear) OR 1 cup buttermilk"],
+      },
+      {
+        heading: "Lunch (1:00–2:00 PM)",
+        items: [
+          "1 small multigrain roti + 1 bowl dal + 1 bowl sabzi (non-starchy)",
+          "1 small bowl salad (cucumber, tomato, onion)",
+          "Avoid: rice, potato, arbi, white bread",
+        ],
+      },
+      {
+        heading: "Evening Snack (4:00–5:00 PM)",
+        items: ["1 cup green tea (no sugar) + 1 small handful of roasted chana"],
+      },
+      {
+        heading: "Dinner (7:00–8:00 PM)",
+        items: [
+          "1 bowl vegetable soup + 1 small multigrain roti + 1 bowl sabzi",
+          "OR: 1 bowl dal khichdi with vegetables",
+          "Finish dinner by 8 PM — no eating after dinner",
+        ],
+      },
+      {
+        heading: "General Rules",
+        items: [
+          "Drink 8–10 glasses of water daily",
+          "No sugar, jaggery, honey, or sweetened drinks",
+          "No fruit juices — eat whole fruits only",
+          "Use only 2 teaspoons oil per day for cooking",
+          "Walk 30 minutes after dinner",
+        ],
+      },
     ],
   },
   mounjaro_guide: {
     title: "Mounjaro (Tirzepatide) Injection Guide",
     emoji: "💉",
     content: [
-      { heading: "How to Inject", items: [
-        "Inject once weekly on the same day each week",
-        "Inject in your stomach (abdomen), thigh, or upper arm",
-        "Rotate injection site each week — do not inject in same spot",
-        "Clean the area with alcohol swab before injecting",
-        "Remove pen cap → Place flat on skin → Press and hold button → Count to 10 → Remove",
-      ]},
-      { heading: "Dose Schedule", items: [
-        "Weeks 1–4: 2.5 mg (starting dose)",
-        "Weeks 5–8: 5 mg",
-        "Doctor may increase further based on response",
-        "Never increase dose on your own",
-      ]},
-      { heading: "Storage", items: [
-        "Store in refrigerator (2–8°C) before first use",
-        "After first use, can keep at room temperature (up to 30°C) for 21 days",
-        "Do not freeze. Do not use if frozen",
-        "Protect from direct sunlight",
-      ]},
-      { heading: "Common Side Effects (Usually Temporary)", items: [
-        "Nausea — eat smaller, more frequent meals",
-        "Decreased appetite — this is expected and helps with weight loss",
-        "Diarrhea or constipation — drink plenty of water",
-        "Stomach pain — avoid spicy and fatty foods",
-      ]},
-      { heading: "When to Call Doctor", items: [
-        "Severe stomach pain that does not go away",
-        "Signs of low blood sugar (shaking, sweating, confusion)",
-        "Allergic reaction (rash, swelling, difficulty breathing)",
-        "Persistent vomiting for more than 24 hours",
-      ]},
+      {
+        heading: "How to Inject",
+        items: [
+          "Inject once weekly on the same day each week",
+          "Inject in your stomach (abdomen), thigh, or upper arm",
+          "Rotate injection site each week — do not inject in same spot",
+          "Clean the area with alcohol swab before injecting",
+          "Remove pen cap → Place flat on skin → Press and hold button → Count to 10 → Remove",
+        ],
+      },
+      {
+        heading: "Dose Schedule",
+        items: [
+          "Weeks 1–4: 2.5 mg (starting dose)",
+          "Weeks 5–8: 5 mg",
+          "Doctor may increase further based on response",
+          "Never increase dose on your own",
+        ],
+      },
+      {
+        heading: "Storage",
+        items: [
+          "Store in refrigerator (2–8°C) before first use",
+          "After first use, can keep at room temperature (up to 30°C) for 21 days",
+          "Do not freeze. Do not use if frozen",
+          "Protect from direct sunlight",
+        ],
+      },
+      {
+        heading: "Common Side Effects (Usually Temporary)",
+        items: [
+          "Nausea — eat smaller, more frequent meals",
+          "Decreased appetite — this is expected and helps with weight loss",
+          "Diarrhea or constipation — drink plenty of water",
+          "Stomach pain — avoid spicy and fatty foods",
+        ],
+      },
+      {
+        heading: "When to Call Doctor",
+        items: [
+          "Severe stomach pain that does not go away",
+          "Signs of low blood sugar (shaking, sweating, confusion)",
+          "Allergic reaction (rash, swelling, difficulty breathing)",
+          "Persistent vomiting for more than 24 hours",
+        ],
+      },
     ],
   },
   blood_sugar_log: {
     title: "Blood Sugar Log Sheet",
     emoji: "🩸",
     content: [
-      { heading: "Instructions", items: [
-        "Check blood sugar at the times marked by your doctor",
-        "Write the reading in the correct column",
-        "Bring this sheet to every doctor visit",
-      ]},
-      { heading: "When to Check", items: [
-        "Fasting (before breakfast) — most important",
-        "2 hours after lunch",
-        "Before dinner (if advised)",
-        "Bedtime (if advised)",
-      ]},
-      { heading: "Target Ranges", items: [
-        "Fasting: 80–130 mg/dL",
-        "2 hours after meal: Less than 180 mg/dL",
-        "HbA1c target: Less than 7%",
-      ]},
-      { heading: "What to Record", items: [
-        "Date and time of reading",
-        "Blood sugar value (mg/dL)",
-        "Meal details (what you ate before the reading)",
-        "Any symptoms (dizziness, shakiness, blurred vision)",
-        "Medications taken / missed",
-      ]},
+      {
+        heading: "Instructions",
+        items: [
+          "Check blood sugar at the times marked by your doctor",
+          "Write the reading in the correct column",
+          "Bring this sheet to every doctor visit",
+        ],
+      },
+      {
+        heading: "When to Check",
+        items: [
+          "Fasting (before breakfast) — most important",
+          "2 hours after lunch",
+          "Before dinner (if advised)",
+          "Bedtime (if advised)",
+        ],
+      },
+      {
+        heading: "Target Ranges",
+        items: [
+          "Fasting: 80–130 mg/dL",
+          "2 hours after meal: Less than 180 mg/dL",
+          "HbA1c target: Less than 7%",
+        ],
+      },
+      {
+        heading: "What to Record",
+        items: [
+          "Date and time of reading",
+          "Blood sugar value (mg/dL)",
+          "Meal details (what you ate before the reading)",
+          "Any symptoms (dizziness, shakiness, blurred vision)",
+          "Medications taken / missed",
+        ],
+      },
     ],
   },
   fasting_lab: {
     title: "Fasting Lab Instructions",
     emoji: "📋",
     content: [
-      { heading: "Before the Test", items: [
-        "Do not eat or drink anything (except plain water) for 10–12 hours",
-        "Last meal should be by 8:00–9:00 PM the night before",
-        "You may drink plain water — stay hydrated",
-        "Do NOT drink tea, coffee, milk, or juice in the morning",
-      ]},
-      { heading: "Medications", items: [
-        "Take your blood pressure and heart medicines as usual with water",
-        "Do NOT take diabetes medicines or insulin before the test",
-        "Bring your medicines with you — take them after blood is drawn",
-      ]},
-      { heading: "On the Day of Test", items: [
-        "Come to the lab between 7:00–9:00 AM",
-        "Wear loose sleeves for easy blood draw",
-        "Carry your doctor's prescription / lab order",
-        "Carry your previous reports if available",
-      ]},
-      { heading: "After the Test", items: [
-        "Eat your breakfast and take your medicines",
-        "Reports are usually ready in 24–48 hours",
-        "Collect reports and bring them to your next doctor visit",
-      ]},
+      {
+        heading: "Before the Test",
+        items: [
+          "Do not eat or drink anything (except plain water) for 10–12 hours",
+          "Last meal should be by 8:00–9:00 PM the night before",
+          "You may drink plain water — stay hydrated",
+          "Do NOT drink tea, coffee, milk, or juice in the morning",
+        ],
+      },
+      {
+        heading: "Medications",
+        items: [
+          "Take your blood pressure and heart medicines as usual with water",
+          "Do NOT take diabetes medicines or insulin before the test",
+          "Bring your medicines with you — take them after blood is drawn",
+        ],
+      },
+      {
+        heading: "On the Day of Test",
+        items: [
+          "Come to the lab between 7:00–9:00 AM",
+          "Wear loose sleeves for easy blood draw",
+          "Carry your doctor's prescription / lab order",
+          "Carry your previous reports if available",
+        ],
+      },
+      {
+        heading: "After the Test",
+        items: [
+          "Eat your breakfast and take your medicines",
+          "Reports are usually ready in 24–48 hours",
+          "Collect reports and bring them to your next doctor visit",
+        ],
+      },
     ],
   },
 };
 
 function buildTemplatePrintHTML(template, patient) {
-  const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
   let sectionsHTML = "";
   for (const section of template.content) {
     sectionsHTML += `<div style="margin-bottom:16px">
@@ -226,7 +292,10 @@ const TemplateModal = memo(function TemplateModal({ templateKey, patient, onClos
     if (!win) return;
     win.document.write(html);
     win.document.close();
-    setTimeout(() => { win.focus(); win.print(); }, 300);
+    setTimeout(() => {
+      win.focus();
+      win.print();
+    }, 300);
   }, [template, patient]);
 
   const handleWhatsApp = useCallback(() => {
@@ -239,13 +308,32 @@ const TemplateModal = memo(function TemplateModal({ templateKey, patient, onClos
   return (
     <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mbox" style={{ maxWidth: 600, maxHeight: "80vh", overflow: "auto" }}>
-        <div className="mttl">{template.emoji} {template.title}</div>
+        <div className="mttl">
+          {template.emoji} {template.title}
+        </div>
         {template.content.map((section, i) => (
           <div key={i} style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 4, paddingBottom: 4, borderBottom: "1px solid var(--border)" }}>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: "var(--text)",
+                marginBottom: 4,
+                paddingBottom: 4,
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
               {section.heading}
             </div>
-            <ul style={{ fontSize: 12, color: "var(--t2)", paddingLeft: 20, lineHeight: 1.9, margin: 0 }}>
+            <ul
+              style={{
+                fontSize: 12,
+                color: "var(--t2)",
+                paddingLeft: 20,
+                lineHeight: 1.9,
+                margin: 0,
+              }}
+            >
               {section.items.map((item, j) => (
                 <li key={j}>{item}</li>
               ))}
@@ -253,9 +341,15 @@ const TemplateModal = memo(function TemplateModal({ templateKey, patient, onClos
           </div>
         ))}
         <div className="macts">
-          <button className="btn" onClick={onClose}>Close</button>
-          <button className="btn" onClick={handleWhatsApp}>📱 Send via WhatsApp</button>
-          <button className="btn-p" onClick={handlePrint}>🖨 Print</button>
+          <button className="btn" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn" onClick={handleWhatsApp}>
+            📱 Send via WhatsApp
+          </button>
+          <button className="btn-p" onClick={handlePrint}>
+            🖨 Print
+          </button>
         </div>
       </div>
     </div>

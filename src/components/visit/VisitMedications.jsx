@@ -28,7 +28,13 @@ function dedup(meds) {
   return Object.values(grouped);
 }
 
-const VisitMedications = memo(function VisitMedications({ activeMeds, stoppedMeds, onAddMed, onEditMed, onStopMed }) {
+const VisitMedications = memo(function VisitMedications({
+  activeMeds,
+  stoppedMeds,
+  onAddMed,
+  onEditMed,
+  onStopMed,
+}) {
   const [showStopped, setShowStopped] = useState(false);
 
   const uniqueActive = useMemo(() => dedup(activeMeds), [activeMeds]);
@@ -46,7 +52,9 @@ const VisitMedications = memo(function VisitMedications({ activeMeds, stoppedMed
               Stopped Meds
             </button>
           )}
-          <button className="bx bx-p" onClick={onAddMed}>+ Add Medicine</button>
+          <button className="bx bx-p" onClick={onAddMed}>
+            + Add Medicine
+          </button>
         </div>
       </div>
       <div className="scb">
@@ -90,8 +98,12 @@ const VisitMedications = memo(function VisitMedications({ activeMeds, stoppedMed
               )}
             </div>
             <div className="macts">
-              <button className="ma ma-e" onClick={() => onEditMed?.(m)}>Edit</button>
-              <button className="ma ma-s" onClick={() => onStopMed?.(m)}>Stop</button>
+              <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                Edit
+              </button>
+              <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                Stop
+              </button>
               {m.route === "SC" ||
               m.route === "Subcutaneous" ||
               (m.name || "").toLowerCase().includes("inj") ? (

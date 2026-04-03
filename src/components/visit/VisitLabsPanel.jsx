@@ -30,7 +30,9 @@ const VisitLabsPanel = memo(function VisitLabsPanel({ documents, labResults, onU
           <div className="sct">
             <div className="sci ic-b">🩸</div>Blood Reports
           </div>
-          <button className="bx bx-p" onClick={onUploadReport}>+ Upload Report</button>
+          <button className="bx bx-p" onClick={onUploadReport}>
+            + Upload Report
+          </button>
         </div>
         <div className="scb">
           {labDocs.length > 0 ? (
@@ -71,7 +73,9 @@ const VisitLabsPanel = memo(function VisitLabsPanel({ documents, labResults, onU
           <div className="sct">
             <div className="sci ic-t">🩻</div>Radiology Reports
           </div>
-          <button className="bx bx-p" onClick={onUploadReport}>+ Upload</button>
+          <button className="bx bx-p" onClick={onUploadReport}>
+            + Upload
+          </button>
         </div>
         <div className="scb">
           {radiologyDocs.length > 0 ? (
@@ -172,7 +176,6 @@ const VisitLabsPanel = memo(function VisitLabsPanel({ documents, labResults, onU
           </div>
         </div>
       )}
-
     </div>
   );
 });

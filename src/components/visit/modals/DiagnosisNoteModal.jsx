@@ -43,17 +43,31 @@ const DiagnosisNoteModal = memo(function DiagnosisNoteModal({ diagnosis, onClose
         <div className="mttl">📝 Note — {diagnosis.label || diagnosis.diagnosis_id}</div>
         <div className="mf">
           <label className="ml">Clinical note / observation</label>
-          <textarea className="mta" style={{ minHeight: 90 }} placeholder="Add your note..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <textarea
+            className="mta"
+            style={{ minHeight: 90 }}
+            placeholder="Add your note..."
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
         </div>
         <div className="mf">
           <label className="ml">Action flag</label>
           <select className="ms" value={flag} onChange={(e) => setFlag(e.target.value)}>
-            {FLAGS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+            {FLAGS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="macts">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn-p" onClick={handleSave}>Save Note</button>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn-p" onClick={handleSave}>
+            Save Note
+          </button>
         </div>
       </div>
     </div>

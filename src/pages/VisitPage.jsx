@@ -23,14 +23,28 @@ import VisitLoggedData from "../components/visit/VisitLoggedData";
 import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import {
-  AddLabModal, AddDiagnosisModal, DiagnosisNoteModal,
-  AddMedicationModal, EditMedicationModal, StopMedicationModal,
-  AddReferralModal, UploadReportModal, ChangeFollowUpModal, TemplateModal,
+  AddLabModal,
+  AddDiagnosisModal,
+  DiagnosisNoteModal,
+  AddMedicationModal,
+  EditMedicationModal,
+  StopMedicationModal,
+  AddReferralModal,
+  UploadReportModal,
+  ChangeFollowUpModal,
+  TemplateModal,
 } from "../components/visit/modals";
 import { useVisitMutations } from "../hooks/useVisitMutations";
 
 // ── Tab definitions ──
-const SY_STATUS_OPTS = ["Mild", "Improving", "Still present", "Resolved ✓", "Controlled", "Got worse"];
+const SY_STATUS_OPTS = [
+  "Mild",
+  "Improving",
+  "Still present",
+  "Resolved ✓",
+  "Controlled",
+  "Got worse",
+];
 const syDotColor = (s) => {
   if (!s) return "var(--t3)";
   const v = s.toLowerCase();
@@ -41,11 +55,14 @@ const syDotColor = (s) => {
 function VisitSymptomsSection({ consultations }) {
   const con = consultations[0]?.con_data;
   const mo = consultations[0]?.mo_data;
-  const symptoms = con?.symptoms || con?.chief_complaints || mo?.symptoms || mo?.chief_complaints || [];
+  const symptoms =
+    con?.symptoms || con?.chief_complaints || mo?.symptoms || mo?.chief_complaints || [];
   return (
     <div className="sc" id="symptoms">
       <div className="sch">
-        <div className="sct"><div className="sci ic-a">🩹</div>Symptoms &amp; Concerns</div>
+        <div className="sct">
+          <div className="sci ic-a">🩹</div>Symptoms &amp; Concerns
+        </div>
       </div>
       <div className="scb">
         {symptoms.length > 0 ? (
@@ -53,9 +70,13 @@ function VisitSymptomsSection({ consultations }) {
             <div className="subsec">Active / Historical — Update Status</div>
             <div className="syg">
               {symptoms.map((sy, i) => {
-                const name = typeof sy === "string" ? sy : sy.name || sy.symptom || sy.complaint || String(sy);
-                const meta = typeof sy === "object" ? (sy.notes || sy.meta || sy.duration || sy.since || "") : "";
-                const status = typeof sy === "object" ? (sy.status || "Mild") : "Mild";
+                const name =
+                  typeof sy === "string" ? sy : sy.name || sy.symptom || sy.complaint || String(sy);
+                const meta =
+                  typeof sy === "object"
+                    ? sy.notes || sy.meta || sy.duration || sy.since || ""
+                    : "";
+                const status = typeof sy === "object" ? sy.status || "Mild" : "Mild";
                 return (
                   <div key={i} className="syi">
                     <div className="sy-dot" style={{ background: syDotColor(status) }} />
@@ -63,9 +84,16 @@ function VisitSymptomsSection({ consultations }) {
                       <div className="sy-nm">{name}</div>
                       {meta && <div className="sy-meta">{meta}</div>}
                     </div>
-                    <select className="sy-sel" defaultValue={status}
-                      style={{ color: syDotColor(status) === "var(--green)" ? "var(--green)" : undefined }}>
-                      {SY_STATUS_OPTS.map((o) => <option key={o}>{o}</option>)}
+                    <select
+                      className="sy-sel"
+                      defaultValue={status}
+                      style={{
+                        color: syDotColor(status) === "var(--green)" ? "var(--green)" : undefined,
+                      }}
+                    >
+                      {SY_STATUS_OPTS.map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
                     </select>
                   </div>
                 );
@@ -117,7 +145,9 @@ export default function VisitPage() {
     const id = sessionStorage.getItem("gini_opd_appt_id");
     return id ? Number(id) : null;
   });
-  const [visitStart, setVisitStart] = useState(() => sessionStorage.getItem("gini_visit_start") || null);
+  const [visitStart, setVisitStart] = useState(
+    () => sessionStorage.getItem("gini_visit_start") || null,
+  );
   const hasActiveVisit = !!opdApptId;
 
   // ── UI state ──
@@ -159,7 +189,9 @@ export default function VisitPage() {
     try {
       const { data: d } = await api.get(`/api/visit/${dbPatientId}`);
       setData(d);
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
   }, [dbPatientId]);
 
   const mutations = useVisitMutations(dbPatientId, refreshData, opdApptId);
@@ -485,7 +517,11 @@ export default function VisitPage() {
 
           {/* ═══ OTHER PANELS ═══ */}
           <div className={`panel ${tab === "labs" ? "on" : ""}`}>
-            <VisitLabsPanel documents={documents} labResults={labResults} onUploadReport={() => setModal({ type: "uploadReport" })} />
+            <VisitLabsPanel
+              documents={documents}
+              labResults={labResults}
+              onUploadReport={() => setModal({ type: "uploadReport" })}
+            />
           </div>
           <div className={`panel ${tab === "exam" ? "on" : ""}`}>
             <div className="panel-body">
@@ -771,7 +807,10 @@ export default function VisitPage() {
             </div>
           </div>
           <div className={`panel ${tab === "docs" ? "on" : ""}`}>
-            <VisitDocsPanel documents={documents} onUploadReport={() => setModal({ type: "uploadReport" })} />
+            <VisitDocsPanel
+              documents={documents}
+              onUploadReport={() => setModal({ type: "uploadReport" })}
+            />
           </div>
           <div className={`panel ${tab === "medcard" ? "on" : ""}`}>
             <VisitMedCard patient={patient} activeMeds={uniqueActiveMeds} />
@@ -821,31 +860,90 @@ export default function VisitPage() {
 
       {/* ── Action Modals ── */}
       {modal?.type === "addLab" && (
-        <AddLabModal onClose={closeModal} onSubmit={async (d) => { const r = await mutations.addLab(d); if (r.success) closeModal(); }} />
+        <AddLabModal
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.addLab(d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "addDiagnosis" && (
-        <AddDiagnosisModal onClose={closeModal} onSubmit={async (d) => { const r = await mutations.addDiagnosis(d); if (r.success) closeModal(); }} />
+        <AddDiagnosisModal
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.addDiagnosis(d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "diagnosisNote" && (
-        <DiagnosisNoteModal diagnosis={modal.data} onClose={closeModal} onSubmit={async (d) => { const r = await mutations.updateDiagnosis(modal.data.id, d); if (r.success) closeModal(); }} />
+        <DiagnosisNoteModal
+          diagnosis={modal.data}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.updateDiagnosis(modal.data.id, d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "addMed" && (
-        <AddMedicationModal diagnoses={activeDx} onClose={closeModal} onSubmit={async (d) => { const r = await mutations.addMedication(d); if (r.success) closeModal(); }} />
+        <AddMedicationModal
+          diagnoses={activeDx}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.addMedication(d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "editMed" && (
-        <EditMedicationModal medication={modal.data} onClose={closeModal} onSubmit={async (d) => { const r = await mutations.editMedication(modal.data.id, d); if (r.success) closeModal(); }} />
+        <EditMedicationModal
+          medication={modal.data}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.editMedication(modal.data.id, d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "stopMed" && (
-        <StopMedicationModal medication={modal.data} onClose={closeModal} onSubmit={async (d) => { const r = await mutations.stopMedication(modal.data.id, d); if (r.success) closeModal(); }} />
+        <StopMedicationModal
+          medication={modal.data}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.stopMedication(modal.data.id, d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "addReferral" && (
-        <AddReferralModal onClose={closeModal} onSubmit={async (d) => { const r = await mutations.addReferral(d); if (r.success) closeModal(); }} />
+        <AddReferralModal
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.addReferral(d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "uploadReport" && (
-        <UploadReportModal onClose={closeModal} onSubmit={async (d) => { const r = await mutations.uploadDocument(d); if (r.success) closeModal(); }} />
+        <UploadReportModal
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.uploadDocument(d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "changeFollowUp" && (
-        <ChangeFollowUpModal currentDate={consultations[0]?.con_data?.follow_up?.date || ""} onClose={closeModal} onSubmit={async (d) => { const r = await mutations.updateFollowUp(d); if (r.success) closeModal(); }} />
+        <ChangeFollowUpModal
+          currentDate={consultations[0]?.con_data?.follow_up?.date || ""}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.updateFollowUp(d);
+            if (r.success) closeModal();
+          }}
+        />
       )}
       {modal?.type === "template" && (
         <TemplateModal templateKey={modal.data} patient={patient} onClose={closeModal} />

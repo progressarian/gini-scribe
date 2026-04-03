@@ -9,14 +9,21 @@ const DX_STATUS_OPTS = [
   "Resolved",
 ];
 
-const VisitDiagnoses = memo(function VisitDiagnoses({ activeDx, onAddDiagnosis, onDiagnosisNote, onUpdateDiagnosis }) {
+const VisitDiagnoses = memo(function VisitDiagnoses({
+  activeDx,
+  onAddDiagnosis,
+  onDiagnosisNote,
+  onUpdateDiagnosis,
+}) {
   return (
     <div className="sc" id="diagnoses">
       <div className="sch">
         <div className="sct">
           <div className="sci ic-p">🏷</div>Diagnoses
         </div>
-        <button className="bx bx-p" onClick={onAddDiagnosis}>+ Add Diagnosis</button>
+        <button className="bx bx-p" onClick={onAddDiagnosis}>
+          + Add Diagnosis
+        </button>
       </div>
       <div className="scb">
         {activeDx.map((dx, i) => {
@@ -46,7 +53,11 @@ const VisitDiagnoses = memo(function VisitDiagnoses({ activeDx, onAddDiagnosis, 
                   <option key={o}>{o}</option>
                 ))}
               </select>
-              <button className="bx bx-p" style={{ marginLeft: 5 }} onClick={() => onDiagnosisNote?.(dx)}>
+              <button
+                className="bx bx-p"
+                style={{ marginLeft: 5 }}
+                onClick={() => onDiagnosisNote?.(dx)}
+              >
                 Note
               </button>
             </div>

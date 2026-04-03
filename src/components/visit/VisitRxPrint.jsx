@@ -55,7 +55,7 @@ const VisitRxPrint = memo(function VisitRxPrint({
 
   const bmi =
     latestVitals?.weight && latestVitals?.height
-      ? (latestVitals.weight / ((latestVitals.height / 100) ** 2)).toFixed(1)
+      ? (latestVitals.weight / (latestVitals.height / 100) ** 2).toFixed(1)
       : latestVitals?.bmi || null;
 
   // Build biomarker rows with goals (matching what UI shows)
@@ -78,9 +78,11 @@ const VisitRxPrint = memo(function VisitRxPrint({
       : null;
 
   // HbA1c first reading for journey
-  const hba1cHist = labHistory ? Object.entries(labHistory).find(([k]) =>
-    k.toLowerCase().includes("hba1c") || k.toLowerCase().includes("a1c")
-  ) : null;
+  const hba1cHist = labHistory
+    ? Object.entries(labHistory).find(
+        ([k]) => k.toLowerCase().includes("hba1c") || k.toLowerCase().includes("a1c"),
+      )
+    : null;
   const hba1cHistArr = hba1cHist?.[1] || [];
   const hba1cFirst = hba1cHistArr.length > 0 ? hba1cHistArr[0] : null;
 
@@ -100,7 +102,12 @@ const VisitRxPrint = memo(function VisitRxPrint({
         <div>
           <div className="rx-dr-name">{doctor?.name || "Doctor"}</div>
           <div className="rx-dr-cred">
-            {doctor?.qualification && <>{doctor.qualification}<br /></>}
+            {doctor?.qualification && (
+              <>
+                {doctor.qualification}
+                <br />
+              </>
+            )}
             {doctor?.reg_no && <>Reg. No. {doctor.reg_no}</>}
           </div>
         </div>
@@ -159,31 +166,60 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {latestVitals && (
         <div className="rx-vitals">
           {latestVitals.height != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.height} cm</div><div className="rx-vl">Height</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.height} cm</div>
+              <div className="rx-vl">Height</div>
+            </div>
           )}
           {latestVitals.weight != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.weight} kg</div><div className="rx-vl">Weight</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.weight} kg</div>
+              <div className="rx-vl">Weight</div>
+            </div>
           )}
           {bmi && (
-            <div className="rx-vbox"><div className="rx-vv">{bmi}</div><div className="rx-vl">BMI</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{bmi}</div>
+              <div className="rx-vl">BMI</div>
+            </div>
           )}
           {latestVitals.bp_sys != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.bp_sys}/{latestVitals.bp_dia}</div><div className="rx-vl">BP (mmHg)</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">
+                {latestVitals.bp_sys}/{latestVitals.bp_dia}
+              </div>
+              <div className="rx-vl">BP (mmHg)</div>
+            </div>
           )}
           {(latestVitals.heart_rate || latestVitals.pulse) && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.heart_rate || latestVitals.pulse}/min</div><div className="rx-vl">Heart Rate</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.heart_rate || latestVitals.pulse}/min</div>
+              <div className="rx-vl">Heart Rate</div>
+            </div>
           )}
           {latestVitals.spo2 != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.spo2}%</div><div className="rx-vl">SpO2</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.spo2}%</div>
+              <div className="rx-vl">SpO2</div>
+            </div>
           )}
           {latestVitals.temp != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.temp}°F</div><div className="rx-vl">Temp</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.temp}°F</div>
+              <div className="rx-vl">Temp</div>
+            </div>
           )}
           {latestVitals.waist != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.waist} cm</div><div className="rx-vl">Waist</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.waist} cm</div>
+              <div className="rx-vl">Waist</div>
+            </div>
           )}
           {latestVitals.body_fat != null && (
-            <div className="rx-vbox"><div className="rx-vv">{latestVitals.body_fat}%</div><div className="rx-vl">Body Fat</div></div>
+            <div className="rx-vbox">
+              <div className="rx-vv">{latestVitals.body_fat}%</div>
+              <div className="rx-vl">Body Fat</div>
+            </div>
           )}
         </div>
       )}
@@ -196,17 +232,37 @@ const VisitRxPrint = memo(function VisitRxPrint({
             {summary?.monthsWithGini != null && (
               <div className="rx-jc">
                 <div className="rx-jc-lbl">With Gini</div>
-                <div className="rx-jc-val">{summary.monthsWithGini >= 12 ? `${Math.floor(summary.monthsWithGini / 12)}+ yrs` : `${summary.monthsWithGini}m`}</div>
-                <div className="rx-jc-arrow" style={{ color: "#4466f5" }}>{summary.totalVisits} visits</div>
+                <div className="rx-jc-val">
+                  {summary.monthsWithGini >= 12
+                    ? `${Math.floor(summary.monthsWithGini / 12)}+ yrs`
+                    : `${summary.monthsWithGini}m`}
+                </div>
+                <div className="rx-jc-arrow" style={{ color: "#4466f5" }}>
+                  {summary.totalVisits} visits
+                </div>
               </div>
             )}
             {hba1c && (
               <div className="rx-jc">
                 <div className="rx-jc-lbl">HbA1c</div>
-                <div className="rx-jc-val">{hba1c.result}{hba1c.unit || "%"}</div>
+                <div className="rx-jc-val">
+                  {hba1c.result}
+                  {hba1c.unit || "%"}
+                </div>
                 {hba1cFirst && (
-                  <div className="rx-jc-arrow" style={{ color: Number(hba1c.result) <= Number(hba1cFirst.result || hba1cFirst.value) ? "#12b981" : "#f59e0b" }}>
-                    {Number(hba1c.result) <= Number(hba1cFirst.result || hba1cFirst.value) ? "↓" : "↑"} from {hba1cFirst.result || hba1cFirst.value}%
+                  <div
+                    className="rx-jc-arrow"
+                    style={{
+                      color:
+                        Number(hba1c.result) <= Number(hba1cFirst.result || hba1cFirst.value)
+                          ? "#12b981"
+                          : "#f59e0b",
+                    }}
+                  >
+                    {Number(hba1c.result) <= Number(hba1cFirst.result || hba1cFirst.value)
+                      ? "↓"
+                      : "↑"}{" "}
+                    from {hba1cFirst.result || hba1cFirst.value}%
                   </div>
                 )}
               </div>
@@ -216,7 +272,10 @@ const VisitRxPrint = memo(function VisitRxPrint({
                 <div className="rx-jc-lbl">Weight</div>
                 <div className="rx-jc-val">{latestVitals.weight} kg</div>
                 {weightChange && (
-                  <div className="rx-jc-arrow" style={{ color: Number(weightChange) <= 0 ? "#12b981" : "#f59e0b" }}>
+                  <div
+                    className="rx-jc-arrow"
+                    style={{ color: Number(weightChange) <= 0 ? "#12b981" : "#f59e0b" }}
+                  >
                     {Number(weightChange) > 0 ? "↑" : "↓"} {Math.abs(Number(weightChange))} kg
                   </div>
                 )}
@@ -226,14 +285,18 @@ const VisitRxPrint = memo(function VisitRxPrint({
               <div className="rx-jc">
                 <div className="rx-jc-lbl">Waist</div>
                 <div className="rx-jc-val">{latestVitals.waist} cm</div>
-                <div className="rx-jc-arrow" style={{ color: "#6b7280" }}>—</div>
+                <div className="rx-jc-arrow" style={{ color: "#6b7280" }}>
+                  —
+                </div>
               </div>
             )}
             {latestVitals?.body_fat != null && (
               <div className="rx-jc">
                 <div className="rx-jc-lbl">Body Fat</div>
                 <div className="rx-jc-val">{latestVitals.body_fat}%</div>
-                <div className="rx-jc-arrow" style={{ color: "#6b7280" }}>—</div>
+                <div className="rx-jc-arrow" style={{ color: "#6b7280" }}>
+                  —
+                </div>
               </div>
             )}
           </div>
@@ -242,12 +305,33 @@ const VisitRxPrint = memo(function VisitRxPrint({
 
       {/* ═══════ CLINICAL ALERTS / FLAGS ═══════ */}
       {flags?.length > 0 && (
-        <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 7, padding: "8px 14px", marginBottom: 12, fontSize: 11 }}>
-          <div style={{ fontSize: 10, fontWeight: 800, color: "#92400e", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>
+        <div
+          style={{
+            background: "#fff7ed",
+            border: "1px solid #fed7aa",
+            borderRadius: 7,
+            padding: "8px 14px",
+            marginBottom: 12,
+            fontSize: 11,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "#92400e",
+              textTransform: "uppercase",
+              letterSpacing: ".5px",
+              marginBottom: 4,
+            }}
+          >
             Clinical Alerts
           </div>
           {flags.map((f, i) => (
-            <div key={i} style={{ color: f.type === "red" ? "#dc2626" : "#92400e", marginBottom: 2 }}>
+            <div
+              key={i}
+              style={{ color: f.type === "red" ? "#dc2626" : "#92400e", marginBottom: 2 }}
+            >
               {f.icon} {f.text}
             </div>
           ))}
@@ -261,8 +345,7 @@ const VisitRxPrint = memo(function VisitRxPrint({
           <div className="rx-dx">
             {activeDx.map((d, i) => (
               <span key={i} className="rx-dx-tag">
-                {STATUS_ICON[d.status] || "○"}{" "}
-                {d.label || d.diagnosis_id}
+                {STATUS_ICON[d.status] || "○"} {d.label || d.diagnosis_id}
                 {d.since_year ? ` (Since ${d.since_year})` : ""}
                 {d.status ? ` — ${d.status}` : ""}
               </span>
@@ -287,17 +370,21 @@ const VisitRxPrint = memo(function VisitRxPrint({
             <tbody>
               {biomarkerRows.map((r, i) => {
                 const val = r.val;
-                const result = r.label === "Creatinine / eGFR" && r.extra
-                  ? `${val.result} / ${r.extra.result}`
-                  : `${val.result} ${val.unit || r.unit || ""}`;
+                const result =
+                  r.label === "Creatinine / eGFR" && r.extra
+                    ? `${val.result} / ${r.extra.result}`
+                    : `${val.result} ${val.unit || r.unit || ""}`;
                 const isOk = val.flag === "normal" || val.flag === "ok";
-                const isAb = val.flag === "abnormal" || val.flag === "high" || val.flag === "critical";
+                const isAb =
+                  val.flag === "abnormal" || val.flag === "high" || val.flag === "critical";
                 const cls = isOk ? "rx-ok" : isAb ? "rx-ab" : "rx-wrn";
                 const statusText = isOk ? "✓ At Goal" : isAb ? "↑ Review" : "⚠ Borderline";
                 return (
                   <tr key={i}>
                     <td>{r.label}</td>
-                    <td><b>{result}</b></td>
+                    <td>
+                      <b>{result}</b>
+                    </td>
                     <td>{r.goal}</td>
                     <td className={cls}>{statusText}</td>
                   </tr>
@@ -312,7 +399,14 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {activeMeds.length > 0 && (
         <>
           <div className="rx-sec-title">Medications ({activeMeds.length} Active)</div>
-          <div style={{ border: "1px solid #e4e9f2", borderRadius: 8, overflow: "hidden", marginBottom: 12 }}>
+          <div
+            style={{
+              border: "1px solid #e4e9f2",
+              borderRadius: 8,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
             <div className="rx-med-row head">
               <span>MEDICINE (BRAND / GENERIC)</span>
               <span>DOSE</span>
@@ -327,9 +421,7 @@ const VisitRxPrint = memo(function VisitRxPrint({
                   {m.route && <div className="rx-med-gen">{m.route}</div>}
                 </div>
                 <span>{m.dose || m.dosage || "—"}</span>
-                <span>
-                  {[m.frequency, m.timing].filter(Boolean).join(" · ") || "—"}
-                </span>
+                <span>{[m.frequency, m.timing].filter(Boolean).join(" · ") || "—"}</span>
                 <span>
                   {Array.isArray(m.for_diagnosis)
                     ? m.for_diagnosis.join(", ")
@@ -344,12 +436,27 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {/* ═══════ STOPPED MEDICATIONS ═══════ */}
       {stoppedMeds?.length > 0 && (
         <>
-          <div className="rx-sec-title" style={{ color: "#9ca3af" }}>Recently Stopped Medications</div>
-          <div style={{ border: "1px solid #e4e9f2", borderRadius: 8, overflow: "hidden", marginBottom: 12, opacity: 0.7 }}>
+          <div className="rx-sec-title" style={{ color: "#9ca3af" }}>
+            Recently Stopped Medications
+          </div>
+          <div
+            style={{
+              border: "1px solid #e4e9f2",
+              borderRadius: 8,
+              overflow: "hidden",
+              marginBottom: 12,
+              opacity: 0.7,
+            }}
+          >
             {stoppedMeds.map((m, i) => (
               <div key={i} className="rx-med-row" style={{ fontSize: 10 }}>
                 <div>
-                  <div className="rx-med-nm" style={{ textDecoration: "line-through", fontSize: 11 }}>{m.name}</div>
+                  <div
+                    className="rx-med-nm"
+                    style={{ textDecoration: "line-through", fontSize: 11 }}
+                  >
+                    {m.name}
+                  </div>
                   {m.composition && <div className="rx-med-gen">{m.composition}</div>}
                 </div>
                 <span>{m.dose || "—"}</span>
@@ -375,7 +482,9 @@ const VisitRxPrint = memo(function VisitRxPrint({
                     <td style={{ padding: "4px 0", fontWeight: 600 }}>{name}</td>
                     <td style={{ padding: "4px 8px", textAlign: "right" }}>
                       {urgent ? (
-                        <span style={{ color: "#ef4444", fontWeight: 700, fontSize: 10 }}>URGENT</span>
+                        <span style={{ color: "#ef4444", fontWeight: 700, fontSize: 10 }}>
+                          URGENT
+                        </span>
                       ) : (
                         <span style={{ color: "#6b7280", fontSize: 10 }}>Next visit</span>
                       )}
@@ -403,21 +512,69 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {/* ═══════ GOALS SET ═══════ */}
       {goals?.length > 0 && (
         <div className="rx-inst" style={{ background: "#ecfdf5", border: "1px solid #a7f3d0" }}>
-          <div className="rx-inst-title" style={{ color: "#065f46" }}>Goals Set for Patient</div>
+          <div className="rx-inst-title" style={{ color: "#065f46" }}>
+            Goals Set for Patient
+          </div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", padding: "3px 0", fontSize: 9, fontWeight: 700, color: "#065f46", textTransform: "uppercase" }}>Marker</th>
-                <th style={{ textAlign: "center", padding: "3px 0", fontSize: 9, fontWeight: 700, color: "#065f46", textTransform: "uppercase" }}>Current</th>
-                <th style={{ textAlign: "center", padding: "3px 0", fontSize: 9, fontWeight: 700, color: "#065f46", textTransform: "uppercase" }}>Target</th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "3px 0",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: "#065f46",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Marker
+                </th>
+                <th
+                  style={{
+                    textAlign: "center",
+                    padding: "3px 0",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: "#065f46",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Current
+                </th>
+                <th
+                  style={{
+                    textAlign: "center",
+                    padding: "3px 0",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: "#065f46",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Target
+                </th>
               </tr>
             </thead>
             <tbody>
               {goals.map((g, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid #a7f3d0" }}>
-                  <td style={{ padding: "4px 0", fontWeight: 600, color: "#047857" }}>{g.marker}</td>
-                  <td style={{ padding: "4px 0", textAlign: "center", color: "#374151" }}>{g.current_value}</td>
-                  <td style={{ padding: "4px 0", textAlign: "center", fontWeight: 700, color: "#047857" }}>{g.target_value}</td>
+                  <td style={{ padding: "4px 0", fontWeight: 600, color: "#047857" }}>
+                    {g.marker}
+                  </td>
+                  <td style={{ padding: "4px 0", textAlign: "center", color: "#374151" }}>
+                    {g.current_value}
+                  </td>
+                  <td
+                    style={{
+                      padding: "4px 0",
+                      textAlign: "center",
+                      fontWeight: 700,
+                      color: "#047857",
+                    }}
+                  >
+                    {g.target_value}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -429,14 +586,18 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {doctorNote && (
         <div className="rx-inst">
           <div className="rx-inst-title">Doctor's Note</div>
-          <div style={{ whiteSpace: "pre-wrap", color: "#374151", lineHeight: 1.6 }}>{doctorNote}</div>
+          <div style={{ whiteSpace: "pre-wrap", color: "#374151", lineHeight: 1.6 }}>
+            {doctorNote}
+          </div>
         </div>
       )}
 
       {/* ═══════ VITALS HISTORY TABLE ═══════ */}
       {vitals?.length > 1 && (
         <>
-          <div className="rx-sec-title">Vitals History (Last {Math.min(vitals.length, 5)} Visits)</div>
+          <div className="rx-sec-title">
+            Vitals History (Last {Math.min(vitals.length, 5)} Visits)
+          </div>
           <table className="rx-bm-table" style={{ marginBottom: 14 }}>
             <thead>
               <tr>
@@ -454,7 +615,9 @@ const VisitRxPrint = memo(function VisitRxPrint({
                   <td>{fmtDate(v.recorded_at)}</td>
                   <td style={{ textAlign: "center" }}>{v.weight ? `${v.weight} kg` : "—"}</td>
                   <td style={{ textAlign: "center" }}>{v.bmi || "—"}</td>
-                  <td style={{ textAlign: "center" }}>{v.bp_sys && v.bp_dia ? `${v.bp_sys}/${v.bp_dia}` : "—"}</td>
+                  <td style={{ textAlign: "center" }}>
+                    {v.bp_sys && v.bp_dia ? `${v.bp_sys}/${v.bp_dia}` : "—"}
+                  </td>
                   <td style={{ textAlign: "center" }}>{v.waist ? `${v.waist} cm` : "—"}</td>
                   <td style={{ textAlign: "center" }}>{v.body_fat ? `${v.body_fat}%` : "—"}</td>
                 </tr>
@@ -465,16 +628,36 @@ const VisitRxPrint = memo(function VisitRxPrint({
       )}
 
       {/* ═══════ VISIT SUMMARY ═══════ */}
-      <div style={{ background: "#f8f9fc", borderRadius: 7, border: "1px solid #e4e9f2", padding: "10px 14px", marginBottom: 12 }}>
-        <div style={{ fontSize: 10, fontWeight: 800, color: "#374151", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 8 }}>
+      <div
+        style={{
+          background: "#f8f9fc",
+          borderRadius: 7,
+          border: "1px solid #e4e9f2",
+          padding: "10px 14px",
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "#374151",
+            textTransform: "uppercase",
+            letterSpacing: ".5px",
+            marginBottom: 8,
+          }}
+        >
           Visit Summary — {fmtDate(today)}
         </div>
         <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
           <tbody>
             <tr style={{ borderBottom: "1px solid #e4e9f2" }}>
-              <td style={{ padding: "4px 0", fontWeight: 700, color: "#6b7280", width: 100 }}>Patient</td>
+              <td style={{ padding: "4px 0", fontWeight: 700, color: "#6b7280", width: 100 }}>
+                Patient
+              </td>
               <td style={{ padding: "4px 0", color: "#1a1f2e" }}>
-                {patient.name}, {patient.age}{patient.sex?.[0]} · ID: {patient.file_no || patient.id}
+                {patient.name}, {patient.age}
+                {patient.sex?.[0]} · ID: {patient.file_no || patient.id}
                 {doctor?.name ? ` · ${doctor.name}` : ""}
               </td>
             </tr>
@@ -487,7 +670,8 @@ const VisitRxPrint = memo(function VisitRxPrint({
             <tr style={{ borderBottom: "1px solid #e4e9f2" }}>
               <td style={{ padding: "4px 0", fontWeight: 700, color: "#6b7280" }}>Diagnoses</td>
               <td style={{ padding: "4px 0", color: "#1a1f2e" }}>
-                {activeDx.map((d) => `${d.label || d.diagnosis_id} (${d.status})`).join(", ") || "None"}
+                {activeDx.map((d) => `${d.label || d.diagnosis_id} (${d.status})`).join(", ") ||
+                  "None"}
               </td>
             </tr>
             <tr style={{ borderBottom: "1px solid #e4e9f2" }}>
@@ -500,7 +684,9 @@ const VisitRxPrint = memo(function VisitRxPrint({
                   latestVitals?.weight && `Weight ${latestVitals.weight}kg`,
                   ldl && `LDL ${ldl.result}`,
                   tsh && `TSH ${tsh.result}`,
-                ].filter(Boolean).join(", ") || "—"}
+                ]
+                  .filter(Boolean)
+                  .join(", ") || "—"}
               </td>
             </tr>
             <tr style={{ borderBottom: "1px solid #e4e9f2" }}>
@@ -511,9 +697,11 @@ const VisitRxPrint = memo(function VisitRxPrint({
             </tr>
             {tests.length > 0 && (
               <tr style={{ borderBottom: "1px solid #e4e9f2" }}>
-                <td style={{ padding: "4px 0", fontWeight: 700, color: "#6b7280" }}>Tests Ordered</td>
+                <td style={{ padding: "4px 0", fontWeight: 700, color: "#6b7280" }}>
+                  Tests Ordered
+                </td>
                 <td style={{ padding: "4px 0", color: "#1a1f2e" }}>
-                  {tests.map((t) => typeof t === "string" ? t : t.name || t.test).join(", ")}
+                  {tests.map((t) => (typeof t === "string" ? t : t.name || t.test)).join(", ")}
                 </td>
               </tr>
             )}
@@ -530,7 +718,16 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {/* ═══════ FOOTER ═══════ */}
       <div className="rx-footer">
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 3 }}>
+          <div
+            style={{
+              fontSize: 10,
+              color: "#6b7280",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: ".5px",
+              marginBottom: 3,
+            }}
+          >
             Next Visit
           </div>
           <div className="rx-next">
@@ -538,14 +735,17 @@ const VisitRxPrint = memo(function VisitRxPrint({
           </div>
           {tests.length > 0 && (
             <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
-              Advice: {tests.map((t) => typeof t === "string" ? t : t.name || t.test).join(" · ")}
+              Advice: {tests.map((t) => (typeof t === "string" ? t : t.name || t.test)).join(" · ")}
             </div>
           )}
         </div>
         <div className="rx-footer-contact">
-          Gini Advanced Care Hospital<br />
-          Shivalik Hospital, 2nd Floor, Sector 69, Mohali<br />
-          01724120100 · WhatsApp: +91 8146320100<br />
+          Gini Advanced Care Hospital
+          <br />
+          Shivalik Hospital, 2nd Floor, Sector 69, Mohali
+          <br />
+          01724120100 · WhatsApp: +91 8146320100
+          <br />
           ginihealth.com
         </div>
       </div>
@@ -553,7 +753,15 @@ const VisitRxPrint = memo(function VisitRxPrint({
       {/* ═══════ SIGNATURE LINE ═══════ */}
       <div style={{ marginTop: 30, display: "flex", justifyContent: "flex-end" }}>
         <div style={{ textAlign: "center", minWidth: 200 }}>
-          <div style={{ borderTop: "1px solid #374151", paddingTop: 6, fontSize: 11, fontWeight: 700, color: "#374151" }}>
+          <div
+            style={{
+              borderTop: "1px solid #374151",
+              paddingTop: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#374151",
+            }}
+          >
             {doctor?.name || "Doctor's Signature"}
           </div>
           {doctor?.qualification && (

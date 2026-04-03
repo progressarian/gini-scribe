@@ -8,12 +8,16 @@ import { getCanonical } from "../utils/labCanonical.js";
 const router = Router();
 
 // Ensure referrals table exists (with appointment_id)
-pool.query(`CREATE TABLE IF NOT EXISTS referrals (
+pool
+  .query(
+    `CREATE TABLE IF NOT EXISTS referrals (
   id SERIAL PRIMARY KEY, patient_id INTEGER NOT NULL,
   doctor_name TEXT, speciality TEXT, reason TEXT,
   appointment_id INTEGER,
   status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW()
-)`).catch(() => {});
+)`,
+  )
+  .catch(() => {});
 // Add appointment_id column if table already exists without it
 pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS appointment_id INTEGER`).catch(() => {});
 
@@ -143,10 +147,7 @@ router.get("/visit/:patientId", async (req, res) => {
       ),
 
       // 15. Referrals
-      pool.query(
-        `SELECT * FROM referrals WHERE patient_id=$1 ORDER BY created_at DESC`,
-        [pid],
-      ),
+      pool.query(`SELECT * FROM referrals WHERE patient_id=$1 ORDER BY created_at DESC`, [pid]),
     ]);
 
     const patient = patientR.rows[0];
@@ -249,7 +250,15 @@ router.post("/visit/:patientId/lab", async (req, res) => {
     const r = await pool.query(
       `INSERT INTO lab_results (patient_id, test_name, canonical_name, result, unit, test_date, source, appointment_id)
        VALUES ($1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),'manual',$7) RETURNING *`,
-      [pid, t(test_name, 200), canonical, num(result), t(unit, 50), n(test_date), appointment_id || null],
+      [
+        pid,
+        t(test_name, 200),
+        canonical,
+        num(result),
+        t(unit, 50),
+        n(test_date),
+        appointment_id || null,
+      ],
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -264,7 +273,10 @@ router.post("/visit/:patientId/diagnosis", async (req, res) => {
   try {
     const { name, icd_code, status, notes } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
-    const diagId = (icd_code || name).toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 100);
+    const diagId = (icd_code || name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .slice(0, 100);
     const r = await pool.query(
       `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, notes)
        VALUES ($1,$2,$3,$4,$5)
@@ -304,9 +316,23 @@ router.post("/visit/:patientId/medication", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const { name, dose, frequency, timing, route, for_diagnosis, started_date, appointment_id, composition } = req.body;
+    const {
+      name,
+      dose,
+      frequency,
+      timing,
+      route,
+      for_diagnosis,
+      started_date,
+      appointment_id,
+      composition,
+    } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
-    const forDx = Array.isArray(for_diagnosis) ? for_diagnosis : for_diagnosis ? [for_diagnosis] : null;
+    const forDx = Array.isArray(for_diagnosis)
+      ? for_diagnosis
+      : for_diagnosis
+        ? [for_diagnosis]
+        : null;
     const r = await pool.query(
       `INSERT INTO medications (patient_id, name, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,COALESCE($9::date, CURRENT_DATE),$10,'visit')
@@ -321,7 +347,18 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          appointment_id = COALESCE(EXCLUDED.appointment_id, medications.appointment_id),
          updated_at = NOW()
        RETURNING *`,
-      [pid, t(name, 200), t(composition, 200), t(dose, 100), t(frequency, 100), t(timing, 200), t(route, 50) || "Oral", forDx, n(started_date), appointment_id || null],
+      [
+        pid,
+        t(name, 200),
+        t(composition, 200),
+        t(dose, 100),
+        t(frequency, 100),
+        t(timing, 200),
+        t(route, 50) || "Oral",
+        forDx,
+        n(started_date),
+        appointment_id || null,
+      ],
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -364,7 +401,8 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
        WHERE id = $3 AND patient_id = $4 AND is_active = true RETURNING *`,
       [t(reason, 200), t(notes, 500), mid, pid],
     );
-    if (!r.rows[0]) return res.status(404).json({ error: "Medication not found or already stopped" });
+    if (!r.rows[0])
+      return res.status(404).json({ error: "Medication not found or already stopped" });
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Stop medication");
@@ -377,7 +415,8 @@ router.post("/visit/:patientId/referral", async (req, res) => {
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
     const { doctor_name, speciality, reason, appointment_id } = req.body;
-    if (!doctor_name || !speciality) return res.status(400).json({ error: "doctor_name and speciality required" });
+    if (!doctor_name || !speciality)
+      return res.status(400).json({ error: "doctor_name and speciality required" });
     const r = await pool.query(
       `INSERT INTO referrals (patient_id, doctor_name, speciality, reason, appointment_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [pid, t(doctor_name, 200), t(speciality, 100), t(reason, 1000), appointment_id || null],
@@ -399,14 +438,25 @@ router.post("/visit/:patientId/document", async (req, res) => {
     const r = await pool.query(
       `INSERT INTO documents (patient_id, doc_type, title, doc_date, source, notes)
        VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5,$6) RETURNING *`,
-      [pid, t(doc_type, 50), t(fileName || doc_type, 200), n(doc_date), t(source, 200), t(notes, 1000)],
+      [
+        pid,
+        t(doc_type, 50),
+        t(fileName || doc_type, 200),
+        n(doc_date),
+        t(source, 200),
+        t(notes, 1000),
+      ],
     );
     const doc = r.rows[0];
     // Upload file to Supabase if provided
     if (base64 && fileName && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-      const mediaType = fileName.match(/\.pdf$/i) ? "application/pdf"
-        : fileName.match(/\.png$/i) ? "image/png"
-        : fileName.match(/\.jpe?g$/i) ? "image/jpeg" : "application/octet-stream";
+      const mediaType = fileName.match(/\.pdf$/i)
+        ? "application/pdf"
+        : fileName.match(/\.png$/i)
+          ? "image/png"
+          : fileName.match(/\.jpe?g$/i)
+            ? "image/jpeg"
+            : "application/octet-stream";
       const storagePath = `patients/${pid}/${doc_type}/${Date.now()}_${fileName}`;
       const fileBuffer = Buffer.from(base64, "base64");
       const uploadResp = await fetch(
@@ -422,7 +472,11 @@ router.post("/visit/:patientId/document", async (req, res) => {
         },
       );
       if (uploadResp.ok) {
-        await pool.query("UPDATE documents SET storage_path=$1, mime_type=$2 WHERE id=$3", [storagePath, mediaType, doc.id]);
+        await pool.query("UPDATE documents SET storage_path=$1, mime_type=$2 WHERE id=$3", [
+          storagePath,
+          mediaType,
+          doc.id,
+        ]);
         doc.storage_path = storagePath;
       }
     }
