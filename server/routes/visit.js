@@ -7,6 +7,27 @@ import { getCanonical } from "../utils/labCanonical.js";
 
 const router = Router();
 
+// Ensure visit_symptoms table exists
+pool
+  .query(
+    `CREATE TABLE IF NOT EXISTS visit_symptoms (
+  id SERIAL PRIMARY KEY,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  symptom_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  since_date DATE,
+  severity TEXT DEFAULT 'Mild',
+  related_to TEXT,
+  status TEXT DEFAULT 'Active',
+  appointment_id INTEGER,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(patient_id, symptom_id)
+)`,
+  )
+  .catch(() => {});
+
 // Ensure referrals table exists (with appointment_id)
 pool
   .query(
@@ -43,6 +64,8 @@ router.get("/visit/:patientId", async (req, res) => {
       medLogR,
       mealLogR,
       referralsR,
+      symptomsR,
+      latestApptR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -148,6 +171,20 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 15. Referrals
       pool.query(`SELECT * FROM referrals WHERE patient_id=$1 ORDER BY created_at DESC`, [pid]),
+
+      // 16. Visit symptoms
+      pool.query(
+        `SELECT * FROM visit_symptoms WHERE patient_id=$1 AND is_active=true ORDER BY created_at ASC`,
+        [pid],
+      ),
+
+      // 17. Latest appointment plan data (from HealthRay sync)
+      pool.query(
+        `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers
+         FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
+         ORDER BY appointment_date DESC LIMIT 1`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -207,6 +244,25 @@ router.get("/visit/:patientId", async (req, res) => {
     if (totalVisits >= 10) carePhase = "Phase 3 — Continuous Care";
     else if (totalVisits >= 4) carePhase = "Phase 2 — Active Management";
 
+    // Load doctor note from active appointment if present
+    let apptDoctorNote = null;
+    if (req.query.appointment_id) {
+      const noteR = await pool.query(
+        `SELECT opd_vitals->>'doctor_note' AS doctor_note FROM appointments WHERE id=$1`,
+        [Number(req.query.appointment_id)],
+      );
+      apptDoctorNote = noteR.rows[0]?.doctor_note || null;
+    }
+
+    const apptPlan = latestApptR.rows[0] || null;
+    const apptCompliance = apptPlan?.compliance || {};
+    const apptBiomarkers = apptPlan?.biomarkers || {};
+    const followUpDate =
+      apptPlan?.healthray_follow_up ||
+      (apptBiomarkers.followup
+        ? { date: apptBiomarkers.followup, notes: null, timing: null }
+        : null);
+
     res.json({
       patient,
       vitals: vitalsR.rows,
@@ -219,7 +275,22 @@ router.get("/visit/:patientId", async (req, res) => {
       consultations,
       documents: docsR.rows,
       referrals: referralsR.rows,
+      symptoms: symptomsR.rows,
       goals: goalsR.rows,
+      appt_doctor_note: apptDoctorNote,
+      appt_plan: apptPlan
+        ? {
+            investigations_to_order: (apptPlan.healthray_investigations || []).map((t) =>
+              typeof t === "string" ? { name: t, urgency: "routine" } : t,
+            ),
+            follow_up: followUpDate,
+            diet_lifestyle: [
+              apptCompliance.diet,
+              apptCompliance.exercise,
+              apptCompliance.stress,
+            ].filter(Boolean),
+          }
+        : null,
       loggedData: {
         vitals: vitalsLogR.rows,
         activity: activityLogR.rows,
@@ -508,6 +579,97 @@ router.patch("/visit/:patientId/followup", async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Update follow-up");
+  }
+});
+
+// ── POST /visit/:patientId/symptom — Add / upsert symptom ──
+router.post("/visit/:patientId/symptom", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { name, since, severity, related_to, appointment_id } = req.body;
+    if (!name) return res.status(400).json({ error: "name is required" });
+    const symptomId = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .slice(0, 100);
+    const r = await pool.query(
+      `INSERT INTO visit_symptoms (patient_id, symptom_id, label, since_date, severity, related_to, appointment_id)
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7)
+       ON CONFLICT (patient_id, symptom_id) DO UPDATE SET
+         label = EXCLUDED.label,
+         since_date = COALESCE(EXCLUDED.since_date, visit_symptoms.since_date),
+         severity = COALESCE(EXCLUDED.severity, visit_symptoms.severity),
+         related_to = COALESCE(EXCLUDED.related_to, visit_symptoms.related_to),
+         status = 'Active',
+         is_active = true,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        pid,
+        symptomId,
+        t(name, 500),
+        n(since),
+        t(severity, 50) || "Mild",
+        t(related_to, 200),
+        appointment_id || null,
+      ],
+    );
+    res.json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Add symptom");
+  }
+});
+
+// ── PATCH /visit/:patientId/symptom/:id — Update symptom status ──
+router.patch("/visit/:patientId/symptom/:id", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  const sid = Number(req.params.id);
+  if (!pid || !sid) return res.status(400).json({ error: "Invalid IDs" });
+  try {
+    const { status } = req.body;
+    const r = await pool.query(
+      `UPDATE visit_symptoms SET status = COALESCE($1, status), updated_at = NOW()
+       WHERE id=$2 AND patient_id=$3 RETURNING *`,
+      [t(status, 100), sid, pid],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: "Symptom not found" });
+    res.json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Update symptom status");
+  }
+});
+
+// PATCH /visit/:patientId/doctor-note — save doctor's note
+router.patch("/visit/:patientId/doctor-note", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  const { note, appointment_id } = req.body;
+  if (note === undefined) return res.status(400).json({ error: "note is required" });
+
+  try {
+    if (appointment_id) {
+      // Active visit — save on appointment
+      await pool.query(
+        `UPDATE appointments SET opd_vitals = opd_vitals || jsonb_build_object('doctor_note', $1::text), updated_at = NOW() WHERE id = $2`,
+        [note, appointment_id],
+      );
+    } else {
+      // No active visit — save on latest consultation
+      await pool.query(
+        `UPDATE consultations
+         SET con_data = COALESCE(con_data, '{}'::jsonb) || jsonb_build_object('assessment_summary', $1::text),
+             updated_at = NOW()
+         WHERE id = (
+           SELECT id FROM consultations WHERE patient_id = $2
+           ORDER BY visit_date DESC, created_at DESC LIMIT 1
+         )`,
+        [note, pid],
+      );
+    }
+    res.json({ success: true });
+  } catch (e) {
+    handleError(res, e, "Save doctor note");
   }
 });
 

@@ -28,6 +28,9 @@ pool
   ALTER TABLE appointments ADD COLUMN IF NOT EXISTS opd_medications JSONB DEFAULT '[]'::jsonb;
   ALTER TABLE appointments ADD COLUMN IF NOT EXISTS opd_diagnoses JSONB DEFAULT '[]'::jsonb;
   ALTER TABLE appointments ADD COLUMN IF NOT EXISTS opd_stopped_medications JSONB DEFAULT '[]'::jsonb;
+  ALTER TABLE appointments ADD COLUMN IF NOT EXISTS healthray_investigations JSONB DEFAULT '[]'::jsonb;
+  ALTER TABLE appointments ADD COLUMN IF NOT EXISTS healthray_follow_up JSONB;
+  ALTER TABLE appointments ADD COLUMN IF NOT EXISTS healthray_clinical_notes TEXT;
   ALTER TABLE medications  ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
   ALTER TABLE medications  ADD COLUMN IF NOT EXISTS source TEXT;
 `,
@@ -290,6 +293,86 @@ router.get("/opd/patient-docs/:patientId", async (req, res) => {
   }
 });
 
+// ── PATCH /api/appointments/:id/status — direct status update, no side effects ──
+router.patch("/appointments/:id/status", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid appointment ID" });
+  const { status } = req.body;
+  if (!status) return res.status(400).json({ error: "status is required" });
+
+  const allowed = ["scheduled", "checkedin", "in_visit", "seen", "cancelled", "no_show"];
+  if (!allowed.includes(status))
+    return res.status(400).json({ error: `status must be one of: ${allowed.join(", ")}` });
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE appointments SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [status, id],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Appointment not found" });
+    res.json(rows[0]);
+  } catch (e) {
+    handleError(res, e, "Update appointment status");
+  }
+});
+
+// ── POST /api/appointments/:id/resync-condata — patch con_data on existing consultation ──
+router.post("/appointments/:id/resync-condata", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid appointment ID" });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT consultation_id, healthray_investigations, healthray_follow_up, compliance
+       FROM appointments WHERE id = $1`,
+      [id],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Appointment not found" });
+
+    const appt = rows[0];
+    if (!appt.consultation_id)
+      return res.status(400).json({ error: "No consultation linked — mark visit as seen first" });
+
+    const inv = (appt.healthray_investigations || []).map((t) =>
+      typeof t === "string"
+        ? { name: t, urgency: "routine" }
+        : { name: t.name || String(t), urgency: t.urgency || "routine" },
+    );
+    const followUp = appt.healthray_follow_up || null;
+    const c = appt.compliance || {};
+    const dietLifestyle = [c.diet, c.exercise, c.stress].filter(Boolean);
+
+    // Merge into existing con_data (preserve other fields)
+    await pool.query(
+      `UPDATE consultations
+       SET con_data = con_data ||
+         jsonb_build_object(
+           'investigations_to_order', $1::jsonb,
+           'follow_up', $2::jsonb,
+           'diet_lifestyle', $3::jsonb
+         ),
+         updated_at = NOW()
+       WHERE id = $4`,
+      [
+        JSON.stringify(inv),
+        followUp ? JSON.stringify(followUp) : "null",
+        JSON.stringify(dietLifestyle),
+        appt.consultation_id,
+      ],
+    );
+
+    res.json({
+      success: true,
+      consultationId: appt.consultation_id,
+      investigations: inv,
+      followUp,
+      dietLifestyle,
+    });
+  } catch (e) {
+    handleError(res, e, "Resync con_data");
+  }
+});
+
 // ── PATCH /api/appointments/:id — status / category / doctor ─────────────────
 // When status → "seen", creates a consultation and links all OPD data
 router.patch("/appointments/:id", async (req, res) => {
@@ -443,6 +526,23 @@ router.patch("/appointments/:id", async (req, res) => {
             biomarkers,
             opd_notes: notes.join("\n"),
             medications_confirmed: opdMeds,
+            investigations_to_order: (() => {
+              const inv = appt.healthray_investigations || [];
+              return inv.map((t) =>
+                typeof t === "string"
+                  ? { name: t, urgency: "routine" }
+                  : { name: t.name || t.test || String(t), urgency: t.urgency || "routine" },
+              );
+            })(),
+            diet_lifestyle: (() => {
+              const c = appt.compliance || {};
+              const lines = [];
+              if (c.diet) lines.push(c.diet);
+              if (c.exercise) lines.push(c.exercise);
+              if (c.stress) lines.push(c.stress);
+              return lines;
+            })(),
+            follow_up: appt.healthray_follow_up || null,
           }),
           conTranscript || null,
         ],

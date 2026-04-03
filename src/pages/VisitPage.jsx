@@ -27,6 +27,7 @@ import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import {
   AddLabModal,
+  AddSymptomModal,
   AddDiagnosisModal,
   DiagnosisNoteModal,
   AddMedicationModal,
@@ -55,45 +56,48 @@ const syDotColor = (s) => {
   if (v.includes("resolved") || v === "controlled") return "var(--green)";
   return "var(--amber)";
 };
+const sySelStyle = (s) => {
+  if (!s) return {};
+  const v = s.toLowerCase();
+  if (v.includes("resolved") || v === "controlled")
+    return { color: "var(--green)", borderColor: "var(--grn-bd)" };
+  if (v === "improving") return { color: "var(--primary)", borderColor: "var(--primary)" };
+  if (v === "got worse") return { color: "var(--red)", borderColor: "var(--red)" };
+  return {};
+};
 
-function VisitSymptomsSection({ consultations }) {
-  const con = consultations[0]?.con_data;
-  const mo = consultations[0]?.mo_data;
-  const symptoms =
-    con?.symptoms || con?.chief_complaints || mo?.symptoms || mo?.chief_complaints || [];
+function VisitSymptomsSection({ symptoms = [], onAddSymptom, onStatusChange }) {
   return (
     <div className="sc" id="symptoms">
       <div className="sch">
         <div className="sct">
           <div className="sci ic-a">🩹</div>Symptoms &amp; Concerns
         </div>
+        <button className="bx bx-p" onClick={onAddSymptom}>
+          + Add Symptom
+        </button>
       </div>
       <div className="scb">
         {symptoms.length > 0 ? (
           <>
             <div className="subsec">Active / Historical — Update Status</div>
             <div className="syg">
-              {symptoms.map((sy, i) => {
-                const name =
-                  typeof sy === "string" ? sy : sy.name || sy.symptom || sy.complaint || String(sy);
-                const meta =
-                  typeof sy === "object"
-                    ? sy.notes || sy.meta || sy.duration || sy.since || ""
-                    : "";
-                const status = typeof sy === "object" ? sy.status || "Mild" : "Mild";
+              {symptoms.map((sy) => {
+                const meta = [sy.related_to, sy.since_date ? `Since ${sy.since_date}` : ""]
+                  .filter(Boolean)
+                  .join(" · ");
                 return (
-                  <div key={i} className="syi">
-                    <div className="sy-dot" style={{ background: syDotColor(status) }} />
+                  <div key={sy.id} className="syi">
+                    <div className="sy-dot" style={{ background: syDotColor(sy.status) }} />
                     <div style={{ flex: 1 }}>
-                      <div className="sy-nm">{name}</div>
+                      <div className="sy-nm">{sy.label}</div>
                       {meta && <div className="sy-meta">{meta}</div>}
                     </div>
                     <select
                       className="sy-sel"
-                      defaultValue={status}
-                      style={{
-                        color: syDotColor(status) === "var(--green)" ? "var(--green)" : undefined,
-                      }}
+                      value={sy.status}
+                      style={sySelStyle(sy.status)}
+                      onChange={(e) => onStatusChange(sy.id, e.target.value)}
                     >
                       {SY_STATUS_OPTS.map((o) => (
                         <option key={o}>{o}</option>
@@ -109,7 +113,7 @@ function VisitSymptomsSection({ consultations }) {
             No symptoms or concerns recorded for this visit
           </div>
         )}
-        <div className="addr">
+        <div className="addr" onClick={onAddSymptom}>
           <span style={{ fontSize: 16, color: "var(--t3)" }}>+</span>
           <span className="addr-lbl">Add new symptom or concern for this visit</span>
         </div>
@@ -180,6 +184,32 @@ export default function VisitPage() {
   const [modal, setModal] = useState(null); // { type, data? }
   const [labExtractSaving, setLabExtractSaving] = useState(false);
   const scrollRef = useRef(null);
+  const noteTimerRef = useRef(null);
+
+  const saveDoctorNote = useCallback(
+    (note) => {
+      clearTimeout(noteTimerRef.current);
+      noteTimerRef.current = setTimeout(async () => {
+        try {
+          await api.patch(`/api/visit/${dbPatientId}/doctor-note`, {
+            note,
+            appointment_id: opdApptId || null,
+          });
+        } catch {
+          // silent fail — note will retry on next keystroke
+        }
+      }, 1200);
+    },
+    [dbPatientId, opdApptId],
+  );
+
+  const handleDoctorNoteChange = useCallback(
+    (val) => {
+      setDoctorNote(val);
+      saveDoctorNote(val);
+    },
+    [saveDoctorNote],
+  );
 
   // ── Redirect if no patient ──
   useEffect(() => {
@@ -192,9 +222,13 @@ export default function VisitPage() {
     (async () => {
       setLoading(true);
       try {
-        const { data: d } = await api.get(`/api/visit/${dbPatientId}`);
+        const { data: d } = await api.get(
+          `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
+        );
         setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
-        if (d.consultations?.[0]?.con_data?.assessment_summary) {
+        if (d.appt_doctor_note) {
+          setDoctorNote(d.appt_doctor_note);
+        } else if (d.consultations?.[0]?.con_data?.assessment_summary) {
           setDoctorNote(d.consultations[0].con_data.assessment_summary);
         }
       } catch {
@@ -207,12 +241,14 @@ export default function VisitPage() {
   // ── Refresh data after mutations ──
   const refreshData = useCallback(async () => {
     try {
-      const { data: d } = await api.get(`/api/visit/${dbPatientId}`);
+      const { data: d } = await api.get(
+        `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
+      );
       setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
     } catch {
       /* silent */
     }
-  }, [dbPatientId]);
+  }, [dbPatientId, opdApptId]);
 
   const mutations = useVisitMutations(dbPatientId, refreshData, opdApptId);
   const closeModal = useCallback(() => setModal(null), []);
@@ -445,6 +481,7 @@ export default function VisitPage() {
     loggedData,
     summary,
     vitals,
+    appt_plan,
   } = data;
   const {
     latestV,
@@ -472,6 +509,7 @@ export default function VisitPage() {
         onEndVisit={hasActiveVisit ? openEndModal : null}
         onPrint={handlePrint}
         visitStart={visitStart}
+        hasActiveVisit={hasActiveVisit}
       />
 
       <VisitStrip
@@ -560,7 +598,11 @@ export default function VisitPage() {
                 onOpenAI={() => setAiOpen(true)}
                 onAddLab={() => setModal({ type: "addLab" })}
               />
-              {/* <VisitSymptomsSection consultations={consultations} /> */}
+              <VisitSymptomsSection
+                symptoms={data.symptoms || []}
+                onAddSymptom={() => setModal({ type: "addSymptom" })}
+                onStatusChange={(id, status) => mutations.updateSymptomStatus(id, status)}
+              />
               <VisitDiagnoses
                 activeDx={activeDx}
                 onAddDiagnosis={() => setModal({ type: "addDiagnosis" })}
@@ -576,9 +618,10 @@ export default function VisitPage() {
               />
               <VisitPlan
                 consultations={consultations}
+                apptPlan={appt_plan}
                 goals={goals}
                 doctorNote={doctorNote}
-                onDoctorNoteChange={setDoctorNote}
+                onDoctorNoteChange={handleDoctorNoteChange}
                 patient={patient}
                 doctor={doctor}
                 activeDx={activeDx}
@@ -587,6 +630,7 @@ export default function VisitPage() {
                 latestVitals={latestV}
                 summary={summary}
                 labResults={labResults}
+                symptoms={data.symptoms || []}
                 onEndVisit={hasActiveVisit ? openEndModal : null}
                 referrals={referrals || []}
                 onAddReferral={() => setModal({ type: "addReferral" })}
@@ -950,6 +994,17 @@ export default function VisitPage() {
       )}
 
       {/* ── Action Modals ── */}
+      {modal?.type === "addSymptom" && (
+        <AddSymptomModal
+          activeDx={activeDx}
+          activeMeds={uniqueActiveMeds}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.addSymptom(d);
+            if (r.success) closeModal();
+          }}
+        />
+      )}
       {modal?.type === "addLab" && (
         <AddLabModal
           onClose={closeModal}
@@ -1091,6 +1146,7 @@ export default function VisitPage() {
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.updateFollowUp(d);
+
             if (r.success) closeModal();
           }}
         />

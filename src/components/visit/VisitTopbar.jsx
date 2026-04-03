@@ -90,7 +90,6 @@ const VisitTopbar = memo(function VisitTopbar({
   visitStart,
   hasActiveVisit,
 }) {
-  console.log("latest vitals in topbar", latestVitals);
   const today = new Date().toISOString().split("T")[0];
   return (
     <div className="topbar">

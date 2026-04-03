@@ -196,6 +196,8 @@ async function syncAppointment(appt, localDoctorName) {
     healthrayMedications: [],
     healthrayLabs: [],
     healthrayAdvice: null,
+    healthrayInvestigations: [],
+    healthrayFollowUp: null,
   };
 
   if (doctorId) {
@@ -219,6 +221,8 @@ async function syncAppointment(appt, localDoctorName) {
           clinical.healthrayMedications = parsed.medications || [];
           clinical.healthrayLabs = parsed.labs || [];
           clinical.healthrayAdvice = parsed.advice || null;
+          clinical.healthrayInvestigations = parsed.investigations_to_order || [];
+          clinical.healthrayFollowUp = parsed.follow_up || null;
 
           // Merge vitals
           const v = parsed.vitals || {};
@@ -284,6 +288,8 @@ async function syncAppointment(appt, localDoctorName) {
     healthrayMedications: clinical.healthrayMedications,
     healthrayLabs: clinical.healthrayLabs,
     healthrayAdvice: clinical.healthrayAdvice,
+    healthrayInvestigations: clinical.healthrayInvestigations,
+    healthrayFollowUp: clinical.healthrayFollowUp,
   });
 
   // ── Sync to normalized tables + documents ──

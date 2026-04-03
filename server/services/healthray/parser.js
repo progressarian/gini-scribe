@@ -84,6 +84,8 @@ export function repairAndParseJSON(raw) {
       "previous_medications",
       "vitals",
       "lifestyle",
+      "investigations_to_order",
+      "follow_up",
       "advice",
     ];
     for (const key of keys) {
@@ -115,6 +117,8 @@ Return JSON with these keys:
   "previous_medications": [{"name": "...", "dose": "...", "frequency": "...", "status": "stopped/changed", "reason": "..."}],
   "vitals": {"height": null, "weight": null, "bmi": null, "bpSys": null, "bpDia": null, "waist": null, "bodyFat": null},
   "lifestyle": {"diet": null, "exercise": null, "smoking": null, "alcohol": null, "stress": null},
+  "investigations_to_order": [{"name": "...", "urgency": "urgent/routine/next_visit"}],
+  "follow_up": {"date": null, "timing": null, "notes": null},
   "advice": "..."
 }
 
@@ -132,6 +136,8 @@ STRICT Rules:
   - alcohol: ONLY if explicitly mentioned. Null if not found
   - stress: ONLY if explicitly mentioned. Null if not found
 - For advice: glucose monitoring instructions, TSH targets, medication holds, insulin dose adjustments, other clinical instructions. Null if not found
+- For investigations_to_order: extract ALL tests/investigations ordered or recommended. Set urgency to "urgent" if marked urgent, "next_visit" if scheduled for next visit, "routine" otherwise. [] if none found
+- For follow_up: extract follow-up date (YYYY-MM-DD if exact date given), timing (e.g. "1 month", "3 months"), and any notes. Null fields if not found
 - Only include the LATEST follow-up data if multiple follow-ups exist
 - Return ONLY valid JSON, no markdown`;
 

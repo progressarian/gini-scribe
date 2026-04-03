@@ -95,6 +95,35 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData],
   );
 
+  const addSymptom = useCallback(
+    async (data) => {
+      try {
+        await api.post(`/api/visit/${patientId}/symptom`, { ...data, ...extra });
+        toast("Symptom added", "success");
+        await refreshData();
+        return { success: true };
+      } catch {
+        toast("Failed to add symptom", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData, extra],
+  );
+
+  const updateSymptomStatus = useCallback(
+    async (id, status) => {
+      try {
+        await api.patch(`/api/visit/${patientId}/symptom/${id}`, { status });
+        await refreshData();
+        return { success: true };
+      } catch {
+        toast("Failed to update symptom status", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   const addReferral = useCallback(
     async (data) => {
       try {
@@ -144,6 +173,8 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     addLab,
     addDiagnosis,
     updateDiagnosis,
+    addSymptom,
+    updateSymptomStatus,
     addMedication,
     editMedication,
     stopMedication,

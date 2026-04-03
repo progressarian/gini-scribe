@@ -278,6 +278,7 @@ export const BiomarkerCard = memo(function BiomarkerCard({
   goalLabel,
   history,
   color,
+  valueColor,
 }) {
   const cls =
     trendDir === "good" ? "imp" : trendDir === "bad" ? "bad" : trendDir === "warn" ? "wrn" : "ok";
@@ -299,7 +300,16 @@ export const BiomarkerCard = memo(function BiomarkerCard({
         )}
       </div>
       <div className="bmvr">
-        <span className="bmv" style={trendDir === "bad" ? { color: "var(--red)" } : undefined}>
+        <span
+          className="bmv"
+          style={
+            valueColor
+              ? { color: valueColor }
+              : trendDir === "bad"
+                ? { color: "var(--red)" }
+                : undefined
+          }
+        >
           {value ?? "—"}
         </span>
         {unit && <span className="bmu">{unit}</span>}

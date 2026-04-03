@@ -1,6 +1,6 @@
 import { memo, useCallback } from "react";
 import { fmtDate, fmtDateLong, getLabVal, MED_COLORS } from "./helpers";
-import { TIME_SLOTS, getTimeSlot, buildMedCardPrintHTML } from "./VisitMedCard";
+import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard";
 
 function buildRxHTML(
   patient,
@@ -162,6 +162,7 @@ const DX_STATUS_ICON = (status) => {
 
 const VisitPlan = memo(function VisitPlan({
   consultations,
+  apptPlan,
   goals,
   doctorNote,
   onDoctorNoteChange,
@@ -179,10 +180,15 @@ const VisitPlan = memo(function VisitPlan({
   onOpenTemplate,
   onMedCardTab,
   referrals,
+  symptoms,
 }) {
   const latestCon = consultations[0]?.con_data;
-  const tests = latestCon?.investigations_to_order || latestCon?.tests_ordered || [];
-  const followUp = latestCon?.follow_up;
+  const tests = latestCon?.investigations_to_order?.length
+    ? latestCon.investigations_to_order
+    : latestCon?.tests_ordered?.length
+      ? latestCon.tests_ordered
+      : apptPlan?.investigations_to_order || [];
+  const followUp = latestCon?.follow_up || apptPlan?.follow_up;
   const today = new Date().toISOString().split("T")[0];
   const hba1c = getLabVal(labResults, "HbA1c");
   const fbs = getLabVal(labResults, "FBS");
@@ -204,9 +210,10 @@ const VisitPlan = memo(function VisitPlan({
   const handlePrintMedCard = useCallback(() => {
     const grouped = {};
     activeMeds.forEach((m, i) => {
-      const slot = getTimeSlot(m);
-      if (!grouped[slot]) grouped[slot] = [];
-      grouped[slot].push({ ...m, _idx: i });
+      getTimeSlots(m).forEach((slot) => {
+        if (!grouped[slot]) grouped[slot] = [];
+        grouped[slot].push({ ...m, _idx: i });
+      });
     });
     const slotsWithMeds = TIME_SLOTS.filter((s) => grouped[s.key]?.length > 0);
     const html = buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMeds);
@@ -268,6 +275,13 @@ const VisitPlan = memo(function VisitPlan({
     (m) => m.stopped_date && m.stopped_date.startsWith(new Date().toISOString().slice(0, 7)),
   );
 
+  const getInitials = (name) => {
+    if (!name) return "EN";
+    const parts = name.replace(/^Dr\.\s*/i, "").split(" ");
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+  };
+
   return (
     <>
       {/* PLAN */}
@@ -277,7 +291,7 @@ const VisitPlan = memo(function VisitPlan({
             <div className="sci ic-b">📝</div>Plan for This Visit
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn" onClick={() => onOpenTemplate("insulin_titration")}>
+            <button className="btn" onClick={() => onOpenTemplate(null)}>
               📋 Templates
             </button>
             <button className="bx bx-p" onClick={onAddReferral}>
@@ -303,75 +317,159 @@ const VisitPlan = memo(function VisitPlan({
               )}
             </div>
             <div className="plc">
-              <div className="plct">🏃 Lifestyle Instructions</div>
-              {latestCon?.diet_lifestyle?.length > 0 ? (
-                latestCon.diet_lifestyle.map((d, i) => (
-                  <div key={i} style={{ fontSize: 12, color: "var(--t2)", lineHeight: 1.9 }}>
-                    {typeof d === "string" ? d : d.instruction || JSON.stringify(d)}
+              {/* Referrals */}
+              {referrals.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="subsec" style={{ fontWeight: 600, marginBottom: 8 }}>
+                    Referrals
                   </div>
-                ))
-              ) : (
-                <div style={{ fontSize: 12, color: "var(--t3)" }}>
-                  No lifestyle instructions recorded
+                  {referrals.map((ref) => (
+                    <div
+                      key={ref.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 12,
+                        padding: "12px",
+                        background: "var(--bg, #ffffff)",
+                        border: "1px solid var(--border, #e5e7eb)",
+                        borderRadius: 8,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <div
+                        style={{
+                          minWidth: 40,
+                          height: 40,
+                          borderRadius: 8,
+                          backgroundColor: "var(--primary, #5c59f5)",
+                          color: "#ffffff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontWeight: 600,
+                          fontSize: 16,
+                        }}
+                      >
+                        {getInitials(ref.doctor_name)}
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text, #111)" }}>
+                          {ref.doctor_name}
+                        </div>
+                        <div style={{ fontSize: 13, color: "var(--t3, #6b7280)" }}>
+                          {ref.speciality}
+                        </div>
+                        {ref.reason && (
+                          <div style={{ fontSize: 13, color: "var(--primary, #5c59f5)" }}>
+                            {ref.reason}
+                          </div>
+                        )}
+
+                        {/* Status Badge (Commented Out)
+                        <span
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            background: ref.status === "pending" ? "var(--amb-lt)" : "var(--grn-lt)",
+                            color: ref.status === "pending" ? "var(--amber)" : "var(--green)",
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: ".3px",
+                            marginTop: 4,
+                            alignSelf: "flex-start"
+                          }}
+                        >
+                          {ref.status || "pending"}
+                        </span>
+                      */}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-              {followUp && (
+
+              <div
+                className="addr"
+                onClick={onAddReferral}
+                style={{
+                  marginTop: 8,
+                  marginBottom: 16,
+                  padding: "10px",
+                  border: "1px dashed var(--border, #cbd5e1)",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ fontSize: 18, color: "var(--t3, #6b7280)", lineHeight: 1 }}>+</span>
+                <span
+                  className="addr-lbl"
+                  style={{ fontSize: 13, color: "var(--primary, #5c59f5)", fontWeight: 500 }}
+                >
+                  Add referral
+                </span>
+              </div>
+
+              <div className="m-5" style={{ height: 16 }}></div>
+
+              <div className="plct" style={{ fontWeight: 600, marginBottom: 12 }}>
+                🏃 Lifestyle Instructions
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {latestCon?.diet_lifestyle?.length > 0 || apptPlan?.diet_lifestyle?.length > 0 ? (
+                  (latestCon?.diet_lifestyle?.length > 0
+                    ? latestCon.diet_lifestyle
+                    : apptPlan.diet_lifestyle
+                  ).map((d, i) => {
+                    const text = typeof d === "string" ? d : d.instruction || JSON.stringify(d);
+
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 8,
+                          fontSize: 13,
+                          color: "var(--t2, #374151)",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        <span>
+                          {d.icon ||
+                            (text.toLowerCase().includes("diet")
+                              ? "🍽️"
+                              : text.toLowerCase().includes("step")
+                                ? "👣"
+                                : "💉")}
+                        </span>
+
+                        <div dangerouslySetInnerHTML={{ __html: text }} />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--t3, #6b7280)" }}>
+                    No lifestyle instructions recorded
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          {/* {followUp && (
                 <div style={{ marginTop: 10 }}>
                   <div className="plct">Follow-up</div>
                   <div style={{ fontSize: 12, color: "var(--t2)" }}>
                     {followUp.date ? fmtDateLong(followUp.date) : followUp.notes || "Scheduled"}
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* Referrals */}
-          {referrals.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div className="subsec">Referrals</div>
-              {referrals.map((ref) => (
-                <div
-                  key={ref.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 10px",
-                    background: "var(--bg)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 6,
-                    marginBottom: 4,
-                    fontSize: 12,
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: "var(--text)" }}>{ref.doctor_name}</span>
-                  <span style={{ color: "var(--t3)" }}>·</span>
-                  <span style={{ color: "var(--primary)" }}>{ref.speciality}</span>
-                  {ref.reason && (
-                    <>
-                      <span style={{ color: "var(--t3)" }}>·</span>
-                      <span style={{ color: "var(--t2)", flex: 1 }}>{ref.reason}</span>
-                    </>
-                  )}
-                  <span
-                    style={{
-                      fontSize: 10,
-                      padding: "2px 8px",
-                      borderRadius: 10,
-                      background: ref.status === "pending" ? "var(--amb-lt)" : "var(--grn-lt)",
-                      color: ref.status === "pending" ? "var(--amber)" : "var(--green)",
-                      fontWeight: 600,
-                      textTransform: "uppercase",
-                      letterSpacing: ".3px",
-                    }}
-                  >
-                    {ref.status || "pending"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+              )} */}
 
           <div className="subsec">Templates &amp; Patient Instructions</div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 12 }}>
@@ -399,30 +497,6 @@ const VisitPlan = memo(function VisitPlan({
             placeholder="Add your notes for this visit..."
             style={{ marginBottom: 12 }}
           />
-
-          {goals.length > 0 && (
-            <div className="nv-row" style={{ marginBottom: 12 }}>
-              <div>
-                <div
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: "#065f46",
-                    textTransform: "uppercase",
-                    letterSpacing: ".5px",
-                  }}
-                >
-                  Goals Set
-                </div>
-                <div style={{ fontSize: 12, color: "#047857" }}>
-                  {goals
-                    .slice(0, 3)
-                    .map((g) => `${g.marker}: ${g.current_value} → ${g.target_value}`)
-                    .join(" · ")}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Next Visit row */}
           <div className="nv-row">
@@ -454,22 +528,171 @@ const VisitPlan = memo(function VisitPlan({
         </div>
       </div>
 
-      {/* CHANGES MADE THIS VISIT — commented out
-      <div className="sc" id="changes" style={{ border: "2px solid var(--pri-lt)" }}>
-        <div className="sch" style={{ background: "var(--pri-lt)" }}>
-          <div className="sct" style={{ color: "var(--primary)" }}>
-            <div className="sci" style={{ background: "var(--primary)", color: "white" }}>✏️</div>
-            Changes Made This Visit
+      {/* CHANGES MADE THIS VISIT */}
+      {(() => {
+        const newMeds = activeMeds.filter(
+          (m) => m.prescribed_date && m.prescribed_date.startsWith(today),
+        );
+        const stoppedToday = (stoppedMeds || []).filter(
+          (m) => m.stopped_date && m.stopped_date.startsWith(today),
+        );
+        const continuedMeds = activeMeds.filter(
+          (m) => !m.prescribed_date || !m.prescribed_date.startsWith(today),
+        );
+
+        return (
+          <div className="sc" id="changes" style={{ border: "2px solid var(--pri-lt)" }}>
+            <div className="sch" style={{ background: "var(--pri-lt)" }}>
+              <div className="sct" style={{ color: "var(--primary)" }}>
+                <div className="sci" style={{ background: "var(--primary)", color: "white" }}>
+                  ✏️
+                </div>
+                Changes Made This Visit
+              </div>
+              <span style={{ fontSize: 11, color: "var(--primary)", fontWeight: 600 }}>
+                Auto-updates as you make changes above
+              </span>
+            </div>
+            <div className="scb">
+              <div className="chg-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+                {/* SYMPTOMS & CONCERNS */}
+                <div>
+                  <div className="chg-sec-lbl">Symptoms &amp; Concerns</div>
+                  {(symptoms || []).length > 0 ? (
+                    symptoms.map((sy) => {
+                      const s = (sy.status || "").toLowerCase();
+                      const icon =
+                        s.includes("resolved") || s === "controlled"
+                          ? "✓"
+                          : s === "improving"
+                            ? "○"
+                            : s === "got worse"
+                              ? "↑"
+                              : s === "still present"
+                                ? "·"
+                                : "·";
+                      const color =
+                        s.includes("resolved") || s === "controlled"
+                          ? "var(--green)"
+                          : s === "improving"
+                            ? "var(--primary)"
+                            : s === "got worse"
+                              ? "var(--red)"
+                              : "var(--amber)";
+                      return (
+                        <div key={sy.id} className="chg-line">
+                          <span style={{ color, marginRight: 5 }}>{icon}</span>
+                          {sy.label}
+                          {sy.status ? (
+                            <span style={{ color: "var(--t3)" }}> — {sy.status}</span>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="chg-line" style={{ color: "var(--t3)" }}>
+                      No symptoms recorded
+                    </div>
+                  )}
+                </div>
+
+                {/* DIAGNOSIS UPDATES */}
+                <div>
+                  <div className="chg-sec-lbl">Diagnosis Updates</div>
+                  {activeDx.length > 0 ? (
+                    activeDx.map((dx) => {
+                      const { icon, color } = DX_STATUS_ICON(dx.status);
+                      return (
+                        <div key={dx.id} className="chg-line">
+                          <span style={{ color, marginRight: 5 }}>{icon}</span>
+                          {dx.label || dx.diagnosis_id}
+                          {dx.status ? (
+                            <span style={{ color: "var(--t3)" }}> — {dx.status}</span>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="chg-line" style={{ color: "var(--t3)" }}>
+                      No diagnoses recorded
+                    </div>
+                  )}
+                </div>
+
+                {/* MEDICATION CHANGES */}
+                <div>
+                  <div className="chg-sec-lbl">Medication Changes</div>
+                  {continuedMeds.length > 0 && newMeds.length === 0 && stoppedToday.length === 0 ? (
+                    <div className="chg-line">
+                      <span style={{ color: "var(--green)", marginRight: 5 }}>✓</span>
+                      All {continuedMeds.length} med{continuedMeds.length !== 1 ? "s" : ""}{" "}
+                      continued
+                    </div>
+                  ) : (
+                    <>
+                      {continuedMeds.length > 0 && (
+                        <div className="chg-line">
+                          <span style={{ color: "var(--green)", marginRight: 5 }}>✓</span>
+                          {continuedMeds.length} med{continuedMeds.length !== 1 ? "s" : ""}{" "}
+                          continued
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {newMeds.map((m) => (
+                    <div key={m.id} className="chg-line">
+                      <span style={{ color: "var(--primary)", marginRight: 5 }}>+</span>
+                      {m.name}
+                      {m.dose ? ` ${m.dose}` : ""} — added
+                    </div>
+                  ))}
+                  {stoppedToday.map((m) => (
+                    <div key={m.id} className="chg-line">
+                      <span style={{ color: "var(--red)", marginRight: 5 }}>✗</span>
+                      {m.name} — stopped
+                    </div>
+                  ))}
+                  {activeMeds.length === 0 && stoppedToday.length === 0 && (
+                    <div className="chg-line" style={{ color: "var(--t3)" }}>
+                      No medications recorded
+                    </div>
+                  )}
+                </div>
+
+                {/* TESTS & PLAN */}
+                <div>
+                  <div className="chg-sec-lbl">Tests &amp; Plan</div>
+                  {tests.length > 0 ? (
+                    tests.map((t, i) => {
+                      const name = typeof t === "string" ? t : t.name || t.test;
+                      const urgent = t.urgency === "urgent";
+                      return (
+                        <div key={i} className="chg-line">
+                          <span style={{ color: "var(--primary)", marginRight: 5 }}>+</span>
+                          {name}
+                          {urgent ? (
+                            <span style={{ color: "var(--amber)", marginLeft: 4 }}>(urgent)</span>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="chg-line" style={{ color: "var(--t3)" }}>
+                      No tests ordered
+                    </div>
+                  )}
+                  {referrals?.length > 0 && (
+                    <div className="chg-line">
+                      <span style={{ color: "var(--teal)", marginRight: 5 }}>↗</span>
+                      {referrals.length} referral{referrals.length !== 1 ? "s" : ""} added
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-          <span style={{ fontSize: 11, color: "var(--primary)", fontWeight: 600 }}>Auto-updates as you make changes above</span>
-        </div>
-        <div className="scb">
-          <div className="chg-grid">
-            ...
-          </div>
-        </div>
-      </div>
-      */}
+        );
+      })()}
 
       {/* SUMMARY */}
       <div className="sc" id="summary">

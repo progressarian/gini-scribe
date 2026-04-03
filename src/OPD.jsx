@@ -3738,24 +3738,7 @@ function PatientDetail({
                   if (appt.patient_id) {
                     await onPatchStatus(appt.id, "in_visit");
                     sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
-                    sessionStorage.setItem(
-                      "gini_visit_start",
-                      appt.checked_in_at || new Date().toISOString(),
-                    );
-                    setPatient({
-                      name: appt.patient_name || "",
-                      phone: appt.phone || "",
-                      age: appt.age || "",
-                      sex: appt.sex || "Male",
-                      fileNo: appt.file_no || "",
-                      dob: "",
-                      abhaId: "",
-                      healthId: "",
-                      aadhaar: "",
-                      govtId: "",
-                      govtIdType: "",
-                      address: "",
-                    });
+                    sessionStorage.setItem("gini_visit_start", new Date().toISOString());
                     setDbPatientId(appt.patient_id);
                     sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
                     navigate("/visit");

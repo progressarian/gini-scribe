@@ -3,46 +3,114 @@ import { MED_COLORS } from "./helpers";
 
 export const TIME_SLOTS = [
   {
-    key: "before_breakfast",
-    label: "Khaane se pehle (Before Breakfast)",
+    key: "fasting",
+    label: "Khaali pet (Fasting)",
     emoji: "🌅",
+    colorVar: "--teal",
+    bgCls: "teal-lt",
+  },
+  {
+    key: "before_breakfast",
+    label: "Naashte se pehle (Before Breakfast)",
+    emoji: "🌄",
     colorVar: "--primary",
     bgCls: "pri-lt",
   },
-  { key: "morning", label: "Subah (Morning)", emoji: "🌄", colorVar: "--amber", bgCls: "amb-lt" },
   {
-    key: "before_dinner",
-    label: "Dinner se pehle (Before Dinner)",
+    key: "after_breakfast",
+    label: "Naashte ke baad (After Breakfast)",
+    emoji: "☕",
+    colorVar: "--amber",
+    bgCls: "amb-lt",
+  },
+  {
+    key: "before_lunch",
+    label: "Khaane se pehle (Before Lunch)",
     emoji: "🍽️",
     colorVar: "--t3",
     bgCls: "bg",
     border: true,
   },
   {
-    key: "evening",
-    label: "Sham (Evening)",
+    key: "after_lunch",
+    label: "Khaane ke baad (After Lunch)",
+    emoji: "🍛",
+    colorVar: "--green",
+    bgCls: "grn-lt",
+  },
+  {
+    key: "before_dinner",
+    label: "Dinner se pehle (Before Dinner)",
     emoji: "🌙",
     colorVar: "--t3",
     bgCls: "bg",
     border: true,
   },
-  { key: "night", label: "Raat (Night)", emoji: "🌟", colorVar: "--purple", bgCls: "pur-lt" },
+  {
+    key: "after_dinner",
+    label: "Dinner ke baad (After Dinner)",
+    emoji: "🌆",
+    colorVar: "--t3",
+    bgCls: "bg",
+    border: true,
+  },
+  {
+    key: "bedtime",
+    label: "Sone se pehle (Bedtime)",
+    emoji: "💤",
+    colorVar: "--purple",
+    bgCls: "pur-lt",
+  },
   { key: "weekly", label: "Weekly", emoji: "📅", colorVar: "--purple", bgCls: "pur-lt" },
 ];
 
-export function getTimeSlot(med) {
+// Returns an ARRAY of slot keys — a medicine can appear in multiple slots
+export function getTimeSlots(med) {
   const t = (med.timing || "").toLowerCase();
   const f = (med.frequency || "").toLowerCase();
+  const slots = new Set();
+
+  // Explicit timing keywords
+  if (t.includes("fasting")) slots.add("fasting");
   if (t.includes("before breakfast") || (t.includes("before food") && t.includes("morning")))
-    return "before_breakfast";
+    slots.add("before_breakfast");
+  if (t.includes("after breakfast") || t.includes("with breakfast")) slots.add("after_breakfast");
+  if (t.includes("before lunch")) slots.add("before_lunch");
+  if (t.includes("after lunch") || t.includes("with lunch")) slots.add("after_lunch");
   if (t.includes("before dinner") || (t.includes("before food") && t.includes("evening")))
-    return "before_dinner";
-  if (t.includes("morning") || t.includes("am") || f.includes("morning")) return "morning";
-  if (t.includes("night") || t.includes("pm") || t.includes("bedtime") || f.includes("night"))
-    return "night";
-  if (t.includes("evening") || t.includes("dinner")) return "evening";
-  if (f.includes("weekly") || f.includes("week")) return "weekly";
-  return "morning";
+    slots.add("before_dinner");
+  if (t.includes("after dinner") || t.includes("with dinner")) slots.add("after_dinner");
+  if (
+    t.includes("bedtime") ||
+    t.includes("at bedtime") ||
+    t.includes("before bed") ||
+    t.includes("night")
+  )
+    slots.add("bedtime");
+  if (t.includes("morning") || t.includes("am")) slots.add("after_breakfast");
+  if (t.includes("evening")) slots.add("after_dinner");
+  if (f.includes("weekly") || f.includes("week")) slots.add("weekly");
+
+  // Frequency-based inference when no explicit timing matched
+  if (slots.size === 0) {
+    if (f.includes("tds") || f.includes("tid") || f.includes("three")) {
+      slots.add("after_breakfast");
+      slots.add("after_lunch");
+      slots.add("after_dinner");
+    } else if (f.includes("bd") || f.includes("twice")) {
+      slots.add("after_breakfast");
+      slots.add("after_dinner");
+    } else if (f.includes("od") || f.includes("once") || f.includes("hs"))
+      slots.add("after_breakfast");
+    else slots.add("after_breakfast"); // fallback
+  }
+
+  return [...slots];
+}
+
+// Kept for backward compatibility — returns first slot only
+export function getTimeSlot(med) {
+  return getTimeSlots(med)[0];
 }
 
 export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMeds) {
@@ -53,11 +121,14 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
   });
 
   const slotColors = {
+    fasting: { color: "#0e7490", bg: "#ecfeff" },
     before_breakfast: { color: "#009e8c", bg: "#e6f6f4" },
-    morning: { color: "#d97a0a", bg: "#fef6e6" },
+    after_breakfast: { color: "#d97a0a", bg: "#fef6e6" },
+    before_lunch: { color: "#6b7d90", bg: "#f0f4f7" },
+    after_lunch: { color: "#16a34a", bg: "#f0fdf4" },
     before_dinner: { color: "#6b7d90", bg: "#f0f4f7" },
-    evening: { color: "#6b7d90", bg: "#f0f4f7" },
-    night: { color: "#7c3aed", bg: "#f5f3ff" },
+    after_dinner: { color: "#6b7d90", bg: "#f0f4f7" },
+    bedtime: { color: "#7c3aed", bg: "#f5f3ff" },
     weekly: { color: "#7c3aed", bg: "#f5f3ff" },
   };
 
@@ -157,12 +228,14 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
 const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
   const cardRef = useRef(null);
 
-  // Group meds by time slot
+  // Group meds by time slot — one med can appear in multiple slots
   const grouped = {};
   activeMeds.forEach((m, i) => {
-    const slot = getTimeSlot(m);
-    if (!grouped[slot]) grouped[slot] = [];
-    grouped[slot].push({ ...m, _idx: i });
+    const slots = getTimeSlots(m);
+    slots.forEach((slot) => {
+      if (!grouped[slot]) grouped[slot] = [];
+      grouped[slot].push({ ...m, _idx: i });
+    });
   });
 
   const slotsWithMeds = TIME_SLOTS.filter((s) => grouped[s.key]?.length > 0);

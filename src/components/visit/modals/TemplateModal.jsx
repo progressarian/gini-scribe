@@ -1,10 +1,40 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 
 const TEMPLATES = {
   insulin_titration: {
     title: "Insulin Titration Guide",
     emoji: "📌",
     content: [
+      {
+        heading: "Fasting Blood Sugar (FBS) Based Titration",
+        items: [
+          "FBS > 180 mg/dL → Increase dose by 4 units",
+          "FBS 130–180 mg/dL → Increase dose by 2 units",
+          "FBS 100–130 mg/dL → No change (maintain current dose)",
+          "FBS 70–100 mg/dL → Decrease dose by 2 units",
+          "FBS < 70 mg/dL → Decrease dose by 4 units & contact doctor",
+        ],
+      },
+      {
+        heading: "Important Instructions",
+        items: [
+          "Check your fasting sugar every morning before breakfast",
+          "Adjust dose every 3 days based on above chart",
+          "Always keep sugar/glucose tablets with you",
+          "If sugar drops below 70 — eat 3 glucose tablets immediately",
+          "Do not skip meals after taking insulin",
+          "Store insulin in refrigerator (2–8°C), never freeze",
+        ],
+      },
+      {
+        heading: "When to Call Doctor",
+        items: [
+          "Blood sugar stays above 250 mg/dL for 2 days",
+          "Blood sugar drops below 70 mg/dL more than once a week",
+          "You feel dizzy, shaky, or confused",
+          "You are unwell, vomiting, or unable to eat",
+        ],
+      },
       {
         heading: "Fasting Blood Sugar (FBS) Based Titration",
         items: [
@@ -282,11 +312,31 @@ function buildTemplateWhatsAppText(template) {
   return lines.join("\n");
 }
 
+const TEMPLATE_META = {
+  insulin_titration: {
+    dot: "#3b82f6",
+    desc: "Dose adjustment rules based on fasting & post-meal blood sugar",
+  },
+  mounjaro_guide: {
+    dot: "#8b5cf6",
+    desc: "Injection sites, technique, weekly rotation, side effect management",
+  },
+  diet_1000kcal: { dot: "#22c55e", desc: "Meal plan with 60g protein, food list in Hindi/Punjabi" },
+  blood_sugar_log: {
+    dot: "#ef4444",
+    desc: "Daily log sheet for fasting, post-meal and bedtime readings",
+  },
+  fasting_lab: { dot: "#f97316", desc: "Off meds 24h, nothing after 10 PM, sample 8–9 AM" },
+};
+
 const TemplateModal = memo(function TemplateModal({ templateKey, patient, onClose }) {
-  const template = TEMPLATES[templateKey];
-  if (!template) return null;
+  // All hooks must come before any conditional return
+  const [activeKey, setActiveKey] = useState(templateKey || null);
+
+  const template = activeKey ? TEMPLATES[activeKey] : null;
 
   const handlePrint = useCallback(() => {
+    if (!template) return;
     const html = buildTemplatePrintHTML(template, patient);
     const win = window.open("", "_blank");
     if (!win) return;
@@ -299,16 +349,94 @@ const TemplateModal = memo(function TemplateModal({ templateKey, patient, onClos
   }, [template, patient]);
 
   const handleWhatsApp = useCallback(() => {
+    if (!template) return;
     const text = encodeURIComponent(buildTemplateWhatsAppText(template));
     const phone = (patient.phone || patient.mobile || "").replace(/\D/g, "");
     const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
     window.open(url, "_blank");
   }, [template, patient]);
 
+  // Picker view — no template selected yet
+  if (!template) {
+    return (
+      <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="mbox" style={{ maxWidth: 480 }}>
+          <div className="mttl">📋 Add Template</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0 10px" }}>
+            {Object.entries(TEMPLATES).map(([key, tpl]) => {
+              const meta = TEMPLATE_META[key] || {};
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveKey(key)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "12px 14px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--rs)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    width: "100%",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "var(--primary)";
+                    e.currentTarget.style.background = "var(--pri-lt)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "var(--border)";
+                    e.currentTarget.style.background = "var(--card)";
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: meta.dot || "var(--t3)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                      {tpl.emoji} {tpl.title}
+                    </div>
+                    {meta.desc && (
+                      <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>
+                        {meta.desc}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="macts">
+            <button className="btn" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Detail view — specific template selected
   return (
     <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mbox" style={{ maxWidth: 600, maxHeight: "80vh", overflow: "auto" }}>
-        <div className="mttl">
+        <div className="mttl" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!templateKey && (
+            <button
+              className="btn"
+              onClick={() => setActiveKey(null)}
+              style={{ fontSize: 11, padding: "2px 10px" }}
+            >
+              ← Back
+            </button>
+          )}
           {template.emoji} {template.title}
         </div>
         {template.content.map((section, i) => (

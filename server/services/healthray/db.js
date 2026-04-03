@@ -22,6 +22,10 @@ export async function ensureSyncColumns() {
       ADD COLUMN IF NOT EXISTS healthray_labs JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE appointments
       ADD COLUMN IF NOT EXISTS healthray_advice TEXT;
+    ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS healthray_investigations JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS healthray_follow_up JSONB;
     ALTER TABLE doctors
       ADD COLUMN IF NOT EXISTS healthray_id INTEGER;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_healthray
@@ -48,7 +52,7 @@ export async function findAppointmentWithNotes(fileNo, phone, excludeHealthrayId
 export async function findAppointment(healthrayId, fileNo, apptDate) {
   // First try exact healthray_id match
   const { rows } = await pool.query(
-    `SELECT id, patient_id, healthray_clinical_notes, compliance, source FROM appointments WHERE healthray_id = $1`,
+    `SELECT id, patient_id, healthray_clinical_notes, compliance, source, healthray_investigations, healthray_follow_up FROM appointments WHERE healthray_id = $1`,
     [healthrayId],
   );
   if (rows[0]) return rows[0];
@@ -195,6 +199,8 @@ export async function upsertAppointment(existingId, data) {
     healthrayMedications,
     healthrayLabs,
     healthrayAdvice,
+    healthrayInvestigations,
+    healthrayFollowUp,
   } = data;
 
   if (existingId) {
@@ -215,7 +221,9 @@ export async function upsertAppointment(existingId, data) {
         opd_vitals = $2::jsonb, biomarkers = $3::jsonb, compliance = $10::jsonb,
         healthray_clinical_notes = $4, healthray_diagnoses = $5::jsonb,
         healthray_medications = $6::jsonb, healthray_labs = $7::jsonb,
-        healthray_advice = $8, status = COALESCE($9, status), updated_at = NOW()
+        healthray_advice = $8, status = COALESCE($9, status),
+        healthray_investigations = $11::jsonb, healthray_follow_up = $12::jsonb,
+        updated_at = NOW()
        WHERE id = $1 RETURNING id`,
       [
         existingId,
@@ -239,6 +247,8 @@ export async function upsertAppointment(existingId, data) {
         sex,
         notes,
         healthrayId,
+        JSON.stringify(healthrayInvestigations || []),
+        healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
       ],
     );
     return rows[0].id;
@@ -250,8 +260,8 @@ export async function upsertAppointment(existingId, data) {
         appointment_date, time_slot, visit_type, status, is_walkin,
         age, sex, notes, healthray_id, opd_vitals, biomarkers, compliance,
         healthray_clinical_notes, healthray_diagnoses, healthray_medications,
-        healthray_labs, healthray_advice)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22)
+        healthray_labs, healthray_advice, healthray_investigations, healthray_follow_up)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb)
      RETURNING id`,
     [
       patientId,
@@ -276,6 +286,8 @@ export async function upsertAppointment(existingId, data) {
       JSON.stringify(healthrayMedications),
       JSON.stringify(healthrayLabs),
       healthrayAdvice,
+      JSON.stringify(healthrayInvestigations || []),
+      healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
     ],
   );
   return rows[0].id;

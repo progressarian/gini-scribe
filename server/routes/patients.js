@@ -164,7 +164,7 @@ router.get("/patients/:id", async (req, res) => {
     const patient = await pool.query("SELECT * FROM patients WHERE id=$1", [id]);
     if (!patient.rows[0]) return res.status(404).json({ error: "Not found" });
 
-    const [consultations, vitals, meds, labs, diagnoses, docs, consultRx, goals] =
+    const [consultations, vitals, meds, labs, diagnoses, docs, consultRx, goals, latestAppt] =
       await Promise.all([
         pool.query(
           "SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC",
@@ -209,6 +209,12 @@ router.get("/patients/:id", async (req, res) => {
         pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [
           id,
         ]),
+        pool.query(
+          `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers
+           FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
+           ORDER BY appointment_date DESC LIMIT 1`,
+          [id],
+        ),
       ]);
 
     // Deduplicate consultations by visit_date+status
@@ -277,6 +283,15 @@ router.get("/patients/:id", async (req, res) => {
     const patientData = patient.rows[0];
     if (patientData.aadhaar) patientData.aadhaar = decryptAadhaar(patientData.aadhaar);
 
+    const apptPlan = latestAppt.rows[0] || null;
+    const apptCompliance = apptPlan?.compliance || {};
+    const apptBiomarkers = apptPlan?.biomarkers || {};
+    const followUpDate =
+      apptPlan?.healthray_follow_up ||
+      (apptBiomarkers.followup
+        ? { date: apptBiomarkers.followup, notes: null, timing: null }
+        : null);
+
     res.json({
       ...patientData,
       consultations: uniqueConsultations,
@@ -286,6 +301,19 @@ router.get("/patients/:id", async (req, res) => {
       diagnoses: diagnoses.rows,
       documents: allDocs,
       goals: goals.rows,
+      appt_plan: apptPlan
+        ? {
+            investigations_to_order: (apptPlan.healthray_investigations || []).map((t) =>
+              typeof t === "string" ? { name: t, urgency: "routine" } : t,
+            ),
+            follow_up: followUpDate,
+            diet_lifestyle: [
+              apptCompliance.diet,
+              apptCompliance.exercise,
+              apptCompliance.stress,
+            ].filter(Boolean),
+          }
+        : null,
     });
 
     // Auto-sync patient logs from Genie in background

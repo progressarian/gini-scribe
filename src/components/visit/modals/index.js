@@ -1,4 +1,5 @@
 export { default as AddLabModal } from "./AddLabModal";
+export { default as AddSymptomModal } from "./AddSymptomModal";
 export { default as AddDiagnosisModal } from "./AddDiagnosisModal";
 export { default as DiagnosisNoteModal } from "./DiagnosisNoteModal";
 export { default as AddMedicationModal } from "./AddMedicationModal";
