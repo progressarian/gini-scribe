@@ -40,12 +40,32 @@ router.get("/patients/:id/labs", async (req, res) => {
 // Save individual lab result
 router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) => {
   try {
-    const { test_name, result, unit, flag, ref_range, test_date, consultation_id } = req.body;
+    const { test_name, result, unit, flag, ref_range, test_date, consultation_id, source } =
+      req.body;
+      function parseIndianDate(date) {
+  if (!date) return null;
+
+  // Already ISO
+  if (date.includes("-")) return date;
+
+  const parts = date.split("/");
+
+  if (parts.length === 3) {
+    let [day, month, year] = parts;
+
+    if (year.length === 2) year = "20" + year;
+
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  return date;
+}
+
     const numericResult = num(result);
     const resultText = numericResult === null && result ? String(result) : null;
     const r = await pool.query(
-      `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, result_text, unit, flag, ref_range, test_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, result_text, unit, flag, ref_range, test_date, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
         req.params.id,
         n(consultation_id),
@@ -56,7 +76,9 @@ router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) =>
         n(unit),
         n(flag) || "N",
         n(ref_range),
-        n(test_date) || new Date().toISOString().split("T")[0],
+       parseIndianDate(test_date) || new Date().toISOString().split("T")[0],
+
+        (source || "lab").slice(0, 50),
       ],
     );
     res.json(r.rows[0]);

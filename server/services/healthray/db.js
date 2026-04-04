@@ -28,6 +28,12 @@ export async function ensureSyncColumns() {
       ADD COLUMN IF NOT EXISTS healthray_follow_up JSONB;
     ALTER TABLE doctors
       ADD COLUMN IF NOT EXISTS healthray_id INTEGER;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS waist REAL;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS body_fat REAL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_healthray
       ON appointments(healthray_id) WHERE healthray_id IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_healthray
@@ -222,7 +228,7 @@ export async function upsertAppointment(existingId, data) {
         healthray_clinical_notes = $4, healthray_diagnoses = $5::jsonb,
         healthray_medications = $6::jsonb, healthray_labs = $7::jsonb,
         healthray_advice = $8, status = COALESCE($9, status),
-        healthray_investigations = $11::jsonb, healthray_follow_up = $12::jsonb,
+        healthray_investigations = $22::jsonb, healthray_follow_up = $23::jsonb,
         updated_at = NOW()
        WHERE id = $1 RETURNING id`,
       [
@@ -293,6 +299,49 @@ export async function upsertAppointment(existingId, data) {
   return rows[0].id;
 }
 
+// Source priority — lower number wins
+const SOURCE_PRIORITY = {
+  opd: 1,
+  report_extract: 2,
+  lab_healthray: 3,
+  vitals_sheet: 4,
+  prescription_parsed: 5,
+  healthray: 6,
+};
+
+function normalizeCanonicalName(name) {
+  if (!name) return name;
+
+  const n = name.toLowerCase().trim();
+
+  // FBS
+  if (n.includes("fasting") || n.includes("fbs") || n.includes("fbg")) {
+    return "FBS";
+  }
+
+  // PPBS
+  if (n.includes("post") || n.includes("ppbs") || n.includes("postprandial")) {
+    return "PPBS";
+  }
+
+  // RBS
+  if (n.includes("random") || n.includes("rbs")) {
+    return "RBS";
+  }
+
+  // HbA1c
+  if (n.includes("hba1c") || n.includes("glycated")) {
+    return "HbA1c";
+  }
+
+  // Weight
+  if (n.includes("weight")) {
+    return "Weight";
+  }
+
+  return name;
+}
+
 // ── Sync parsed labs → lab_results table ────────────────────────────────────
 export async function syncLabResults(patientId, apptId, apptDate, labs) {
   if (!patientId || labs.length === 0) return;
@@ -304,20 +353,29 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
   for (const lab of labs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
+    const canonicalName = normalizeCanonicalName(lab.test);
+
+    // Skip if a better-or-equal source already exists for same patient + test + date
+    const existing = await pool.query(
+      `SELECT source FROM lab_results
+       WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+       ORDER BY CASE source
+         WHEN 'opd' THEN 1 WHEN 'report_extract' THEN 2 WHEN 'lab_healthray' THEN 3
+         WHEN 'vitals_sheet' THEN 4 WHEN 'prescription_parsed' THEN 5 WHEN 'healthray' THEN 6 ELSE 7
+       END ASC LIMIT 1`,
+      [patientId, canonicalName, apptDate],
+    );
+    if (existing.rows[0]) {
+      const existingPriority = SOURCE_PRIORITY[existing.rows[0].source] ?? 99;
+      if (existingPriority <= SOURCE_PRIORITY.healthray) continue;
+    }
+
     await pool
       .query(
         `INSERT INTO lab_results
          (patient_id, appointment_id, test_date, test_name, canonical_name, result, unit, source)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'healthray')`,
-        [
-          patientId,
-          apptId,
-          apptDate,
-          lab.test,
-          (lab.test || "").toLowerCase().replace(/\s+/g, "_"),
-          val,
-          lab.unit || null,
-        ],
+        [patientId, apptId, apptDate, lab.test, canonicalName, val, lab.unit || null],
       )
       .catch(() => {});
   }
@@ -352,6 +410,35 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       )
       .catch(() => {});
   }
+}
+
+// ── Sync opdVitals → vitals table ───────────────────────────────────────────
+export async function syncVitals(patientId, apptId, apptDate, opdVitals) {
+  if (!patientId || !opdVitals) return;
+  const w = parseFloat(opdVitals.weight) || null;
+  const bpSys = parseFloat(opdVitals.bpSys) || null;
+  if (!w && !bpSys) return; // nothing useful to write
+
+  await pool.query(`DELETE FROM vitals WHERE appointment_id = $1`, [apptId]);
+  await pool
+    .query(
+      `INSERT INTO vitals
+       (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, weight, height, bmi, waist, body_fat)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        patientId,
+        apptId,
+        apptDate,
+        bpSys,
+        parseFloat(opdVitals.bpDia) || null,
+        w,
+        parseFloat(opdVitals.height) || null,
+        parseFloat(opdVitals.bmi) || null,
+        parseFloat(opdVitals.waist) || null,
+        parseFloat(opdVitals.bodyFat) || null,
+      ],
+    )
+    .catch(() => {});
 }
 
 // ── Sync medical records (documents) ────────────────────────────────────────

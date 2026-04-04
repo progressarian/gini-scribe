@@ -29,6 +29,7 @@ import {
   syncLabResults,
   syncMedications,
   syncDocuments,
+  syncVitals,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 const { log, error } = createLogger("HealthRay Sync");
@@ -293,6 +294,7 @@ async function syncAppointment(appt, localDoctorName) {
   });
 
   // ── Sync to normalized tables + documents ──
+  await syncVitals(patientId, localApptId, apptDate, opdVitals);
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
@@ -300,48 +302,66 @@ async function syncAppointment(appt, localDoctorName) {
   return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };
 }
 
+// ── Helper: run async tasks with limited concurrency ────────────────────────
+async function runBatch(items, concurrency, fn) {
+  const results = [];
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = await Promise.allSettled(items.slice(i, i + concurrency).map(fn));
+    results.push(...batch);
+  }
+  return results;
+}
+
 // ── Run sync for a given date ───────────────────────────────────────────────
-async function runSync(date) {
+// Accepts optional pre-fetched doctors to avoid redundant API calls in range sync
+async function runSync(date, prefetched = null) {
   const startTime = Date.now();
   log("Sync", `Starting for ${date}...`);
 
   try {
     await ensureSyncColumns();
 
-    const rayDoctors = await fetchDoctors();
-    const doctorMap = await syncDoctors(rayDoctors);
-    log("Sync", `${doctorMap.size} doctors mapped`);
+    const rayDoctors = prefetched?.rayDoctors || (await fetchDoctors());
+    const doctorMap = prefetched?.doctorMap || (await syncDoctors(rayDoctors));
+    if (!prefetched) log("Sync", `${doctorMap.size} doctors mapped`);
 
     let totalCreated = 0,
       totalSkipped = 0,
       totalEnriched = 0,
       totalErrors = 0;
 
-    for (const doc of rayDoctors) {
-      if (doc.is_deactivated) continue;
+    const activeDoctors = rayDoctors.filter((doc) => !doc.is_deactivated);
 
-      const localName = doctorMap.get(doc.id) || doc.doctor_name;
-      try {
+    // Fetch all doctors' appointments in parallel
+    const apptFetches = await Promise.allSettled(
+      activeDoctors.map(async (doc) => {
+        const localName = doctorMap.get(doc.id) || doc.doctor_name;
         const appointments = await fetchAppointments(doc.id, date);
-        if (!appointments || appointments.length === 0) continue;
+        return { localName, appointments: appointments || [] };
+      }),
+    );
 
-        log("Sync", `${localName}: ${appointments.length} appointments`);
+    // Process each doctor's appointments in batches of 5
+    for (const settled of apptFetches) {
+      if (settled.status === "rejected") {
+        error("Sync", settled.reason?.message);
+        continue;
+      }
+      const { localName, appointments } = settled.value;
+      if (!appointments.length) continue;
+      log("Sync", `${localName}: ${appointments.length} appointments`);
 
-        for (const appt of appointments) {
-          try {
-            const result = await syncAppointment(appt, localName);
-            if (result.skipped) totalSkipped++;
-            else {
-              totalCreated++;
-              if (result.enriched) totalEnriched++;
-            }
-          } catch (e) {
-            totalErrors++;
-            error("Sync", `Appt ${appt.id}: ${e.message}`);
-          }
+      const results = await runBatch(appointments, 5, (appt) => syncAppointment(appt, localName));
+      for (const r of results) {
+        if (r.status === "rejected") {
+          totalErrors++;
+          error("Sync", r.reason?.message);
+        } else if (r.value.skipped) {
+          totalSkipped++;
+        } else {
+          totalCreated++;
+          if (r.value.enriched) totalEnriched++;
         }
-      } catch (e) {
-        error("Sync", `${localName}: ${e.message}`);
       }
     }
 
@@ -356,6 +376,59 @@ async function runSync(date) {
     error("Sync", `Fatal: ${e.message}`);
     throw e;
   }
+}
+
+// ── Date-range backfill ─────────────────────────────────────────────────────
+// Runs in the background; caller gets a status object to poll via rangeStatus.
+const rangeStatus = { running: false, from: null, to: null, done: 0, total: 0, errors: 0 };
+
+export function getRangeSyncStatus() {
+  return { ...rangeStatus };
+}
+
+export async function syncDateRange(from, to) {
+  if (rangeStatus.running) throw new Error("Range sync already in progress");
+
+  // Build list of dates (inclusive)
+  const dates = [];
+  const cursor = new Date(from);
+  const end = new Date(to);
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().split("T")[0]);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  Object.assign(rangeStatus, { running: true, from, to, done: 0, total: dates.length, errors: 0 });
+  log("Range", `Starting backfill ${from} → ${to} (${dates.length} days)`);
+
+  // Run async in background — don't await
+  (async () => {
+    // Fetch doctors once for the entire range — avoids 450 redundant API calls
+    const rayDoctors = await fetchDoctors();
+    const doctorMap = await syncDoctors(rayDoctors);
+    const prefetched = { rayDoctors, doctorMap };
+    log("Range", `${doctorMap.size} doctors cached for range`);
+
+    // Process 3 dates concurrently
+    for (let i = 0; i < dates.length; i += 3) {
+      const batch = dates.slice(i, i + 3);
+      await Promise.allSettled(
+        batch.map(async (date) => {
+          try {
+            await runSync(date, prefetched);
+          } catch (e) {
+            error("Range", `${date}: ${e.message}`);
+            rangeStatus.errors++;
+          }
+          rangeStatus.done++;
+        }),
+      );
+    }
+    log("Range", `Backfill complete — ${dates.length} days, ${rangeStatus.errors} errors`);
+    rangeStatus.running = false;
+  })();
+
+  return { started: true, total: dates.length };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

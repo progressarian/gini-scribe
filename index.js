@@ -608,6 +608,9 @@ app.post("/api/consultations", async (req, res) => {
         );
       }
     }
+    await client.query(`DELETE FROM lab_results WHERE consultation_id=$1 AND source='scribe'`, [
+      consultationId,
+    ]);
     for (const inv of moData?.investigations || []) {
       if (inv?.test && num(inv.value) !== null && !inv.from_report) {
         const invDate = inv.date || vDate || null;

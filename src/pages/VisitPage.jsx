@@ -38,6 +38,7 @@ import {
   ChangeFollowUpModal,
   TemplateModal,
   LabExtractionReviewModal,
+  PasteBiomarkersModal,
 } from "../components/visit/modals";
 import { useVisitMutations } from "../hooks/useVisitMutations";
 
@@ -597,6 +598,7 @@ export default function VisitPage() {
                 flags={flags}
                 onOpenAI={() => setAiOpen(true)}
                 onAddLab={() => setModal({ type: "addLab" })}
+                onPasteBiomarkers={() => setModal({ type: "pasteText" })}
               />
               <VisitSymptomsSection
                 symptoms={data.symptoms || []}
@@ -1111,6 +1113,19 @@ export default function VisitPage() {
           }}
         />
       )}
+      {modal?.type === "pasteText" && (
+        <PasteBiomarkersModal
+          patientId={dbPatientId}
+          onClose={closeModal}
+          onExtracted={({ extracted, doc_date }) => {
+            closeModal();
+            setModal({
+              type: "labReview",
+              data: { extracted, doc_date, source: "report_extract" },
+            });
+          }}
+        />
+      )}
       {modal?.type === "labReview" && (
         <LabExtractionReviewModal
           extracted={modal.data.extracted}
@@ -1119,6 +1134,7 @@ export default function VisitPage() {
           onClose={closeModal}
           onSave={async (tests, doc_date) => {
             setLabExtractSaving(true);
+            const source = modal.data.source || "lab";
             let saved = 0;
             for (const test of tests) {
               await api
@@ -1129,6 +1145,7 @@ export default function VisitPage() {
                   flag: test.flag || "N",
                   ref_range: test.ref_range || "",
                   test_date: doc_date || null,
+                  source,
                 })
                 .catch(() => {});
               saved++;

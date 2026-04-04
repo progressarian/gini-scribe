@@ -4,7 +4,12 @@ import {
   syncWalkingAppointments,
   syncTodayWalkingAppointments,
   syncWalkingAppointmentsByDate,
+  syncDateRange,
+  getRangeSyncStatus,
+  runLabSync,
+  getLabSyncStatus,
 } from "../services/cron/index.js";
+import { labLogin } from "../services/lab/labHealthrayApi.js";
 import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reader.js";
 import { syncFromSheets } from "../services/cron/sheetsSync.js";
 import pool from "../config/db.js";
@@ -78,6 +83,130 @@ router.get("/sync/sheets/tab", async (req, res) => {
   }
 });
 
+// Date-range backfill: POST /api/sync/healthray/range?from=2025-01-01&to=2026-04-03
+router.post("/sync/healthray/range", async (req, res) => {
+  try {
+    const from = req.query.from || req.body.from;
+    const to = req.query.to || req.body.to;
+    if (!from || !to)
+      return res.status(400).json({ error: "from and to query params required (YYYY-MM-DD)" });
+    if (from > to) return res.status(400).json({ error: "from must be before to" });
+
+    const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+    if (days > 730)
+      return res.status(400).json({ error: "Range too large — max 2 years at a time" });
+
+    const result = await syncDateRange(from, to);
+    res.json({ success: true, from, to, ...result });
+  } catch (e) {
+    handleError(res, e, "HealthRay range sync");
+  }
+});
+
+// Poll range sync progress: GET /api/sync/healthray/range/status
+router.get("/sync/healthray/range/status", (req, res) => {
+  res.json(getRangeSyncStatus());
+});
+
+// Backfill: copy opd_vitals → vitals table for all appointments that have weight/BP
+// POST /api/sync/backfill/vitals
+router.post("/sync/backfill/vitals", async (req, res) => {
+  try {
+    // Ensure columns exist (added after initial schema)
+    await pool
+      .query(
+        `
+      ALTER TABLE vitals ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
+      ALTER TABLE vitals ADD COLUMN IF NOT EXISTS waist REAL;
+      ALTER TABLE vitals ADD COLUMN IF NOT EXISTS body_fat REAL;
+    `,
+      )
+      .catch(() => {});
+
+    const { rows } = await pool.query(`
+      SELECT id, patient_id, appointment_date, opd_vitals
+      FROM appointments
+      WHERE patient_id IS NOT NULL
+        AND opd_vitals IS NOT NULL
+        AND (
+          (opd_vitals->>'weight') IS NOT NULL
+          OR (opd_vitals->>'bpSys') IS NOT NULL
+        )
+      ORDER BY appointment_date ASC
+    `);
+
+    let inserted = 0;
+    for (const appt of rows) {
+      const v = appt.opd_vitals || {};
+      const w = parseFloat(v.weight) || null;
+      const bpSys = parseFloat(v.bpSys) || null;
+      if (!w && !bpSys) continue;
+
+      await pool.query(`DELETE FROM vitals WHERE appointment_id = $1`, [appt.id]);
+      await pool
+        .query(
+          `INSERT INTO vitals
+         (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, weight, height, bmi, waist, body_fat)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            appt.patient_id,
+            appt.id,
+            appt.appointment_date,
+            bpSys,
+            parseFloat(v.bpDia) || null,
+            w,
+            parseFloat(v.height) || null,
+            parseFloat(v.bmi) || null,
+            parseFloat(v.waist) || null,
+            parseFloat(v.bodyFat) || null,
+          ],
+        )
+        .catch(() => {});
+      inserted++;
+    }
+
+    res.json({ success: true, appointmentsBackfilled: inserted });
+  } catch (e) {
+    handleError(res, e, "Backfill vitals");
+  }
+});
+
+// One-time cleanup: delete low-priority import/prescription_parsed lab rows where
+// a better source already exists for the same patient + test + date.
+// POST /api/sync/backfill/labs-dedup
+router.post("/sync/backfill/labs-dedup", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      DELETE FROM lab_results
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, COALESCE(canonical_name, test_name), test_date::date
+              ORDER BY
+                CASE source
+                  WHEN 'opd'                THEN 1
+                  WHEN 'report_extract'     THEN 2
+                  WHEN 'lab_healthray'      THEN 3
+                  WHEN 'vitals_sheet'       THEN 4
+                  WHEN 'prescription_parsed' THEN 5
+                  WHEN 'healthray'          THEN 6
+                  ELSE 7
+                END ASC,
+                created_at DESC
+            ) AS rn
+          FROM lab_results
+        ) ranked
+        WHERE rn > 1
+      )
+      RETURNING id
+    `);
+    res.json({ success: true, deleted: rows.length });
+  } catch (e) {
+    handleError(res, e, "Labs dedup cleanup");
+  }
+});
+
 // Backfill: re-parse clinical notes for a single appointment
 // POST /api/sync/backfill/investigations/:appointmentId
 router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => {
@@ -130,6 +259,33 @@ router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => 
     res.json({ success: true, appointmentId: apptId, investigations, followUp });
   } catch (e) {
     handleError(res, e, "Backfill investigations");
+  }
+});
+
+// ── Lab HealthRay sync ───────────────────────────────────────────────────────
+
+// Manual trigger: POST /api/sync/lab/trigger
+router.post("/sync/lab/trigger", async (req, res) => {
+  try {
+    const result = await runLabSync();
+    res.json({ success: true, ...result });
+  } catch (e) {
+    handleError(res, e, "Lab sync trigger");
+  }
+});
+
+// Status: GET /api/sync/lab/status
+router.get("/sync/lab/status", (req, res) => {
+  res.json(getLabSyncStatus());
+});
+
+// Manual token refresh: POST /api/sync/lab/refresh-auth
+router.post("/sync/lab/refresh-auth", async (req, res) => {
+  try {
+    await labLogin();
+    res.json({ success: true, message: "Lab API tokens refreshed" });
+  } catch (e) {
+    handleError(res, e, "Lab auth refresh");
   }
 });
 

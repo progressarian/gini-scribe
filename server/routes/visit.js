@@ -4,6 +4,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { getCanonical } from "../utils/labCanonical.js";
+import { parseClinicalWithAI } from "../services/healthray/parser.js";
 
 const router = Router();
 
@@ -105,9 +106,28 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 6. All lab results (for trends)
+      // 6. All lab results (deduped: one per test per date, best source wins)
       pool.query(
-        "SELECT * FROM lab_results WHERE patient_id=$1 ORDER BY test_date DESC, created_at DESC",
+        `SELECT * FROM (
+           SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date)
+             *
+           FROM lab_results
+           WHERE patient_id = $1
+           ORDER BY
+             COALESCE(canonical_name, test_name),
+             test_date::date,
+             CASE source
+               WHEN 'opd'                THEN 1
+               WHEN 'report_extract'     THEN 2
+               WHEN 'lab_healthray'      THEN 3
+               WHEN 'vitals_sheet'       THEN 4
+               WHEN 'prescription_parsed' THEN 5
+               WHEN 'healthray'          THEN 6
+               ELSE 7
+             END ASC,
+             created_at DESC
+         ) deduped
+         ORDER BY test_date DESC, created_at DESC`,
         [pid],
       ),
 
@@ -670,6 +690,21 @@ router.patch("/visit/:patientId/doctor-note", async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     handleError(res, e, "Save doctor note");
+  }
+});
+
+// ── POST /visit/:patientId/parse-text — AI extract biomarkers from pasted text ──
+router.post("/visit/:patientId/parse-text", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  const { text } = req.body;
+  if (!text?.trim() || text.trim().length < 20)
+    return res.status(400).json({ error: "Text is too short to parse" });
+  try {
+    const parsed = await parseClinicalWithAI(text);
+    res.json(parsed || {});
+  } catch (e) {
+    handleError(res, e, "Parse clinical text");
   }
 });
 

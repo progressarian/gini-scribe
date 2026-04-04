@@ -8,6 +8,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   flags,
   onOpenAI,
   onAddLab,
+  onPasteBiomarkers,
 }) {
   const today = new Date().toISOString().split("T")[0];
   const latestV = vitals?.[0];
@@ -49,6 +50,16 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
         .filter(Boolean)
         .reverse();
 
+    // Weight: prefer vitals table, fall back to lab_results canonical_name='Weight'
+    const weightLab = getLabVal(labResults, "Weight");
+    const weightLabH = getLabHist(labHistory, "Weight");
+    const vitalWeightH = vitalHist("weight");
+    const weightH = vitalWeightH.length > 0 ? vitalWeightH : weightLabH;
+
+    // Waist: prefer vitals table, fall back to lab_results
+    const waistLab = getLabVal(labResults, "Waist");
+    const vitalWaistH = vitalHist("waist");
+
     return {
       hba1c,
       hba1cH,
@@ -69,9 +80,11 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       homaIr,
       homaIrH,
       homaIrCalc,
-      weightH: vitalHist("weight"),
+      weightLab,
+      weightH,
       bodyFatH: vitalHist("body_fat"),
-      waistH: vitalHist("waist"),
+      waistLab,
+      waistH: vitalWaistH.length > 0 ? vitalWaistH : getLabHist(labHistory, "Waist"),
     };
   }, [labResults, labHistory, vitals]);
 
@@ -95,8 +108,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     homaIr,
     homaIrH,
     homaIrCalc,
+    weightLab,
     weightH,
     bodyFatH,
+    waistLab,
     waistH,
   } = markers;
 
@@ -110,6 +125,13 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500 }}>
             Updated: {fmtDate(today)}
           </span>
+          <button
+            className="bx"
+            onClick={onPasteBiomarkers}
+            title="Paste clinical text from HealthRay to extract biomarkers"
+          >
+            📋 Paste
+          </button>
           <button className="bx bx-p" onClick={onAddLab}>
             + Add Value
           </button>
@@ -223,22 +245,28 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           Body Composition / Haematology
         </div>
         <div className="bmg">
-          {latestV?.weight && (
-            <BiomarkerCard
-              label="Weight"
-              value={latestV.weight}
-              unit="kg"
-              trend={
-                prevV?.weight
-                  ? `${latestV.weight > prevV.weight ? "↑" : "▼"} ${Math.abs(latestV.weight - prevV.weight).toFixed(1)} kg since ${fmtDate(prevV.recorded_at)}`
-                  : null
-              }
-              trendDir={prevV?.weight && latestV.weight > prevV.weight ? "warn" : "good"}
-              goal="<90 kg"
-              goalLabel="Target"
-              history={weightH}
-            />
-          )}
+          {(latestV?.weight || weightLab) &&
+            (() => {
+              const wVal = latestV?.weight ?? weightLab?.result;
+              const wPrev = prevV?.weight ?? weightH?.[weightH.length - 2]?.result;
+              const wPrevDate = prevV?.recorded_at ?? weightH?.[weightH.length - 2]?.date;
+              return (
+                <BiomarkerCard
+                  label="Weight"
+                  value={wVal}
+                  unit="kg"
+                  trend={
+                    wPrev
+                      ? `${wVal > wPrev ? "↑" : "▼"} ${Math.abs(wVal - wPrev).toFixed(1)} kg since ${fmtDate(wPrevDate)}`
+                      : null
+                  }
+                  trendDir={wPrev && wVal > wPrev ? "warn" : "good"}
+                  goal="<90 kg"
+                  goalLabel="Target"
+                  history={weightH}
+                />
+              );
+            })()}
           {latestV?.body_fat && (
             <BiomarkerCard
               label="Body Fat %"
@@ -265,17 +293,17 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             goalLabel="Normal"
             history={hbH}
           />
-          {latestV?.waist && (
+          {(latestV?.waist || waistLab) && (
             <BiomarkerCard
               label="Waist Circumference"
-              value={latestV.waist}
+              value={latestV?.waist ?? waistLab?.result}
               unit="cm"
               trend={
                 waistH.length > 1
-                  ? `${latestV.waist > waistH[0]?.result ? "▲" : "▼"} From ${waistH[0]?.result} cm`
+                  ? `${(latestV?.waist ?? waistLab?.result) > waistH[0]?.result ? "▲" : "▼"} From ${waistH[0]?.result} cm`
                   : null
               }
-              trendDir={latestV.waist > 90 ? "warn" : "good"}
+              trendDir={(latestV?.waist ?? waistLab?.result) > 90 ? "warn" : "good"}
               goal="<90 cm"
               goalLabel="Target"
               history={waistH}
