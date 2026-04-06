@@ -884,42 +884,42 @@ app.post("/api/documents/:id/upload-file", async (req, res) => {
 });
 
 // Get signed URL to view/download a file
-app.get("/api/documents/:id/file-url", async (req, res) => {
-  try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
-      return res.status(400).json({ error: "Storage not configured" });
+// app.get("/api/documents/:id/file-url", async (req, res) => {
+//   try {
+//     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
+//       return res.status(400).json({ error: "Storage not configured" });
 
-    const doc = await pool.query(
-      "SELECT storage_path, mime_type, file_name FROM documents WHERE id=$1",
-      [req.params.id],
-    );
-    if (!doc.rows[0]?.storage_path) return res.status(404).json({ error: "No file attached" });
+//     const doc = await pool.query(
+//       "SELECT storage_path, mime_type, file_name FROM documents WHERE id=$1",
+//       [req.params.id],
+//     );
+//     if (!doc.rows[0]?.storage_path) return res.status(404).json({ error: "No file attached" });
 
-    // Create signed URL (valid for 1 hour)
-    const signResp = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${doc.rows[0].storage_path}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ expiresIn: 3600 }),
-      },
-    );
+//     // Create signed URL (valid for 1 hour)
+//     const signResp = await fetch(
+//       `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${doc.rows[0].storage_path}`,
+//       {
+//         method: "POST",
+//         headers: {
+//           Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+//           "Content-Type": "application/json",
+//         },
+//         body: JSON.stringify({ expiresIn: 3600 }),
+//       },
+//     );
 
-    if (!signResp.ok) return res.status(500).json({ error: "Failed to generate URL" });
-    const signData = await signResp.json();
-    const signedPath = signData.signedURL || signData.signedUrl || signData.token;
+//     if (!signResp.ok) return res.status(500).json({ error: "Failed to generate URL" });
+//     const signData = await signResp.json();
+//     const signedPath = signData.signedURL || signData.signedUrl || signData.token;
 
-    const url = signedPath?.startsWith("http")
-      ? signedPath
-      : `${SUPABASE_URL}/storage/v1${signedPath}`;
-    res.json({ url, mime_type: doc.rows[0].mime_type, file_name: doc.rows[0].file_name });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+//     const url = signedPath?.startsWith("http")
+//       ? signedPath
+//       : `${SUPABASE_URL}/storage/v1${signedPath}`;
+//     res.json({ url, mime_type: doc.rows[0].mime_type, file_name: doc.rows[0].file_name });
+//   } catch (e) {
+//     res.status(500).json({ error: e.message });
+//   }
+// });
 
 // Get prescription for a consultation (for reprinting)
 app.get("/api/consultations/:id/prescription", async (req, res) => {

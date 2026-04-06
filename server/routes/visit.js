@@ -67,6 +67,7 @@ router.get("/visit/:patientId", async (req, res) => {
       referralsR,
       symptomsR,
       latestApptR,
+      labOrdersR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -205,6 +206,18 @@ router.get("/visit/:patientId", async (req, res) => {
          ORDER BY appointment_date DESC LIMIT 1`,
         [pid],
       ),
+
+      // 18. Lab orders (Reports/Tests classification per case date)
+      pool.query(
+        `SELECT case_no, patient_case_no, case_date, investigation_summary
+         FROM lab_cases
+         WHERE patient_id = $1
+           AND results_synced = TRUE
+           AND investigation_summary IS NOT NULL
+         ORDER BY case_date DESC
+         LIMIT 20`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -236,6 +249,7 @@ router.get("/visit/:patientId", async (req, res) => {
       });
       if (!labLatest[key]) {
         labLatest[key] = {
+          test_name: r.test_name,
           result: r.result,
           result_text: r.result_text,
           unit: r.unit,
@@ -243,6 +257,7 @@ router.get("/visit/:patientId", async (req, res) => {
           date: r.test_date,
           ref_range: r.ref_range,
           is_critical: r.is_critical,
+          source: r.source,
         };
       }
     }
@@ -292,6 +307,13 @@ router.get("/visit/:patientId", async (req, res) => {
       labResults: labsR.rows,
       labHistory,
       labLatest,
+      labOrders: labOrdersR.rows.map((r) => ({
+        caseNo: r.case_no,
+        patientCaseNo: r.patient_case_no,
+        date: r.case_date,
+        reports: r.investigation_summary?.reports || [],
+        tests: r.investigation_summary?.tests || [],
+      })),
       consultations,
       documents: docsR.rows,
       referrals: referralsR.rows,

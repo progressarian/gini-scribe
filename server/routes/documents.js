@@ -229,33 +229,40 @@ router.get("/documents/:id/file-url", async (req, res) => {
     // ── HealthRay document: re-fetch fresh URL from HealthRay API ──────────────
     if (!d.storage_path && d.source === "healthray") {
       try {
-        // Find the HealthRay appointment ID via patient + date
         const apptR = await pool.query(
           `SELECT healthray_id FROM appointments
-           WHERE patient_id = $1 AND appointment_date::date = $2::date
-           AND healthray_id IS NOT NULL LIMIT 1`,
+       WHERE patient_id = $1 AND appointment_date::date = $2::date
+       AND healthray_id IS NOT NULL LIMIT 1`,
           [d.patient_id, d.doc_date],
         );
+
+        console.log("[healthray] doc:", {
+          patient_id: d.patient_id,
+          doc_date: d.doc_date,
+          notes: d.notes,
+        });
+        console.log("[healthray] appt found:", apptR.rows[0]);
+
         const healthrayApptId = apptR.rows[0]?.healthray_id;
-        if (!healthrayApptId) {
-          // Fall back to stored URL if we can't re-fetch
-          if (d.file_url) return res.json({ url: d.file_url, file_name: d.file_name });
-          return res
-            .status(404)
-            .json({ error: "No HealthRay appointment found for this document" });
-        }
+        if (!healthrayApptId)
+          return res.status(404).json({ error: "No HealthRay appointment found" });
 
         const records = await fetchMedicalRecords(healthrayApptId);
+        console.log("[healthray] records fetched:", JSON.stringify(records?.slice(0, 2)));
+
         const recordIdStr = (d.notes || "").match(/healthray_record:(\d+)/)?.[1];
+        console.log("[healthray] recordIdStr:", recordIdStr);
+
         const match = records?.find((r) => String(r.id) === recordIdStr);
-        const url =
-          match?.url || match?.file_url || match?.attachment_url || match?.thumbnail || d.file_url;
+        console.log("[healthray] match:", match);
+
+        const url = match?.url || match?.file_url || match?.attachment_url || match?.thumbnail;
+        console.log("[healthray] final url:", url);
 
         if (!url) return res.status(404).json({ error: "Could not get file URL from HealthRay" });
         return res.json({ url, file_name: d.file_name, mime_type: d.mime_type });
-      } catch {
-        // If re-fetch fails, fall back to stored URL
-        if (d.file_url) return res.json({ url: d.file_url, file_name: d.file_name });
+      } catch (err) {
+        console.error("[healthray] error:", err); // ← this will show the real error
         return res.status(404).json({ error: "Failed to get fresh URL from HealthRay" });
       }
     }

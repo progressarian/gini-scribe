@@ -1,6 +1,7 @@
 // ── Lab HealthRay Sync — DB operations ──────────────────────────────────────
 
 import pool from "../../config/db.js";
+import { extractInvestigationSummary } from "./labHealthrayParser.js";
 
 // Source priority — lower number wins (lab_healthray = 3, between report_extract and vitals_sheet)
 const SOURCE_PRIORITY = {
@@ -34,9 +35,11 @@ export async function ensureLabCasesTable() {
       results_synced  BOOLEAN DEFAULT FALSE,
       raw_list_json   JSONB,
       raw_detail_json JSONB,
+      investigation_summary JSONB,
       fetched_at      TIMESTAMPTZ DEFAULT NOW(),
       synced_at       TIMESTAMPTZ
     );
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS investigation_summary JSONB;
     CREATE INDEX IF NOT EXISTS idx_lab_cases_patient    ON lab_cases(patient_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_appt       ON lab_cases(appointment_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_date       ON lab_cases(case_date);
@@ -98,15 +101,23 @@ export async function insertLabCase({
 
 // ── Update case after detail fetch + lab_results written ────────────────────
 export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson }) {
+  const summary = rawDetailJson ? extractInvestigationSummary(rawDetailJson) : null;
   await pool.query(
     `UPDATE lab_cases
-     SET results_synced = TRUE,
-         patient_id     = COALESCE($2, patient_id),
-         appointment_id = COALESCE($3, appointment_id),
-         raw_detail_json = $4::jsonb,
-         synced_at      = NOW()
+     SET results_synced        = TRUE,
+         patient_id            = COALESCE($2, patient_id),
+         appointment_id        = COALESCE($3, appointment_id),
+         raw_detail_json       = $4::jsonb,
+         investigation_summary = $5::jsonb,
+         synced_at             = NOW()
      WHERE case_no = $1`,
-    [caseNo, patientId || null, appointmentId || null, JSON.stringify(rawDetailJson)],
+    [
+      caseNo,
+      patientId || null,
+      appointmentId || null,
+      JSON.stringify(rawDetailJson),
+      summary ? JSON.stringify(summary) : null,
+    ],
   );
 }
 
@@ -141,6 +152,27 @@ export async function linkLabAppointment(healthrayOrderId) {
 }
 
 // ── Write lab results from parsed case ──────────────────────────────────────
+// Patch ref_range + flag onto existing lab_healthray rows — no deletes/inserts
+export async function patchLabRanges(patientId, caseDate, results) {
+  if (!patientId || !results.length) return 0;
+  let updated = 0;
+  for (const r of results) {
+    if (!r.refRange && !r.flag) continue;
+    const { rowCount } = await pool.query(
+      `UPDATE lab_results
+       SET ref_range = COALESCE(ref_range, $1),
+           flag      = COALESCE(flag,      $2)
+       WHERE patient_id = $3
+         AND canonical_name = $4
+         AND test_date::date = $5::date
+         AND source = 'lab_healthray'`,
+      [r.refRange || null, r.flag || null, patientId, r.canonicalName, caseDate],
+    );
+    updated += rowCount;
+  }
+  return updated;
+}
+
 export async function syncLabCaseResults(patientId, appointmentId, caseDate, results) {
   if (!patientId || !results.length) return 0;
 
@@ -187,8 +219,8 @@ export async function syncLabCaseResults(patientId, appointmentId, caseDate, res
     await pool
       .query(
         `INSERT INTO lab_results
-         (patient_id, appointment_id, test_date, test_name, canonical_name, result, unit, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'lab_healthray')`,
+         (patient_id, appointment_id, test_date, test_name, canonical_name, result, unit, ref_range, flag, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'lab_healthray')`,
         [
           patientId,
           appointmentId || null,
@@ -197,6 +229,8 @@ export async function syncLabCaseResults(patientId, appointmentId, caseDate, res
           r.canonicalName,
           r.value,
           r.unit || null,
+          r.refRange || null,
+          r.flag || null,
         ],
       )
       .catch(() => {});

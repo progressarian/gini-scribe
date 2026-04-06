@@ -15,6 +15,7 @@ import {
   matchLabPatient,
   linkLabAppointment,
   syncLabCaseResults,
+  patchLabRanges,
 } from "../lab/db.js";
 import { createLogger } from "../logger.js";
 
@@ -81,8 +82,12 @@ async function processCase(listRow) {
   // Step f: write to lab_results
   const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
 
-  // Step g: mark synced
-  await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
+  // Step g: mark synced — only if results were written or patient is unknown (can't do better)
+  // If patient found but 0 written, results may not be ready yet; leave results_synced=false
+  // so the recovery job retries after results are available.
+  if (written > 0 || !patientId) {
+    await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
+  }
 
   log(
     "Sync",
@@ -157,6 +162,63 @@ export async function runLabSync(dateStr) {
   }
 }
 
+// ── Backfill ref_range + flag for existing lab_healthray rows ────────────────
+// Re-fetches case detail from API, re-parses ref ranges, and UPDATEs existing rows.
+// No rows are deleted or inserted — only ref_range/flag are patched in.
+export async function backfillLabRanges(dateStr) {
+  const pool = (await import("../../config/db.js")).default;
+
+  // If no date given, backfill ALL synced cases missing ref_range data
+  let query, params;
+  if (dateStr) {
+    query = `SELECT case_uid, lab_case_id, lab_user_id, patient_id, case_date, patient_case_no, case_no
+             FROM lab_cases
+             WHERE case_date::date = $1::date AND results_synced = TRUE AND patient_id IS NOT NULL`;
+    params = [dateStr];
+  } else {
+    // All synced cases that don't have investigation_summary yet
+    query = `SELECT case_uid, lab_case_id, lab_user_id, patient_id, case_date, patient_case_no, case_no
+             FROM lab_cases
+             WHERE results_synced = TRUE AND patient_id IS NOT NULL
+               AND investigation_summary IS NULL
+             ORDER BY case_date DESC`;
+    params = [];
+  }
+
+  const date = dateStr || "all";
+  const { rows } = await pool.query(query, params);
+
+  log("Backfill", `${date} | ${rows.length} cases to patch`);
+
+  let totalUpdated = 0;
+  for (const row of rows) {
+    try {
+      const detail = await fetchLabCaseDetail(row.case_uid, row.lab_case_id, row.lab_user_id);
+      const results = parseLabCaseResults(detail);
+      const { extractInvestigationSummary } = await import("../lab/labHealthrayParser.js");
+      const summary = extractInvestigationSummary(detail);
+      const caseDate =
+        typeof row.case_date === "string"
+          ? row.case_date.slice(0, 10)
+          : row.case_date.toISOString().slice(0, 10);
+      const updated = await patchLabRanges(row.patient_id, caseDate, results);
+
+      // Also store investigation_summary
+      await pool.query(
+        `UPDATE lab_cases SET investigation_summary = $1::jsonb WHERE case_no = $2`,
+        [JSON.stringify(summary), row.case_no],
+      );
+
+      totalUpdated += updated;
+      log("Backfill", `${row.patient_case_no} | ${updated} rows patched`);
+    } catch (e) {
+      log("Backfill", `${row.patient_case_no} error: ${e.message}`);
+    }
+  }
+
+  return { date, cases: rows.length, updated: totalUpdated };
+}
+
 // ── Recovery job: retry cases stuck with results_synced=false ───────────────
 export async function retryPendingLabCases() {
   const pending = await getPendingLabCases();
@@ -167,7 +229,11 @@ export async function retryPendingLabCases() {
   for (const row of pending) {
     try {
       const patientId = row.patient_id;
-      const caseDate = row.case_date ? row.case_date.toISOString().slice(0, 10) : null;
+      const caseDate = row.case_date
+        ? typeof row.case_date === "string"
+          ? row.case_date.slice(0, 10) // already a string, just trim time if any
+          : row.case_date.toISOString().slice(0, 10)
+        : null;
 
       let detail;
       try {

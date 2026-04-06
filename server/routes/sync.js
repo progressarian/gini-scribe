@@ -8,7 +8,9 @@ import {
   getRangeSyncStatus,
   runLabSync,
   getLabSyncStatus,
+  backfillLabRanges,
 } from "../services/cron/index.js";
+import { retryPendingLabCases } from "../services/cron/labSync.js";
 import { labLogin } from "../services/lab/labHealthrayApi.js";
 import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reader.js";
 import { syncFromSheets } from "../services/cron/sheetsSync.js";
@@ -46,6 +48,16 @@ router.post("/sync/healthray/date", async (req, res) => {
     res.json({ success: true, ...result });
   } catch (e) {
     handleError(res, e, "HealthRay date sync");
+  }
+});
+
+// Manual trigger: retry pending/reset lab cases
+router.post("/sync/lab/retry", async (req, res) => {
+  try {
+    const result = await retryPendingLabCases();
+    res.json({ success: true, ...result });
+  } catch (e) {
+    handleError(res, e, "Lab retry pending cases");
   }
 });
 
@@ -279,8 +291,20 @@ router.get("/sync/lab/status", (req, res) => {
   res.json(getLabSyncStatus());
 });
 
+// Backfill ref_range + flag for a date's lab_healthray rows (UPDATE only, no deletes)
+// POST /api/sync/lab/backfill-ranges?date=2026-04-06  (defaults to today)
+router.post("/sync/lab/backfill-ranges", async (req, res) => {
+  try {
+    const date = req.query.date || req.body.date;
+    const result = await backfillLabRanges(date);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    handleError(res, e, "Lab backfill ranges");
+  }
+});
+
 // Manual token refresh: POST /api/sync/lab/refresh-auth
-router.post("/sync/lab/refresh-auth", async (req, res) => {
+router.post("/sync/lab/refresh-auth", async (_req, res) => {
   try {
     await labLogin();
     res.json({ success: true, message: "Lab API tokens refreshed" });

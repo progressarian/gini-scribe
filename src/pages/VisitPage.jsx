@@ -666,6 +666,8 @@ export default function VisitPage() {
             <VisitLabsPanel
               documents={documents}
               labResults={labResults}
+              labLatest={data.labLatest}
+              labOrders={data.labOrders}
               onUploadReport={() => setModal({ type: "uploadReport" })}
             />
           </div>

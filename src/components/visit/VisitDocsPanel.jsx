@@ -33,14 +33,40 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
       toast("No file attached to this document", "warn");
       return;
     }
+
+    const newTab = window.open("", "_blank");
+
     try {
       const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
-      if (data.url) {
-        window.open(data.url, "_blank");
-      } else {
+
+      if (!data.url) {
+        newTab.close();
         toast("Could not get file link", "warn");
+        return;
       }
+
+      const res = await fetch(data.url);
+      const blob = await res.blob();
+
+      // Detect real mime type from URL extension, fallback to blob type, then mime_type from DB
+      const urlPath = data.url.split("?")[0].toLowerCase(); // strip query params
+      let mimeType;
+      if (urlPath.endsWith(".jpg") || urlPath.endsWith(".jpeg")) {
+        mimeType = "image/jpeg";
+      } else if (urlPath.endsWith(".png")) {
+        mimeType = "image/png";
+      } else if (urlPath.endsWith(".pdf")) {
+        mimeType = "application/pdf";
+      } else {
+        mimeType = blob.type || data.mime_type || "application/pdf";
+      }
+
+      const typedBlob = new Blob([blob], { type: mimeType });
+      const blobUrl = URL.createObjectURL(typedBlob);
+      newTab.location.href = blobUrl;
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
     } catch {
+      newTab?.close();
       toast("Failed to open document", "error");
     }
   }, []);

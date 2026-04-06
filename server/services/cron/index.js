@@ -5,7 +5,12 @@ import {
   syncDateRange,
   getRangeSyncStatus,
 } from "./healthraySync.js";
-import { runLabSync, retryPendingLabCases, getLabSyncStatus } from "./labSync.js";
+import {
+  runLabSync,
+  retryPendingLabCases,
+  getLabSyncStatus,
+  backfillLabRanges,
+} from "./labSync.js";
 
 // ── Sync interval (every 5 minutes) ────────────────────────────────────────
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
@@ -76,4 +81,5 @@ export {
   getRangeSyncStatus,
   runLabSync,
   getLabSyncStatus,
+  backfillLabRanges,
 };
