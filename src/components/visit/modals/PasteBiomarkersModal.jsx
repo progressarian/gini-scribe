@@ -31,24 +31,8 @@ function PasteBiomarkersModal({ patientId, onClose, onExtracted }) {
         return;
       }
 
-      // Use date from first lab entry if available, else fall back to user-selected date
-      const parseDate = (d) => {
-        if (!d) return null;
-
-        // If already ISO format
-        if (d.includes("-")) return d;
-
-        // Handle DD/MM/YYYY
-        const parts = d.split("/");
-        if (parts.length === 3) {
-          const [day, month, year] = parts;
-          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-        }
-
-        return null;
-      };
-
-      const detectedDate = parseDate(labs.find((l) => l.date)?.date) || date;
+      // Always use the user's explicitly selected date — AI-extracted dates are unreliable
+      const detectedDate = date;
 
       const extracted = {
         panels: [
