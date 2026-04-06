@@ -462,7 +462,7 @@ export async function syncDocuments(patientId, records, fallbackDate) {
           docType,
           `${rec.record_type} - ${rec.file_name}`,
           rec.file_name,
-          rec.thumbnail || null,
+          rec.url || rec.file_url || rec.attachment_url || rec.thumbnail || null,
           rec.file_type || "application/pdf",
           rec.app_date_time ? toISTDate(rec.app_date_time) : fallbackDate,
           `healthray_record:${rec.id}`,

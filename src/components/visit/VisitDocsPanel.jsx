@@ -29,7 +29,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
   );
 
   const openDoc = useCallback(async (doc) => {
-    if (!doc.storage_path) {
+    if (!doc.storage_path && doc.source !== "healthray") {
       toast("No file attached to this document", "warn");
       return;
     }

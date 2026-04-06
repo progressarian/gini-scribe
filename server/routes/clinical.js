@@ -42,24 +42,24 @@ router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) =>
   try {
     const { test_name, result, unit, flag, ref_range, test_date, consultation_id, source } =
       req.body;
-      function parseIndianDate(date) {
-  if (!date) return null;
+    function parseIndianDate(date) {
+      if (!date) return null;
 
-  // Already ISO
-  if (date.includes("-")) return date;
+      // Already ISO
+      if (date.includes("-")) return date;
 
-  const parts = date.split("/");
+      const parts = date.split("/");
 
-  if (parts.length === 3) {
-    let [day, month, year] = parts;
+      if (parts.length === 3) {
+        let [day, month, year] = parts;
 
-    if (year.length === 2) year = "20" + year;
+        if (year.length === 2) year = "20" + year;
 
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
+        return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+      }
 
-  return date;
-}
+      return date;
+    }
 
     const numericResult = num(result);
     const resultText = numericResult === null && result ? String(result) : null;
@@ -76,7 +76,7 @@ router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) =>
         n(unit),
         n(flag) || "N",
         n(ref_range),
-       parseIndianDate(test_date) || new Date().toISOString().split("T")[0],
+        parseIndianDate(test_date) || new Date().toISOString().split("T")[0],
 
         (source || "lab").slice(0, 50),
       ],

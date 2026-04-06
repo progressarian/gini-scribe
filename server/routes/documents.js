@@ -6,6 +6,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
+import { fetchMedicalRecords } from "../services/healthray/client.js";
 
 const router = Router();
 
@@ -218,17 +219,53 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
 // Get signed URL to view/download a file
 router.get("/documents/:id/file-url", async (req, res) => {
   try {
+    const doc = await pool.query(
+      "SELECT storage_path, file_url, mime_type, file_name, source, notes, patient_id, doc_date FROM documents WHERE id=$1",
+      [req.params.id],
+    );
+    const d = doc.rows[0];
+    if (!d) return res.status(404).json({ error: "Document not found" });
+
+    // ── HealthRay document: re-fetch fresh URL from HealthRay API ──────────────
+    if (!d.storage_path && d.source === "healthray") {
+      try {
+        // Find the HealthRay appointment ID via patient + date
+        const apptR = await pool.query(
+          `SELECT healthray_id FROM appointments
+           WHERE patient_id = $1 AND appointment_date::date = $2::date
+           AND healthray_id IS NOT NULL LIMIT 1`,
+          [d.patient_id, d.doc_date],
+        );
+        const healthrayApptId = apptR.rows[0]?.healthray_id;
+        if (!healthrayApptId) {
+          // Fall back to stored URL if we can't re-fetch
+          if (d.file_url) return res.json({ url: d.file_url, file_name: d.file_name });
+          return res
+            .status(404)
+            .json({ error: "No HealthRay appointment found for this document" });
+        }
+
+        const records = await fetchMedicalRecords(healthrayApptId);
+        const recordIdStr = (d.notes || "").match(/healthray_record:(\d+)/)?.[1];
+        const match = records?.find((r) => String(r.id) === recordIdStr);
+        const url =
+          match?.url || match?.file_url || match?.attachment_url || match?.thumbnail || d.file_url;
+
+        if (!url) return res.status(404).json({ error: "Could not get file URL from HealthRay" });
+        return res.json({ url, file_name: d.file_name, mime_type: d.mime_type });
+      } catch {
+        // If re-fetch fails, fall back to stored URL
+        if (d.file_url) return res.json({ url: d.file_url, file_name: d.file_name });
+        return res.status(404).json({ error: "Failed to get fresh URL from HealthRay" });
+      }
+    }
+
+    if (!d.storage_path) return res.status(404).json({ error: "No file attached" });
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
       return res.status(400).json({ error: "Storage not configured" });
 
-    const doc = await pool.query(
-      "SELECT storage_path, mime_type, file_name FROM documents WHERE id=$1",
-      [req.params.id],
-    );
-    if (!doc.rows[0]?.storage_path) return res.status(404).json({ error: "No file attached" });
-
     const signResp = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${doc.rows[0].storage_path}`,
+      `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${d.storage_path}`,
       {
         method: "POST",
         headers: {
@@ -246,7 +283,7 @@ router.get("/documents/:id/file-url", async (req, res) => {
     const url = signedPath?.startsWith("http")
       ? signedPath
       : `${SUPABASE_URL}/storage/v1${signedPath}`;
-    res.json({ url, mime_type: doc.rows[0].mime_type, file_name: doc.rows[0].file_name });
+    res.json({ url, mime_type: d.mime_type, file_name: d.file_name });
   } catch (e) {
     handleError(res, e, "Document");
   }
