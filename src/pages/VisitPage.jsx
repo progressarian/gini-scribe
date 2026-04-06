@@ -226,11 +226,24 @@ export default function VisitPage() {
         const { data: d } = await api.get(
           `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
         );
+
         setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
         if (d.appt_doctor_note) {
           setDoctorNote(d.appt_doctor_note);
         } else if (d.consultations?.[0]?.con_data?.assessment_summary) {
           setDoctorNote(d.consultations[0].con_data.assessment_summary);
+        }
+        // Stop active meds from older visits in DB, then refresh if any were stopped
+        try {
+          const rec = await api.patch(`/api/visit/${dbPatientId}/medications/reconcile`);
+          if (rec.data?.stopped > 0) {
+            const { data: d2 } = await api.get(
+              `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
+            );
+            setData({ ...d2, examFindings: buildExamFindings(d2.consultations?.[0]?.exam_data) });
+          }
+        } catch {
+          // non-critical — don't block the page
         }
       } catch {
         toast("Failed to load visit data", "error");
@@ -257,6 +270,7 @@ export default function VisitPage() {
   // ── Derived data (memoized) ──
   const derived = useMemo(() => {
     if (!data) return null;
+    console.log("data", data);
     const { vitals, diagnoses, labResults, labHistory } = data;
     const latestV = vitals?.[0] || null;
     const prevV = vitals?.[1] || null;
@@ -529,6 +543,9 @@ export default function VisitPage() {
           activeDx={activeDx}
           activeMeds={uniqueActiveMeds}
           flags={flags}
+          labResults={labResults}
+          onSaveVitals={(data) => mutations.updateVitals(data, latestV)}
+          onSaveLab={(data) => mutations.addLab(data)}
         />
 
         <div className="main">

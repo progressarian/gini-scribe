@@ -55,6 +55,23 @@ const STATUS_MAP = {
 
 export const statusClass = (s) => `sp-${STATUS_MAP[s] || "mon"}`;
 
+export const DX_STATUS_STYLE = {
+  New: { dot: "#2563eb", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
+  Active: { dot: "#0891b2", bg: "#ecfeff", color: "#0e7490", border: "#a5f3fc" },
+  Controlled: { dot: "#16a34a", bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
+  Improving: { dot: "#16a34a", bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
+  Review: { dot: "#d97706", bg: "#fffbeb", color: "#b45309", border: "#fde68a" },
+  Uncontrolled: { dot: "#dc2626", bg: "#fef2f2", color: "#b91c1c", border: "#fecaca" },
+  Monitoring: { dot: "#7c3aed", bg: "#f5f3ff", color: "#6d28d9", border: "#ddd6fe" },
+  Resolved: { dot: "#94a3b8", bg: "#f8fafc", color: "#64748b", border: "#e2e8f0" },
+};
+export const DX_STATUS_DEFAULT = {
+  dot: "#94a3b8",
+  bg: "#f8fafc",
+  color: "#64748b",
+  border: "#e2e8f0",
+};
+
 // ── Find a lab result by alias ──
 export const findLab = (labs, name) => {
   const aliases = LAB_ALIASES[name] || [name];

@@ -36,9 +36,25 @@ const VisitMedications = memo(function VisitMedications({
   onStopMed,
 }) {
   const [showStopped, setShowStopped] = useState(false);
+  const [showPrev, setShowPrev] = useState(false);
 
   const uniqueActive = useMemo(() => dedup(activeMeds), [activeMeds]);
   const uniqueStopped = useMemo(() => dedup(stoppedMeds), [stoppedMeds]);
+
+  // Split: last visit meds (active) vs previous visit meds (display as stopped)
+  const { lastVisitMeds, prevVisitMeds } = useMemo(() => {
+    const dates = uniqueActive.map((m) => m.prescribed_date).filter(Boolean);
+    const latestDate = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
+    if (!latestDate) return { lastVisitMeds: uniqueActive, prevVisitMeds: [] };
+    return {
+      lastVisitMeds: uniqueActive.filter(
+        (m) => !m.prescribed_date || m.prescribed_date === latestDate,
+      ),
+      prevVisitMeds: uniqueActive.filter(
+        (m) => m.prescribed_date && m.prescribed_date !== latestDate,
+      ),
+    };
+  }, [uniqueActive]);
 
   return (
     <div className="sc" id="medications">
@@ -47,6 +63,11 @@ const VisitMedications = memo(function VisitMedications({
           <div className="sci ic-g">💊</div>Medications
         </div>
         <div style={{ display: "flex", gap: 6 }}>
+          {prevVisitMeds.length > 0 && (
+            <button className="bx bx-n" onClick={() => setShowPrev(!showPrev)}>
+              Prev Visit ({prevVisitMeds.length})
+            </button>
+          )}
           {uniqueStopped.length > 0 && (
             <button className="bx bx-n" onClick={() => setShowStopped(!showStopped)}>
               Stopped Meds
@@ -66,7 +87,7 @@ const VisitMedications = memo(function VisitMedications({
           <span className="mthl">Actions</span>
         </div>
 
-        {uniqueActive.map((m, i) => (
+        {lastVisitMeds.map((m, i) => (
           <div key={m.id || i} className="mtr">
             <div className="mmain">
               <div className="mdot" style={{ background: MED_COLORS[i % MED_COLORS.length] }} />
@@ -122,10 +143,46 @@ const VisitMedications = memo(function VisitMedications({
           </div>
         ))}
 
-        {uniqueActive.length === 0 && (
+        {lastVisitMeds.length === 0 && (
           <div style={{ fontSize: 13, color: "var(--t3)", padding: 16, textAlign: "center" }}>
             No active medications
           </div>
+        )}
+
+        {/* Previous visit meds */}
+        {showPrev && prevVisitMeds.length > 0 && (
+          <>
+            <div className="stp-lbl">Previous Visit Medications</div>
+            {prevVisitMeds.map((m, i) => (
+              <div key={m.id || i} className="mtr stp">
+                <div className="mmain">
+                  <div className="mdot" style={{ background: "var(--t4)" }} />
+                  <div>
+                    <div className="mbrand">{m.name}</div>
+                    <div className="mgen">{m.composition || ""}</div>
+                  </div>
+                </div>
+                <div className="mtd">{m.dose || "—"}</div>
+                <div className="mtd">Was {m.frequency || "OD"}</div>
+                <div>
+                  <span className="stoptag">Prev Visit</span>
+                  {m.prescribed_date && (
+                    <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 2 }}>
+                      {fmtDate(m.prescribed_date)}
+                    </div>
+                  )}
+                </div>
+                <div className="macts">
+                  <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                    Edit
+                  </button>
+                  <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                    Stop
+                  </button>
+                </div>
+              </div>
+            ))}
+          </>
         )}
 
         {/* Stopped meds */}

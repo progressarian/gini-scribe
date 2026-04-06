@@ -5552,6 +5552,7 @@ export default function OPD() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDoc, setFilterDoc] = useState("all");
   const [filterCat, setFilterCat] = useState("all");
+  const [searchQ, setSearchQ] = useState("");
   const [selAppt, setSelAppt] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [view, setView] = useState("list");
@@ -5710,6 +5711,13 @@ export default function OPD() {
     if (filterCat === "complex" && a.category !== "complex") return false;
     if (filterCat === "maint" && a.category !== "maint") return false;
     if (filterCat === "ctrl" && a.category !== "ctrl") return false;
+    if (searchQ.trim()) {
+      const q = searchQ.trim().toLowerCase();
+      const name = (a.patient_name || "").toLowerCase();
+      const phone = (a.phone || "").toLowerCase();
+      const file = (a.file_no || "").toLowerCase();
+      if (!name.includes(q) && !phone.includes(q) && !file.includes(q)) return false;
+    }
     return true;
   });
 
@@ -6128,6 +6136,61 @@ export default function OPD() {
                   >
                     Today
                   </button>
+                </div>
+                <div style={{ position: "relative", marginTop: 8 }}>
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: 9,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      fontSize: 12,
+                      color: INK3,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    🔍
+                  </span>
+                  <input
+                    value={searchQ}
+                    onChange={(e) => setSearchQ(e.target.value)}
+                    placeholder="Search by name, phone, file no..."
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      paddingLeft: 28,
+                      paddingRight: searchQ ? 28 : 10,
+                      paddingTop: 5,
+                      paddingBottom: 5,
+                      border: `1px solid ${BD}`,
+                      borderRadius: 7,
+                      fontFamily: FB,
+                      fontSize: 11,
+                      color: INK,
+                      background: BG,
+                      outline: "none",
+                    }}
+                  />
+                  {searchQ && (
+                    <button
+                      onClick={() => setSearchQ("")}
+                      style={{
+                        position: "absolute",
+                        right: 7,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        color: INK3,
+                        padding: 0,
+                        lineHeight: 1,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
               <div style={{ flex: 1, overflowY: "auto" }}>

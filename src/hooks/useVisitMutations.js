@@ -169,6 +169,36 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData],
   );
 
+  const updateVitals = useCallback(
+    async (vitalsData, latestVitals) => {
+      try {
+        const isToday = (dateStr) => {
+          const d = new Date(dateStr);
+          const now = new Date();
+          return (
+            d.getFullYear() === now.getFullYear() &&
+            d.getMonth() === now.getMonth() &&
+            d.getDate() === now.getDate()
+          );
+        };
+        const useExisting =
+          latestVitals?.id && latestVitals?.recorded_at && isToday(latestVitals.recorded_at);
+        if (useExisting) {
+          await api.patch(`/api/visit/${patientId}/vitals/${latestVitals.id}`, vitalsData);
+        } else {
+          await api.post(`/api/visit/${patientId}/vitals`, vitalsData);
+        }
+        toast("Vitals updated", "success");
+        await refreshData();
+        return { success: true };
+      } catch {
+        toast("Failed to update vitals", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   return {
     addLab,
     addDiagnosis,
@@ -181,5 +211,6 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     addReferral,
     uploadDocument,
     updateFollowUp,
+    updateVitals,
   };
 }

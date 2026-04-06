@@ -708,4 +708,93 @@ router.post("/visit/:patientId/parse-text", async (req, res) => {
   }
 });
 
+// ── PATCH /visit/:patientId/medications/reconcile — Stop meds from older visits ──
+router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const r = await pool.query(
+      `UPDATE medications
+       SET is_active = false, stopped_date = CURRENT_DATE, stop_reason = 'Previous visit'
+       WHERE patient_id = $1
+         AND is_active = true
+         AND consultation_id IS NOT NULL
+         AND consultation_id IN (
+           SELECT id FROM consultations
+           WHERE patient_id = $1
+             AND visit_date < (SELECT MAX(visit_date) FROM consultations WHERE patient_id = $1)
+         )
+       RETURNING id`,
+      [pid],
+    );
+    res.json({ stopped: r.rowCount });
+  } catch (e) {
+    handleError(res, e, "Reconcile medications");
+  }
+});
+
+// ── POST /visit/:patientId/vitals — Create new vitals record for today ──
+router.post("/visit/:patientId/vitals", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist } =
+      req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO vitals (patient_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [
+        pid,
+        num(bp_sys),
+        num(bp_dia),
+        num(pulse),
+        num(temp),
+        num(spo2),
+        num(weight),
+        num(height),
+        num(bmi),
+        num(body_fat),
+        num(muscle_mass),
+        num(waist),
+      ],
+    );
+    res.json({ ok: true, id: rows[0].id });
+  } catch (e) {
+    handleError(res, e, "Create vitals");
+  }
+});
+
+// ── PATCH /visit/:patientId/vitals/:id — Update existing vitals record ──
+router.patch("/visit/:patientId/vitals/:id", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  const vid = Number(req.params.id);
+  if (!pid || !vid) return res.status(400).json({ error: "Invalid IDs" });
+  try {
+    const allowed = [
+      "bp_sys",
+      "bp_dia",
+      "pulse",
+      "temp",
+      "spo2",
+      "weight",
+      "height",
+      "bmi",
+      "body_fat",
+      "muscle_mass",
+      "waist",
+    ];
+    const keys = allowed.filter((f) => req.body[f] !== undefined);
+    if (!keys.length) return res.json({ ok: true });
+    const sets = keys.map((f, i) => `${f} = $${i + 1}`).join(", ");
+    const vals = keys.map((f) => num(req.body[f]));
+    await pool.query(
+      `UPDATE vitals SET ${sets} WHERE id = $${vals.length + 1} AND patient_id = $${vals.length + 2}`,
+      [...vals, vid, pid],
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    handleError(res, e, "Update vitals");
+  }
+});
+
 export default router;

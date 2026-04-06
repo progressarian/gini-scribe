@@ -1,6 +1,9 @@
 import { memo } from "react";
+import { DX_STATUS_STYLE, DX_STATUS_DEFAULT } from "./helpers";
 
 const DX_STATUS_OPTS = [
+  "New",
+  "Active",
   "Controlled",
   "Improving",
   "Review",
@@ -27,15 +30,10 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
       </div>
       <div className="scb">
         {activeDx.map((dx, i) => {
-          const dotColor =
-            dx.status === "Controlled" || dx.status === "Improving"
-              ? "var(--green)"
-              : dx.status === "Review" || dx.status === "Uncontrolled"
-                ? "var(--amber)"
-                : "var(--t3)";
+          const st = DX_STATUS_STYLE[dx.status] || DX_STATUS_DEFAULT;
           return (
             <div key={dx.id || i} className="dxi">
-              <div className="dxi-dot" style={{ background: dotColor }} />
+              <div className="dxi-dot" style={{ background: st.dot }} />
               <div style={{ flex: 1 }}>
                 <div className="dxi-ttl">{dx.label || dx.diagnosis_id}</div>
                 <div className="dxi-sub">
@@ -46,7 +44,15 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
               <select
                 className="sy-sel"
                 value={dx.status || ""}
-                style={{ fontSize: 12, height: 29, padding: "0 8px" }}
+                style={{
+                  fontSize: 12,
+                  height: 29,
+                  padding: "0 8px",
+                  background: st.bg,
+                  color: st.color,
+                  borderColor: st.border,
+                  fontWeight: 600,
+                }}
                 onChange={(e) => onUpdateDiagnosis?.(dx.id, { status: e.target.value })}
               >
                 {DX_STATUS_OPTS.map((o) => (
