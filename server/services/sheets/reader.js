@@ -16,7 +16,16 @@ let sheetsClient = null;
 
 function getClient() {
   if (sheetsClient) return sheetsClient;
-  const creds = JSON.parse(readFileSync(CREDS_PATH, "utf8"));
+
+  let creds;
+  if (process.env.GOOGLE_CREDENTIALS) {
+    // Use environment variable on Railway
+    creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+  } else {
+    // Fallback to file for local development
+    creds = JSON.parse(readFileSync(CREDS_PATH, "utf8"));
+  }
+
   const auth = new google.auth.GoogleAuth({
     credentials: creds,
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
