@@ -107,43 +107,130 @@ export const getLabHist = (labHistory, name) => {
   return h ? h.slice().reverse() : [];
 };
 
+// ── Get HTN status from latest BP reading ──
+export const getHtnStatusFromBP = (vitals) => {
+  if (!vitals?.length) return null;
+  const latest = vitals[0];
+  if (!latest?.bp_sys || !latest?.bp_dia) return null;
+  const sys = parseFloat(latest.bp_sys);
+  const dia = parseFloat(latest.bp_dia);
+  // Control: <140/90, Uncontrolled: >=140/90
+  return sys >= 140 || dia >= 90 ? "Uncontrolled" : "Controlled";
+};
+
 // ── Compute diagnosis status from biomarker values (Controlled/Uncontrolled) ──
-export const getDxStatusFromBiomarkers = (dxId, labResults) => {
+export const getDxStatusFromBiomarkers = (dxId, labResults, vitals) => {
+  const normalizedId = dxId?.toLowerCase().replace(/\s+/g, "_");
+
+  // Handle HTN separately from lab results
+  if (normalizedId === "hypertension" || normalizedId === "htn") {
+    return getHtnStatusFromBP(vitals);
+  }
+
   if (!labResults?.length) return null;
 
-  switch (dxId) {
-    case "dm2": {
-      const hba1c = getLabVal(labResults, "HbA1c");
-      if (!hba1c?.result) return null;
-      const val = parseFloat(hba1c.result);
-      return val <= 7 ? "Controlled" : "Uncontrolled";
-    }
-    case "dyslipidemia": {
-      const ldl = getLabVal(labResults, "LDL");
-      if (!ldl?.result) return null;
-      const val = parseFloat(ldl.result);
-      return val <= 100 ? "Controlled" : "Uncontrolled";
-    }
-    case "hypo": {
-      const tsh = getLabVal(labResults, "TSH");
-      if (!tsh?.result) return null;
-      const val = parseFloat(tsh.result);
-      return val <= 4.5 ? "Controlled" : "Uncontrolled";
-    }
-    case "ckd": {
-      const cr = getLabVal(labResults, "Creatinine");
-      if (!cr?.result) return null;
-      const val = parseFloat(cr.result);
-      return val <= 1.2 ? "Controlled" : "Uncontrolled";
-    }
-    case "cad":
-    case "htn": {
-      // These require BP which is not in lab results (comes from vitals)
-      return null;
-    }
-    default:
-      return null;
+  if (
+    normalizedId === "type_2_dm" ||
+    normalizedId === "dm2" ||
+    normalizedId === "diabetes_mellitus"
+  ) {
+    const hba1c = getLabVal(labResults, "HbA1c");
+    if (!hba1c?.result) return null;
+    const val = parseFloat(hba1c.result);
+    return val <= 7 ? "Controlled" : "Uncontrolled";
+  } else if (normalizedId === "dyslipidemia" || normalizedId === "hyperlipidemia") {
+    const ldl = getLabVal(labResults, "LDL");
+    if (!ldl?.result) return null;
+    const val = parseFloat(ldl.result);
+    return val <= 100 ? "Controlled" : "Uncontrolled";
+  } else if (
+    normalizedId === "hypo" ||
+    normalizedId === "hypothyroidism" ||
+    normalizedId === "thyroid"
+  ) {
+    const tsh = getLabVal(labResults, "TSH");
+    if (!tsh?.result) return null;
+    const val = parseFloat(tsh.result);
+    return val <= 4.5 ? "Controlled" : "Uncontrolled";
+  } else if (normalizedId === "ckd" || normalizedId === "chronic_kidney_disease") {
+    const cr = getLabVal(labResults, "Creatinine");
+    if (!cr?.result) return null;
+    const val = parseFloat(cr.result);
+    return val <= 1.2 ? "Controlled" : "Uncontrolled";
   }
+
+  return null;
+};
+
+// ── Get suggested diagnosis status with supporting biomarker details ──
+export const getDxSuggestion = (dxId, labResults, vitals) => {
+  let status = null;
+  let biomarker = null;
+  let value = null;
+  let unit = null;
+  let goal = null;
+
+  // Normalize diagnosis_id to match database values
+  const normalizedId = dxId?.toLowerCase().replace(/\s+/g, "_");
+
+  if (normalizedId === "hypertension" || normalizedId === "htn") {
+    if (!vitals?.length || !vitals[0].bp_sys || !vitals[0].bp_dia) return null;
+    const sys = parseFloat(vitals[0].bp_sys);
+    const dia = parseFloat(vitals[0].bp_dia);
+    status = sys >= 140 || dia >= 90 ? "Uncontrolled" : "Controlled";
+    biomarker = "BP";
+    value = `${sys}/${dia}`;
+    unit = "mmHg";
+    goal = "<140/90";
+  } else if (!labResults?.length) {
+    return null;
+  } else if (
+    normalizedId === "type_2_dm" ||
+    normalizedId === "dm2" ||
+    normalizedId === "diabetes_mellitus"
+  ) {
+    const hba1c = getLabVal(labResults, "HbA1c");
+    if (!hba1c?.result) return null;
+    const val = parseFloat(hba1c.result);
+    status = val <= 7 ? "Controlled" : "Uncontrolled";
+    biomarker = "HbA1c";
+    value = val;
+    unit = "%";
+    goal = "<7.0%";
+  } else if (normalizedId === "dyslipidemia" || normalizedId === "hyperlipidemia") {
+    const ldl = getLabVal(labResults, "LDL");
+    if (!ldl?.result) return null;
+    const val = parseFloat(ldl.result);
+    status = val <= 100 ? "Controlled" : "Uncontrolled";
+    biomarker = "LDL";
+    value = val;
+    unit = "mg/dL";
+    goal = "<100";
+  } else if (
+    normalizedId === "hypo" ||
+    normalizedId === "hypothyroidism" ||
+    normalizedId === "thyroid"
+  ) {
+    const tsh = getLabVal(labResults, "TSH");
+    if (!tsh?.result) return null;
+    const val = parseFloat(tsh.result);
+    status = val <= 4.5 ? "Controlled" : "Uncontrolled";
+    biomarker = "TSH";
+    value = val;
+    unit = "µIU/mL";
+    goal = "<4.5";
+  } else if (normalizedId === "ckd" || normalizedId === "chronic_kidney_disease") {
+    const cr = getLabVal(labResults, "Creatinine");
+    if (!cr?.result) return null;
+    const val = parseFloat(cr.result);
+    status = val <= 1.2 ? "Controlled" : "Uncontrolled";
+    biomarker = "Creatinine";
+    value = val;
+    unit = "mg/dL";
+    goal = "<1.2";
+  }
+
+  return status ? { status, biomarker, value, unit, goal } : null;
 };
 
 // ── Date formatters ──

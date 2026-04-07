@@ -50,6 +50,17 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
         .filter(Boolean)
         .reverse();
 
+    // BP history as combined readings (e.g., "140/90")
+    const bpH = (vitals || [])
+      .filter((v) => v.bp_sys && v.bp_dia)
+      .map((v) => ({
+        result: parseFloat(v.bp_sys),
+        dia: parseFloat(v.bp_dia),
+        date: v.recorded_at,
+        display: `${v.bp_sys}/${v.bp_dia}`,
+      }))
+      .reverse();
+
     // Weight: prefer vitals table, fall back to lab_results canonical_name='Weight'
     const weightLab = getLabVal(labResults, "Weight");
     const weightLabH = getLabHist(labHistory, "Weight");
@@ -85,6 +96,8 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       bodyFatH: vitalHist("body_fat"),
       waistLab,
       waistH: vitalWaistH.length > 0 ? vitalWaistH : getLabHist(labHistory, "Waist"),
+      bpH,
+      pulseH: vitalHist("pulse"),
     };
   }, [labResults, labHistory, vitals]);
 
@@ -113,6 +126,8 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     bodyFatH,
     waistLab,
     waistH,
+    bpH,
+    pulseH,
   } = markers;
 
   return (
@@ -195,6 +210,51 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             history={homaIrH}
           />
         </div>
+
+        {/* ── VITAL SIGNS / CARDIOVASCULAR ── */}
+        {(latestV?.bp_sys || latestV?.pulse) && (
+          <>
+            <div className="subsec" style={{ marginTop: 4 }}>
+              Vital Signs / Cardiovascular
+            </div>
+            <div className="bmg">
+              {latestV?.bp_sys && latestV?.bp_dia && (
+                <BiomarkerCard
+                  label="Blood Pressure"
+                  value={`${latestV.bp_sys}/${latestV.bp_dia}`}
+                  unit="mmHg"
+                  trend={
+                    bpH.length > 1
+                      ? `${latestV.bp_sys >= 140 || latestV.bp_dia >= 90 ? "↑ Elevated" : "✓ Normal"} from ${bpH[0]?.display}`
+                      : latestV.bp_sys >= 140 || latestV.bp_dia >= 90
+                        ? "↑ Elevated"
+                        : "✓ Normal"
+                  }
+                  trendDir={latestV.bp_sys >= 140 || latestV.bp_dia >= 90 ? "bad" : "good"}
+                  goal="<140/90"
+                  goalLabel="Target"
+                  history={bpH}
+                />
+              )}
+              {latestV?.pulse && (
+                <BiomarkerCard
+                  label="Heart Rate"
+                  value={latestV.pulse}
+                  unit="bpm"
+                  trend={
+                    pulseH.length > 1
+                      ? `${latestV.pulse > 90 ? "↑" : "✓"} From ${pulseH[0]?.result} bpm`
+                      : null
+                  }
+                  trendDir={latestV.pulse > 90 ? "warn" : "good"}
+                  goal="60–100"
+                  goalLabel="Normal"
+                  history={pulseH}
+                />
+              )}
+            </div>
+          </>
+        )}
 
         {/* ── LIPIDS / KIDNEY / THYROID ── */}
         <div className="subsec" style={{ marginTop: 4 }}>

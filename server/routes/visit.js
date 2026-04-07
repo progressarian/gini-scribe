@@ -82,25 +82,25 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 4. Active medications (use m.prescribed_date for documents, c.visit_date for consultations)
+      // 4. Active medications (use m.started_date for documents, c.visit_date for consultations)
       pool.query(
         `WITH latest_cons AS (
            SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id
            FROM consultations WHERE patient_id=$1
            ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
          )
-         SELECT m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.prescribed_date) AS prescribed_date
+         SELECT m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = true
            AND (m.consultation_id IN (SELECT id FROM latest_cons) OR m.consultation_id IS NULL)
-         ORDER BY COALESCE(c.visit_date, m.prescribed_date) DESC, m.created_at DESC`,
+         ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
         [pid],
       ),
 
       // 5. Stopped medications (deduplicated — one per drug name, latest wins)
       pool.query(
         `SELECT DISTINCT ON (UPPER(COALESCE(m.pharmacy_match, m.name)))
-           m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.prescribed_date) AS prescribed_date
+           m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = false
          ORDER BY UPPER(COALESCE(m.pharmacy_match, m.name)), m.stopped_date DESC NULLS LAST`,
@@ -749,7 +749,7 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
                AND visit_date < (SELECT MAX(visit_date) FROM consultations WHERE patient_id = $1)
            ))
            -- Case 2: Document medicines from past visits/dates (no consultation_id)
-           OR (consultation_id IS NULL AND (COALESCE(prescribed_date, created_at::DATE) < CURRENT_DATE))
+           OR (consultation_id IS NULL AND (COALESCE(started_date, created_at::DATE) < CURRENT_DATE))
          )
        RETURNING id`,
       [pid],

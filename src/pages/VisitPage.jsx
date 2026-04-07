@@ -668,6 +668,8 @@ export default function VisitPage() {
               />
               <VisitDiagnoses
                 activeDx={activeDx}
+                labResults={data.labResults}
+                vitals={data.vitals}
                 onAddDiagnosis={() => setModal({ type: "addDiagnosis" })}
                 onDiagnosisNote={(dx) => setModal({ type: "diagnosisNote", data: dx })}
                 onUpdateDiagnosis={(id, d) => mutations.updateDiagnosis(id, d)}
