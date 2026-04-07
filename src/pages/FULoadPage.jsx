@@ -49,6 +49,50 @@ export default function FULoadPage() {
         <span className="fu-load__header-step">Step 1/5</span>
       </div>
 
+      {/* Extraction in progress modal overlay */}
+      {intakeReports.some((r) => r.extracting) && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: 12,
+              padding: "32px",
+              textAlign: "center",
+              boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
+              maxWidth: 320,
+            }}
+          >
+            <div style={{ fontSize: 48, marginBottom: 16, animation: "spin 2s linear infinite" }}>
+              ⏳
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#1a1f2e", marginBottom: 8 }}>
+              Extracting Report Values
+            </div>
+            {intakeReports.filter((r) => r.extracting).length > 1 && (
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Processing {intakeReports.filter((r) => r.extracting).length} reports...
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              Please wait while we extract the lab results...
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Patient Concerns from Mobile App */}
       {patientAlertsLoading ? (
         <div style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 13 }}>
@@ -105,7 +149,7 @@ export default function FULoadPage() {
       <div className="fu-load__section">
         <div className="fu-load__section-title">💓 Vitals</div>
         <AudioInput
-          label="Say vitals: BP 140/90, weight 80kg"
+          label="Say vitals: BP 140/90, weight 80kg, muscle mass 35kg"
           dgKey={dgKey}
           whisperKey={whisperKey}
           color="#ea580c"
@@ -122,6 +166,7 @@ export default function FULoadPage() {
             { k: "height", l: "Height", min: 30, max: 250, unit: "cm" },
             { k: "temp", l: "Temp", min: 90, max: 110, unit: "°F" },
             { k: "waist", l: "Waist", min: 30, max: 200, unit: "cm" },
+            { k: "muscle_mass", l: "Muscle Mass", min: 0, max: 150, unit: "kg" },
           ].map((v) => {
             const val = vitals[v.k] || "";
             const num = parseFloat(val);
@@ -308,47 +353,54 @@ export default function FULoadPage() {
             {intakeReports.some((r) => !r.data && !r.extracting) && (
               <button
                 onClick={async () => {
-                  for (const rpt of intakeReports.filter((r) => !r.data && !r.extracting)) {
-                    setIntakeReports((prev) =>
-                      prev.map((r) => (r.id === rpt.id ? { ...r, extracting: true } : r)),
-                    );
-                    try {
-                      const extFn = rpt.type === "imaging" ? extractImaging : extractLab;
-                      const { data, error } = await extFn(rpt.base64, rpt.mediaType);
-                      if (data) {
-                        setIntakeReports((prev) =>
-                          prev.map((r) =>
-                            r.id === rpt.id ? { ...r, data, extracting: false } : r,
-                          ),
-                        );
-                        if (rpt.type !== "imaging" && data.panels) {
-                          const taggedPanels = data.panels.map((p) => ({
-                            ...p,
-                            _source: rpt.fileName,
-                          }));
-                          setLabData((prev) =>
-                            prev
-                              ? { ...prev, panels: [...(prev.panels || []), ...taggedPanels] }
-                              : { ...data, panels: taggedPanels },
+                  const toExtract = intakeReports.filter((r) => !r.data && !r.extracting);
+                  // Mark all as extracting at once
+                  setIntakeReports((prev) =>
+                    prev.map((r) =>
+                      toExtract.find((t) => t.id === r.id) ? { ...r, extracting: true } : r,
+                    ),
+                  );
+                  // Extract all in parallel
+                  await Promise.all(
+                    toExtract.map(async (rpt) => {
+                      try {
+                        const extFn = rpt.type === "imaging" ? extractImaging : extractLab;
+                        const { data, error } = await extFn(rpt.base64, rpt.mediaType);
+                        if (data) {
+                          setIntakeReports((prev) =>
+                            prev.map((r) =>
+                              r.id === rpt.id ? { ...r, data, extracting: false } : r,
+                            ),
+                          );
+                          if (rpt.type !== "imaging" && data.panels) {
+                            const taggedPanels = data.panels.map((p) => ({
+                              ...p,
+                              _source: rpt.fileName,
+                            }));
+                            setLabData((prev) =>
+                              prev
+                                ? { ...prev, panels: [...(prev.panels || []), ...taggedPanels] }
+                                : { ...data, panels: taggedPanels },
+                            );
+                          }
+                        } else {
+                          setIntakeReports((prev) =>
+                            prev.map((r) =>
+                              r.id === rpt.id
+                                ? { ...r, error: error || "No data", extracting: false }
+                                : r,
+                            ),
                           );
                         }
-                      } else {
+                      } catch (e) {
                         setIntakeReports((prev) =>
                           prev.map((r) =>
-                            r.id === rpt.id
-                              ? { ...r, error: error || "No data", extracting: false }
-                              : r,
+                            r.id === rpt.id ? { ...r, error: e.message, extracting: false } : r,
                           ),
                         );
                       }
-                    } catch (e) {
-                      setIntakeReports((prev) =>
-                        prev.map((r) =>
-                          r.id === rpt.id ? { ...r, error: e.message, extracting: false } : r,
-                        ),
-                      );
-                    }
-                  }
+                    }),
+                  );
                 }}
                 className="fu-load__extract-all-btn"
               >
@@ -379,9 +431,19 @@ export default function FULoadPage() {
         if (!orderedTests.length) return null;
         const loadedTests =
           labData?.panels?.flatMap((p) => p.tests.map((t) => t.test_name.toLowerCase())) || [];
+        const testsDueDate = lastConData.follow_up?.tests_due_date;
+        const dueDateStr = testsDueDate
+          ? new Date(testsDueDate).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })
+          : null;
         return (
           <div className="fu-load__ordered-tests">
-            <div className="fu-load__ordered-tests-title">📋 Tests ordered last visit:</div>
+            <div className="fu-load__ordered-tests-title">
+              📋 Tests ordered last visit{dueDateStr ? ` (due: ${dueDateStr})` : ""}:
+            </div>
             <div className="fu-load__ordered-tests-list">
               {orderedTests.map((t, i) => {
                 const tStr = typeof t === "string" ? t : t.test || t.name || "";

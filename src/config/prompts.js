@@ -16,6 +16,7 @@ RULES:
 - Indian brand names: identify composition
 - MEDICINE NAME MATCHING: Use EXACT brand names from Gini pharmacy: ${GINI_BRANDS}. When doctor says a medicine name, match to the closest brand. E.g. "thyro norm 88"\u2192"THYRONORM 88MCG", "telma 40"\u2192"TELMA 40", "ecosprin gold"\u2192"ECOSPRIN GOLD", "atchol 10"\u2192"ATCHOL 10", "concor am"\u2192"CONCOR AM", "dytor 10"\u2192"DYTOR 10"
 - Keep label SHORT (max 8 words)
+- Qualifiers like "Young onset", "juvenile", "early onset", "late onset" MUST appear in brackets within the diagnosis label (e.g., "Type 2 DM (Young onset)"), NEVER as standalone diagnoses
 - complications severity: "high" if active/dangerous, "low" if stable`;
 
 export const CONSULTANT_PROMPT = `Extract clinical decisions from consultant's verbal notes. Output ONLY valid JSON. No backticks.

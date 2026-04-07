@@ -5,6 +5,7 @@ import api from "../services/api";
 import usePatientStore from "../stores/patientStore";
 import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
+import useClinicalStore from "../stores/clinicalStore";
 import { toast } from "../stores/uiStore";
 import { findLab, getLabVal, getLabHist, computeFlags, fmtDate } from "../components/visit/helpers";
 import { extractLab } from "../services/extraction";
@@ -163,6 +164,8 @@ export default function VisitPage() {
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
   const doctor = useAuthStore((s) => s.currentDoctor);
   const endVisitAction = useVisitStore((s) => s.endVisit);
+  const conData = useClinicalStore((s) => s.conData);
+  const setConData = useClinicalStore((s) => s.setConData);
 
   // ── OPD appointment sync ──
   const [opdApptId] = useState(() => {
@@ -184,6 +187,7 @@ export default function VisitPage() {
   const [doctorNote, setDoctorNote] = useState("");
   const [modal, setModal] = useState(null); // { type, data? }
   const [labExtractSaving, setLabExtractSaving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const scrollRef = useRef(null);
   const noteTimerRef = useRef(null);
 
@@ -258,9 +262,10 @@ export default function VisitPage() {
       const { data: d } = await api.get(
         `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
       );
+      console.log("[RefreshData] Updated labs:", d.labResults?.length);
       setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
-    } catch {
-      /* silent */
+    } catch (e) {
+      console.error("[RefreshData] Error:", e.message);
     }
   }, [dbPatientId, opdApptId]);
 
@@ -536,6 +541,45 @@ export default function VisitPage() {
         activeMeds={uniqueActiveMeds}
       />
 
+      {/* Extraction in progress modal overlay */}
+      {extracting && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: 12,
+              padding: "32px",
+              textAlign: "center",
+              boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
+              maxWidth: 320,
+            }}
+          >
+            <div style={{ fontSize: 48, marginBottom: 16, animation: "spin 2s linear infinite" }}>
+              ⏳
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#1a1f2e", marginBottom: 8 }}>
+              Extracting Lab Values
+            </div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              Please wait while we extract the lab results from your report...
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bodywrap">
         <VisitSidebar
           summary={summary}
@@ -656,6 +700,8 @@ export default function VisitPage() {
                 onChangeFollowUp={() => setModal({ type: "changeFollowUp" })}
                 onOpenTemplate={(tpl) => setModal({ type: "template", data: tpl })}
                 onMedCardTab={() => setTab("medcard")}
+                conData={conData}
+                setConData={setConData}
               />
               <div style={{ height: 28 }} />
             </div>
@@ -813,7 +859,15 @@ export default function VisitPage() {
                       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                         <thead>
                           <tr style={{ background: "var(--bg)" }}>
-                            {["Date", "Weight", "BMI", "Waist", "Body Fat %", "BP"].map((h) => (
+                            {[
+                              "Date",
+                              "Weight",
+                              "BMI",
+                              "Waist",
+                              "Body Fat %",
+                              "Muscle Mass",
+                              "BP",
+                            ].map((h) => (
                               <th
                                 key={h}
                                 style={{
@@ -854,6 +908,9 @@ export default function VisitPage() {
                               </td>
                               <td style={{ padding: "7px 12px", textAlign: "center" }}>
                                 {v.body_fat ? `${v.body_fat}%` : "—"}
+                              </td>
+                              <td style={{ padding: "7px 12px", textAlign: "center" }}>
+                                {v.muscle_mass ? `${v.muscle_mass} kg` : "—"}
                               </td>
                               <td style={{ padding: "7px 12px", textAlign: "center" }}>
                                 {v.bp_sys && v.bp_dia ? `${v.bp_sys}/${v.bp_dia}` : "—"}
@@ -1102,7 +1159,7 @@ export default function VisitPage() {
             closeModal();
             // For lab reports with a file, extract and show review modal
             if (d.doc_type === "lab_report" && d.base64) {
-              toast("Extracting lab values...", "success");
+              setExtracting(true);
               try {
                 const mediaType = d.fileName?.match(/\.pdf$/i)
                   ? "application/pdf"
@@ -1115,6 +1172,7 @@ export default function VisitPage() {
                 });
                 const { data: extracted, error } = await extractLab(d.base64, mediaType);
                 console.log("[LabExtract] Result:", { extracted, error });
+                setExtracting(false);
                 if (error) {
                   toast(`Extraction error: ${error}`, "warn");
                 } else if (!extracted?.panels?.length) {
@@ -1124,6 +1182,7 @@ export default function VisitPage() {
                 }
               } catch (e) {
                 console.error("[LabExtract] Exception:", e);
+                setExtracting(false);
                 toast(`Lab extraction failed: ${e.message}`, "warn");
               }
             } else if (d.doc_type === "lab_report" && !d.base64) {
@@ -1156,8 +1215,8 @@ export default function VisitPage() {
             const source = modal.data.source || "lab";
             let saved = 0;
             for (const test of tests) {
-              await api
-                .post(`/api/patients/${dbPatientId}/labs`, {
+              try {
+                await api.post(`/api/patients/${dbPatientId}/labs`, {
                   test_name: normalizeTestName(test.test_name),
                   result: String(test.result_text || test.result),
                   unit: test.unit || "",
@@ -1165,11 +1224,15 @@ export default function VisitPage() {
                   ref_range: test.ref_range || "",
                   test_date: doc_date || null,
                   source,
-                })
-                .catch(() => {});
-              saved++;
+                });
+                saved++;
+              } catch (e) {
+                console.error("Failed to save lab:", e.message);
+              }
             }
+            // Refresh data and wait a moment for state to update
             await refreshData();
+            await new Promise((r) => setTimeout(r, 500));
             setLabExtractSaving(false);
             closeModal();
             toast(`${saved} lab value${saved !== 1 ? "s" : ""} saved`, "success");

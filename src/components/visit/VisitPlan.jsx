@@ -1,6 +1,7 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import { fmtDate, fmtDateLong, getLabVal, MED_COLORS } from "./helpers";
 import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard";
+import { LAB_ORDER_CHIPS } from "../../config/chips";
 
 function buildRxHTML(
   patient,
@@ -181,6 +182,8 @@ const VisitPlan = memo(function VisitPlan({
   onMedCardTab,
   referrals,
   symptoms,
+  conData,
+  setConData,
 }) {
   const latestCon = consultations[0]?.con_data;
   const tests = latestCon?.investigations_to_order?.length
@@ -193,6 +196,37 @@ const VisitPlan = memo(function VisitPlan({
   const hba1c = getLabVal(labResults, "HbA1c");
   const fbs = getLabVal(labResults, "FBS");
 
+  // Ensure conData has follow_up structure for tests
+  const ensureConData = () => {
+    if (!conData) {
+      setConData({
+        follow_up: {
+          tests_to_bring: [],
+        },
+      });
+      return {
+        follow_up: {
+          tests_to_bring: [],
+        },
+      };
+    }
+    if (!conData.follow_up) {
+      setConData({
+        ...conData,
+        follow_up: {
+          tests_to_bring: [],
+        },
+      });
+      return {
+        ...conData,
+        follow_up: {
+          tests_to_bring: [],
+        },
+      };
+    }
+    return conData;
+  };
+  const activeConData = ensureConData();
   const handlePrintRx = useCallback(() => {
     const html = buildRxHTML(
       patient,
@@ -314,6 +348,123 @@ const VisitPlan = memo(function VisitPlan({
                 ))
               ) : (
                 <div style={{ fontSize: 12, color: "var(--t3)" }}>No tests ordered</div>
+              )}
+            </div>
+            <div className="plc">
+              <div className="plct">🗓 Tests for Next Appointment</div>
+              {activeConData && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {/* Test Chips */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {LAB_ORDER_CHIPS.map((test) => {
+                      const isSelected = (activeConData?.follow_up?.tests_to_bring || []).includes(
+                        test,
+                      );
+                      return (
+                        <button
+                          key={test}
+                          onClick={() => {
+                            const current = activeConData?.follow_up?.tests_to_bring || [];
+                            const updated = isSelected
+                              ? current.filter((t) => t !== test)
+                              : [...current, test];
+                            setConData((prev) => ({
+                              ...prev,
+                              follow_up: {
+                                ...prev.follow_up,
+                                tests_to_bring: updated,
+                              },
+                            }));
+                          }}
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: 16,
+                            border: isSelected ? "2px solid #3b82f6" : "1px solid #d1d5db",
+                            background: isSelected ? "#dbeafe" : "white",
+                            color: isSelected ? "#1e40af" : "#374151",
+                            fontWeight: isSelected ? 600 : 500,
+                            fontSize: 11,
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {test}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Selected Tests Summary */}
+                  {(activeConData?.follow_up?.tests_to_bring || []).length > 0 && (
+                    <div
+                      style={{
+                        padding: 8,
+                        background: "#f0f9ff",
+                        borderRadius: 4,
+                        border: "1px solid #bfdbfe",
+                        fontSize: 11,
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, color: "#1e40af", marginBottom: 4 }}>
+                        Selected ({(activeConData?.follow_up?.tests_to_bring || []).length}):
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                        {(activeConData?.follow_up?.tests_to_bring || []).map((t) => (
+                          <span
+                            key={t}
+                            style={{
+                              fontSize: 10,
+                              background: "#3b82f6",
+                              color: "white",
+                              padding: "2px 6px",
+                              borderRadius: 2,
+                            }}
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Date Input */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
+                    <label style={{ fontWeight: 600, color: "#475569", flexShrink: 0 }}>
+                      Due date:
+                    </label>
+                    <input
+                      type="date"
+                      value={activeConData?.follow_up?.tests_due_date || ""}
+                      onChange={(e) => {
+                        setConData((prev) => ({
+                          ...prev,
+                          follow_up: {
+                            ...prev.follow_up,
+                            tests_due_date: e.target.value,
+                          },
+                        }));
+                      }}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: 4,
+                        border: "1px solid #d1d5db",
+                        fontSize: 11,
+                      }}
+                    />
+                    {activeConData?.follow_up?.tests_due_date && (
+                      <span style={{ fontSize: 10, color: "#059669", fontWeight: 600 }}>
+                        {new Date(activeConData.follow_up.tests_due_date).toLocaleDateString(
+                          "en-IN",
+                          {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          },
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
             <div className="plc">

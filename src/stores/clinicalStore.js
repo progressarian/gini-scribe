@@ -15,6 +15,69 @@ import useUiStore from "./uiStore.js";
 import useVisitStore from "./visitStore.js";
 import useExamStore from "./examStore.js";
 import useLabStore from "./labStore.js";
+import { getDxStatusFromBiomarkers } from "../components/visit/helpers.jsx";
+
+// Helper: Merge qualifiers like "Young onset" into diagnosis labels (e.g., "Type 2 DM (Young onset)")
+function mergeQualifiersIntoDiagnoses(diagnoses) {
+  if (!diagnoses?.length) return diagnoses;
+
+  // Pattern for labels like "Young Onset Type 2 DM" → extract qualifier + base condition
+  const qualifierInLabelPattern =
+    /(young\s*onset|juvenile|early\s*onset|late\s*onset|new\s*onset)\s+(.+)/i;
+
+  const result = [];
+  const processed = new Set();
+
+  diagnoses.forEach((d) => {
+    const label = d.label || "";
+    const match = label.match(qualifierInLabelPattern);
+
+    if (match) {
+      // This is a label like "Young Onset Type 2 DM" — extract qualifier + base
+      const qualifier = match[1].trim();
+      const baseCondition = match[2].trim();
+
+      // Find matching main diagnosis (e.g., "Type 2 DM")
+      const mainDx = diagnoses.find((main) => {
+        const mainLabel = (main.label || "").toLowerCase();
+        const baseLower = baseCondition.toLowerCase();
+        return mainLabel === baseLower || mainLabel.includes(baseLower);
+      });
+
+      if (mainDx && !processed.has(mainDx.diagnosis_id || mainDx.label)) {
+        // Merge qualifier into main diagnosis label
+        result.push({
+          ...mainDx,
+          label: `${mainDx.label} (${qualifier})`,
+        });
+        processed.add(mainDx.diagnosis_id || mainDx.label);
+        processed.add(d.diagnosis_id || d.label); // Mark this entry as merged
+      } else if (!processed.has(d.diagnosis_id || d.label)) {
+        result.push(d);
+        processed.add(d.diagnosis_id || d.label);
+      }
+    } else if (!processed.has(d.diagnosis_id || d.label)) {
+      result.push(d);
+      processed.add(d.diagnosis_id || d.label);
+    }
+  });
+
+  return result;
+}
+
+// Helper: Sync diagnosis status from biomarker values (only if biomarkers available)
+function syncDxStatusFromBiomarkers(diagnoses, labResults) {
+  if (!diagnoses?.length || !labResults?.length) return diagnoses;
+
+  return diagnoses.map((dx) => {
+    const bioStatus = getDxStatusFromBiomarkers(dx.diagnosis_id || dx.id, labResults);
+    // Only override status if biomarker logic returns a result and status differs
+    if (bioStatus && bioStatus !== dx.status) {
+      return { ...dx, status: bioStatus };
+    }
+    return dx;
+  });
+}
 
 const useClinicalStore = create((set, get) => ({
   // ── state ──
@@ -125,8 +188,17 @@ const useClinicalStore = create((set, get) => ({
     }
     const { data, error } = await callClaude(MO_PROMPT, txt + extra);
     if (error) setErrors((p) => ({ ...p, mo: error }));
-    else if (data) set({ moData: fixMoMedicines(data) });
-    else setErrors((p) => ({ ...p, mo: "No data returned" }));
+    else if (data) {
+      const fixedData = fixMoMedicines(data);
+      // Merge qualifiers like "Young onset" into diagnosis labels
+      if (fixedData.diagnoses?.length) {
+        fixedData.diagnoses = mergeQualifiersIntoDiagnoses(fixedData.diagnoses);
+        // Sync diagnosis status from biomarker values (if labs are available)
+        const labResults = useLabStore.getState().labData?.panels?.flatMap((p) => p.tests) || [];
+        fixedData.diagnoses = syncDxStatusFromBiomarkers(fixedData.diagnoses, labResults);
+      }
+      set({ moData: fixedData });
+    } else setErrors((p) => ({ ...p, mo: "No data returned" }));
     setLoading((p) => ({ ...p, mo: false }));
   },
 

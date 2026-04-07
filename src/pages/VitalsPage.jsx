@@ -32,7 +32,7 @@ export default function VitalsPage() {
         <div className="vitals__col">
           <div className="vitals__section-title">📊 Vitals</div>
           <AudioInput
-            label="Say vitals: BP 140 over 90, weight 80kg"
+            label="Say vitals: BP 140 over 90, weight 80kg, muscle mass 35kg"
             dgKey={dgKey}
             whisperKey={whisperKey}
             color="#ea580c"

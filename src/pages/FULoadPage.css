@@ -235,3 +235,9 @@
   font-weight: 800;
   cursor: pointer;
 }
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -107,6 +107,45 @@ export const getLabHist = (labHistory, name) => {
   return h ? h.slice().reverse() : [];
 };
 
+// ── Compute diagnosis status from biomarker values (Controlled/Uncontrolled) ──
+export const getDxStatusFromBiomarkers = (dxId, labResults) => {
+  if (!labResults?.length) return null;
+
+  switch (dxId) {
+    case "dm2": {
+      const hba1c = getLabVal(labResults, "HbA1c");
+      if (!hba1c?.result) return null;
+      const val = parseFloat(hba1c.result);
+      return val <= 7 ? "Controlled" : "Uncontrolled";
+    }
+    case "dyslipidemia": {
+      const ldl = getLabVal(labResults, "LDL");
+      if (!ldl?.result) return null;
+      const val = parseFloat(ldl.result);
+      return val <= 100 ? "Controlled" : "Uncontrolled";
+    }
+    case "hypo": {
+      const tsh = getLabVal(labResults, "TSH");
+      if (!tsh?.result) return null;
+      const val = parseFloat(tsh.result);
+      return val <= 4.5 ? "Controlled" : "Uncontrolled";
+    }
+    case "ckd": {
+      const cr = getLabVal(labResults, "Creatinine");
+      if (!cr?.result) return null;
+      const val = parseFloat(cr.result);
+      return val <= 1.2 ? "Controlled" : "Uncontrolled";
+    }
+    case "cad":
+    case "htn": {
+      // These require BP which is not in lab results (comes from vitals)
+      return null;
+    }
+    default:
+      return null;
+  }
+};
+
 // ── Date formatters ──
 const MONTHS_S = [
   "Jan",

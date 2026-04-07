@@ -86,6 +86,14 @@ export default function IntakePage() {
           const lastFollowUp = lastConData.follow_up || {};
           const orderedTests =
             lastFollowUp.tests_to_bring || lastConData.investigations_to_order || [];
+          const testsDueDate = lastFollowUp.tests_due_date;
+          const dueDateStr = testsDueDate
+            ? new Date(testsDueDate).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : null;
           const lastMeds = lastConData.medications_confirmed || [];
           const lastStopped = lastConData.medications_stopped || [];
           const uniqueDx = [
@@ -606,7 +614,7 @@ export default function IntakePage() {
                       marginBottom: 6,
                     }}
                   >
-                    📋 Tests Ordered Last Visit{" "}
+                    📋 Tests Ordered Last Visit{dueDateStr && ` (due: ${dueDateStr})`}{" "}
                     {!hasNewLabs && "— Upload reports to see updated trends"}
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -1270,7 +1278,7 @@ export default function IntakePage() {
       <div className="intake__section">
         <div className="intake__section-title">💓 Vitals</div>
         <AudioInput
-          label="Say vitals: BP 140/90, weight 80kg"
+          label="Say vitals: BP 140/90, weight 80kg, muscle mass 35kg"
           dgKey={dgKey}
           whisperKey={whisperKey}
           color="#ea580c"

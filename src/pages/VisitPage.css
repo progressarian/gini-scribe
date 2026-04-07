@@ -2974,3 +2974,9 @@ textarea.nf:focus {
     padding: 8px 10px;
   }
 }
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

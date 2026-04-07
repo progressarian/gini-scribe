@@ -12,13 +12,15 @@ const KEY_BIOMARKERS = [
 ];
 
 const VITALS_FIELDS = [
-  { key: "bp_sys", label: "BP Sys", unit: "mmHg" },
+  { key: "bp_sys", label: "BP", unit: "mmHg" },
   { key: "bp_dia", label: "BP Dia", unit: "mmHg" },
   { key: "pulse", label: "HR", unit: "bpm" },
   { key: "weight", label: "Weight", unit: "kg" },
   { key: "height", label: "Height", unit: "cm" },
   { key: "bmi", label: "BMI", unit: "", readOnly: true },
   { key: "body_fat", label: "Body Fat", unit: "%" },
+  { key: "waist", label: "Waist", unit: "cm" },
+  { key: "muscle_mass", label: "Muscle Mass", unit: "kg" },
   { key: "spo2", label: "SpO2", unit: "%" },
   { key: "temp", label: "Temp", unit: "°F" },
 ];
@@ -57,6 +59,8 @@ const VisitSidebar = memo(function VisitSidebar({
       height: v?.height ?? "",
       bmi: v?.bmi ?? "",
       body_fat: v?.body_fat ?? "",
+      waist: v?.waist ?? "",
+      muscle_mass: v?.muscle_mass ?? "",
       spo2: v?.spo2 ?? "",
       temp: v?.temp ?? "",
     });
@@ -233,77 +237,36 @@ const VisitSidebar = memo(function VisitSidebar({
                 ))}
               </div>
             ) : (
-              <>
-                <div className="vgrid">
-                  <div className="vbox">
-                    <div className="vval">
-                      {v.bp_sys || "-"}
-                      <span style={{ fontSize: 9, color: "var(--sbmuted)" }}>
-                        /{v.bp_dia || "-"}
-                      </span>
-                    </div>
-                    <div className="vlbl">BP mmHg</div>
-                  </div>
+              <div className="vgrid">
+                {VITALS_FIELDS.map(({ key, label, unit, readOnly }) => {
+                  let displayVal = v?.[key] ?? "-";
 
-                  <div className="vbox">
-                    <div className="vval">{v.pulse || "-"}</div>
-                    <div className="vlbl">HR bpm</div>
-                  </div>
+                  // Format special cases
+                  if (key === "bp_sys" && v?.bp_sys && v?.bp_dia) {
+                    displayVal = `${v.bp_sys}/${v.bp_dia}`;
+                  } else if (key === "bp_dia") {
+                    return null; // Skip, already shown in BP
+                  } else if (key === "bmi" && v?.bmi) {
+                    displayVal = Number(v.bmi).toFixed(1);
+                  }
 
-                  <div className="vbox">
-                    <div className="vval">
-                      {v.weight || "-"}
-                      <span style={{ fontSize: 9, color: "var(--sbmuted)" }}>kg</span>
-                    </div>
-                    <div className="vlbl">Weight</div>
-                  </div>
+                  if (displayVal === "-") return null; // Skip empty vitals
 
-                  <div className="vbox">
-                    <div className="vval">{v.bmi ? Number(v.bmi).toFixed(1) : "-"}</div>
-                    <div className="vlbl">BMI</div>
-                  </div>
-                  <div className="vbox">
-                    <div className="vval">
-                      {v.body_fat || "-"}
-                      <span style={{ fontSize: 9, color: "var(--sbmuted)" }}>%</span>
+                  return (
+                    <div key={key} className="vbox">
+                      <div className="vval">
+                        {displayVal}
+                        {unit && unit !== "" && (
+                          <span style={{ fontSize: 9, color: "var(--sbmuted)", marginLeft: 2 }}>
+                            {unit}
+                          </span>
+                        )}
+                      </div>
+                      <div className="vlbl">{label}</div>
                     </div>
-                    <div className="vlbl">Body Fat</div>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 5,
-                    background: "var(--sb2)",
-                    border: "1px solid var(--sbb)",
-                    borderRadius: 6,
-                    padding: "5px 8px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <div style={{ textAlign: "center" }}>
-                    <div className="vval" style={{ fontSize: 12 }}>
-                      {v.height || "-"} cm
-                    </div>
-                    <div className="vlbl">Height</div>
-                  </div>
-
-                  <div style={{ textAlign: "center" }}>
-                    <div className="vval" style={{ fontSize: 12 }}>
-                      {v.spo2 || "-"}%
-                    </div>
-                    <div className="vlbl">SpO2</div>
-                  </div>
-
-                  <div style={{ textAlign: "center" }}>
-                    <div className="vval" style={{ fontSize: 12 }}>
-                      {v.temp || "-"}°F
-                    </div>
-                    <div className="vlbl">Temp</div>
-                  </div>
-                </div>
-              </>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
