@@ -1120,6 +1120,9 @@ export default function VisitPage() {
       {modal?.type === "addMed" && (
         <AddMedicationModal
           diagnoses={activeDx}
+          patient={data.patient}
+          labResults={data.labResults}
+          activeMeds={derived.uniqueActiveMeds}
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.addMedication(d);

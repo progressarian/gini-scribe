@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { getWarning } from "../../../utils/drugWarnings";
 
 const DRUG_LIST = [
   "Metformin 500mg",
@@ -49,7 +50,14 @@ const TIMINGS = [
   "SOS only",
 ];
 
-const AddMedicationModal = memo(function AddMedicationModal({ onClose, onSubmit, diagnoses }) {
+const AddMedicationModal = memo(function AddMedicationModal({
+  onClose,
+  onSubmit,
+  diagnoses,
+  patient,
+  labResults,
+  activeMeds,
+}) {
   const [form, setForm] = useState({
     name: "",
     dose: "",
@@ -57,12 +65,28 @@ const AddMedicationModal = memo(function AddMedicationModal({ onClose, onSubmit,
     route: "Oral",
     for_diagnosis: "",
     started_date: "",
+    notes: "",
   });
   const [timings, setTimings] = useState([]);
+  const [warning, setWarning] = useState(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const toggleTiming = (t) =>
     setTimings((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]));
+
+  const handleNameChange = (e) => {
+    const name = e.target.value;
+    set("name", name);
+    setWarning(getWarning(name, { labResults, diagnoses, activeMeds, patient }));
+
+    // Auto-timing and auto-instruction for specific drugs
+    if (/levothyroxine|thyroxine|eltroxin/i.test(name)) {
+      setTimings(["Fasting"]);
+      set("notes", "30 min before breakfast");
+    } else if (/atorvastatin|rosuvastatin/i.test(name)) {
+      setTimings(["At bedtime"]);
+    }
+  };
 
   const handleSubmit = () => {
     onSubmit({ ...form, timing: timings.join(", ") });
@@ -79,7 +103,7 @@ const AddMedicationModal = memo(function AddMedicationModal({ onClose, onSubmit,
             list="med-add-list"
             placeholder="Type to search..."
             value={form.name}
-            onChange={(e) => set("name", e.target.value)}
+            onChange={handleNameChange}
           />
           <datalist id="med-add-list">
             {DRUG_LIST.map((d) => (
@@ -87,6 +111,16 @@ const AddMedicationModal = memo(function AddMedicationModal({ onClose, onSubmit,
             ))}
           </datalist>
         </div>
+        {warning && (
+          <div
+            className={`noticebar ${
+              warning.level === "RED" ? "red" : warning.level === "AMBER" ? "amb" : "pri"
+            }`}
+            style={{ marginTop: 6, marginBottom: 8 }}
+          >
+            {warning.message}
+          </div>
+        )}
         <div className="g2">
           <div className="mf">
             <label className="ml">Dosage</label>
@@ -127,6 +161,15 @@ const AddMedicationModal = memo(function AddMedicationModal({ onClose, onSubmit,
               </label>
             ))}
           </div>
+        </div>
+        <div className="mf">
+          <label className="ml">Additional instruction</label>
+          <input
+            className="mi"
+            placeholder="e.g. 30 min before breakfast, with food"
+            value={form.notes}
+            onChange={(e) => set("notes", e.target.value)}
+          />
         </div>
         <div className="g2">
           <div className="mf">

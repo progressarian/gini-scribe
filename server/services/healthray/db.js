@@ -382,6 +382,96 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
 }
 
 // ── Sync parsed medications → medications table ─────────────────────────────
+// ── Sync diagnoses from HealthRay clinical notes ────────────────────────────
+export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
+  if (!patientId || !diagnoses || diagnoses.length === 0) return;
+
+  for (const dx of diagnoses) {
+    if (!dx.name) continue;
+    const diagId = (dx.id || dx.name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .slice(0, 100);
+
+    await pool
+      .query(
+        `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, notes)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
+           label = EXCLUDED.label,
+           status = COALESCE(EXCLUDED.status, diagnoses.status),
+           notes = COALESCE(EXCLUDED.notes, diagnoses.notes),
+           updated_at = NOW()`,
+        [
+          patientId,
+          diagId,
+          dx.name || null,
+          dx.status || "Active",
+          `healthray:${healthrayId}${dx.details ? " — " + dx.details : ""}`,
+        ],
+      )
+      .catch(() => {});
+  }
+}
+
+// ── Sync stopped/previous medications from HealthRay ──────────────────────────
+export async function syncStoppedMedications(patientId, healthrayId, stoppedMeds) {
+  if (!patientId || !stoppedMeds || stoppedMeds.length === 0) return;
+
+  for (const med of stoppedMeds) {
+    if (!med.name) continue;
+
+    const reason = `healthray:${healthrayId}${med.reason ? " — " + med.reason : med.status || ""}`;
+
+    // Try to mark existing active med as stopped (by name + dose)
+    const updateRes = await pool
+      .query(
+        `UPDATE medications
+         SET is_active = false,
+             stopped_date = CURRENT_DATE,
+             stop_reason = $2,
+             updated_at = NOW()
+         WHERE patient_id = $1
+           AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)
+           AND (($4::text IS NULL AND dose IS NULL) OR dose = $4)
+           AND is_active = true`,
+        [patientId, reason, med.name, med.dose || null],
+      )
+      .catch(() => ({ rowCount: 0 }));
+
+    // If no existing active medicine found, insert as a new stopped entry (for dose changes)
+    // Only insert if this dose+name combo doesn't already exist
+    if (updateRes.rowCount === 0) {
+      const checkExists = await pool
+        .query(
+          `SELECT id FROM medications
+           WHERE patient_id = $1
+             AND UPPER(name) = UPPER($2)
+             AND dose = $3`,
+          [patientId, med.name, med.dose || null],
+        )
+        .catch(() => ({ rows: [] }));
+
+      if (checkExists.rows.length === 0) {
+        await pool
+          .query(
+            `INSERT INTO medications (patient_id, name, dose, frequency, is_active, stopped_date, stop_reason, notes)
+             VALUES ($1, $2, $3, $4, false, CURRENT_DATE, $5, $6)`,
+            [
+              patientId,
+              med.name,
+              med.dose || null,
+              med.frequency || null,
+              reason,
+              `Previous dose (stopped)`,
+            ],
+          )
+          .catch(() => {});
+      }
+    }
+  }
+}
+
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
 
@@ -392,8 +482,16 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
         `INSERT INTO medications
          (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes)
          VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
-         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
-         DO NOTHING`,
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name)))
+         DO UPDATE SET
+           dose = COALESCE(EXCLUDED.dose, medications.dose),
+           frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+           timing = COALESCE(EXCLUDED.timing, medications.timing),
+           route = COALESCE(EXCLUDED.route, medications.route),
+           is_active = true,
+           started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+           notes = EXCLUDED.notes,
+           updated_at = NOW()`,
         [
           patientId,
           med.name,

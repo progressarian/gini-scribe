@@ -28,6 +28,8 @@ import {
   upsertAppointment,
   syncLabResults,
   syncMedications,
+  syncDiagnoses,
+  syncStoppedMedications,
   syncDocuments,
   syncVitals,
 } from "../healthray/db.js";
@@ -195,6 +197,7 @@ async function syncAppointment(appt, localDoctorName) {
     parsedClinical: null,
     healthrayDiagnoses: [],
     healthrayMedications: [],
+    healthrayStoppedMedications: [],
     healthrayLabs: [],
     healthrayAdvice: null,
     healthrayInvestigations: [],
@@ -220,6 +223,7 @@ async function syncAppointment(appt, localDoctorName) {
           clinical.parsedClinical = parsed;
           clinical.healthrayDiagnoses = parsed.diagnoses || [];
           clinical.healthrayMedications = parsed.medications || [];
+          clinical.healthrayStoppedMedications = parsed.previous_medications || [];
           clinical.healthrayLabs = parsed.labs || [];
           clinical.healthrayAdvice = parsed.advice || null;
           clinical.healthrayInvestigations = parsed.investigations_to_order || [];
@@ -297,6 +301,8 @@ async function syncAppointment(appt, localDoctorName) {
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
+  await syncStoppedMedications(patientId, healthrayId, clinical.healthrayStoppedMedications);
+  await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
 
   return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };

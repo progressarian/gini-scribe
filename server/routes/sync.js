@@ -16,6 +16,7 @@ import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reade
 import { syncFromSheets } from "../services/cron/sheetsSync.js";
 import pool from "../config/db.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
+import { syncDiagnoses, syncMedications, syncStoppedMedications } from "../services/healthray/db.js";
 
 const router = Router();
 
@@ -271,6 +272,136 @@ router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => 
     res.json({ success: true, appointmentId: apptId, investigations, followUp });
   } catch (e) {
     handleError(res, e, "Backfill investigations");
+  }
+});
+
+// ── Backfill diagnoses: re-parse clinical notes and sync diagnoses ──────────
+// POST /api/sync/backfill/diagnoses/:appointmentId
+// Re-parses clinical notes with updated AI prompt to extract all diagnoses
+router.post("/sync/backfill/diagnoses/:appointmentId", async (req, res) => {
+  const apptId = Number(req.params.appointmentId);
+  if (!apptId) return res.status(400).json({ error: "Valid appointmentId required" });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, healthray_id, healthray_clinical_notes FROM appointments WHERE id = $1`,
+      [apptId],
+    );
+
+    if (!rows[0]) return res.status(404).json({ error: "Appointment not found" });
+
+    const appt = rows[0];
+    let notes = appt.healthray_clinical_notes;
+
+    // If notes provided in body, save them first
+    if (req.body?.notes) {
+      notes = req.body.notes;
+      await pool.query(
+        `UPDATE appointments SET healthray_clinical_notes = $1, updated_at = NOW() WHERE id = $2`,
+        [notes, apptId],
+      );
+    }
+
+    if (!notes) {
+      return res.status(400).json({
+        error:
+          "Appointment has no clinical notes to parse. Pass { notes: '...' } in the request body.",
+      });
+    }
+
+    const parsed = await parseClinicalWithAI(notes);
+    if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
+
+    const diagnoses = parsed.diagnoses || [];
+
+    // Update appointments table with parsed diagnoses
+    await pool.query(
+      `UPDATE appointments SET healthray_diagnoses = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(diagnoses), apptId],
+    );
+
+    // Sync diagnoses to diagnoses table
+    if (appt.patient_id && diagnoses.length > 0) {
+      await syncDiagnoses(appt.patient_id, appt.healthray_id, diagnoses);
+    }
+
+    res.json({
+      success: true,
+      appointmentId: apptId,
+      diagnosesExtracted: diagnoses.length,
+      diagnoses,
+    });
+  } catch (e) {
+    handleError(res, e, "Backfill diagnoses");
+  }
+});
+
+// ── Backfill medicines: re-parse clinical notes and sync medications ────────
+// POST /api/sync/backfill/medicines/:appointmentId
+// Re-parses clinical notes with updated AI prompt to extract dose changes and previous medications
+router.post("/sync/backfill/medicines/:appointmentId", async (req, res) => {
+  const apptId = Number(req.params.appointmentId);
+  if (!apptId) return res.status(400).json({ error: "Valid appointmentId required" });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, healthray_id, appointment_date, healthray_clinical_notes FROM appointments WHERE id = $1`,
+      [apptId],
+    );
+
+    if (!rows[0]) return res.status(404).json({ error: "Appointment not found" });
+
+    const appt = rows[0];
+    let notes = appt.healthray_clinical_notes;
+
+    // If notes provided in body, save them first
+    if (req.body?.notes) {
+      notes = req.body.notes;
+      await pool.query(
+        `UPDATE appointments SET healthray_clinical_notes = $1, updated_at = NOW() WHERE id = $2`,
+        [notes, apptId],
+      );
+    }
+
+    if (!notes) {
+      return res.status(400).json({
+        error:
+          "Appointment has no clinical notes to parse. Pass { notes: '...' } in the request body.",
+      });
+    }
+
+    const parsed = await parseClinicalWithAI(notes);
+    if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
+
+    const medications = parsed.medications || [];
+    const previousMeds = parsed.previous_medications || [];
+
+    // Update appointments table with parsed medications
+    await pool.query(
+      `UPDATE appointments SET healthray_medications = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(medications), apptId],
+    );
+
+    // Sync current medications
+    if (appt.patient_id && medications.length > 0) {
+      await syncMedications(appt.patient_id, appt.healthray_id, appt.appointment_date, medications);
+    }
+
+    // Sync stopped/previous medications
+    if (appt.patient_id && previousMeds.length > 0) {
+      await syncStoppedMedications(appt.patient_id, appt.healthray_id, previousMeds);
+    }
+
+    res.json({
+      success: true,
+      appointmentId: apptId,
+      medicinesExtracted: medications.length,
+      previousMedicinesExtracted: previousMeds.length,
+      medicines: medications,
+      previousMedicines: previousMeds,
+    });
+  } catch (e) {
+    handleError(res, e, "Backfill medicines");
   }
 });
 
