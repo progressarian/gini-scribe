@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useLabStore from "../stores/labStore.js";
@@ -12,7 +13,7 @@ export default function FUReviewPage() {
   const navigate = useNavigate();
   const [continuing, setContinuing] = useState(false);
   const { conName } = useAuthStore();
-  const { patient, getPfd } = usePatientStore();
+  const { patient, getPfd, dbPatientId } = usePatientStore();
   const { labData } = useLabStore();
   const { conData } = useClinicalStore();
   const {
@@ -227,6 +228,9 @@ export default function FUReviewPage() {
 
           return (
             <div>
+              {/* ── Clinical Summary Panel ── */}
+              <VisitSummaryPanel patientId={dbPatientId} />
+
               {/* Last Visit Summary (expandable) */}
               {lastConData.assessment_summary && (
                 <div className="fu-review__summary-card">

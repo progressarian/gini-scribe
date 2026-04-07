@@ -39,6 +39,11 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
     try {
       const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
 
+      // Mark as reviewed (fire-and-forget — clears R5 rule on next summary load)
+      if (!doc.reviewed) {
+        api.patch(`/api/documents/${doc.id}/reviewed`).catch(() => {});
+      }
+
       if (!data.url) {
         newTab.close();
         toast("Could not get file link", "warn");

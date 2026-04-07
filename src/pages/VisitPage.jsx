@@ -26,6 +26,8 @@ import VisitMedCard from "../components/visit/VisitMedCard";
 import VisitLoggedData from "../components/visit/VisitLoggedData";
 import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
+import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
+import VisitCoordPrep from "../components/visit/VisitCoordPrep";
 import {
   AddLabModal,
   AddSymptomModal,
@@ -652,6 +654,7 @@ export default function VisitPage() {
               </button>
             </div>
             <div className="scrl" ref={scrollRef}>
+              <VisitSummaryPanel patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitBiomarkers
                 labResults={labResults}
                 labHistory={labHistory}
@@ -661,6 +664,7 @@ export default function VisitPage() {
                 onAddLab={() => setModal({ type: "addLab" })}
                 onPasteBiomarkers={() => setModal({ type: "pasteText" })}
               />
+              <VisitCoordPrep prep={data.prep} />
               <VisitSymptomsSection
                 symptoms={data.symptoms || []}
                 onAddSymptom={() => setModal({ type: "addSymptom" })}

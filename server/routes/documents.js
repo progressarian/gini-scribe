@@ -18,6 +18,11 @@ pool
   )
   .catch(() => {});
 
+// ── DB migration: reviewed flag for unread report rule ───────────────────────
+pool
+  .query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS reviewed BOOLEAN DEFAULT FALSE`)
+  .catch(() => {});
+
 // ── Refresh OPD consultations when prescription data changes ────────────────
 async function refreshOpdConsultations(client, patientId) {
   // Get ALL prescription documents for this patient
@@ -236,33 +241,21 @@ router.get("/documents/:id/file-url", async (req, res) => {
           [d.patient_id, d.doc_date],
         );
 
-        console.log("[healthray] doc:", {
-          patient_id: d.patient_id,
-          doc_date: d.doc_date,
-          notes: d.notes,
-        });
-        console.log("[healthray] appt found:", apptR.rows[0]);
-
         const healthrayApptId = apptR.rows[0]?.healthray_id;
         if (!healthrayApptId)
           return res.status(404).json({ error: "No HealthRay appointment found" });
 
         const records = await fetchMedicalRecords(healthrayApptId);
-        console.log("[healthray] records fetched:", JSON.stringify(records?.slice(0, 2)));
 
         const recordIdStr = (d.notes || "").match(/healthray_record:(\d+)/)?.[1];
-        console.log("[healthray] recordIdStr:", recordIdStr);
 
         const match = records?.find((r) => String(r.id) === recordIdStr);
-        console.log("[healthray] match:", match);
 
         const url = match?.url || match?.file_url || match?.attachment_url || match?.thumbnail;
-        console.log("[healthray] final url:", url);
 
         if (!url) return res.status(404).json({ error: "Could not get file URL from HealthRay" });
         return res.json({ url, file_name: d.file_name, mime_type: d.mime_type });
       } catch (err) {
-        console.error("[healthray] error:", err); // ← this will show the real error
         return res.status(404).json({ error: "Failed to get fresh URL from HealthRay" });
       }
     }
@@ -525,6 +518,20 @@ router.patch("/documents/:id", async (req, res) => {
     handleError(res, e, "Document patch");
   } finally {
     client.release();
+  }
+});
+
+// ── Mark a document as reviewed by the doctor ────────────────────────────────
+router.patch("/documents/:id/reviewed", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE documents SET reviewed=TRUE WHERE id=$1 RETURNING id, reviewed`,
+      [req.params.id],
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
+    res.json(result.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Mark document reviewed");
   }
 });
 

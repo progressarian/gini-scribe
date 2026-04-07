@@ -375,9 +375,6 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     (d) => d.doc_type === "imaging" || d.doc_type === "radiology",
   );
 
-  console.log("VisitLabsPanel render results", { labResults });
-  console.log("VisitLabsPanel render orders", { labLatest, labOrders });
-
   const openDoc = useCallback(async (doc) => {
     if (doc.storage_path) {
       try {

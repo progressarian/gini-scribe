@@ -2293,6 +2293,8 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
   const [exercise, setExercise] = useState(ex.exercise || "Moderate (30 min, 3–4×/week)");
   const [stress, setStress] = useState(ex.stress || "Moderate");
   const [notes, setNotes] = useState(ex.notes || "");
+  const [symptoms, setSymptoms] = useState(ex.symptoms || []);
+  const [symptomInput, setSymptomInput] = useState("");
   const pctColor = medPct >= 90 ? GN : medPct >= 70 ? AM : RE;
 
   // Prescriptions: [{id, doctorName, date, fileName, uploading, docId?}]
@@ -2473,6 +2475,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                 exercise,
                 stress,
                 notes,
+                symptoms,
                 medications: allMeds,
                 stopped_medications: stoppedMeds,
                 diagnoses: Object.values(diagMap),
@@ -2509,6 +2512,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                 exercise,
                 stress,
                 notes,
+                symptoms,
                 medications: allMeds,
                 stopped_medications: stoppedMeds,
                 diagnoses: Object.values(diagMap),
@@ -3077,12 +3081,89 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
           boxShadow: SH,
         }}
       >
-        <SLbl>Symptoms / Notes</SLbl>
+        <SLbl>Symptoms since last visit</SLbl>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+          <input
+            value={symptomInput}
+            onChange={(e) => setSymptomInput(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.key === "Enter" || e.key === ",") && symptomInput.trim()) {
+                e.preventDefault();
+                const val = symptomInput.trim().replace(/,$/, "");
+                if (val && !symptoms.includes(val)) setSymptoms((prev) => [...prev, val]);
+                setSymptomInput("");
+              }
+            }}
+            placeholder="Type symptom + Enter (e.g. fatigue, dizziness…)"
+            style={{
+              flex: 1,
+              border: `1px solid ${BD}`,
+              borderRadius: 7,
+              padding: "7px 10px",
+              fontFamily: FB,
+              fontSize: 13,
+              color: INK,
+              outline: "none",
+              background: WH,
+            }}
+          />
+          <button
+            onClick={() => {
+              const val = symptomInput.trim();
+              if (val && !symptoms.includes(val)) setSymptoms((prev) => [...prev, val]);
+              setSymptomInput("");
+            }}
+            style={{
+              padding: "7px 12px",
+              borderRadius: 7,
+              border: `1px solid ${BD}`,
+              background: WH,
+              fontFamily: FB,
+              fontSize: 12,
+              cursor: "pointer",
+              color: T,
+              fontWeight: 600,
+            }}
+          >
+            + Add
+          </button>
+        </div>
+        {symptoms.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+            {symptoms.map((s, i) => (
+              <span
+                key={i}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  background: "#fff7ed",
+                  border: `1px solid #fed7aa`,
+                  color: "#92400e",
+                  borderRadius: 20,
+                  padding: "3px 10px",
+                  fontSize: 12,
+                  fontFamily: FB,
+                  fontWeight: 500,
+                }}
+              >
+                {s}
+                <span
+                  onClick={() => setSymptoms((prev) => prev.filter((_, j) => j !== i))}
+                  style={{ cursor: "pointer", opacity: 0.6, fontSize: 11 }}
+                >
+                  ✕
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+        <SLbl style={{ marginTop: 4 }}>Notes</SLbl>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Patient-reported symptoms or notes…"
-          rows={3}
+          placeholder="Any additional notes…"
+          rows={2}
           style={{
             width: "100%",
             border: `1px solid ${BD}`,

@@ -23,6 +23,7 @@ import alertRoutes from "./routes/alerts.js";
 import healthLogRoutes from "./routes/health-logs.js";
 import visitRoutes from "./routes/visit.js";
 import syncRoutes from "./routes/sync.js";
+import summaryRoutes from "./routes/summary.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 
@@ -40,6 +41,7 @@ app.use((req, res, next) => {
   // 50MB: consultation save (transcripts + full visit data), base64 file/audio uploads
   const isLarge =
     (p === "/api/consultations" && req.method === "POST") ||
+    (p.includes("/visit/") && p.endsWith("/document")) ||
     p.includes("/upload-file") ||
     p.includes("/audio") ||
     p === "/api/convert-heic" ||
@@ -85,6 +87,7 @@ app.use("/api", aiRoutes);
 app.use("/api", alertRoutes);
 app.use("/api", healthLogRoutes);
 app.use("/api", visitRoutes);
+app.use("/api", summaryRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");

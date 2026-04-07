@@ -385,18 +385,15 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
 
-  const existing = await pool.query(
-    `SELECT id FROM medications WHERE patient_id = $1 AND notes = $2 LIMIT 1`,
-    [patientId, `healthray:${healthrayId}`],
-  );
-  if (existing.rows[0]) return;
-
   for (const med of meds) {
+    if (!med.name) continue;
     await pool
       .query(
         `INSERT INTO medications
          (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)`,
+         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+         DO NOTHING`,
         [
           patientId,
           med.name,

@@ -142,7 +142,7 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 8. Documents
       pool.query(
-        `SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, file_url, created_at
+        `SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, file_url, reviewed, created_at
          FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC NULLS LAST`,
         [pid],
       ),
@@ -279,19 +279,28 @@ router.get("/visit/:patientId", async (req, res) => {
     if (totalVisits >= 10) carePhase = "Phase 3 — Continuous Care";
     else if (totalVisits >= 4) carePhase = "Phase 2 — Active Management";
 
-    // Load doctor note from active appointment if present
+    // Load doctor note + compliance from active OPD appointment if present
     let apptDoctorNote = null;
+    let opdCompliance = null;
     if (req.query.appointment_id) {
-      const noteR = await pool.query(
-        `SELECT opd_vitals->>'doctor_note' AS doctor_note FROM appointments WHERE id=$1`,
+      const opdR = await pool.query(
+        `SELECT opd_vitals->>'doctor_note' AS doctor_note, compliance
+         FROM appointments WHERE id=$1`,
         [Number(req.query.appointment_id)],
       );
-      apptDoctorNote = noteR.rows[0]?.doctor_note || null;
+      apptDoctorNote = opdR.rows[0]?.doctor_note || null;
+      opdCompliance = opdR.rows[0]?.compliance || null;
     }
 
     const apptPlan = latestApptR.rows[0] || null;
-    const apptCompliance = apptPlan?.compliance || {};
+    // Prefer compliance from today's OPD appointment; fall back to last HealthRay-synced one
+    const apptCompliance = opdCompliance || apptPlan?.compliance || {};
     const apptBiomarkers = apptPlan?.biomarkers || {};
+    const prep = {
+      medPct: apptCompliance.medPct ?? null,
+      missed: apptCompliance.missed || null,
+      symptoms: apptCompliance.symptoms || [],
+    };
     const followUpDate =
       apptPlan?.healthray_follow_up ||
       (apptBiomarkers.followup
@@ -319,6 +328,7 @@ router.get("/visit/:patientId", async (req, res) => {
       referrals: referralsR.rows,
       symptoms: symptomsR.rows,
       goals: goalsR.rows,
+      prep,
       appt_doctor_note: apptDoctorNote,
       appt_plan: apptPlan
         ? {

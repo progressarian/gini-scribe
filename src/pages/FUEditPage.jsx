@@ -4,12 +4,13 @@ import usePatientStore from "../stores/patientStore.js";
 import useClinicalStore from "../stores/clinicalStore.js";
 import useVisitStore from "../stores/visitStore.js";
 import useUiStore from "../stores/uiStore.js";
+import VisitSummaryPanel from "../components/visit/VisitSummaryPanel.jsx";
 import "./FUEditPage.css";
 
 export default function FUEditPage() {
   const navigate = useNavigate();
   const [continuing, setContinuing] = useState(false);
-  const { patient, getPfd } = usePatientStore();
+  const { patient, getPfd, dbPatientId } = usePatientStore();
   const { conData } = useClinicalStore();
   const { fuMedEdits, setFuMedEdits, fuNewMeds, setFuNewMeds, saveDraft } = useVisitStore();
 
@@ -17,6 +18,7 @@ export default function FUEditPage() {
 
   return (
     <div>
+      <VisitSummaryPanel patientId={dbPatientId} forceCollapsed />
       <div className="fu-edit__header">
         <span className="fu-edit__header-icon">📋</span>
         <div className="fu-edit__header-info">

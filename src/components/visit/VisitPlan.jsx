@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import { fmtDate, fmtDateLong, getLabVal, MED_COLORS } from "./helpers";
 import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard";
 import { LAB_ORDER_CHIPS } from "../../config/chips";
@@ -196,37 +196,22 @@ const VisitPlan = memo(function VisitPlan({
   const hba1c = getLabVal(labResults, "HbA1c");
   const fbs = getLabVal(labResults, "FBS");
 
-  // Ensure conData has follow_up structure for tests
-  const ensureConData = () => {
+  // Ensure conData has follow_up structure — initialise via effect, never during render
+  useEffect(() => {
+    if (!setConData) return;
     if (!conData) {
-      setConData({
-        follow_up: {
-          tests_to_bring: [],
-        },
-      });
-      return {
-        follow_up: {
-          tests_to_bring: [],
-        },
-      };
+      setConData({ follow_up: { tests_to_bring: [] } });
+    } else if (!conData.follow_up) {
+      setConData({ ...conData, follow_up: { tests_to_bring: [] } });
     }
-    if (!conData.follow_up) {
-      setConData({
-        ...conData,
-        follow_up: {
-          tests_to_bring: [],
-        },
-      });
-      return {
-        ...conData,
-        follow_up: {
-          tests_to_bring: [],
-        },
-      };
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount — conData is intentionally omitted to avoid loop
+
+  const activeConData = useMemo(() => {
+    if (!conData) return { follow_up: { tests_to_bring: [] } };
+    if (!conData.follow_up) return { ...conData, follow_up: { tests_to_bring: [] } };
     return conData;
-  };
-  const activeConData = ensureConData();
+  }, [conData]);
   const handlePrintRx = useCallback(() => {
     const html = buildRxHTML(
       patient,

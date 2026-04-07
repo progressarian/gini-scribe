@@ -1,0 +1,252 @@
+/* ── Visit Summary Panel ─────────────────────────────────────────────────────
+   Three-zone clinical briefing panel shown at the top of the patient view.
+   Zone colours: red (action needed) → amber (consider) → green (working well)
+──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Expanded panel ── */
+.sp-panel {
+  background: var(--card);
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border2);
+  margin-bottom: 13px;
+  box-shadow: var(--sh);
+  overflow: hidden;
+}
+.sp-panel.zone-red {
+  border-left-color: var(--red);
+}
+.sp-panel.zone-amber {
+  border-left-color: var(--amber);
+}
+.sp-panel.zone-green {
+  border-left-color: var(--green);
+}
+
+/* ── Header ── */
+.sp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  background: var(--bg);
+}
+.sp-panel.zone-red .sp-head {
+  background: var(--red-lt);
+  border-bottom-color: var(--red-bd);
+}
+.sp-panel.zone-amber .sp-head {
+  background: var(--amb-lt);
+  border-bottom-color: var(--amb-bd);
+}
+.sp-panel.zone-green .sp-head {
+  background: var(--grn-lt);
+  border-bottom-color: var(--grn-bd);
+}
+
+.sp-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--t2);
+  flex: 1;
+}
+.sp-panel.zone-red .sp-title {
+  color: #b91c1c;
+}
+.sp-panel.zone-amber .sp-title {
+  color: #92400e;
+}
+.sp-panel.zone-green .sp-title {
+  color: #166534;
+}
+
+.sp-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+}
+.sp-badge.red {
+  background: var(--red);
+}
+.sp-badge.amber {
+  background: var(--amber);
+}
+
+.sp-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sp-close-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border2);
+  background: var(--card);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--t3);
+  padding: 0;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+.sp-close-btn:hover {
+  background: var(--red-lt);
+  color: var(--red);
+  border-color: var(--red-bd);
+}
+
+/* ── Body ── */
+.sp-body {
+  padding: 8px 12px 10px;
+}
+
+.sp-zone-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--t4);
+  padding: 4px 8px 2px;
+}
+
+.sp-alert-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--rs);
+  margin-bottom: 2px;
+  transition: background 0.1s;
+}
+.sp-alert-row:hover {
+  background: var(--bg);
+}
+.sp-alert-row:last-child {
+  margin-bottom: 0;
+}
+
+.sp-alert-icon {
+  font-size: 13px;
+  line-height: 1.2;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.sp-alert-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-alert-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+  margin-bottom: 1px;
+}
+.sp-alert-row.zone-red .sp-alert-title {
+  color: #991b1b;
+}
+.sp-alert-row.zone-amber .sp-alert-title {
+  color: #78350f;
+}
+.sp-alert-row.zone-green .sp-alert-title {
+  color: #14532d;
+}
+
+.sp-alert-detail {
+  font-size: 11px;
+  color: var(--t3);
+  line-height: 1.45;
+  margin-bottom: 2px;
+}
+
+.sp-alert-action {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--primary);
+  line-height: 1.35;
+}
+.sp-alert-row.zone-red .sp-alert-action {
+  color: #dc2626;
+}
+.sp-alert-row.zone-amber .sp-alert-action {
+  color: #d97706;
+}
+.sp-alert-row.zone-green .sp-alert-action {
+  color: #16a34a;
+}
+
+.sp-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 7px 0;
+}
+
+/* ── Footer ── */
+.sp-footer {
+  padding: 5px 13px 7px;
+  font-size: 9.5px;
+  color: var(--t4);
+  text-align: right;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Collapsed (all-green / routine) state ── */
+.sp-panel-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 13px;
+  background: var(--grn-lt);
+  border-radius: var(--r);
+  border: 1px solid var(--grn-bd);
+  border-left: 4px solid var(--green);
+  margin-bottom: 13px;
+  box-shadow: var(--sh);
+  gap: 8px;
+}
+
+.sp-routine-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #166534;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sp-collapsed-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+/* ── Empty state ── */
+.sp-empty {
+  padding: 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--t3);
+}

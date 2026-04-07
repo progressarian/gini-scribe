@@ -247,7 +247,12 @@ export async function retryPendingLabCases() {
       const appointmentId =
         row.appointment_id || (await linkLabAppointment(detail.healthray_order_id));
       const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
-      await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
+
+      // Only mark synced if results were written or patient is unknown (can't do better)
+      // If patient found but 0 written, results may not be ready — leave for next retry
+      if (written > 0 || !patientId) {
+        await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
+      }
 
       log("Recovery", `${row.patient_case_no} recovered | ${written} results written`);
     } catch (e) {

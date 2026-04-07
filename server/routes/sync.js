@@ -274,6 +274,43 @@ router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => 
   }
 });
 
+// ── Backfill medications from appointments.healthray_medications ─────────────
+// POST /api/sync/healthray/backfill-meds
+// Reads every appointment that has healthray_medications stored and re-syncs
+// any medications missing from the medications table (uses per-med UPSERT, safe to re-run)
+router.post("/sync/healthray/backfill-meds", async (req, res) => {
+  try {
+    const r = await pool.query(
+      `INSERT INTO medications
+         (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes)
+       SELECT
+         a.patient_id,
+         med->>'name',
+         NULLIF(med->>'dose', ''),
+         NULLIF(med->>'frequency', ''),
+         NULLIF(med->>'timing', ''),
+         COALESCE(NULLIF(med->>'route', ''), 'Oral'),
+         true,
+         a.appointment_date,
+         'healthray:' || a.healthray_id
+       FROM appointments a,
+            jsonb_array_elements(a.healthray_medications) AS med
+       WHERE a.patient_id IS NOT NULL
+         AND a.healthray_id IS NOT NULL
+         AND a.healthray_medications IS NOT NULL
+         AND jsonb_typeof(a.healthray_medications) = 'array'
+         AND jsonb_array_length(a.healthray_medications) > 0
+         AND med->>'name' IS NOT NULL
+         AND med->>'name' != ''
+       ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+       DO NOTHING`,
+    );
+    res.json({ success: true, inserted: r.rowCount });
+  } catch (e) {
+    handleError(res, e, "Backfill medications");
+  }
+});
+
 // ── Lab HealthRay sync ───────────────────────────────────────────────────────
 
 // Manual trigger: POST /api/sync/lab/trigger
