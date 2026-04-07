@@ -157,6 +157,7 @@ async function fetchClinicalText(appt, healthrayId, doctorId) {
   }
 
   const sections = extractClinicalText(effectiveData);
+
   return Object.values(sections).join("\n\n---\n\n");
 }
 

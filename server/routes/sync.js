@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { handleError } from "../utils/errorHandler.js";
+import { createLogger } from "../services/logger.js";
+const { log, error: logError } = createLogger("Backfill");
 import {
   syncWalkingAppointments,
   syncTodayWalkingAppointments,
@@ -478,6 +480,160 @@ router.post("/sync/lab/refresh-auth", async (_req, res) => {
     res.json({ success: true, message: "Lab API tokens refreshed" });
   } catch (e) {
     handleError(res, e, "Lab auth refresh");
+  }
+});
+
+// ── Bulk backfill diagnoses: shared state for progress tracking ───────────────
+const diagBackfillStatus = { running: false, total: 0, done: 0, errors: 0, startedAt: null };
+
+// GET /api/sync/backfill/diagnoses-all/status — poll progress
+router.get("/sync/backfill/diagnoses-all/status", (_req, res) => {
+  const { running, total, done, errors, startedAt } = diagBackfillStatus;
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+  const rate = elapsed > 0 ? (done / elapsed).toFixed(1) : 0;
+  const remaining = rate > 0 ? Math.round((total - done) / rate) : null;
+  res.json({ running, total, done, errors, elapsed: `${elapsed}s`, rate: `${rate}/s`, remainingEst: remaining ? `${remaining}s` : null });
+});
+
+// ── Bulk backfill diagnoses from existing JSONB data (no AI re-parse needed) ─
+// POST /api/sync/backfill/diagnoses-all
+// Reads appointments.healthray_diagnoses JSONB and syncs to diagnoses table
+// Safe to re-run — uses ON CONFLICT DO UPDATE in syncDiagnoses
+router.post("/sync/backfill/diagnoses-all", async (req, res) => {
+  if (diagBackfillStatus.running) {
+    return res.status(409).json({ error: "Backfill already running", status: diagBackfillStatus });
+  }
+
+  try {
+    // Find all appointments with diagnoses in JSONB but patient has none in diagnoses table
+    const { rows: appts } = await pool.query(`
+      SELECT DISTINCT ON (a.patient_id)
+        a.id, a.patient_id, a.healthray_id, a.appointment_date, a.healthray_diagnoses
+      FROM appointments a
+      WHERE a.patient_id IS NOT NULL
+        AND a.healthray_diagnoses IS NOT NULL
+        AND jsonb_typeof(a.healthray_diagnoses) = 'array'
+        AND jsonb_array_length(a.healthray_diagnoses) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM diagnoses d WHERE d.patient_id = a.patient_id
+        )
+      ORDER BY a.patient_id, a.appointment_date DESC
+    `);
+
+    if (appts.length === 0) {
+      log("Diagnoses", "No patients need backfill — already up to date");
+      return res.json({ success: true, message: "No patients need backfill", synced: 0 });
+    }
+
+    Object.assign(diagBackfillStatus, { running: true, total: appts.length, done: 0, errors: 0, startedAt: Date.now() });
+    log("Diagnoses", `Starting bulk backfill — ${appts.length} patients to process`);
+
+    // Respond immediately so the caller doesn't timeout
+    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/backfill/diagnoses-all/status" });
+
+    // Run in background
+    (async () => {
+      for (const appt of appts) {
+        try {
+          await syncDiagnoses(appt.patient_id, appt.healthray_id, appt.healthray_diagnoses);
+          diagBackfillStatus.done++;
+
+          // Log progress every 50 patients
+          if (diagBackfillStatus.done % 50 === 0 || diagBackfillStatus.done === appts.length) {
+            const pct = Math.round((diagBackfillStatus.done / appts.length) * 100);
+            log("Diagnoses", `Progress: ${diagBackfillStatus.done}/${appts.length} (${pct}%) — errors: ${diagBackfillStatus.errors}`);
+          }
+        } catch (e) {
+          diagBackfillStatus.errors++;
+          logError("Diagnoses", `patient_id ${appt.patient_id}: ${e.message}`);
+        }
+      }
+
+      const elapsed = Math.round((Date.now() - diagBackfillStatus.startedAt) / 1000);
+      log("Diagnoses", `Bulk backfill complete — ${diagBackfillStatus.done} synced, ${diagBackfillStatus.errors} errors, ${elapsed}s elapsed`);
+      diagBackfillStatus.running = false;
+    })();
+  } catch (e) {
+    diagBackfillStatus.running = false;
+    handleError(res, e, "Bulk backfill diagnoses");
+  }
+});
+
+// ── Bulk backfill medicines: shared state for progress tracking ───────────────
+const medsBackfillStatus = { running: false, total: 0, done: 0, errors: 0, startedAt: null };
+
+// GET /api/sync/backfill/medicines-all/status
+router.get("/sync/backfill/medicines-all/status", (_req, res) => {
+  const { running, total, done, errors, startedAt } = medsBackfillStatus;
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+  const rate = elapsed > 0 ? (done / elapsed).toFixed(1) : 0;
+  const remaining = rate > 0 ? Math.round((total - done) / rate) : null;
+  res.json({ running, total, done, errors, elapsed: `${elapsed}s`, rate: `${rate}/s`, remainingEst: remaining ? `${remaining}s` : null });
+});
+
+// ── Bulk backfill medicines from existing JSONB data (no AI re-parse needed) ─
+// POST /api/sync/backfill/medicines-all
+// Reads appointments.healthray_medications JSONB and syncs to medications table
+// Targets appointments whose medicines haven't been synced yet (by healthray_id in notes)
+// Safe to re-run — syncMedications uses ON CONFLICT upsert
+router.post("/sync/backfill/medicines-all", async (req, res) => {
+  if (medsBackfillStatus.running) {
+    return res.status(409).json({ error: "Backfill already running", status: medsBackfillStatus });
+  }
+
+  try {
+    // Find appointments with medicines in JSONB not yet reflected in medications table
+    const { rows: appts } = await pool.query(`
+      SELECT a.id, a.patient_id, a.healthray_id, a.appointment_date, a.healthray_medications
+      FROM appointments a
+      WHERE a.patient_id IS NOT NULL
+        AND a.healthray_id IS NOT NULL
+        AND a.healthray_medications IS NOT NULL
+        AND jsonb_typeof(a.healthray_medications) = 'array'
+        AND jsonb_array_length(a.healthray_medications) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM medications m
+          WHERE m.patient_id = a.patient_id
+            AND m.notes LIKE '%' || a.healthray_id || '%'
+        )
+      ORDER BY a.appointment_date ASC
+    `);
+
+    if (appts.length === 0) {
+      log("Medicines", "No appointments need backfill — already up to date");
+      return res.json({ success: true, message: "No appointments need backfill", synced: 0 });
+    }
+
+    Object.assign(medsBackfillStatus, { running: true, total: appts.length, done: 0, errors: 0, startedAt: Date.now() });
+    log("Medicines", `Starting bulk backfill — ${appts.length} appointments to process`);
+
+    // Respond immediately so the caller doesn't timeout
+    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/backfill/medicines-all/status" });
+
+    // Run in background
+    (async () => {
+      for (const appt of appts) {
+        try {
+          await syncMedications(appt.patient_id, appt.healthray_id, appt.appointment_date, appt.healthray_medications);
+          medsBackfillStatus.done++;
+
+          if (medsBackfillStatus.done % 100 === 0 || medsBackfillStatus.done === appts.length) {
+            const pct = Math.round((medsBackfillStatus.done / appts.length) * 100);
+            log("Medicines", `Progress: ${medsBackfillStatus.done}/${appts.length} (${pct}%) — errors: ${medsBackfillStatus.errors}`);
+          }
+        } catch (e) {
+          medsBackfillStatus.errors++;
+          logError("Medicines", `appt_id ${appt.id}: ${e.message}`);
+        }
+      }
+
+      const elapsed = Math.round((Date.now() - medsBackfillStatus.startedAt) / 1000);
+      log("Medicines", `Bulk backfill complete — ${medsBackfillStatus.done} appointments synced, ${medsBackfillStatus.errors} errors, ${elapsed}s elapsed`);
+      medsBackfillStatus.running = false;
+    })();
+  } catch (e) {
+    medsBackfillStatus.running = false;
+    handleError(res, e, "Bulk backfill medicines");
   }
 });
 
