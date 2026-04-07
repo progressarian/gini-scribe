@@ -82,25 +82,25 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 4. Active medications (same query as patients.js for consistency)
+      // 4. Active medications (use m.prescribed_date for documents, c.visit_date for consultations)
       pool.query(
         `WITH latest_cons AS (
            SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id
            FROM consultations WHERE patient_id=$1
            ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
          )
-         SELECT m.*, c.con_name AS prescriber, c.visit_date AS prescribed_date
+         SELECT m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.prescribed_date) AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = true
            AND (m.consultation_id IN (SELECT id FROM latest_cons) OR m.consultation_id IS NULL)
-         ORDER BY m.created_at DESC`,
+         ORDER BY COALESCE(c.visit_date, m.prescribed_date) DESC, m.created_at DESC`,
         [pid],
       ),
 
       // 5. Stopped medications (deduplicated — one per drug name, latest wins)
       pool.query(
         `SELECT DISTINCT ON (UPPER(COALESCE(m.pharmacy_match, m.name)))
-           m.*, c.con_name AS prescriber, c.visit_date AS prescribed_date
+           m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.prescribed_date) AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = false
          ORDER BY UPPER(COALESCE(m.pharmacy_match, m.name)), m.stopped_date DESC NULLS LAST`,
@@ -735,16 +735,21 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
+    // Stop medications from older consultations AND old document medicines
     const r = await pool.query(
       `UPDATE medications
        SET is_active = false, stopped_date = CURRENT_DATE, stop_reason = 'Previous visit'
        WHERE patient_id = $1
          AND is_active = true
-         AND consultation_id IS NOT NULL
-         AND consultation_id IN (
-           SELECT id FROM consultations
-           WHERE patient_id = $1
-             AND visit_date < (SELECT MAX(visit_date) FROM consultations WHERE patient_id = $1)
+         AND (
+           -- Case 1: Medicines from older consultations (original logic)
+           (consultation_id IS NOT NULL AND consultation_id IN (
+             SELECT id FROM consultations
+             WHERE patient_id = $1
+               AND visit_date < (SELECT MAX(visit_date) FROM consultations WHERE patient_id = $1)
+           ))
+           -- Case 2: Document medicines from past visits/dates (no consultation_id)
+           OR (consultation_id IS NULL AND (COALESCE(prescribed_date, created_at::DATE) < CURRENT_DATE))
          )
        RETURNING id`,
       [pid],

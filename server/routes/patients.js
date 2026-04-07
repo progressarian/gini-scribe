@@ -177,7 +177,7 @@ router.get("/patients/:id", async (req, res) => {
         FROM consultations WHERE patient_id=$1
         ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
       )
-      SELECT m.*, c.con_name as prescriber, c.visit_date as prescribed_date, c.visit_type, c.status as con_status
+      SELECT m.*, c.con_name as prescriber, COALESCE(c.visit_date, m.prescribed_date) as prescribed_date, c.visit_type, c.status as con_status
         FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
         WHERE m.patient_id=$1
           AND m.is_active = true
@@ -185,7 +185,7 @@ router.get("/patients/:id", async (req, res) => {
             m.consultation_id IN (SELECT id FROM latest_cons)
             OR m.consultation_id IS NULL
           )
-        ORDER BY m.created_at DESC`,
+        ORDER BY COALESCE(c.visit_date, m.prescribed_date) DESC, m.created_at DESC`,
           [id],
         ),
         pool.query(
