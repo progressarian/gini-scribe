@@ -164,5 +164,11 @@ export function buildCompliance(parsedClinical, healthrayMedications, healthrayA
   if (lifestyle.alcohol) stressParts.push(`Alcohol: ${lifestyle.alcohol}`);
   if (stressParts.length > 0) compliance.stress = stressParts.join(" | ");
 
+  // Symptoms for OPD coordinator prep
+  const parsedSymptoms = parsedClinical?.symptoms || [];
+  if (parsedSymptoms.length > 0) {
+    compliance.symptoms = parsedSymptoms.map((s) => s.name);
+  }
+
   return compliance;
 }

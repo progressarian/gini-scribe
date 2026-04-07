@@ -664,7 +664,7 @@ export default function VisitPage() {
                 onAddLab={() => setModal({ type: "addLab" })}
                 onPasteBiomarkers={() => setModal({ type: "pasteText" })}
               />
-              <VisitCoordPrep prep={data.prep} />
+              {/* <VisitCoordPrep prep={data.prep} /> */}
               <VisitSymptomsSection
                 symptoms={data.symptoms || []}
                 onAddSymptom={() => setModal({ type: "addSymptom" })}

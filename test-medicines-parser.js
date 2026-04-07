@@ -1,6 +1,6 @@
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 
-dotenv.config({ path: 'server/.env' });
+dotenv.config({ path: "server/.env" });
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -33,7 +33,7 @@ STRICT Rules:
 
 async function testParser() {
   try {
-    console.log('Testing medicine extraction with updated prompt...\n');
+    console.log("Testing medicine extraction with updated prompt...\n");
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -55,30 +55,32 @@ async function testParser() {
     }
 
     const rawJSON = data.content[0].text;
-    
+
     try {
       const parsed = JSON.parse(rawJSON);
-      console.log('💊 CURRENT MEDICATIONS extracted:\n');
+      console.log("💊 CURRENT MEDICATIONS extracted:\n");
       (parsed.medications || []).forEach((m, i) => {
-        console.log(`  ${i + 1}. ${m.name} - ${m.dose || 'N/A'} ${m.frequency || ''}`);
+        console.log(`  ${i + 1}. ${m.name} - ${m.dose || "N/A"} ${m.frequency || ""}`);
       });
-      
-      console.log('\n📌 PREVIOUS MEDICATIONS extracted:\n');
+
+      console.log("\n📌 PREVIOUS MEDICATIONS extracted:\n");
       if (!parsed.previous_medications || parsed.previous_medications.length === 0) {
-        console.log('  ⚠️  None extracted');
+        console.log("  ⚠️  None extracted");
       } else {
         (parsed.previous_medications || []).forEach((m, i) => {
-          console.log(`  ${i + 1}. ${m.name} - ${m.dose || 'N/A'} (Status: ${m.status})`);
-          console.log(`     Reason: ${m.reason || 'N/A'}`);
+          console.log(`  ${i + 1}. ${m.name} - ${m.dose || "N/A"} (Status: ${m.status})`);
+          console.log(`     Reason: ${m.reason || "N/A"}`);
         });
       }
-      
-      console.log('\n✅ Result: NMZ 10 mg should be in previous_medications with reason "dose changed to 20mg"');
+
+      console.log(
+        '\n✅ Result: NMZ 10 mg should be in previous_medications with reason "dose changed to 20mg"',
+      );
     } catch {
-      console.log('Response:', rawJSON);
+      console.log("Response:", rawJSON);
     }
   } catch (err) {
-    console.error('Error:', err.message);
+    console.error("Error:", err.message);
   }
 }
 

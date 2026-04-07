@@ -111,6 +111,7 @@ export async function parseClinicalWithAI(rawText) {
 
 Return JSON with these keys:
 {
+  "symptoms": [{"name": "...", "duration": "...", "severity": "mild/moderate/severe"}],
   "diagnoses": [{"name": "...", "details": "...", "since": "..."}],
   "labs": [{"test": "...", "value": "...", "unit": "...", "date": "..."}],
   "medications": [{"name": "...", "dose": "...", "frequency": "...", "timing": "...", "route": "Oral", "is_new": false}],
@@ -127,6 +128,7 @@ STRICT Rules:
 - For labs: extract ALL lab values with test name, numeric value, unit. Include HbA1c, FBG, PPBG, LDL, TG, TSH, T3, T4, Creatinine, eGFR, UACR, Hb, Iron, Ferritin, OT/SGOT, PT/SGPT, ALP, Calcium, Albumin, etc. For the date field in labs, ALWAYS use YYYY-MM-DD format (e.g. "2026-04-03" for April 3rd 2026). If date is ambiguous or not present, set to null.
 - For medications: parse CURRENT/TREATMENT medications with name, dose, frequency (OD/BD/TDS etc), timing (before/after food etc), route (Oral/SC/IV/IM etc). Set is_new=true if it's a new addition. Also look for medications where dose has CHANGED (e.g. "NMZ 10 to NMZ 20") — the OLD dose should be in previous_medications.
 - For previous_medications: extract from "PREVIOUS MEDICATION" section + ANY medicines with dose/frequency changes. Capture: old/previous dose, medication name, status ("stopped" or "changed"), and reason (e.g. "side effect", "dose increased from 10mg to 20mg", "replaced by", "discontinued"). If dose changed (e.g. NMZ 10 became NMZ 20), extract NMZ 10 as previous_medication with reason "dose changed".
+- For symptoms: extract ALL chief complaints, presenting complaints, and reported symptoms (e.g. fatigue, weight gain, tremor, palpitations, pain). Each should have name, duration (e.g. "2 months", "since last visit"), and severity (mild/moderate/severe) if mentioned. [] if none found.
 - For diagnoses: extract EACH condition separately. Include: PRIMARY diagnosis (e.g. Graves' Disease), clinical findings (tremor +, dermopathy, goitre), scan/test findings (diffuse toxic goitre, nodules, uptake), and chief complaints (weight gain, fatigue) as separate diagnoses. Each should have name, details (severity/specifics), and since (duration if mentioned).
 - For vitals: extract HT/WT/BMI/BP/WC/BF if mentioned
 - For lifestyle: SPLIT into separate fields. Set to null if not found — do NOT put medication instructions, monitoring instructions, or follow-up advice here:

@@ -2182,7 +2182,17 @@ textarea.nf:focus {
   .sidebar,
   .stabs,
   .jnav,
+  /* Global AppLayout elements */
+  .header,
+  .patient-bar,
+  .tabs,
+  .visit-banner,
+  /* Visit-page-specific UI */
   .topbar,
+  .summary-strip,
+  .sp-panel,
+  .sp-panel-collapsed,
+  /* Other UI chrome */
   .mo,
   .aip,
   .macts,
@@ -2192,7 +2202,6 @@ textarea.nf:focus {
   .btn,
   .btn-p,
   .ma,
-  .summary-strip,
   .jnav,
   .noticebar,
   .stp-lbl,
@@ -2228,6 +2237,11 @@ textarea.nf:focus {
   .visit-page {
     height: auto;
     overflow: visible;
+  }
+  .app,
+  .app:has(.visit-page) {
+    height: auto !important;
+    overflow: visible !important;
   }
 }
 /* Print Prescription */
@@ -2513,7 +2527,7 @@ textarea.nf:focus {
 /* Vital signs box */
 .rx-vitals {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
   gap: 5px;
   margin-bottom: 12px;
 }

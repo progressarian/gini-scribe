@@ -18,7 +18,11 @@ import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reade
 import { syncFromSheets } from "../services/cron/sheetsSync.js";
 import pool from "../config/db.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
-import { syncDiagnoses, syncMedications, syncStoppedMedications } from "../services/healthray/db.js";
+import {
+  syncDiagnoses,
+  syncMedications,
+  syncStoppedMedications,
+} from "../services/healthray/db.js";
 
 const router = Router();
 

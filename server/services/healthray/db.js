@@ -414,6 +414,29 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
   }
 }
 
+// ── Sync symptoms from HealthRay clinical notes ─────────────────────────────
+export async function syncSymptoms(patientId, apptId, symptoms) {
+  if (!patientId || !symptoms?.length) return;
+  for (const sy of symptoms) {
+    if (!sy.name) continue;
+    const symptomId = sy.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .slice(0, 100);
+    await pool
+      .query(
+        `INSERT INTO visit_symptoms (patient_id, symptom_id, label, appointment_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (patient_id, symptom_id) DO UPDATE SET
+           label = EXCLUDED.label,
+           appointment_id = EXCLUDED.appointment_id,
+           updated_at = NOW()`,
+        [patientId, symptomId, sy.name, apptId],
+      )
+      .catch(() => {});
+  }
+}
+
 // ── Sync stopped/previous medications from HealthRay ──────────────────────────
 export async function syncStoppedMedications(patientId, healthrayId, stoppedMeds) {
   if (!patientId || !stoppedMeds || stoppedMeds.length === 0) return;

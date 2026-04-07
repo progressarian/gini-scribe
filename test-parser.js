@@ -1,6 +1,6 @@
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 
-dotenv.config({ path: 'server/.env' });
+dotenv.config({ path: "server/.env" });
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -37,7 +37,7 @@ STRICT Rules:
 
 async function testParser() {
   try {
-    console.log('Sending clinical notes to Claude AI for parsing...\n');
+    console.log("Sending clinical notes to Claude AI for parsing...\n");
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -59,26 +59,26 @@ async function testParser() {
     }
 
     const rawJSON = data.content[0].text;
-    console.log('📋 AI Response:\n');
+    console.log("📋 AI Response:\n");
     console.log(rawJSON);
-    
+
     // Try to parse JSON
     try {
       const parsed = JSON.parse(rawJSON);
-      console.log('\n✅ Parsed JSON:\n');
+      console.log("\n✅ Parsed JSON:\n");
       console.log(JSON.stringify(parsed, null, 2));
-      
-      console.log('\n🔍 ANALYSIS:');
+
+      console.log("\n🔍 ANALYSIS:");
       console.log(`   Diagnoses extracted: ${parsed.diagnoses?.length || 0}`);
-      parsed.diagnoses?.forEach(d => console.log(`   - ${d.name}`));
+      parsed.diagnoses?.forEach((d) => console.log(`   - ${d.name}`));
       console.log(`   Previous medications: ${parsed.previous_medications?.length || 0}`);
       console.log(`   Current medications: ${parsed.medications?.length || 0}`);
       console.log(`   Labs: ${parsed.labs?.length || 0}`);
     } catch {
-      console.log('⚠️ Could not parse JSON');
+      console.log("⚠️ Could not parse JSON");
     }
   } catch (err) {
-    console.error('Error:', err.message);
+    console.error("Error:", err.message);
   }
 }
 

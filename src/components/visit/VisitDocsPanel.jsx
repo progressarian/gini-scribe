@@ -40,7 +40,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
       const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
 
       // Mark as reviewed (fire-and-forget — clears R5 rule on next summary load)
-      if (!doc.reviewed) {
+      if (doc.reviewed === false) {
         api.patch(`/api/documents/${doc.id}/reviewed`).catch(() => {});
       }
 

@@ -125,7 +125,12 @@ export function getWarning(drugName, context = {}) {
   }
 
   // 4. SGLT2i + eGFR < 30
-  if (isSGLT2i(name) && eGFR != null && eGFR < 30 && hasMed(activeMeds, "empagliflozin", "dapagliflozin", "canagliflozin")) {
+  if (
+    isSGLT2i(name) &&
+    eGFR != null &&
+    eGFR < 30 &&
+    hasMed(activeMeds, "empagliflozin", "dapagliflozin", "canagliflozin")
+  ) {
     return {
       level: "AMBER",
       message: `eGFR is ${eGFR} ml/min. SGLT2 inhibitor is already prescribed — not effective and not recommended below eGFR 30.`,
@@ -133,15 +138,25 @@ export function getWarning(drugName, context = {}) {
   }
 
   // 5. Two statins
-  if (isStatin(name) && hasMed(activeMeds, "atorvastatin", "rosuvastatin", "simvastatin", "pravastatin")) {
+  if (
+    isStatin(name) &&
+    hasMed(activeMeds, "atorvastatin", "rosuvastatin", "simvastatin", "pravastatin")
+  ) {
     return {
       level: "AMBER",
-      message: "A statin is already prescribed. Two statins are rarely needed — confirm this is intentional.",
+      message:
+        "A statin is already prescribed. Two statins are rarely needed — confirm this is intentional.",
     };
   }
 
   // 6. Glimepiride + age > 70
-  if (isSulphonylurea(name) && /glimepiride/i.test(name) && age != null && age > 70 && hasMed(activeMeds, "glimepiride")) {
+  if (
+    isSulphonylurea(name) &&
+    /glimepiride/i.test(name) &&
+    age != null &&
+    age > 70 &&
+    hasMed(activeMeds, "glimepiride")
+  ) {
     return {
       level: "RED",
       message: `Patient is ${age} years old. Glimepiride is already prescribed — hypoglycaemia risk is significantly higher in elderly. Review and consider switching to DPP-4 inhibitor.`,
@@ -149,7 +164,10 @@ export function getWarning(drugName, context = {}) {
   }
 
   // 7. Fenofibrate + Statin
-  if (isFenofibrate(name) && hasMed(activeMeds, "atorvastatin", "rosuvastatin", "simvastatin", "pravastatin")) {
+  if (
+    isFenofibrate(name) &&
+    hasMed(activeMeds, "atorvastatin", "rosuvastatin", "simvastatin", "pravastatin")
+  ) {
     const statinName = activeMeds.find((m) =>
       /atorvastatin|rosuvastatin|simvastatin|pravastatin/i.test(m.name),
     )?.name;
@@ -241,7 +259,8 @@ export function getWarning(drugName, context = {}) {
       } else {
         return {
           level: "BLUE",
-          message: "Counsel patient on genital hygiene — SGLT2 inhibitors increase risk of urinary tract and fungal infections.",
+          message:
+            "Counsel patient on genital hygiene — SGLT2 inhibitors increase risk of urinary tract and fungal infections.",
         };
       }
     } else if (hasDx(diagnoses, "Diabetic Nephropathy", "CKD", "chronic kidney disease")) {
@@ -253,7 +272,8 @@ export function getWarning(drugName, context = {}) {
     } else {
       return {
         level: "BLUE",
-        message: "Check eGFR before initiating — not effective if eGFR < 30. Counsel patient on genital hygiene: increased urinary tract and fungal infection risk.",
+        message:
+          "Check eGFR before initiating — not effective if eGFR < 30. Counsel patient on genital hygiene: increased urinary tract and fungal infection risk.",
       };
     }
   }
@@ -285,7 +305,8 @@ export function getWarning(drugName, context = {}) {
     } else {
       return {
         level: "AMBER",
-        message: "ACE inhibitor — check eGFR, potassium, and creatinine before starting and again 2 weeks after. Do not combine with ARB. Monitor for dry cough.",
+        message:
+          "ACE inhibitor — check eGFR, potassium, and creatinine before starting and again 2 weeks after. Do not combine with ARB. Monitor for dry cough.",
       };
     }
   }
@@ -313,7 +334,8 @@ export function getWarning(drugName, context = {}) {
   if (isLevo(name)) {
     return {
       level: "BLUE",
-      message: "Must be taken on empty stomach, 30 minutes before any food or drink. Food, calcium tablets, and iron supplements block absorption significantly. Do not share a timing slot with any other medication.",
+      message:
+        "Must be taken on empty stomach, 30 minutes before any food or drink. Food, calcium tablets, and iron supplements block absorption significantly. Do not share a timing slot with any other medication.",
     };
   }
 
@@ -323,7 +345,8 @@ export function getWarning(drugName, context = {}) {
 
     return {
       level: "BLUE",
-      message: "Take at night — the liver produces cholesterol overnight, making evening dosing significantly more effective than morning.",
+      message:
+        "Take at night — the liver produces cholesterol overnight, making evening dosing significantly more effective than morning.",
     };
   }
 
@@ -333,13 +356,25 @@ export function getWarning(drugName, context = {}) {
 
     return {
       level: "BLUE",
-      message: "If combined with a statin later, monitor for muscle pain and check CK if symptoms appear.",
+      message:
+        "If combined with a statin later, monitor for muscle pain and check CK if symptoms appear.",
     };
   }
 
   // ASPIRIN 75mg
   if (isAspirin(name)) {
-    if (hasDx(diagnoses, "CAD", "MI", "CVA", "cardiovascular", "stroke", "coronary", "myocardial infarction")) {
+    if (
+      hasDx(
+        diagnoses,
+        "CAD",
+        "MI",
+        "CVA",
+        "cardiovascular",
+        "stroke",
+        "coronary",
+        "myocardial infarction",
+      )
+    ) {
       return {
         level: "BLUE",
         message: "Aspirin is appropriate for this patient given documented cardiovascular history.",
@@ -347,14 +382,24 @@ export function getWarning(drugName, context = {}) {
     } else {
       return {
         level: "AMBER",
-        message: "Aspirin 75mg should only be prescribed if there is documented high cardiovascular risk or a prior cardiovascular event (MI, stroke). Not for routine use in diabetes without a CV indication.",
+        message:
+          "Aspirin 75mg should only be prescribed if there is documented high cardiovascular risk or a prior cardiovascular event (MI, stroke). Not for routine use in diabetes without a CV indication.",
       };
     }
   }
 
   // BETA BLOCKERS (Metoprolol, Bisoprolol, etc.)
   if (isBetaBlocker(name)) {
-    if (hasDx(diagnoses, "Heart Failure", "AF", "Atrial Fibrillation", "post-MI", "myocardial infarction")) {
+    if (
+      hasDx(
+        diagnoses,
+        "Heart Failure",
+        "AF",
+        "Atrial Fibrillation",
+        "post-MI",
+        "myocardial infarction",
+      )
+    ) {
       return {
         level: "BLUE",
         message:
@@ -382,7 +427,8 @@ export function getWarning(drugName, context = {}) {
     } else {
       return {
         level: "AMBER",
-        message: "Avoid if patient has or develops heart failure, bladder cancer, or osteoporosis. Can cause fluid retention and weight gain.",
+        message:
+          "Avoid if patient has or develops heart failure, bladder cancer, or osteoporosis. Can cause fluid retention and weight gain.",
       };
     }
   }

@@ -251,7 +251,7 @@ router.get("/documents/:id/file-url", async (req, res) => {
 
         const match = records?.find((r) => String(r.id) === recordIdStr);
 
-        const url = match?.url || match?.file_url || match?.attachment_url || match?.thumbnail;
+        const url = match?.url || match?.file_url || match?.attachment_url;
 
         if (!url) return res.status(404).json({ error: "Could not get file URL from HealthRay" });
         return res.json({ url, file_name: d.file_name, mime_type: d.mime_type });
