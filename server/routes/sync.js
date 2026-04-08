@@ -496,7 +496,15 @@ router.get("/sync/backfill/diagnoses-all/status", (_req, res) => {
   const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
   const rate = elapsed > 0 ? (done / elapsed).toFixed(1) : 0;
   const remaining = rate > 0 ? Math.round((total - done) / rate) : null;
-  res.json({ running, total, done, errors, elapsed: `${elapsed}s`, rate: `${rate}/s`, remainingEst: remaining ? `${remaining}s` : null });
+  res.json({
+    running,
+    total,
+    done,
+    errors,
+    elapsed: `${elapsed}s`,
+    rate: `${rate}/s`,
+    remainingEst: remaining ? `${remaining}s` : null,
+  });
 });
 
 // ── Bulk backfill diagnoses from existing JSONB data (no AI re-parse needed) ─
@@ -529,11 +537,22 @@ router.post("/sync/backfill/diagnoses-all", async (req, res) => {
       return res.json({ success: true, message: "No patients need backfill", synced: 0 });
     }
 
-    Object.assign(diagBackfillStatus, { running: true, total: appts.length, done: 0, errors: 0, startedAt: Date.now() });
+    Object.assign(diagBackfillStatus, {
+      running: true,
+      total: appts.length,
+      done: 0,
+      errors: 0,
+      startedAt: Date.now(),
+    });
     log("Diagnoses", `Starting bulk backfill — ${appts.length} patients to process`);
 
     // Respond immediately so the caller doesn't timeout
-    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/backfill/diagnoses-all/status" });
+    res.json({
+      success: true,
+      started: true,
+      total: appts.length,
+      statusUrl: "/api/sync/backfill/diagnoses-all/status",
+    });
 
     // Run in background
     (async () => {
@@ -545,7 +564,10 @@ router.post("/sync/backfill/diagnoses-all", async (req, res) => {
           // Log progress every 50 patients
           if (diagBackfillStatus.done % 50 === 0 || diagBackfillStatus.done === appts.length) {
             const pct = Math.round((diagBackfillStatus.done / appts.length) * 100);
-            log("Diagnoses", `Progress: ${diagBackfillStatus.done}/${appts.length} (${pct}%) — errors: ${diagBackfillStatus.errors}`);
+            log(
+              "Diagnoses",
+              `Progress: ${diagBackfillStatus.done}/${appts.length} (${pct}%) — errors: ${diagBackfillStatus.errors}`,
+            );
           }
         } catch (e) {
           diagBackfillStatus.errors++;
@@ -554,7 +576,10 @@ router.post("/sync/backfill/diagnoses-all", async (req, res) => {
       }
 
       const elapsed = Math.round((Date.now() - diagBackfillStatus.startedAt) / 1000);
-      log("Diagnoses", `Bulk backfill complete — ${diagBackfillStatus.done} synced, ${diagBackfillStatus.errors} errors, ${elapsed}s elapsed`);
+      log(
+        "Diagnoses",
+        `Bulk backfill complete — ${diagBackfillStatus.done} synced, ${diagBackfillStatus.errors} errors, ${elapsed}s elapsed`,
+      );
       diagBackfillStatus.running = false;
     })();
   } catch (e) {
@@ -572,7 +597,15 @@ router.get("/sync/backfill/medicines-all/status", (_req, res) => {
   const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
   const rate = elapsed > 0 ? (done / elapsed).toFixed(1) : 0;
   const remaining = rate > 0 ? Math.round((total - done) / rate) : null;
-  res.json({ running, total, done, errors, elapsed: `${elapsed}s`, rate: `${rate}/s`, remainingEst: remaining ? `${remaining}s` : null });
+  res.json({
+    running,
+    total,
+    done,
+    errors,
+    elapsed: `${elapsed}s`,
+    rate: `${rate}/s`,
+    remainingEst: remaining ? `${remaining}s` : null,
+  });
 });
 
 // ── Bulk backfill medicines from existing JSONB data (no AI re-parse needed) ─
@@ -608,22 +641,41 @@ router.post("/sync/backfill/medicines-all", async (req, res) => {
       return res.json({ success: true, message: "No appointments need backfill", synced: 0 });
     }
 
-    Object.assign(medsBackfillStatus, { running: true, total: appts.length, done: 0, errors: 0, startedAt: Date.now() });
+    Object.assign(medsBackfillStatus, {
+      running: true,
+      total: appts.length,
+      done: 0,
+      errors: 0,
+      startedAt: Date.now(),
+    });
     log("Medicines", `Starting bulk backfill — ${appts.length} appointments to process`);
 
     // Respond immediately so the caller doesn't timeout
-    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/backfill/medicines-all/status" });
+    res.json({
+      success: true,
+      started: true,
+      total: appts.length,
+      statusUrl: "/api/sync/backfill/medicines-all/status",
+    });
 
     // Run in background
     (async () => {
       for (const appt of appts) {
         try {
-          await syncMedications(appt.patient_id, appt.healthray_id, appt.appointment_date, appt.healthray_medications);
+          await syncMedications(
+            appt.patient_id,
+            appt.healthray_id,
+            appt.appointment_date,
+            appt.healthray_medications,
+          );
           medsBackfillStatus.done++;
 
           if (medsBackfillStatus.done % 100 === 0 || medsBackfillStatus.done === appts.length) {
             const pct = Math.round((medsBackfillStatus.done / appts.length) * 100);
-            log("Medicines", `Progress: ${medsBackfillStatus.done}/${appts.length} (${pct}%) — errors: ${medsBackfillStatus.errors}`);
+            log(
+              "Medicines",
+              `Progress: ${medsBackfillStatus.done}/${appts.length} (${pct}%) — errors: ${medsBackfillStatus.errors}`,
+            );
           }
         } catch (e) {
           medsBackfillStatus.errors++;
@@ -632,7 +684,10 @@ router.post("/sync/backfill/medicines-all", async (req, res) => {
       }
 
       const elapsed = Math.round((Date.now() - medsBackfillStatus.startedAt) / 1000);
-      log("Medicines", `Bulk backfill complete — ${medsBackfillStatus.done} appointments synced, ${medsBackfillStatus.errors} errors, ${elapsed}s elapsed`);
+      log(
+        "Medicines",
+        `Bulk backfill complete — ${medsBackfillStatus.done} appointments synced, ${medsBackfillStatus.errors} errors, ${elapsed}s elapsed`,
+      );
       medsBackfillStatus.running = false;
     })();
   } catch (e) {

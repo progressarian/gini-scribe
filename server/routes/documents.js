@@ -225,42 +225,99 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
 router.get("/documents/:id/file-url", async (req, res) => {
   try {
     const doc = await pool.query(
-      "SELECT storage_path, file_url, mime_type, file_name, source, notes, patient_id, doc_date FROM documents WHERE id=$1",
+      `SELECT storage_path, file_url, mime_type, file_name, source, notes, patient_id, doc_date 
+       FROM documents 
+       WHERE id=$1`,
       [req.params.id],
     );
+
     const d = doc.rows[0];
     if (!d) return res.status(404).json({ error: "Document not found" });
 
-    // ── HealthRay document: re-fetch fresh URL from HealthRay API ──────────────
+    // ── HealthRay document ─────────────────────────────────────────────
     if (!d.storage_path && d.source === "healthray") {
       try {
+        // Step 1: Appointment lookup
         const apptR = await pool.query(
-          `SELECT healthray_id FROM appointments
-       WHERE patient_id = $1 AND appointment_date::date = $2::date
-       AND healthray_id IS NOT NULL LIMIT 1`,
+          `SELECT healthray_id 
+           FROM appointments
+           WHERE patient_id = $1 
+           AND appointment_date::date = $2::date
+           AND healthray_id IS NOT NULL
+           ORDER BY appointment_date DESC
+           LIMIT 1`,
           [d.patient_id, d.doc_date],
         );
 
         const healthrayApptId = apptR.rows[0]?.healthray_id;
-        if (!healthrayApptId)
-          return res.status(404).json({ error: "No HealthRay appointment found" });
 
+        if (!healthrayApptId) {
+          console.error("❌ No HealthRay appointment found", {
+            patient_id: d.patient_id,
+            doc_date: d.doc_date,
+          });
+          return res.status(404).json({ error: "No HealthRay appointment found" });
+        }
+
+        // Step 2: Fetch records
         const records = await fetchMedicalRecords(healthrayApptId);
 
+        if (!records || !Array.isArray(records) || records.length === 0) {
+          console.error("❌ Empty/invalid HealthRay records", records);
+          return res.status(404).json({ error: "No records found from HealthRay" });
+        }
+
+        // Step 3: Extract record ID
         const recordIdStr = (d.notes || "").match(/healthray_record:(\d+)/)?.[1];
 
-        const match = records?.find((r) => String(r.id) === recordIdStr);
+        // Step 4: Match record safely
+        let match = null;
 
-        const url = match?.url || match?.file_url || match?.attachment_url;
+        if (recordIdStr) {
+          match = records.find((r) => String(r.id) === String(recordIdStr));
+        }
 
-        if (!url) return res.status(404).json({ error: "Could not get file URL from HealthRay" });
-        return res.json({ url, file_name: d.file_name, mime_type: d.mime_type });
+        if (!match) {
+          console.warn("⚠️ No exact match found, applying fallback");
+
+          // smarter fallback: prefer record with file/url
+          match = records.find((r) => r?.url || r?.file_url || r?.attachment_url || r?.thumbnail);
+
+          // last fallback: first record
+          if (!match) {
+            match = records[0];
+          }
+        }
+
+        // Step 5: Extract URL (robust)
+        const url = match?.url || match?.file_url || match?.attachment_url || match?.thumbnail;
+
+        if (!url) {
+          console.error("❌ URL extraction failed", {
+            match,
+            records,
+          });
+          return res.status(404).json({
+            error: "Could not get file URL from HealthRay",
+          });
+        }
+
+        return res.json({
+          url,
+          file_name: d.file_name,
+          mime_type: d.mime_type,
+        });
       } catch (err) {
-        return res.status(404).json({ error: "Failed to get fresh URL from HealthRay" });
+        console.error("❌ HealthRay fetch failed:", err);
+        return res.status(500).json({
+          error: "Failed to get fresh URL from HealthRay",
+        });
       }
     }
 
+    // ── Supabase storage ─────────────────────────────────────────────
     if (!d.storage_path) return res.status(404).json({ error: "No file attached" });
+
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
       return res.status(400).json({ error: "Storage not configured" });
 
@@ -276,14 +333,23 @@ router.get("/documents/:id/file-url", async (req, res) => {
       },
     );
 
-    if (!signResp.ok) return res.status(500).json({ error: "Failed to generate URL" });
+    if (!signResp.ok) {
+      console.error("❌ Supabase signing failed");
+      return res.status(500).json({ error: "Failed to generate URL" });
+    }
+
     const signData = await signResp.json();
     const signedPath = signData.signedURL || signData.signedUrl || signData.token;
 
     const url = signedPath?.startsWith("http")
       ? signedPath
       : `${SUPABASE_URL}/storage/v1${signedPath}`;
-    res.json({ url, mime_type: d.mime_type, file_name: d.file_name });
+
+    return res.json({
+      url,
+      mime_type: d.mime_type,
+      file_name: d.file_name,
+    });
   } catch (e) {
     handleError(res, e, "Document");
   }
@@ -512,6 +578,19 @@ router.patch("/documents/:id", async (req, res) => {
     }
 
     await client.query("COMMIT");
+
+    // Bust summary cache so the panel reflects the newly extracted report immediately
+    if (doc.patient_id && extracted_data?.panels) {
+      pool
+        .query(
+          `UPDATE appointments SET ai_summary=NULL, ai_summary_generated_at=NULL
+           WHERE patient_id=$1
+             AND appointment_date=(SELECT MAX(appointment_date) FROM appointments WHERE patient_id=$1)`,
+          [doc.patient_id],
+        )
+        .catch(() => {});
+    }
+
     res.json(doc);
   } catch (e) {
     await client.query("ROLLBACK");

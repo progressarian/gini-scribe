@@ -45,8 +45,9 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
   const [loading, setLoading] = useState(true);
   const [rules, setRules] = useState(null); // { red, amber, green }
   const [ai, setAi] = useState(null); // { red, amber, green } | null
-  const [generatedAt, setGeneratedAt] = useState(null);
+  const [dataAsOf, setDataAsOf] = useState(null);
   const [fromCache, setFromCache] = useState(false);
+  const [latestReport, setLatestReport] = useState(null);
   const hasFiredRef = useRef(false);
 
   useEffect(() => {
@@ -62,8 +63,9 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
       .then(({ data }) => {
         setRules(data.rules || { red: [], amber: [], green: [] });
         setAi(data.ai || null);
-        setGeneratedAt(data.generatedAt || null);
+        setDataAsOf(data.dataAsOf || null);
         setFromCache(data.cached ?? false);
+        setLatestReport(data.latestReport || null);
       })
       .catch(() => {
         // Silent fail — panel stays hidden (rules = null means nothing to show)
@@ -77,17 +79,21 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
   const hasRed = display.red.length > 0;
   const hasAmber = display.amber.length > 0;
   const hasGreen = display.green.length > 0;
-  const totalUrgent = rules.red.length + rules.amber.length;
-
   if (!hasRed && !hasAmber && !hasGreen) return null;
 
   const autoExpand = !forceCollapsed && (rules.red.length > 0 || rules.amber.length > 0);
   const isExpanded = autoExpand || manualExpand;
   const topZone = rules.red.length > 0 ? "red" : rules.amber.length > 0 ? "amber" : "green";
 
-  let footerText = generatedAt
-    ? `Generated ${fmtDate(generatedAt)} from latest data`
-    : "Generated from latest data";
+  let footerText;
+  if (latestReport) {
+    const reportName = latestReport.title || latestReport.file_name || "Latest report";
+    footerText = `Based on ${reportName} · ${fmtDate(dataAsOf)}`;
+  } else {
+    footerText = dataAsOf
+      ? `Based on data from ${fmtDate(dataAsOf)}`
+      : "Generated from latest data";
+  }
   if (fromCache) footerText += " · cached";
   if (ai) footerText += " · ✦ AI";
 
@@ -119,33 +125,35 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
       ),
     );
 
+  const controls = (
+    <div className="sp-actions">
+      {!autoExpand && manualExpand && (
+        <button className="bx bx-n" onClick={() => setManualExpand(false)}>Collapse ▴</button>
+      )}
+      <button className="sp-close-btn" title="Dismiss" onClick={() => setDismissed(true)}>✕</button>
+    </div>
+  );
+
   return (
     <div className={`sp-panel zone-${topZone}`}>
-      <div className="sp-head">
-        <div className="sp-title">
-          {topZone === "red" && "🔴 Before you start"}
-          {topZone === "amber" && "🟡 Consider this visit"}
-          {topZone === "green" && "✅ All parameters on track"}
-          {totalUrgent > 0 && <span className={`sp-badge ${topZone}`}>{totalUrgent}</span>}
-        </div>
-        <div className="sp-actions">
-          {!autoExpand && manualExpand && (
-            <button className="bx bx-n" onClick={() => setManualExpand(false)}>
-              Collapse ▴
-            </button>
-          )}
-          <button className="sp-close-btn" title="Dismiss" onClick={() => setDismissed(true)}>
-            ✕
-          </button>
-        </div>
-      </div>
-
       <div className="sp-body">
-        {hasRed && renderZone("red", display.red)}
+        {hasRed && (
+          <>
+            <div className="sp-zone-hd zone-red">
+              <span>🔴 Before you start — {display.red.length} item{display.red.length !== 1 ? "s" : ""} need your attention today</span>
+              {controls}
+            </div>
+            {renderZone("red", display.red)}
+          </>
+        )}
 
         {hasAmber && (
           <>
             {hasRed && <div className="sp-divider" />}
+            <div className="sp-zone-hd zone-amber">
+              <span>🟡 Also consider</span>
+              {!hasRed && controls}
+            </div>
             {renderZone("amber", display.amber)}
           </>
         )}
@@ -153,6 +161,10 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
         {hasGreen && (
           <>
             {(hasRed || hasAmber) && <div className="sp-divider" />}
+            <div className="sp-zone-hd zone-green">
+              <span>✅ Working well <span className="sp-zone-hd-sub">— tell the patient</span></span>
+              {!hasRed && !hasAmber && controls}
+            </div>
             {renderZone("green", display.green)}
           </>
         )}

@@ -23,28 +23,7 @@
   border-left-color: var(--green);
 }
 
-/* ── Header ── */
-.sp-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 9px 13px;
-  border-bottom: 1px solid var(--border);
-  gap: 8px;
-  background: var(--bg);
-}
-.sp-panel.zone-red .sp-head {
-  background: var(--red-lt);
-  border-bottom-color: var(--red-bd);
-}
-.sp-panel.zone-amber .sp-head {
-  background: var(--amb-lt);
-  border-bottom-color: var(--amb-bd);
-}
-.sp-panel.zone-green .sp-head {
-  background: var(--grn-lt);
-  border-bottom-color: var(--grn-bd);
-}
+/* sp-head removed — controls now live inside the first zone heading */
 
 .sp-title {
   display: flex;
@@ -117,24 +96,50 @@
 
 /* ── Body ── */
 .sp-body {
-  padding: 8px 12px 10px;
+  padding: 0;
 }
 
-.sp-zone-label {
-  font-size: 9.5px;
+/* ── Zone heading strip ── */
+.sp-zone-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 13px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.2px;
   text-transform: uppercase;
-  color: var(--t4);
-  padding: 4px 8px 2px;
+}
+.sp-zone-hd.zone-red {
+  background: var(--red-lt);
+  color: #b91c1c;
+  border-bottom: 1px solid var(--red-bd);
+}
+.sp-zone-hd.zone-amber {
+  background: var(--amb-lt);
+  color: #92400e;
+  border-bottom: 1px solid var(--amb-bd);
+}
+.sp-zone-hd.zone-green {
+  background: var(--grn-lt);
+  color: #166534;
+  border-bottom: 1px solid var(--grn-bd);
+}
+
+.sp-zone-hd-sub {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--t3);
 }
 
 .sp-alert-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--rs);
+  padding: 7px 13px;
   margin-bottom: 2px;
   transition: background 0.1s;
 }
@@ -200,7 +205,7 @@
 .sp-divider {
   height: 1px;
   background: var(--border);
-  margin: 7px 0;
+  margin: 4px 0;
 }
 
 /* ── Footer ── */
@@ -228,8 +233,8 @@
 }
 
 .sp-routine-text {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 300;
   color: #166534;
   display: flex;
   align-items: center;

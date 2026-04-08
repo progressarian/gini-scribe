@@ -500,31 +500,56 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
 
   for (const med of meds) {
     if (!med.name) continue;
+    const params = [
+      patientId,
+      med.name,
+      med.dose || null,
+      med.frequency || null,
+      med.timing || null,
+      med.route || "Oral",
+      apptDate,
+      `healthray:${healthrayId}`,
+    ];
+
+    // Step 1: reactivate any existing inactive row with the same name first.
+    // Without this, syncMedications creates a duplicate active row (because the
+    // ON CONFLICT below can't match the partial inactive index), and the next
+    // reconcile then fails with a unique constraint violation when it tries to
+    // stop both rows.
+    await pool
+      .query(
+        `UPDATE medications
+         SET is_active = true,
+             dose = COALESCE($3, dose),
+             frequency = COALESCE($4, frequency),
+             timing = COALESCE($5, timing),
+             route = COALESCE($6, route),
+             started_date = COALESCE($7, started_date),
+             notes = $8,
+             updated_at = NOW()
+         WHERE patient_id = $1
+           AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($2)
+           AND is_active = false`,
+        params,
+      )
+      .catch(() => {});
+
+    // Step 2: insert or upsert the active row.
     await pool
       .query(
         `INSERT INTO medications
          (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes)
          VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
-         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name)))
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
            timing = COALESCE(EXCLUDED.timing, medications.timing),
            route = COALESCE(EXCLUDED.route, medications.route),
-           is_active = true,
            started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
            notes = EXCLUDED.notes,
            updated_at = NOW()`,
-        [
-          patientId,
-          med.name,
-          med.dose || null,
-          med.frequency || null,
-          med.timing || null,
-          med.route || "Oral",
-          apptDate,
-          `healthray:${healthrayId}`,
-        ],
+        params,
       )
       .catch(() => {});
   }

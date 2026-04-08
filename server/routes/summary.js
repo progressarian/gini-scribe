@@ -116,7 +116,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     }
 
     // ── 2. Fetch data needed for the rule engine ──
-    const [patientR, diagnosesR, activeMedsR, stoppedMedsR, labsR, vitalsR, apptR, docsR] =
+    const [patientR, diagnosesR, activeMedsR, stoppedMedsR, labsR, vitalsR, apptR, docsR, latestReportR] =
       await Promise.all([
         pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
@@ -188,6 +188,17 @@ router.get("/patients/:id/summary", async (req, res) => {
            ORDER BY created_at DESC`,
           [pid],
         ),
+
+        // Latest report that has extracted lab results
+        pool.query(
+          `SELECT d.id, d.title, d.file_name, d.doc_date, d.created_at
+           FROM documents d
+           WHERE d.patient_id=$1
+             AND EXISTS (SELECT 1 FROM lab_results lr WHERE lr.document_id=d.id AND lr.result IS NOT NULL)
+           ORDER BY d.created_at DESC
+           LIMIT 1`,
+          [pid],
+        ),
       ]);
 
     const patient = patientR.rows[0];
@@ -227,7 +238,14 @@ router.get("/patients/:id/summary", async (req, res) => {
     const ai = await generateAiBrief(patient, diagnosesR.rows, rules);
 
     const generatedAt = new Date().toISOString();
-    const payload = { rules, ai, generatedAt, cached: false };
+    const latestReport = latestReportR.rows[0] || null;
+    // dataAsOf = the date of the most recent piece of data used by the rules
+    const dataAsOf =
+      latestReport?.doc_date ||
+      latestReport?.created_at ||
+      labsR.rows[0]?.test_date ||
+      generatedAt;
+    const payload = { rules, ai, generatedAt, dataAsOf, cached: false, latestReport };
 
     // ── 7. Store in cache ──
     if (resolvedApptId) {
