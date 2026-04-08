@@ -19,6 +19,8 @@ export async function ensureSyncColumns() {
     ALTER TABLE appointments
       ADD COLUMN IF NOT EXISTS healthray_medications JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS healthray_previous_medications JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE appointments
       ADD COLUMN IF NOT EXISTS healthray_labs JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE appointments
       ADD COLUMN IF NOT EXISTS healthray_advice TEXT;
@@ -207,6 +209,7 @@ export async function upsertAppointment(existingId, data) {
     healthrayAdvice,
     healthrayInvestigations,
     healthrayFollowUp,
+    healthrayPreviousMedications,
   } = data;
 
   if (existingId) {
@@ -229,6 +232,7 @@ export async function upsertAppointment(existingId, data) {
         healthray_medications = $6::jsonb, healthray_labs = $7::jsonb,
         healthray_advice = $8, status = COALESCE($9, status),
         healthray_investigations = $22::jsonb, healthray_follow_up = $23::jsonb,
+        healthray_previous_medications = $24::jsonb,
         updated_at = NOW()
        WHERE id = $1 RETURNING id`,
       [
@@ -255,6 +259,7 @@ export async function upsertAppointment(existingId, data) {
         healthrayId,
         JSON.stringify(healthrayInvestigations || []),
         healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
+        JSON.stringify(healthrayPreviousMedications || []),
       ],
     );
     return rows[0].id;
@@ -266,8 +271,9 @@ export async function upsertAppointment(existingId, data) {
         appointment_date, time_slot, visit_type, status, is_walkin,
         age, sex, notes, healthray_id, opd_vitals, biomarkers, compliance,
         healthray_clinical_notes, healthray_diagnoses, healthray_medications,
-        healthray_labs, healthray_advice, healthray_investigations, healthray_follow_up)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb)
+        healthray_labs, healthray_advice, healthray_investigations, healthray_follow_up,
+        healthray_previous_medications)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb)
      RETURNING id`,
     [
       patientId,
@@ -294,6 +300,7 @@ export async function upsertAppointment(existingId, data) {
       healthrayAdvice,
       JSON.stringify(healthrayInvestigations || []),
       healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
+      JSON.stringify(healthrayPreviousMedications || []),
     ],
   );
   return rows[0].id;
@@ -382,16 +389,78 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
 }
 
 // ── Sync parsed medications → medications table ─────────────────────────────
+// ── Normalize diagnosis name → canonical ID to prevent duplicates ───────────
+function normalizeDiagnosisId(name) {
+  // Strip parenthetical qualifiers before matching — "(Since 1998)", "(Seronegative)", etc.
+  const n = name.toLowerCase().trim().replace(/\([^)]*\)/g, "").trim().replace(/\s+/g, " ");
+
+  // Type 2 Diabetes — catches T2DM, DM2, Type 2 DM, Type II DM, T2 DM, etc.
+  if (/type\s*2|type\s*ii|t2\b|dm\s*2|dm2/.test(n) && /diabet|dm\b/.test(n))
+    return "type_2_diabetes_mellitus";
+  if (/^t2dm$/.test(n.replace(/\s/g, ""))) return "type_2_diabetes_mellitus";
+
+  // Type 1 Diabetes
+  if (/type\s*1|type\s*i\b|t1\b|dm\s*1|dm1/.test(n) && /diabet|dm\b/.test(n))
+    return "type_1_diabetes_mellitus";
+
+  // Hypertension
+  if (/^(htn|hypertension|essential hypertension|high blood pressure|high bp)$/.test(n))
+    return "hypertension";
+
+  // Thyroid conditions — order matters: specific before generic
+  if (/graves.*disease|graves.*hyperthyroid/.test(n)) return "graves_disease";
+  if (/graves.*dermopathy|\bdermopathy\b/.test(n)) return "graves_dermopathy";
+  if (/graves/.test(n)) return "graves_disease";
+  if (/hypothyroid/.test(n)) return "hypothyroidism";
+  if (/hyperthyroid/.test(n)) return "hyperthyroidism";
+  if (/hashimoto/.test(n)) return "hashimoto_thyroiditis";
+
+  // Neuropathy — diabetic context and plain both map to same
+  if (/neuropathy/.test(n)) return "diabetic_neuropathy";
+
+  // Nephropathy
+  if (/nephropathy/.test(n)) return "diabetic_nephropathy";
+  if (/chronic kidney disease|ckd/.test(n)) {
+    const stage = n.match(/stage\s*(\d)/);
+    return stage ? `ckd_stage_${stage[1]}` : "chronic_kidney_disease";
+  }
+
+  // Heart & vascular conditions
+  if (/heart failure.*preserved|hfpef|hfp\b/.test(n)) return "heart_failure_preserved_ef";
+  if (/heart failure/.test(n)) return "heart_failure";
+  if (/coronary artery disease|cad\b/.test(n)) return "coronary_artery_disease";
+  if (/atrial fibrillation|af\b|afib/.test(n)) return "atrial_fibrillation";
+  if (/myocardial infarction|\bmi\b.*heart|heart.*\bmi\b/.test(n)) return "myocardial_infarction";
+  if (/cerebrovascular accident|cva\b|stroke/.test(n)) return "cerebrovascular_accident";
+  if (/peripheral vascular disease|pvd\b/.test(n)) return "peripheral_vascular_disease";
+
+  // Sleep & respiratory
+  if (/obstructive sleep apnea|osas\b|osa\b/.test(n)) return "obstructive_sleep_apnea";
+
+  // Thyroid eye disease
+  if (/thyroid.*(orbitopathy|ophthalmopathy|eye disease)|tao\b|ted\b/.test(n))
+    return "thyroid_associated_orbitopathy";
+
+  // Retinopathy
+  if (/retinopathy/.test(n)) return "diabetic_retinopathy";
+
+  // Dyslipidemia
+  if (/dyslipidemia|hyperlipidemia|hypercholesterol/.test(n)) return "dyslipidemia";
+
+  // Obesity
+  if (/^obesity$/.test(n)) return "obesity";
+
+  // Default: slugify (using stripped name without parentheticals)
+  return n.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 100);
+}
+
 // ── Sync diagnoses from HealthRay clinical notes ────────────────────────────
 export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
   if (!patientId || !diagnoses || diagnoses.length === 0) return;
 
   for (const dx of diagnoses) {
     if (!dx.name) continue;
-    const diagId = (dx.id || dx.name)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .slice(0, 100);
+    const diagId = normalizeDiagnosisId(dx.id || dx.name);
 
     await pool
       .query(
@@ -538,9 +607,9 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     await pool
       .query(
         `INSERT INTO medications
-         (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
-         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+         (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes, source)
+         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 'healthray')
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
@@ -548,6 +617,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            route = COALESCE(EXCLUDED.route, medications.route),
            started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
            notes = EXCLUDED.notes,
+           source = 'healthray',
            updated_at = NOW()`,
         params,
       )

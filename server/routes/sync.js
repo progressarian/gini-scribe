@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { handleError } from "../utils/errorHandler.js";
 import { createLogger } from "../services/logger.js";
-const { log, error: logError } = createLogger("Backfill");
+const { log, error } = createLogger("Backfill");
 import {
   syncWalkingAppointments,
   syncTodayWalkingAppointments,
@@ -23,6 +23,7 @@ import {
   syncMedications,
   syncStoppedMedications,
 } from "../services/healthray/db.js";
+import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 
 const router = Router();
 
@@ -571,7 +572,7 @@ router.post("/sync/backfill/diagnoses-all", async (req, res) => {
           }
         } catch (e) {
           diagBackfillStatus.errors++;
-          logError("Diagnoses", `patient_id ${appt.patient_id}: ${e.message}`);
+          error("Diagnoses", `patient_id ${appt.patient_id}: ${e.message}`);
         }
       }
 
@@ -679,7 +680,7 @@ router.post("/sync/backfill/medicines-all", async (req, res) => {
           }
         } catch (e) {
           medsBackfillStatus.errors++;
-          logError("Medicines", `appt_id ${appt.id}: ${e.message}`);
+          error("Medicines", `appt_id ${appt.id}: ${e.message}`);
         }
       }
 
@@ -693,6 +694,228 @@ router.post("/sync/backfill/medicines-all", async (req, res) => {
   } catch (e) {
     medsBackfillStatus.running = false;
     handleError(res, e, "Bulk backfill medicines");
+  }
+});
+
+// ── Bulk extract medicines from all HealthRay prescription PDFs ──────────────
+// POST /api/sync/healthray/extract-prescriptions
+// Finds all healthray prescription docs without extracted_data, downloads each PDF,
+// extracts medicines via Claude vision, syncs to medications table.
+// Processes one at a time to avoid API rate limits.
+const prescriptionExtractStatus = { running: false, total: 0, done: 0, extracted: 0, errors: 0, startedAt: null };
+
+router.get("/sync/healthray/extract-prescriptions/status", (_req, res) => {
+  const { running, total, done, extracted, errors, startedAt } = prescriptionExtractStatus;
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+  res.json({ running, total, done, extracted, errors, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
+  if (prescriptionExtractStatus.running) {
+    return res.status(409).json({ error: "Extraction already running", status: prescriptionExtractStatus });
+  }
+
+  try {
+    const { rows: docs } = await pool.query(`
+      SELECT d.id, d.patient_id, d.file_url, d.doc_date
+      FROM documents d
+      WHERE d.source = 'healthray'
+        AND d.doc_type = 'prescription'
+        AND d.file_url IS NOT NULL
+        AND d.extracted_data IS NULL
+        AND d.patient_id IS NOT NULL
+      ORDER BY d.doc_date DESC
+    `);
+
+    if (docs.length === 0) {
+      return res.json({ success: true, message: "No unextracted prescription PDFs found", total: 0 });
+    }
+
+    Object.assign(prescriptionExtractStatus, {
+      running: true, total: docs.length, done: 0, extracted: 0, errors: 0, startedAt: Date.now(),
+    });
+
+    res.json({ success: true, started: true, total: docs.length, statusUrl: "/api/sync/healthray/extract-prescriptions/status" });
+
+    (async () => {
+      const CONCURRENCY = 10;
+
+      async function processDoc(doc) {
+        try {
+          const extracted = await extractPrescription(doc.file_url);
+          const meds = extracted.medications || [];
+
+          await pool.query(
+            `UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`,
+            [JSON.stringify(extracted), doc.id],
+          );
+
+          if (meds.length > 0) {
+            const rxDate = extracted.visit_date ||
+              (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
+
+            await pool.query(`DELETE FROM medications WHERE document_id = $1`, [doc.id]);
+            for (const m of meds) {
+              if (!m?.name) continue;
+              await pool.query(
+                `INSERT INTO medications
+                   (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
+                 ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+                 DO UPDATE SET document_id = EXCLUDED.document_id,
+                   dose = COALESCE(EXCLUDED.dose, medications.dose),
+                   frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+                   timing = COALESCE(EXCLUDED.timing, medications.timing),
+                   updated_at = NOW()`,
+                [doc.patient_id, doc.id, (m.name||"").slice(0,200), (m.dose||"").slice(0,100),
+                 (m.frequency||"").slice(0,100), (m.timing||"").slice(0,100), (m.route||"Oral").slice(0,50), rxDate],
+              ).catch(() => {});
+            }
+            prescriptionExtractStatus.extracted += meds.length;
+          }
+          prescriptionExtractStatus.done++;
+        } catch (e) {
+          prescriptionExtractStatus.errors++;
+          error("Prescriptions", `doc ${doc.id}: ${e.message}`);
+          prescriptionExtractStatus.done++;
+        }
+      }
+
+      // Process in batches of CONCURRENCY
+      for (let i = 0; i < docs.length; i += CONCURRENCY) {
+        await Promise.allSettled(docs.slice(i, i + CONCURRENCY).map(processDoc));
+      }
+
+      log("Prescriptions", `Extraction complete — ${prescriptionExtractStatus.done}/${prescriptionExtractStatus.total} docs, ${prescriptionExtractStatus.extracted} medicines, ${prescriptionExtractStatus.errors} errors`);
+      prescriptionExtractStatus.running = false;
+    })();
+  } catch (e) {
+    prescriptionExtractStatus.running = false;
+    handleError(res, e, "Bulk prescription extraction");
+  }
+});
+
+// ── Bulk backfill stopped/previous meds from healthray_previous_medications JSONB ─
+// POST /api/sync/healthray/backfill-stopped-meds
+// Reads every appointment that has healthray_previous_medications stored and syncs
+// stopped medicines to the medications table. Safe to re-run.
+const stoppedMedsBackfillStatus = { running: false, total: 0, done: 0, errors: 0, startedAt: null };
+
+router.get("/sync/healthray/backfill-stopped-meds/status", (_req, res) => {
+  const { running, total, done, errors, startedAt } = stoppedMedsBackfillStatus;
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+  res.json({ running, total, done, errors, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/healthray/backfill-stopped-meds", async (req, res) => {
+  if (stoppedMedsBackfillStatus.running) {
+    return res.status(409).json({ error: "Backfill already running", status: stoppedMedsBackfillStatus });
+  }
+
+  try {
+    const { rows: appts } = await pool.query(`
+      SELECT a.id, a.patient_id, a.healthray_id, a.healthray_previous_medications
+      FROM appointments a
+      WHERE a.patient_id IS NOT NULL
+        AND a.healthray_id IS NOT NULL
+        AND a.healthray_previous_medications IS NOT NULL
+        AND jsonb_typeof(a.healthray_previous_medications) = 'array'
+        AND jsonb_array_length(a.healthray_previous_medications) > 0
+      ORDER BY a.appointment_date ASC
+    `);
+
+    if (appts.length === 0) {
+      return res.json({ success: true, message: "No appointments with previous medications data", synced: 0 });
+    }
+
+    Object.assign(stoppedMedsBackfillStatus, {
+      running: true, total: appts.length, done: 0, errors: 0, startedAt: Date.now(),
+    });
+
+    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/healthray/backfill-stopped-meds/status" });
+
+    (async () => {
+      for (const appt of appts) {
+        try {
+          await syncStoppedMedications(appt.patient_id, appt.healthray_id, appt.healthray_previous_medications);
+          stoppedMedsBackfillStatus.done++;
+        } catch (e) {
+          stoppedMedsBackfillStatus.errors++;
+        }
+      }
+      log("Medicines", `Stopped meds backfill complete — ${stoppedMedsBackfillStatus.done} appointments, ${stoppedMedsBackfillStatus.errors} errors`);
+      stoppedMedsBackfillStatus.running = false;
+    })();
+  } catch (e) {
+    stoppedMedsBackfillStatus.running = false;
+    handleError(res, e, "Backfill stopped medicines");
+  }
+});
+
+// ── Dedup diagnoses: remove duplicates created by AI name variations ──────────
+// POST /api/sync/backfill/dedup-diagnoses
+// Deletes lower-priority duplicate diagnosis rows per patient.
+// Priority: Active > Monitoring > Resolved. Within same status, keeps most recent.
+router.post("/sync/backfill/dedup-diagnoses", async (req, res) => {
+  try {
+    // Step 1: Delete exact label duplicates (same patient, same label case-insensitive)
+    const exactDup = await pool.query(`
+      DELETE FROM diagnoses
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, LOWER(TRIM(label))
+              ORDER BY
+                CASE LOWER(status)
+                  WHEN 'active' THEN 1
+                  WHEN 'monitoring' THEN 2
+                  WHEN 'resolved' THEN 3
+                  ELSE 4
+                END ASC,
+                updated_at DESC,
+                created_at DESC
+            ) AS rn
+          FROM diagnoses
+        ) ranked
+        WHERE rn > 1
+      )
+      RETURNING id
+    `);
+
+    // Step 2: Delete duplicates with same diagnosis_id (shouldn't exist but clean up)
+    const idDup = await pool.query(`
+      DELETE FROM diagnoses
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, diagnosis_id
+              ORDER BY
+                CASE LOWER(status)
+                  WHEN 'active' THEN 1
+                  WHEN 'monitoring' THEN 2
+                  WHEN 'resolved' THEN 3
+                  ELSE 4
+                END ASC,
+                updated_at DESC,
+                created_at DESC
+            ) AS rn
+          FROM diagnoses
+        ) ranked
+        WHERE rn > 1
+      )
+      RETURNING id
+    `);
+
+    res.json({
+      success: true,
+      deletedExactLabelDuplicates: exactDup.rowCount,
+      deletedSameIdDuplicates: idDup.rowCount,
+      totalDeleted: exactDup.rowCount + idDup.rowCount,
+    });
+  } catch (e) {
+    handleError(res, e, "Dedup diagnoses");
   }
 });
 

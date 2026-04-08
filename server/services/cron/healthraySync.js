@@ -107,6 +107,8 @@ function buildVitalsAndBiomarkers(appt) {
 // ── Fetch clinical text — handles show_previous_appointment fallback ────────
 async function fetchClinicalText(appt, healthrayId, doctorId) {
   const clinicalData = await fetchClinicalNotes(healthrayId, doctorId);
+
+  console.log("Data of Arvinda kaur ->" ,  clinicalData)
   if (!clinicalData || !Array.isArray(clinicalData)) return null;
 
   const selCount = clinicalData.reduce(
@@ -219,7 +221,7 @@ async function syncAppointment(appt, localDoctorName) {
         // Parse with AI
         const parsed = await parseClinicalWithAI(rawText);
         clinical.clinicalRaw = rawText;
-
+        console.log(" parsed.medications", parsed.medications);
         if (parsed) {
           clinical.parsedClinical = parsed;
           clinical.healthrayDiagnoses = parsed.diagnoses || [];
@@ -292,12 +294,13 @@ async function syncAppointment(appt, localDoctorName) {
     clinicalRaw: clinical.clinicalRaw,
     healthrayDiagnoses: clinical.healthrayDiagnoses,
     healthrayMedications: clinical.healthrayMedications,
+    healthrayPreviousMedications: clinical.healthrayStoppedMedications,
     healthrayLabs: clinical.healthrayLabs,
     healthrayAdvice: clinical.healthrayAdvice,
     healthrayInvestigations: clinical.healthrayInvestigations,
     healthrayFollowUp: clinical.healthrayFollowUp,
   });
-
+  console.log("clinical.healthrayMedications", clinical.healthrayMedications);
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);

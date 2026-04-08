@@ -758,8 +758,12 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
              WHERE patient_id = $1
                AND visit_date < (SELECT MAX(visit_date) FROM consultations WHERE patient_id = $1)
            ))
-           -- Case 2: Document medicines from past visits/dates (no consultation_id)
-           OR (consultation_id IS NULL AND (COALESCE(started_date, created_at::DATE) < CURRENT_DATE))
+           -- Case 2: Document/uploaded prescription medicines from past dates only
+           -- Excludes HealthRay medicines (source = 'healthray') — those stay active
+           -- until the doctor explicitly stops them or HealthRay sync marks them stopped
+           OR (consultation_id IS NULL
+               AND COALESCE(source, '') != 'healthray'
+               AND (COALESCE(started_date, created_at::DATE) < CURRENT_DATE))
          )
        RETURNING id`,
       [pid],

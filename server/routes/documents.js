@@ -7,6 +7,7 @@ import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
 import { fetchMedicalRecords } from "../services/healthray/client.js";
+import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 
 const router = Router();
 
@@ -597,6 +598,95 @@ router.patch("/documents/:id", async (req, res) => {
     handleError(res, e, "Document patch");
   } finally {
     client.release();
+  }
+});
+
+// ── Extract medicines from a HealthRay prescription PDF/image using Claude vision
+// POST /api/documents/:id/extract-prescription
+router.post("/documents/:id/extract-prescription", async (req, res) => {
+  const docId = Number(req.params.id);
+  if (!docId) return res.status(400).json({ error: "Valid document ID required" });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, doc_type, file_url, doc_date FROM documents WHERE id = $1`,
+      [docId],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Document not found" });
+    const doc = rows[0];
+
+    if (doc.doc_type !== "prescription")
+      return res.status(400).json({ error: "Document is not a prescription" });
+    if (!doc.file_url)
+      return res.status(400).json({ error: "Document has no file URL" });
+
+    // Download + extract via Claude (handles PDF and image formats automatically)
+    const extracted = await extractPrescription(doc.file_url);
+
+    // Save extracted_data + sync medicines in a transaction
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`,
+        [JSON.stringify(extracted), docId],
+      );
+
+      if (doc.patient_id && extracted.medications?.length > 0) {
+        await client.query(`DELETE FROM medications WHERE document_id = $1`, [docId]);
+
+        const rxDate =
+          extracted.visit_date ||
+          (doc.doc_date
+            ? new Date(doc.doc_date).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0]);
+
+        for (const m of extracted.medications) {
+          if (!m?.name) continue;
+          await client
+            .query(
+              `INSERT INTO medications
+                 (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
+               ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+               DO UPDATE SET document_id = EXCLUDED.document_id,
+                 dose = COALESCE(EXCLUDED.dose, medications.dose),
+                 frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+                 timing = COALESCE(EXCLUDED.timing, medications.timing),
+                 route = COALESCE(EXCLUDED.route, medications.route),
+                 source = EXCLUDED.source,
+                 started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+                 updated_at = NOW()`,
+              [
+                doc.patient_id, docId,
+                (m.name || "").slice(0, 200),
+                (m.dose || "").slice(0, 100),
+                (m.frequency || "").slice(0, 100),
+                (m.timing || "").slice(0, 100),
+                (m.route || "Oral").slice(0, 50),
+                rxDate,
+              ],
+            )
+            .catch(() => {});
+        }
+      }
+
+      await client.query("COMMIT");
+      res.json({
+        success: true,
+        documentId: docId,
+        medicinesExtracted: extracted.medications?.length || 0,
+        medicines: extracted.medications || [],
+      });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    handleError(res, e, "Extract prescription PDF");
   }
 });
 
