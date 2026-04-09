@@ -56,12 +56,6 @@ function daysSince(dateStr) {
   return Math.round((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
 
-function hasMed(meds, ...names) {
-  return (meds || []).some((m) =>
-    names.some((n) => (m.name || "").toLowerCase().includes(n.toLowerCase())),
-  );
-}
-
 function hasDx(diagnoses, id, ...labelKeywords) {
   return (diagnoses || []).some(
     (d) =>
@@ -77,7 +71,6 @@ function numVal(labResults, name) {
 
 export function runSummaryRules({
   diagnoses = [],
-  activeMeds = [],
   labResults = [],
   labHistory = {},
   vitals = [],
@@ -95,23 +88,6 @@ export function runSummaryRules({
   const isHTN = hasDx(diagnoses, "htn", "hypertension");
   const isHypo = hasDx(diagnoses, "hypo", "hypothyroid");
 
-  const onLevo = hasMed(activeMeds, "levothyroxine", "thyroxine", "eltroxin");
-  const onMetformin = hasMed(activeMeds, "metformin");
-  const hasACEorARB = hasMed(
-    activeMeds,
-    "ramipril",
-    "enalapril",
-    "lisinopril",
-    "perindopril",
-    "captopril",
-    "telmisartan",
-    "losartan",
-    "valsartan",
-    "olmesartan",
-    "irbesartan",
-    "candesartan",
-  );
-
   const hba1c = numVal(labResults, "HbA1c");
   const hba1cInfo = getLabVal(labResults, "HbA1c");
   const uacr = numVal(labResults, "UACR");
@@ -124,16 +100,6 @@ export function runSummaryRules({
   const uacrH = getLabHist(labHistory, "UACR");
 
   // ─── RED ─────────────────────────────────────────────────────────────────────
-
-  // R1: Missing ACE/ARB with UACR > 30 in T2DM
-  if (isT2DM && uacr != null && uacr > 30 && !hasACEorARB) {
-    red.push({
-      id: "r1_ace_missing",
-      title: `UACR ${uacr} mg/g — no ACE inhibitor or ARB prescribed`,
-      detail: "Protocol: ACE/ARB required for UACR > 30 mg/g in T2DM.",
-      action: "Consider Ramipril 2.5mg OD or Telmisartan 20mg OD",
-    });
-  }
 
   // R2: HbA1c rising for 3 consecutive visits
   if (hba1cH.length >= 3) {
@@ -196,14 +162,12 @@ export function runSummaryRules({
   if (uacrH.length >= 3) {
     const [a, b, c] = uacrH.slice(-3).map((v) => parseFloat(v.result));
     if (c > b && b > a && c > 60 && !isNaN(a) && !isNaN(b) && !isNaN(c)) {
-      if (!red.some((r) => r.id === "r1_ace_missing")) {
-        red.push({
-          id: "r8_uacr_worsening",
-          title: `UACR worsening: ${a}→${b}→${c} mg/g over 3 visits`,
-          detail: "Nephropathy progressing — urgent renoprotective review.",
-          action: "Maximise ACE/ARB dose; consider nephrology referral",
-        });
-      }
+      red.push({
+        id: "r8_uacr_worsening",
+        title: `UACR worsening: ${a}→${b}→${c} mg/g over 3 visits`,
+        detail: "Nephropathy progressing — urgent renoprotective review.",
+        action: "Maximise ACE/ARB dose; consider nephrology referral",
+      });
     }
   }
 
@@ -222,52 +186,15 @@ export function runSummaryRules({
     }
   }
 
-  // A1b: TSH overdue
-  if ((isHypo || onLevo) && tshInfo?.date) {
+  // A1b: TSH overdue (hypothyroid patients)
+  if (isHypo && tshInfo?.date) {
     const d = daysSince(tshInfo.date);
     if (d > 90) {
       amber.push({
         id: "a1_tsh_overdue",
-        title: `TSH not checked in ${d} days — patient on Levothyroxine`,
-        detail: "Thyroid function should be monitored every 3 months on replacement therapy.",
+        title: `TSH not checked in ${d} days — patient has hypothyroidism`,
+        detail: "Thyroid function should be monitored every 3 months.",
         action: "Add TSH to today's lab orders",
-      });
-    }
-  }
-
-  // A2: Metformin + renal risk
-  if (onMetformin) {
-    if (egfr != null && egfr < 45) {
-      amber.push({
-        id: "a2_metformin_egfr",
-        title: `Metformin dose review — eGFR ${egfr} mL/min/1.73m²`,
-        detail: "Metformin contraindicated at eGFR < 30; reduce dose at eGFR 30–45.",
-        action: "Review dose safety — consider switching to safer alternative",
-      });
-    } else if (uacr != null && uacr > 60 && egfr == null) {
-      amber.push({
-        id: "a2_metformin_uacr",
-        title: `Metformin on board — UACR ${uacr} mg/g, eGFR not available`,
-        detail: "Check renal function before continuing Metformin.",
-        action: "Order eGFR this visit",
-      });
-    }
-  }
-
-  // A4: Insulin on high dose with poor control
-  const insulinMed = activeMeds.find(
-    (m) =>
-      (m.name || "").toLowerCase().includes("glargine") ||
-      (m.name || "").toLowerCase().includes("insulin"),
-  );
-  if (insulinMed && hba1c != null && hba1c > 8) {
-    const doseNum = parseInt((insulinMed.dose || "").match(/(\d+)/)?.[1]);
-    if (!isNaN(doseNum) && doseNum > 40) {
-      amber.push({
-        id: "a4_insulin_high",
-        title: `${insulinMed.name} at ${doseNum} units — HbA1c still ${hba1c}%`,
-        detail: "High insulin dose with suboptimal glycaemic control.",
-        action: "Consider specialist review or basal-bolus regimen",
       });
     }
   }
@@ -288,13 +215,13 @@ export function runSummaryRules({
     });
   }
 
-  // A: TSH elevated on Levothyroxine
-  if ((isHypo || onLevo) && tsh != null && tsh > 4.5) {
+  // A: TSH elevated in hypothyroid patients
+  if (isHypo && tsh != null && tsh > 4.5) {
     amber.push({
       id: "a_tsh_elevated",
-      title: `TSH ${tsh} µIU/mL — elevated on Levothyroxine`,
+      title: `TSH ${tsh} µIU/mL — elevated in hypothyroid patient`,
       detail: "Under-replaced hypothyroidism.",
-      action: "Consider dose uptitration",
+      action: "Consider dose adjustment",
     });
   }
 

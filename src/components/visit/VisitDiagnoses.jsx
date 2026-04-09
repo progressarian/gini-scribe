@@ -74,13 +74,29 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
           const detail = extractHRDetail(dx.notes);
           const visibleNote = displayNote(dx.notes);
 
+          // Build status label with trend if Worsening
+          let statusLabel = effectiveStatus || "Active";
+          if (dx.status === "Worsening" && dx.trend) {
+            statusLabel = `Worsening — ${dx.trend}`;
+          }
+          // Add external doctor for external category
+          if (dx.category === "external" && dx.external_doctor) {
+            statusLabel = `On Treatment — Dr. ${dx.external_doctor}`;
+          }
+
           return (
             <div key={dx.id || i} className="dxi" style={{ position: "relative" }}>
+              <div className="dxi-num">{i + 1}.</div>
               <div className="dxi-dot" style={{ background: st.dot }} />
               <div style={{ flex: 1 }}>
                 <div className="dxi-ttl">
                   {dx.label || dx.diagnosis_id}
-                  {detail && (
+                  {dx.key_value && (
+                    <span style={{ fontWeight: 400, color: "var(--t2)", marginLeft: 6 }}>
+                      — {dx.key_value}
+                    </span>
+                  )}
+                  {detail && !dx.key_value && (
                     <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 4 }}>
                       ({detail})
                     </span>
@@ -108,6 +124,20 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
                   )}
                 </div>
               </div>
+              <span
+                className="dxi-status"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  background: st.bg,
+                  color: st.color,
+                  border: `1px solid ${st.border}`,
+                }}
+              >
+                {statusLabel}
+              </span>
               <select
                 className="sy-sel"
                 value={effectiveStatus || ""}
@@ -121,6 +151,7 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
                   fontWeight: 600,
                   border: isManuallyOverridden ? "1.5px solid #fde68a" : undefined,
                   opacity: isAutoSet ? 0.7 : 1,
+                  marginLeft: 8,
                 }}
                 onChange={(e) => onUpdateDiagnosis?.(dx.id, { status: e.target.value })}
                 title={isAutoSet ? "Auto-set based on biomarkers. Change to override." : ""}

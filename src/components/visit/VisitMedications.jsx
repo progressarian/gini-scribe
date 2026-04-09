@@ -1,5 +1,6 @@
 import { memo, useState, useMemo } from "react";
 import { MED_COLORS, fmtDate } from "./helpers";
+import { MED_GROUPS } from "../../config/drugDatabase";
 
 // Deduplicate meds by name (same logic as Outcomes page)
 function dedup(meds) {
@@ -28,12 +29,30 @@ function dedup(meds) {
   return Object.values(grouped);
 }
 
+// Group medications by med_group
+function groupMedsByCategory(meds) {
+  const groups = {};
+  meds.forEach((m) => {
+    const group = m.med_group || "supplement";
+    if (!groups[group]) groups[group] = [];
+    groups[group].push(m);
+  });
+  return groups;
+}
+
+// Get group label
+function getGroupLabel(group) {
+  const found = MED_GROUPS.find((g) => g.id === group);
+  return found ? found.label : group.charAt(0).toUpperCase() + group.slice(1);
+}
+
 const VisitMedications = memo(function VisitMedications({
   activeMeds,
   stoppedMeds,
   onAddMed,
   onEditMed,
   onStopMed,
+  onDeleteMed,
 }) {
   const [showStopped, setShowStopped] = useState(false);
   const [showPrev, setShowPrev] = useState(false);
@@ -55,6 +74,12 @@ const VisitMedications = memo(function VisitMedications({
       ),
     };
   }, [uniqueActive]);
+
+  // Group medications by category
+  const groupedMeds = useMemo(() => groupMedsByCategory(lastVisitMeds), [lastVisitMeds]);
+
+  // Group order
+  const groupOrder = ["diabetes", "kidney", "bp", "lipids", "thyroid", "supplement", "external"];
 
   return (
     <div className="sc" id="medications">
@@ -87,61 +112,137 @@ const VisitMedications = memo(function VisitMedications({
           <span className="mthl">Actions</span>
         </div>
 
-        {lastVisitMeds.map((m, i) => (
-          <div key={m.id || i} className="mtr">
-            <div className="mmain">
-              <div className="mdot" style={{ background: MED_COLORS[i % MED_COLORS.length] }} />
-              <div>
-                <div className="mbrand">{m.name}</div>
-                <div className="mgen">
-                  {m.composition || ""}
-                  {m.route ? ` · ${m.route}` : ""}
-                </div>
-              </div>
-            </div>
-            <div className="mtd">{m.dose || "—"}</div>
-            <div className="mtd">
-              {m.frequency || "OD"}
-              {m.timing && (
-                <>
-                  <br />
-                  <span style={{ fontSize: 10, color: "var(--t3)" }}>{m.timing}</span>
-                </>
-              )}
-            </div>
-            <div>
-              {m.for_diagnosis?.length > 0 && <span className="mfor">{m.for_diagnosis[0]}</span>}
-              {m.prescribed_date && (
-                <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 3 }}>
-                  Since {fmtDate(m.prescribed_date)}
-                  {m.prescriber ? ` · ${m.prescriber}` : ""}
-                </div>
-              )}
-            </div>
-            <div className="macts">
-              <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
-                Edit
-              </button>
-              <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
-                Stop
-              </button>
-              {m.route === "SC" ||
-              m.route === "Subcutaneous" ||
-              (m.name || "").toLowerCase().includes("inj") ? (
-                <button
-                  className="ma"
+        {groupOrder.map((group) => {
+          const meds = groupedMeds[group];
+          if (!meds || meds.length === 0) return null;
+
+          const isExternal = group === "external";
+
+          return (
+            <div key={group}>
+              {/* Group header */}
+              <div
+                className="med-group-header"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  background: isExternal ? "#fef2f2" : "#f8fafc",
+                  borderBottom: `1px solid ${isExternal ? "#fecaca" : "var(--border)"}`,
+                  marginTop: group === groupOrder[0] ? 0 : 8,
+                }}
+              >
+                <span
                   style={{
-                    color: "var(--amber)",
-                    borderColor: "var(--amb-bd)",
-                    background: "var(--amb-lt)",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: isExternal ? "#dc2626" : "var(--t2)",
                   }}
                 >
-                  Pause
-                </button>
-              ) : null}
+                  {getGroupLabel(group)}
+                </span>
+                <span style={{ fontSize: 10, color: "var(--t4)" }}>({meds.length})</span>
+                {isExternal && (
+                  <span style={{ fontSize: 10, color: "#dc2626", marginLeft: "auto" }}>
+                    Do not modify without consent
+                  </span>
+                )}
+              </div>
+
+              {/* Medications in group */}
+              {meds.map((m, i) => (
+                <div key={m.id || `${group}-${i}`} className="mtr">
+                  <div className="mmain">
+                    <div
+                      className="mdot"
+                      style={{ background: MED_COLORS[i % MED_COLORS.length] }}
+                    />
+                    <div>
+                      <div className="mbrand">{m.name}</div>
+                      <div className="mgen">
+                        {m.composition || ""}
+                        {m.route ? ` · ${m.route}` : ""}
+                        {m.clinical_note && (
+                          <span style={{ color: "var(--primary)", display: "block", marginTop: 2 }}>
+                            {m.clinical_note}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mtd">{m.dose || "—"}</div>
+                  <div className="mtd">
+                    {m.frequency || "OD"}
+                    {m.timing && (
+                      <>
+                        <br />
+                        <span style={{ fontSize: 10, color: "var(--t3)" }}>{m.timing}</span>
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    {m.for_diagnosis?.length > 0 && (
+                      <span className="mfor">{m.for_diagnosis[0]}</span>
+                    )}
+                    {m.prescribed_date && (
+                      <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 3 }}>
+                        Since {fmtDate(m.prescribed_date)}
+                        {m.prescriber ? ` · ${m.prescriber}` : ""}
+                        {m.external_doctor && (
+                          <span style={{ color: "var(--red)" }}> · Dr. {m.external_doctor}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="macts">
+                    {!isExternal && (
+                      <>
+                        <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                          Edit
+                        </button>
+                        <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                          Stop
+                        </button>
+                        <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                    {isExternal && (
+                      <button
+                        className="ma"
+                        style={{
+                          color: "var(--t3)",
+                          borderColor: "var(--border)",
+                          background: "var(--bg)",
+                        }}
+                        title="External medication - cannot modify"
+                      >
+                        View Only
+                      </button>
+                    )}
+                    {(m.route === "SC" ||
+                      m.route === "Subcutaneous" ||
+                      (m.name || "").toLowerCase().includes("inj")) &&
+                      !isExternal && (
+                        <button
+                          className="ma"
+                          style={{
+                            color: "var(--amber)",
+                            borderColor: "var(--amb-bd)",
+                            background: "var(--amb-lt)",
+                          }}
+                        >
+                          Pause
+                        </button>
+                      )}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {lastVisitMeds.length === 0 && (
           <div style={{ fontSize: 13, color: "var(--t3)", padding: 16, textAlign: "center" }}>
@@ -178,6 +279,9 @@ const VisitMedications = memo(function VisitMedications({
                   </button>
                   <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
                     Stop
+                  </button>
+                  <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
+                    Delete
                   </button>
                 </div>
               </div>

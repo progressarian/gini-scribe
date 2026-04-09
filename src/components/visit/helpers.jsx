@@ -44,25 +44,70 @@ export const MED_COLORS = [
 const STATUS_MAP = {
   Controlled: "ctrl",
   Improving: "ctrl",
+  "In Remission": "ctrl",
+  Resolved: "ctrl",
   Uncontrolled: "rev",
   Review: "rev",
   "Review ⚠": "rev",
+  Worsening: "rev",
   New: "new",
+  "Newly Diagnosed": "new",
   Monitoring: "mon",
+  "Under Monitoring": "mon",
   Stable: "mon",
-  Resolved: "ctrl",
+  Active: "act",
 };
 
 export const statusClass = (s) => `sp-${STATUS_MAP[s] || "mon"}`;
 
+// Diagnosis status options per clinical brief
+export const DX_STATUS_OPTS = [
+  "Uncontrolled",
+  "Improving",
+  "Controlled",
+  "Newly Diagnosed",
+  "Worsening",
+  "Stable",
+  "In Remission",
+  "Resolved",
+  "Under Monitoring",
+];
+
+// Diagnosis categories per clinical brief
+export const DX_CATEGORIES = [
+  {
+    id: "primary",
+    label: "Primary Diagnosis",
+    description: "Main condition - reason for programme",
+  },
+  { id: "complication", label: "Diabetic Complication", description: "Caused by diabetes" },
+  { id: "comorbidity", label: "Comorbidity", description: "Linked condition (HTN, lipids, etc.)" },
+  { id: "external", label: "External Doctor", description: "Managed by another specialist" },
+  { id: "monitoring", label: "Under Monitoring", description: "Watching but not treating" },
+];
+
+// Complication types for diabetic complications
+export const COMPLICATION_TYPES = [
+  { id: "nephropathy", label: "Nephropathy", severity: 1 },
+  { id: "neuropathy", label: "Neuropathy", severity: 2 },
+  { id: "retinopathy", label: "Retinopathy", severity: 3 },
+  { id: "foot", label: "Diabetic Foot", severity: 4 },
+  { id: "other", label: "Other", severity: 5 },
+];
+
 export const DX_STATUS_STYLE = {
   New: { dot: "#2563eb", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
+  "Newly Diagnosed": { dot: "#2563eb", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
   Active: { dot: "#0891b2", bg: "#ecfeff", color: "#0e7490", border: "#a5f3fc" },
   Controlled: { dot: "#16a34a", bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
   Improving: { dot: "#16a34a", bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
+  "In Remission": { dot: "#10b981", bg: "#ecfdf5", color: "#059669", border: "#a7f3d0" },
   Review: { dot: "#d97706", bg: "#fffbeb", color: "#b45309", border: "#fde68a" },
   Uncontrolled: { dot: "#dc2626", bg: "#fef2f2", color: "#b91c1c", border: "#fecaca" },
+  Worsening: { dot: "#dc2626", bg: "#fef2f2", color: "#b91c1c", border: "#fecaca" },
   Monitoring: { dot: "#7c3aed", bg: "#f5f3ff", color: "#6d28d9", border: "#ddd6fe" },
+  "Under Monitoring": { dot: "#7c3aed", bg: "#f5f3ff", color: "#6d28d9", border: "#ddd6fe" },
+  Stable: { dot: "#6b7280", bg: "#f9fafb", color: "#4b5563", border: "#e5e7eb" },
   Resolved: { dot: "#94a3b8", bg: "#f8fafc", color: "#64748b", border: "#e2e8f0" },
 };
 export const DX_STATUS_DEFAULT = {

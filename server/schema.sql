@@ -106,13 +106,20 @@ CREATE TABLE IF NOT EXISTS diagnoses (
   diagnosis_id    TEXT NOT NULL,       -- 'dm2','htn','cad','ckd','hypo','obesity','dyslipidemia'
   label           TEXT NOT NULL,       -- 'Type 2 DM (Since 2010)'
   status          TEXT NOT NULL,       -- 'Controlled','Uncontrolled','New','Resolved'
+  category        TEXT,                -- 'primary','complication','comorbidity','external','monitoring'
+  complication_type TEXT,              -- 'nephropathy','neuropathy','retinopathy','foot','other'
+  external_doctor TEXT,                -- Doctor name for external diagnoses
+  key_value       TEXT,                -- e.g. 'HbA1c 10.6%', 'UACR 88 mg/g'
+  trend           TEXT,                -- e.g. '48→62→88'
   since_year      INTEGER,            -- Year of diagnosis
+  sort_order      INTEGER DEFAULT 0,   -- Manual ordering within category
   notes           TEXT,
   is_active       BOOLEAN DEFAULT TRUE,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_diagnoses_patient ON diagnoses(patient_id);
+CREATE INDEX idx_diagnoses_category ON diagnoses(patient_id, category);
 
 -- ============ MEDICATIONS ============
 -- Prescription history. Every medication ever prescribed.
@@ -128,6 +135,11 @@ CREATE TABLE IF NOT EXISTS medications (
   timing          TEXT,                -- 'Before breakfast','After meals','At bedtime'
   route           TEXT DEFAULT 'Oral', -- 'Oral','IV','IM','SC','Topical','Inhaled'
   for_diagnosis   TEXT[],              -- ['dm2','htn']
+  med_group       TEXT,                -- 'diabetes','kidney','bp','lipids','thyroid','supplement','external'
+  drug_class      TEXT,                -- 'insulin','metformin','sglt2','glp1','dpp4','su','other'
+  external_doctor TEXT,                -- For external medications
+  clinical_note   TEXT,                -- e.g. 'Renal protection — UACR 88'
+  sort_order      INTEGER DEFAULT 0,   -- Manual ordering within group
   is_new          BOOLEAN DEFAULT FALSE,
   is_active       BOOLEAN DEFAULT TRUE,-- Still taking
   started_date    DATE,
@@ -138,6 +150,7 @@ CREATE TABLE IF NOT EXISTS medications (
 );
 CREATE INDEX idx_medications_patient ON medications(patient_id);
 CREATE INDEX idx_medications_active ON medications(patient_id, is_active);
+CREATE INDEX idx_medications_group ON medications(patient_id, med_group);
 
 -- ============ LAB RESULTS ============
 -- Individual test results. Tracks biomarker trends.

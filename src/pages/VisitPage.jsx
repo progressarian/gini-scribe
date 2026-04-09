@@ -28,6 +28,7 @@ import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
 import VisitCoordPrep from "../components/visit/VisitCoordPrep";
+import SyncStatusBanner from "../components/visit/SyncStatusBanner";
 import {
   AddLabModal,
   AddSymptomModal,
@@ -36,6 +37,7 @@ import {
   AddMedicationModal,
   EditMedicationModal,
   StopMedicationModal,
+  DeleteMedicationModal,
   AddReferralModal,
   UploadReportModal,
   ChangeFollowUpModal,
@@ -663,6 +665,7 @@ export default function VisitPage() {
               </button>
             </div>
             <div className="scrl" ref={scrollRef}>
+              <SyncStatusBanner syncStatus={data.syncStatus} />
               <VisitSummaryPanel patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitBiomarkers
                 labResults={labResults}
@@ -694,6 +697,7 @@ export default function VisitPage() {
                 onAddMed={() => setModal({ type: "addMed" })}
                 onEditMed={(m) => setModal({ type: "editMed", data: m })}
                 onStopMed={(m) => setModal({ type: "stopMed", data: m })}
+                onDeleteMed={(m) => setModal({ type: "deleteMed", data: m })}
               />
               <VisitPlan
                 consultations={consultations}
@@ -1156,6 +1160,16 @@ export default function VisitPage() {
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.stopMedication(modal.data.id, d);
+            if (r.success) closeModal();
+          }}
+        />
+      )}
+      {modal?.type === "deleteMed" && (
+        <DeleteMedicationModal
+          medication={modal.data}
+          onClose={closeModal}
+          onSubmit={async (id) => {
+            const r = await mutations.deleteMedication(id);
             if (r.success) closeModal();
           }}
         />

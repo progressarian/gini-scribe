@@ -5,6 +5,13 @@ import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
+import {
+  sortMedications,
+  groupMedications,
+  detectMedGroup,
+  detectDrugClass,
+} from "../utils/medicationSort.js";
 
 const router = Router();
 
@@ -69,6 +76,8 @@ router.get("/visit/:patientId", async (req, res) => {
       latestApptR,
       labOrdersR,
       healthrayDxApptR,
+      healthraySyncR,
+      labSyncR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -230,6 +239,22 @@ router.get("/visit/:patientId", async (req, res) => {
          ORDER BY appointment_date DESC LIMIT 1`,
         [pid],
       ),
+
+      // 20. HealthRay sync status (latest synced appointment)
+      pool.query(
+        `SELECT id, appointment_date, healthray_id, updated_at
+         FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
+         ORDER BY appointment_date DESC LIMIT 1`,
+        [pid],
+      ),
+
+      // 21. Lab sync status (synced lab cases)
+      pool.query(
+        `SELECT case_no, patient_case_no, case_date, synced_at
+         FROM lab_cases WHERE patient_id=$1 AND results_synced = TRUE
+         ORDER BY case_date DESC LIMIT 5`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -321,12 +346,16 @@ router.get("/visit/:patientId", async (req, res) => {
 
     const healthrayDxAppt = healthrayDxApptR.rows[0] || null;
 
+    // Apply clinical sorting to diagnoses and medications
+    const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
+    const sortedActiveMeds = sortMedications(activeMedsR.rows);
+
     res.json({
       patient,
       vitals: vitalsR.rows,
-      diagnoses: diagnosesR.rows,
+      diagnoses: sortedDiagnoses,
       healthrayDiagnoses: healthrayDxAppt?.healthray_diagnoses || null,
-      activeMeds: activeMedsR.rows,
+      activeMeds: sortedActiveMeds,
       stoppedMeds: stoppedMedsR.rows,
       labResults: labsR.rows,
       labHistory,
@@ -371,6 +400,10 @@ router.get("/visit/:patientId", async (req, res) => {
         monthsWithGini,
         carePhase,
       },
+      syncStatus: {
+        healthray: healthraySyncR.rows[0] || null,
+        labs: labSyncR.rows || [],
+      },
     });
   } catch (err) {
     handleError(res, err, "Failed to load visit data");
@@ -409,20 +442,46 @@ router.post("/visit/:patientId/diagnosis", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const { name, icd_code, status, notes } = req.body;
+    const {
+      name,
+      icd_code,
+      status,
+      category,
+      complication_type,
+      external_doctor,
+      key_value,
+      trend,
+      notes,
+    } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
     const diagId = (icd_code || name)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_")
       .slice(0, 100);
     const r = await pool.query(
-      `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, notes)
-       VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, category, complication_type, external_doctor, key_value, trend, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
          label = EXCLUDED.label, status = COALESCE(EXCLUDED.status, diagnoses.status),
+         category = COALESCE(EXCLUDED.category, diagnoses.category),
+         complication_type = COALESCE(EXCLUDED.complication_type, diagnoses.complication_type),
+         external_doctor = COALESCE(EXCLUDED.external_doctor, diagnoses.external_doctor),
+         key_value = COALESCE(EXCLUDED.key_value, diagnoses.key_value),
+         trend = COALESCE(EXCLUDED.trend, diagnoses.trend),
          notes = COALESCE(EXCLUDED.notes, diagnoses.notes), updated_at = NOW()
        RETURNING *`,
-      [pid, diagId, t(name, 500), t(status, 100) || "New", t(notes, 1000)],
+      [
+        pid,
+        diagId,
+        t(name, 500),
+        t(status, 100) || "Newly Diagnosed",
+        t(category, 50),
+        t(complication_type, 50),
+        t(external_doctor, 200),
+        t(key_value, 200),
+        t(trend, 200),
+        t(notes, 1000),
+      ],
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -464,6 +523,11 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       started_date,
       appointment_id,
       composition,
+      med_group,
+      drug_class,
+      external_doctor,
+      clinical_note,
+      notes,
     } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
     const forDx = Array.isArray(for_diagnosis)
@@ -471,9 +535,14 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       : for_diagnosis
         ? [for_diagnosis]
         : null;
+
+    // Auto-detect group and class if not provided
+    const detectedGroup = med_group || detectMedGroup({ name, composition });
+    const detectedClass = drug_class || detectDrugClass({ name, composition });
+
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,COALESCE($9::date, CURRENT_DATE),$10,'visit')
+      `INSERT INTO medications (patient_id, name, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,COALESCE($9::date, CURRENT_DATE),$10,'visit',$11,$12,$13,$14,$15)
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          composition = COALESCE(EXCLUDED.composition, medications.composition),
@@ -483,6 +552,11 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          route = COALESCE(EXCLUDED.route, medications.route),
          for_diagnosis = COALESCE(EXCLUDED.for_diagnosis, medications.for_diagnosis),
          appointment_id = COALESCE(EXCLUDED.appointment_id, medications.appointment_id),
+         med_group = COALESCE(EXCLUDED.med_group, medications.med_group),
+         drug_class = COALESCE(EXCLUDED.drug_class, medications.drug_class),
+         external_doctor = COALESCE(EXCLUDED.external_doctor, medications.external_doctor),
+         clinical_note = COALESCE(EXCLUDED.clinical_note, medications.clinical_note),
+         notes = COALESCE(EXCLUDED.notes, medications.notes),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -496,6 +570,11 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         forDx,
         n(started_date),
         appointment_id || null,
+        t(detectedGroup, 50),
+        t(detectedClass, 50),
+        t(external_doctor, 200),
+        t(clinical_note, 500),
+        t(notes, 1000),
       ],
     );
     res.json(r.rows[0]);
@@ -544,6 +623,23 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Stop medication");
+  }
+});
+
+// ── DELETE /visit/:patientId/medication/:id — Delete medication permanently ──
+router.delete("/visit/:patientId/medication/:id", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  const mid = Number(req.params.id);
+  if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
+  try {
+    const r = await pool.query(
+      "DELETE FROM medications WHERE id = $1 AND patient_id = $2 RETURNING id",
+      [mid, pid],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
+    res.json({ success: true });
+  } catch (e) {
+    handleError(res, e, "Delete medication");
   }
 });
 

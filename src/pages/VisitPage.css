@@ -938,6 +938,12 @@
   align-items: center;
   gap: 9px;
 }
+.dxi-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--t3);
+  min-width: 20px;
+}
 .dxi-dot {
   width: 9px;
   height: 9px;
@@ -1079,6 +1085,15 @@
 }
 .ma-s:hover {
   background: #fee2e2;
+}
+.ma-d {
+  color: var(--t4);
+  border-color: var(--border);
+  background: transparent;
+}
+.ma-d:hover {
+  background: var(--bg);
+  color: var(--red);
 }
 .ma-p {
   color: var(--amber);
@@ -2993,4 +3008,35 @@ textarea.nf:focus {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ── SYNC STATUS BANNER ── */
+.sync-banner {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--grn-lt);
+  border: 1px solid var(--grn-bd);
+  border-radius: var(--rs);
+  margin-bottom: 12px;
+}
+
+.sync-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.sync-icon {
+  font-size: 14px;
+}
+
+.sync-label {
+  font-weight: 600;
+  color: var(--green);
+}
+
+.sync-date {
+  color: var(--t3);
 }

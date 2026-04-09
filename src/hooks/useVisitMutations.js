@@ -95,6 +95,21 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData],
   );
 
+  const deleteMedication = useCallback(
+    async (id) => {
+      try {
+        await api.delete(`/api/visit/${patientId}/medication/${id}`);
+        toast("Medication deleted", "success");
+        await refreshData();
+        return { success: true };
+      } catch {
+        toast("Failed to delete medication", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   const addSymptom = useCallback(
     async (data) => {
       try {
@@ -208,6 +223,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     addMedication,
     editMedication,
     stopMedication,
+    deleteMedication,
     addReferral,
     uploadDocument,
     updateFollowUp,
