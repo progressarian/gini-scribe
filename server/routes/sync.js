@@ -229,11 +229,21 @@ router.post("/sync/backfill/labs/all", async (req, res) => {
     labsBackfillStatus.done = 0;
     labsBackfillStatus.errors = 0;
     labsBackfillStatus.startedAt = Date.now();
-    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/backfill/labs/all/status" });
+    res.json({
+      success: true,
+      started: true,
+      total: appts.length,
+      statusUrl: "/api/sync/backfill/labs/all/status",
+    });
     (async () => {
       for (const appt of appts) {
         try {
-          await syncLabResults(appt.patient_id, appt.id, appt.appointment_date, appt.healthray_labs);
+          await syncLabResults(
+            appt.patient_id,
+            appt.id,
+            appt.appointment_date,
+            appt.healthray_labs,
+          );
           labsBackfillStatus.done++;
         } catch (e) {
           labsBackfillStatus.errors++;
@@ -242,7 +252,10 @@ router.post("/sync/backfill/labs/all", async (req, res) => {
         }
       }
       labsBackfillStatus.running = false;
-      log("Labs Backfill", `Done — ${labsBackfillStatus.done} appts, ${labsBackfillStatus.errors} errors`);
+      log(
+        "Labs Backfill",
+        `Done — ${labsBackfillStatus.done} appts, ${labsBackfillStatus.errors} errors`,
+      );
     })();
   } catch (e) {
     labsBackfillStatus.running = false;
@@ -311,8 +324,10 @@ router.post("/sync/debug/stop-stale-meds", async (req, res) => {
 // POST /api/sync/debug/update-med-date  body: { ids: [1,2,3], date: "2026-02-18" }
 router.post("/sync/debug/update-med-date", async (req, res) => {
   const { ids, date } = req.body || {};
-  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array required" });
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date required (YYYY-MM-DD)" });
+  if (!Array.isArray(ids) || ids.length === 0)
+    return res.status(400).json({ error: "ids array required" });
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date))
+    return res.status(400).json({ error: "date required (YYYY-MM-DD)" });
   try {
     const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
     const { rows } = await pool.query(
@@ -348,7 +363,8 @@ router.post("/sync/debug/rename-med", async (req, res) => {
 router.get("/sync/debug/diagnoses/:fileNo", async (req, res) => {
   try {
     const { rows: patients } = await pool.query(
-      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [req.params.fileNo],
+      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+      [req.params.fileNo],
     );
     if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
     const { rows } = await pool.query(
@@ -356,15 +372,22 @@ router.get("/sync/debug/diagnoses/:fileNo", async (req, res) => {
        FROM diagnoses WHERE patient_id = $1 ORDER BY is_active DESC, label`,
       [patients[0].id],
     );
-    res.json({ total: rows.length, active: rows.filter(r=>r.is_active).length, diagnoses: rows });
-  } catch (e) { handleError(res, e, "Debug diagnoses"); }
+    res.json({
+      total: rows.length,
+      active: rows.filter((r) => r.is_active).length,
+      diagnoses: rows,
+    });
+  } catch (e) {
+    handleError(res, e, "Debug diagnoses");
+  }
 });
 
 // ── Debug: delete specific diagnosis rows by ID ──────────────────────────────
 // POST /api/sync/debug/delete-diagnoses  body: { ids: [1,2,3] }
 router.post("/sync/debug/delete-diagnoses", async (req, res) => {
   const { ids } = req.body || {};
-  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array required" });
+  if (!Array.isArray(ids) || ids.length === 0)
+    return res.status(400).json({ error: "ids array required" });
   try {
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
     const { rows } = await pool.query(

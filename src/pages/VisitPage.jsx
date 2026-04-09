@@ -524,6 +524,7 @@ export default function VisitPage() {
     aiInitialMsg,
     uniqueActiveMeds,
     uniqueStoppedMeds,
+    latestVisitMeds,
     anthropoRows,
     anthropoTrend,
   } = derived;

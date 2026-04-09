@@ -460,7 +460,11 @@ function normalizeDiagnosisId(name) {
   if (/dual adiposity|visceral adiposity|adiposity/.test(n)) return "dual_adiposity";
 
   // MASLD / fatty liver
-  if (/masld|mafld|nafld|non.alcoholic fatty liver|metabolic.*steatotic liver|metabolic.*fatty liver/.test(n))
+  if (
+    /masld|mafld|nafld|non.alcoholic fatty liver|metabolic.*steatotic liver|metabolic.*fatty liver/.test(
+      n,
+    )
+  )
     return "masld";
 
   // Default: slugify (using stripped name without parentheticals)
