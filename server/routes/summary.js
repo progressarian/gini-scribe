@@ -116,44 +116,26 @@ router.get("/patients/:id/summary", async (req, res) => {
     }
 
     // ── 2. Fetch data needed for the rule engine ──
-    const [
-      patientR,
-      diagnosesR,
-      activeMedsR,
-      stoppedMedsR,
-      labsR,
-      vitalsR,
-      apptR,
-      docsR,
-      latestReportR,
-    ] = await Promise.all([
-      pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
+    const [patientR, diagnosesR, activeMedsR, labsR, vitalsR, apptR, docsR, latestReportR] =
+      await Promise.all([
+        pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
-      pool.query(
-        `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
-           WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`,
-        [pid],
-      ),
+        pool.query(
+          `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
+           WHERE patient_id=$1 ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
+          [pid],
+        ),
 
-      pool.query(
-        `SELECT m.* FROM medications m
+        pool.query(
+          `SELECT m.* FROM medications m
            WHERE m.patient_id=$1 AND m.is_active=true
            ORDER BY m.created_at DESC`,
-        [pid],
-      ),
+          [pid],
+        ),
 
-      pool.query(
-        `SELECT DISTINCT ON (UPPER(COALESCE(pharmacy_match, name)))
-             id, name, pharmacy_match, stop_reason, stopped_date
-           FROM medications
-           WHERE patient_id=$1 AND is_active=false
-           ORDER BY UPPER(COALESCE(pharmacy_match, name)), stopped_date DESC NULLS LAST`,
-        [pid],
-      ),
-
-      // All labs deduped (same query as visit route)
-      pool.query(
-        `SELECT * FROM (
+        // All labs deduped (same query as visit route)
+        pool.query(
+          `SELECT * FROM (
              SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date)
                *
              FROM lab_results
@@ -173,42 +155,42 @@ router.get("/patients/:id/summary", async (req, res) => {
                created_at DESC
            ) deduped
            ORDER BY test_date DESC`,
-        [pid],
-      ),
+          [pid],
+        ),
 
-      pool.query(`SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 5`, [
-        pid,
-      ]),
+        pool.query(`SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 5`, [
+          pid,
+        ]),
 
-      // Prep from latest appointment (or specific appointment)
-      apptId
-        ? pool.query(`SELECT id, compliance, biomarkers FROM appointments WHERE id=$1`, [apptId])
-        : pool.query(
-            `SELECT id, compliance, biomarkers FROM appointments
+        // Prep from latest appointment (or specific appointment)
+        apptId
+          ? pool.query(`SELECT id, compliance, biomarkers FROM appointments WHERE id=$1`, [apptId])
+          : pool.query(
+              `SELECT id, compliance, biomarkers FROM appointments
                WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
                ORDER BY appointment_date DESC LIMIT 1`,
-            [pid],
-          ),
+              [pid],
+            ),
 
-      // Unreviewed documents
-      pool.query(
-        `SELECT id, title, file_name, doc_type, reviewed FROM documents
+        // Unreviewed documents
+        pool.query(
+          `SELECT id, title, file_name, doc_type, reviewed FROM documents
            WHERE patient_id=$1 AND reviewed=FALSE
            ORDER BY created_at DESC`,
-        [pid],
-      ),
+          [pid],
+        ),
 
-      // Latest report that has extracted lab results
-      pool.query(
-        `SELECT d.id, d.title, d.file_name, d.doc_date, d.created_at
+        // Latest report that has extracted lab results
+        pool.query(
+          `SELECT d.id, d.title, d.file_name, d.doc_date, d.created_at
            FROM documents d
            WHERE d.patient_id=$1
              AND EXISTS (SELECT 1 FROM lab_results lr WHERE lr.document_id=d.id AND lr.result IS NOT NULL)
            ORDER BY d.created_at DESC
            LIMIT 1`,
-        [pid],
-      ),
-    ]);
+          [pid],
+        ),
+      ]);
 
     const patient = patientR.rows[0];
     if (!patient) return res.status(404).json({ error: "Patient not found" });
@@ -235,7 +217,6 @@ router.get("/patients/:id/summary", async (req, res) => {
     const rules = runSummaryRules({
       diagnoses: diagnosesR.rows,
       activeMeds: activeMedsR.rows,
-      stoppedMeds: stoppedMedsR.rows,
       labResults: labsR.rows,
       labHistory,
       vitals: vitalsR.rows,

@@ -382,8 +382,128 @@ router.get("/sync/debug/diagnoses/:fileNo", async (req, res) => {
   }
 });
 
+// ── Patient note inject: parse + sync a pasted clinical note for a patient ───
+// POST /api/sync/patient/:fileNo/note  body: { notes: "...", date: "YYYY-MM-DD" (optional) }
+// Finds the patient's most recent appointment (or creates one for the given date),
+// saves the note, then runs the full AI parse → diagnoses + meds + labs pipeline.
+router.post("/sync/patient/:fileNo/note", async (req, res) => {
+  const fileNo = req.params.fileNo;
+  const { notes, date } = req.body || {};
+  if (!notes || notes.trim().length < 20)
+    return res.status(400).json({ error: "notes required (min 20 chars)" });
+
+  try {
+    // Find patient
+    const { rows: patients } = await pool.query(
+      `SELECT id, name FROM patients WHERE file_no = $1 LIMIT 1`,
+      [fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: `Patient ${fileNo} not found` });
+    const patient = patients[0];
+
+    // Find or create appointment
+    const apptDate = date || new Date().toISOString().split("T")[0];
+    let appt;
+    const { rows: existing } = await pool.query(
+      `SELECT id, patient_id, healthray_id, appointment_date FROM appointments
+       WHERE patient_id = $1 AND appointment_date = $2 LIMIT 1`,
+      [patient.id, apptDate],
+    );
+    if (existing[0]) {
+      appt = existing[0];
+    } else {
+      // Use most recent appointment if no date match
+      const { rows: latest } = await pool.query(
+        `SELECT id, patient_id, healthray_id, appointment_date FROM appointments
+         WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+        [patient.id],
+      );
+      if (!latest[0]) return res.status(404).json({ error: "No appointments found for patient" });
+      appt = latest[0];
+    }
+
+    // Save note
+    await pool.query(
+      `UPDATE appointments SET healthray_clinical_notes = $1, updated_at = NOW() WHERE id = $2`,
+      [notes.trim(), appt.id],
+    );
+
+    // Parse
+    const parsed = await parseClinicalWithAI(notes.trim());
+    if (!parsed) return res.status(422).json({ error: "AI parsing failed" });
+
+    const medications = parsed.medications || [];
+    const previousMeds = parsed.previous_medications || [];
+    const diagnoses = parsed.diagnoses || [];
+    const labs = parsed.labs || [];
+
+    // Store parsed JSONB
+    await pool.query(
+      `UPDATE appointments SET
+         healthray_medications = $1::jsonb,
+         healthray_diagnoses = $2::jsonb,
+         healthray_labs = $3::jsonb,
+         updated_at = NOW()
+       WHERE id = $4`,
+      [JSON.stringify(medications), JSON.stringify(diagnoses), JSON.stringify(labs), appt.id],
+    );
+
+    // Sync to tables
+    if (medications.length > 0)
+      await syncMedications(patient.id, appt.healthray_id, appt.appointment_date, medications);
+    if (previousMeds.length > 0)
+      await syncStoppedMedications(patient.id, appt.healthray_id, previousMeds, medications);
+    if (medications.length > 0)
+      await stopStaleHealthrayMeds(patient.id, appt.healthray_id, appt.appointment_date);
+    if (diagnoses.length > 0) await syncDiagnoses(patient.id, appt.healthray_id, diagnoses);
+    if (labs.length > 0) await syncLabResults(patient.id, appt.id, appt.appointment_date, labs);
+
+    res.json({
+      success: true,
+      patient: patient.name,
+      appointmentId: appt.id,
+      appointmentDate: appt.appointment_date,
+      medications: medications.length,
+      diagnoses: diagnoses.length,
+      labs: labs.length,
+    });
+  } catch (e) {
+    handleError(res, e, "Patient note inject");
+  }
+});
+
 // ── Debug: delete specific diagnosis rows by ID ──────────────────────────────
 // POST /api/sync/debug/delete-diagnoses  body: { ids: [1,2,3] }
+// POST /api/sync/debug/add-diagnosis  body: { fileNo, name, status? }
+router.post("/sync/debug/add-diagnosis", async (req, res) => {
+  const { fileNo, name, status = "Active" } = req.body || {};
+  if (!fileNo || !name) return res.status(400).json({ error: "fileNo and name required" });
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+      [fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
+    const patientId = patients[0].id;
+    const diagId = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 100);
+    const { rows } = await pool.query(
+      `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, is_active)
+       VALUES ($1,$2,$3,$4,true)
+       ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
+         label = EXCLUDED.label, status = EXCLUDED.status, is_active = true, updated_at = NOW()
+       RETURNING id, patient_id, diagnosis_id, label, status`,
+      [patientId, diagId, name, status],
+    );
+    res.json({ success: true, diagnosis: rows[0] });
+  } catch (e) {
+    handleError(res, e, "Add diagnosis");
+  }
+});
+
 router.post("/sync/debug/delete-diagnoses", async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || ids.length === 0)
@@ -754,7 +874,7 @@ router.post("/sync/backfill/medicines/:appointmentId", async (req, res) => {
 
     // Sync stopped/previous medications
     if (appt.patient_id && previousMeds.length > 0) {
-      await syncStoppedMedications(appt.patient_id, appt.healthray_id, previousMeds);
+      await syncStoppedMedications(appt.patient_id, appt.healthray_id, previousMeds, medications);
     }
 
     // Stop any HealthRay-sourced meds not in current prescription
@@ -888,7 +1008,7 @@ router.post("/sync/backfill/medicines/opd/:date?", async (req, res) => {
             );
           }
           if (patient_id && previousMeds.length > 0) {
-            await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds);
+            await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds, medications);
           }
           if (patient_id && medications.length > 0) {
             await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
@@ -1124,7 +1244,12 @@ router.post("/sync/backfill/medicines/date/:date?", async (req, res) => {
             );
           }
           if (appt.patient_id && previousMeds.length > 0) {
-            await syncStoppedMedications(appt.patient_id, appt.healthray_id, previousMeds);
+            await syncStoppedMedications(
+              appt.patient_id,
+              appt.healthray_id,
+              previousMeds,
+              medications,
+            );
           }
           if (appt.patient_id && medications.length > 0) {
             await stopStaleHealthrayMeds(appt.patient_id, appt.healthray_id, appt.appointment_date);
@@ -1185,6 +1310,137 @@ router.post("/sync/healthray/backfill-meds", async (req, res) => {
     res.json({ success: true, inserted: r.rowCount });
   } catch (e) {
     handleError(res, e, "Backfill medications");
+  }
+});
+
+// ── Re-sync medicines + diagnoses for all patients on a given date ───────────
+// Processes in batches of 3 concurrent patients; logs progress with index/total
+// POST /api/sync/resync-opd/:date?  (YYYY-MM-DD, defaults to today)
+// Optional query: ?batch=5  to override concurrency (default 3)
+router.post("/sync/resync-opd/:date?", async (req, res) => {
+  const date = req.params.date || new Date().toISOString().split("T")[0];
+  const BATCH = Math.min(parseInt(req.query.batch || "3", 10), 10);
+
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT DISTINCT patient_id FROM appointments WHERE appointment_date = $1 AND patient_id IS NOT NULL`,
+      [date],
+    );
+
+    if (patients.length === 0) {
+      return res.json({
+        success: true,
+        date,
+        message: "No patients found for this date",
+        total: 0,
+      });
+    }
+
+    const total = patients.length;
+    log("Re-sync OPD", `Starting — ${total} patients, batch size ${BATCH}`);
+
+    const results = [];
+    let medsTotal = 0,
+      dxTotal = 0,
+      errors = 0,
+      done = 0;
+
+    async function processPatient(patient_id) {
+      const { rows } = await pool.query(
+        `SELECT id, patient_id, healthray_id, appointment_date, healthray_clinical_notes,
+                (SELECT name FROM patients WHERE id = $1) AS patient_name
+         FROM appointments
+         WHERE patient_id = $1
+           AND healthray_clinical_notes IS NOT NULL
+           AND LENGTH(healthray_clinical_notes) > 20
+         ORDER BY appointment_date DESC LIMIT 1`,
+        [patient_id],
+      );
+
+      if (!rows[0]) {
+        done++;
+        results.push({ patient_id, status: "no_notes" });
+        log("Re-sync OPD", `[${done}/${total}] Patient ${patient_id}: no clinical notes — skipped`);
+        return;
+      }
+
+      const appt = rows[0];
+      const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+
+      if (!parsed) {
+        done++;
+        errors++;
+        results.push({ patient_id, name: appt.patient_name, status: "parse_failed" });
+        log(
+          "Re-sync OPD",
+          `[${done}/${total}] Patient ${patient_id} (${appt.patient_name}): AI parse failed`,
+        );
+        return;
+      }
+
+      const medications = parsed.medications || [];
+      const previousMeds = parsed.previous_medications || [];
+      const diagnoses = parsed.diagnoses || [];
+
+      await pool.query(
+        `UPDATE appointments SET healthray_medications = $1::jsonb, healthray_diagnoses = $2::jsonb, updated_at = NOW() WHERE id = $3`,
+        [JSON.stringify(medications), JSON.stringify(diagnoses), appt.id],
+      );
+
+      if (patient_id && medications.length > 0) {
+        await syncMedications(patient_id, appt.healthray_id, appt.appointment_date, medications);
+      }
+      if (patient_id && previousMeds.length > 0) {
+        await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds, medications);
+      }
+      if (patient_id && medications.length > 0) {
+        await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
+      }
+      if (patient_id && diagnoses.length > 0) {
+        await syncDiagnoses(patient_id, appt.healthray_id, diagnoses);
+      }
+
+      done++;
+      medsTotal += medications.length;
+      dxTotal += diagnoses.length;
+      results.push({
+        patient_id,
+        name: appt.patient_name,
+        appt_id: appt.id,
+        status: "ok",
+        meds: medications.length,
+        diagnoses: diagnoses.length,
+      });
+      log(
+        "Re-sync OPD",
+        `[${done}/${total}] Patient ${patient_id} (${appt.patient_name}): ${medications.length} meds, ${diagnoses.length} dx`,
+      );
+    }
+
+    // Process in batches of BATCH concurrent patients
+    for (let i = 0; i < patients.length; i += BATCH) {
+      const batch = patients.slice(i, i + BATCH);
+      await Promise.allSettled(
+        batch.map(async ({ patient_id }) => {
+          try {
+            await processPatient(patient_id);
+          } catch (e) {
+            done++;
+            errors++;
+            results.push({ patient_id, status: "error", error: e.message });
+            error("Re-sync OPD", `[${done}/${total}] Patient ${patient_id}: ${e.message}`);
+          }
+        }),
+      );
+    }
+
+    log(
+      "Re-sync OPD",
+      `Done — ${total} patients, ${medsTotal} meds, ${dxTotal} dx, ${errors} errors`,
+    );
+    res.json({ success: true, date, total, medsTotal, dxTotal, errors, results });
+  } catch (e) {
+    handleError(res, e, "Re-sync OPD");
   }
 });
 
@@ -1716,6 +1972,387 @@ router.post("/sync/backfill/dedup-diagnoses", async (req, res) => {
     });
   } catch (e) {
     handleError(res, e, "Dedup diagnoses");
+  }
+});
+
+// ── Backfill pharmacy_match on existing healthray meds (one-time fix) ─────────
+// Sets pharmacy_match = normalized name (strips TAB/INJ/CAP prefix) so the
+// ON CONFLICT dedup key works correctly on future syncs.
+// POST /api/sync/backfill/pharmacy-match
+router.post("/sync/backfill/pharmacy-match", async (req, res) => {
+  const PREFIX_RE = `'^(TAB[.]?[[:space:]]+|TABLET[[:space:]]+|INJ[.]?[[:space:]]+|INJECTION[[:space:]]+|CAP[.]?[[:space:]]+|CAPSULE[[:space:]]+|SYP[.]?[[:space:]]+|SYRUP[[:space:]]+|DROPS?[[:space:]]+|OINT[.]?[[:space:]]+|OINTMENT[[:space:]]+|GEL[[:space:]]+|CREAM[[:space:]]+|SPRAY[[:space:]]+|SACHET[[:space:]]+|PWD[.]?[[:space:]]+|POWDER[[:space:]]+)'`;
+  const NORM = (col) => `UPPER(TRIM(REGEXP_REPLACE(${col}, ${PREFIX_RE}, '', 'i')))`;
+
+  try {
+    await pool.query("BEGIN");
+
+    // Step 1: DELETE duplicate active healthray rows — keep newest per (patient, normalized name)
+    const dedupActive = await pool.query(`
+      DELETE FROM medications WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY patient_id, ${NORM("name")}
+            ORDER BY started_date DESC NULLS LAST, created_at DESC
+          ) rn
+          FROM medications WHERE is_active = true AND source = 'healthray'
+        ) x WHERE rn > 1
+      ) RETURNING id
+    `);
+
+    // Step 2: DELETE duplicate inactive healthray rows — keep newest per (patient, normalized name)
+    const dedupInactive = await pool.query(`
+      DELETE FROM medications WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY patient_id, ${NORM("name")}
+            ORDER BY started_date DESC NULLS LAST, created_at DESC
+          ) rn
+          FROM medications WHERE is_active = false AND source = 'healthray'
+        ) x WHERE rn > 1
+      ) RETURNING id
+    `);
+
+    // Step 3: Set pharmacy_match, skipping any row that would still conflict
+    const updated = await pool.query(`
+      UPDATE medications m
+      SET pharmacy_match = ${NORM("m.name")}
+      WHERE m.pharmacy_match IS NULL
+        AND m.source = 'healthray'
+        AND NOT EXISTS (
+          SELECT 1 FROM medications m2
+          WHERE m2.patient_id = m.patient_id
+            AND m2.id != m.id
+            AND m2.is_active = m.is_active
+            AND UPPER(COALESCE(m2.pharmacy_match, m2.name)) = ${NORM("m.name")}
+        )
+      RETURNING id
+    `);
+
+    await pool.query("COMMIT");
+    res.json({
+      success: true,
+      dedupedActive: dedupActive.rowCount,
+      dedupedInactive: dedupInactive.rowCount,
+      updated: updated.rowCount,
+    });
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    res.status(500).json({ error: e.message, detail: e.detail || null });
+  }
+});
+
+// ── GET /api/sync/debug/audit-all — scan every patient for data quality issues ─
+// Checks: duplicate diagnosis_ids, stale diagnosis_ids, duplicate active meds
+router.get("/sync/debug/audit-all", async (req, res) => {
+  try {
+    // 1. Duplicate diagnosis_id per patient (both active)
+    const dupDx = await pool.query(`
+      SELECT p.file_no, p.name, d.patient_id,
+             d.diagnosis_id,
+             COUNT(*) AS cnt,
+             array_agg(d.id ORDER BY d.id) AS ids,
+             array_agg(d.label ORDER BY d.id) AS labels,
+             array_agg(d.is_active::text ORDER BY d.id) AS actives
+      FROM diagnoses d
+      JOIN patients p ON p.id = d.patient_id
+      GROUP BY p.file_no, p.name, d.patient_id, d.diagnosis_id
+      HAVING COUNT(*) > 1
+      ORDER BY p.file_no, d.diagnosis_id
+    `);
+
+    // 2. Stale/renamed diagnosis_ids still present
+    const STALE_IDS = [
+      "type_2_dm",
+      "t2dm",
+      "dm2",
+      "asld",
+      "nafld",
+      "mafld",
+      "nephropathy",
+      "neuropathy",
+      "aidp_post_ivig_transfusion",
+      "htn",
+      "essential_hypertension",
+      "cad",
+      "mng_with_retristernal_extension",
+      "sunclinical_hypothyrodism",
+      "subclinical_hypothyrodism",
+      "subclinical_hypothyroidism",
+      "thallasemia_minor",
+      "thallasemia_major",
+      "thallasemia",
+      "hashimoto_s_thyroiditis",
+      "mild_dr",
+      "m_a_s_l_d",
+      "achillis_tendinitis",
+      "ca_colon_s_p_op_chemo",
+      "gsd_s_p_op",
+      "tkr_b_l_2024",
+    ];
+    const staleDx = await pool.query(
+      `
+      SELECT p.file_no, p.name, d.id, d.patient_id, d.diagnosis_id, d.label, d.is_active
+      FROM diagnoses d
+      JOIN patients p ON p.id = d.patient_id
+      WHERE d.diagnosis_id = ANY($1::text[])
+      ORDER BY p.file_no, d.diagnosis_id
+    `,
+      [STALE_IDS],
+    );
+
+    // 3. Duplicate active medications per patient (same name case-insensitive)
+    const dupMeds = await pool.query(`
+      SELECT p.file_no, p.name, m.patient_id,
+             UPPER(TRIM(m.name)) AS norm_name,
+             COUNT(*) AS cnt,
+             array_agg(m.id ORDER BY m.id) AS ids,
+             array_agg(m.name ORDER BY m.id) AS names,
+             array_agg(m.dose ORDER BY m.id) AS dosages
+      FROM medications m
+      JOIN patients p ON p.id = m.patient_id
+      WHERE m.is_active = true
+      GROUP BY p.file_no, p.name, m.patient_id, UPPER(TRIM(m.name))
+      HAVING COUNT(*) > 1
+      ORDER BY p.file_no, norm_name
+    `);
+
+    // Build per-patient issue map
+    const patientMap = {};
+    const addIssue = (fileNo, patName, issue) => {
+      if (!patientMap[fileNo]) patientMap[fileNo] = { fileNo, name: patName, issues: [] };
+      patientMap[fileNo].issues.push(issue);
+    };
+
+    for (const r of dupDx.rows) {
+      addIssue(r.file_no, r.name, {
+        type: "duplicate_diagnosis",
+        diagnosis_id: r.diagnosis_id,
+        count: parseInt(r.cnt),
+        ids: r.ids,
+        labels: r.labels,
+        is_active: r.actives,
+      });
+    }
+    for (const r of staleDx.rows) {
+      addIssue(r.file_no, r.name, {
+        type: "stale_diagnosis_id",
+        id: r.id,
+        stale_id: r.diagnosis_id,
+        label: r.label,
+        is_active: r.is_active,
+      });
+    }
+    for (const r of dupMeds.rows) {
+      addIssue(r.file_no, r.name, {
+        type: "duplicate_active_med",
+        norm_name: r.norm_name,
+        count: parseInt(r.cnt),
+        ids: r.ids,
+        names: r.names,
+        dosages: r.dosages,
+      });
+    }
+
+    const patients = Object.values(patientMap).sort((a, b) =>
+      (a.fileNo || "").localeCompare(b.fileNo || ""),
+    );
+    const totalIssues = patients.reduce((s, p) => s + p.issues.length, 0);
+
+    res.json({
+      summary: {
+        patientsWithIssues: patients.length,
+        totalIssues,
+        duplicateDiagnoses: dupDx.rowCount,
+        staleDiagnoses: staleDx.rowCount,
+        duplicateActiveMeds: dupMeds.rowCount,
+      },
+      patients,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message, detail: e.detail || null });
+  }
+});
+
+// ── POST /api/sync/debug/fix-all — auto-fix all safe data quality issues ───────
+// Safe fixes: dedup diagnoses (same id/label), deactivate stale ids, dedup active meds
+router.post("/sync/debug/fix-all", async (req, res) => {
+  const { dryRun = false } = req.body || {};
+  try {
+    await pool.query("BEGIN");
+
+    // 1. Delete exact label duplicates — keep best (Active > Monitoring > Resolved, then newest)
+    const exactDup = await pool.query(`
+      DELETE FROM diagnoses
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, LOWER(TRIM(label))
+              ORDER BY
+                CASE LOWER(status) WHEN 'active' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END,
+                is_active DESC,
+                updated_at DESC, created_at DESC
+            ) rn
+          FROM diagnoses
+        ) x WHERE rn > 1
+      )
+      RETURNING id, patient_id, label, diagnosis_id
+    `);
+
+    // 2. Delete same diagnosis_id duplicates — keep best
+    const idDup = await pool.query(`
+      DELETE FROM diagnoses
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, diagnosis_id
+              ORDER BY
+                CASE LOWER(status) WHEN 'active' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END,
+                is_active DESC,
+                updated_at DESC, created_at DESC
+            ) rn
+          FROM diagnoses
+        ) x WHERE rn > 1
+      )
+      RETURNING id, patient_id, label, diagnosis_id
+    `);
+
+    // 3. Rename stale diagnosis_ids to their canonical equivalents
+    // Strategy:
+    //   a) Where the canonical row already exists for this patient → delete the stale row
+    //   b) Where no canonical row exists → rename the stale row in place
+    const RENAMES = {
+      type_2_dm: "type_2_diabetes_mellitus",
+      t2dm: "type_2_diabetes_mellitus",
+      dm2: "type_2_diabetes_mellitus",
+      asld: "masld",
+      nafld: "masld",
+      mafld: "masld",
+      nephropathy: "diabetic_nephropathy",
+      neuropathy: "diabetic_neuropathy",
+      aidp_post_ivig_transfusion: "aidp",
+      htn: "hypertension",
+      essential_hypertension: "hypertension",
+      cad: "coronary_artery_disease",
+      mng_with_retristernal_extension: "mng_with_retrosternal_extension",
+      sunclinical_hypothyrodism: "hypothyroidism",
+      subclinical_hypothyrodism: "hypothyroidism",
+      subclinical_hypothyroidism: "hypothyroidism",
+      thallasemia_minor: "thalassemia_minor",
+      thallasemia_major: "thalassemia_major",
+      thallasemia: "thalassemia",
+      hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+      mild_dr: "diabetic_retinopathy",
+      m_a_s_l_d: "masld",
+      achillis_tendinitis: "achilles_tendinitis",
+      ca_colon_s_p_op_chemo: "ca_colon",
+      gsd_s_p_op: "gsd",
+      tkr_b_l_2024: "tkr_b_l",
+    };
+    const STALE_IDS = Object.keys(RENAMES);
+    let staleDeleted = 0,
+      staleRenamed = 0;
+    const staleDetails = [];
+    for (const [staleId, canonicalId] of Object.entries(RENAMES)) {
+      // a) Delete stale row where patient already has canonical
+      const del = await pool.query(
+        `
+        DELETE FROM diagnoses d
+        USING diagnoses canon
+        WHERE d.diagnosis_id = $1
+          AND canon.patient_id = d.patient_id
+          AND canon.diagnosis_id = $2
+        RETURNING d.id, d.patient_id, d.label
+      `,
+        [staleId, canonicalId],
+      );
+      staleDeleted += del.rowCount;
+      for (const r of del.rows)
+        staleDetails.push({ action: "deleted", staleId, canonicalId, ...r });
+
+      // b) Rename stale row where no canonical exists yet
+      const upd = await pool.query(
+        `
+        UPDATE diagnoses SET diagnosis_id = $2, updated_at = NOW()
+        WHERE diagnosis_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM diagnoses c
+            WHERE c.patient_id = diagnoses.patient_id AND c.diagnosis_id = $2
+          )
+        RETURNING id, patient_id, label
+      `,
+        [staleId, canonicalId],
+      );
+      staleRenamed += upd.rowCount;
+      for (const r of upd.rows)
+        staleDetails.push({ action: "renamed", staleId, canonicalId, ...r });
+    }
+
+    // After renames, dedup again in case two stale ids renamed to same canonical
+    const postRenameDup = await pool.query(`
+      DELETE FROM diagnoses
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, diagnosis_id
+              ORDER BY
+                CASE LOWER(status) WHEN 'active' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END,
+                is_active DESC, updated_at DESC, created_at DESC
+            ) rn
+          FROM diagnoses
+        ) x WHERE rn > 1
+      )
+      RETURNING id, patient_id, label, diagnosis_id
+    `);
+
+    // 4. Remove duplicate active medications — keep newest per (patient, normalised name)
+    // Delete rather than deactivate to avoid unique constraint on inactive meds
+    const PREFIX_RE = `'^(TAB[.]?[[:space:]]+|TABLET[[:space:]]+|INJ[.]?[[:space:]]+|INJECTION[[:space:]]+|CAP[.]?[[:space:]]+|CAPSULE[[:space:]]+|SYP[.]?[[:space:]]+|SYRUP[[:space:]]+|DROPS?[[:space:]]+|OINT[.]?[[:space:]]+|CREAM[[:space:]]+|SPRAY[[:space:]]+|SACHET[[:space:]]+)'`;
+    const NORM = `UPPER(TRIM(REGEXP_REPLACE(name, ${PREFIX_RE}, '', 'i')))`;
+    const dupMedsStopped = await pool.query(`
+      DELETE FROM medications
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY patient_id, ${NORM}
+            ORDER BY started_date DESC NULLS LAST, created_at DESC
+          ) rn
+          FROM medications WHERE is_active = true
+        ) x WHERE rn > 1
+      )
+      RETURNING id, patient_id, name
+    `);
+
+    if (dryRun) {
+      await pool.query("ROLLBACK");
+    } else {
+      await pool.query("COMMIT");
+    }
+
+    res.json({
+      success: true,
+      dryRun,
+      fixes: {
+        exactLabelDupsRemoved: exactDup.rowCount,
+        sameIdDupsRemoved: idDup.rowCount,
+        staleIdsDeleted: staleDeleted,
+        staleIdsRenamed: staleRenamed,
+        postRenameDupsRemoved: postRenameDup.rowCount,
+        dupMedsStopped: dupMedsStopped.rowCount,
+      },
+      details: {
+        exactLabelDups: exactDup.rows,
+        sameIdDups: idDup.rows,
+        staleChanges: staleDetails.slice(0, 200),
+        postRenameDups: postRenameDup.rows.slice(0, 100),
+        dupMeds: dupMedsStopped.rows,
+      },
+    });
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    res.status(500).json({ error: e.message, detail: e.detail || null });
   }
 });
 

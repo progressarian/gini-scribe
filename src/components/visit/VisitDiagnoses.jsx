@@ -31,12 +31,27 @@ function displayNote(notes) {
 
 const VisitDiagnoses = memo(function VisitDiagnoses({
   activeDx,
+  healthrayDiagnoses,
   labResults,
   vitals,
   onAddDiagnosis,
   onDiagnosisNote,
   onUpdateDiagnosis,
 }) {
+  // Build absent/uncertain findings from healthray_diagnoses not already in activeDx table
+  const absentFindings = (() => {
+    if (!healthrayDiagnoses?.length) return [];
+    const activeDxIds = new Set(activeDx.map((d) => d.diagnosis_id));
+    return healthrayDiagnoses.filter((d) => {
+      const status = (d.status || "").toLowerCase();
+      // Absent findings: not in the diagnoses table (so absent = not stored)
+      if (status === "absent" || status === "ruled out") return true;
+      // Also show unknown/null status items not in the DB
+      if (!status && !activeDxIds.has(d.diagnosis_id)) return true;
+      return false;
+    });
+  })();
+
   return (
     <div className="sc" id="diagnoses">
       <div className="sch">
@@ -145,6 +160,45 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
         {activeDx.length === 0 && (
           <div style={{ fontSize: 13, color: "var(--t3)", padding: 16, textAlign: "center" }}>
             No diagnoses recorded
+          </div>
+        )}
+        {absentFindings.length > 0 && (
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--t3)",
+                fontWeight: 600,
+                marginBottom: 6,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Absent / Ruled Out
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {absentFindings.map((d, i) => {
+                const label = (d.name || d.label || d.diagnosis_id || "").toUpperCase();
+                const detail = d.details || d.detail || null;
+                const chip = detail ? `${label}(${detail})(-)` : `${label}(-)`;
+                return (
+                  <span
+                    key={i}
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 12,
+                      background: "var(--tl)",
+                      color: "var(--t2)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 4,
+                      padding: "2px 7px",
+                    }}
+                  >
+                    {chip}
+                  </span>
+                );
+              })}
+            </div>
           </div>
         )}
         <div className="addr" onClick={onAddDiagnosis}>

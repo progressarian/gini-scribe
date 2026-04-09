@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { fmtDate } from "./helpers";
+import { fmtDate, fmtLabVal } from "./helpers";
 
 const VisitStrip = memo(function VisitStrip({
   summary,
@@ -48,8 +48,8 @@ const VisitStrip = memo(function VisitStrip({
           <div>
             <div className="ss-label">HbA1c — Since 1st Visit</div>
             <div className="ss-val">
-              {hba1cFirst ? `${hba1cFirst.result} → ` : ""}
-              {hba1cCurr.result}%
+              {hba1cFirst ? `${fmtLabVal(null, hba1cFirst.result)} → ` : ""}
+              {fmtLabVal(null, hba1cCurr.result)}%
               {hba1cFirst && hba1cCurr.result < hba1cFirst.result && (
                 <span className="ss-badge ss-g">
                   ↓ {Math.round(((hba1cFirst.result - hba1cCurr.result) / hba1cFirst.result) * 100)}

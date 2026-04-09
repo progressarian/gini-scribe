@@ -1,5 +1,5 @@
 import { memo, useState, useCallback } from "react";
-import { MED_COLORS, DX_STATUS_STYLE, DX_STATUS_DEFAULT, findLab } from "./helpers";
+import { MED_COLORS, DX_STATUS_STYLE, DX_STATUS_DEFAULT, findLab, fmtLabVal } from "./helpers";
 
 const KEY_BIOMARKERS = [
   { name: "HbA1c", unit: "%", flag: (v) => (v > 7 ? "high" : "ok") },
@@ -415,7 +415,7 @@ const VisitSidebar = memo(function VisitSidebar({
                         }`,
                       }}
                     >
-                      {lab.result_text || lab.result}
+                      {fmtLabVal(lab.result_text, lab.result)}
                       {unit && (
                         <span style={{ fontSize: 9, fontWeight: 400, marginLeft: 2, opacity: 0.7 }}>
                           {unit}

@@ -264,7 +264,16 @@ router.get("/opd/appointments", async (req, res) => {
                 WHERE a3.patient_id = a.patient_id
                   AND a3.patient_id IS NOT NULL
                   AND a3.appointment_date < a.appointment_date
-              ) AS last_visit_date
+              ) AS last_visit_date,
+              COALESCE(
+                NULLIF(a.healthray_diagnoses, '[]'::jsonb),
+                (SELECT a4.healthray_diagnoses FROM appointments a4
+                  WHERE a4.patient_id = a.patient_id
+                    AND a4.patient_id IS NOT NULL
+                    AND a4.healthray_diagnoses IS NOT NULL
+                    AND jsonb_array_length(a4.healthray_diagnoses) > 0
+                  ORDER BY a4.appointment_date DESC LIMIT 1)
+              ) AS healthray_diagnoses
          FROM appointments a
          LEFT JOIN patients p ON p.id = a.patient_id
         WHERE a.appointment_date = $1

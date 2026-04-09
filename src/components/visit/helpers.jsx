@@ -264,6 +264,18 @@ const MONTHS_L = [
 ];
 const DAYS_L = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Format a lab result value — rounds to max 2 decimal places (handles REAL
+// float imprecision e.g. 3.30 stored as 3.2969), strips trailing zeros,
+// passes through non-numeric strings (e.g. "Positive", "NORMAL") unchanged.
+// Accepts result_text or result (whichever is available).
+export const fmtLabVal = (resultText, result) => {
+  const raw = resultText ?? result;
+  if (raw == null || raw === "") return "";
+  const n = parseFloat(raw);
+  if (isNaN(n)) return raw; // non-numeric — return as-is
+  return parseFloat(n.toFixed(2)); // round to 2dp, strip trailing zeros
+};
+
 export const fmtDate = (d) => {
   if (!d) return "";
   const dt = new Date(d);

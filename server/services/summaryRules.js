@@ -78,7 +78,6 @@ function numVal(labResults, name) {
 export function runSummaryRules({
   diagnoses = [],
   activeMeds = [],
-  stoppedMeds = [],
   labResults = [],
   labHistory = {},
   vitals = [],
@@ -157,19 +156,6 @@ export function runSummaryRules({
       detail: "Target ≤ 7.0% for most T2DM patients.",
       action: "Insulin initiation or intensification to consider",
     });
-  }
-
-  // R4: Self-stopped medication within last 60 days
-  for (const m of stoppedMeds) {
-    const d = daysSince(m.stopped_date);
-    if (d <= 60) {
-      red.push({
-        id: `r4_stopped_${m.id || m.name}`,
-        title: `${m.name} stopped ${d} day${d !== 1 ? "s" : ""} ago${m.stop_reason ? ` — ${m.stop_reason}` : ""}`,
-        detail: "Treatment gap — glycaemic or clinical cover may be incomplete.",
-        action: "Discuss replacement or resumption",
-      });
-    }
   }
 
   // R5: Unreviewed documents uploaded by coordinator

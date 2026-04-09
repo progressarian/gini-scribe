@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { fmtLabVal } from "../components/visit/helpers";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../stores/authStore.js";
 import useVitalsStore from "../stores/vitalsStore.js";
@@ -132,7 +133,7 @@ export default function VitalsPage() {
                         color: t.flag === "H" ? "#dc2626" : t.flag === "L" ? "#2563eb" : "#1e293b",
                       }}
                     >
-                      {t.result_text || t.result} {t.unit}
+                      {fmtLabVal(t.result_text, t.result)} {t.unit}
                     </td>
                     <td className="vitals__panel-cell vitals__panel-cell--center">
                       {t.flag === "H" ? "↑ HIGH" : t.flag === "L" ? "↓ LOW" : "✓"}

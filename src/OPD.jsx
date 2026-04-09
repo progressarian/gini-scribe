@@ -722,6 +722,62 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
       </span>
     ) : null;
 
+  // ── Shared: diagnoses chip block (shown in both hasRayData and default views) ──
+  const dxChips = (() => {
+    const dxList = appt.healthray_diagnoses || [];
+    if (!dxList.length) return null;
+    return (
+      <div
+        style={{
+          background: WH,
+          border: `1px solid ${BD}`,
+          borderRadius: 10,
+          padding: 14,
+          marginBottom: 12,
+          boxShadow: SH,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: INK3,
+            letterSpacing: ".07em",
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          Diagnoses
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {dxList.map((dx, i) => {
+            const absent = dx.status === "Absent";
+            const present = dx.status === "Present";
+            const sign = absent ? "-" : present ? "+" : "?";
+            const label = `${dx.name}${dx.details ? `(${dx.details})` : ""}(${sign})`;
+            return (
+              <span
+                key={i}
+                style={{
+                  padding: "3px 9px",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  background: TL,
+                  color: INK2,
+                  border: `1px solid ${BD}`,
+                  fontFamily: FM,
+                }}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    );
+  })();
+
   // ── HealthRay synced appointment view ──
   if (hasRayData) {
     return (
@@ -794,6 +850,8 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
             </div>
           </div>
         )}
+
+        {dxChips}
 
         {/* Follow-up */}
         {bio.followup && (
@@ -908,6 +966,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
   ];
   return (
     <div>
+      {dxChips}
       {/* Readiness banner */}
       <div
         style={{

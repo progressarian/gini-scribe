@@ -68,6 +68,7 @@ router.get("/visit/:patientId", async (req, res) => {
       symptomsR,
       latestApptR,
       labOrdersR,
+      healthrayDxApptR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -75,10 +76,11 @@ router.get("/visit/:patientId", async (req, res) => {
       // 2. All vitals (for history/trends)
       pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [pid]),
 
-      // 3. Diagnoses (deduplicated — one per diagnosis_id, latest wins — same as patients.js)
+      // 3. Diagnoses (deduplicated — one per diagnosis_id, active rows preferred, then latest)
       pool.query(
         `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
-         WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`,
+         WHERE patient_id=$1
+         ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
         [pid],
       ),
 
@@ -218,6 +220,16 @@ router.get("/visit/:patientId", async (req, res) => {
          LIMIT 20`,
         [pid],
       ),
+
+      // 19. Latest appointment healthray_diagnoses JSONB (includes absent findings like CAD/CVA/PVD)
+      pool.query(
+        `SELECT healthray_diagnoses, appointment_date FROM appointments
+         WHERE patient_id=$1
+           AND healthray_diagnoses IS NOT NULL
+           AND jsonb_array_length(healthray_diagnoses) > 0
+         ORDER BY appointment_date DESC LIMIT 1`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -307,10 +319,13 @@ router.get("/visit/:patientId", async (req, res) => {
         ? { date: apptBiomarkers.followup, notes: null, timing: null }
         : null);
 
+    const healthrayDxAppt = healthrayDxApptR.rows[0] || null;
+
     res.json({
       patient,
       vitals: vitalsR.rows,
       diagnoses: diagnosesR.rows,
+      healthrayDiagnoses: healthrayDxAppt?.healthray_diagnoses || null,
       activeMeds: activeMedsR.rows,
       stoppedMeds: stoppedMedsR.rows,
       labResults: labsR.rows,

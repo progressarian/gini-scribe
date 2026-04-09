@@ -380,6 +380,21 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
       if (existingPriority <= SOURCE_PRIORITY.healthray) continue;
     }
 
+    // Skip if this lab has no specific date (fell back to apptDate) AND the same
+    // test+value already exists for this patient within the last 365 days —
+    // this prevents carry-forward values from being re-inserted each visit.
+    if (!lab.date) {
+      const carryForward = await pool.query(
+        `SELECT id FROM lab_results
+         WHERE patient_id = $1 AND canonical_name = $2
+           AND result::numeric = $3::numeric
+           AND test_date >= NOW() - INTERVAL '365 days'
+         LIMIT 1`,
+        [patientId, canonicalName, val],
+      );
+      if (carryForward.rows[0]) continue;
+    }
+
     await pool
       .query(
         `INSERT INTO lab_results
@@ -394,10 +409,15 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
 // ── Sync parsed medications → medications table ─────────────────────────────
 // ── Normalize diagnosis name → canonical ID to prevent duplicates ───────────
 function normalizeDiagnosisId(name) {
+  // Check full name (with parentheticals) first, for conditions whose qualifier may be inside parens
+  const fullLower = name.toLowerCase().trim();
+
+  // MNG with retrosternal extension — qualifier sometimes in parens: "MNG(With retristernal extension...)"
+  if (/\bmng\b|multinodular goiter/.test(fullLower) && /retrosternal|retristernal/.test(fullLower))
+    return "mng_with_retrosternal_extension";
+
   // Strip parenthetical qualifiers before matching — "(Since 1998)", "(Seronegative)", etc.
-  const n = name
-    .toLowerCase()
-    .trim()
+  const n = fullLower
     .replace(/\([^)]*\)/g, "")
     .trim()
     .replace(/\s+/g, " ");
@@ -419,7 +439,7 @@ function normalizeDiagnosisId(name) {
   if (/graves.*disease|graves.*hyperthyroid/.test(n)) return "graves_disease";
   if (/graves.*dermopathy|\bdermopathy\b/.test(n)) return "graves_dermopathy";
   if (/graves/.test(n)) return "graves_disease";
-  if (/hypothyroid/.test(n)) return "hypothyroidism";
+  if (/hypothyroid|hypothyrod/.test(n)) return "hypothyroidism"; // catches "hypothyrodism" typo
   if (/hyperthyroid/.test(n)) return "hyperthyroidism";
   if (/hashimoto/.test(n)) return "hashimoto_thyroiditis";
 
@@ -436,7 +456,7 @@ function normalizeDiagnosisId(name) {
   // Heart & vascular conditions
   if (/heart failure.*preserved|hfpef|hfp\b/.test(n)) return "heart_failure_preserved_ef";
   if (/heart failure/.test(n)) return "heart_failure";
-  if (/coronary artery disease|cad\b/.test(n)) return "coronary_artery_disease";
+  if (/coronary artery disease|\bcad\b/.test(n)) return "coronary_artery_disease";
   if (/atrial fibrillation|af\b|afib/.test(n)) return "atrial_fibrillation";
   if (/myocardial infarction|\bmi\b.*heart|heart.*\bmi\b/.test(n)) return "myocardial_infarction";
   if (/cerebrovascular accident|cva\b|stroke/.test(n)) return "cerebrovascular_accident";
@@ -449,7 +469,9 @@ function normalizeDiagnosisId(name) {
   if (/thyroid.*(orbitopathy|ophthalmopathy|eye disease)|tao\b|ted\b/.test(n))
     return "thyroid_associated_orbitopathy";
 
-  // Retinopathy
+  // Retinopathy — "mild DR" / "mild diabetic retinopathy" severity qualifiers → canonical
+  if (/\bmild\s+dr\b|mild.*diabet.*retin|diabet.*retin.*mild/.test(n))
+    return "diabetic_retinopathy";
   if (/retinopathy/.test(n)) return "diabetic_retinopathy";
 
   // Dyslipidemia
@@ -457,15 +479,69 @@ function normalizeDiagnosisId(name) {
 
   // Obesity / adiposity
   if (/^obesity$/.test(n)) return "obesity";
-  if (/dual adiposity|visceral adiposity|adiposity/.test(n)) return "dual_adiposity";
+  if (/dual adiposity/.test(n)) return "dual_adiposity";
+  if (/central adiposity|visceral adiposity/.test(n)) return "central_adiposity";
+  if (/adiposity/.test(n)) return "dual_adiposity";
 
-  // MASLD / fatty liver
+  // MASLD / fatty liver — also matches M.A.S.L.D with dots, asld/nafld/mafld variants
   if (
-    /masld|mafld|nafld|non.alcoholic fatty liver|metabolic.*steatotic liver|metabolic.*fatty liver/.test(
+    /^m\.?a\.?s\.?l\.?d$|^asld$|masld|mafld|nafld|non.alcoholic fatty liver|metabolic.*steatotic liver|metabolic.*fatty liver/.test(
       n,
     )
   )
     return "masld";
+
+  // Prediabetes
+  if (/pre.?diabet|impaired fasting|impaired glucose/.test(n)) return "prediabetes";
+
+  // Metabolic syndrome
+  if (/metabolic syndrome/.test(n)) return "metabolic_syndrome";
+
+  // Hypertriglyceridemia (catches misspellings like hypertriglycerdemia)
+  if (/hypertriglycer/.test(n)) return "hypertriglyceridemia";
+
+  // PCOS
+  if (/polycystic ovary|pcos|pcod/.test(n)) return "pcos";
+
+  // Depression / anxiety
+  if (/^depression$/.test(n)) return "depression";
+  if (/^anxiety$/.test(n)) return "anxiety";
+
+  // Pancreatitis
+  if (/pancreatitis/.test(n)) return "pancreatitis";
+  if (/pancreatic exocrine insufficiency|pei\b/.test(n)) return "pancreatic_exocrine_insufficiency";
+
+  // AIDP / GBS
+  if (/aidp|guillain.barr/.test(n)) return "aidp";
+
+  // Carpal tunnel syndrome (with or without laterality — lt/rt/bilateral)
+  if (/carpal tunnel/.test(n)) return "carpal_tunnel_syndrome";
+
+  // Osteoporosis
+  if (/osteoporosis/.test(n)) {
+    if (/post.?menopausal/.test(n)) return "post_menopausal_osteoporosis";
+    return "osteoporosis";
+  }
+
+  // Thalassemia (catches double-L typo "thallasemia")
+  if (/thal+asemia|thalassemia/.test(n)) {
+    if (/minor/.test(n)) return "thalassemia_minor";
+    if (/major/.test(n)) return "thalassemia_major";
+    return "thalassemia";
+  }
+
+  // Tendinitis — catches achillis/achilles spelling variants
+  if (/achil+[ei]s?\s+tendin/.test(n)) return "achilles_tendinitis";
+
+  // Surgical/procedural qualifiers — collapse to base diagnosis
+  if (/\bca\s*colon\b|\bcolorectal\s*(ca|cancer)\b|\bcolon\s*ca\b/.test(n)) return "ca_colon";
+  if (/\bgsd\b/.test(n)) return "gsd";
+  if (/\btkr\b|\btotal\s+knee\s+replacement/.test(n)) return "tkr_b_l";
+
+  // Non-medical descriptors — return null to signal "skip this"
+  if (/^non.obese$|^non.smoker$|^non.alcoholic$/.test(n)) return null;
+  if (/^allergic to\b/.test(n)) return null; // allergy note, not a diagnosis
+  if (/^intensive.*program$|^.*management program$/.test(n)) return null; // program labels, not diagnoses
 
   // Default: slugify (using stripped name without parentheticals)
   return n
@@ -477,6 +553,8 @@ function normalizeDiagnosisId(name) {
 // ── Sync diagnoses from HealthRay clinical notes ────────────────────────────
 // Detect negative/absent findings that should not be stored as diagnoses
 function isAbsentFinding(dx) {
+  // Explicit status field set by AI
+  if (dx.status === "Absent") return true;
   const name = (dx.name || "").toLowerCase().trim();
   const details = (dx.details || "").toLowerCase().trim();
   // Name ends with "-" (e.g. "CAD-", "CVA-")
@@ -494,8 +572,51 @@ function stripPlusSuffix(name) {
   return (name || "").replace(/\s*\+\s*$/, "").trim();
 }
 
+// Old diagnosis_id values that were renamed — deactivate stale rows before upserting canonical
+const DIAGNOSIS_ID_RENAMES = {
+  type_2_dm: "type_2_diabetes_mellitus",
+  t2dm: "type_2_diabetes_mellitus",
+  dm2: "type_2_diabetes_mellitus",
+  asld: "masld",
+  nafld: "masld",
+  mafld: "masld",
+  nephropathy: "diabetic_nephropathy",
+  neuropathy: "diabetic_neuropathy",
+  aidp_post_ivig_transfusion: "aidp",
+  htn: "hypertension",
+  essential_hypertension: "hypertension",
+  cad: "coronary_artery_disease",
+  mng_with_retristernal_extension: "mng_with_retrosternal_extension",
+  sunclinical_hypothyrodism: "hypothyroidism",
+  subclinical_hypothyrodism: "hypothyroidism",
+  subclinical_hypothyroidism: "hypothyroidism",
+  thallasemia_minor: "thalassemia_minor",
+  thallasemia_major: "thalassemia_major",
+  thallasemia: "thalassemia",
+  hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+  mild_dr: "diabetic_retinopathy",
+  m_a_s_l_d: "masld",
+  achillis_tendinitis: "achilles_tendinitis",
+  ca_colon_s_p_op_chemo: "ca_colon",
+  gsd_s_p_op: "gsd",
+  tkr_b_l_2024: "tkr_b_l",
+};
+
 export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
   if (!patientId || !diagnoses || diagnoses.length === 0) return;
+
+  // Deactivate stale duplicate rows for known renamed IDs before upserting
+  const oldIds = Object.keys(DIAGNOSIS_ID_RENAMES);
+  if (oldIds.length) {
+    const placeholders = oldIds.map((_, i) => `$${i + 2}`).join(",");
+    await pool
+      .query(
+        `UPDATE diagnoses SET is_active = false, updated_at = NOW()
+         WHERE patient_id = $1 AND diagnosis_id IN (${placeholders})`,
+        [patientId, ...oldIds],
+      )
+      .catch(() => {});
+  }
 
   for (const dx of diagnoses) {
     if (!dx.name) continue;
@@ -504,6 +625,7 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
     const cleanName = stripPlusSuffix(dx.name);
     if (!cleanName) continue;
     const diagId = normalizeDiagnosisId(dx.id || cleanName);
+    if (!diagId) continue; // null = non-medical descriptor, skip
 
     await pool
       .query(
@@ -513,6 +635,7 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
            label = EXCLUDED.label,
            status = COALESCE(EXCLUDED.status, diagnoses.status),
            notes = COALESCE(EXCLUDED.notes, diagnoses.notes),
+           is_active = true,
            updated_at = NOW()`,
         [
           patientId,
@@ -550,11 +673,26 @@ export async function syncSymptoms(patientId, apptId, symptoms) {
 }
 
 // ── Sync stopped/previous medications from HealthRay ──────────────────────────
-export async function syncStoppedMedications(patientId, healthrayId, stoppedMeds) {
+export async function syncStoppedMedications(
+  patientId,
+  healthrayId,
+  stoppedMeds,
+  currentMeds = [],
+) {
   if (!patientId || !stoppedMeds || stoppedMeds.length === 0) return;
+
+  // Build set of current prescription pharmacy_match keys so we don't accidentally
+  // stop a medication that changed frequency/dose but is still being prescribed
+  // e.g. "CCM OD" in previous + "CCM BD" in current → don't stop CCM
+  const currentMatchKeys = new Set(
+    currentMeds.map((m) => normalizeMedName(m.name || "")).filter(Boolean),
+  );
 
   for (const med of stoppedMeds) {
     if (!med.name) continue;
+
+    // Skip if this med is still in the current prescription (frequency/dose change)
+    if (currentMatchKeys.has(normalizeMedName(med.name))) continue;
 
     const reason = `healthray:${healthrayId}${med.reason ? " — " + med.reason : med.status || ""}`;
 
@@ -607,14 +745,29 @@ export async function syncStoppedMedications(patientId, healthrayId, stoppedMeds
   }
 }
 
+// Strip common dosage-form prefixes so "Tab Wegovy", "INJ Wegovy", "WEGOVY"
+// all resolve to the same canonical key ("WEGOVY") for the ON CONFLICT check.
+function normalizeMedName(name) {
+  return name
+    .replace(
+      /^(tab\.?\s+|tablet\s+|inj\.?\s+|injection\s+|cap\.?\s+|capsule\s+|syp\.?\s+|syrup\s+|drops?\s+|oint\.?\s+|ointment\s+|gel\s+|cream\s+|spray\s+|sachet\s+|pwd\.?\s+|powder\s+)/i,
+      "",
+    )
+    .replace(/\s*\([\d\s+.\/mg%KkUuIL]+\)\s*$/i, "") // strip trailing dose in parens e.g. "(5+25+1000 mg)", "(60K units)"
+    .trim()
+    .toUpperCase();
+}
+
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
 
   for (const med of meds) {
     if (!med.name) continue;
+    const pharmacyMatch = normalizeMedName(med.name);
     const params = [
       patientId,
       med.name,
+      pharmacyMatch,
       med.dose || null,
       med.frequency || null,
       med.timing || null,
@@ -630,32 +783,34 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     // stop both rows.
     // Also clear consultation_id/document_id so HealthRay takes ownership —
     // otherwise old consultation-linked rows stay filtered out by latest_cons.
+    // Step 1: reactivate any existing inactive row with the same canonical name.
     await pool
       .query(
         `UPDATE medications
          SET is_active = true,
-             dose = COALESCE($3, dose),
-             frequency = COALESCE($4, frequency),
-             timing = COALESCE($5, timing),
-             route = COALESCE($6, route),
-             started_date = COALESCE($7, started_date),
-             notes = $8,
+             pharmacy_match = $3,
+             dose = COALESCE($4, dose),
+             frequency = COALESCE($5, frequency),
+             timing = COALESCE($6, timing),
+             route = COALESCE($7, route),
+             started_date = COALESCE($8, started_date),
+             notes = $9,
              consultation_id = NULL,
              document_id = NULL,
              updated_at = NOW()
          WHERE patient_id = $1
-           AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($2)
+           AND UPPER(COALESCE(pharmacy_match, name)) = $3
            AND is_active = false`,
         params,
       )
       .catch(() => {});
 
-    // Step 2: insert or upsert the active row.
+    // Step 2: insert or upsert the active row (pharmacy_match ensures canonical dedup).
     await pool
       .query(
         `INSERT INTO medications
-         (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes, source)
-         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 'healthray')
+         (patient_id, name, pharmacy_match, dose, frequency, timing, route, is_active, started_date, notes, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, 'healthray')
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
@@ -664,6 +819,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            route = COALESCE(EXCLUDED.route, medications.route),
            started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
            notes = EXCLUDED.notes,
+           pharmacy_match = EXCLUDED.pharmacy_match,
            source = 'healthray',
            consultation_id = NULL,
            document_id = NULL,
@@ -672,6 +828,30 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       )
       .catch(() => {});
   }
+
+  // Step 3: dedup — delete older active healthray rows where pharmacy_match
+  // is now set and duplicates exist (catches near-identical brand/generic names
+  // that slipped through on earlier syncs before pharmacy_match was populated).
+  await pool
+    .query(
+      `DELETE FROM medications
+       WHERE patient_id = $1
+         AND is_active = true
+         AND source = 'healthray'
+         AND pharmacy_match IS NOT NULL
+         AND id NOT IN (
+           SELECT DISTINCT ON (UPPER(pharmacy_match))
+             id
+           FROM medications
+           WHERE patient_id = $1
+             AND is_active = true
+             AND source = 'healthray'
+             AND pharmacy_match IS NOT NULL
+           ORDER BY UPPER(pharmacy_match), started_date DESC NULLS LAST, created_at DESC
+         )`,
+      [patientId],
+    )
+    .catch(() => {});
 }
 
 // ── Stop stale HealthRay meds not in the current prescription ───────────────

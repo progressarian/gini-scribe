@@ -681,6 +681,7 @@ export default function VisitPage() {
               />
               <VisitDiagnoses
                 activeDx={activeDx}
+                healthrayDiagnoses={data.healthrayDiagnoses}
                 labResults={data.labResults}
                 vitals={data.vitals}
                 onAddDiagnosis={() => setModal({ type: "addDiagnosis" })}

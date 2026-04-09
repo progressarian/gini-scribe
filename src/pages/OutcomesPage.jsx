@@ -7,6 +7,7 @@ import useReportsStore from "../stores/reportsStore";
 import Shimmer from "../components/Shimmer.jsx";
 import Sparkline from "../components/Sparkline.jsx";
 import { fmtDate } from "../utils/helpers.js";
+import { fmtLabVal } from "../components/visit/helpers";
 import { DRUG_BIOMARKER_MAP, getMedsForBiomarker } from "../config/constants.js";
 
 const fmtCompliance = (c) => {
@@ -460,7 +461,7 @@ export default function OutcomesPage() {
                                       }
                                       return true;
                                     });
-                                    const val = dp[c.valueKey || "result"];
+                                    const val = fmtLabVal(null, dp[c.valueKey || "result"]);
                                     const s = String(dateKey || "");
                                     const fd =
                                       s.length >= 10
@@ -2537,7 +2538,7 @@ export default function OutcomesPage() {
                                 >
                                   {v ? (
                                     <>
-                                      {v.result}
+                                      {fmtLabVal(null, v.result)}
                                       <span
                                         style={{
                                           fontSize: 8,

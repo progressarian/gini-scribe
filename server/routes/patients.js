@@ -195,7 +195,7 @@ router.get("/patients/:id", async (req, res) => {
         ),
         pool.query(
           `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
-        WHERE patient_id=$1 ORDER BY diagnosis_id, created_at DESC`,
+        WHERE patient_id=$1 ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
           [id],
         ),
         pool.query(

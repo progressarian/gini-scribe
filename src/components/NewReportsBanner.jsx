@@ -2,6 +2,7 @@ import usePatientStore from "../stores/patientStore";
 import useReportsStore from "../stores/reportsStore";
 import useClinicalStore from "../stores/clinicalStore";
 import { getNewReportsSinceLastVisit } from "../utils/helpers";
+import { fmtLabVal } from "./visit/helpers";
 
 export default function NewReportsBanner() {
   const patientFullData = usePatientStore((s) => s.patientFullData);
@@ -156,7 +157,8 @@ export default function NewReportsBanner() {
                       color: l.flag === "H" ? "#dc2626" : l.flag === "L" ? "#2563eb" : "#059669",
                     }}
                   >
-                    {l.result} {l.unit || ""} {l.flag === "H" ? "↑" : l.flag === "L" ? "↓" : ""}
+                    {fmtLabVal(null, l.result)} {l.unit || ""}{" "}
+                    {l.flag === "H" ? "↑" : l.flag === "L" ? "↓" : ""}
                   </td>
                   <td
                     style={{
