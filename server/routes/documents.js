@@ -617,8 +617,7 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
 
     if (doc.doc_type !== "prescription")
       return res.status(400).json({ error: "Document is not a prescription" });
-    if (!doc.file_url)
-      return res.status(400).json({ error: "Document has no file URL" });
+    if (!doc.file_url) return res.status(400).json({ error: "Document has no file URL" });
 
     // Download + extract via Claude (handles PDF and image formats automatically)
     const extracted = await extractPrescription(doc.file_url);
@@ -628,10 +627,10 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
     try {
       await client.query("BEGIN");
 
-      await client.query(
-        `UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`,
-        [JSON.stringify(extracted), docId],
-      );
+      await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+        JSON.stringify(extracted),
+        docId,
+      ]);
 
       if (doc.patient_id && extracted.medications?.length > 0) {
         await client.query(`DELETE FROM medications WHERE document_id = $1`, [docId]);
@@ -659,7 +658,8 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
                  started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
                  updated_at = NOW()`,
               [
-                doc.patient_id, docId,
+                doc.patient_id,
+                docId,
                 (m.name || "").slice(0, 200),
                 (m.dose || "").slice(0, 100),
                 (m.frequency || "").slice(0, 100),

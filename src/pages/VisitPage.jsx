@@ -305,6 +305,13 @@ export default function VisitPage() {
     const uniqueActiveMeds = dedupMeds(data.activeMeds);
     const uniqueStoppedMeds = dedupMeds(data.stoppedMeds);
 
+    // Filter to latest prescription date only (for sidebar — same logic as VisitMedications)
+    const _dates = uniqueActiveMeds.map((m) => m.prescribed_date).filter(Boolean);
+    const _latestDate = _dates.length ? _dates.reduce((a, b) => (a > b ? a : b)) : null;
+    const latestVisitMeds = _latestDate
+      ? uniqueActiveMeds.filter((m) => !m.prescribed_date || m.prescribed_date === _latestDate)
+      : uniqueActiveMeds;
+
     // HbA1c trend for the summary strip
     const hba1cH = getLabHist(labHistory, "HbA1c");
     const hba1cFirst = hba1cH.length > 0 ? hba1cH[0] : null;
@@ -397,6 +404,7 @@ export default function VisitPage() {
       aiInitialMsg,
       uniqueActiveMeds,
       uniqueStoppedMeds,
+      latestVisitMeds,
       anthropoRows: topRows,
       anthropoTrend,
     };
@@ -587,7 +595,7 @@ export default function VisitPage() {
           summary={summary}
           latestVitals={latestV}
           activeDx={activeDx}
-          activeMeds={uniqueActiveMeds}
+          activeMeds={latestVisitMeds}
           flags={flags}
           labResults={labResults}
           onSaveVitals={(data) => mutations.updateVitals(data, latestV)}

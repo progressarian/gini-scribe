@@ -30,6 +30,7 @@ import {
   syncMedications,
   syncDiagnoses,
   syncStoppedMedications,
+  stopStaleHealthrayMeds,
   syncDocuments,
   syncVitals,
 } from "../healthray/db.js";
@@ -108,7 +109,7 @@ function buildVitalsAndBiomarkers(appt) {
 async function fetchClinicalText(appt, healthrayId, doctorId) {
   const clinicalData = await fetchClinicalNotes(healthrayId, doctorId);
 
-  console.log("Data of Arvinda kaur ->" ,  clinicalData)
+  // console.log("Data of Arvinda kaur ->" ,  clinicalData)
   if (!clinicalData || !Array.isArray(clinicalData)) return null;
 
   const selCount = clinicalData.reduce(
@@ -306,6 +307,7 @@ async function syncAppointment(appt, localDoctorName) {
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
   await syncStoppedMedications(patientId, healthrayId, clinical.healthrayStoppedMedications);
+  await stopStaleHealthrayMeds(patientId, healthrayId, apptDate);
   await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
 

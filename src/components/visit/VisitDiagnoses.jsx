@@ -12,6 +12,23 @@ const DX_STATUS_OPTS = [
   "Resolved",
 ];
 
+// Extract clinical detail from notes like "healthray:234347328 — G2A1" → "G2A1"
+// Returns null if no detail, or if notes is a plain manual note (no healthray prefix)
+function extractHRDetail(notes) {
+  if (!notes) return null;
+  const m = notes.match(/^healthray:\d+\s*[—–-]+\s*(.+)$/i);
+  return m ? m[1].trim() : null;
+}
+
+// For display: if it's a plain healthray:ID note with no detail, hide it.
+// If it has a manual note (no healthray prefix), show it.
+function displayNote(notes) {
+  if (!notes) return null;
+  if (/^healthray:\d+$/.test(notes.trim())) return null; // bare ID — hide
+  if (/^healthray:\d+\s*[—–-]+/.test(notes)) return null; // detail shown inline — hide
+  return notes; // manual note — show
+}
+
 const VisitDiagnoses = memo(function VisitDiagnoses({
   activeDx,
   labResults,
@@ -39,14 +56,24 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
           const isAutoSet = suggestion && !dx.status;
           const isManuallyOverridden = suggestion && suggestion.status !== dx.status && dx.status;
 
+          const detail = extractHRDetail(dx.notes);
+          const visibleNote = displayNote(dx.notes);
+
           return (
             <div key={dx.id || i} className="dxi" style={{ position: "relative" }}>
               <div className="dxi-dot" style={{ background: st.dot }} />
               <div style={{ flex: 1 }}>
-                <div className="dxi-ttl">{dx.label || dx.diagnosis_id}</div>
+                <div className="dxi-ttl">
+                  {dx.label || dx.diagnosis_id}
+                  {detail && (
+                    <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 4 }}>
+                      ({detail})
+                    </span>
+                  )}
+                </div>
                 <div className="dxi-sub">
                   {dx.since_year ? `Since ${dx.since_year}` : ""}
-                  {dx.notes ? ` · ${dx.notes}` : ""}
+                  {visibleNote ? ` · ${visibleNote}` : ""}
                   {suggestion && (
                     <>
                       {" · "}

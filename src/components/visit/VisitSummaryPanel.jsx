@@ -128,9 +128,13 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
   const controls = (
     <div className="sp-actions">
       {!autoExpand && manualExpand && (
-        <button className="bx bx-n" onClick={() => setManualExpand(false)}>Collapse ▴</button>
+        <button className="bx bx-n" onClick={() => setManualExpand(false)}>
+          Collapse ▴
+        </button>
       )}
-      <button className="sp-close-btn" title="Dismiss" onClick={() => setDismissed(true)}>✕</button>
+      <button className="sp-close-btn" title="Dismiss" onClick={() => setDismissed(true)}>
+        ✕
+      </button>
     </div>
   );
 
@@ -140,7 +144,10 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
         {hasRed && (
           <>
             <div className="sp-zone-hd zone-red">
-              <span>🔴 Before you start — {display.red.length} item{display.red.length !== 1 ? "s" : ""} need your attention today</span>
+              <span>
+                🔴 Before you start — {display.red.length} item{display.red.length !== 1 ? "s" : ""}{" "}
+                need your attention today
+              </span>
               {controls}
             </div>
             {renderZone("red", display.red)}
@@ -162,7 +169,9 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
           <>
             {(hasRed || hasAmber) && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-green">
-              <span>✅ Working well <span className="sp-zone-hd-sub">— tell the patient</span></span>
+              <span>
+                ✅ Working well <span className="sp-zone-hd-sub">— tell the patient</span>
+              </span>
               {!hasRed && !hasAmber && controls}
             </div>
             {renderZone("green", display.green)}

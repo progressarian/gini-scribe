@@ -361,6 +361,9 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
+    // Use lab's own date if the AI extracted a specific date (e.g. "FOLLOW UP TODAY: 31/1/26" labs)
+    // otherwise fall back to appointment date
+    const labDate = lab.date || apptDate;
 
     // Skip if a better-or-equal source already exists for same patient + test + date
     const existing = await pool.query(
@@ -370,7 +373,7 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
          WHEN 'opd' THEN 1 WHEN 'report_extract' THEN 2 WHEN 'lab_healthray' THEN 3
          WHEN 'vitals_sheet' THEN 4 WHEN 'prescription_parsed' THEN 5 WHEN 'healthray' THEN 6 ELSE 7
        END ASC LIMIT 1`,
-      [patientId, canonicalName, apptDate],
+      [patientId, canonicalName, labDate],
     );
     if (existing.rows[0]) {
       const existingPriority = SOURCE_PRIORITY[existing.rows[0].source] ?? 99;
@@ -382,7 +385,7 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
         `INSERT INTO lab_results
          (patient_id, appointment_id, test_date, test_name, canonical_name, result, unit, source)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'healthray')`,
-        [patientId, apptId, apptDate, lab.test, canonicalName, val, lab.unit || null],
+        [patientId, apptId, labDate, lab.test, canonicalName, val, lab.unit || null],
       )
       .catch(() => {});
   }
@@ -392,7 +395,12 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
 // ── Normalize diagnosis name → canonical ID to prevent duplicates ───────────
 function normalizeDiagnosisId(name) {
   // Strip parenthetical qualifiers before matching — "(Since 1998)", "(Seronegative)", etc.
-  const n = name.toLowerCase().trim().replace(/\([^)]*\)/g, "").trim().replace(/\s+/g, " ");
+  const n = name
+    .toLowerCase()
+    .trim()
+    .replace(/\([^)]*\)/g, "")
+    .trim()
+    .replace(/\s+/g, " ");
 
   // Type 2 Diabetes — catches T2DM, DM2, Type 2 DM, Type II DM, T2 DM, etc.
   if (/type\s*2|type\s*ii|t2\b|dm\s*2|dm2/.test(n) && /diabet|dm\b/.test(n))
@@ -447,20 +455,51 @@ function normalizeDiagnosisId(name) {
   // Dyslipidemia
   if (/dyslipidemia|hyperlipidemia|hypercholesterol/.test(n)) return "dyslipidemia";
 
-  // Obesity
+  // Obesity / adiposity
   if (/^obesity$/.test(n)) return "obesity";
+  if (/dual adiposity|visceral adiposity|adiposity/.test(n)) return "dual_adiposity";
+
+  // MASLD / fatty liver
+  if (/masld|mafld|nafld|non.alcoholic fatty liver|metabolic.*steatotic liver|metabolic.*fatty liver/.test(n))
+    return "masld";
 
   // Default: slugify (using stripped name without parentheticals)
-  return n.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 100);
+  return n
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100);
 }
 
 // ── Sync diagnoses from HealthRay clinical notes ────────────────────────────
+// Detect negative/absent findings that should not be stored as diagnoses
+function isAbsentFinding(dx) {
+  const name = (dx.name || "").toLowerCase().trim();
+  const details = (dx.details || "").toLowerCase().trim();
+  // Name ends with "-" (e.g. "CAD-", "CVA-")
+  if (name.endsWith("-")) return true;
+  // Details explicitly say absent/negative/no
+  if (/\babsent\b|\bnegative\b|\bnot present\b|\bno history\b|\bruled out\b/.test(details))
+    return true;
+  // Details contain "(-)" marker
+  if (details.includes("(-)")) return true;
+  return false;
+}
+
+// Strip "+" suffix from diagnosis name (e.g. "NEUROPATHY+" → "NEUROPATHY")
+function stripPlusSuffix(name) {
+  return (name || "").replace(/\s*\+\s*$/, "").trim();
+}
+
 export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
   if (!patientId || !diagnoses || diagnoses.length === 0) return;
 
   for (const dx of diagnoses) {
     if (!dx.name) continue;
-    const diagId = normalizeDiagnosisId(dx.id || dx.name);
+    if (isAbsentFinding(dx)) continue;
+    // Strip "+" suffix the AI may leave on condition names (e.g. "NEUROPATHY+" → "NEUROPATHY")
+    const cleanName = stripPlusSuffix(dx.name);
+    if (!cleanName) continue;
+    const diagId = normalizeDiagnosisId(dx.id || cleanName);
 
     await pool
       .query(
@@ -474,7 +513,7 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
         [
           patientId,
           diagId,
-          dx.name || null,
+          cleanName,
           dx.status || "Active",
           `healthray:${healthrayId}${dx.details ? " — " + dx.details : ""}`,
         ],
@@ -585,6 +624,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     // ON CONFLICT below can't match the partial inactive index), and the next
     // reconcile then fails with a unique constraint violation when it tries to
     // stop both rows.
+    // Also clear consultation_id/document_id so HealthRay takes ownership —
+    // otherwise old consultation-linked rows stay filtered out by latest_cons.
     await pool
       .query(
         `UPDATE medications
@@ -595,6 +636,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
              route = COALESCE($6, route),
              started_date = COALESCE($7, started_date),
              notes = $8,
+             consultation_id = NULL,
+             document_id = NULL,
              updated_at = NOW()
          WHERE patient_id = $1
            AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($2)
@@ -609,7 +652,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
         `INSERT INTO medications
          (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes, source)
          VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 'healthray')
-         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true WHERE is_active = true
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
@@ -618,11 +661,35 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
            notes = EXCLUDED.notes,
            source = 'healthray',
+           consultation_id = NULL,
+           document_id = NULL,
            updated_at = NOW()`,
         params,
       )
       .catch(() => {});
   }
+}
+
+// ── Stop stale HealthRay meds not in the current prescription ───────────────
+// After syncing current meds (which sets notes = 'healthray:ID'), deactivate
+// any other HealthRay-sourced active meds that weren't updated by this sync.
+// This handles meds that were prescribed before but dropped from the current note.
+export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
+  if (!patientId || !healthrayId) return;
+  await pool
+    .query(
+      `UPDATE medications
+       SET is_active = false,
+           stopped_date = $3,
+           stop_reason = $2 || 'stopped',
+           updated_at = NOW()
+       WHERE patient_id = $1
+         AND is_active = true
+         AND source = 'healthray'
+         AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')`,
+      [patientId, String(healthrayId), apptDate],
+    )
+    .catch(() => {});
 }
 
 // ── Sync opdVitals → vitals table ───────────────────────────────────────────

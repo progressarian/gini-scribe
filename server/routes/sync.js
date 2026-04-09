@@ -20,8 +20,10 @@ import pool from "../config/db.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import {
   syncDiagnoses,
+  syncLabResults,
   syncMedications,
   syncStoppedMedications,
+  stopStaleHealthrayMeds,
 } from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 
@@ -56,6 +58,339 @@ router.post("/sync/healthray/date", async (req, res) => {
     res.json({ success: true, ...result });
   } catch (e) {
     handleError(res, e, "HealthRay date sync");
+  }
+});
+
+// ── Debug: inspect raw HealthRay data stored in DB for a patient ────────────
+// GET /api/sync/debug/patient/:fileNo
+// Returns the last appointment's raw healthray_clinical_notes + all parsed JSONB fields
+router.get("/sync/debug/patient/:fileNo", async (req, res) => {
+  try {
+    const fileNo = req.params.fileNo;
+    const { rows: patients } = await pool.query(
+      `SELECT id, name, phone FROM patients WHERE file_no = $1 LIMIT 1`,
+      [fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: `Patient ${fileNo} not found` });
+    const patient = patients[0];
+
+    const { rows: appts } = await pool.query(
+      `SELECT id, healthray_id, appointment_date, status,
+              healthray_clinical_notes,
+              healthray_diagnoses, healthray_medications, healthray_labs,
+              healthray_advice, healthray_investigations, healthray_follow_up,
+              healthray_previous_medications
+       FROM appointments
+       WHERE patient_id = $1
+       ORDER BY appointment_date DESC
+       LIMIT 5`,
+      [patient.id],
+    );
+
+    // Run the exact same query visit.js uses for active meds
+    const { rows: activeMeds } = await pool.query(
+      `WITH latest_cons AS (
+         SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id
+         FROM consultations WHERE patient_id=$1
+         ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
+       )
+       SELECT m.id, m.name, m.dose, m.is_active, m.consultation_id, m.source, m.notes
+       FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
+       WHERE m.patient_id=$1 AND m.is_active = true
+         AND (m.consultation_id IN (SELECT id FROM latest_cons) OR m.consultation_id IS NULL)
+       ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
+      [patient.id],
+    );
+
+    res.json({
+      patient: { id: patient.id, name: patient.name, phone: patient.phone, file_no: fileNo },
+      activeMedsFromVisitQuery: activeMeds,
+      activeMedsCount: activeMeds.length,
+      appointments: appts.map((a) => ({
+        id: a.id,
+        healthray_id: a.healthray_id,
+        date: a.appointment_date,
+        status: a.status,
+        has_clinical_notes: !!a.healthray_clinical_notes,
+        clinical_notes_length: a.healthray_clinical_notes?.length || 0,
+        clinical_notes_preview: a.healthray_clinical_notes?.slice(0, 500) || null,
+        diagnoses_count: (a.healthray_diagnoses || []).length,
+        diagnoses: a.healthray_diagnoses,
+        medications_count: (a.healthray_medications || []).length,
+        medications: a.healthray_medications,
+        labs_count: (a.healthray_labs || []).length,
+        labs: a.healthray_labs,
+        advice: a.healthray_advice,
+        investigations: a.healthray_investigations,
+        follow_up: a.healthray_follow_up,
+        previous_medications_count: (a.healthray_previous_medications || []).length,
+        previous_medications: a.healthray_previous_medications,
+      })),
+    });
+  } catch (e) {
+    handleError(res, e, "Debug patient HealthRay data");
+  }
+});
+
+// ── Debug: inspect medications table for a patient ──────────────────────────
+// GET /api/sync/debug/meds/:fileNo
+router.get("/sync/debug/meds/:fileNo", async (req, res) => {
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id, name FROM patients WHERE file_no = $1 LIMIT 1`,
+      [req.params.fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
+
+    const { rows: meds } = await pool.query(
+      `SELECT id, name, pharmacy_match, dose, frequency, timing, route,
+              is_active, is_new, source, started_date, stopped_date, stop_reason, notes, document_id, consultation_id
+       FROM medications WHERE patient_id = $1
+       ORDER BY is_active DESC, started_date DESC NULLS LAST`,
+      [patients[0].id],
+    );
+
+    res.json({
+      patient: { id: patients[0].id, name: patients[0].name },
+      total: meds.length,
+      active: meds.filter((m) => m.is_active).length,
+      stopped: meds.filter((m) => !m.is_active).length,
+      medications: meds,
+    });
+  } catch (e) {
+    handleError(res, e, "Debug medications");
+  }
+});
+
+// ── Debug: inspect lab_results table for a patient ───────────────────────────
+// GET /api/sync/debug/labs/:fileNo
+router.get("/sync/debug/labs/:fileNo", async (req, res) => {
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id, name FROM patients WHERE file_no = $1 LIMIT 1`,
+      [req.params.fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
+    const pid = patients[0].id;
+
+    const { rows: labs } = await pool.query(
+      `SELECT id, test_date, test_name, canonical_name, result, unit, source, appointment_id
+       FROM lab_results WHERE patient_id = $1
+       ORDER BY test_date DESC NULLS LAST, test_name`,
+      [pid],
+    );
+    res.json({ patient: { id: pid, name: patients[0].name }, total: labs.length, labs });
+  } catch (e) {
+    handleError(res, e, "Debug labs");
+  }
+});
+
+// ── Bulk labs backfill: re-sync labs from stored JSONB for ALL appointments ───
+// Fixes the date bug where per-lab dates (e.g. follow-up labs) were stored as appt date.
+// Safe to re-run — DELETE + re-INSERT per appointment.
+// POST /api/sync/backfill/labs/all  (must be before /:appointmentId to avoid wildcard match)
+
+const labsBackfillStatus = {
+  running: false,
+  total: 0,
+  done: 0,
+  errors: 0,
+  startedAt: null,
+};
+
+router.get("/sync/backfill/labs/all/status", (_req, res) => {
+  const elapsed = labsBackfillStatus.startedAt
+    ? Math.round((Date.now() - labsBackfillStatus.startedAt) / 1000)
+    : 0;
+  res.json({ ...labsBackfillStatus, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/backfill/labs/all", async (req, res) => {
+  if (labsBackfillStatus.running) {
+    return res.status(409).json({ error: "Backfill already running", status: labsBackfillStatus });
+  }
+  try {
+    // Find distinct patients scheduled today or in future, then get each patient's
+    // last completed appointment that has labs JSONB
+    const { rows: appts } = await pool.query(
+      `SELECT DISTINCT ON (a.patient_id)
+         a.id, a.patient_id, a.appointment_date, a.healthray_labs
+       FROM appointments a
+       WHERE a.patient_id IN (
+         SELECT DISTINCT patient_id FROM appointments
+         WHERE appointment_date >= CURRENT_DATE
+       )
+         AND a.healthray_labs IS NOT NULL
+         AND jsonb_array_length(a.healthray_labs) > 0
+       ORDER BY a.patient_id, a.appointment_date DESC`,
+    );
+    labsBackfillStatus.running = true;
+    labsBackfillStatus.total = appts.length;
+    labsBackfillStatus.done = 0;
+    labsBackfillStatus.errors = 0;
+    labsBackfillStatus.startedAt = Date.now();
+    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/backfill/labs/all/status" });
+    (async () => {
+      for (const appt of appts) {
+        try {
+          await syncLabResults(appt.patient_id, appt.id, appt.appointment_date, appt.healthray_labs);
+          labsBackfillStatus.done++;
+        } catch (e) {
+          labsBackfillStatus.errors++;
+          labsBackfillStatus.done++;
+          error("Labs Backfill", `appt ${appt.id}: ${e.message}`);
+        }
+      }
+      labsBackfillStatus.running = false;
+      log("Labs Backfill", `Done — ${labsBackfillStatus.done} appts, ${labsBackfillStatus.errors} errors`);
+    })();
+  } catch (e) {
+    labsBackfillStatus.running = false;
+    handleError(res, e, "Labs backfill all");
+  }
+});
+
+// ── Backfill labs: re-sync labs from stored JSONB for an appointment ──────────
+// POST /api/sync/backfill/labs/:appointmentId
+router.post("/sync/backfill/labs/:appointmentId", async (req, res) => {
+  const apptId = Number(req.params.appointmentId);
+  if (!apptId) return res.status(400).json({ error: "Valid appointmentId required" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, healthray_id, appointment_date, healthray_labs, healthray_clinical_notes
+       FROM appointments WHERE id = $1`,
+      [apptId],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Appointment not found" });
+    const appt = rows[0];
+
+    let labs = appt.healthray_labs || [];
+
+    // Force re-parse if ?force=true or labs JSONB is empty
+    const forceReparse = req.query.force === "true" || req.body?.force === true;
+    if ((labs.length === 0 || forceReparse) && appt.healthray_clinical_notes) {
+      const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+      if (parsed?.labs?.length) {
+        labs = parsed.labs;
+        await pool.query(
+          `UPDATE appointments SET healthray_labs = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+          [JSON.stringify(labs), apptId],
+        );
+      }
+    }
+
+    if (labs.length === 0) return res.json({ success: true, synced: 0, message: "No labs found" });
+
+    await syncLabResults(appt.patient_id, apptId, appt.appointment_date, labs);
+    res.json({ success: true, synced: labs.length, labs });
+  } catch (e) {
+    handleError(res, e, "Backfill labs");
+  }
+});
+
+// ── Debug: stop stale duplicate active meds for a patient ────────────────────
+// POST /api/sync/debug/stop-stale-meds  body: { ids: [1,2,3], reason: "..." }
+router.post("/sync/debug/stop-stale-meds", async (req, res) => {
+  const { ids, reason } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "ids array required" });
+  }
+  try {
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+    const { rows } = await pool.query(
+      `DELETE FROM medications WHERE id IN (${placeholders}) RETURNING id, name, dose`,
+      ids,
+    );
+    res.json({ success: true, deleted: rows });
+  } catch (e) {
+    handleError(res, e, "Stop stale meds");
+  }
+});
+
+// ── Debug: update started_date for specific med IDs (fix truncated-note date issues) ──
+// POST /api/sync/debug/update-med-date  body: { ids: [1,2,3], date: "2026-02-18" }
+router.post("/sync/debug/update-med-date", async (req, res) => {
+  const { ids, date } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array required" });
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date required (YYYY-MM-DD)" });
+  try {
+    const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
+    const { rows } = await pool.query(
+      `UPDATE medications SET started_date = $1, updated_at = NOW()
+       WHERE id IN (${placeholders}) RETURNING id, name, started_date`,
+      [date, ...ids],
+    );
+    res.json({ success: true, updated: rows });
+  } catch (e) {
+    handleError(res, e, "Update med date");
+  }
+});
+
+// ── Debug: rename a medication (fix generic→brand name issues from AI extraction) ──
+// POST /api/sync/debug/rename-med  body: { id: 502127, name: "Atchol", pharmacy_match: "ATCHOL" }
+router.post("/sync/debug/rename-med", async (req, res) => {
+  const { id, name, pharmacy_match } = req.body || {};
+  if (!id || !name) return res.status(400).json({ error: "id and name required" });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE medications SET name = $1, pharmacy_match = COALESCE($2, pharmacy_match), updated_at = NOW()
+       WHERE id = $3 RETURNING id, name, pharmacy_match`,
+      [name, pharmacy_match || null, id],
+    );
+    res.json({ success: true, updated: rows[0] });
+  } catch (e) {
+    handleError(res, e, "Rename med");
+  }
+});
+
+// ── Debug: inspect all diagnoses for a patient ───────────────────────────────
+// GET /api/sync/debug/diagnoses/:fileNo
+router.get("/sync/debug/diagnoses/:fileNo", async (req, res) => {
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [req.params.fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
+    const { rows } = await pool.query(
+      `SELECT id, diagnosis_id, label, status, since_year, notes, consultation_id, is_active, created_at
+       FROM diagnoses WHERE patient_id = $1 ORDER BY is_active DESC, label`,
+      [patients[0].id],
+    );
+    res.json({ total: rows.length, active: rows.filter(r=>r.is_active).length, diagnoses: rows });
+  } catch (e) { handleError(res, e, "Debug diagnoses"); }
+});
+
+// ── Debug: delete specific diagnosis rows by ID ──────────────────────────────
+// POST /api/sync/debug/delete-diagnoses  body: { ids: [1,2,3] }
+router.post("/sync/debug/delete-diagnoses", async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array required" });
+  try {
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+    const { rows } = await pool.query(
+      `DELETE FROM diagnoses WHERE id IN (${placeholders}) RETURNING id, patient_id, label, diagnosis_id`,
+      ids,
+    );
+    res.json({ success: true, deleted: rows });
+  } catch (e) {
+    handleError(res, e, "Delete diagnoses");
+  }
+});
+
+// ── Cleanup: remove absent/negative diagnoses stored incorrectly ─────────────
+// POST /api/sync/debug/cleanup-absent-diagnoses
+// Deletes diagnoses where notes contain "absent" or details have "(-)" marker
+router.post("/sync/debug/cleanup-absent-diagnoses", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `DELETE FROM diagnoses
+       WHERE notes ~* '^healthray:[0-9]+(\\s*[—–-]+\\s*)(negative|absent|not present|no history|ruled out|\\(\\-\\))\\s*$'
+          OR label ~* '[\\-]$'
+       RETURNING id, patient_id, label, notes`,
+    );
+    res.json({ success: true, deleted: rows.length, examples: rows.slice(0, 10) });
+  } catch (e) {
+    handleError(res, e, "Cleanup absent diagnoses");
   }
 });
 
@@ -399,6 +734,11 @@ router.post("/sync/backfill/medicines/:appointmentId", async (req, res) => {
       await syncStoppedMedications(appt.patient_id, appt.healthray_id, previousMeds);
     }
 
+    // Stop any HealthRay-sourced meds not in current prescription
+    if (appt.patient_id && medications.length > 0) {
+      await stopStaleHealthrayMeds(appt.patient_id, appt.healthray_id, appt.appointment_date);
+    }
+
     res.json({
       success: true,
       appointmentId: apptId,
@@ -409,6 +749,382 @@ router.post("/sync/backfill/medicines/:appointmentId", async (req, res) => {
     });
   } catch (e) {
     handleError(res, e, "Backfill medicines");
+  }
+});
+
+// ── Backfill medicines for all patients scheduled on a given date ────────────
+// Finds each patient's LAST completed appointment with clinical notes and re-parses it
+// POST /api/sync/backfill/medicines/opd/:date  (YYYY-MM-DD, defaults to today)
+const opdBackfillStatus = {
+  running: false,
+  date: null,
+  total: 0,
+  done: 0,
+  errors: 0,
+  results: [],
+  startedAt: null,
+};
+
+router.get("/sync/backfill/medicines/opd/status", (_req, res) => {
+  const elapsed = opdBackfillStatus.startedAt
+    ? Math.round((Date.now() - opdBackfillStatus.startedAt) / 1000)
+    : 0;
+  res.json({ ...opdBackfillStatus, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/backfill/medicines/opd/:date?", async (req, res) => {
+  if (opdBackfillStatus.running) {
+    return res.status(409).json({ error: "Backfill already running", status: opdBackfillStatus });
+  }
+
+  const date = req.params.date || new Date().toISOString().split("T")[0];
+
+  try {
+    // Get all unique patients scheduled today
+    const { rows: patients } = await pool.query(
+      `SELECT DISTINCT patient_id FROM appointments WHERE appointment_date = $1 AND patient_id IS NOT NULL`,
+      [date],
+    );
+
+    if (patients.length === 0) {
+      return res.json({
+        success: true,
+        date,
+        message: "No patients found for this date",
+        total: 0,
+      });
+    }
+
+    Object.assign(opdBackfillStatus, {
+      running: true,
+      date,
+      total: patients.length,
+      done: 0,
+      errors: 0,
+      results: [],
+      startedAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      started: true,
+      date,
+      total: patients.length,
+      statusUrl: "/api/sync/backfill/medicines/opd/status",
+    });
+
+    (async () => {
+      for (const { patient_id } of patients) {
+        try {
+          // Find this patient's last completed appointment with clinical notes
+          const { rows } = await pool.query(
+            `SELECT id, patient_id, healthray_id, appointment_date, healthray_clinical_notes, file_no,
+                    (SELECT name FROM patients WHERE id = $1) AS patient_name
+             FROM appointments
+             WHERE patient_id = $1
+               AND healthray_clinical_notes IS NOT NULL
+               AND LENGTH(healthray_clinical_notes) > 20
+             ORDER BY appointment_date DESC LIMIT 1`,
+            [patient_id],
+          );
+
+          if (!rows[0]) {
+            opdBackfillStatus.results.push({ patient_id, status: "no_notes" });
+            opdBackfillStatus.done++;
+            continue;
+          }
+
+          const appt = rows[0];
+          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+
+          if (!parsed) {
+            opdBackfillStatus.results.push({
+              patient_id,
+              name: appt.patient_name,
+              status: "parse_failed",
+            });
+            opdBackfillStatus.errors++;
+            opdBackfillStatus.done++;
+            continue;
+          }
+
+          const medications = parsed.medications || [];
+          const previousMeds = parsed.previous_medications || [];
+
+          await pool.query(
+            `UPDATE appointments SET healthray_medications = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(medications), appt.id],
+          );
+
+          if (patient_id && medications.length > 0) {
+            await syncMedications(
+              patient_id,
+              appt.healthray_id,
+              appt.appointment_date,
+              medications,
+            );
+          }
+          if (patient_id && previousMeds.length > 0) {
+            await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds);
+          }
+          if (patient_id && medications.length > 0) {
+            await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
+          }
+
+          opdBackfillStatus.results.push({
+            patient_id,
+            name: appt.patient_name,
+            appt_date: appt.appointment_date,
+            appt_id: appt.id,
+            status: "ok",
+            meds: medications.length,
+            prev_meds: previousMeds.length,
+          });
+          log(
+            "OPD Backfill",
+            `Patient ${patient_id} (${appt.patient_name}): ${medications.length} meds from appt ${appt.id}`,
+          );
+        } catch (e) {
+          opdBackfillStatus.results.push({ patient_id, status: "error", error: e.message });
+          opdBackfillStatus.errors++;
+          error("OPD Backfill", `Patient ${patient_id}: ${e.message}`);
+        }
+        opdBackfillStatus.done++;
+      }
+      log(
+        "OPD Backfill",
+        `Done — ${opdBackfillStatus.done} patients, ${opdBackfillStatus.errors} errors`,
+      );
+      opdBackfillStatus.running = false;
+    })();
+  } catch (e) {
+    opdBackfillStatus.running = false;
+    handleError(res, e, "OPD medicines backfill");
+  }
+});
+
+// ── Backfill diagnoses for all patients scheduled on a given date ────────────
+// POST /api/sync/backfill/diagnoses/opd/:date  (YYYY-MM-DD, defaults to today)
+const opdDxBackfillStatus = {
+  running: false,
+  date: null,
+  total: 0,
+  done: 0,
+  errors: 0,
+  results: [],
+  startedAt: null,
+};
+
+router.get("/sync/backfill/diagnoses/opd/status", (_req, res) => {
+  const elapsed = opdDxBackfillStatus.startedAt
+    ? Math.round((Date.now() - opdDxBackfillStatus.startedAt) / 1000)
+    : 0;
+  res.json({ ...opdDxBackfillStatus, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/backfill/diagnoses/opd/:date?", async (req, res) => {
+  if (opdDxBackfillStatus.running) {
+    return res.status(409).json({ error: "Backfill already running", status: opdDxBackfillStatus });
+  }
+
+  const date = req.params.date || new Date().toISOString().split("T")[0];
+
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT DISTINCT patient_id FROM appointments WHERE appointment_date = $1 AND patient_id IS NOT NULL`,
+      [date],
+    );
+
+    if (patients.length === 0) {
+      return res.json({
+        success: true,
+        date,
+        message: "No patients found for this date",
+        total: 0,
+      });
+    }
+
+    Object.assign(opdDxBackfillStatus, {
+      running: true,
+      date,
+      total: patients.length,
+      done: 0,
+      errors: 0,
+      results: [],
+      startedAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      started: true,
+      date,
+      total: patients.length,
+      statusUrl: "/api/sync/backfill/diagnoses/opd/status",
+    });
+
+    (async () => {
+      for (const { patient_id } of patients) {
+        try {
+          const { rows } = await pool.query(
+            `SELECT id, patient_id, healthray_id, appointment_date, healthray_clinical_notes,
+                    (SELECT name FROM patients WHERE id = $1) AS patient_name
+             FROM appointments
+             WHERE patient_id = $1
+               AND healthray_clinical_notes IS NOT NULL
+               AND LENGTH(healthray_clinical_notes) > 20
+             ORDER BY appointment_date DESC LIMIT 1`,
+            [patient_id],
+          );
+
+          if (!rows[0]) {
+            opdDxBackfillStatus.results.push({ patient_id, status: "no_notes" });
+            opdDxBackfillStatus.done++;
+            continue;
+          }
+
+          const appt = rows[0];
+          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+
+          if (!parsed) {
+            opdDxBackfillStatus.results.push({
+              patient_id,
+              name: appt.patient_name,
+              status: "parse_failed",
+            });
+            opdDxBackfillStatus.errors++;
+            opdDxBackfillStatus.done++;
+            continue;
+          }
+
+          const diagnoses = parsed.diagnoses || [];
+
+          await pool.query(
+            `UPDATE appointments SET healthray_diagnoses = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(diagnoses), appt.id],
+          );
+
+          if (patient_id && diagnoses.length > 0) {
+            await syncDiagnoses(patient_id, appt.healthray_id, diagnoses);
+          }
+
+          opdDxBackfillStatus.results.push({
+            patient_id,
+            name: appt.patient_name,
+            appt_date: appt.appointment_date,
+            appt_id: appt.id,
+            status: "ok",
+            diagnoses: diagnoses.length,
+          });
+          log(
+            "OPD Dx Backfill",
+            `Patient ${patient_id} (${appt.patient_name}): ${diagnoses.length} diagnoses`,
+          );
+        } catch (e) {
+          opdDxBackfillStatus.results.push({ patient_id, status: "error", error: e.message });
+          opdDxBackfillStatus.errors++;
+          error("OPD Dx Backfill", `Patient ${patient_id}: ${e.message}`);
+        }
+        opdDxBackfillStatus.done++;
+      }
+      log(
+        "OPD Dx Backfill",
+        `Done — ${opdDxBackfillStatus.done} patients, ${opdDxBackfillStatus.errors} errors`,
+      );
+      opdDxBackfillStatus.running = false;
+    })();
+  } catch (e) {
+    opdDxBackfillStatus.running = false;
+    handleError(res, e, "OPD diagnoses backfill");
+  }
+});
+
+// ── Backfill medicines for all appointments on a given date ─────────────────
+// POST /api/sync/backfill/medicines/date/:date  (YYYY-MM-DD, defaults to today)
+router.post("/sync/backfill/medicines/date/:date?", async (req, res) => {
+  const date = req.params.date || new Date().toISOString().split("T")[0];
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, healthray_id, appointment_date, healthray_clinical_notes
+       FROM appointments
+       WHERE appointment_date = $1
+         AND healthray_clinical_notes IS NOT NULL
+         AND LENGTH(healthray_clinical_notes) > 20`,
+      [date],
+    );
+
+    if (rows.length === 0) {
+      return res.json({
+        success: true,
+        date,
+        message: "No appointments with clinical notes found",
+        processed: 0,
+      });
+    }
+
+    res.json({
+      success: true,
+      date,
+      total: rows.length,
+      message: `Processing ${rows.length} appointments in background`,
+      statusNote: "Check server logs for progress",
+    });
+
+    // Process in background
+    (async () => {
+      let done = 0,
+        errors = 0,
+        totalMeds = 0;
+      for (const appt of rows) {
+        try {
+          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+
+          if (!parsed) {
+            errors++;
+            continue;
+          }
+
+          const medications = parsed.medications || [];
+          const previousMeds = parsed.previous_medications || [];
+
+          await pool.query(
+            `UPDATE appointments SET healthray_medications = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(medications), appt.id],
+          );
+
+          if (appt.patient_id && medications.length > 0) {
+            await syncMedications(
+              appt.patient_id,
+              appt.healthray_id,
+              appt.appointment_date,
+              medications,
+            );
+          }
+          if (appt.patient_id && previousMeds.length > 0) {
+            await syncStoppedMedications(appt.patient_id, appt.healthray_id, previousMeds);
+          }
+          if (appt.patient_id && medications.length > 0) {
+            await stopStaleHealthrayMeds(appt.patient_id, appt.healthray_id, appt.appointment_date);
+          }
+
+          totalMeds += medications.length;
+          done++;
+          log(
+            "Backfill",
+            `Appt ${appt.id}: ${medications.length} meds, ${previousMeds.length} prev`,
+          );
+        } catch (e) {
+          errors++;
+          error("Backfill", `Appt ${appt.id}: ${e.message}`);
+        }
+      }
+      log(
+        "Backfill",
+        `Date ${date} done — ${done}/${rows.length} appointments, ${totalMeds} total meds, ${errors} errors`,
+      );
+    })();
+  } catch (e) {
+    handleError(res, e, "Backfill medicines by date");
   }
 });
 
@@ -702,7 +1418,14 @@ router.post("/sync/backfill/medicines-all", async (req, res) => {
 // Finds all healthray prescription docs without extracted_data, downloads each PDF,
 // extracts medicines via Claude vision, syncs to medications table.
 // Processes one at a time to avoid API rate limits.
-const prescriptionExtractStatus = { running: false, total: 0, done: 0, extracted: 0, errors: 0, startedAt: null };
+const prescriptionExtractStatus = {
+  running: false,
+  total: 0,
+  done: 0,
+  extracted: 0,
+  errors: 0,
+  startedAt: null,
+};
 
 router.get("/sync/healthray/extract-prescriptions/status", (_req, res) => {
   const { running, total, done, extracted, errors, startedAt } = prescriptionExtractStatus;
@@ -712,7 +1435,9 @@ router.get("/sync/healthray/extract-prescriptions/status", (_req, res) => {
 
 router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
   if (prescriptionExtractStatus.running) {
-    return res.status(409).json({ error: "Extraction already running", status: prescriptionExtractStatus });
+    return res
+      .status(409)
+      .json({ error: "Extraction already running", status: prescriptionExtractStatus });
   }
 
   try {
@@ -728,14 +1453,28 @@ router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
     `);
 
     if (docs.length === 0) {
-      return res.json({ success: true, message: "No unextracted prescription PDFs found", total: 0 });
+      return res.json({
+        success: true,
+        message: "No unextracted prescription PDFs found",
+        total: 0,
+      });
     }
 
     Object.assign(prescriptionExtractStatus, {
-      running: true, total: docs.length, done: 0, extracted: 0, errors: 0, startedAt: Date.now(),
+      running: true,
+      total: docs.length,
+      done: 0,
+      extracted: 0,
+      errors: 0,
+      startedAt: Date.now(),
     });
 
-    res.json({ success: true, started: true, total: docs.length, statusUrl: "/api/sync/healthray/extract-prescriptions/status" });
+    res.json({
+      success: true,
+      started: true,
+      total: docs.length,
+      statusUrl: "/api/sync/healthray/extract-prescriptions/status",
+    });
 
     (async () => {
       const CONCURRENCY = 10;
@@ -745,20 +1484,24 @@ router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
           const extracted = await extractPrescription(doc.file_url);
           const meds = extracted.medications || [];
 
-          await pool.query(
-            `UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`,
-            [JSON.stringify(extracted), doc.id],
-          );
+          await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+            JSON.stringify(extracted),
+            doc.id,
+          ]);
 
           if (meds.length > 0) {
-            const rxDate = extracted.visit_date ||
-              (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
+            const rxDate =
+              extracted.visit_date ||
+              (doc.doc_date
+                ? new Date(doc.doc_date).toISOString().split("T")[0]
+                : new Date().toISOString().split("T")[0]);
 
             await pool.query(`DELETE FROM medications WHERE document_id = $1`, [doc.id]);
             for (const m of meds) {
               if (!m?.name) continue;
-              await pool.query(
-                `INSERT INTO medications
+              await pool
+                .query(
+                  `INSERT INTO medications
                    (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
                  ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
@@ -767,9 +1510,18 @@ router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
                    frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
                    timing = COALESCE(EXCLUDED.timing, medications.timing),
                    updated_at = NOW()`,
-                [doc.patient_id, doc.id, (m.name||"").slice(0,200), (m.dose||"").slice(0,100),
-                 (m.frequency||"").slice(0,100), (m.timing||"").slice(0,100), (m.route||"Oral").slice(0,50), rxDate],
-              ).catch(() => {});
+                  [
+                    doc.patient_id,
+                    doc.id,
+                    (m.name || "").slice(0, 200),
+                    (m.dose || "").slice(0, 100),
+                    (m.frequency || "").slice(0, 100),
+                    (m.timing || "").slice(0, 100),
+                    (m.route || "Oral").slice(0, 50),
+                    rxDate,
+                  ],
+                )
+                .catch(() => {});
             }
             prescriptionExtractStatus.extracted += meds.length;
           }
@@ -786,7 +1538,10 @@ router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
         await Promise.allSettled(docs.slice(i, i + CONCURRENCY).map(processDoc));
       }
 
-      log("Prescriptions", `Extraction complete — ${prescriptionExtractStatus.done}/${prescriptionExtractStatus.total} docs, ${prescriptionExtractStatus.extracted} medicines, ${prescriptionExtractStatus.errors} errors`);
+      log(
+        "Prescriptions",
+        `Extraction complete — ${prescriptionExtractStatus.done}/${prescriptionExtractStatus.total} docs, ${prescriptionExtractStatus.extracted} medicines, ${prescriptionExtractStatus.errors} errors`,
+      );
       prescriptionExtractStatus.running = false;
     })();
   } catch (e) {
@@ -809,7 +1564,9 @@ router.get("/sync/healthray/backfill-stopped-meds/status", (_req, res) => {
 
 router.post("/sync/healthray/backfill-stopped-meds", async (req, res) => {
   if (stoppedMedsBackfillStatus.running) {
-    return res.status(409).json({ error: "Backfill already running", status: stoppedMedsBackfillStatus });
+    return res
+      .status(409)
+      .json({ error: "Backfill already running", status: stoppedMedsBackfillStatus });
   }
 
   try {
@@ -825,25 +1582,45 @@ router.post("/sync/healthray/backfill-stopped-meds", async (req, res) => {
     `);
 
     if (appts.length === 0) {
-      return res.json({ success: true, message: "No appointments with previous medications data", synced: 0 });
+      return res.json({
+        success: true,
+        message: "No appointments with previous medications data",
+        synced: 0,
+      });
     }
 
     Object.assign(stoppedMedsBackfillStatus, {
-      running: true, total: appts.length, done: 0, errors: 0, startedAt: Date.now(),
+      running: true,
+      total: appts.length,
+      done: 0,
+      errors: 0,
+      startedAt: Date.now(),
     });
 
-    res.json({ success: true, started: true, total: appts.length, statusUrl: "/api/sync/healthray/backfill-stopped-meds/status" });
+    res.json({
+      success: true,
+      started: true,
+      total: appts.length,
+      statusUrl: "/api/sync/healthray/backfill-stopped-meds/status",
+    });
 
     (async () => {
       for (const appt of appts) {
         try {
-          await syncStoppedMedications(appt.patient_id, appt.healthray_id, appt.healthray_previous_medications);
+          await syncStoppedMedications(
+            appt.patient_id,
+            appt.healthray_id,
+            appt.healthray_previous_medications,
+          );
           stoppedMedsBackfillStatus.done++;
         } catch (e) {
           stoppedMedsBackfillStatus.errors++;
         }
       }
-      log("Medicines", `Stopped meds backfill complete — ${stoppedMedsBackfillStatus.done} appointments, ${stoppedMedsBackfillStatus.errors} errors`);
+      log(
+        "Medicines",
+        `Stopped meds backfill complete — ${stoppedMedsBackfillStatus.done} appointments, ${stoppedMedsBackfillStatus.errors} errors`,
+      );
       stoppedMedsBackfillStatus.running = false;
     })();
   } catch (e) {

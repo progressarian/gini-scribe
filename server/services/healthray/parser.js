@@ -125,11 +125,18 @@ Return JSON with these keys:
 
 STRICT Rules:
 - NEVER invent or assume data. If a field is not explicitly mentioned in the text, set it to null. Do NOT fill fields with unrelated data.
-- For labs: extract ALL lab values with test name, numeric value, unit. Include HbA1c, FBG, PPBG, LDL, TG, TSH, T3, T4, Creatinine, eGFR, UACR, Hb, Iron, Ferritin, OT/SGOT, PT/SGPT, ALP, Calcium, Albumin, etc. For the date field in labs, ALWAYS use YYYY-MM-DD format (e.g. "2026-04-03" for April 3rd 2026). If date is ambiguous or not present, set to null.
-- For medications: parse CURRENT/TREATMENT medications with name, dose, frequency (OD/BD/TDS etc), timing (before/after food etc), route (Oral/SC/IV/IM etc). Set is_new=true if it's a new addition. Also look for medications where dose has CHANGED (e.g. "NMZ 10 to NMZ 20") — the OLD dose should be in previous_medications.
+- For labs: extract ALL lab values with test name, numeric value, unit. Include HbA1c, FBG, PPBG, LDL, TG, TSH, T3, T4, Creatinine, eGFR, UACR, Hb, Iron, Ferritin, OT/SGOT, PT/SGPT, ALP, Calcium, Albumin, GTT, Insulin, C-Peptide, HOMA-IR, HOMA-Beta, etc. IMPORTANT: If the same test appears multiple times (e.g. HbA1c in OBSERVATIONS and in a follow-up section), extract EACH occurrence separately with its own date. The OBSERVATIONS section (no date header) should have date: null — do NOT skip it because a later follow-up has the same test. Extract every numeric lab value you see.
+- For medications: parse CURRENT/TREATMENT medications with name, dose, frequency (OD/BD/TDS etc), timing (before/after food etc), route (Oral/SC/IV/IM etc). Set is_new=true if it's a new addition. Also look for medications where dose has CHANGED (e.g. "NMZ 10 to NMZ 20") — the OLD dose should be in previous_medications. For sliding scale insulin (different doses per meal), extract as ONE entry with dose as the range (e.g. "5-9 units") and frequency as "Thrice daily". Do NOT create separate entries per meal. Do NOT extract diagnoses, lab findings, clinical events (GMI, hypoglycemia, SGLT2 inhibitor-related events) or monitoring instructions as medications — only actual drugs/injections/ointments.
 - For previous_medications: extract from "PREVIOUS MEDICATION" section + ANY medicines with dose/frequency changes. Capture: old/previous dose, medication name, status ("stopped" or "changed"), and reason (e.g. "side effect", "dose increased from 10mg to 20mg", "replaced by", "discontinued"). If dose changed (e.g. NMZ 10 became NMZ 20), extract NMZ 10 as previous_medication with reason "dose changed".
 - For symptoms: extract ALL chief complaints, presenting complaints, and reported symptoms (e.g. fatigue, weight gain, tremor, palpitations, pain). Each should have name, duration (e.g. "2 months", "since last visit"), and severity (mild/moderate/severe) if mentioned. [] if none found.
-- For diagnoses: extract EACH condition separately. Include: PRIMARY diagnosis (e.g. Graves' Disease), clinical findings (tremor +, dermopathy, goitre), scan/test findings (diffuse toxic goitre, nodules, uptake), and chief complaints (weight gain, fatigue) as separate diagnoses. Each should have name, details (severity/specifics), and since (duration if mentioned).
+- For diagnoses: extract ONLY conditions the patient CURRENTLY HAS. Rules:
+  • A "+" suffix or "+" marker means PRESENT — include it. Strip the "+" from the name (e.g. "NEUROPATHY+" → name: "NEUROPATHY"). "MASLD +" → include as "MASLD".
+  • A "-" suffix means ABSENT — skip it entirely (e.g. "CAD-", "CVA-", "PVD-" → skip all). Also skip if details say "absent", "negative", "no history of", "ruled out", "(-)", "not present".
+  • Conditions grouped together in a list where others have "-" (e.g. "CAD-, CVA-, PVD") — if a condition has no "+" or "-", but is listed alongside absent "-" conditions in that same comma-separated group, skip the whole group.
+  • Conditions with NO sign that appear in a dedicated DIAGNOSIS or IMPRESSION section on their own line or with other present conditions — treat as PRESENT (e.g. "RETINOPATHY", "HYPERTENSION", "DUAL ADIPOSITY" in a diagnosis list).
+  • "AOO-" or "AOO" means "Age of Onset" — it is NOT an absent marker. Do NOT skip the diagnosis it belongs to.
+  • For conditions with parenthetical details like "NEPHROPATHY(G1A?)" or "TYPE 2 DM (2025)", extract: name without parentheses (e.g. "NEPHROPATHY"), details = the parenthetical content (e.g. "G1A?"). For "TYPE 2 DM (2025), AOO- 49YRS" → name: "Type 2 DM", details: "Age of onset 49 years".
+  • Extract ALL diagnoses from the DIAGNOSIS section including: Type 2 DM, MASLD, DUAL ADIPOSITY, NEUROPATHY, NEPHROPATHY, RETINOPATHY, HYPERTENSION, and any other conditions explicitly listed as present or marked "+".
 - For vitals: extract HT/WT/BMI/BP/WC/BF if mentioned
 - For lifestyle: SPLIT into separate fields. Set to null if not found — do NOT put medication instructions, monitoring instructions, or follow-up advice here:
   - diet: ONLY calorie/protein/food plan (e.g. "1400 kcal with 60g protein"). Must mention kcal/calories/protein/food. Null if not found
@@ -153,7 +160,7 @@ STRICT Rules:
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: rawText }],
         system: prompt,
       }),

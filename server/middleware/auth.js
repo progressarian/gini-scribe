@@ -34,8 +34,11 @@ const PUBLIC_PATHS = [
   "/api/sync/healthray/today",
 ];
 
+const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/"];
+
 export const requireAuth = (req, res, next) => {
   if (!req.path.startsWith("/api/") || PUBLIC_PATHS.includes(req.path)) return next();
+  if (PUBLIC_PREFIXES.some((p) => req.path.startsWith(p))) return next();
   if (!req.doctor) return res.status(401).json({ error: "Authentication required" });
   next();
 };

@@ -1,0 +1,348 @@
+{
+  "patient": {
+    "id": 3600,
+    "name": "Mrs. Rita Sangaari",
+    "phone": "9814177114",
+    "file_no": "P_178506"
+  },
+  "activeMedsFromVisitQuery": [
+    {
+      "id": 1169787,
+      "name": "Insulin Lantus",
+      "dose": "8 units initially, increase by 1 unit daily",
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:234347328"
+    },
+    {
+      "id": 1169786,
+      "name": "Insulin Fisap",
+      "dose": "Variable: 5-9 units",
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:234347328"
+    },
+    {
+      "id": 508827,
+      "name": "Insulin Aspart (Fisap)",
+      "dose": "5 unit",
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:234347328"
+    },
+    {
+      "id": 502127,
+      "name": "Atorvastatin",
+      "dose": "20 mg",
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:232750068"
+    },
+    {
+      "id": 502126,
+      "name": "Insulin Glargine (Lantus)",
+      "dose": "10 units initially, increase by 1 unit daily till FBG is 100",
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:232750068"
+    },
+    {
+      "id": 502125,
+      "name": "Insulin Fast-Acting (FiasPS/C)",
+      "dose": "5-9 units",
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:232750068"
+    },
+    {
+      "id": 500735,
+      "name": "SGLT2 inhibitor",
+      "dose": null,
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:232587150"
+    },
+    {
+      "id": 500734,
+      "name": "GMI",
+      "dose": null,
+      "is_active": true,
+      "consultation_id": null,
+      "source": "healthray",
+      "notes": "healthray:232587150"
+    }
+  ],
+  "activeMedsCount": 8,
+  "appointments": [
+    {
+      "id": 27755,
+      "healthray_id": null,
+      "date": "2026-04-08",
+      "status": "scheduled",
+      "has_clinical_notes": false,
+      "clinical_notes_length": 0,
+      "clinical_notes_preview": null,
+      "diagnoses_count": 0,
+      "diagnoses": [],
+      "medications_count": 0,
+      "medications": [],
+      "labs_count": 0,
+      "labs": [],
+      "advice": null,
+      "investigations": [],
+      "follow_up": null,
+      "previous_medications_count": 0,
+      "previous_medications": []
+    },
+    {
+      "id": 1682,
+      "healthray_id": null,
+      "date": "2026-04-06",
+      "status": "scheduled",
+      "has_clinical_notes": false,
+      "clinical_notes_length": 0,
+      "clinical_notes_preview": null,
+      "diagnoses_count": 0,
+      "diagnoses": [],
+      "medications_count": 0,
+      "medications": [],
+      "labs_count": 0,
+      "labs": [],
+      "advice": null,
+      "investigations": [],
+      "follow_up": null,
+      "previous_medications_count": 0,
+      "previous_medications": []
+    },
+    {
+      "id": 24734,
+      "healthray_id": "234347328",
+      "date": "2026-02-18",
+      "status": "completed",
+      "has_clinical_notes": true,
+      "clinical_notes_length": 1436,
+      "clinical_notes_preview": "Diagnosis\nLADA (SINCE 2023 ,AOO:68YRS)\r\nNON OBESE\r\nNEUROPATHY-,NEPHROPATHY(G2A1) RETINOPATHY\r\nCAD-,CVA-,PVD\r\nGMI DENOVO +SGLT2\r\n\r\n\r\n\r\nFOLLOW UP ON 18/2/26\r\nEPISODES OF HYPOGLYCEMIA +\r\n\r\n\r\n70 YR FEMALE DIAGNOSED CASE OF TYPE 2 DM SINCE 2 YR\r\n2 YR BACK PATIENT HAD GMI\r\nDONE WITH ROUTINE INVESTIGATIONS\r\nIBG\r\nSTARTED ORALLY\r\nSHE LOST 25 KG IN 2 YRS\r\nIDEAL BODY WEIGHT 75KG\r\nC/O FLUCTUATING BLOOD GLUCOSE PROFILE\r\nPAST H/O LEFT COLLES FRACTURE\r\nDUE TO FALL FROM HER OWN HEIGHT 7 YRS BACK\r\nFAMILY H/O F H",
+      "diagnoses_count": 5,
+      "diagnoses": [
+        { "name": "LADA", "since": "2023", "details": "Age of onset 68 years" },
+        { "name": "Type 2 DM", "since": "2 years", "details": null },
+        { "name": "Nephropathy", "since": null, "details": "G2A1" },
+        { "name": "Retinopathy", "since": null, "details": null },
+        { "name": "Small left renal calculus", "since": null, "details": null }
+      ],
+      "medications_count": 0,
+      "medications": [],
+      "labs_count": 17,
+      "labs": [
+        { "date": null, "test": "FBG", "unit": "mg/dL", "value": 122 },
+        { "date": null, "test": "PP", "unit": "mg/dL", "value": 302 },
+        { "date": null, "test": "HbA1c", "unit": "%", "value": 11.6 },
+        { "date": null, "test": "Creatinine", "unit": "mg/dL", "value": 0.82 },
+        { "date": null, "test": "eGFR", "unit": "mL/min/1.73m²", "value": 78 },
+        { "date": null, "test": "UACR", "unit": "mg/g", "value": 8.2 },
+        { "date": null, "test": "Triglycerides", "unit": "mg/dL", "value": 66.9 },
+        { "date": null, "test": "LDL", "unit": "mg/dL", "value": 117.3 },
+        { "date": null, "test": "Non-HDL", "unit": "mg/dL", "value": 130.4 },
+        { "date": null, "test": "Hemoglobin", "unit": "g/dL", "value": 11.8 },
+        { "date": null, "test": "Iron", "unit": "µg/dL", "value": 84.8 },
+        { "date": null, "test": "Ferritin", "unit": "ng/mL", "value": 196 },
+        { "date": "2026-01-31", "test": "FBG", "unit": "mg/dL", "value": 299.1 },
+        { "date": "2026-01-31", "test": "FPI", "unit": "µU/mL", "value": 0.9 },
+        { "date": "2026-01-31", "test": "C-Peptide", "unit": "ng/mL", "value": 0.5 },
+        { "date": "2026-01-31", "test": "HOMA-IR", "unit": null, "value": 0.6 },
+        { "date": "2026-01-31", "test": "HOMA-Beta", "unit": "%", "value": 1.4 }
+      ],
+      "advice": "Insulin aspart dosing adjusted based on blood glucose profile: 80-130 mg/dL: 5 units; 131-160 mg/dL: 6 units; 161-190 mg/dL: 7 units; 191-220 mg/dL: 8 units; >221 mg/dL: 9 units. Increase Lantus dose by 1 unit daily until FBG reaches 100 mg/dL. Monitor for hypoglycemic episodes.",
+      "investigations": [
+        { "name": "GAD 65, IAA, IA-2 autoantibodies", "urgency": "routine" },
+        { "name": "Tissue Transglutaminase IgA (TTG IgA)", "urgency": "routine" }
+      ],
+      "follow_up": {
+        "date": "2026-02-18",
+        "notes": "Episodes of hypoglycemia reported",
+        "timing": null
+      },
+      "previous_medications_count": 0,
+      "previous_medications": []
+    },
+    {
+      "id": 23684,
+      "healthray_id": "232750068",
+      "date": "2026-01-31",
+      "status": "completed",
+      "has_clinical_notes": true,
+      "clinical_notes_length": 1823,
+      "clinical_notes_preview": "Diagnosis\nLADA  (SINCE 2023 ,AOO:68YRS)\r\nNON OBESE \r\nNEUROPATHY-,NEPHROPATHY(G2A1) RETINOPATHY\r\nCAD-,CVA-,PVD\r\nGMI DENOVO +SGLT2 \r\n\r\n\r\n70 YR FEMALE DIAGNOSED CASE OF TYPE 2 DM SINCE 2 YR \r\n\r\n2 YR BACK PATIENT HAD GMI \r\nDONE WITH ROUTINE INVESTIGATIONS\r\nIBG \r\nSTARTED ORALLY\r\nSHE LOST 25 KG IN 2 YRS \r\nIDEAL BODY WEIGHT 75KG \r\n\r\nC/O FLUCTUATING BLOOD GLUCOSE PROFILE \r\n\r\nPAST H/O LEFT COLLES FRACTURE \r\nDUE TO FALL FROM HER OWN HEIGHT 7 YRS BACK \r\nFAMILY H/O F HAD DM \r\nCOVID NO\r\nVACCINATION DONE \r\n\r\n",
+      "diagnoses_count": 10,
+      "diagnoses": [
+        { "name": "LADA", "since": "2023", "details": "Latent Autoimmune Diabetes in Adults" },
+        { "name": "Type 2 Diabetes Mellitus", "since": "2 years ago", "details": "Non-obese" },
+        { "name": "Diabetic Nephropathy", "since": null, "details": "Stage G2A1" },
+        { "name": "Diabetic Retinopathy", "since": null, "details": null },
+        { "name": "Neuropathy", "since": null, "details": "Negative" },
+        { "name": "CAD", "since": null, "details": "Negative" },
+        { "name": "CVA", "since": null, "details": "Negative" },
+        { "name": "PVD", "since": null, "details": "Negative" },
+        {
+          "name": "Left Colles Fracture",
+          "since": "7 years ago",
+          "details": "Due to fall from own height"
+        },
+        { "name": "Small left renal calculus", "since": null, "details": null }
+      ],
+      "medications_count": 4,
+      "medications": [
+        {
+          "dose": "5-9 units",
+          "name": "Insulin Fast-Acting (FiasPS/C)",
+          "route": "Subcutaneous",
+          "is_new": true,
+          "timing": "15 minutes before breakfast, lunch, and dinner with sliding scale based on blood glucose",
+          "frequency": "Thrice daily"
+        },
+        {
+          "dose": "10 units initially, increase by 1 unit daily till FBG is 100",
+          "name": "Insulin Glargine (Lantus)",
+          "route": "Subcutaneous",
+          "is_new": true,
+          "timing": "10 PM",
+          "frequency": "Once daily"
+        },
+        {
+          "dose": "20 mg",
+          "name": "Atorvastatin",
+          "route": "Oral",
+          "is_new": false,
+          "timing": "10 PM",
+          "frequency": "Once daily"
+        },
+        {
+          "dose": null,
+          "name": "Candid B Ointment",
+          "route": "Topical",
+          "is_new": false,
+          "timing": "Local application",
+          "frequency": null
+        }
+      ],
+      "labs_count": 17,
+      "labs": [
+        { "date": null, "test": "FBG", "unit": "mg/dL", "value": 122 },
+        { "date": null, "test": "PP", "unit": "mg/dL", "value": 302 },
+        { "date": null, "test": "HbA1c", "unit": "%", "value": 11.6 },
+        { "date": null, "test": "Creatinine", "unit": "mg/dL", "value": 0.82 },
+        { "date": null, "test": "eGFR", "unit": "mL/min/1.73m²", "value": 78 },
+        { "date": null, "test": "UACR", "unit": "mg/g", "value": 8.2 },
+        { "date": null, "test": "Triglycerides", "unit": "mg/dL", "value": 66.9 },
+        { "date": null, "test": "LDL", "unit": "mg/dL", "value": 117.3 },
+        { "date": null, "test": "Non-HDL", "unit": "mg/dL", "value": 130.4 },
+        { "date": null, "test": "Hemoglobin", "unit": "g/dL", "value": 11.8 },
+        { "date": null, "test": "Iron", "unit": "µg/dL", "value": 84.8 },
+        { "date": null, "test": "Ferritin", "unit": "ng/mL", "value": 196 },
+        { "date": "2026-01-31", "test": "FBG", "unit": "mg/dL", "value": 299.1 },
+        { "date": "2026-01-31", "test": "Fasting Proinsulin", "unit": null, "value": 0.9 },
+        { "date": "2026-01-31", "test": "C-Peptide", "unit": null, "value": 0.5 },
+        { "date": "2026-01-31", "test": "HOMA-IR", "unit": null, "value": 0.6 },
+        { "date": "2026-01-31", "test": "HOMA-Beta", "unit": "%", "value": 1.4 }
+      ],
+      "advice": "Inject rapid-acting insulin 5-9 units thrice daily 15 minutes before meals using sliding scale based on blood glucose levels. Increase Lantus insulin dose by 1 unit every day until fasting blood glucose reaches 100 mg/dL. Monitor fasting blood glucose and postprandial glucose. Titrate insulin doses based on blood glucose profile.",
+      "investigations": [
+        { "name": "GAD 65 antibody", "urgency": "routine" },
+        { "name": "IAA (Insulin Autoantibody)", "urgency": "routine" },
+        { "name": "IA-2 antibody", "urgency": "routine" },
+        { "name": "TTG IgA", "urgency": "routine" }
+      ],
+      "follow_up": {
+        "date": "2026-01-31",
+        "notes": "Follow up with FBG and PP measurements",
+        "timing": null
+      },
+      "previous_medications_count": 0,
+      "previous_medications": []
+    },
+    {
+      "id": 23448,
+      "healthray_id": "232587150",
+      "date": "2026-01-29",
+      "status": "completed",
+      "has_clinical_notes": true,
+      "clinical_notes_length": 1027,
+      "clinical_notes_preview": "Diagnosis\n?LADA  (SINCE 2023 ,AOO:68YRS)\r\nNON OBESE \r\nNEUROPATHY-,NEPHROPATHY(G2A1) RETINOPATHY\r\nCAD-,CVA-,PVD\r\nGMI DENOVO +SGLT2 \r\n\r\n\r\n70 YR FEMALE DIAGNOSED CASE OF TYPE 2 DM SINCE 2 YR \r\n\r\n2 YR BACK PATIENT HAD GMI \r\nDONE WITH ROUTINE INVESTIGATIONS\r\nIBG \r\nSTARTED ORALLY\r\nSHE LOST 25 KG IN 2 YRS \r\nIDEAL BODY WEIGHT 75KG \r\n\r\nC/O FLUCTUATING BLOOD GLUCOSE PROFILE \r\n\r\nPAST H/O LEFT COLLES FRACTURE \r\nDUE TO FALL FROM HER OWN HEIGHT 7 YRS BACK \r\nFAMILY H/O F HAD DM \r\nCOVID NO\r\nVACCINATION DONE \r\n\r",
+      "diagnoses_count": 9,
+      "diagnoses": [
+        { "name": "LADA", "since": "2023", "details": "De novo GMI + SGLT2" },
+        { "name": "Type 2 Diabetes Mellitus", "since": "2 years", "details": "Non obese" },
+        { "name": "Neuropathy", "since": null, "details": "Negative" },
+        { "name": "Nephropathy", "since": null, "details": "G2A1" },
+        { "name": "Retinopathy", "since": null, "details": null },
+        { "name": "CAD", "since": null, "details": "Negative" },
+        { "name": "CVA", "since": null, "details": "Negative" },
+        { "name": "PVD", "since": null, "details": "Negative" },
+        {
+          "name": "Left Colles Fracture",
+          "since": "7 years",
+          "details": "Due to fall from own height"
+        }
+      ],
+      "medications_count": 2,
+      "medications": [
+        {
+          "dose": null,
+          "name": "GMI",
+          "route": "Oral",
+          "is_new": true,
+          "timing": null,
+          "frequency": "OD"
+        },
+        {
+          "dose": null,
+          "name": "SGLT2 inhibitor",
+          "route": "Oral",
+          "is_new": true,
+          "timing": null,
+          "frequency": null
+        }
+      ],
+      "labs_count": 12,
+      "labs": [
+        { "date": null, "test": "FBG", "unit": "mg/dL", "value": 122 },
+        { "date": null, "test": "PP", "unit": "mg/dL", "value": 302 },
+        { "date": null, "test": "HbA1c", "unit": "%", "value": 11.6 },
+        { "date": null, "test": "Creatinine", "unit": "mg/dL", "value": 0.82 },
+        { "date": null, "test": "eGFR", "unit": "mL/min/1.73m2", "value": 78 },
+        { "date": null, "test": "UACR", "unit": "mg/g", "value": 8.2 },
+        { "date": null, "test": "Triglycerides", "unit": "mg/dL", "value": 66.9 },
+        { "date": null, "test": "LDL", "unit": "mg/dL", "value": 117.3 },
+        { "date": null, "test": "Non-HDL", "unit": "mg/dL", "value": 130.4 },
+        { "date": null, "test": "Hemoglobin", "unit": "g/dL", "value": 11.8 },
+        { "date": null, "test": "Iron", "unit": "mcg/dL", "value": 84.8 },
+        { "date": null, "test": "Ferritin", "unit": "ng/mL", "value": 196 }
+      ],
+      "advice": "Omit antidiabetic medication for 24 hours prior to fasting sample collection",
+      "investigations": [
+        { "name": "USG Whole Abdomen for Pancreas", "urgency": "routine" },
+        { "test": "TTG IgA", "urgency": "routine" },
+        { "test": "FBG", "urgency": "next_visit" },
+        { "test": "FPI", "urgency": "next_visit" },
+        { "test": "C-peptide", "urgency": "next_visit" },
+        { "test": "GAD 65", "urgency": "next_visit" },
+        { "test": "IAA", "urgency": "next_visit" },
+        { "test": "IA-2", "urgency": "next_visit" }
+      ],
+      "follow_up": {
+        "date": null,
+        "notes": "Fasting sample at GINI Health 8:30 AM after omission of antidiabetic medication for 24 hours for FBG, FPI, C-peptide, GAD 65, IAA, IA-2",
+        "timing": null
+      },
+      "previous_medications_count": 0,
+      "previous_medications": []
+    }
+  ]
+}

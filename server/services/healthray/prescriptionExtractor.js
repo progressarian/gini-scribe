@@ -23,9 +23,9 @@ function detectMediaType(buffer) {
   // PDF: starts with %PDF (25 50 44 46)
   if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "application/pdf";
   // JPEG: FF D8 FF
-  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return "image/jpeg";
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
   // PNG: 89 50 4E 47 0D 0A 1A 0A
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return "image/png";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
   // GIF: GIF8
   if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "image/gif";
   // WebP: RIFF....WEBP
@@ -40,7 +40,10 @@ function buildClaudeBlock(base64Data, buffer) {
   const mediaType = detectMediaType(buffer);
 
   if (mediaType === "application/pdf") {
-    return { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } };
+    return {
+      type: "document",
+      source: { type: "base64", media_type: "application/pdf", data: base64Data },
+    };
   }
   return { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } };
 }
@@ -75,13 +78,12 @@ export async function extractFromFile(base64, buffer) {
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 2000,
-      messages: [{
-        role: "user",
-        content: [
-          buildClaudeBlock(base64, buffer),
-          { type: "text", text: EXTRACT_PROMPT },
-        ],
-      }],
+      messages: [
+        {
+          role: "user",
+          content: [buildClaudeBlock(base64, buffer), { type: "text", text: EXTRACT_PROMPT }],
+        },
+      ],
     }),
   });
 
