@@ -16,9 +16,11 @@ const pool = new pg.Pool({
   connectionString: finalDbUrl,
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 20000,
-  idleTimeoutMillis: 30000,
+  idleTimeoutMillis: 20000, // close idle connections before Railway's 30s server timeout
   max: 15,
   allowExitOnIdle: true,
+  keepAlive: true, // send TCP keepalives — prevents Railway from closing idle connections
+  keepAliveInitialDelayMillis: 10000,
 });
 
 // Log unexpected pool errors (prevents unhandled rejection crashes)

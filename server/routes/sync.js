@@ -11,6 +11,7 @@ import {
   runLabSync,
   getLabSyncStatus,
   backfillLabRanges,
+  runDailyOpdBackfill,
 } from "../services/cron/index.js";
 import { retryPendingLabCases } from "../services/cron/labSync.js";
 import { labLogin } from "../services/lab/labHealthrayApi.js";
@@ -36,6 +37,19 @@ router.post("/sync/healthray/full", async (req, res) => {
     res.json({ success: true, ...result });
   } catch (e) {
     handleError(res, e, "HealthRay full sync");
+  }
+});
+
+// Manual trigger: daily OPD re-parse (fixes diagnoses + medicines JSONB and normalized tables)
+// POST /api/sync/opd/daily-backfill?date=2026-04-10  (defaults to today)
+router.post("/sync/opd/daily-backfill", async (req, res) => {
+  try {
+    const date = req.query.date || req.body.date || null;
+    // Run in background — responds immediately
+    res.json({ success: true, started: true, date: date || "today" });
+    runDailyOpdBackfill(date).catch((e) => error("Daily OPD Backfill", e.message));
+  } catch (e) {
+    handleError(res, e, "Daily OPD backfill");
   }
 });
 
@@ -164,6 +178,26 @@ router.get("/sync/debug/meds/:fileNo", async (req, res) => {
 
 // ── Debug: inspect lab_results table for a patient ───────────────────────────
 // GET /api/sync/debug/labs/:fileNo
+router.get("/sync/debug/diagnoses/:fileNo", async (req, res) => {
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id, name FROM patients WHERE file_no = $1 LIMIT 1`,
+      [req.params.fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
+    const pid = patients[0].id;
+    const { rows } = await pool.query(
+      `SELECT diagnosis_id, label, status, is_active, notes, created_at, updated_at
+       FROM diagnoses WHERE patient_id = $1
+       ORDER BY is_active DESC, updated_at DESC`,
+      [pid],
+    );
+    res.json({ patient: { id: pid, name: patients[0].name }, total: rows.length, diagnoses: rows });
+  } catch (e) {
+    handleError(res, e, "Debug diagnoses");
+  }
+});
+
 router.get("/sync/debug/labs/:fileNo", async (req, res) => {
   try {
     const { rows: patients } = await pool.query(
@@ -1473,6 +1507,135 @@ router.post("/sync/lab/backfill-ranges", async (req, res) => {
   }
 });
 
+// Debug: inspect raw patient data from stored lab cases
+// GET /api/sync/lab/debug-cases?limit=5
+router.get("/sync/lab/debug-cases", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT case_no, patient_case_no, patient_id,
+              raw_list_json->'patient' AS patient_json,
+              results_synced, case_date
+       FROM lab_cases ORDER BY fetched_at DESC LIMIT 10`,
+    );
+    res.json({ total: rows.length, cases: rows });
+  } catch (e) {
+    handleError(res, e, "Lab debug cases");
+  }
+});
+
+// Backfill: match lab_cases with null patient_id → patients table, then re-process results
+// POST /api/sync/lab/backfill-patient-match
+const labPatientMatchStatus = {
+  running: false,
+  matched: 0,
+  reprocessed: 0,
+  written: 0,
+  errors: 0,
+  done: false,
+};
+router.get("/sync/lab/backfill-patient-match/status", (_req, res) =>
+  res.json(labPatientMatchStatus),
+);
+router.post("/sync/lab/backfill-patient-match", async (req, res) => {
+  if (labPatientMatchStatus.running)
+    return res.status(409).json({ error: "Already running", status: labPatientMatchStatus });
+
+  // Step 1: update patient_id on unmatched cases where we can now find the patient
+  try {
+    const { rowCount: matched } = await pool.query(
+      `UPDATE lab_cases lc
+       SET patient_id = p.id
+       FROM patients p
+       WHERE lc.patient_id IS NULL
+         AND p.file_no = lc.raw_list_json->'patient'->>'healthray_uid'`,
+    );
+    labPatientMatchStatus.matched = matched;
+    log("Lab Backfill", `Matched ${matched} previously-unmatched lab cases to patients`);
+  } catch (e) {
+    return handleError(res, e, "Lab patient match backfill");
+  }
+
+  // Step 2: find all cases with patient_id set but no lab_results written (check via absence in lab_results)
+  const { rows: toReprocess } = await pool.query(
+    `SELECT lc.id, lc.case_no, lc.case_uid, lc.lab_case_id, lc.lab_user_id,
+            lc.patient_id, lc.appointment_id, lc.case_date, lc.raw_detail_json
+     FROM lab_cases lc
+     WHERE lc.patient_id IS NOT NULL
+       AND lc.raw_detail_json IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM lab_results lr
+         WHERE lr.patient_id = lc.patient_id
+           AND lr.source = 'lab_healthray'
+           AND lr.test_date::date = lc.case_date::date
+       )
+     ORDER BY lc.case_date DESC`,
+  );
+
+  Object.assign(labPatientMatchStatus, {
+    running: true,
+    reprocessed: 0,
+    written: 0,
+    errors: 0,
+    done: false,
+  });
+
+  // Step 3: reset results_synced=false for matched cases with no lab_healthray results
+  // so the retry job re-fetches fresh results from the API
+  const { rowCount: reset } = await pool.query(
+    `UPDATE lab_cases lc SET results_synced = FALSE
+     WHERE lc.patient_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM lab_results lr
+         WHERE lr.patient_id = lc.patient_id
+           AND lr.source = 'lab_healthray'
+           AND lr.test_date::date = lc.case_date::date
+       )`,
+  );
+  labPatientMatchStatus.reset = reset;
+  log("Lab Backfill", `Reset results_synced=false for ${reset} cases (will re-fetch from API)`);
+
+  res.json({
+    success: true,
+    matched: labPatientMatchStatus.matched,
+    toReprocess: toReprocess.length,
+    reset,
+    statusUrl: "/api/sync/lab/backfill-patient-match/status",
+  });
+
+  (async () => {
+    const { syncLabCaseResults } = await import("../services/lab/db.js");
+    const { parseLabCaseResults } = await import("../services/lab/labHealthrayParser.js");
+
+    for (const lc of toReprocess) {
+      try {
+        const results = parseLabCaseResults(lc.raw_detail_json);
+        const written = await syncLabCaseResults(
+          lc.patient_id,
+          lc.appointment_id,
+          lc.case_date,
+          results,
+        );
+        labPatientMatchStatus.written += written;
+        labPatientMatchStatus.reprocessed++;
+        if (written > 0)
+          log(
+            "Lab Backfill",
+            `Case ${lc.case_no} → patient ${lc.patient_id}: ${written} results written`,
+          );
+      } catch (e) {
+        labPatientMatchStatus.errors++;
+        log("Lab Backfill", `Case ${lc.case_no} error: ${e.message}`);
+      }
+    }
+    labPatientMatchStatus.running = false;
+    labPatientMatchStatus.done = true;
+    log(
+      "Lab Backfill",
+      `Done — ${labPatientMatchStatus.reprocessed} cases, ${labPatientMatchStatus.written} results written, ${labPatientMatchStatus.errors} errors`,
+    );
+  })();
+});
+
 // Manual token refresh: POST /api/sync/lab/refresh-auth
 router.post("/sync/lab/refresh-auth", async (_req, res) => {
   try {
@@ -2353,6 +2516,389 @@ router.post("/sync/debug/fix-all", async (req, res) => {
   } catch (e) {
     await pool.query("ROLLBACK");
     res.status(500).json({ error: e.message, detail: e.detail || null });
+  }
+});
+
+// ── Bulk medication dedup: keep newest row per canonical name, stop older dupes ─
+// POST /api/sync/audit/dedup-meds
+// Pure SQL — no AI calls, runs in seconds. Safe to re-run.
+const dedupMedsStatus = { running: false, patients: 0, stopped: 0, startedAt: null };
+
+router.get("/sync/audit/dedup-meds/status", (_req, res) => {
+  const elapsed = dedupMedsStatus.startedAt
+    ? Math.round((Date.now() - dedupMedsStatus.startedAt) / 1000)
+    : 0;
+  res.json({ ...dedupMedsStatus, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/audit/dedup-meds", async (req, res) => {
+  if (dedupMedsStatus.running)
+    return res.status(409).json({ error: "Already running", status: dedupMedsStatus });
+
+  try {
+    Object.assign(dedupMedsStatus, {
+      running: true,
+      patients: 0,
+      stopped: 0,
+      startedAt: Date.now(),
+    });
+
+    // JS mirror of normalizeMedName() in db.js
+    const normalizeName = (name) =>
+      (name || "")
+        .replace(
+          /^(tab\.?\s+|tablet\s+|inj\.?\s+|injection\s+|cap\.?\s+|capsule\s+|syp\.?\s+|syrup\s+|drops?\s+|oint\.?\s+|ointment\s+|gel\s+|cream\s+|spray\s+|sachet\s+|pwd\.?\s+|powder\s+)/i,
+          "",
+        )
+        .replace(/\s*\([\d\s+./mg%KkUuIL]+\)\s*$/i, "")
+        .trim()
+        .toUpperCase();
+
+    // Step 1: rows WITH pharmacy_match — DELETE older dupes, keep newest per UPPER(pharmacy_match).
+    // DELETE (not mark inactive) to avoid unique constraint on inactive meds.
+    const r1 = await pool.query(
+      `DELETE FROM medications
+       WHERE is_active = true AND pharmacy_match IS NOT NULL
+         AND id NOT IN (
+           SELECT DISTINCT ON (patient_id, UPPER(pharmacy_match)) id
+           FROM medications
+           WHERE is_active = true AND pharmacy_match IS NOT NULL
+           ORDER BY patient_id, UPPER(pharmacy_match), started_date DESC NULLS LAST, created_at DESC
+         )
+       RETURNING patient_id`,
+    );
+
+    // Steps 2 & 3: fetch all active meds with null pharmacy_match, normalise in JS,
+    // keep newest per (patient_id, canonicalName), collect IDs to delete.
+    const { rows: nullMeds } = await pool.query(
+      `SELECT id, patient_id, name, started_date, created_at
+       FROM medications
+       WHERE is_active = true AND pharmacy_match IS NULL
+       ORDER BY patient_id, started_date DESC NULLS LAST, created_at DESC`,
+    );
+
+    // Also fetch active meds WITH pharmacy_match to detect old-null-match duplicates
+    const { rows: canonicalMeds } = await pool.query(
+      `SELECT patient_id, UPPER(pharmacy_match) AS canonical
+       FROM medications
+       WHERE is_active = true AND pharmacy_match IS NOT NULL`,
+    );
+    const canonicalSet = new Set(canonicalMeds.map((r) => `${r.patient_id}::${r.canonical}`));
+
+    // For null-pm rows: group by (patient_id, normalised_name), keep first (newest)
+    const seen = new Set();
+    const toDelete = [];
+    for (const m of nullMeds) {
+      const canonical = normalizeName(m.name);
+      if (!canonical) continue;
+      const canonKey = `${m.patient_id}::${canonical}`;
+      if (canonicalSet.has(canonKey) || seen.has(canonKey)) {
+        toDelete.push(m.id);
+      } else {
+        seen.add(canonKey);
+      }
+    }
+
+    let r2r3Count = 0;
+    if (toDelete.length > 0) {
+      for (let i = 0; i < toDelete.length; i += 500) {
+        const chunk = toDelete.slice(i, i + 500);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(",");
+        const result = await pool.query(
+          `DELETE FROM medications WHERE id IN (${placeholders})`,
+          chunk,
+        );
+        r2r3Count += result.rowCount;
+      }
+    }
+
+    const totalDeleted = r1.rowCount + r2r3Count;
+    const affectedPatients = new Set([
+      ...r1.rows.map((r) => r.patient_id),
+      ...nullMeds.filter((m) => toDelete.includes(m.id)).map((m) => m.patient_id),
+    ]).size;
+
+    Object.assign(dedupMedsStatus, {
+      running: false,
+      patients: affectedPatients,
+      stopped: totalDeleted,
+    });
+
+    res.json({
+      success: true,
+      patientsAffected: affectedPatients,
+      medsDeleted: totalDeleted,
+      breakdown: {
+        withPharmacyMatch: r1.rowCount,
+        nullMatchNormalised: r2r3Count,
+      },
+    });
+  } catch (e) {
+    dedupMedsStatus.running = false;
+    handleError(res, e, "Bulk med dedup");
+  }
+});
+
+// ── Patient data audit: find missing diagnoses, missing meds, duplicates ──────
+// GET /api/sync/audit/patients
+// Returns per-patient report of data quality issues across the whole DB.
+// Safe read-only — makes no changes.
+router.get("/sync/audit/patients", async (_req, res) => {
+  try {
+    // 1. Patients with 0 active diagnoses
+    const { rows: noDx } = await pool.query(
+      `SELECT p.id, p.name, p.file_no, p.phone,
+              COUNT(d.id) AS active_dx
+       FROM patients p
+       LEFT JOIN diagnoses d ON d.patient_id = p.id AND d.is_active = true
+       GROUP BY p.id, p.name, p.file_no, p.phone
+       HAVING COUNT(d.id) = 0
+       ORDER BY p.name`,
+    );
+
+    // 2. Appointments with clinical notes but empty diagnoses JSONB
+    //    (root cause: fast-path skip or AI parse failure)
+    const { rows: emptyDxAppts } = await pool.query(
+      `SELECT a.id AS appt_id, a.patient_id, p.name, p.file_no,
+              a.appointment_date,
+              LENGTH(a.healthray_clinical_notes) AS notes_len,
+              jsonb_array_length(COALESCE(a.healthray_diagnoses, '[]'::jsonb)) AS dx_count,
+              jsonb_array_length(COALESCE(a.healthray_medications, '[]'::jsonb)) AS meds_count
+       FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       WHERE a.healthray_clinical_notes IS NOT NULL
+         AND LENGTH(a.healthray_clinical_notes) > 50
+         AND (
+           a.healthray_diagnoses IS NULL
+           OR jsonb_array_length(a.healthray_diagnoses) = 0
+         )
+       ORDER BY a.appointment_date DESC`,
+    );
+
+    // 3. Appointments with clinical notes but empty medications JSONB
+    const { rows: emptyMedAppts } = await pool.query(
+      `SELECT a.id AS appt_id, a.patient_id, p.name, p.file_no,
+              a.appointment_date,
+              LENGTH(a.healthray_clinical_notes) AS notes_len,
+              jsonb_array_length(COALESCE(a.healthray_medications, '[]'::jsonb)) AS meds_count
+       FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       WHERE a.healthray_clinical_notes IS NOT NULL
+         AND LENGTH(a.healthray_clinical_notes) > 50
+         AND (
+           a.healthray_medications IS NULL
+           OR jsonb_array_length(a.healthray_medications) = 0
+         )
+       ORDER BY a.appointment_date DESC`,
+    );
+
+    // 4. Patients with duplicate active meds (same pharmacy_match, multiple rows)
+    const { rows: dupMeds } = await pool.query(
+      `SELECT p.id AS patient_id, p.name, p.file_no,
+              UPPER(COALESCE(m.pharmacy_match, m.name)) AS canonical_name,
+              COUNT(*) AS active_count,
+              STRING_AGG(m.name || ' (id=' || m.id || ')', ', ' ORDER BY m.id) AS rows
+       FROM medications m
+       JOIN patients p ON p.id = m.patient_id
+       WHERE m.is_active = true
+       GROUP BY p.id, p.name, p.file_no, UPPER(COALESCE(m.pharmacy_match, m.name))
+       HAVING COUNT(*) > 1
+       ORDER BY p.name, canonical_name`,
+    );
+
+    // 5. Patients with suspiciously many active meds (>12, likely duplicates)
+    const { rows: manyMeds } = await pool.query(
+      `SELECT p.id, p.name, p.file_no, COUNT(m.id) AS active_med_count
+       FROM patients p
+       JOIN medications m ON m.patient_id = p.id AND m.is_active = true
+       GROUP BY p.id, p.name, p.file_no
+       HAVING COUNT(m.id) > 12
+       ORDER BY active_med_count DESC`,
+    );
+
+    // 6. Patients whose latest appointment JSONB meds don't match active meds count
+    const { rows: mismatch } = await pool.query(
+      `WITH latest_appt AS (
+         SELECT DISTINCT ON (patient_id) patient_id, id AS appt_id, appointment_date,
+                jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb)) AS jsonb_med_count
+         FROM appointments
+         WHERE healthray_clinical_notes IS NOT NULL
+           AND healthray_medications IS NOT NULL
+           AND jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb)) > 0
+         ORDER BY patient_id, appointment_date DESC
+       ),
+       active_count AS (
+         SELECT patient_id, COUNT(*) AS db_med_count
+         FROM medications WHERE is_active = true
+         GROUP BY patient_id
+       )
+       SELECT p.name, p.file_no, la.appt_id, la.appointment_date,
+              la.jsonb_med_count, ac.db_med_count,
+              ABS(la.jsonb_med_count::int - ac.db_med_count::int) AS diff
+       FROM latest_appt la
+       JOIN active_count ac ON ac.patient_id = la.patient_id
+       JOIN patients p ON p.id = la.patient_id
+       WHERE ABS(la.jsonb_med_count::int - ac.db_med_count::int) > 2
+       ORDER BY diff DESC`,
+    );
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      summary: {
+        patientsWithNoDiagnoses: noDx.length,
+        appointmentsWithEmptyDxJsonb: emptyDxAppts.length,
+        appointmentsWithEmptyMedJsonb: emptyMedAppts.length,
+        patientsWithDuplicateMeds: [...new Set(dupMeds.map((r) => r.patient_id))].length,
+        patientsWithTooManyMeds: manyMeds.length,
+        patientsWithMedMismatch: mismatch.length,
+      },
+      issues: {
+        noDiagnoses: noDx,
+        emptyDxAppointments: emptyDxAppts,
+        emptyMedAppointments: emptyMedAppts,
+        duplicateMeds: dupMeds,
+        tooManyMeds: manyMeds,
+        medCountMismatch: mismatch,
+      },
+    });
+  } catch (e) {
+    handleError(res, e, "Patient audit");
+  }
+});
+
+// ── Bulk fix: re-parse all appointments with notes but empty diagnoses/meds JSONB ──
+// POST /api/sync/audit/fix-empty-jsonb
+// Finds every appointment with clinical notes but empty healthray_diagnoses or
+// healthray_medications JSONB and re-runs AI parsing + sync for each one.
+// Runs in background — poll /api/sync/audit/fix-empty-jsonb/status for progress.
+const fixEmptyJsonbStatus = {
+  running: false,
+  total: 0,
+  done: 0,
+  errors: 0,
+  fixed: [],
+  startedAt: null,
+};
+
+router.get("/sync/audit/fix-empty-jsonb/status", (_req, res) => {
+  const elapsed = fixEmptyJsonbStatus.startedAt
+    ? Math.round((Date.now() - fixEmptyJsonbStatus.startedAt) / 1000)
+    : 0;
+  res.json({ ...fixEmptyJsonbStatus, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/audit/fix-empty-jsonb", async (req, res) => {
+  if (fixEmptyJsonbStatus.running)
+    return res.status(409).json({ error: "Already running", status: fixEmptyJsonbStatus });
+
+  // Which mode: "diagnoses" | "medications" | "both" (default)
+  const mode = req.body?.mode || "both";
+
+  const dxCondition =
+    mode === "medications"
+      ? "false"
+      : `(a.healthray_diagnoses IS NULL OR jsonb_array_length(a.healthray_diagnoses) = 0)`;
+  const medCondition =
+    mode === "diagnoses"
+      ? "false"
+      : `(a.healthray_medications IS NULL OR jsonb_array_length(a.healthray_medications) = 0)`;
+
+  try {
+    const { rows: appts } = await pool.query(
+      `SELECT a.id, a.patient_id, a.healthray_id, a.appointment_date, a.healthray_clinical_notes,
+              jsonb_array_length(COALESCE(a.healthray_diagnoses,'[]'::jsonb)) AS dx_count,
+              jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) AS med_count
+       FROM appointments a
+       WHERE a.healthray_clinical_notes IS NOT NULL
+         AND LENGTH(a.healthray_clinical_notes) > 50
+         AND (${dxCondition} OR ${medCondition})
+       ORDER BY a.appointment_date DESC`,
+    );
+
+    Object.assign(fixEmptyJsonbStatus, {
+      running: true,
+      total: appts.length,
+      done: 0,
+      errors: 0,
+      fixed: [],
+      startedAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      message: `Started background fix for ${appts.length} appointments`,
+      statusUrl: "/api/sync/audit/fix-empty-jsonb/status",
+    });
+
+    // Run in background
+    (async () => {
+      for (const appt of appts) {
+        try {
+          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+          if (!parsed) {
+            fixEmptyJsonbStatus.errors++;
+            fixEmptyJsonbStatus.done++;
+            continue;
+          }
+
+          const diagnoses = parsed.diagnoses || [];
+          const medications = parsed.medications || [];
+          const previousMeds = parsed.previous_medications || [];
+
+          // Update JSONB
+          await pool.query(
+            `UPDATE appointments SET
+               healthray_diagnoses  = COALESCE($2::jsonb, healthray_diagnoses),
+               healthray_medications = COALESCE($3::jsonb, healthray_medications),
+               updated_at = NOW()
+             WHERE id = $1`,
+            [
+              appt.id,
+              diagnoses.length ? JSON.stringify(diagnoses) : null,
+              medications.length ? JSON.stringify(medications) : null,
+            ],
+          );
+
+          // Sync to tables
+          if (appt.patient_id) {
+            if ((mode === "both" || mode === "diagnoses") && diagnoses.length)
+              await syncDiagnoses(appt.patient_id, appt.healthray_id, diagnoses);
+            if ((mode === "both" || mode === "medications") && medications.length) {
+              await syncMedications(
+                appt.patient_id,
+                appt.healthray_id,
+                appt.appointment_date,
+                medications,
+              );
+              if (previousMeds.length)
+                await syncStoppedMedications(
+                  appt.patient_id,
+                  appt.healthray_id,
+                  previousMeds,
+                  medications,
+                );
+            }
+          }
+
+          fixEmptyJsonbStatus.fixed.push({
+            apptId: appt.id,
+            patientId: appt.patient_id,
+            date: appt.appointment_date,
+            dxFound: diagnoses.length,
+            medsFound: medications.length,
+          });
+        } catch (e) {
+          fixEmptyJsonbStatus.errors++;
+        }
+        fixEmptyJsonbStatus.done++;
+        // Small delay to avoid overloading AI API
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      fixEmptyJsonbStatus.running = false;
+    })();
+  } catch (e) {
+    fixEmptyJsonbStatus.running = false;
+    handleError(res, e, "Fix empty JSONB");
   }
 });
 

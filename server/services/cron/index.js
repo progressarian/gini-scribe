@@ -4,6 +4,7 @@ import {
   syncWalkingAppointmentsByDate,
   syncDateRange,
   getRangeSyncStatus,
+  runDailyOpdBackfill,
 } from "./healthraySync.js";
 import {
   runLabSync,
@@ -19,6 +20,7 @@ const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
 let intervalId = null;
 let labIntervalId = null;
 let recoveryIntervalId = null;
+let dailyBackfillIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -53,6 +55,22 @@ export function startCronJobs() {
   recoveryIntervalId = setInterval(() => {
     retryPendingLabCases().catch((e) => console.error("[Cron] Lab recovery failed:", e.message));
   }, RECOVERY_INTERVAL_MS);
+
+  // ── Daily OPD re-parse: fixes diagnoses + medicines for today's patients ──
+  // Runs 30 min after startup (lets initial sync settle), then every 24 hours.
+  // Re-parses clinical notes to correct stale "Absent" diagnoses in JSONB.
+  const DAILY_BACKFILL_DELAY_MS = 30 * 60 * 1000; // 30 min initial delay
+  const DAILY_BACKFILL_INTERVAL_MS = 24 * 60 * 60 * 1000; // every 24 hours
+  setTimeout(() => {
+    runDailyOpdBackfill().catch((e) =>
+      console.error("[Cron] Daily OPD backfill failed:", e.message),
+    );
+    dailyBackfillIntervalId = setInterval(() => {
+      runDailyOpdBackfill().catch((e) =>
+        console.error("[Cron] Daily OPD backfill failed:", e.message),
+      );
+    }, DAILY_BACKFILL_INTERVAL_MS);
+  }, DAILY_BACKFILL_DELAY_MS);
 }
 
 export function stopCronJobs() {
@@ -70,6 +88,11 @@ export function stopCronJobs() {
     recoveryIntervalId = null;
     console.log("[Cron] Lab sync stopped");
   }
+  if (dailyBackfillIntervalId) {
+    clearInterval(dailyBackfillIntervalId);
+    dailyBackfillIntervalId = null;
+    console.log("[Cron] Daily OPD backfill stopped");
+  }
 }
 
 // Manual trigger exports
@@ -82,4 +105,5 @@ export {
   runLabSync,
   getLabSyncStatus,
   backfillLabRanges,
+  runDailyOpdBackfill,
 };

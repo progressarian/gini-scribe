@@ -829,9 +829,10 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       .catch(() => {});
   }
 
-  // Step 3: dedup — delete older active healthray rows where pharmacy_match
-  // is now set and duplicates exist (catches near-identical brand/generic names
-  // that slipped through on earlier syncs before pharmacy_match was populated).
+  // Step 3: dedup — remove older active healthray rows that are superseded.
+  // First pass: rows WITH pharmacy_match — keep newest per canonical name.
+  // Second pass: rows WITHOUT pharmacy_match whose name normalises to the same
+  //   value as an existing active row that HAS pharmacy_match (old pre-normalisation rows).
   await pool
     .query(
       `DELETE FROM medications
@@ -840,14 +841,36 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
          AND source = 'healthray'
          AND pharmacy_match IS NOT NULL
          AND id NOT IN (
-           SELECT DISTINCT ON (UPPER(pharmacy_match))
-             id
+           SELECT DISTINCT ON (UPPER(pharmacy_match)) id
            FROM medications
-           WHERE patient_id = $1
-             AND is_active = true
-             AND source = 'healthray'
-             AND pharmacy_match IS NOT NULL
+           WHERE patient_id = $1 AND is_active = true
+             AND source = 'healthray' AND pharmacy_match IS NOT NULL
            ORDER BY UPPER(pharmacy_match), started_date DESC NULLS LAST, created_at DESC
+         )`,
+      [patientId],
+    )
+    .catch(() => {});
+
+  // Remove old null-pharmacy_match rows whose normalised name matches a row that
+  // now has pharmacy_match set (i.e. the canonical version already exists).
+  await pool
+    .query(
+      `DELETE FROM medications old
+       WHERE old.patient_id = $1
+         AND old.is_active = true
+         AND old.source = 'healthray'
+         AND old.pharmacy_match IS NULL
+         AND EXISTS (
+           SELECT 1 FROM medications newer
+           WHERE newer.patient_id = $1
+             AND newer.is_active = true
+             AND newer.pharmacy_match IS NOT NULL
+             AND UPPER(newer.pharmacy_match) = (
+               SELECT UPPER(REGEXP_REPLACE(
+                 REGEXP_REPLACE(old.name,
+                   E'^(tab\\.?\\s+|tablet\\s+|inj\\.?\\s+|injection\\s+|cap\\.?\\s+|capsule\\s+|syp\\.?\\s+|syrup\\s+|drops?\\s+|oint\\.?\\s+|ointment\\s+|gel\\s+|cream\\s+|spray\\s+|sachet\\s+|pwd\\.?\\s+|powder\\s+)', '', 'i'),
+                 E'\\s*\\([\\d\\s+.\\/mg%KkUuIL]+\\)\\s*$', '', 'i'))
+             )
          )`,
       [patientId],
     )

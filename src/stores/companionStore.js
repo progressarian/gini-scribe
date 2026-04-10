@@ -188,7 +188,10 @@ const useCompanionStore = create((set, get) => ({
           : "image/jpeg";
 
       const docBlock = isPdf
-        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: imgData } }
+        ? {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: imgData },
+          }
         : { type: "image", source: { type: "base64", media_type: mediaType, data: imgData } };
 
       const r = await retryPost("/api/ai/complete", {
@@ -301,23 +304,23 @@ const useCompanionStore = create((set, get) => ({
         // Map extracted lab names to vitals fields
         const VITALS_MAP = {
           "blood pressure": { sys: true, dia: true },
-          "bp": { sys: true, dia: true },
-          "systolic": { field: "bp_sys" },
-          "diastolic": { field: "bp_dia" },
-          "pulse": { field: "pulse" },
+          bp: { sys: true, dia: true },
+          systolic: { field: "bp_sys" },
+          diastolic: { field: "bp_dia" },
+          pulse: { field: "pulse" },
           "heart rate": { field: "pulse" },
-          "spo2": { field: "spo2" },
+          spo2: { field: "spo2" },
           "oxygen saturation": { field: "spo2" },
           "spo₂": { field: "spo2" },
-          "weight": { field: "weight" },
+          weight: { field: "weight" },
           "body weight": { field: "weight" },
-          "height": { field: "height" },
-          "temperature": { field: "temp" },
-          "temp": { field: "temp" },
+          height: { field: "height" },
+          temperature: { field: "temp" },
+          temp: { field: "temp" },
           "body temperature": { field: "temp" },
-          "waist": { field: "waist" },
+          waist: { field: "waist" },
           "waist circumference": { field: "waist" },
-          "bmi": { field: "bmi" },
+          bmi: { field: "bmi" },
         };
 
         const vitalsPayload = {};

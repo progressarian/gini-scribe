@@ -109,11 +109,19 @@ router.get("/visit/:patientId", async (req, res) => {
       ),
 
       // 5. Stopped medications (deduplicated — one per drug name, latest wins)
+      //    Exclude stopped rows that have an active counterpart with the same normalised name
+      //    (handles old pharmacy_match=null duplicates from before normalisation was added)
       pool.query(
         `SELECT DISTINCT ON (UPPER(COALESCE(m.pharmacy_match, m.name)))
            m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = false
+           AND NOT EXISTS (
+             SELECT 1 FROM medications am
+             WHERE am.patient_id = m.patient_id
+               AND am.is_active = true
+               AND UPPER(COALESCE(am.pharmacy_match, am.name)) = UPPER(COALESCE(m.pharmacy_match, m.name))
+           )
          ORDER BY UPPER(COALESCE(m.pharmacy_match, m.name)), m.stopped_date DESC NULLS LAST`,
         [pid],
       ),

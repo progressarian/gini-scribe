@@ -57,6 +57,17 @@ export async function healthrayFetch(path, isRetry = false) {
     headers: { Cookie: `connect.sid=${sessionCookie}` },
   });
 
+  // HealthRay returns 200 + HTML when session expires (redirect to login page).
+  // Detect this before trying to parse JSON, otherwise the parse throws and the
+  // retry logic below is never reached.
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("text/html")) {
+    if (isRetry) throw new Error("HealthRay session expired — re-login failed, check credentials");
+    log("Auth", "Session expired (HTML response) — re-logging in");
+    await healthrayLogin();
+    return healthrayFetch(path, true);
+  }
+
   const json = await res.json();
 
   if (json.status === 401 && !isRetry) {

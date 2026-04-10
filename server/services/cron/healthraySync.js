@@ -183,8 +183,11 @@ async function syncAppointment(appt, localDoctorName) {
   const isCompleted = status === "completed";
 
   // ── FAST PATH: completed appointment with notes — only sync new docs ──
-  // Completed appointments won't get new clinical notes, so skip re-enrichment
-  if (existing && isCompleted && existing.healthray_clinical_notes) {
+  // Skip re-enrichment ONLY if diagnoses AND medications were already extracted.
+  // If either JSONB is empty despite having notes, fall through to re-parse.
+  const alreadyEnriched =
+    existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
+  if (existing && isCompleted && existing.healthray_clinical_notes && alreadyEnriched) {
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
     return { skipped: true, id: existing.id };
   }
@@ -222,7 +225,6 @@ async function syncAppointment(appt, localDoctorName) {
         // Parse with AI
         const parsed = await parseClinicalWithAI(rawText);
         clinical.clinicalRaw = rawText;
-        console.log(" parsed.medications", parsed.medications);
         if (parsed) {
           clinical.parsedClinical = parsed;
           clinical.healthrayDiagnoses = parsed.diagnoses || [];
@@ -301,12 +303,16 @@ async function syncAppointment(appt, localDoctorName) {
     healthrayInvestigations: clinical.healthrayInvestigations,
     healthrayFollowUp: clinical.healthrayFollowUp,
   });
-  console.log("clinical.healthrayMedications", clinical.healthrayMedications);
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
-  await syncStoppedMedications(patientId, healthrayId, clinical.healthrayStoppedMedications);
+  await syncStoppedMedications(
+    patientId,
+    healthrayId,
+    clinical.healthrayStoppedMedications,
+    clinical.healthrayMedications,
+  );
   await stopStaleHealthrayMeds(patientId, healthrayId, apptDate);
   await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
@@ -441,6 +447,97 @@ export async function syncDateRange(from, to) {
   })();
 
   return { started: true, total: dates.length };
+}
+
+// ── Daily OPD re-parse: fixes diagnoses + medicines for today's patients ─────
+// Re-parses clinical notes for all patients with today's appointments.
+// Corrects stale "Absent" diagnoses in JSONB and keeps normalized tables current.
+// Runs once per day — does NOT use the fast-path skip.
+import pool from "../../config/db.js";
+
+export async function runDailyOpdBackfill(dateStr) {
+  const date = dateStr || toISTDate(new Date().toISOString());
+  log("Daily Backfill", `Starting OPD re-parse for ${date}...`);
+
+  const { rows: patients } = await pool.query(
+    `SELECT DISTINCT patient_id FROM appointments
+     WHERE appointment_date = $1 AND patient_id IS NOT NULL`,
+    [date],
+  );
+
+  if (!patients.length) {
+    log("Daily Backfill", `No patients found for ${date}`);
+    return { date, total: 0, done: 0, errors: 0 };
+  }
+
+  let done = 0,
+    errors = 0,
+    fixed = 0;
+
+  for (const { patient_id } of patients) {
+    try {
+      // Find latest appointment with clinical notes for this patient
+      const { rows } = await pool.query(
+        `SELECT id, healthray_id, appointment_date, healthray_clinical_notes
+         FROM appointments
+         WHERE patient_id = $1
+           AND healthray_clinical_notes IS NOT NULL
+           AND LENGTH(healthray_clinical_notes) > 20
+         ORDER BY appointment_date DESC LIMIT 1`,
+        [patient_id],
+      );
+
+      if (!rows[0]) {
+        done++;
+        continue;
+      }
+      const appt = rows[0];
+
+      const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+      if (!parsed) {
+        errors++;
+        done++;
+        continue;
+      }
+
+      const diagnoses = parsed.diagnoses || [];
+      const medications = parsed.medications || [];
+      const previousMeds = parsed.previous_medications || [];
+
+      // Update JSONB on appointment
+      await pool.query(
+        `UPDATE appointments
+         SET healthray_diagnoses = $1::jsonb,
+             healthray_medications = $2::jsonb,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [JSON.stringify(diagnoses), JSON.stringify(medications), appt.id],
+      );
+
+      // Sync to normalized tables
+      if (diagnoses.length > 0) {
+        await syncDiagnoses(patient_id, appt.healthray_id, diagnoses);
+      }
+      if (medications.length > 0) {
+        await syncMedications(patient_id, appt.healthray_id, appt.appointment_date, medications);
+        await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
+      }
+      if (previousMeds.length > 0) {
+        await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds, medications);
+      }
+
+      fixed++;
+    } catch (e) {
+      error("Daily Backfill", `Patient ${patient_id}: ${e.message}`);
+      errors++;
+    }
+    done++;
+    // Small delay to avoid connection pressure during long backfill runs
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  log("Daily Backfill", `Done ${date} — ${done} patients, ${fixed} re-parsed, ${errors} errors`);
+  return { date, total: patients.length, done, fixed, errors };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
