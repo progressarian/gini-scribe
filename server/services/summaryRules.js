@@ -56,6 +56,14 @@ function daysSince(dateStr) {
   return Math.round((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
 
+// Freshness window for "current value" rules. Findings whose underlying lab
+// or vital is older than this are NOT surfaced as current alerts — the summary
+// should reflect this visit's data, not historical context.
+const FRESH_DAYS = 3;
+function isFresh(dateStr) {
+  return dateStr != null && daysSince(dateStr) <= FRESH_DAYS;
+}
+
 function hasDx(diagnoses, id, ...labelKeywords) {
   return (diagnoses || []).some(
     (d) =>
@@ -93,8 +101,10 @@ export function runSummaryRules({
   const uacr = numVal(labResults, "UACR");
   const egfr = numVal(labResults, "eGFR");
   const ldl = numVal(labResults, "LDL");
+  const ldlInfo = getLabVal(labResults, "LDL");
   const tshInfo = getLabVal(labResults, "TSH");
   const tsh = tshInfo ? parseFloat(tshInfo.result) : null;
+  const latestVDate = latestV?.recorded_at || latestV?.created_at || null;
 
   const hba1cH = getLabHist(labHistory, "HbA1c");
   const uacrH = getLabHist(labHistory, "UACR");
@@ -114,8 +124,8 @@ export function runSummaryRules({
     }
   }
 
-  // R3: HbA1c critically high (> 10%)
-  if (hba1c != null && hba1c > 10) {
+  // R3: HbA1c critically high (> 10%) — only if measurement is fresh
+  if (hba1c != null && hba1c > 10 && isFresh(hba1cInfo?.date)) {
     red.push({
       id: "r3_hba1c_critical",
       title: `HbA1c ${hba1c}% — critically elevated`,
@@ -124,17 +134,9 @@ export function runSummaryRules({
     });
   }
 
-  // R5: Unreviewed documents uploaded by coordinator
-  const unreviewed = documents.filter((d) => d.reviewed === false);
-  if (unreviewed.length > 0) {
-    const names = unreviewed.map((d) => d.title || d.file_name || "Report").join(", ");
-    red.push({
-      id: "r5_unreviewed_docs",
-      title: `${unreviewed.length} unreviewed report${unreviewed.length > 1 ? "s" : ""} uploaded`,
-      detail: names,
-      action: "Review before prescribing",
-    });
-  }
+  // R5 removed — the summary should surface clinical findings (labs, vitals,
+  // compliance), not document-review todos. "Unreviewed report" alerts belong
+  // in a separate inbox/notification surface, not in the visit summary panel.
 
   // R6: Compliance critically low (< 50%)
   if (prep.medPct != null && prep.medPct < 50) {
@@ -146,8 +148,13 @@ export function runSummaryRules({
     });
   }
 
-  // R7: BP critically elevated and worsening
-  if (latestV?.bp_sys != null && latestV.bp_sys > 150 && prevV?.bp_sys != null) {
+  // R7: BP critically elevated and worsening — only if vitals are fresh
+  if (
+    latestV?.bp_sys != null &&
+    latestV.bp_sys > 150 &&
+    prevV?.bp_sys != null &&
+    isFresh(latestVDate)
+  ) {
     if (latestV.bp_sys > prevV.bp_sys) {
       red.push({
         id: "r7_bp_critical",
@@ -199,12 +206,13 @@ export function runSummaryRules({
     }
   }
 
-  // A: BP borderline elevated
+  // A: BP borderline elevated — only if vitals are fresh
   if (
     isHTN &&
     latestV?.bp_sys != null &&
     latestV.bp_sys >= 130 &&
     latestV.bp_sys <= 150 &&
+    isFresh(latestVDate) &&
     !red.some((r) => r.id === "r7_bp_critical")
   ) {
     amber.push({
@@ -215,8 +223,8 @@ export function runSummaryRules({
     });
   }
 
-  // A: TSH elevated in hypothyroid patients
-  if (isHypo && tsh != null && tsh > 4.5) {
+  // A: TSH elevated in hypothyroid patients — only if measurement is fresh
+  if (isHypo && tsh != null && tsh > 4.5 && isFresh(tshInfo?.date)) {
     amber.push({
       id: "a_tsh_elevated",
       title: `TSH ${tsh} µIU/mL — elevated in hypothyroid patient`,
@@ -277,8 +285,8 @@ export function runSummaryRules({
     }
   }
 
-  // G2: HbA1c at target
-  if (hba1c != null && hba1c <= 7.0 && !g1Fired && !g4Fired) {
+  // G2: HbA1c at target — only if measurement is fresh
+  if (hba1c != null && hba1c <= 7.0 && isFresh(hba1cInfo?.date) && !g1Fired && !g4Fired) {
     green.push({
       id: "g2_hba1c_target",
       title: `HbA1c ${hba1c}% — at target (≤ 7.0%)`,
@@ -297,8 +305,8 @@ export function runSummaryRules({
     });
   }
 
-  // G5: BP well controlled
-  if (isHTN && latestV?.bp_sys != null && latestV.bp_sys < 130) {
+  // G5: BP well controlled — only if vitals are fresh
+  if (isHTN && latestV?.bp_sys != null && latestV.bp_sys < 130 && isFresh(latestVDate)) {
     green.push({
       id: "g5_bp_controlled",
       title: `BP ${latestV.bp_sys}/${latestV.bp_dia ?? "?"} — well controlled`,
@@ -307,8 +315,8 @@ export function runSummaryRules({
     });
   }
 
-  // G: LDL at target
-  if (ldl != null && ldl <= 100) {
+  // G: LDL at target — only if measurement is fresh
+  if (ldl != null && ldl <= 100 && isFresh(ldlInfo?.date)) {
     green.push({
       id: "g_ldl_target",
       title: `LDL ${ldl} mg/dL — at target`,

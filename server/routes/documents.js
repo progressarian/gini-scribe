@@ -268,6 +268,21 @@ router.get("/documents/:id/file-url", async (req, res) => {
           return res.status(404).json({ error: "No records found from HealthRay" });
         }
 
+        // ── DIAGNOSTIC: dump raw HealthRay response so we can see which URL
+        // fields are actually populated. Remove once URL extraction is fixed.
+        console.log(
+          "🔬 [HealthRay doc debug] docId=%s healthrayApptId=%s file_name=%s notes=%s",
+          req.params.id,
+          healthrayApptId,
+          d.file_name,
+          d.notes,
+        );
+        console.log(
+          "🔬 [HealthRay doc debug] records (%d total):\n%s",
+          records.length,
+          JSON.stringify(records, null, 2),
+        );
+
         // Step 3: Extract record ID
         const recordIdStr = (d.notes || "").match(/healthray_record:(\d+)/)?.[1];
 
@@ -292,6 +307,24 @@ router.get("/documents/:id/file-url", async (req, res) => {
 
         // Step 5: Extract URL (robust)
         const url = match?.url || match?.file_url || match?.attachment_url || match?.thumbnail;
+
+        // ── DIAGNOSTIC: log which field won for the matched record ──
+        const chosenField = match?.url
+          ? "url"
+          : match?.file_url
+            ? "file_url"
+            : match?.attachment_url
+              ? "attachment_url"
+              : match?.thumbnail
+                ? "thumbnail"
+                : "NONE";
+        console.log(
+          "🔬 [HealthRay doc debug] matched record id=%s chosen_field=%s matched_keys=%s",
+          match?.id,
+          chosenField,
+          match ? Object.keys(match).join(",") : "(no match)",
+        );
+        console.log("🔬 [HealthRay doc debug] matched record full:\n%s", JSON.stringify(match, null, 2));
 
         if (!url) {
           console.error("❌ URL extraction failed", {

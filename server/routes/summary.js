@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { runSummaryRules } from "../services/summaryRules.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 
 const router = Router();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -116,7 +117,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     }
 
     // ── 2. Fetch data needed for the rule engine ──
-    const [patientR, diagnosesR, labsR, vitalsR, apptR, docsR, latestReportR] = await Promise.all([
+    const [patientR, diagnosesR, labsR, vitalsR, apptR, latestReportR] = await Promise.all([
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
       pool.query(
@@ -164,13 +165,8 @@ router.get("/patients/:id/summary", async (req, res) => {
             [pid],
           ),
 
-      // Unreviewed documents
-      pool.query(
-        `SELECT id, title, file_name, doc_type, reviewed FROM documents
-           WHERE patient_id=$1 AND reviewed=FALSE
-           ORDER BY created_at DESC`,
-        [pid],
-      ),
+      // (Unreviewed-documents query removed — R5 rule deleted; doc-review
+      // alerts no longer surfaced in the visit summary)
 
       // Latest report that has extracted lab results
       pool.query(
@@ -206,17 +202,17 @@ router.get("/patients/:id/summary", async (req, res) => {
     };
 
     // ── 5. Run rule engine ──
+    const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
     const rules = runSummaryRules({
-      diagnoses: diagnosesR.rows,
+      diagnoses: sortedDiagnoses,
       labResults: labsR.rows,
       labHistory,
       vitals: vitalsR.rows,
-      documents: docsR.rows,
       prep,
     });
 
     // ── 6. Generate AI brief (async, non-blocking for cache write) ──
-    const ai = await generateAiBrief(patient, diagnosesR.rows, rules);
+    const ai = await generateAiBrief(patient, sortedDiagnoses, rules);
 
     const generatedAt = new Date().toISOString();
     const latestReport = latestReportR.rows[0] || null;

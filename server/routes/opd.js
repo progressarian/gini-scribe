@@ -1,6 +1,7 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 
 const router = Router();
 
@@ -280,6 +281,12 @@ router.get("/opd/appointments", async (req, res) => {
         ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
       [date],
     );
+    // Apply clinical sort to HealthRay diagnoses on each row
+    for (const r of rows) {
+      if (Array.isArray(r.healthray_diagnoses) && r.healthray_diagnoses.length > 0) {
+        r.healthray_diagnoses = sortDiagnoses(r.healthray_diagnoses);
+      }
+    }
     res.json(rows);
   } catch (e) {
     handleError(res, e, "OPD appointments list");

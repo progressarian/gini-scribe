@@ -1,6 +1,7 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 
 const router = Router();
 
@@ -315,7 +316,7 @@ router.get("/reports/today", async (req, res) => {
           value: val,
           display: displayVal,
           status,
-          diagnoses: p.diagnoses,
+          diagnoses: sortDiagnoses(p.diagnoses || []),
         });
       });
 
@@ -388,7 +389,7 @@ router.get("/reports/today", async (req, res) => {
           phone: p.phone,
           con_name: p.con_name,
           visit_date: p.visit_date,
-          diagnoses: p.diagnoses,
+          diagnoses: sortDiagnoses(p.diagnoses || []),
           targets_met: met,
           targets_total: total,
           pct: total > 0 ? Math.round((met / total) * 100) : null,

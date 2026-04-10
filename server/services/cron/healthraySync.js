@@ -273,6 +273,12 @@ async function syncAppointment(appt, localDoctorName) {
     log("Compliance", `${healthrayId}: ${Object.keys(compliance).join(",")}`);
   }
 
+  // ── Stamp source & prescription date on vitals so UI can show origin ──
+  if (Object.keys(opdVitals).length > 0) {
+    opdVitals._source = "healthray";
+    opdVitals._prescriptionDate = apptDate; // date the prescription carrying these vitals is from
+  }
+
   // ── Save appointment ──
   const localApptId = await upsertAppointment(existing?.id || null, {
     patientId,

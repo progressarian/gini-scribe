@@ -39,35 +39,49 @@ const COMORBIDITY_ORDER = {
   hyperuricemia: 9,
 };
 
-// Auto-detect category from diagnosis_id or label
+// Auto-detect category from diagnosis_id or label (or HealthRay `name`)
 export function detectDiagnosisCategory(dx) {
+  // Respect explicit category if already set
+  if (dx.category) return dx.category;
+
   const id = (dx.diagnosis_id || "").toLowerCase();
-  const label = (dx.label || "").toLowerCase();
+  const label = (dx.label || dx.name || "").toLowerCase();
+  const text = `${id} ${label}`;
 
-  // Primary: T2DM, T1DM
-  if (id.includes("dm2") || id.includes("t2dm") || id.includes("dm1") || id.includes("t1dm")) {
-    if (
-      label.includes("type 2") ||
-      label.includes("type 1") ||
-      label.includes("diabetes mellitus")
-    ) {
-      return "primary";
-    }
-  }
-
-  // Complications: diabetic nephropathy, neuropathy, retinopathy, foot
+  // Complications (check BEFORE primary so "diabetic nephropathy" doesn't get
+  // classified as primary just because it contains "diabetic")
   if (
-    label.includes("nephropathy") ||
-    label.includes("neuropathy") ||
-    label.includes("retinopathy") ||
-    label.includes("diabetic foot") ||
-    label.includes("kidney disease") ||
-    id.includes("neuropathy") ||
-    id.includes("nephropathy") ||
-    id.includes("retinopathy") ||
+    text.includes("nephropathy") ||
+    text.includes("neuropathy") ||
+    text.includes("retinopathy") ||
+    text.includes("diabetic foot") ||
+    text.includes("diabetic ulcer") ||
+    text.includes("kidney disease") ||
     id.includes("ckd")
   ) {
     return "complication";
+  }
+
+  // Primary: any form of diabetes mellitus — T1DM, T2DM, T3C, MODY, LADA, etc.
+  if (
+    text.includes("diabetes mellitus") ||
+    text.includes("type 2 dm") ||
+    text.includes("type 1 dm") ||
+    text.includes("type_2_dm") ||
+    text.includes("type_1_dm") ||
+    text.includes("type 2 diabetes") ||
+    text.includes("type 1 diabetes") ||
+    text.includes("type_2_diabetes") ||
+    text.includes("type_1_diabetes") ||
+    text.includes("type 3c") ||
+    text.includes("type_3c") ||
+    text.includes("early onset type") ||
+    text.includes("mody") ||
+    /\bt[123]dm\b/.test(text) ||
+    /\bdm[12]\b/.test(text) ||
+    /\blada\b/.test(text)
+  ) {
+    return "primary";
   }
 
   // Comorbidities: HTN, dyslipidemia, obesity, NAFLD
@@ -107,7 +121,7 @@ export function detectDiagnosisCategory(dx) {
 
 // Detect complication type from diagnosis
 export function detectComplicationType(dx) {
-  const label = (dx.label || "").toLowerCase();
+  const label = (dx.label || dx.name || "").toLowerCase();
   const id = (dx.diagnosis_id || "").toLowerCase();
 
   if (label.includes("nephropathy") || label.includes("kidney") || id.includes("nephropathy")) {
@@ -128,7 +142,7 @@ export function detectComplicationType(dx) {
 // Get comorbidity sort key
 function getComorbiditySortKey(dx) {
   const id = (dx.diagnosis_id || "").toLowerCase();
-  const label = (dx.label || "").toLowerCase();
+  const label = (dx.label || dx.name || "").toLowerCase();
 
   for (const [key, rank] of Object.entries(COMORBIDITY_ORDER)) {
     if (id.includes(key) || label.includes(key)) {
@@ -175,7 +189,7 @@ export function sortDiagnoses(diagnoses) {
       }
 
       // 4. Sort by label alphabetically as final tiebreaker
-      return (a.label || "").localeCompare(b.label || "");
+      return (a.label || a.name || "").localeCompare(b.label || b.name || "");
     });
 }
 

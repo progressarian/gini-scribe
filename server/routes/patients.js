@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { n, int } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
@@ -298,7 +299,7 @@ router.get("/patients/:id", async (req, res) => {
       vitals: vitals.rows,
       medications: meds.rows,
       lab_results: labs.rows,
-      diagnoses: diagnoses.rows,
+      diagnoses: sortDiagnoses(diagnoses.rows),
       documents: allDocs,
       goals: goals.rows,
       appt_plan: apptPlan

@@ -1,0 +1,163 @@
+.pdf-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.pdf-modal {
+  background: white;
+  border-radius: 12px;
+  width: 95%;
+  max-width: 1100px;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.pdf-modal.fullscreen {
+  width: 100%;
+  max-width: 100%;
+  height: 100vh;
+  border-radius: 0;
+}
+
+.pdf-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pdf-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pdf-modal-icon {
+  font-size: 28px;
+}
+
+.pdf-modal-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.pdf-modal-meta {
+  font-size: 12px;
+  color: var(--t3);
+  margin-top: 2px;
+}
+
+.pdf-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--tl);
+  color: var(--t2);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+
+.pdf-btn:hover {
+  background: var(--primary);
+  color: white;
+}
+
+.pdf-btn-close {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.pdf-btn-close:hover {
+  background: #dc2626;
+  color: white;
+}
+
+.pdf-modal-content {
+  flex: 1;
+  overflow: auto;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pdf-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+}
+
+.pdf-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: zoom-in;
+  image-rendering: auto;
+}
+
+.pdf-image.zoomed {
+  max-width: none;
+  max-height: none;
+  object-fit: none;
+  cursor: zoom-out;
+}
+
+.pdf-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: var(--t3);
+  font-size: 14px;
+}
+
+.pdf-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: pdf-spin 0.8s linear infinite;
+}
+
+@keyframes pdf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pdf-error {
+  color: #dc2626;
+  font-size: 14px;
+  padding: 20px;
+  text-align: center;
+}

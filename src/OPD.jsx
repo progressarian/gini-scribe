@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
 import usePatientStore from "./stores/patientStore.js";
+import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -833,8 +834,22 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
               boxShadow: SH,
             }}
           >
-            <div style={{ fontSize: 13, fontWeight: 600, color: INK, marginBottom: 10 }}>
-              VITALS
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                justifyContent: "space-between",
+                marginBottom: 10,
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, color: INK }}>VITALS</div>
+              {(vitals._source === "healthray" || hasRayData) && (
+                <div style={{ fontSize: 10, color: INK3, fontWeight: 500 }}>
+                  From HealthRay
+                  {vitals._prescriptionDate ? ` · ${fmtDate(vitals._prescriptionDate)}` : ""}
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               <VitalChip label="Height" value={vitals.height ? `${vitals.height} cm` : null} />
@@ -1540,6 +1555,8 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
     .flat()
     .filter((r) => !r.uploading).length;
 
+  const [viewingDoc, setViewingDoc] = useState(null);
+
   return (
     <div>
       {/* ── Report uploads ── */}
@@ -1766,16 +1783,17 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                           )}
                           {!r.uploading && !r.extracting && r.docId && (
                             <button
-                              onClick={async () => {
-                                try {
-                                  const resp = await apiFetch(`/api/documents/${r.docId}/file-url`);
-                                  const data = await resp.json();
-                                  if (data.url) window.open(data.url, "_blank");
-                                  else showToast("Could not get file URL", "err");
-                                } catch {
-                                  showToast("Failed to open file", "err");
-                                }
-                              }}
+                              onClick={() =>
+                                setViewingDoc({
+                                  id: r.docId,
+                                  title: r.name || "Lab Report",
+                                  file_name: r.name,
+                                  doc_type: "lab_report",
+                                  doc_date: r.date,
+                                  source: "opd_upload",
+                                  reviewed: true,
+                                })
+                              }
                               style={{
                                 fontSize: 11,
                                 color: T,
@@ -2108,6 +2126,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
           })}
         </div>
       </div>
+      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
     </div>
   );
 }
@@ -2358,6 +2377,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
 
   // Prescriptions: [{id, doctorName, date, fileName, uploading, docId?}]
   const [prescriptions, setPrescriptions] = useState([]);
+  const [viewingDoc, setViewingDoc] = useState(null);
   const [addingRx, setAddingRx] = useState(false);
   const [rxForm, setRxForm] = useState({
     doctorName: "",
@@ -2795,16 +2815,17 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                   )}
                   {!p.uploading && !p.extracting && p.docId && (
                     <button
-                      onClick={async () => {
-                        try {
-                          const resp = await apiFetch(`/api/documents/${p.docId}/file-url`);
-                          const data = await resp.json();
-                          if (data.url) window.open(data.url, "_blank");
-                          else if (showToast) showToast("Could not get file URL", "err");
-                        } catch {
-                          if (showToast) showToast("Failed to open file", "err");
-                        }
-                      }}
+                      onClick={() =>
+                        setViewingDoc({
+                          id: p.docId,
+                          title: `Prescription — ${p.doctorName || "Unknown"}`,
+                          file_name: p.fileName,
+                          doc_type: "prescription",
+                          doc_date: p.date,
+                          source: "opd_upload",
+                          reviewed: true,
+                        })
+                      }
                       style={{
                         fontSize: 11,
                         color: T,
@@ -3237,6 +3258,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
           }}
         />
       </div>
+      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
     </div>
   );
 }
