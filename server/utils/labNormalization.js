@@ -30,6 +30,10 @@ add(
   "hba1c (glycosylated hemoglobin)",
   "hba1c (%)",
   "hba1c (previous)",
+  "hb a1c",
+  "hb a1c - glycated hb(glycated hemoglobin )",
+  "hb a1c - glycated hb (glycated hemoglobin)",
+  "hb a1c-glycated hb(glycated hemoglobin)",
 );
 add(
   "FBS",
@@ -45,6 +49,7 @@ add(
   "blood glucose fasting",
   "fasting plasma glucose (fpg)",
   "fpg (mg/dl)",
+  "fasting blood sugar .",
 );
 add(
   "PPBS",
@@ -61,7 +66,12 @@ add(
   "2hr pp glucose",
   "pp2bs",
   "post-prandial glucose",
+  "post-prandial blood glucose",
+  "post-prandial blood sugar",
   "post prandial blood glucose",
+  "postprandial blood glucose",
+  "postprandial blood sugar",
+  "postprandial glucose",
   "1hr post meal blood sugar",
   "2hr post meal blood sugar",
   "post prandial glucose (ppg)",
@@ -75,6 +85,9 @@ add(
   "random blood glucose",
   "spot blood sugar",
   "spot glucose",
+  "spot",
+  "spot bg",
+  "spot blood glucose",
   "rbg (4:10pm)",
   "spot glucose (4:10pm)",
 );
@@ -88,6 +101,8 @@ add(
   "insulin",
   "fpi",
   "fasting plasma insulin (uiu/ml)",
+  "insulin f",
+  "insulin fasting (uiu/ml)",
 );
 add(
   "C-Peptide",
@@ -99,7 +114,7 @@ add(
   "random c-peptide",
   "fasting c peptide (ng/ml)",
 );
-add("HOMA-IR", "homa-ir", "homa ir", "homair", "homa - ir (nmol/l)");
+add("HOMA-IR", "homa-ir", "homa ir", "homair", "homa - ir (nmol/l)", "homa - ir");
 add("HOMA-Beta", "homa-beta", "homa beta", "homa-b", "homa b", "homa - b (nmol/l)");
 
 // ── Lipids ───────────────────────────────────────────────────────────────────
@@ -139,6 +154,8 @@ add(
   "trigs",
   "serum triglycerides",
   "triglycerides (mg/dl)",
+  "triglycerides (tg)",
+  "triglycerides(tg)",
 );
 add(
   "VLDL",
@@ -157,6 +174,8 @@ add(
   "non hdl",
   "nhdl",
   "non-hdl (mg/dl)",
+  "non hdl cholestrol",
+  "non hdl cholesterol",
 );
 
 // ── Renal ────────────────────────────────────────────────────────────────────
@@ -169,6 +188,8 @@ add(
   "s creatinine",
   "creatinine (serum)",
   "creatinine (mg/dl)",
+  "creatinine (crt)",
+  "creatinine(crt)",
 );
 add(
   "BUN",
@@ -190,6 +211,8 @@ add(
   "glomerular filtration rate",
   "egfr (ml/ minute)",
   "egfr (ml/minute/1.73msq.)",
+  "egfr (gfr)",
+  "egfr(gfr)",
 );
 add(
   "UACR",
@@ -264,8 +287,13 @@ add(
   "tg antibody",
   "thyroglobulin antibody",
   "anti thyroglobulin",
+  "anti-thyroglobulin",
   "anti thyroglobulin antibodies",
   "anti thyroglobulin antibody",
+  "anti-thyroglobulin antibody",
+  "anti thyroid globulin",
+  "anti-thyroglobulin (anti-tg)",
+  "anti thyroglobulin (anti-tg)",
 );
 add(
   "TSH Receptor Ab",
@@ -296,6 +324,8 @@ add(
   "alanine transaminase",
   "sgpt (alt), serum",
   "sgpt (alanine amino transferase - alt)",
+  "pt/sgpt",
+  "sgpt/alt",
 );
 add(
   "SGOT (AST)",
@@ -309,6 +339,8 @@ add(
   "sgot (ast), serum",
   "sgot (aspartate amino transferase - ast)",
   "ot",
+  "ot/sgot",
+  "sgot/ast",
 );
 add(
   "ALP",
@@ -529,11 +561,44 @@ add(
   "eag",
 );
 
+// ── Vitals stored in lab_results ─────────────────────────────────────────────
+// These are vital signs but HealthRay sometimes sends them as lab rows.
+add("Weight", "weight", "body weight", "weight (kg)", "wt", "wt.");
+add("Height", "height", "height (cm)", "ht", "ht.");
+add("BMI", "bmi", "body mass index", "bmi (kg/m2)", "bmi (kg/m²)");
+add("Waist", "waist", "waist circumference", "waist (cm)", "waist circumference (cm)");
+add("Body Fat", "body fat", "body fat %", "body fat percentage", "% body fat");
+add("Systolic BP", "systolic bp", "sbp", "systolic blood pressure", "bp systolic");
+add("Diastolic BP", "diastolic bp", "dbp", "diastolic blood pressure", "bp diastolic");
+
 // ── Vitals-sheet names (with units in parentheses) ───────────────────────────
 // These are NOT added as canonical entries — they map to existing canonical names above.
 // Weight, Height, BMI, BP, Waist, Body Fat from vitals sheet are vital signs, not labs.
 // But some get stored in lab_results if classification misses them.
 // Keep them mapped so outcomes queries can find them.
+
+// ── Fibroscan ─────────────────────────────────────────────────────────────────
+add(
+  "FIB4",
+  "fib4",
+  "fib-4",
+  "fibrosis-4",
+  "fibrosis 4",
+  "fib 4",
+);
+add(
+  "Fibroscan CAP",
+  "fibroscan cap",
+  "cap",
+  "controlled attenuation parameter",
+);
+add(
+  "Fibroscan LSM",
+  "fibroscan lsm",
+  "lsm",
+  "liver stiffness measurement",
+  "liver stiffness",
+);
 
 // ── Screening tests (kept as-is for the screenings panel) ────────────────────
 add("VPT", "vpt", "vpt left", "vpt right", "vpt l", "vpt r");

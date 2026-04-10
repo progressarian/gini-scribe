@@ -27,6 +27,7 @@ import {
   stopStaleHealthrayMeds,
 } from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
+import { normalizeTestName } from "../utils/labNormalization.js";
 
 const router = Router();
 
@@ -538,6 +539,26 @@ router.post("/sync/debug/add-diagnosis", async (req, res) => {
   }
 });
 
+// POST /api/sync/debug/deactivate-diagnosis  body: { fileNo, diagnosisId }
+router.post("/sync/debug/deactivate-diagnosis", async (req, res) => {
+  const { fileNo, diagnosisId } = req.body || {};
+  if (!fileNo || !diagnosisId) return res.status(400).json({ error: "fileNo and diagnosisId required" });
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
+    const { rowCount } = await pool.query(
+      `UPDATE diagnoses SET is_active = false, updated_at = NOW()
+       WHERE patient_id = $1 AND diagnosis_id = $2`,
+      [patients[0].id, diagnosisId],
+    );
+    res.json({ success: true, deactivated: rowCount });
+  } catch (e) {
+    handleError(res, e, "Deactivate diagnosis");
+  }
+});
+
 router.post("/sync/debug/delete-diagnoses", async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || ids.length === 0)
@@ -705,6 +726,127 @@ router.post("/sync/backfill/vitals", async (req, res) => {
 
 // One-time cleanup: delete low-priority import/prescription_parsed lab rows where
 // a better source already exists for the same patient + test + date.
+// POST /api/sync/backfill/labs-renormalize
+// Re-applies canonical name normalization to all existing lab_results rows,
+// then removes duplicates. Run this once after updating labNormalization.js.
+router.post("/sync/backfill/labs-renormalize", async (req, res) => {
+  const startTime = Date.now();
+  const elapsed = () => `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+
+  try {
+    // 1. Count total rows + patients for context
+    const { rows: stats } = await pool.query(
+      `SELECT COUNT(*) AS total_rows, COUNT(DISTINCT patient_id) AS total_patients FROM lab_results`,
+    );
+    const totalRows = Number(stats[0].total_rows);
+    const totalPatients = Number(stats[0].total_patients);
+    log("Labs Renormalize", `Starting — ${totalRows} rows across ${totalPatients} patients`);
+
+    // 2. Fetch all distinct test_names and their current canonical_names
+    const { rows: tests } = await pool.query(
+      `SELECT DISTINCT test_name, canonical_name FROM lab_results WHERE test_name IS NOT NULL`,
+    );
+    log("Labs Renormalize", `[${elapsed()}] Found ${tests.length} distinct test names`);
+
+    // 3. Build update map: current canonical → new canonical
+    const updates = [];
+    for (const { test_name, canonical_name } of tests) {
+      const newCanonical = normalizeTestName(test_name);
+      if (newCanonical !== canonical_name) {
+        updates.push({ test_name, oldCanonical: canonical_name, newCanonical });
+      }
+    }
+    log("Labs Renormalize", `[${elapsed()}] ${updates.length} test names need remapping:`);
+    for (const u of updates) {
+      log("Labs Renormalize", `  "${u.test_name}" : "${u.oldCanonical}" → "${u.newCanonical}"`);
+    }
+
+    // 4. Apply canonical name updates
+    let updated = 0;
+    for (const { test_name, newCanonical } of updates) {
+      const { rowCount } = await pool.query(
+        `UPDATE lab_results SET canonical_name = $1 WHERE test_name = $2`,
+        [newCanonical, test_name],
+      );
+      updated += rowCount;
+    }
+    log("Labs Renormalize", `[${elapsed()}] Remapped ${updated} rows`);
+
+    // 5. Fix legacy lowercase canonical names (from old normalization code)
+    const legacyFixes = [
+      ["creatinine", "Creatinine"],
+      ["egfr", "eGFR"],
+      ["hba1c", "HbA1c"],
+      ["fasting_blood_glucose", "FBS"],
+      ["post_prandial_glucose", "PPBS"],
+      ["random_blood_glucose", "RBS"],
+      ["urine_acr", "UACR"],
+      ["vitamin_d", "Vitamin D"],
+      ["haemoglobin", "Hemoglobin"],
+      ["Haemoglobin", "Hemoglobin"],
+    ];
+    let legacyFixed = 0;
+    for (const [old, fixed] of legacyFixes) {
+      const { rowCount } = await pool.query(
+        `UPDATE lab_results SET canonical_name = $1 WHERE canonical_name = $2`,
+        [fixed, old],
+      );
+      if (rowCount > 0) {
+        log("Labs Renormalize", `  Legacy fix: "${old}" → "${fixed}" (${rowCount} rows)`);
+        legacyFixed += rowCount;
+      }
+    }
+    updated += legacyFixed;
+    log("Labs Renormalize", `[${elapsed()}] Legacy fixes applied: ${legacyFixed} rows`);
+
+    // 6. Dedup — keep highest-priority source per patient+canonical+date
+    log("Labs Renormalize", `[${elapsed()}] Running dedup...`);
+    const { rows: deleted } = await pool.query(`
+      DELETE FROM lab_results
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY patient_id, COALESCE(canonical_name, test_name), test_date::date
+              ORDER BY
+                CASE source
+                  WHEN 'opd'                 THEN 1
+                  WHEN 'report_extract'      THEN 2
+                  WHEN 'lab_healthray'       THEN 3
+                  WHEN 'vitals_sheet'        THEN 4
+                  WHEN 'prescription_parsed' THEN 5
+                  WHEN 'healthray'           THEN 6
+                  ELSE 7
+                END ASC,
+                created_at DESC
+            ) AS rn
+          FROM lab_results
+        ) ranked
+        WHERE rn > 1
+      )
+      RETURNING id
+    `);
+
+    log(
+      "Labs Renormalize",
+      `[${elapsed()}] Done — ${updated} rows renormalized, ${deleted.length} duplicates removed`,
+    );
+
+    res.json({
+      success: true,
+      totalRows,
+      totalPatients,
+      testNamesRemapped: updates.length,
+      rowsUpdated: updated,
+      duplicatesRemoved: deleted.length,
+      elapsedSeconds: ((Date.now() - startTime) / 1000).toFixed(1),
+      remappedNames: updates.map((u) => `"${u.test_name}": "${u.oldCanonical}" → "${u.newCanonical}"`),
+    });
+  } catch (e) {
+    handleError(res, e, "Labs renormalize");
+  }
+});
+
 // POST /api/sync/backfill/labs-dedup
 router.post("/sync/backfill/labs-dedup", async (req, res) => {
   try {
@@ -2068,6 +2210,52 @@ router.post("/sync/healthray/backfill-stopped-meds", async (req, res) => {
   } catch (e) {
     stoppedMedsBackfillStatus.running = false;
     handleError(res, e, "Backfill stopped medicines");
+  }
+});
+
+// POST /api/sync/backfill/fix-diagnosis-typos
+// Deactivates known typo diagnosis_id rows where the correct canonical already exists.
+router.post("/sync/backfill/fix-diagnosis-typos", async (req, res) => {
+  try {
+    const TYPO_MAP = {
+      balanoprosthitis: "balanoposthitis",
+      thallasemia_minor: "thalassemia_minor",
+      thallasemia_major: "thalassemia_major",
+      thallasemia: "thalassemia",
+      sunclinical_hypothyrodism: "hypothyroidism",
+      subclinical_hypothyrodism: "hypothyroidism",
+      subclinical_hypothyroidism: "hypothyroidism",
+      achillis_tendinitis: "achilles_tendinitis",
+      seropositive_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+      seronegative_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+      type_2_pge: "pge_type_2",
+      hypo: "hypothyroidism",
+      osas: "obstructive_sleep_apnea",
+    };
+
+    let totalDeactivated = 0;
+    const details = [];
+
+    for (const [typoId, correctId] of Object.entries(TYPO_MAP)) {
+      // Deactivate typo row only when the correct row also exists for the same patient
+      const { rowCount } = await pool.query(
+        `UPDATE diagnoses SET is_active = false, updated_at = NOW()
+         WHERE diagnosis_id = $1
+           AND is_active = true
+           AND patient_id IN (
+             SELECT patient_id FROM diagnoses WHERE diagnosis_id = $2 AND is_active = true
+           )`,
+        [typoId, correctId],
+      );
+      if (rowCount > 0) {
+        details.push(`${typoId} → ${correctId}: deactivated ${rowCount} rows`);
+        totalDeactivated += rowCount;
+      }
+    }
+
+    res.json({ success: true, totalDeactivated, details });
+  } catch (e) {
+    handleError(res, e, "Fix diagnosis typos");
   }
 });
 

@@ -3,6 +3,7 @@
 import pool from "../../config/db.js";
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
+import { normalizeTestName } from "../../utils/labNormalization.js";
 const { log } = createLogger("HealthRay Sync");
 
 // ── Ensure sync columns exist ───────────────────────────────────────────────
@@ -317,36 +318,7 @@ const SOURCE_PRIORITY = {
 };
 
 function normalizeCanonicalName(name) {
-  if (!name) return name;
-
-  const n = name.toLowerCase().trim();
-
-  // FBS
-  if (n.includes("fasting") || n.includes("fbs") || n.includes("fbg")) {
-    return "FBS";
-  }
-
-  // PPBS
-  if (n.includes("post") || n.includes("ppbs") || n.includes("postprandial")) {
-    return "PPBS";
-  }
-
-  // RBS
-  if (n.includes("random") || n.includes("rbs")) {
-    return "RBS";
-  }
-
-  // HbA1c
-  if (n.includes("hba1c") || n.includes("glycated")) {
-    return "HbA1c";
-  }
-
-  // Weight
-  if (n.includes("weight")) {
-    return "Weight";
-  }
-
-  return name;
+  return normalizeTestName(name);
 }
 
 // ── Sync parsed labs → lab_results table ────────────────────────────────────
@@ -555,6 +527,8 @@ function normalizeDiagnosisId(name) {
 function isAbsentFinding(dx) {
   // Explicit status field set by AI
   if (dx.status === "Absent") return true;
+  // Explicit present — never treat as absent
+  if (dx.status === "Present") return false;
   const name = (dx.name || "").toLowerCase().trim();
   const details = (dx.details || "").toLowerCase().trim();
   // Name ends with "-" (e.g. "CAD-", "CVA-")
@@ -600,6 +574,12 @@ const DIAGNOSIS_ID_RENAMES = {
   ca_colon_s_p_op_chemo: "ca_colon",
   gsd_s_p_op: "gsd",
   tkr_b_l_2024: "tkr_b_l",
+  balanoprosthitis: "balanoposthitis",
+  osas: "obstructive_sleep_apnea",
+  seropositive_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+  seronegative_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+  type_2_pge: "pge_type_2",
+  hypo: "hypothyroidism",
 };
 
 export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
