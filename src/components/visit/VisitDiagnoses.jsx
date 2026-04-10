@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { DX_STATUS_STYLE, DX_STATUS_DEFAULT, getDxSuggestion } from "./helpers";
 
 const DX_STATUS_OPTS = [
@@ -12,7 +12,7 @@ const DX_STATUS_OPTS = [
   "Resolved",
 ];
 
-// Extract clinical detail from notes like "healthray:234347328 — G2A1" → "G2A1"
+// Extract clinical detail from notes like "healthray:234347328 - G2A1" to "G2A1"
 // Returns null if no detail, or if notes is a plain manual note (no healthray prefix)
 function extractHRDetail(notes) {
   if (!notes) return null;
@@ -24,9 +24,18 @@ function extractHRDetail(notes) {
 // If it has a manual note (no healthray prefix), show it.
 function displayNote(notes) {
   if (!notes) return null;
-  if (/^healthray:\d+$/.test(notes.trim())) return null; // bare ID — hide
-  if (/^healthray:\d+\s*[—–-]+/.test(notes)) return null; // detail shown inline — hide
-  return notes; // manual note — show
+  if (/^healthray:\d+$/.test(notes.trim())) return null; // bare ID - hide
+  if (/^healthray:\d+\s*[—–-]+/.test(notes)) return null; // detail shown inline - hide
+  return notes; // manual note - show
+}
+
+// Normalize diagnosis label for deduplication
+function normalizeLabel(label) {
+  if (!label) return "";
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "") // Remove non-alphanumeric
+    .trim();
 }
 
 const VisitDiagnoses = memo(function VisitDiagnoses({
@@ -38,10 +47,32 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
   onDiagnosisNote,
   onUpdateDiagnosis,
 }) {
+  // Deduplicate diagnoses by normalized label (catches duplicates with different IDs)
+  const dedupedDx = useMemo(() => {
+    if (!activeDx?.length) return [];
+    const seen = new Map();
+    for (const dx of activeDx) {
+      const key = normalizeLabel(dx.label || dx.diagnosis_id);
+      if (!key) continue;
+      if (!seen.has(key)) {
+        seen.set(key, dx);
+      } else {
+        // Keep the one with is_active=true or more recent update
+        const existing = seen.get(key);
+        if (dx.is_active && !existing.is_active) {
+          seen.set(key, dx);
+        } else if (dx.updated_at && (!existing.updated_at || dx.updated_at > existing.updated_at)) {
+          seen.set(key, dx);
+        }
+      }
+    }
+    return Array.from(seen.values());
+  }, [activeDx]);
+
   // Build absent/uncertain findings from healthray_diagnoses not already in activeDx table
-  const absentFindings = (() => {
+  const absentFindings = useMemo(() => {
     if (!healthrayDiagnoses?.length) return [];
-    const activeDxIds = new Set(activeDx.map((d) => d.diagnosis_id));
+    const activeDxIds = new Set(dedupedDx.map((d) => d.diagnosis_id));
     return healthrayDiagnoses.filter((d) => {
       const status = (d.status || "").toLowerCase();
       // Absent findings: not in the diagnoses table (so absent = not stored)
@@ -50,7 +81,7 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
       if (!status && !activeDxIds.has(d.diagnosis_id)) return true;
       return false;
     });
-  })();
+  }, [healthrayDiagnoses, dedupedDx]);
 
   return (
     <div className="sc" id="diagnoses">
@@ -63,7 +94,7 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
         </button>
       </div>
       <div className="scb">
-        {activeDx.map((dx, i) => {
+        {dedupedDx.map((dx, i) => {
           const suggestion = getDxSuggestion(dx.diagnosis_id, labResults, vitals);
           // Auto-apply: use suggestion.status if it exists, otherwise use dx.status
           const effectiveStatus = suggestion?.status || dx.status;
@@ -188,7 +219,7 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
             </div>
           );
         })}
-        {activeDx.length === 0 && (
+        {dedupedDx.length === 0 && (
           <div style={{ fontSize: 13, color: "var(--t3)", padding: 16, textAlign: "center" }}>
             No diagnoses recorded
           </div>

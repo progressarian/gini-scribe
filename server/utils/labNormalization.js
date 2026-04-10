@@ -578,27 +578,9 @@ add("Diastolic BP", "diastolic bp", "dbp", "diastolic blood pressure", "bp diast
 // Keep them mapped so outcomes queries can find them.
 
 // ── Fibroscan ─────────────────────────────────────────────────────────────────
-add(
-  "FIB4",
-  "fib4",
-  "fib-4",
-  "fibrosis-4",
-  "fibrosis 4",
-  "fib 4",
-);
-add(
-  "Fibroscan CAP",
-  "fibroscan cap",
-  "cap",
-  "controlled attenuation parameter",
-);
-add(
-  "Fibroscan LSM",
-  "fibroscan lsm",
-  "lsm",
-  "liver stiffness measurement",
-  "liver stiffness",
-);
+add("FIB4", "fib4", "fib-4", "fibrosis-4", "fibrosis 4", "fib 4");
+add("Fibroscan CAP", "fibroscan cap", "cap", "controlled attenuation parameter");
+add("Fibroscan LSM", "fibroscan lsm", "lsm", "liver stiffness measurement", "liver stiffness");
 
 // ── Screening tests (kept as-is for the screenings panel) ────────────────────
 add("VPT", "vpt", "vpt left", "vpt right", "vpt l", "vpt r");

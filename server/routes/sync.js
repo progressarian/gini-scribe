@@ -542,10 +542,12 @@ router.post("/sync/debug/add-diagnosis", async (req, res) => {
 // POST /api/sync/debug/deactivate-diagnosis  body: { fileNo, diagnosisId }
 router.post("/sync/debug/deactivate-diagnosis", async (req, res) => {
   const { fileNo, diagnosisId } = req.body || {};
-  if (!fileNo || !diagnosisId) return res.status(400).json({ error: "fileNo and diagnosisId required" });
+  if (!fileNo || !diagnosisId)
+    return res.status(400).json({ error: "fileNo and diagnosisId required" });
   try {
     const { rows: patients } = await pool.query(
-      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo],
+      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+      [fileNo],
     );
     if (!patients[0]) return res.status(404).json({ error: "Patient not found" });
     const { rowCount } = await pool.query(
@@ -840,7 +842,9 @@ router.post("/sync/backfill/labs-renormalize", async (req, res) => {
       rowsUpdated: updated,
       duplicatesRemoved: deleted.length,
       elapsedSeconds: ((Date.now() - startTime) / 1000).toFixed(1),
-      remappedNames: updates.map((u) => `"${u.test_name}": "${u.oldCanonical}" → "${u.newCanonical}"`),
+      remappedNames: updates.map(
+        (u) => `"${u.test_name}": "${u.oldCanonical}" → "${u.newCanonical}"`,
+      ),
     });
   } catch (e) {
     handleError(res, e, "Labs renormalize");
