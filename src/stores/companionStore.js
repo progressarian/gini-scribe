@@ -88,7 +88,10 @@ const useCompanionStore = create((set, get) => ({
     set({ loading: true });
     try {
       const r = await api.get(`/api/patients/${patientId}`);
-      set({ patientData: r.data });
+      set((s) => ({
+        patientData: r.data,
+        selectedPatient: s.selectedPatient ?? r.data,
+      }));
     } catch (e) {
       console.error("Load patient:", e);
     }
@@ -118,6 +121,7 @@ const useCompanionStore = create((set, get) => ({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
+
     reader.onload = () => {
       set({
         currentCapture: {
@@ -144,6 +148,7 @@ const useCompanionStore = create((set, get) => ({
       captureStep: "camera",
       currentCapture: null,
       currentCategory: null,
+      captureMeta: {},
       extractedData: null,
       captureError: null,
       nameMismatch: null,
@@ -175,16 +180,23 @@ const useCompanionStore = create((set, get) => ({
 {"patient_name":"name on document","doc_type":"${currentCategory}","findings":"","date":"YYYY-MM-DD","doctor":"","notes":""}`;
 
       const imgData = currentCapture.base64;
-      const mediaType = currentCapture.mediaType?.startsWith("image/")
-        ? currentCapture.mediaType
-        : "image/jpeg";
+      const isPdf = currentCapture.mediaType === "application/pdf";
+      const mediaType = isPdf
+        ? "application/pdf"
+        : currentCapture.mediaType?.startsWith("image/")
+          ? currentCapture.mediaType
+          : "image/jpeg";
+
+      const docBlock = isPdf
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: imgData } }
+        : { type: "image", source: { type: "base64", media_type: mediaType, data: imgData } };
 
       const r = await retryPost("/api/ai/complete", {
         messages: [
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "base64", media_type: mediaType, data: imgData } },
+              docBlock,
               {
                 type: "text",
                 text: prompt + "\n\nReturn ONLY valid JSON. No markdown, no backticks.",
@@ -257,6 +269,8 @@ const useCompanionStore = create((set, get) => ({
     const { selectedPatient, currentCategory, extractedData, captureMeta, currentCapture } = get();
     if (!selectedPatient?.id) return;
     set({ loading: true, saveStatus: "Saving..." });
+
+    console.log("Saving capture for patient:", selectedPatient);
 
     try {
       const isRx = currentCategory === "prescription";

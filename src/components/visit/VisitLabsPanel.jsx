@@ -370,7 +370,9 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   labOrders,
   onUploadReport,
 }) {
-  const labDocs = documents.filter((d) => d.doc_type === "lab_report");
+  const labDocs = documents.filter(
+    (d) => d.doc_type === "lab_report" || d.doc_type === "blood_test",
+  );
   const radiologyDocs = documents.filter(
     (d) => d.doc_type === "imaging" || d.doc_type === "radiology",
   );

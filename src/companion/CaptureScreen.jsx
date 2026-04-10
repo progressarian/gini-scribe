@@ -41,7 +41,13 @@ export default function CaptureScreen() {
   return (
     <div>
       <div className="capture__header">
-        <button onClick={() => navigate("/companion")} className="capture__back">
+        <button
+          onClick={() => {
+            discardCapture();
+            navigate("/companion");
+          }}
+          className="capture__back"
+        >
           ←
         </button>
         <div className="capture__info">
@@ -74,14 +80,20 @@ export default function CaptureScreen() {
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={handleFileSelect}
+              onChange={(e) => {
+                handleFileSelect(e);
+                e.target.value = null;
+              }}
               style={{ display: "none" }}
             />
             <input
               ref={fileRef}
               type="file"
               accept="image/*,.pdf"
-              onChange={handleFileSelect}
+              onChange={(e) => {
+                handleFileSelect(e);
+                e.target.value = null;
+              }}
               style={{ display: "none" }}
             />
             {captureCount > 0 && (
@@ -97,9 +109,26 @@ export default function CaptureScreen() {
 
         {captureStep === "categorize" && currentCapture && (
           <div>
-            {currentCapture.preview && (
+            {/* {currentCapture.preview && (
               <div className="capture__preview">
                 <img src={currentCapture.preview} alt="Captured" className="capture__preview-img" />
+              </div>
+            )} */}
+            {currentCapture?.preview && (
+              <div className="capture__preview">
+                {currentCapture.mediaType === "application/pdf" ? (
+                  <iframe
+                    src={currentCapture.preview}
+                    title="PDF Preview"
+                    className="capture__preview-pdf"
+                  />
+                ) : (
+                  <img
+                    src={currentCapture.preview}
+                    alt="Captured"
+                    className="capture__preview-img"
+                  />
+                )}
               </div>
             )}
             <div className="capture__cat-label">What type of document is this?</div>
@@ -193,8 +222,20 @@ export default function CaptureScreen() {
               </div>
             )}
             {currentCapture?.preview && (
-              <div className="capture__review-preview">
-                <img src={currentCapture.preview} alt="" className="capture__review-img" />
+              <div className="capture__preview">
+                {currentCapture.mediaType === "application/pdf" ? (
+                  <iframe
+                    src={currentCapture.preview}
+                    title="PDF Preview"
+                    className="capture__preview-pdf"
+                  />
+                ) : (
+                  <img
+                    src={currentCapture.preview}
+                    alt="Captured"
+                    className="capture__preview-img"
+                  />
+                )}
               </div>
             )}
             {extractedData && (

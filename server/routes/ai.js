@@ -28,13 +28,22 @@ router.post("/ai/complete", async (req, res) => {
     };
     if (system) body.system = system;
 
+    const hasPdf = messages.some((m) =>
+      (Array.isArray(m.content) ? m.content : []).some(
+        (c) => c.type === "document" && c.source?.media_type === "application/pdf",
+      ),
+    );
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+    };
+    if (hasPdf) headers["anthropic-beta"] = "pdfs-2024-09-25";
+
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
