@@ -214,8 +214,8 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
         [patientId, t(m._matched, 200), stopReason, t(m.name, 200)],
       );
       await client.query(
-        `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, is_new, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false,false)
+        `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, stopped_date, is_new, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,CURRENT_DATE,false,false)
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
          DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
            composition = COALESCE(EXCLUDED.composition, medications.composition),
@@ -223,6 +223,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
            timing = COALESCE(EXCLUDED.timing, medications.timing),
            stop_reason = COALESCE(EXCLUDED.stop_reason, medications.stop_reason),
+           stopped_date = COALESCE(medications.stopped_date, CURRENT_DATE),
            updated_at = NOW()`,
         [
           patientId,
