@@ -5,3 +5,4 @@ dist/
 server/gini-ai-8fc66116e12e.json
 server/*.json
 gini-ai-8fc66116e12e.json
+config.bat
