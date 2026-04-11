@@ -192,30 +192,50 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
         );
       }
     }
+    // previous_medications = meds the patient was on but stopped or changed
+    // (per parser.js the AI emits status: "stopped"/"changed"). They must NOT
+    // land in the active list. Two steps:
+    //   1) If a matching active row exists (e.g. carried over from a prior
+    //      visit or HealthRay sync), flip it to inactive and record why.
+    //   2) Upsert a historical record into the inactive partial index so the
+    //      doctor still sees the med in the patient's history.
     for (const m of moData?.previous_medications || []) {
-      if (m?.name) {
-        await client.query(
-          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_new, is_active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,true)
-           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
-           DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
-             composition = COALESCE(EXCLUDED.composition, medications.composition),
-             dose = COALESCE(EXCLUDED.dose, medications.dose),
-             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
-             timing = COALESCE(EXCLUDED.timing, medications.timing),
-             updated_at = NOW()`,
-          [
-            patientId,
-            consultationId,
-            t(m.name, 200),
-            t(m._matched, 200),
-            t(m.composition, 200),
-            t(m.dose, 100),
-            t(m.frequency, 100),
-            t(m.timing, 100),
-          ],
-        );
-      }
+      if (!m?.name) continue;
+      const stopReason = t(m.reason || m.status, 200);
+      await client.query(
+        `UPDATE medications
+            SET is_active   = false,
+                stopped_date = COALESCE(stopped_date, CURRENT_DATE),
+                stop_reason  = COALESCE(stop_reason, $3),
+                updated_at   = NOW()
+          WHERE patient_id = $1
+            AND UPPER(COALESCE(pharmacy_match, name)) = UPPER(COALESCE($2, $4))
+            AND is_active = true`,
+        [patientId, t(m._matched, 200), stopReason, t(m.name, 200)],
+      );
+      await client.query(
+        `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, is_new, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,false,false)
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+         DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+           composition = COALESCE(EXCLUDED.composition, medications.composition),
+           dose = COALESCE(EXCLUDED.dose, medications.dose),
+           frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+           timing = COALESCE(EXCLUDED.timing, medications.timing),
+           stop_reason = COALESCE(EXCLUDED.stop_reason, medications.stop_reason),
+           updated_at = NOW()`,
+        [
+          patientId,
+          consultationId,
+          t(m.name, 200),
+          t(m._matched, 200),
+          t(m.composition, 200),
+          t(m.dose, 100),
+          t(m.frequency, 100),
+          t(m.timing, 100),
+          stopReason,
+        ],
+      );
     }
     for (const m of conData?.medications_confirmed || []) {
       if (m?.name) {
