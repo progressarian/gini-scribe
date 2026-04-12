@@ -117,7 +117,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     }
 
     // ── 2. Fetch data needed for the rule engine ──
-    const [patientR, diagnosesR, labsR, vitalsR, apptR, latestReportR] = await Promise.all([
+    const [patientR, diagnosesR, labsR, vitalsR, apptR, latestReportR, activeMedsR, stoppedMedsR] = await Promise.all([
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
       pool.query(
@@ -165,9 +165,6 @@ router.get("/patients/:id/summary", async (req, res) => {
             [pid],
           ),
 
-      // (Unreviewed-documents query removed — R5 rule deleted; doc-review
-      // alerts no longer surfaced in the visit summary)
-
       // Latest report that has extracted lab results
       pool.query(
         `SELECT d.id, d.title, d.file_name, d.doc_date, d.created_at
@@ -176,6 +173,19 @@ router.get("/patients/:id/summary", async (req, res) => {
              AND EXISTS (SELECT 1 FROM lab_results lr WHERE lr.document_id=d.id AND lr.result IS NOT NULL)
            ORDER BY d.created_at DESC
            LIMIT 1`,
+        [pid],
+      ),
+
+      // Active medications (for drug-interaction and protocol-gap rules)
+      pool.query(
+        `SELECT id, name, dose, frequency FROM medications WHERE patient_id=$1 AND is_active=true`,
+        [pid],
+      ),
+
+      // Recently stopped medications (for R4 rule — stopped within last 60 days)
+      pool.query(
+        `SELECT id, name, dose, stopped_date, stop_reason FROM medications
+         WHERE patient_id=$1 AND is_active=false AND stopped_date > CURRENT_DATE - INTERVAL '60 days'`,
         [pid],
       ),
     ]);
@@ -205,6 +215,8 @@ router.get("/patients/:id/summary", async (req, res) => {
     const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
     const rules = runSummaryRules({
       diagnoses: sortedDiagnoses,
+      activeMeds: activeMedsR.rows,
+      stoppedMeds: stoppedMedsR.rows,
       labResults: labsR.rows,
       labHistory,
       vitals: vitalsR.rows,

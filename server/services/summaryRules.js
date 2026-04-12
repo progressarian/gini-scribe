@@ -56,10 +56,12 @@ function daysSince(dateStr) {
   return Math.round((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
 
-// Freshness window for "current value" rules. Findings whose underlying lab
-// or vital is older than this are NOT surfaced as current alerts — the summary
-// should reflect this visit's data, not historical context.
-const FRESH_DAYS = 3;
+// Freshness window for "current value" rules. Labs/vitals older than this
+// are considered stale and won't trigger RED/AMBER alerts (to avoid alarming
+// the doctor with data that may have changed). Set to 120 days (one follow-up
+// cycle, ~4 months). GREEN rules have no freshness check — positive signals
+// are never stale.
+const FRESH_DAYS = 120;
 function isFresh(dateStr) {
   return dateStr != null && daysSince(dateStr) <= FRESH_DAYS;
 }
@@ -77,8 +79,16 @@ function numVal(labResults, name) {
   return v?.result != null ? parseFloat(v.result) : null;
 }
 
+function hasMed(meds, ...names) {
+  return (meds || []).some((m) =>
+    names.some((n) => (m.name || "").toLowerCase().includes(n.toLowerCase())),
+  );
+}
+
 export function runSummaryRules({
   diagnoses = [],
+  activeMeds = [],
+  stoppedMeds = [],
   labResults = [],
   labHistory = {},
   vitals = [],
@@ -96,6 +106,10 @@ export function runSummaryRules({
   const isHTN = hasDx(diagnoses, "htn", "hypertension");
   const isHypo = hasDx(diagnoses, "hypo", "hypothyroid");
 
+  const onMetformin = hasMed(activeMeds, "metformin");
+  const hasACEorARB = hasMed(activeMeds, "ramipril", "enalapril", "lisinopril", "perindopril",
+    "captopril", "telmisartan", "losartan", "valsartan", "olmesartan", "irbesartan", "candesartan");
+
   const hba1c = numVal(labResults, "HbA1c");
   const hba1cInfo = getLabVal(labResults, "HbA1c");
   const uacr = numVal(labResults, "UACR");
@@ -110,6 +124,16 @@ export function runSummaryRules({
   const uacrH = getLabHist(labHistory, "UACR");
 
   // ─── RED ─────────────────────────────────────────────────────────────────────
+
+  // R1: Missing ACE/ARB with UACR > 30 in T2DM
+  if (isT2DM && uacr != null && uacr > 30 && !hasACEorARB) {
+    red.push({
+      id: "r1_ace_missing",
+      title: `UACR ${uacr} mg/g — no ACE inhibitor or ARB prescribed`,
+      detail: "Protocol: ACE/ARB required for UACR > 30 mg/g in T2DM.",
+      action: "Consider Ramipril 2.5mg OD or Telmisartan 20mg OD",
+    });
+  }
 
   // R2: HbA1c rising for 3 consecutive visits
   if (hba1cH.length >= 3) {
@@ -131,6 +155,29 @@ export function runSummaryRules({
       title: `HbA1c ${hba1c}% — critically elevated`,
       detail: "Target ≤ 7.0% for most T2DM patients.",
       action: "Insulin initiation or intensification to consider",
+    });
+  }
+
+  // R4: Recently stopped medication (within 60 days)
+  for (const m of stoppedMeds) {
+    const d = daysSince(m.stopped_date);
+    if (d <= 60) {
+      red.push({
+        id: `r4_stopped_${m.id || m.name}`,
+        title: `${m.name} stopped ${d} day${d !== 1 ? "s" : ""} ago${m.stop_reason ? ` — ${m.stop_reason}` : ""}`,
+        detail: "Treatment gap — glycaemic or clinical cover may be incomplete.",
+        action: "Discuss replacement or resumption",
+      });
+    }
+  }
+
+  // A2: Metformin + renal risk
+  if (onMetformin && egfr != null && egfr < 45) {
+    amber.push({
+      id: "a2_metformin_egfr",
+      title: `Metformin dose review — eGFR ${egfr} mL/min/1.73m²`,
+      detail: "Metformin contraindicated at eGFR < 30; reduce dose at eGFR 30–45.",
+      action: "Review dose safety — consider switching to safer alternative",
     });
   }
 
@@ -285,8 +332,8 @@ export function runSummaryRules({
     }
   }
 
-  // G2: HbA1c at target — only if measurement is fresh
-  if (hba1c != null && hba1c <= 7.0 && isFresh(hba1cInfo?.date) && !g1Fired && !g4Fired) {
+  // G2: HbA1c at target
+  if (hba1c != null && hba1c <= 7.0 && !g1Fired && !g4Fired) {
     green.push({
       id: "g2_hba1c_target",
       title: `HbA1c ${hba1c}% — at target (≤ 7.0%)`,
@@ -305,8 +352,8 @@ export function runSummaryRules({
     });
   }
 
-  // G5: BP well controlled — only if vitals are fresh
-  if (isHTN && latestV?.bp_sys != null && latestV.bp_sys < 130 && isFresh(latestVDate)) {
+  // G5: BP well controlled
+  if (isHTN && latestV?.bp_sys != null && latestV.bp_sys < 130) {
     green.push({
       id: "g5_bp_controlled",
       title: `BP ${latestV.bp_sys}/${latestV.bp_dia ?? "?"} — well controlled`,
