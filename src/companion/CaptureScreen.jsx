@@ -150,32 +150,39 @@ export default function CaptureScreen() {
                 </button>
               ))}
             </div>
-            {currentCategory === "prescription" && (
+            {currentCategory && (
               <div className="capture__meta-grid">
-                <input
-                  value={captureMeta.doctor}
-                  onChange={(e) => setCaptureMeta((p) => ({ ...p, doctor: e.target.value }))}
-                  placeholder="Doctor name"
-                  className="capture__meta-input"
-                />
-                <input
-                  value={captureMeta.hospital}
-                  onChange={(e) => setCaptureMeta((p) => ({ ...p, hospital: e.target.value }))}
-                  placeholder="Hospital"
-                  className="capture__meta-input"
-                />
-                <input
-                  value={captureMeta.specialty}
-                  onChange={(e) => setCaptureMeta((p) => ({ ...p, specialty: e.target.value }))}
-                  placeholder="Specialty"
-                  className="capture__meta-input"
-                />
                 <input
                   type="date"
                   value={captureMeta.date}
                   onChange={(e) => setCaptureMeta((p) => ({ ...p, date: e.target.value }))}
                   className="capture__meta-input"
+                  placeholder="Report date"
+                  style={{ flex: '1 1 45%' }}
                 />
+                <input
+                  value={captureMeta.hospital}
+                  onChange={(e) => setCaptureMeta((p) => ({ ...p, hospital: e.target.value }))}
+                  placeholder={currentCategory === "prescription" ? "Hospital" : "Lab name"}
+                  className="capture__meta-input"
+                  style={{ flex: '1 1 45%' }}
+                />
+                {currentCategory === "prescription" && (
+                  <>
+                    <input
+                      value={captureMeta.doctor}
+                      onChange={(e) => setCaptureMeta((p) => ({ ...p, doctor: e.target.value }))}
+                      placeholder="Doctor name"
+                      className="capture__meta-input"
+                    />
+                    <input
+                      value={captureMeta.specialty}
+                      onChange={(e) => setCaptureMeta((p) => ({ ...p, specialty: e.target.value }))}
+                      placeholder="Specialty"
+                      className="capture__meta-input"
+                    />
+                  </>
+                )}
               </div>
             )}
             <div className="capture__actions">
