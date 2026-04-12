@@ -98,6 +98,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
         <div className="report-dt">
           {fmtDate(doc.doc_date || doc.created_at)}
           {doc.source ? ` · ${doc.source}` : ""}
+          {doc.created_at && (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10) ? ` · Uploaded ${fmtDate(doc.created_at)}` : ""}
           {doc.notes ? ` · ${doc.notes}` : ""}
         </div>
       </div>

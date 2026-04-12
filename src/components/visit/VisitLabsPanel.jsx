@@ -429,6 +429,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                   <div className="report-dt">
                     {fmtDate(doc.doc_date)}
                     {doc.source ? ` · ${doc.source}` : ""}
+                    {doc.created_at && (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10) ? ` · Uploaded ${fmtDate(doc.created_at)}` : ""}
                     {doc.notes ? ` · ${doc.notes}` : ""}
                   </div>
                 </div>
