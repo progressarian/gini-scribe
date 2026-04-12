@@ -247,9 +247,6 @@ const useCompanionStore = create((set, get) => ({
       // Detect category mismatch: user picked lab but doc has medications, or vice versa
       const hasMeds = (parsed.medications || []).length > 0;
       const hasLabs = (parsed.labs || []).length > 0;
-      const hasDx = (parsed.diagnoses || []).length > 0;
-      const isRx = currentCategory === "prescription";
-      const isLab = ["blood_test", "thyroid", "lipid", "kidney", "hba1c", "urine"].includes(currentCategory);
 
       if (isLab && hasMeds && !hasLabs) {
         updates.categoryMismatch = { detected: "prescription", selected: currentCategory, msg: "This looks like a prescription (found medications but no lab values)." };
