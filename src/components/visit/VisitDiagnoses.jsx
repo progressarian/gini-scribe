@@ -317,12 +317,18 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
 
           if (!items?.length) return null;
 
+          // Hide prediabetes from monitoring when T2DM exists (shown as progression note on T2DM row)
+          const filteredItems = (catKey === "monitoring" && hasDiabetes && prediabetesEntry)
+            ? items.filter((dx) => dx.id !== prediabetesEntry.id)
+            : items;
+          if (!filteredItems.length) return null;
+
           return (
             <div key={catKey}>
               <div style={{ fontSize: 10, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.08em", padding: "12px 0 4px", marginTop: catKey === "primary" ? 0 : 4 }}>
                 {config.label}
               </div>
-              {items.map((dx) => {
+              {filteredItems.map((dx) => {
                 const num = globalIndex.get(dx.id) || 0;
                 const suggestion = getDxSuggestion(dx.diagnosis_id, labResults, vitals);
                 const effectiveStatus = suggestion?.status || dx.status;
