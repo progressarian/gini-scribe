@@ -343,8 +343,9 @@ export function runSummaryRules({
     }
   }
 
-  // G2: HbA1c at target (only if G1 and G4 didn't fire — they're more specific)
-  if (hba1c != null && hba1c <= 7.0 && !g1Fired && !g4Fired) {
+  // G2: HbA1c at target — suppress if R2 (rising trend) fired, since rising + at target is contradictory
+  const r2Fired = red.some((r) => r.id === "r2_hba1c_rising");
+  if (hba1c != null && hba1c <= 7.0 && !g1Fired && !g4Fired && !r2Fired) {
     green.push({
       id: "g2_hba1c_target",
       title: `HbA1c ${hba1c}% — at target (≤ 7.0%)`,
