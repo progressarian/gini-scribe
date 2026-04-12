@@ -38,49 +38,87 @@ function getBorderColor(category, status) {
   return "#888780"; // comorbidity = gray
 }
 
-// Inline biomarker tag for a diagnosis
+// Find all numeric results for a test (up to `limit` most recent), sorted newest-first
+function findHistory(labResults, names, limit = 3) {
+  if (!labResults?.length) return [];
+  const matches = [];
+  for (const l of labResults) {
+    if (l.result == null) continue;
+    const cn = (l.canonical_name || "").toLowerCase();
+    const tn = (l.test_name || "").toLowerCase();
+    if (names.some((n) => cn === n.toLowerCase() || tn === n.toLowerCase())) {
+      const v = parseFloat(l.result);
+      if (!isNaN(v)) matches.push({ value: v, date: l.test_date });
+    }
+    if (matches.length >= limit) break; // labResults already sorted DESC
+  }
+  return matches;
+}
+
+// Build a trend string like "5.9→6.3→6.9 ↑" from history array
+// lowerIsBetter: true for HbA1c/LDL/BP/UACR, false for eGFR
+function trendInfo(history, lowerIsBetter = true) {
+  if (history.length < 2) return { arrow: "", trendText: "", trendColor: "#6b7280" };
+  const current = history[0].value;
+  const previous = history[1].value;
+  const diff = current - previous;
+  const pctChange = Math.abs(diff / (previous || 1)) * 100;
+
+  // < 3% change = stable
+  if (pctChange < 3) return { arrow: "→", trendText: "", trendColor: "#6b7280" };
+
+  const improving = lowerIsBetter ? diff < 0 : diff > 0;
+  const arrow = improving ? "↓" : "↑";
+  const trendColor = improving ? "#16a34a" : "#dc2626";
+
+  // Build trajectory string from oldest to newest (reverse the array)
+  const vals = history.slice().reverse().map((h) => h.value);
+  const trendText = vals.join("→");
+
+  return { arrow, trendText, trendColor };
+}
+
+// Inline biomarker tag for a diagnosis — now with trend arrows
 function getBiomarkerTag(dx, labResults, vitals) {
   const id = (dx.diagnosis_id || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const label = (dx.label || "").toLowerCase();
   const text = `${id} ${label}`;
 
-  const findVal = (names) => {
-    if (!labResults?.length) return null;
-    for (const name of names) {
-      const lab = labResults.find(
-        (l) =>
-          (l.canonical_name || "").toLowerCase() === name.toLowerCase() ||
-          (l.test_name || "").toLowerCase() === name.toLowerCase(),
-      );
-      if (lab?.result != null) return { value: lab.result, date: lab.test_date };
-    }
-    return null;
-  };
+  function makeTag(displayLabel, value, color, history, lowerIsBetter = true) {
+    const { arrow, trendText, trendColor } = trendInfo(history, lowerIsBetter);
+    const fullLabel = arrow && trendText
+      ? `${displayLabel} ${arrow} (${trendText})`
+      : `${displayLabel}`;
+    return { label: fullLabel, color: arrow ? trendColor : color };
+  }
 
-  // Type 2 DM → HbA1c
+  // Type 2 DM → HbA1c + FBS
   if (text.includes("dm2") || text.includes("dm1") || text.includes("diabetes")) {
-    const hba1c = findVal(["HbA1c", "Glycated Hemoglobin", "A1c", "HBA1C"]);
-    const fbs = findVal(["FBS", "Fasting Glucose", "Fasting Blood Sugar", "FPG"]);
-    if (hba1c) {
-      const v = parseFloat(hba1c.value);
+    const hHist = findHistory(labResults, ["HbA1c", "Glycated Hemoglobin", "A1c", "HBA1C"]);
+    const fHist = findHistory(labResults, ["FBS", "Fasting Glucose", "Fasting Blood Sugar", "FPG"]);
+    if (hHist.length > 0) {
+      const v = hHist[0].value;
       const color = v <= 7 ? "#16a34a" : v <= 9 ? "#d97706" : "#dc2626";
-      const tags = [{ label: `HbA1c ${hba1c.value}%`, color }];
-      if (fbs) tags.push({ label: `FBS ${fbs.value}`, color: parseFloat(fbs.value) <= 130 ? "#16a34a" : "#d97706" });
+      const tags = [makeTag(`HbA1c ${v}%`, v, color, hHist, true)];
+      if (fHist.length > 0) {
+        const fv = fHist[0].value;
+        tags.push(makeTag(`FBS ${fv}`, fv, fv <= 130 ? "#16a34a" : "#d97706", fHist, true));
+      }
       return tags;
     }
   }
 
   // Nephropathy → UACR
   if (text.includes("nephropathy")) {
-    const uacr = findVal(["UACR", "Urine ACR", "Microalbumin"]);
-    if (uacr) {
-      const v = parseFloat(uacr.value);
+    const hist = findHistory(labResults, ["UACR", "Urine ACR", "Microalbumin"]);
+    if (hist.length > 0) {
+      const v = hist[0].value;
       const color = v > 60 ? "#dc2626" : v > 30 ? "#d97706" : "#16a34a";
-      return [{ label: `UACR ${uacr.value} mg/g`, color }];
+      return [makeTag(`UACR ${v} mg/g`, v, color, hist, true)];
     }
   }
 
-  // Hypertension → BP
+  // Hypertension → BP (vitals don't have history in the same format, show current only)
   if (text.includes("htn") || text.includes("hypertension")) {
     const sys = vitals?.bp_sys || vitals?.bpSys;
     const dia = vitals?.bp_dia || vitals?.bpDia;
@@ -93,21 +131,22 @@ function getBiomarkerTag(dx, labResults, vitals) {
 
   // Dyslipidemia → LDL
   if (text.includes("lipid") || text.includes("dyslipid") || text.includes("cholesterol")) {
-    const ldl = findVal(["LDL", "LDL Cholesterol", "LDL-C"]);
-    if (ldl) {
-      const v = parseFloat(ldl.value);
+    const hist = findHistory(labResults, ["LDL", "LDL Cholesterol", "LDL-C", "LDL CHOLESTEROL-DIRECT"]);
+    if (hist.length > 0) {
+      const v = hist[0].value;
       const color = v > 130 ? "#dc2626" : v > 100 ? "#d97706" : "#16a34a";
-      return [{ label: `LDL ${ldl.value}`, color }];
+      return [makeTag(`LDL ${v}`, v, color, hist, true)];
     }
   }
 
   // Hypothyroidism → TSH
   if (text.includes("thyroid") || text.includes("hypo")) {
-    const tsh = findVal(["TSH", "Thyroid Stimulating Hormone"]);
-    if (tsh) {
-      const v = parseFloat(tsh.value);
+    const hist = findHistory(labResults, ["TSH", "Thyroid Stimulating Hormone"]);
+    if (hist.length > 0) {
+      const v = hist[0].value;
       const color = v < 0.5 || v > 4.5 ? "#dc2626" : "#16a34a";
-      return [{ label: `TSH ${tsh.value}`, color }];
+      // TSH: for hypothyroid patients, lower is better (they start high)
+      return [makeTag(`TSH ${v}`, v, color, hist, true)];
     }
   }
 
@@ -125,21 +164,21 @@ function getBiomarkerTag(dx, labResults, vitals) {
 
   // NAFLD/MASLD → ALT/AST
   if (text.includes("nafld") || text.includes("masld") || text.includes("fatty liver")) {
-    const alt = findVal(["ALT", "SGPT", "Alanine Aminotransferase"]);
-    if (alt) {
-      const v = parseFloat(alt.value);
-      return [{ label: `ALT ${alt.value}`, color: v > 40 ? "#dc2626" : "#16a34a" }];
+    const hist = findHistory(labResults, ["ALT", "SGPT", "Alanine Aminotransferase"]);
+    if (hist.length > 0) {
+      const v = hist[0].value;
+      return [makeTag(`ALT ${v}`, v, v > 40 ? "#dc2626" : "#16a34a", hist, true)];
     }
     return [{ label: "No liver enzymes on file", color: "#9ca3af" }];
   }
 
   // CKD → eGFR + Creatinine
   if (text.includes("ckd") || (text.includes("kidney") && !text.includes("nephropathy"))) {
-    const egfr = findVal(["eGFR", "GFR", "Estimated GFR"]);
-    const cr = findVal(["Creatinine", "S.Creatinine", "Serum Creatinine"]);
+    const eHist = findHistory(labResults, ["eGFR", "GFR", "Estimated GFR"]);
+    const cHist = findHistory(labResults, ["Creatinine", "S.Creatinine", "Serum Creatinine"]);
     const tags = [];
-    if (egfr) tags.push({ label: `eGFR ${egfr.value}`, color: parseFloat(egfr.value) < 60 ? "#dc2626" : "#16a34a" });
-    if (cr) tags.push({ label: `Cr ${cr.value}`, color: parseFloat(cr.value) > 1.2 ? "#dc2626" : "#16a34a" });
+    if (eHist.length > 0) tags.push(makeTag(`eGFR ${eHist[0].value}`, eHist[0].value, eHist[0].value < 60 ? "#dc2626" : "#16a34a", eHist, false));
+    if (cHist.length > 0) tags.push(makeTag(`Cr ${cHist[0].value}`, cHist[0].value, cHist[0].value > 1.2 ? "#dc2626" : "#16a34a", cHist, true));
     return tags.length > 0 ? tags : null;
   }
 
