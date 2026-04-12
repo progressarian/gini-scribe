@@ -162,7 +162,7 @@ router.get("/visit/:patientId", async (req, res) => {
       // 8. Documents
       pool.query(
         `SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, file_url, reviewed, created_at
-         FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC NULLS LAST`,
+         FROM documents WHERE patient_id=$1 ORDER BY created_at DESC NULLS LAST`,
         [pid],
       ),
 

@@ -434,9 +434,9 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                   </div>
                 </div>
                 <span
-                  className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
+                  className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
                 >
-                  {i === 0 ? "Latest" : doc.has_abnormal ? "Abnormal" : "Normal"}
+                  {doc.has_abnormal ? "Abnormal" : "Normal"}
                 </span>
               </div>
             ))

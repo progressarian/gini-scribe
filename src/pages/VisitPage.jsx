@@ -184,7 +184,8 @@ export default function VisitPage() {
   // ── UI state ──
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("visit");
+  const [tab, setTabRaw] = useState(() => sessionStorage.getItem("gini_visit_tab") || "visit");
+  const setTab = (t) => { setTabRaw(t); sessionStorage.setItem("gini_visit_tab", t); };
   const [jumpTarget, setJumpTarget] = useState("biomarkers");
   const [aiOpen, setAiOpen] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
