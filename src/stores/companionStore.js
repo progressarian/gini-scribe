@@ -48,6 +48,8 @@ const useCompanionStore = create((set, get) => ({
   extracting: false,
   captureError: null,
   nameMismatch: null,
+  categoryMismatch: null,
+  changeCategory: (newCat) => set({ currentCategory: newCat, categoryMismatch: null }),
   saveStatus: null,
 
   // ── Data loading ──────────────────────────────────────────
@@ -156,7 +158,7 @@ const useCompanionStore = create((set, get) => ({
   },
 
   retryCapture: () => {
-    set({ captureStep: "categorize", extractedData: null, captureError: null, nameMismatch: null });
+    set({ captureStep: "categorize", extractedData: null, captureError: null, nameMismatch: null, categoryMismatch: null });
   },
 
   extractDocument: async () => {
@@ -242,6 +244,23 @@ const useCompanionStore = create((set, get) => ({
       const mismatch = get().checkNameMismatch(parsed);
       if (mismatch) updates.nameMismatch = mismatch;
 
+      // Detect category mismatch: user picked lab but doc has medications, or vice versa
+      const hasMeds = (parsed.medications || []).length > 0;
+      const hasLabs = (parsed.labs || []).length > 0;
+      const hasDx = (parsed.diagnoses || []).length > 0;
+      const isRx = currentCategory === "prescription";
+      const isLab = ["blood_test", "thyroid", "lipid", "kidney", "hba1c", "urine"].includes(currentCategory);
+
+      if (isLab && hasMeds && !hasLabs) {
+        updates.categoryMismatch = { detected: "prescription", selected: currentCategory, msg: "This looks like a prescription (found medications but no lab values)." };
+      } else if (isLab && hasMeds && hasLabs) {
+        updates.categoryMismatch = { detected: "both", selected: currentCategory, msg: "This document has both lab values and medications. Both will be saved." };
+      } else if (isRx && hasLabs && !hasMeds) {
+        updates.categoryMismatch = { detected: "lab", selected: currentCategory, msg: "This looks like a lab report (found test values but no medications)." };
+      } else {
+        updates.categoryMismatch = null;
+      }
+
       set(updates);
     } catch (e) {
       console.error("Extraction:", e);
@@ -281,7 +300,11 @@ const useCompanionStore = create((set, get) => ({
         currentCategory,
       );
 
-      if (isRx && extractedData) {
+      const hasMeds = (extractedData?.medications || []).length > 0;
+      const hasLabValues = (extractedData?.labs || []).length > 0;
+
+      // Save prescription data if present (regardless of selected category)
+      if (hasMeds && extractedData) {
         set({ saveStatus: "Saving prescription..." });
         await api.post(`/api/patients/${selectedPatient.id}/history`, {
           visit_date: captureMeta.date || new Date().toISOString().split("T")[0],
@@ -300,7 +323,10 @@ const useCompanionStore = create((set, get) => ({
           })),
           vitals: extractedData.vitals || {},
         });
-      } else if (isLab && extractedData?.labs?.length) {
+      }
+
+      // Save lab values if present (regardless of selected category)
+      if (hasLabValues && extractedData?.labs?.length) {
         // Map extracted lab names to vitals fields
         const VITALS_MAP = {
           "blood pressure": { sys: true, dia: true },
@@ -398,6 +424,7 @@ const useCompanionStore = create((set, get) => ({
         captureStep: "camera",
         captureError: null,
         nameMismatch: null,
+        categoryMismatch: null,
       }));
       get().loadPatientData(selectedPatient.id);
     } catch (e) {

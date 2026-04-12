@@ -17,10 +17,12 @@ export default function CaptureScreen() {
     extractedData,
     captureError,
     nameMismatch,
+    categoryMismatch,
     loading,
     saveStatus,
     handleFileSelect,
     setCurrentCategory,
+    changeCategory,
     setCaptureMeta,
     extractDocument,
     saveCapture,
@@ -214,6 +216,33 @@ export default function CaptureScreen() {
                 <div className="capture__mismatch-hint">
                   Please verify this is the correct patient before saving.
                 </div>
+              </div>
+            )}
+            {categoryMismatch && (
+              <div className="capture__mismatch" style={{ borderColor: '#f59e0b', background: '#fffbeb' }}>
+                <div className="capture__mismatch-title">📋 Category Check</div>
+                <div className="capture__mismatch-body">{categoryMismatch.msg}</div>
+                {categoryMismatch.detected === "prescription" && (
+                  <button
+                    onClick={() => changeCategory("prescription")}
+                    style={{ marginTop: 8, padding: '6px 16px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 13, cursor: 'pointer' }}
+                  >
+                    Change to Prescription
+                  </button>
+                )}
+                {categoryMismatch.detected === "lab" && (
+                  <button
+                    onClick={() => changeCategory("blood_test")}
+                    style={{ marginTop: 8, padding: '6px 16px', borderRadius: 8, border: 'none', background: '#0369a1', color: '#fff', fontSize: 13, cursor: 'pointer' }}
+                  >
+                    Change to Lab Report
+                  </button>
+                )}
+                {categoryMismatch.detected === "both" && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#92400e' }}>
+                    Both medications and lab values will be saved automatically.
+                  </div>
+                )}
               </div>
             )}
             {captureError && (
