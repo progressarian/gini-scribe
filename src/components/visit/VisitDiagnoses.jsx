@@ -268,6 +268,15 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
   });
   const hasComplications = (grouped.complication || []).length > 0;
 
+  // Detect prediabetes → T2DM progression
+  const prediabetesEntry = useMemo(() => {
+    const allDx = Object.values(grouped).flat();
+    return allDx.find((dx) => {
+      const t = `${(dx.diagnosis_id || "")} ${(dx.label || "")}`.toLowerCase();
+      return t.includes("prediabet") || t.includes("pre-diabet") || t.includes("pre_diabet");
+    });
+  }, [grouped]);
+
   const categoryOrder = ["primary", "complication", "comorbidity", "external", "monitoring"];
 
   return (
@@ -349,6 +358,15 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
                       <div className="dxi-sub" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 2 }}>
                         {dx.since_year ? <span>Since {dx.since_year}</span> : null}
                         {dx.age_of_onset ? <span>· AOO: {dx.age_of_onset} yrs</span> : null}
+                        {/* Prediabetes → T2DM progression note */}
+                        {catKey === "primary" && prediabetesEntry && (dx._category || detectDiagnosisCategory(dx)) === "primary" && (
+                          <span style={{ fontSize: 11, color: "#7c3aed", fontWeight: 500 }}>
+                            · Previously: {prediabetesEntry.label || "Prediabetes"}
+                            {prediabetesEntry.key_value ? ` (${prediabetesEntry.key_value})` : ""}
+                            {prediabetesEntry.since_year ? ` since ${prediabetesEntry.since_year}` : ""}
+                            {extractHRDetail(prediabetesEntry.notes) ? ` — ${extractHRDetail(prediabetesEntry.notes)}` : ""}
+                          </span>
+                        )}
                         {visibleNote ? <span>· {visibleNote}</span> : null}
                         {bioTags && bioTags.map((tag, ti) => (
                           <span
