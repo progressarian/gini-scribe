@@ -620,6 +620,24 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
   try {
     const { reason, notes } = req.body;
     if (!reason) return res.status(400).json({ error: "reason is required" });
+
+    // Get the medication name before stopping (needed to clear duplicate inactive rows)
+    const med = await pool.query(
+      "SELECT pharmacy_match, name FROM medications WHERE id = $1 AND patient_id = $2",
+      [mid, pid],
+    );
+    if (!med.rows[0]) return res.status(404).json({ error: "Medication not found" });
+
+    // Remove any existing inactive duplicates with the same pharmacy_match/name
+    // so the inactive partial unique index doesn't reject our UPDATE
+    const matchKey = med.rows[0].pharmacy_match || med.rows[0].name;
+    await pool.query(
+      `DELETE FROM medications
+       WHERE patient_id = $1 AND id != $2 AND is_active = false
+         AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)`,
+      [pid, mid, matchKey],
+    );
+
     const r = await pool.query(
       `UPDATE medications SET is_active = false, stopped_date = CURRENT_DATE,
          stop_reason = $1, notes = COALESCE($2, notes), updated_at = NOW()
