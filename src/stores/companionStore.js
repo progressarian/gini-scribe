@@ -395,7 +395,7 @@ const useCompanionStore = create((set, get) => ({
           ? `${captureMeta.doctor || "External"} — ${captureMeta.specialty || currentCategory}`
           : `${(docCategories.find((c) => c.id === currentCategory)?.label || currentCategory).replace(/^[^\s]+\s/, "")} — ${captureMeta.date || "Today"}`,
         doc_date: captureMeta.date || new Date().toISOString().split("T")[0],
-        source: captureMeta.hospital || "Companion Upload",
+        source: "Companion Upload",
         notes: captureMeta.doctor ? `Doctor: ${captureMeta.doctor}` : extractedData?.summary || "",
         extracted_data: JSON.stringify(extractedData || {}),
       });
