@@ -431,7 +431,7 @@ function ApptRow({ a, sel, onSelect }) {
         )}
 
         {/* Labs row */}
-        <div style={{ display: "flex", gap: 7, fontSize: 10, fontFamily: FM, marginTop: 1 }}>
+        <div style={{ display: "flex", gap: 7, fontSize: 10, fontFamily: FM, marginTop: 1, flexWrap: "wrap", alignItems: "center" }}>
           {bio.hba1c ? (
             <span style={{ color: BC[bioS("hba1c", bio.hba1c)] }}>HbA1c {bio.hba1c}%</span>
           ) : (
@@ -439,6 +439,30 @@ function ApptRow({ a, sel, onSelect }) {
           )}
           {bio.fg && <span style={{ color: BC[bioS("fg", bio.fg)] }}>FG {bio.fg}</span>}
           {bio.bp && <span style={{ color: INK3 }}>BP {bio.bp}</span>}
+          {/* Trajectory indicator */}
+          {bio.hba1c && a.prev_hba1c != null && (() => {
+            const curr = parseFloat(bio.hba1c);
+            const prev = parseFloat(a.prev_hba1c);
+            if (isNaN(prev)) return null;
+            const improving = curr < prev;
+            const worsening = curr > prev;
+            return improving
+              ? <span style={{ color: GN, fontWeight: 700, fontSize: 9 }}>↓ from {prev}%</span>
+              : worsening
+                ? <span style={{ color: RE, fontWeight: 700, fontSize: 9 }}>↑ from {prev}%</span>
+                : <span style={{ color: INK3, fontSize: 9 }}>→ stable</span>;
+          })()}
+          {/* Lab pending indicator */}
+          {a.pending_labs > 0 && (
+            <span style={{ background: "#eff6ff", color: "#2563eb", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, border: "1px solid #bfdbfe" }}>
+              🔬 {a.pending_labs} lab{a.pending_labs > 1 ? "s" : ""} pending
+            </span>
+          )}
+          {a.recent_labs > 0 && !a.pending_labs && (
+            <span style={{ background: GNL, color: GN, fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, border: `1px solid ${GNB}` }}>
+              ✅ Labs received
+            </span>
+          )}
         </div>
       </div>
 
@@ -3312,12 +3336,20 @@ function CategorizeTab({ appt, doctors, allAppts, onSave, onContinue }) {
               AI Suggestion: {catIcon(aiCat)} {catLabel(aiCat)}
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.85 }}>
-              Based on HbA1c {bio.hba1c}%
-              {bio.hba1c > 9
-                ? " — Uncontrolled. Needs senior review."
-                : bio.hba1c > 7
-                  ? " — Improving. Programme care."
-                  : " — At target. Routine care."}
+              {(() => {
+                const h = parseFloat(bio.hba1c);
+                const prev = parseFloat(appt.prev_hba1c);
+                const hasPrev = !isNaN(prev);
+                const improving = hasPrev && h < prev;
+                const worsening = hasPrev && h > prev;
+                const trendText = improving ? ` ↓ improving from ${prev}%` : worsening ? ` ↑ worsening from ${prev}%` : hasPrev ? " → stable" : "";
+                const rangeText = h > 9 ? "Uncontrolled. Needs senior review." : h > 7 ? "Not at target yet." : "At target. Routine care.";
+                const trajectoryLabel = improving ? "Getting better" : worsening ? "Getting worse" : "Stable";
+                return <>
+                  Based on HbA1c <b>{bio.hba1c}%</b>{trendText}<br/>
+                  <span style={{ fontWeight: 600 }}>{trajectoryLabel}</span> — {rangeText}
+                </>;
+              })()}
             </div>
           </div>
           <button

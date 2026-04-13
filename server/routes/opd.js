@@ -274,7 +274,23 @@ router.get("/opd/appointments", async (req, res) => {
                     AND a4.healthray_diagnoses IS NOT NULL
                     AND jsonb_array_length(a4.healthray_diagnoses) > 0
                   ORDER BY a4.appointment_date DESC LIMIT 1)
-              ) AS healthray_diagnoses
+              ) AS healthray_diagnoses,
+              (SELECT COUNT(*) FROM lab_cases lc
+                WHERE lc.patient_id = a.patient_id
+                  AND lc.results_synced = FALSE
+              )::INTEGER AS pending_labs,
+              (SELECT COUNT(*) FROM lab_cases lc2
+                WHERE lc2.patient_id = a.patient_id
+                  AND lc2.results_synced = TRUE
+                  AND lc2.case_date >= CURRENT_DATE - INTERVAL '7 days'
+              )::INTEGER AS recent_labs,
+              (SELECT lr.result FROM lab_results lr
+                WHERE lr.patient_id = a.patient_id
+                  AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
+                  AND lr.result IS NOT NULL
+                ORDER BY lr.test_date DESC, lr.created_at DESC
+                OFFSET 1 LIMIT 1
+              ) AS prev_hba1c
          FROM appointments a
          LEFT JOIN patients p ON p.id = a.patient_id
         WHERE a.appointment_date = $1
