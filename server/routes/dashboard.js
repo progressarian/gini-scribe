@@ -105,42 +105,65 @@ async function computeBiomarkerStats(patientIds, bioKey) {
   const prevMap = new Map();
   for (const r of prevR.rows) prevMap.set(r.patient_id, parseFloat(r.result));
 
-  let withData = 0, atTarget = 0, uncontrolled = 0, rising = 0, improving = 0;
+  let withData = 0, atTargetStable = 0, firstReading = 0;
   const distribution = bio.bands.map(() => 0);
+  const improvingBands = bio.bands.map(() => 0);
+  const worseningBands = bio.bands.map(() => 0);
+  let improvingTotal = 0, worseningTotal = 0, stableOffTarget = 0;
+
+  function getBandIndex(val) {
+    for (let i = 0; i < bio.bands.length; i++) {
+      if (val <= bio.bands[i].max || i === bio.bands.length - 1) return i;
+    }
+    return bio.bands.length - 1;
+  }
+
+  function isAtTarget(val) {
+    if (bio.lowerIsBetter === null) return val >= (bio.targetLow || 0) && val <= bio.target;
+    return bio.lowerIsBetter ? val <= bio.target : val >= bio.target;
+  }
 
   for (const [pid, v] of latestMap) {
     if (isNaN(v)) continue;
     withData++;
+    const band = getBandIndex(v);
+    distribution[band]++;
 
-    // Distribution
-    for (let i = 0; i < bio.bands.length; i++) {
-      if (v <= bio.bands[i].max || i === bio.bands.length - 1) { distribution[i]++; break; }
-    }
-
-    // Target check
-    if (bio.lowerIsBetter === null) {
-      // Range-based (TSH)
-      if (v >= (bio.targetLow || 0) && v <= bio.target) atTarget++;
-      if (v > bio.danger) uncontrolled++;
-    } else if (bio.lowerIsBetter) {
-      if (v <= bio.target) atTarget++;
-      if (v > bio.danger) uncontrolled++;
-    }
-
-    // Trend
     const prev = prevMap.get(pid);
-    if (prev != null && !isNaN(prev)) {
+    if (prev == null || isNaN(prev)) {
+      firstReading++;
+      continue;
+    }
+
+    // Determine trajectory
+    let isImproving = false, isWorsening = false;
+    const pctChange = Math.abs(v - prev) / (prev || 1) * 100;
+    const isStable = pctChange < 3;
+
+    if (!isStable) {
       if (bio.lowerIsBetter === true) {
-        if (v > prev) rising++;
-        else if (v < prev) improving++;
+        isImproving = v < prev;
+        isWorsening = v > prev;
       } else if (bio.lowerIsBetter === false) {
-        if (v < prev) rising++;
-        else if (v > prev) improving++;
+        isImproving = v > prev;
+        isWorsening = v < prev;
       } else {
-        // range-based (TSH)
-        if (v > bio.target && v > prev) rising++;
-        else if (v <= bio.target && prev > bio.target) improving++;
+        // range-based: improving = moving toward target range
+        isImproving = (Math.abs(v - (bio.target + bio.targetLow) / 2) < Math.abs(prev - (bio.target + bio.targetLow) / 2));
+        isWorsening = !isImproving;
       }
+    }
+
+    if (isImproving) {
+      improvingTotal++;
+      improvingBands[band]++;
+    } else if (isWorsening) {
+      worseningTotal++;
+      worseningBands[band]++;
+    } else if (isAtTarget(v)) {
+      atTargetStable++;
+    } else {
+      stableOffTarget++;
     }
   }
 
@@ -150,13 +173,19 @@ async function computeBiomarkerStats(patientIds, bioKey) {
     unit: bio.unit,
     target: bio.lowerIsBetter === null ? `${bio.targetLow}–${bio.target}` : `≤ ${bio.target}`,
     withData,
-    atTarget,
-    uncontrolled,
-    rising,
-    improving,
+    atTargetStable,
+    improving: { total: improvingTotal, bands: improvingBands },
+    worsening: { total: worseningTotal, bands: worseningBands },
+    stableOffTarget,
+    firstReading,
     distribution,
     bandLabels: bio.bands.map((b) => b.label),
-    controlRate: withData > 0 ? Math.round((atTarget / withData) * 100) : 0,
+    // Legacy compat
+    atTarget: atTargetStable + improvingBands[0],
+    uncontrolled: (worseningBands[bio.bands.length - 1] || 0) + (worseningBands[bio.bands.length - 2] || 0),
+    rising: worseningTotal,
+    improving_count: improvingTotal,
+    controlRate: withData > 0 ? Math.round(((atTargetStable + improvingBands[0]) / withData) * 100) : 0,
   };
 }
 

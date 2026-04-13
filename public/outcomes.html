@@ -490,28 +490,79 @@ function renderDashboardData(data) {
   <!-- ── MULTI-BIOMARKER OUTCOMES ── -->
   ${data.biomarkers ? `
   <div class="card">
-    <div class="card-title">📊 Biomarker Outcomes — All Patients <span class="card-sub">${data.period.label}</span></div>
+    <div class="card-title">📊 Biomarker Outcomes <span class="card-sub">${data.period.label}</span></div>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:4px">
       ${['hba1c','bp','ldl','uacr','tsh'].map(key => {
         const b = data.biomarkers[key];
-        if(!b) return '';
+        if(!b || !b.withData) return '';
         const pct = b.controlRate || 0;
         const color = pct >= 60 ? 'var(--gn)' : pct >= 30 ? 'var(--am)' : 'var(--re)';
+        const imp = b.improving?.total ?? b.improving_count ?? 0;
+        const wor = b.worsening?.total ?? b.rising ?? 0;
+        const stable = b.atTargetStable ?? b.atTarget ?? 0;
         return `<div style="border:1px solid var(--bd);border-radius:7px;padding:10px;text-align:center;border-left:3px solid ${color}">
           <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${b.label}</div>
           <div style="font-family:var(--fm);font-size:22px;font-weight:500;color:${color}">${pct}%</div>
           <div style="font-size:9px;color:var(--ink3);margin-top:2px">at target</div>
-          <div style="margin-top:6px;font-size:10px;color:var(--ink2);line-height:1.6">
-            ✅ ${b.atTarget}/${b.withData}<br>
-            ${b.improving > 0 ? `<span style="color:var(--gn)">↓ ${b.improving} getting better</span><br>` : ''}
-            ${b.rising > 0 ? `<span style="color:var(--re)">↑ ${b.rising} getting worse</span><br>` : ''}
-            ${b.uncontrolled > 0 ? `<span style="color:var(--re)">⚠ ${b.uncontrolled} out of range</span>` : ''}
+          <div style="margin-top:6px;font-size:10px;color:var(--ink2);line-height:1.7">
+            <span style="color:var(--gn)">✅ ${stable} at target & stable</span><br>
+            <span style="color:var(--gn)">↓ ${imp} getting better</span><br>
+            <span style="color:var(--re)">↑ ${wor} getting worse</span><br>
+            <span style="color:var(--ink3)">📊 ${b.withData} with data</span>
           </div>
           <div style="font-size:9px;color:var(--ink3);margin-top:4px">Target: ${b.target || ''}</div>
         </div>`;
       }).join('')}
     </div>
-  </div>` : ''}
+  </div>
+
+  <!-- ── HbA1c TRAJECTORY DETAIL ── -->
+  ${data.biomarkers.hba1c?.improving && data.biomarkers.hba1c?.worsening ? (()=>{
+    const h = data.biomarkers.hba1c;
+    const bands = h.bandLabels || ['≤7%','7-8','8-9','9-10','>10%'];
+    const impB = h.improving.bands || [];
+    const worB = h.worsening.bands || [];
+    const maxBar = Math.max(...impB, ...worB, 1);
+    return `
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="color:var(--gn)">✨ Getting Better — HbA1c <span class="card-sub">${h.improving.total} patients</span></div>
+        ${h.improving.total === 0 ? '<div class="no-data">No patients improving this period</div>' :
+        `<div style="display:flex;flex-direction:column;gap:4px">
+          ${bands.map((label, i) => {
+            const n = impB[i] || 0;
+            if(n === 0) return '';
+            const w = Math.round((n/maxBar)*100);
+            return `<div style="display:flex;align-items:center;gap:8px">
+              <div style="width:50px;font-size:10px;font-weight:600;color:var(--ink3);text-align:right">${label}</div>
+              <div style="flex:1;height:18px;background:var(--bg);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${w}%;background:var(--gn);border-radius:4px;min-width:${n>0?'20px':'0'}"></div>
+              </div>
+              <div style="width:24px;font-family:var(--fm);font-size:12px;font-weight:600;color:var(--gn)">${n}</div>
+            </div>`;
+          }).join('')}
+        </div>`}
+      </div>
+      <div class="card">
+        <div class="card-title" style="color:var(--re)">📉 Getting Worse — HbA1c <span class="card-sub">${h.worsening.total} patients</span></div>
+        ${h.worsening.total === 0 ? '<div class="no-data">No patients worsening — excellent!</div>' :
+        `<div style="display:flex;flex-direction:column;gap:4px">
+          ${bands.map((label, i) => {
+            const n = worB[i] || 0;
+            if(n === 0) return '';
+            const w = Math.round((n/maxBar)*100);
+            return `<div style="display:flex;align-items:center;gap:8px">
+              <div style="width:50px;font-size:10px;font-weight:600;color:var(--ink3);text-align:right">${label}</div>
+              <div style="flex:1;height:18px;background:var(--bg);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${w}%;background:var(--re);border-radius:4px;min-width:${n>0?'20px':'0'}"></div>
+              </div>
+              <div style="width:24px;font-family:var(--fm);font-size:12px;font-weight:600;color:var(--re)">${n}</div>
+            </div>`;
+          }).join('')}
+        </div>`}
+      </div>
+    </div>`;
+  })() : ''}` : ''}
 
   <!-- ── RINGS + FLOW ── -->
   <div class="three-col">
