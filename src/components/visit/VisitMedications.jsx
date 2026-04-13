@@ -86,6 +86,13 @@ const VisitMedications = memo(function VisitMedications({
       <div className="sch">
         <div className="sct">
           <div className="sci ic-g">💊</div>Medications
+          {(() => {
+            const latest = (activeMeds || []).reduce((max, m) => {
+              const d = m.updated_at || m.started_date || m.created_at;
+              return d && d > (max || "") ? d : max;
+            }, null);
+            return latest ? <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>Updated {fmtDate(latest)}</span> : null;
+          })()}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {prevVisitMeds.length > 0 && (

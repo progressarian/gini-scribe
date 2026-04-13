@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { DX_STATUS_STYLE, DX_STATUS_DEFAULT, getDxSuggestion } from "./helpers";
+import { DX_STATUS_STYLE, DX_STATUS_DEFAULT, getDxSuggestion, fmtDate } from "./helpers";
 import { sortDiagnoses, detectDiagnosisCategory } from "../../server-utils/diagnosisSort";
 
 const DX_STATUS_OPTS = [
@@ -284,6 +284,14 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
       <div className="sch">
         <div className="sct">
           <div className="sci ic-p">🏷</div>Diagnoses
+          {(() => {
+            const allDx = Object.values(grouped).flat();
+            const latest = allDx.reduce((max, dx) => {
+              const d = dx.updated_at || dx.created_at;
+              return d && d > (max || "") ? d : max;
+            }, null);
+            return latest ? <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>Updated {fmtDate(latest)}</span> : null;
+          })()}
         </div>
         <button className="bx bx-p" onClick={onAddDiagnosis}>
           + Add Diagnosis
