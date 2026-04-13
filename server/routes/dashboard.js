@@ -105,7 +105,7 @@ async function computeBiomarkerStats(patientIds, bioKey) {
   const prevMap = new Map();
   for (const r of prevR.rows) prevMap.set(r.patient_id, parseFloat(r.result));
 
-  let withData = 0, atTarget = 0, uncontrolled = 0, rising = 0;
+  let withData = 0, atTarget = 0, uncontrolled = 0, rising = 0, improving = 0;
   const distribution = bio.bands.map(() => 0);
 
   for (const [pid, v] of latestMap) {
@@ -130,9 +130,17 @@ async function computeBiomarkerStats(patientIds, bioKey) {
     // Trend
     const prev = prevMap.get(pid);
     if (prev != null && !isNaN(prev)) {
-      if (bio.lowerIsBetter === true && v > prev) rising++;
-      else if (bio.lowerIsBetter === false && v < prev) rising++;
-      else if (bio.lowerIsBetter === null && v > bio.target && v > prev) rising++;
+      if (bio.lowerIsBetter === true) {
+        if (v > prev) rising++;
+        else if (v < prev) improving++;
+      } else if (bio.lowerIsBetter === false) {
+        if (v < prev) rising++;
+        else if (v > prev) improving++;
+      } else {
+        // range-based (TSH)
+        if (v > bio.target && v > prev) rising++;
+        else if (v <= bio.target && prev > bio.target) improving++;
+      }
     }
   }
 
@@ -145,6 +153,7 @@ async function computeBiomarkerStats(patientIds, bioKey) {
     atTarget,
     uncontrolled,
     rising,
+    improving,
     distribution,
     bandLabels: bio.bands.map((b) => b.label),
     controlRate: withData > 0 ? Math.round((atTarget / withData) * 100) : 0,
@@ -369,7 +378,7 @@ router.get("/dashboard", async (req, res) => {
        ORDER BY patient_id, recorded_at DESC`,
       [patientIds],
     );
-    let bpWithData = 0, bpAtTarget = 0, bpUncontrolled = 0;
+    let bpWithData = 0, bpAtTarget = 0, bpUncontrolled = 0, bpImproving = 0, bpRising = 0;
     const bpDist = [0, 0, 0, 0]; // <130, 130-140, 140-150, >150
     for (const r of bpR.rows) {
       const sys = parseFloat(r.bp_sys);
@@ -393,7 +402,7 @@ router.get("/dashboard", async (req, res) => {
         bp: {
           key: "bp", label: "Blood Pressure", unit: "mmHg", target: "< 130/80",
           withData: bpWithData, atTarget: bpAtTarget, uncontrolled: bpUncontrolled,
-          rising: 0, distribution: bpDist,
+          rising: bpRising, improving: bpImproving, distribution: bpDist,
           bandLabels: ["< 130", "130–140", "140–150", "> 150"],
           controlRate: bpWithData > 0 ? Math.round((bpAtTarget / bpWithData) * 100) : 0,
         },

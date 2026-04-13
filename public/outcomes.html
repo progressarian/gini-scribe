@@ -444,13 +444,15 @@ function renderDashboardData(data) {
         ${s.uncontrolled>0?'Need immediate attention':'None — excellent!'}
       </div>
     </div>
-    <!-- Rising -->
-    <div class="sc" style="${s.risingTrend>0?'border-color:var(--amb)':''}">
-      <div class="sc-accent" style="background:${s.risingTrend>0?'var(--am)':'var(--bd)'}"></div>
-      <div class="sc-ico">📈</div>
-      <div class="sc-val" style="color:${s.risingTrend>0?'var(--am)':'var(--ink3)'}">${s.risingTrend}</div>
-      <div class="sc-lbl">HbA1c rising ↑</div>
-      <div class="sc-sub">${s.risingTrend>0?'Trending wrong direction':'All stable or improving'}</div>
+    <!-- Getting worse -->
+    <div class="sc" style="${s.risingTrend>0?'border-color:var(--reb)':''}">
+      <div class="sc-accent" style="background:${s.risingTrend>0?'var(--re)':'var(--bd)'}"></div>
+      <div class="sc-ico">📉</div>
+      <div class="sc-val" style="color:${s.risingTrend>0?'var(--re)':'var(--ink3)'}">${s.risingTrend}</div>
+      <div class="sc-lbl">Getting worse</div>
+      <div class="sc-sub" style="color:${s.risingTrend>0?'var(--re)':'var(--ink3)'}">
+        ${s.risingTrend>0?`HbA1c trending up`:'None — all stable or improving'}
+      </div>
     </div>
   </div>
 
@@ -477,7 +479,8 @@ function renderDashboardData(data) {
         <div style="flex:1;font-size:11px;color:var(--ink2);line-height:1.8">
           ✅ At target (≤7%): <b>${data.biomarkers.hba1c.followUpPatients.atTarget}</b><br>
           ⚠️ Uncontrolled (>9%): <b style="color:var(--re)">${data.biomarkers.hba1c.followUpPatients.uncontrolled}</b><br>
-          📈 Rising trend: <b style="color:var(--am)">${data.biomarkers.hba1c.followUpPatients.rising}</b><br>
+          ✨ Getting better: <b style="color:var(--gn)">${data.biomarkers.hba1c.followUpPatients.improving || 0}</b><br>
+          📉 Getting worse: <b style="color:var(--re)">${data.biomarkers.hba1c.followUpPatients.rising}</b><br>
           📊 With data: ${data.biomarkers.hba1c.followUpPatients.withData} / ${data.patientSplit.followUp}
         </div>
       </div>` : `<div class="no-data">No follow-up patients in this period</div>`}
@@ -500,8 +503,9 @@ function renderDashboardData(data) {
           <div style="font-size:9px;color:var(--ink3);margin-top:2px">at target</div>
           <div style="margin-top:6px;font-size:10px;color:var(--ink2);line-height:1.6">
             ✅ ${b.atTarget}/${b.withData}<br>
-            ${b.uncontrolled > 0 ? `<span style="color:var(--re)">⚠ ${b.uncontrolled} uncontrolled</span><br>` : ''}
-            ${b.rising > 0 ? `<span style="color:var(--am)">↑ ${b.rising} rising</span>` : ''}
+            ${b.improving > 0 ? `<span style="color:var(--gn)">↓ ${b.improving} getting better</span><br>` : ''}
+            ${b.rising > 0 ? `<span style="color:var(--re)">↑ ${b.rising} getting worse</span><br>` : ''}
+            ${b.uncontrolled > 0 ? `<span style="color:var(--re)">⚠ ${b.uncontrolled} out of range</span>` : ''}
           </div>
           <div style="font-size:9px;color:var(--ink3);margin-top:4px">Target: ${b.target || ''}</div>
         </div>`;
@@ -778,8 +782,12 @@ document.getElementById('crTo').value = today;
 const monthAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
 document.getElementById('crFrom').value = monthAgo;
 
-// Auto-refresh every 60 seconds
-setInterval(()=>{ if(currentPeriod==='today') loadDashboard(); }, 60000);
+// Auto-refresh every 60 seconds — silent (no skeleton flash)
+setInterval(()=>{
+  if(currentPeriod==='today') {
+    fetchDashboard('today','','').then(data => renderDashboardData(data)).catch(()=>{});
+  }
+}, 60000);
 
 // Initial load
 loadDashboard();
