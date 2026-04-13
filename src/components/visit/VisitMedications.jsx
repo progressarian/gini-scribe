@@ -19,8 +19,8 @@ function autoDetectGroup(name) {
   if (n.includes("metformin") || ["glycomet","glucophage","istamet","obimet"].some(k => baseName.includes(k))) return "diabetes";
   // SGLT2
   if (["forxiga","jardiance","dapagliflozin","empagliflozin","canagliflozin","sglt2"].some(k => baseName.includes(k))) return "diabetes";
-  // DPP4
-  if (["trajenta","januvia","galvus","sitagliptin","vildagliptin","linagliptin","teneligliptin","gliptin"].some(k => baseName.includes(k))) return "diabetes";
+  // DPP4 + combos
+  if (["trajenta","januvia","galvus","sitagliptin","vildagliptin","linagliptin","teneligliptin","gliptin","janumet","istavel","zita","jalra"].some(k => baseName.includes(k))) return "diabetes";
   // GLP1
   if (["ozempic","rybelsus","mounjaro","semaglutide","tirzepatide","liraglutide","dulaglutide"].some(k => baseName.includes(k))) return "diabetes";
   // Sulphonylureas
@@ -37,8 +37,10 @@ function autoDetectGroup(name) {
   if (["aspirin","ecospirin","clopidogrel","prasugrel","ticagrelor"].some(k => baseName.includes(k))) return "bp";
   // Thyroid
   if (["levothyroxine","thyronorm","eltroxin","thyroxine"].some(k => baseName.includes(k))) return "thyroid";
+  // Prostate / Urology (don't lump with supplements)
+  if (["tamsulosin","urimax","silodosin","dutasteride","finasteride","alfuzosin","flotral"].some(k => baseName.includes(k))) return "external";
   // Supplements
-  if (["vitamin","aktiv","calci","calcium","shelcal","iron","folic","omega","maxepa","methylcobal","b12","d3"].some(k => baseName.includes(k))) return "supplement";
+  if (["vitamin","aktiv","calci","calcium","shelcal","iron","folic","omega","maxepa","methylcobal","b12","d3","cospiaq","probiot","enzyme","pantop","panto","rabep","omeprazole"].some(k => baseName.includes(k))) return "supplement";
 
   return "supplement"; // fallback
 }
