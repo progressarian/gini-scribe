@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gini — Clinical Outcomes Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── ROOT — matches coordinator app exactly ── */
+:root{
+  --bg:#f0f4f7;--white:#fff;--ink:#1a2332;--ink2:#3d4f63;--ink3:#6b7d90;
+  --bd:#dde3ea;--bd2:#c4cdd8;
+  --tl:#009e8c;--tll:#e6f6f4;--tlb:rgba(0,158,140,.22);
+  --nv:#0e2240;
+  --re:#d94f4f;--rel:#fdf0f0;--reb:rgba(217,79,79,.2);
+  --am:#d97a0a;--aml:#fef6e6;--amb:rgba(217,122,10,.2);
+  --gn:#15803d;--gnl:#edfcf0;--gnb:rgba(21,128,61,.2);
+  --sk:#2563eb;--skl:#eff6ff;--skb:rgba(37,99,235,.2);
+  --gd:#b45309;--gdl:#fffbeb;--gdb:rgba(180,83,9,.2);
+  --sh:0 1px 3px rgba(0,0,0,.08);--shm:0 4px 14px rgba(0,0,0,.1);
+  --r:9px;--fb:'Outfit',sans-serif;--fd:'Instrument Serif',serif;--fm:'DM Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg)}
+body{font-family:var(--fb);color:var(--ink);font-size:13px;display:flex;flex-direction:column}
+
+/* ── TOPBAR ── */
+.tb{background:var(--nv);height:50px;display:flex;align-items:center;padding:0 18px;gap:12px;flex-shrink:0}
+.logo{font-family:var(--fd);font-size:19px;color:#fff}.logo em{font-style:italic;color:#5dd6ca}
+.logo-d{width:1px;height:16px;background:rgba(255,255,255,.15);margin:0 3px}
+.logo-s{font-size:11px;color:rgba(255,255,255,.4)}
+.tb-r{margin-left:auto;display:flex;align-items:center;gap:10px}
+.clkp{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 10px;font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.7)}
+.uch{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border-radius:20px;padding:3px 11px 3px 4px}
+.ucav{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#5dd6ca,#009e8c);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--nv)}
+.ucn{font-size:11px;font-weight:600;color:rgba(255,255,255,.85)}
+
+/* ── SUBNAV ── */
+.sn{background:var(--white);border-bottom:1px solid var(--bd);padding:0 18px;height:44px;display:flex;align-items:center;gap:3px;flex-shrink:0}
+.sn-title{font-family:var(--fd);font-size:16px;color:var(--ink);margin-right:10px}
+.snb{padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;color:var(--ink3);cursor:pointer;border:none;background:transparent;font-family:var(--fb);transition:all .15s}
+.snb:hover{background:var(--bg);color:var(--ink)}.snb.active{background:var(--tll);color:var(--tl)}
+.sn-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.sync-badge{background:var(--skl);border:1px solid var(--skb);border-radius:5px;padding:3px 9px;font-size:10px;font-weight:700;color:var(--sk);display:flex;align-items:center;gap:5px}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--gn);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.refresh-btn{padding:4px 11px;border-radius:5px;font-size:11px;font-weight:600;border:1px solid var(--bd);background:var(--white);color:var(--ink2);cursor:pointer;font-family:var(--fb)}
+.refresh-btn:hover{background:var(--bg)}
+.refresh-btn.spinning .ri{display:inline-block;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── PERIOD PILLS ── */
+.period-bar{background:var(--white);border-bottom:1px solid var(--bd);padding:8px 18px;display:flex;align-items:center;gap:6px;flex-shrink:0;overflow-x:auto}
+.period-bar::-webkit-scrollbar{height:0}
+.pb{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;color:var(--ink3);cursor:pointer;border:1px solid var(--bd);background:var(--white);font-family:var(--fb);transition:all .15s;white-space:nowrap}
+.pb:hover{border-color:var(--bd2)}.pb.active{background:var(--nv);color:#fff;border-color:var(--nv)}
+.pb-sep{width:1px;height:16px;background:var(--bd);flex-shrink:0}
+.custom-range{display:none;align-items:center;gap:6px;font-size:11px;color:var(--ink3)}
+.custom-range.show{display:flex}
+.crinp{border:1px solid var(--bd);border-radius:5px;padding:3px 8px;font-family:var(--fm);font-size:11px;color:var(--ink);background:var(--bg);outline:none}
+.crinp:focus{border-color:var(--tl)}
+.cr-apply{padding:3px 10px;border-radius:5px;font-size:11px;font-weight:700;background:var(--tl);color:#fff;border:none;cursor:pointer;font-family:var(--fb)}
+
+/* ── MAIN SCROLL ── */
+.db-wrap{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.db-wrap::-webkit-scrollbar{width:4px}.db-wrap::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}
+
+/* ── SKELETON ── */
+.skel{background:linear-gradient(90deg,var(--bd) 25%,var(--bd2) 50%,var(--bd) 75%);background-size:200% 100%;animation:skelAnim 1.2s infinite;border-radius:5px}
+@keyframes skelAnim{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ── STAT CARDS ── */
+.stat-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.sc{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh);position:relative;overflow:hidden}
+.sc-ico{font-size:22px;margin-bottom:7px}
+.sc-val{font-family:var(--fm);font-size:30px;font-weight:500;line-height:1;margin-bottom:4px}
+.sc-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3)}
+.sc-sub{font-size:10px;color:var(--ink3);margin-top:3px}
+.sc-trend{font-size:10px;font-weight:700;margin-top:3px;display:flex;align-items:center;gap:3px}
+.sc-accent{position:absolute;top:0;left:0;width:4px;height:100%;border-radius:var(--r) 0 0 var(--r)}
+
+/* ── SECTION LAYOUT ── */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.card{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:14px;box-shadow:var(--sh)}
+.card-title{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.card-sub{font-size:10px;color:var(--ink3);font-weight:400}
+
+/* ── RINGS ── */
+.ring-wrap{display:flex;align-items:center;gap:14px}
+.ring{position:relative;width:72px;height:72px;flex-shrink:0}
+.ring svg{width:72px;height:72px}
+.ring circle{fill:none;stroke-width:9;stroke-linecap:round}
+.ring-ctr{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;line-height:1}
+.ring-val{font-family:var(--fm);font-size:15px;font-weight:500}
+.ring-lbl{font-size:8px;color:var(--ink3);margin-top:1px}
+.ring-info{flex:1}
+.ring-name{font-size:12px;font-weight:700;margin-bottom:4px}
+.ring-detail{font-size:11px;color:var(--ink3);line-height:1.5}
+
+/* ── PROGRESS BAR ── */
+.prog-bar{height:8px;background:var(--bg);border-radius:4px;overflow:hidden;margin-bottom:3px}
+.prog-fill{height:100%;border-radius:4px;transition:width .8s ease}
+
+/* ── GOAL BAR ── */
+.goal-card{background:var(--white);border:1px solid var(--bd);border-left:4px solid var(--tl);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh)}
+.goal-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.goal-title{font-size:13px;font-weight:700}
+.goal-pct{font-family:var(--fm);font-size:34px;font-weight:500;line-height:1}
+.goal-prog{height:12px;background:var(--bg);border-radius:6px;overflow:hidden;margin-bottom:6px}
+.goal-fill{height:100%;border-radius:6px;transition:width 1s ease;background:linear-gradient(90deg,var(--re),var(--am) 50%,var(--gn))}
+.goal-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--ink3)}
+
+/* ── DISTRIBUTION CHART ── */
+.dist-chart{display:flex;gap:6px;align-items:flex-end;height:70px;margin-bottom:6px}
+.dist-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+.dist-count{font-family:var(--fm);font-size:11px;font-weight:500}
+.dist-bar{width:100%;border-radius:4px 4px 0 0;min-height:4px;transition:height .6s ease}
+.dist-labels{display:flex;gap:6px}
+.dist-lbl{flex:1;text-align:center;font-size:9px;color:var(--ink3)}
+
+/* ── PATIENT LISTS ── */
+.pt-list{display:flex;flex-direction:column;gap:5px;max-height:340px;overflow-y:auto}
+.pt-list::-webkit-scrollbar{width:3px}.pt-list::-webkit-scrollbar-thumb{background:var(--bd)}
+.pt-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:7px;cursor:pointer;transition:all .12s;border:1px solid;position:relative}
+.pt-row:hover{filter:brightness(.97);transform:translateX(2px)}
+.pt-row.urgent{border-color:var(--reb);background:var(--rel)}
+.pt-row.amber{border-color:var(--amb);background:var(--aml)}
+.pt-row.green{border-color:var(--gnb);background:var(--gnl)}
+.pt-row.gray{border-color:var(--bd);background:var(--bg)}
+.pt-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+.pt-body{flex:1;min-width:0}
+.pt-name{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pt-reason{font-size:10px;margin-top:1px;line-height:1.4}
+.pt-right{text-align:right;flex-shrink:0}
+.pt-hba1c{font-family:var(--fm);font-size:13px;font-weight:500;display:flex;align-items:center;gap:3px;justify-content:flex-end}
+.pt-meta{font-size:9px;color:var(--ink3);margin-top:2px}
+.trend-up{color:var(--re);font-weight:700}
+.trend-dn{color:var(--gn);font-weight:700}
+.trend-same{color:var(--am);font-weight:700}
+.no-data{font-size:12px;color:var(--ink3);padding:16px;text-align:center}
+
+/* ── VISIT FLOW ── */
+.flow-row{display:flex;flex-direction:column;gap:5px}
+.flow-item{display:flex;flex-direction:column;gap:2px}
+.flow-label-row{display:flex;justify-content:space-between;font-size:11px}
+.flow-lbl{font-weight:600}
+.flow-n{font-family:var(--fm);font-size:11px}
+
+/* ── MISSING DATA BLOCK ── */
+.missing-block{background:var(--aml);border:1px solid var(--amb);border-radius:7px;padding:9px 12px;margin-top:8px}
+.missing-title{font-size:10px;font-weight:800;color:var(--am);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.missing-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(217,122,10,.12);font-size:11px;cursor:pointer}
+.missing-row:last-child{border:none}
+.missing-row:hover{opacity:.8}
+
+/* ── PHASE BREAKDOWN ── */
+.phase-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+.ph-cell{padding:9px;border-radius:7px;text-align:center}
+.ph-val{font-family:var(--fm);font-size:22px;font-weight:500;margin-bottom:3px}
+.ph-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.ph-sub{font-size:9px;margin-top:2px}
+
+/* ── ERROR / EMPTY ── */
+.db-error{text-align:center;padding:40px;color:var(--ink3)}
+.err-ico{font-size:36px;margin-bottom:8px;opacity:.3}
+.err-title{font-size:14px;font-weight:700;margin-bottom:4px;color:var(--re)}
+.err-sub{font-size:12px;line-height:1.6}
+.retry-btn{margin-top:12px;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:700;background:var(--tl);color:#fff;border:none;cursor:pointer;font-family:var(--fb)}
+
+/* Responsive */
+@media(max-width:1100px){.stat-row{grid-template-columns:repeat(3,1fr)}.three-col{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.stat-row{grid-template-columns:1fr 1fr}.two-col,.three-col{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="tb">
+  <div class="logo">Gini <em>Scribe</em></div>
+  <div class="logo-d"></div>
+  <div class="logo-s">OPD Manager</div>
+  <div class="tb-r">
+    <div class="clkp" id="clk">--</div>
+    <div class="uch"><div class="ucav">PC</div><div class="ucn">Preeti Sharma</div></div>
+  </div>
+</div>
+
+<!-- SUBNAV -->
+<div class="sn">
+  <div class="sn-title">Clinical Outcomes</div>
+  <div class="sn-r">
+    <div class="sync-badge"><div class="sync-dot"></div><span id="syncLabel">HealthRay synced</span></div>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadDashboard()"><span class="ri">⟳</span> Refresh</button>
+  </div>
+</div>
+
+<!-- PERIOD BAR -->
+<div class="period-bar">
+  <button class="pb active" data-period="today" onclick="setPeriod('today',this)">Today</button>
+  <button class="pb" data-period="yesterday" onclick="setPeriod('yesterday',this)">Yesterday</button>
+  <button class="pb" data-period="week" onclick="setPeriod('week',this)">This week</button>
+  <button class="pb" data-period="month" onclick="setPeriod('month',this)">This month</button>
+  <button class="pb" data-period="lastmonth" onclick="setPeriod('lastmonth',this)">Last month</button>
+  <div class="pb-sep"></div>
+  <button class="pb" data-period="custom" onclick="setPeriod('custom',this)">Custom range</button>
+  <div class="custom-range" id="customRange">
+    <span>From</span>
+    <input class="crinp" type="date" id="crFrom">
+    <span>to</span>
+    <input class="crinp" type="date" id="crTo">
+    <button class="cr-apply" onclick="applyCustom()">Apply</button>
+  </div>
+</div>
+
+<!-- DASHBOARD CONTENT -->
+<div class="db-wrap" id="dbWrap"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════
+   CONFIG — developer wires this to real API
+══════════════════════════════════════════════════════ */
+const API_BASE = '/api'; // change to full URL if needed
+// Set to true to use mock data (remove when API is live)
+const USE_MOCK = false;
+
+/* ══════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════ */
+let currentPeriod = 'today';
+let customFrom = '', customTo = '';
+let refreshTimer = null;
+let isLoading = false;
+
+/* ══════════════════════════════════════════════════════
+   MOCK DATA — reflects real patient data from coordinator
+══════════════════════════════════════════════════════ */
+function getMockData(period) {
+  // Simulate what the real API returns
+  const base = {
+    period: { label: period === 'today' ? 'Today' : period === 'week' ? 'This week' : 'This month' },
+    stats: {
+      totalPatients: 13,
+      withHba1c: 11,
+      atTarget: 4,
+      uncontrolled: 5,
+      risingTrend: 3,
+      missingData: 2,
+      controlRate: 36,
+      coverageRate: 85,
+    },
+    distribution: [4, 2, 2, 2, 1], // ≤7, 7-8, 8-9, 9-10, >10
+    needsAttention: [
+      { patientId:'A01', name:'Manpreet Kaur Gill', age:61, gender:'F',
+        latestHba1c:10.6, prevHba1c:9.2, compliance:60, phase:'control',
+        lastVisit:'09:00', urgencyReasons:['HbA1c 10.6% — uncontrolled','Rising from 9.2%','Compliance 60%'] },
+      { patientId:'A05', name:'Kulwinder Randhawa', age:44, gender:'F',
+        latestHba1c:9.8, prevHba1c:9.1, compliance:75, phase:'control',
+        lastVisit:'10:30', urgencyReasons:['HbA1c 9.8% — uncontrolled','Rising from 9.1%'] },
+      { patientId:'A02', name:'Harjinder Singh Dhaliwal', age:54, gender:'M',
+        latestHba1c:11.2, prevHba1c:null, compliance:null, phase:'control',
+        lastVisit:'09:15', urgencyReasons:['HbA1c 11.2% — new patient, critical'] },
+      { patientId:'A04', name:'Gurmail Singh Sandhu', age:71, gender:'M',
+        latestHba1c:8.9, prevHba1c:8.8, compliance:85, phase:'control',
+        lastVisit:'10:00', urgencyReasons:['Rising from 8.8% — plateauing','Age 71 on insulin'] },
+      { patientId:'A07', name:'Deepak Sharma', age:46, gender:'M',
+        latestHba1c:8.1, prevHba1c:8.6, compliance:80, phase:'stabilize',
+        lastVisit:'09:15', urgencyReasons:['Improving but not at target'] },
+    ],
+    missingBiomarkers: [
+      { patientId:'A07x', name:'Ramesh Verma', age:49, gender:'M', time:'11:30' },
+      { patientId:'A08', name:'Amarjit Singh Bhatti', age:63, gender:'M', time:'12:00' },
+    ],
+    onTrack: [
+      { patientId:'A03', name:'Dr. S.K. Mahajan', age:68, gender:'M',
+        latestHba1c:7.0, prevHba1c:7.2, phase:'sustain', lastVisit:'09:40' },
+      { patientId:'A12', name:'Amarjit Kaur Sekhon', age:57, gender:'F',
+        latestHba1c:7.4, prevHba1c:8.2, phase:'stabilize', lastVisit:'09:00' },
+      { patientId:'A09', name:'Surjit Singh Dhaliwal', age:64, gender:'M',
+        latestHba1c:7.1, prevHba1c:8.4, phase:'stabilize', lastVisit:'09:25' },
+      { patientId:'A13', name:'Aman Jolly', age:29, gender:'M',
+        latestHba1c:6.1, prevHba1c:6.4, phase:'sustain', lastVisit:'09:30' },
+    ],
+    phaseBreakdown: { control: 5, stabilize: 5, sustain: 3 },
+    visitFlow: period === 'today' ? { seen:4, withDoctor:2, waiting:3, ready:2, pending:2 } : null,
+    healthraySyncedAt: new Date(Date.now() - 8*60000).toISOString(),
+  };
+  // Adjust for non-today periods
+  if(period !== 'today') {
+    base.stats.totalPatients = period==='week'?47:period==='month'?183:13;
+    base.stats.withHba1c = period==='week'?44:period==='month'?175:11;
+    base.stats.atTarget = period==='week'?18:period==='month'?71:4;
+    base.stats.uncontrolled = period==='week'?14:period==='month'?52:5;
+    base.stats.controlRate = Math.round((base.stats.atTarget/base.stats.withHba1c)*100);
+    base.stats.coverageRate = Math.round((base.stats.withHba1c/base.stats.totalPatients)*100);
+    base.distribution = period==='week'?[18,9,8,8,7]:period==='month'?[71,38,32,24,10]:base.distribution;
+  }
+  return base;
+}
+
+/* ══════════════════════════════════════════════════════
+   API CALL — developer replaces USE_MOCK block
+══════════════════════════════════════════════════════ */
+async function fetchDashboard(period, from, to) {
+  if(USE_MOCK) {
+    await new Promise(r => setTimeout(r, 600)); // simulate network
+    return getMockData(period);
+  }
+  // Real API call:
+  let url = `${API_BASE}/dashboard?period=${period}`;
+  if(period === 'custom' && from && to) url = `${API_BASE}/dashboard?from=${from}&to=${to}`;
+  const token = localStorage.getItem('gini_auth_token'); const res = await fetch(url, { credentials: 'include', headers: token ? { 'x-auth-token': token } : {} });
+  if(!res.ok) throw new Error(`API error ${res.status}`);
+  return await res.json();
+}
+
+/* ══════════════════════════════════════════════════════
+   PERIOD SELECTOR
+══════════════════════════════════════════════════════ */
+function setPeriod(period, btn) {
+  document.querySelectorAll('.pb').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPeriod = period;
+  const cr = document.getElementById('customRange');
+  cr.classList.toggle('show', period === 'custom');
+  if(period !== 'custom') loadDashboard();
+}
+function applyCustom() {
+  customFrom = document.getElementById('crFrom').value;
+  customTo = document.getElementById('crTo').value;
+  if(!customFrom || !customTo) { alert('Please select both dates'); return; }
+  loadDashboard();
+}
+
+/* ══════════════════════════════════════════════════════
+   HELPERS
+══════════════════════════════════════════════════════ */
+function inits(name) {
+  return name.split(' ').filter((_,i,a)=>i===0||i===a.length-1).map(x=>x[0]).join('').toUpperCase().slice(0,2);
+}
+function hba1cColor(v) {
+  if(!v) return 'var(--ink3)';
+  return v<=7?'var(--gn)':v<=9?'var(--am)':'var(--re)';
+}
+function hba1cBg(v) {
+  if(!v) return 'var(--bg)';
+  return v<=7?'var(--gnl)':v<=9?'var(--aml)':'var(--rel)';
+}
+function trendHtml(latest, prev) {
+  if(!prev) return '';
+  if(latest > prev) return `<span class="trend-up">↑</span>`;
+  if(latest < prev) return `<span class="trend-dn">↓</span>`;
+  return `<span class="trend-same">→</span>`;
+}
+function timeSince(isoStr) {
+  if(!isoStr) return '';
+  const mins = Math.round((Date.now() - new Date(isoStr).getTime()) / 60000);
+  if(mins < 1) return 'just now';
+  if(mins < 60) return `${mins}m ago`;
+  return `${Math.round(mins/60)}h ago`;
+}
+function phaseLabel(phase) {
+  return {control:'Control',stabilize:'Stabilize',sustain:'Sustain'}[phase]||phase||'—';
+}
+function phaseBadge(phase) {
+  const map={control:'background:var(--rel);color:var(--re)',stabilize:'background:var(--aml);color:var(--am)',sustain:'background:var(--gnl);color:var(--gn)'};
+  const style=map[phase]||'background:var(--bg);color:var(--ink3)';
+  return `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;${style}">${phaseLabel(phase)}</span>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   SKELETON LOADING
+══════════════════════════════════════════════════════ */
+function renderSkeleton() {
+  document.getElementById('dbWrap').innerHTML = `
+  <div class="stat-row">
+    ${Array(5).fill('<div class="sc"><div class="skel" style="height:24px;width:60px;margin-bottom:8px"></div><div class="skel" style="height:36px;width:80px;margin-bottom:6px"></div><div class="skel" style="height:12px;width:100px"></div></div>').join('')}
+  </div>
+  <div class="three-col">
+    <div class="card" style="height:110px"><div class="skel" style="height:100%"></div></div>
+    <div class="card" style="height:110px"><div class="skel" style="height:100%"></div></div>
+    <div class="card" style="height:110px"><div class="skel" style="height:100%"></div></div>
+  </div>
+  <div class="two-col">
+    <div class="card" style="height:280px"><div class="skel" style="height:100%"></div></div>
+    <div class="card" style="height:280px"><div class="skel" style="height:100%"></div></div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   RENDER
+══════════════════════════════════════════════════════ */
+function renderDashboardData(data) {
+  const s = data.stats;
+  const circ = 2*Math.PI*30;
+  const coverageArc = (s.coverageRate/100)*circ;
+  const controlArc = (s.controlRate/100)*circ;
+  const coverageColor = s.coverageRate>=80?'var(--gn)':s.coverageRate>=60?'var(--am)':'var(--re)';
+  const controlColor = s.controlRate>=60?'var(--gn)':s.controlRate>=30?'var(--am)':'var(--re)';
+  const isToday = data.visitFlow !== null;
+
+  // Dist chart max
+  const distMax = Math.max(...data.distribution, 1);
+  const distColors = ['var(--gn)','#5aad5a','var(--am)','#d97a0a','var(--re)'];
+  const distRanges = ['≤ 7%','7–8','8–9','9–10','> 10%'];
+
+  document.getElementById('dbWrap').innerHTML = `
+
+  <!-- ── STAT CARDS ── -->
+  <div class="stat-row">
+    <!-- Total -->
+    <div class="sc">
+      <div class="sc-accent" style="background:var(--nv)"></div>
+      <div class="sc-ico">👥</div>
+      <div class="sc-val">${s.totalPatients}</div>
+      <div class="sc-lbl">${data.period.label} patients</div>
+      <div class="sc-sub">${isToday?data.visitFlow.seen+' seen so far':s.totalPatients+' total appointments'}</div>
+    </div>
+    <!-- Coverage -->
+    <div class="sc">
+      <div class="sc-accent" style="background:${coverageColor}"></div>
+      <div class="sc-ico">🧪</div>
+      <div class="sc-val" style="color:${coverageColor}">${s.withHba1c}<span style="font-size:16px;color:var(--ink3)">/${s.totalPatients}</span></div>
+      <div class="sc-lbl">HbA1c on file</div>
+      <div class="sc-sub">${s.coverageRate}% coverage${s.missingData>0?` · ${s.missingData} missing`:''}</div>
+    </div>
+    <!-- At target -->
+    <div class="sc" style="border-color:var(--gnb)">
+      <div class="sc-accent" style="background:var(--gn)"></div>
+      <div class="sc-ico">✅</div>
+      <div class="sc-val" style="color:var(--gn)">${s.atTarget}</div>
+      <div class="sc-lbl">At target ≤ 7%</div>
+      <div class="sc-trend" style="color:var(--gn)">${s.controlRate}% control rate</div>
+    </div>
+    <!-- Uncontrolled -->
+    <div class="sc" style="${s.uncontrolled>0?'border-color:var(--reb)':''}">
+      <div class="sc-accent" style="background:${s.uncontrolled>0?'var(--re)':'var(--bd)'}"></div>
+      <div class="sc-ico">⚠️</div>
+      <div class="sc-val" style="color:${s.uncontrolled>0?'var(--re)':'var(--ink3)'}">${s.uncontrolled}</div>
+      <div class="sc-lbl">Uncontrolled > 9%</div>
+      <div class="sc-sub" style="color:${s.uncontrolled>0?'var(--re)':'var(--ink3)'}">
+        ${s.uncontrolled>0?'Need immediate attention':'None — excellent!'}
+      </div>
+    </div>
+    <!-- Rising -->
+    <div class="sc" style="${s.risingTrend>0?'border-color:var(--amb)':''}">
+      <div class="sc-accent" style="background:${s.risingTrend>0?'var(--am)':'var(--bd)'}"></div>
+      <div class="sc-ico">📈</div>
+      <div class="sc-val" style="color:${s.risingTrend>0?'var(--am)':'var(--ink3)'}">${s.risingTrend}</div>
+      <div class="sc-lbl">HbA1c rising ↑</div>
+      <div class="sc-sub">${s.risingTrend>0?'Trending wrong direction':'All stable or improving'}</div>
+    </div>
+  </div>
+
+  <!-- ── RINGS + FLOW ── -->
+  <div class="three-col">
+    <!-- Coverage ring -->
+    <div class="card">
+      <div class="card-title">Biomarker coverage</div>
+      <div class="ring-wrap">
+        <div class="ring">
+          <svg viewBox="0 0 70 70">
+            <circle cx="35" cy="35" r="30" stroke="var(--bd)" stroke-width="9"/>
+            <circle cx="35" cy="35" r="30" stroke="${coverageColor}" stroke-width="9"
+              stroke-dasharray="${circ}" stroke-dashoffset="${circ-coverageArc}"
+              transform="rotate(-90 35 35)" style="transition:stroke-dashoffset .8s"/>
+          </svg>
+          <div class="ring-ctr"><div class="ring-val" style="color:${coverageColor}">${s.coverageRate}%</div><div class="ring-lbl">data</div></div>
+        </div>
+        <div class="ring-info">
+          <div class="ring-name">Data completeness</div>
+          <div class="ring-detail">${s.withHba1c} of ${s.totalPatients} patients have HbA1c</div>
+          ${s.missingData>0?`<div style="font-size:11px;color:var(--re);margin-top:5px;font-weight:600">⚠ ${s.missingData} patients have no data</div>`:`<div style="font-size:11px;color:var(--gn);margin-top:5px">✓ All patients have data</div>`}
+        </div>
+      </div>
+    </div>
+
+    <!-- Control rate ring -->
+    <div class="card">
+      <div class="card-title">Control rate</div>
+      <div class="ring-wrap">
+        <div class="ring">
+          <svg viewBox="0 0 70 70">
+            <circle cx="35" cy="35" r="30" stroke="var(--bd)" stroke-width="9"/>
+            <circle cx="35" cy="35" r="30" stroke="${controlColor}" stroke-width="9"
+              stroke-dasharray="${circ}" stroke-dashoffset="${circ-controlArc}"
+              transform="rotate(-90 35 35)" style="transition:stroke-dashoffset .8s"/>
+          </svg>
+          <div class="ring-ctr"><div class="ring-val" style="color:${controlColor}">${s.controlRate}%</div><div class="ring-lbl">goal</div></div>
+        </div>
+        <div class="ring-info">
+          <div class="ring-name">Programme outcome</div>
+          <div class="ring-detail">${s.atTarget} at target · ${s.risingTrend} rising</div>
+          <div style="margin-top:6px">
+            <div class="prog-bar" style="width:100%"><div class="prog-fill" style="width:${s.controlRate}%;background:${controlColor}"></div></div>
+            <div style="font-size:10px;color:var(--ink3)">Goal: 100%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Visit flow (today) or Phase breakdown (other periods) -->
+    ${isToday ? `
+    <div class="card">
+      <div class="card-title">Today's visit flow</div>
+      <div class="flow-row">
+        ${[['Seen','seen','var(--gn)'],['With doctor','withDoctor','var(--sk)'],['Waiting','waiting','var(--am)'],['Ready to go in','ready','var(--gd)'],['Pending prep','pending','var(--ink3)']].map(([lbl,key,col])=>{
+          const n=data.visitFlow[key];const pct=Math.round((n/s.totalPatients)*100);
+          return n>0?`<div class="flow-item"><div class="flow-label-row"><span class="flow-lbl" style="color:${col}">${lbl}</span><span class="flow-n">${n}</span></div><div class="prog-bar"><div class="prog-fill" style="width:${pct}%;background:${col}"></div></div></div>`:'';
+        }).join('')}
+      </div>
+    </div>` : `
+    <div class="card">
+      <div class="card-title">HbA1c summary for period</div>
+      <div class="phase-grid">
+        <div class="ph-cell" style="background:var(--gnl)">
+          <div class="ph-val" style="color:var(--gn)">${s.atTarget}</div>
+          <div class="ph-lbl" style="color:var(--gn)">At target</div>
+          <div class="ph-sub" style="color:var(--gn)">≤ 7%</div>
+        </div>
+        <div class="ph-cell" style="background:var(--aml)">
+          <div class="ph-val" style="color:var(--am)">${s.withHba1c - s.atTarget - s.uncontrolled}</div>
+          <div class="ph-lbl" style="color:var(--am)">Borderline</div>
+          <div class="ph-sub" style="color:var(--am)">7–9%</div>
+        </div>
+        <div class="ph-cell" style="background:var(--rel)">
+          <div class="ph-val" style="color:var(--re)">${s.uncontrolled}</div>
+          <div class="ph-lbl" style="color:var(--re)">Uncontrolled</div>
+          <div class="ph-sub" style="color:var(--re)">> 9%</div>
+        </div>
+      </div>
+    </div>`}
+  </div>
+
+  <!-- ── ATTENTION + ON TRACK ── -->
+  <div class="two-col">
+    <!-- Needs attention -->
+    <div class="card">
+      <div class="card-title">
+        ⚠ Needs extra attention
+        <span class="card-sub">${data.needsAttention.length} patients — click to open</span>
+      </div>
+      <div class="pt-list">
+        ${data.needsAttention.length===0?`<div class="no-data">✓ All patients are on track</div>`:
+        data.needsAttention.map(pt=>{
+          const isUrgent=pt.latestHba1c>9;
+          const rowCls=isUrgent?'urgent':'amber';
+          const avBg=isUrgent?'var(--rel)':'var(--aml)';
+          const avColor=isUrgent?'var(--re)':'var(--am)';
+          return `<div class="pt-row ${rowCls}" onclick="openPatient('${pt.patientId}')">
+            <div class="pt-av" style="background:${avBg};color:${avColor}">${inits(pt.name)}</div>
+            <div class="pt-body">
+              <div class="pt-name">${pt.name.split('(')[0].trim()}</div>
+              <div class="pt-reason" style="color:${isUrgent?'var(--re)':'var(--am)'}">${pt.urgencyReason || (pt.urgencyReasons||[])[0] || ''}</div>
+            </div>
+            <div class="pt-right">
+              <div class="pt-hba1c" style="color:${hba1cColor(pt.latestHba1c)}">${pt.latestHba1c}% ${trendHtml(pt.latestHba1c,pt.prevHba1c)}</div>
+              <div class="pt-meta">${phaseBadge(pt.phase)}</div>
+              <div class="pt-meta">${pt.lastVisit||''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${(()=>{
+        const missing = data.needsAttention.filter(p => !p.latestHba1c);
+        return missing.length > 0 ? `
+        <div class="missing-block">
+          <div class="missing-title">⚠ No HbA1c data — enter before visit</div>
+          ${missing.map(pt=>`<div class="missing-row" onclick="openPatient('${pt.patientId}')">
+            <span>${pt.name} <span style="color:var(--ink3);font-size:10px">· ${pt.doctor||''}</span></span>
+            <span style="color:var(--am);font-size:10px;font-weight:700">Add biomarkers →</span>
+          </div>`).join('')}
+        </div>` : '';
+      })()}
+    </div>
+
+    <!-- Right col: On track + Distribution -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <!-- On track -->
+      <div class="card">
+        <div class="card-title">
+          ✅ On track
+          <span class="card-sub">${data.onTrack.length} patients</span>
+        </div>
+        <div class="pt-list" style="max-height:200px">
+          ${data.onTrack.length===0?`<div class="no-data">No patients at target yet in this period</div>`:
+          data.onTrack.map(pt=>`<div class="pt-row green" onclick="openPatient('${pt.patientId}')">
+            <div class="pt-av" style="background:var(--gnl);color:var(--gn)">${inits(pt.name)}</div>
+            <div class="pt-body">
+              <div class="pt-name">${pt.name.split('(')[0].trim()}</div>
+              <div class="pt-reason" style="color:var(--gn)">${phaseLabel(pt.phase)} phase</div>
+            </div>
+            <div class="pt-right">
+              <div class="pt-hba1c" style="color:var(--gn)">${pt.latestHba1c}% ${trendHtml(pt.latestHba1c,pt.prevHba1c)}</div>
+              ${pt.prevHba1c?`<div class="pt-meta" style="color:var(--gn)">↓ from ${pt.prevHba1c}%</div>`:''}
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+
+      <!-- Distribution chart -->
+      <div class="card">
+        <div class="card-title">HbA1c distribution — ${data.period.label.toLowerCase()}</div>
+        <div class="dist-chart">
+          ${data.distribution.map((n,i)=>{
+            const h=Math.max(6,Math.round((n/distMax)*60));
+            return `<div class="dist-bar-wrap">
+              <div class="dist-count" style="color:${distColors[i]}">${n}</div>
+              <div class="dist-bar" style="height:${h}px;background:${distColors[i]}"></div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="dist-labels">${distRanges.map(r=>`<div class="dist-lbl">${r}</div>`).join('')}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GOAL BAR ── -->
+  <div class="goal-card">
+    <div class="goal-top">
+      <div>
+        <div class="goal-title">Programme goal — 100% patients in control</div>
+        <div style="font-size:11px;color:var(--ink3);margin-top:3px">
+          ${s.atTarget} of ${s.withHba1c} patients with data at target (HbA1c ≤ 7%) · ${data.period.label}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="goal-pct" style="color:${controlColor}">${s.controlRate}%</div>
+        <div style="font-size:10px;color:var(--ink3)">of programme goal</div>
+      </div>
+    </div>
+    <div class="goal-prog">
+      <div class="goal-fill" style="width:${s.controlRate}%"></div>
+    </div>
+    <div class="goal-labels">
+      <span>0%</span>
+      <span style="color:${controlColor};font-weight:700">${data.period.label}: ${s.controlRate}%</span>
+      <span style="color:var(--gn);font-weight:700">Goal: 100%</span>
+    </div>
+  </div>
+
+  `;
+
+  // Update sync badge
+  if(data.healthraySyncedAt) {
+    document.getElementById('syncLabel').textContent = `HealthRay · ${timeSince(data.healthraySyncedAt)}`;
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   LOAD DASHBOARD
+══════════════════════════════════════════════════════ */
+async function loadDashboard() {
+  if(isLoading) return;
+  isLoading = true;
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  renderSkeleton();
+  try {
+    const data = await fetchDashboard(
+      currentPeriod,
+      customFrom,
+      customTo
+    );
+    renderDashboardData(data);
+  } catch(err) {
+    document.getElementById('dbWrap').innerHTML = `
+    <div class="db-error">
+      <div class="err-ico">⚠</div>
+      <div class="err-title">Could not load dashboard</div>
+      <div class="err-sub">${err.message}<br>Check that the API server is running and you are logged in.</div>
+      <button class="retry-btn" onclick="loadDashboard()">Try again</button>
+    </div>`;
+  } finally {
+    isLoading = false;
+    btn.classList.remove('spinning');
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   PATIENT CLICK — navigate to coordinator app
+══════════════════════════════════════════════════════ */
+function openPatient(patientId) {
+  // Developer: navigate to coordinator app with patient pre-selected
+  // e.g. window.location.href = `/opd?patient=${patientId}`;
+  // or postMessage to parent if embedded
+  sessionStorage.setItem('gini_active_patient', patientId); window.location.href = '/visit';
+  // For demo:
+  const toast = document.createElement('div');
+  toast.textContent = `Opening patient ${patientId} in coordinator…`;
+  Object.assign(toast.style, {
+    position:'fixed',bottom:'18px',right:'18px',
+    background:'var(--nv)',color:'#fff',padding:'8px 15px',
+    borderRadius:'7px',fontSize:'12px',fontWeight:'600',
+    fontFamily:'var(--fb)',zIndex:'9999',
+    animation:'fadeIn .2s ease'
+  });
+  document.body.appendChild(toast);
+  setTimeout(()=>toast.remove(), 2000);
+}
+
+/* ══════════════════════════════════════════════════════
+   CLOCK + AUTO REFRESH
+══════════════════════════════════════════════════════ */
+function tick(){
+  const n=new Date();const p2=x=>String(x).padStart(2,'0');
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const ms=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('clk').textContent=`${p2(n.getHours())}:${p2(n.getMinutes())}:${p2(n.getSeconds())} — ${days[n.getDay()]} ${n.getDate()} ${ms[n.getMonth()]}`;
+}
+
+/* ══════════════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════════════ */
+setInterval(tick,1000); tick();
+
+// Set default dates for custom range
+const today = new Date().toISOString().split('T')[0];
+document.getElementById('crTo').value = today;
+const monthAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+document.getElementById('crFrom').value = monthAgo;
+
+// Auto-refresh every 60 seconds
+setInterval(()=>{ if(currentPeriod==='today') loadDashboard(); }, 60000);
+
+// Initial load
+loadDashboard();
+</script>
+</body>
+</html>
