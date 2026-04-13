@@ -446,11 +446,12 @@ function ApptRow({ a, sel, onSelect }) {
             if (isNaN(prev)) return null;
             const improving = curr < prev;
             const worsening = curr > prev;
-            return improving
-              ? <span style={{ color: GN, fontWeight: 700, fontSize: 9 }}>↓ from {prev}%</span>
-              : worsening
-                ? <span style={{ color: RE, fontWeight: 700, fontSize: 9 }}>↑ from {prev}%</span>
-                : <span style={{ color: INK3, fontSize: 9 }}>→ stable</span>;
+            if (improving) return <span style={{ color: GN, fontWeight: 700, fontSize: 9 }}>↓ from {prev}%</span>;
+            if (worsening) return <span style={{ color: RE, fontWeight: 700, fontSize: 9 }}>↑ from {prev}%</span>;
+            // Stable — but context matters
+            if (curr > 9) return <span style={{ color: RE, fontWeight: 700, fontSize: 9 }}>⚠ stuck at {curr}%</span>;
+            if (curr > 7) return <span style={{ color: AM, fontWeight: 700, fontSize: 9 }}>→ not improving</span>;
+            return <span style={{ color: GN, fontWeight: 700, fontSize: 9 }}>✓ at target</span>;
           })()}
           {/* Lab pending indicator */}
           {a.pending_labs > 0 && (
@@ -3342,12 +3343,31 @@ function CategorizeTab({ appt, doctors, allAppts, onSave, onContinue }) {
                 const hasPrev = !isNaN(prev);
                 const improving = hasPrev && h < prev;
                 const worsening = hasPrev && h > prev;
-                const trendText = improving ? ` ↓ improving from ${prev}%` : worsening ? ` ↑ worsening from ${prev}%` : hasPrev ? " → stable" : "";
-                const rangeText = h > 9 ? "Uncontrolled. Needs senior review." : h > 7 ? "Not at target yet." : "At target. Routine care.";
-                const trajectoryLabel = improving ? "Getting better" : worsening ? "Getting worse" : "Stable";
+                const stable = hasPrev && !improving && !worsening;
+
+                let trendText = "";
+                let trajectoryLabel = "";
+                let trajectoryColor = INK3;
+
+                if (improving) {
+                  trendText = `↓ improving from ${prev}%`;
+                  trajectoryLabel = h <= 7 ? "Getting better — at target ✓" : h <= 9 ? `Getting better — HbA1c ${h}%, not at target yet` : `Getting better — still critically high at ${h}%`;
+                  trajectoryColor = GN;
+                } else if (worsening) {
+                  trendText = `↑ worsening from ${prev}%`;
+                  trajectoryLabel = h > 9 ? `Getting worse — critically uncontrolled at ${h}%` : h > 7 ? `Getting worse — HbA1c rising to ${h}%` : `Getting worse — rising but still at target (${h}%)`;
+                  trajectoryColor = RE;
+                } else if (stable) {
+                  trendText = `→ unchanged from ${prev}%`;
+                  trajectoryLabel = h > 9 ? `⚠ Stuck — critically uncontrolled at ${h}%. No improvement.` : h > 7 ? `Not improving — stuck at ${h}%` : `At target & stable ✓`;
+                  trajectoryColor = h > 9 ? RE : h > 7 ? AM : GN;
+                } else {
+                  trajectoryLabel = h > 9 ? "Uncontrolled. Needs senior review." : h > 7 ? "Not at target yet." : "At target. Routine care.";
+                }
+
                 return <>
-                  Based on HbA1c <b>{bio.hba1c}%</b>{trendText}<br/>
-                  <span style={{ fontWeight: 600 }}>{trajectoryLabel}</span> — {rangeText}
+                  Based on HbA1c <b>{bio.hba1c}%</b> {trendText}<br/>
+                  <span style={{ fontWeight: 600, color: trajectoryColor }}>{trajectoryLabel}</span>
                 </>;
               })()}
             </div>
