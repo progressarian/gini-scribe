@@ -53,15 +53,29 @@ const BIOMARKERS = {
     label: "TSH",
     unit: "µIU/mL",
     aliases: ["TSH", "Thyroid Stimulating Hormone", "THYROID STIMULATING HORMONE", "tsh"],
-    target: 4.5, // upper limit
-    targetLow: 0.5, // lower limit
+    target: 4.5,
+    targetLow: 0.5,
     danger: 10,
-    lowerIsBetter: null, // range-based, not directional
+    lowerIsBetter: null,
     bands: [
       { label: "< 0.5", max: 0.5 },
       { label: "0.5–4.5", max: 4.5 },
       { label: "4.5–10", max: 10 },
       { label: "> 10", max: Infinity },
+    ],
+  },
+  tg: {
+    label: "Triglycerides",
+    unit: "mg/dL",
+    aliases: ["Triglycerides", "TG", "TRIGLYCERIDES", "triglycerides"],
+    target: 150,
+    danger: 500,
+    lowerIsBetter: true,
+    bands: [
+      { label: "< 150", max: 150 },
+      { label: "150–200", max: 200 },
+      { label: "200–500", max: 500 },
+      { label: "> 500", max: Infinity },
     ],
   },
 };
@@ -211,6 +225,12 @@ router.get("/dashboard", async (req, res) => {
       dateFrom = from; dateTo = to; label = `${fmtDate(from)} — ${fmtDate(to)}`;
     } else {
       switch (period) {
+        case "tomorrow": {
+          const t = new Date(now); t.setDate(t.getDate() + 1);
+          dateFrom = dateTo = t.toISOString().split("T")[0];
+          label = `Tomorrow · ${fmtDate(dateFrom)}`;
+          break;
+        }
         case "yesterday": {
           const y = new Date(now); y.setDate(y.getDate() - 1);
           dateFrom = dateTo = y.toISOString().split("T")[0];
@@ -286,11 +306,12 @@ router.get("/dashboard", async (req, res) => {
     }
 
     // ── 4. Compute biomarker stats (all in parallel) ──
-    const [hba1cStats, ldlStats, uacrStats, tshStats] = await Promise.all([
+    const [hba1cStats, ldlStats, uacrStats, tshStats, tgStats] = await Promise.all([
       computeBiomarkerStats(patientIds, "hba1c"),
       computeBiomarkerStats(patientIds, "ldl"),
       computeBiomarkerStats(patientIds, "uacr"),
       computeBiomarkerStats(patientIds, "tsh"),
+      computeBiomarkerStats(patientIds, "tg"),
     ]);
 
     // Also compute HbA1c separately for new vs follow-up
@@ -407,8 +428,8 @@ router.get("/dashboard", async (req, res) => {
        ORDER BY patient_id, recorded_at DESC`,
       [patientIds],
     );
-    let bpWithData = 0, bpAtTarget = 0, bpUncontrolled = 0, bpImproving = 0, bpRising = 0;
-    const bpDist = [0, 0, 0, 0]; // <130, 130-140, 140-150, >150
+    let bpWithData = 0, bpAtTarget = 0, bpUncontrolled = 0;
+    const bpDist = [0, 0, 0, 0];
     for (const r of bpR.rows) {
       const sys = parseFloat(r.bp_sys);
       if (isNaN(sys)) continue;
@@ -418,6 +439,48 @@ router.get("/dashboard", async (req, res) => {
       else if (sys <= 150) { bpDist[2]++; }
       else { bpUncontrolled++; bpDist[3]++; }
     }
+
+    // Body composition from vitals (latest + previous for trend)
+    const bodyR = await pool.query(
+      `SELECT DISTINCT ON (patient_id) patient_id, weight, waist, body_fat, muscle_mass
+       FROM vitals WHERE patient_id = ANY($1::int[])
+         AND (weight IS NOT NULL OR waist IS NOT NULL)
+       ORDER BY patient_id, recorded_at DESC`,
+      [patientIds],
+    );
+    const bodyPrevR = await pool.query(
+      `SELECT DISTINCT ON (patient_id) patient_id, weight, waist, body_fat, muscle_mass
+       FROM (
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY recorded_at DESC) AS rn
+         FROM vitals WHERE patient_id = ANY($1::int[])
+           AND (weight IS NOT NULL OR waist IS NOT NULL)
+       ) sub WHERE rn = 2 ORDER BY patient_id`,
+      [patientIds],
+    );
+    const bodyPrevMap = new Map();
+    for (const r of bodyPrevR.rows) bodyPrevMap.set(r.patient_id, r);
+
+    function computeVitalMetric(field, label, unit, targetVal) {
+      let withData = 0, improving = 0, worsening = 0, atTarget = 0;
+      for (const r of bodyR.rows) {
+        const v = parseFloat(r[field]);
+        if (isNaN(v)) continue;
+        withData++;
+        if (targetVal && v <= targetVal) atTarget++;
+        const prev = bodyPrevMap.get(r.patient_id);
+        const pv = prev ? parseFloat(prev[field]) : NaN;
+        if (!isNaN(pv)) {
+          if (v < pv) improving++; // lower weight/waist/fat = better
+          else if (v > pv) worsening++;
+        }
+      }
+      return { key: field, label, unit, withData, improving: { total: improving }, worsening: { total: worsening }, atTargetStable: atTarget, controlRate: withData > 0 && targetVal ? Math.round((atTarget / withData) * 100) : null, target: targetVal ? `≤ ${targetVal}` : "Patient-specific" };
+    }
+
+    const weightStats = computeVitalMetric("weight", "Weight", "kg", null);
+    const waistStats = computeVitalMetric("waist", "Waist", "cm", null);
+    const bodyFatStats = computeVitalMetric("body_fat", "Body Fat", "%", null);
+    const muscleMassStats = computeVitalMetric("muscle_mass", "Muscle Mass", "kg", null);
 
     res.json({
       period: { from: dateFrom, to: dateTo, label },
@@ -436,8 +499,13 @@ router.get("/dashboard", async (req, res) => {
           controlRate: bpWithData > 0 ? Math.round((bpAtTarget / bpWithData) * 100) : 0,
         },
         ldl: ldlStats,
+        tg: tgStats,
         uacr: uacrStats,
         tsh: tshStats,
+        weight: weightStats,
+        waist: waistStats,
+        bodyFat: bodyFatStats,
+        muscleMass: muscleMassStats,
       },
       // Legacy compat (HbA1c as primary stat cards)
       stats: {

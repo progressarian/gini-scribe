@@ -198,6 +198,7 @@ body{font-family:var(--fb);color:var(--ink);font-size:13px;display:flex;flex-dir
 <!-- PERIOD BAR -->
 <div class="period-bar">
   <button class="pb active" data-period="today" onclick="setPeriod('today',this)">Today</button>
+  <button class="pb" data-period="tomorrow" onclick="setPeriod('tomorrow',this)">Tomorrow</button>
   <button class="pb" data-period="yesterday" onclick="setPeriod('yesterday',this)">Yesterday</button>
   <button class="pb" data-period="week" onclick="setPeriod('week',this)">This week</button>
   <button class="pb" data-period="month" onclick="setPeriod('month',this)">This month</button>
@@ -479,8 +480,8 @@ function renderDashboardData(data) {
         <div style="flex:1;font-size:11px;color:var(--ink2);line-height:1.8">
           ✅ At target (≤7%): <b>${data.biomarkers.hba1c.followUpPatients.atTarget}</b><br>
           ⚠️ Uncontrolled (>9%): <b style="color:var(--re)">${data.biomarkers.hba1c.followUpPatients.uncontrolled}</b><br>
-          ✨ Getting better: <b style="color:var(--gn)">${data.biomarkers.hba1c.followUpPatients.improving || 0}</b><br>
-          📉 Getting worse: <b style="color:var(--re)">${data.biomarkers.hba1c.followUpPatients.rising}</b><br>
+          ✨ Getting better: <b style="color:var(--gn)">${data.biomarkers.hba1c.followUpPatients.improving?.total ?? data.biomarkers.hba1c.followUpPatients.improving_count ?? 0}</b><br>
+          📉 Getting worse: <b style="color:var(--re)">${data.biomarkers.hba1c.followUpPatients.worsening?.total ?? data.biomarkers.hba1c.followUpPatients.rising ?? 0}</b><br>
           📊 With data: ${data.biomarkers.hba1c.followUpPatients.withData} / ${data.patientSplit.followUp}
         </div>
       </div>` : `<div class="no-data">No follow-up patients in this period</div>`}
@@ -491,8 +492,8 @@ function renderDashboardData(data) {
   ${data.biomarkers ? `
   <div class="card">
     <div class="card-title">📊 Biomarker Outcomes <span class="card-sub">${data.period.label}</span></div>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:4px">
-      ${['hba1c','bp','ldl','uacr','tsh'].map(key => {
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:4px">
+      ${['hba1c','bp','ldl','tg','uacr','tsh','weight','waist','bodyFat','muscleMass'].map(key => {
         const b = data.biomarkers[key];
         if(!b || !b.withData) return '';
         const pct = b.controlRate || 0;
@@ -500,17 +501,22 @@ function renderDashboardData(data) {
         const imp = b.improving?.total ?? b.improving_count ?? 0;
         const wor = b.worsening?.total ?? b.rising ?? 0;
         const stable = b.atTargetStable ?? b.atTarget ?? 0;
-        return `<div style="border:1px solid var(--bd);border-radius:7px;padding:10px;text-align:center;border-left:3px solid ${color}">
+        const hasTarget = pct !== null && b.controlRate !== null;
+        return `<div style="border:1px solid var(--bd);border-radius:7px;padding:10px;text-align:center;border-left:3px solid ${hasTarget ? color : imp >= wor ? 'var(--gn)' : 'var(--re)'}">
           <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${b.label}</div>
-          <div style="font-family:var(--fm);font-size:22px;font-weight:500;color:${color}">${pct}%</div>
-          <div style="font-size:9px;color:var(--ink3);margin-top:2px">at target</div>
+          ${hasTarget ? `
+            <div style="font-family:var(--fm);font-size:22px;font-weight:500;color:${color}">${pct}%</div>
+            <div style="font-size:9px;color:var(--ink3);margin-top:2px">at target</div>
+          ` : `
+            <div style="font-family:var(--fm);font-size:18px;font-weight:500;color:var(--ink)">${b.withData}</div>
+            <div style="font-size:9px;color:var(--ink3);margin-top:2px">with data</div>
+          `}
           <div style="margin-top:6px;font-size:10px;color:var(--ink2);line-height:1.7">
-            <span style="color:var(--gn)">✅ ${stable} at target & stable</span><br>
-            <span style="color:var(--gn)">↓ ${imp} getting better</span><br>
-            <span style="color:var(--re)">↑ ${wor} getting worse</span><br>
-            <span style="color:var(--ink3)">📊 ${b.withData} with data</span>
+            ${hasTarget ? `<span style="color:var(--gn)">✅ ${stable} at target</span><br>` : ''}
+            <span style="color:var(--gn)">↓ ${imp} better</span><br>
+            <span style="color:var(--re)">↑ ${wor} worse</span>
           </div>
-          <div style="font-size:9px;color:var(--ink3);margin-top:4px">Target: ${b.target || ''}</div>
+          <div style="font-size:9px;color:var(--ink3);margin-top:4px">${b.target || ''}</div>
         </div>`;
       }).join('')}
     </div>
