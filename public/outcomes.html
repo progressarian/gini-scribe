@@ -408,13 +408,15 @@ function renderDashboardData(data) {
 
   <!-- ── STAT CARDS ── -->
   <div class="stat-row">
-    <!-- Total -->
+    <!-- Total with New/FU split -->
     <div class="sc">
       <div class="sc-accent" style="background:var(--nv)"></div>
       <div class="sc-ico">👥</div>
       <div class="sc-val">${s.totalPatients}</div>
-      <div class="sc-lbl">${data.period.label} patients</div>
-      <div class="sc-sub">${isToday?data.visitFlow.seen+' seen so far':s.totalPatients+' total appointments'}</div>
+      <div class="sc-lbl">${data.period.label}</div>
+      <div class="sc-sub">
+        ${data.patientSplit ? `<span style="color:var(--sk);font-weight:700">${data.patientSplit.new || 0} New</span> · <span style="color:var(--tl);font-weight:700">${data.patientSplit.followUp || 0} Follow-Up</span>` : `${s.totalPatients} patients`}
+      </div>
     </div>
     <!-- Coverage -->
     <div class="sc">
@@ -451,6 +453,61 @@ function renderDashboardData(data) {
       <div class="sc-sub">${s.risingTrend>0?'Trending wrong direction':'All stable or improving'}</div>
     </div>
   </div>
+
+  ${data.patientSplit && (data.biomarkers?.hba1c?.newPatients || data.biomarkers?.hba1c?.followUpPatients) ? `
+  <!-- ── NEW vs FOLLOW-UP HbA1c COMPARISON ── -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title" style="color:var(--sk)">🆕 New Patients — HbA1c <span class="card-sub">${data.patientSplit.new} patients</span></div>
+      ${data.biomarkers.hba1c.newPatients ? `
+      <div style="display:flex;gap:16px;align-items:center">
+        <div style="text-align:center"><div style="font-family:var(--fm);font-size:24px;font-weight:500;color:${data.biomarkers.hba1c.newPatients.controlRate>=50?'var(--gn)':'var(--re)'}">${data.biomarkers.hba1c.newPatients.controlRate}%</div><div style="font-size:9px;color:var(--ink3)">at target</div></div>
+        <div style="flex:1;font-size:11px;color:var(--ink2);line-height:1.8">
+          ✅ At target (≤7%): <b>${data.biomarkers.hba1c.newPatients.atTarget}</b><br>
+          ⚠️ Uncontrolled (>9%): <b style="color:var(--re)">${data.biomarkers.hba1c.newPatients.uncontrolled}</b><br>
+          📊 With data: ${data.biomarkers.hba1c.newPatients.withData} / ${data.patientSplit.new}
+        </div>
+      </div>` : `<div class="no-data">No new patients in this period</div>`}
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--tl)">🔄 Follow-Up Patients — HbA1c <span class="card-sub">${data.patientSplit.followUp} patients</span></div>
+      ${data.biomarkers.hba1c.followUpPatients ? `
+      <div style="display:flex;gap:16px;align-items:center">
+        <div style="text-align:center"><div style="font-family:var(--fm);font-size:24px;font-weight:500;color:${data.biomarkers.hba1c.followUpPatients.controlRate>=50?'var(--gn)':'var(--re)'}">${data.biomarkers.hba1c.followUpPatients.controlRate}%</div><div style="font-size:9px;color:var(--ink3)">at target</div></div>
+        <div style="flex:1;font-size:11px;color:var(--ink2);line-height:1.8">
+          ✅ At target (≤7%): <b>${data.biomarkers.hba1c.followUpPatients.atTarget}</b><br>
+          ⚠️ Uncontrolled (>9%): <b style="color:var(--re)">${data.biomarkers.hba1c.followUpPatients.uncontrolled}</b><br>
+          📈 Rising trend: <b style="color:var(--am)">${data.biomarkers.hba1c.followUpPatients.rising}</b><br>
+          📊 With data: ${data.biomarkers.hba1c.followUpPatients.withData} / ${data.patientSplit.followUp}
+        </div>
+      </div>` : `<div class="no-data">No follow-up patients in this period</div>`}
+    </div>
+  </div>` : ''}
+
+  <!-- ── MULTI-BIOMARKER OUTCOMES ── -->
+  ${data.biomarkers ? `
+  <div class="card">
+    <div class="card-title">📊 Biomarker Outcomes — All Patients <span class="card-sub">${data.period.label}</span></div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:4px">
+      ${['hba1c','bp','ldl','uacr','tsh'].map(key => {
+        const b = data.biomarkers[key];
+        if(!b) return '';
+        const pct = b.controlRate || 0;
+        const color = pct >= 60 ? 'var(--gn)' : pct >= 30 ? 'var(--am)' : 'var(--re)';
+        return `<div style="border:1px solid var(--bd);border-radius:7px;padding:10px;text-align:center;border-left:3px solid ${color}">
+          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${b.label}</div>
+          <div style="font-family:var(--fm);font-size:22px;font-weight:500;color:${color}">${pct}%</div>
+          <div style="font-size:9px;color:var(--ink3);margin-top:2px">at target</div>
+          <div style="margin-top:6px;font-size:10px;color:var(--ink2);line-height:1.6">
+            ✅ ${b.atTarget}/${b.withData}<br>
+            ${b.uncontrolled > 0 ? `<span style="color:var(--re)">⚠ ${b.uncontrolled} uncontrolled</span><br>` : ''}
+            ${b.rising > 0 ? `<span style="color:var(--am)">↑ ${b.rising} rising</span>` : ''}
+          </div>
+          <div style="font-size:9px;color:var(--ink3);margin-top:4px">Target: ${b.target || ''}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>` : ''}
 
   <!-- ── RINGS + FLOW ── -->
   <div class="three-col">
@@ -552,6 +609,7 @@ function renderDashboardData(data) {
             <div class="pt-body">
               <div class="pt-name">${pt.name.split('(')[0].trim()}</div>
               <div class="pt-reason" style="color:${isUrgent?'var(--re)':'var(--am)'}">${pt.urgencyReason || (pt.urgencyReasons||[])[0] || ''}</div>
+              ${pt.visitType ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:${pt.visitType==='New'?'var(--skl)':'var(--tll)'};color:${pt.visitType==='New'?'var(--sk)':'var(--tl)'}">${pt.visitType}</span>` : ''}
             </div>
             <div class="pt-right">
               <div class="pt-hba1c" style="color:${hba1cColor(pt.latestHba1c)}">${pt.latestHba1c}% ${trendHtml(pt.latestHba1c,pt.prevHba1c)}</div>
