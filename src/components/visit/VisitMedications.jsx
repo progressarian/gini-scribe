@@ -47,7 +47,10 @@ function autoDetectGroup(name) {
 function dedup(meds) {
   const grouped = {};
   meds.forEach((m) => {
-    const key = (m.pharmacy_match || m.name || "").toUpperCase();
+    // Normalize: strip parenthetical composition for dedup
+    // "GLIZID M XR (GLICLAZIDE/METFORMIN)" → "GLIZID M XR"
+    const raw = (m.pharmacy_match || m.name || "").toUpperCase();
+    const key = raw.replace(/\s*\(.*\)/, "").replace(/\s+/g, " ").trim();
     if (!key) return;
     if (!grouped[key]) {
       grouped[key] = { ...m, _entries: [] };
