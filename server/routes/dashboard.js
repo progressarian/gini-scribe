@@ -306,21 +306,38 @@ router.get("/dashboard", async (req, res) => {
     }
 
     // ── 4. Compute biomarker stats (all in parallel) ──
-    const [hba1cStats, ldlStats, uacrStats, tshStats, tgStats] = await Promise.all([
-      computeBiomarkerStats(patientIds, "hba1c"),
-      computeBiomarkerStats(patientIds, "ldl"),
-      computeBiomarkerStats(patientIds, "uacr"),
-      computeBiomarkerStats(patientIds, "tsh"),
-      computeBiomarkerStats(patientIds, "tg"),
-    ]);
+    const emptyBio = (key) => ({ key, label: key, unit: "", withData: 0, atTargetStable: 0, improving: { total: 0, bands: [] }, worsening: { total: 0, bands: [] }, stableOffTarget: 0, firstReading: 0, distribution: [], bandLabels: [], atTarget: 0, uncontrolled: 0, rising: 0, improving_count: 0, controlRate: 0 });
+
+    let hba1cStats, ldlStats, uacrStats, tshStats, tgStats;
+    try {
+      [hba1cStats, ldlStats, uacrStats, tshStats, tgStats] = await Promise.all([
+        computeBiomarkerStats(patientIds, "hba1c"),
+        computeBiomarkerStats(patientIds, "ldl"),
+        computeBiomarkerStats(patientIds, "uacr"),
+        computeBiomarkerStats(patientIds, "tsh"),
+        computeBiomarkerStats(patientIds, "tg"),
+      ]);
+    } catch (e) {
+      console.error("Biomarker computation failed:", e.message);
+      hba1cStats = emptyBio("hba1c");
+      ldlStats = emptyBio("ldl");
+      uacrStats = emptyBio("uacr");
+      tshStats = emptyBio("tsh");
+      tgStats = emptyBio("tg");
+    }
 
     // Also compute HbA1c separately for new vs follow-up
     const newIds = newPatients.map((p) => p.patient_id).filter(Boolean);
     const fuIds = followUpPatients.map((p) => p.patient_id).filter(Boolean);
-    const [hba1cNew, hba1cFU] = await Promise.all([
-      newIds.length > 0 ? computeBiomarkerStats(newIds, "hba1c") : null,
-      fuIds.length > 0 ? computeBiomarkerStats(fuIds, "hba1c") : null,
-    ]);
+    let hba1cNew = null, hba1cFU = null;
+    try {
+      [hba1cNew, hba1cFU] = await Promise.all([
+        newIds.length > 0 ? computeBiomarkerStats(newIds, "hba1c") : null,
+        fuIds.length > 0 ? computeBiomarkerStats(fuIds, "hba1c") : null,
+      ]);
+    } catch (e) {
+      console.error("New/FU HbA1c split failed:", e.message);
+    }
 
     // ── 5. Build needs attention + on track from HbA1c (primary metric) ──
     // Get latest + prev HbA1c per patient for the patient lists
@@ -535,6 +552,7 @@ router.get("/dashboard", async (req, res) => {
       healthraySyncedAt,
     });
   } catch (err) {
+    console.error("Dashboard error:", err.message, err.stack?.split("\n").slice(0, 5).join("\n"));
     handleError(res, err, "Dashboard");
   }
 });
