@@ -181,6 +181,16 @@ async function computeBiomarkerStats(patientIds, bioKey) {
   }
 }
 
+// Debug endpoint (temporary, unprotected — remove after testing)
+router.get("/dashboard/debug", async (_req, res) => {
+  try {
+    const r = await pool.query("SELECT COUNT(*) FROM appointments WHERE appointment_date = CURRENT_DATE");
+    res.json({ ok: true, todayAppts: r.rows[0].count });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 // ── GET /api/dashboard ─────────────────────────────────────────────────────
 router.get("/dashboard", async (req, res) => {
   try {

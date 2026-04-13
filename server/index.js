@@ -62,6 +62,8 @@ app.use((req, res, next) => {
 
 // Sync routes (no auth — internal/admin)
 app.use("/api", syncRoutes);
+// Dashboard (temporarily before auth for debugging)
+app.use("/api", dashboardRoutes);
 
 // Auth middleware (attaches req.doctor if valid token, blocks unauthenticated on protected routes)
 app.use(authMiddleware);
@@ -89,7 +91,6 @@ app.use("/api", alertRoutes);
 app.use("/api", healthLogRoutes);
 app.use("/api", visitRoutes);
 app.use("/api", summaryRoutes);
-app.use("/api", dashboardRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
