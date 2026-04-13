@@ -441,46 +441,56 @@ router.get("/dashboard", async (req, res) => {
     }
 
     // Body composition from vitals (latest + previous for trend)
-    const bodyR = await pool.query(
-      `SELECT DISTINCT ON (patient_id) patient_id, weight, waist, body_fat, muscle_mass
-       FROM vitals WHERE patient_id = ANY($1::int[])
-         AND (weight IS NOT NULL OR waist IS NOT NULL)
-       ORDER BY patient_id, recorded_at DESC`,
-      [patientIds],
-    );
-    const bodyPrevR = await pool.query(
-      `SELECT DISTINCT ON (patient_id) patient_id, weight, waist, body_fat, muscle_mass
-       FROM (
-         SELECT *, ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY recorded_at DESC) AS rn
+    let weightStats = { key: "weight", label: "Weight", unit: "kg", withData: 0, improving: { total: 0 }, worsening: { total: 0 }, controlRate: null, target: "Patient-specific" };
+    let waistStats = { key: "waist", label: "Waist", unit: "cm", withData: 0, improving: { total: 0 }, worsening: { total: 0 }, controlRate: null, target: "Patient-specific" };
+    let bodyFatStats = { key: "body_fat", label: "Body Fat", unit: "%", withData: 0, improving: { total: 0 }, worsening: { total: 0 }, controlRate: null, target: "Patient-specific" };
+    let muscleMassStats = { key: "muscle_mass", label: "Muscle Mass", unit: "kg", withData: 0, improving: { total: 0 }, worsening: { total: 0 }, controlRate: null, target: "Trend only" };
+
+    try {
+      const bodyR = await pool.query(
+        `SELECT DISTINCT ON (patient_id) patient_id, weight, waist, body_fat, muscle_mass
          FROM vitals WHERE patient_id = ANY($1::int[])
            AND (weight IS NOT NULL OR waist IS NOT NULL)
-       ) sub WHERE rn = 2 ORDER BY patient_id`,
-      [patientIds],
-    );
-    const bodyPrevMap = new Map();
-    for (const r of bodyPrevR.rows) bodyPrevMap.set(r.patient_id, r);
+         ORDER BY patient_id, recorded_at DESC`,
+        [patientIds],
+      );
+      const bodyPrevR = await pool.query(
+        `SELECT DISTINCT ON (patient_id) patient_id, weight, waist, body_fat, muscle_mass
+         FROM (
+           SELECT *, ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY recorded_at DESC) AS rn
+           FROM vitals WHERE patient_id = ANY($1::int[])
+             AND (weight IS NOT NULL OR waist IS NOT NULL)
+         ) sub WHERE rn = 2 ORDER BY patient_id`,
+        [patientIds],
+      );
+      const bodyPrevMap = new Map();
+      for (const r of bodyPrevR.rows) bodyPrevMap.set(r.patient_id, r);
 
-    function computeVitalMetric(field, label, unit, targetVal) {
-      let withData = 0, improving = 0, worsening = 0, atTarget = 0;
-      for (const r of bodyR.rows) {
-        const v = parseFloat(r[field]);
-        if (isNaN(v)) continue;
-        withData++;
-        if (targetVal && v <= targetVal) atTarget++;
-        const prev = bodyPrevMap.get(r.patient_id);
-        const pv = prev ? parseFloat(prev[field]) : NaN;
-        if (!isNaN(pv)) {
-          if (v < pv) improving++; // lower weight/waist/fat = better
-          else if (v > pv) worsening++;
+      function computeVitalMetric(field, label, unit, lowerIsBetter = true) {
+        let withData = 0, improving = 0, worsening = 0;
+        for (const r of bodyR.rows) {
+          const v = parseFloat(r[field]);
+          if (isNaN(v)) continue;
+          withData++;
+          const prev = bodyPrevMap.get(r.patient_id);
+          const pv = prev ? parseFloat(prev[field]) : NaN;
+          if (!isNaN(pv)) {
+            const better = lowerIsBetter ? v < pv : v > pv;
+            const worse = lowerIsBetter ? v > pv : v < pv;
+            if (better) improving++;
+            else if (worse) worsening++;
+          }
         }
+        return { key: field, label, unit, withData, improving: { total: improving }, worsening: { total: worsening }, controlRate: null, target: "Patient-specific" };
       }
-      return { key: field, label, unit, withData, improving: { total: improving }, worsening: { total: worsening }, atTargetStable: atTarget, controlRate: withData > 0 && targetVal ? Math.round((atTarget / withData) * 100) : null, target: targetVal ? `≤ ${targetVal}` : "Patient-specific" };
-    }
 
-    const weightStats = computeVitalMetric("weight", "Weight", "kg", null);
-    const waistStats = computeVitalMetric("waist", "Waist", "cm", null);
-    const bodyFatStats = computeVitalMetric("body_fat", "Body Fat", "%", null);
-    const muscleMassStats = computeVitalMetric("muscle_mass", "Muscle Mass", "kg", null);
+      weightStats = computeVitalMetric("weight", "Weight", "kg", true);
+      waistStats = computeVitalMetric("waist", "Waist", "cm", true);
+      bodyFatStats = computeVitalMetric("body_fat", "Body Fat", "%", true);
+      muscleMassStats = computeVitalMetric("muscle_mass", "Muscle Mass", "kg", false); // higher is better
+    } catch (e) {
+      console.log("Body composition query failed (non-critical):", e.message);
+    }
 
     res.json({
       period: { from: dateFrom, to: dateTo, label },
