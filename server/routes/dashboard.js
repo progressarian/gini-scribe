@@ -83,124 +83,102 @@ const BIOMARKERS = {
 // Helper: compute stats for one biomarker across a set of patients
 async function computeBiomarkerStats(patientIds, bioKey) {
   const bio = BIOMARKERS[bioKey];
-  if (!bio || patientIds.length === 0) {
-    return { key: bioKey, label: bio?.label || bioKey, unit: bio?.unit || "", withData: 0, atTarget: 0, uncontrolled: 0, rising: 0, distribution: (bio?.bands || []).map(() => 0), patients: [] };
-  }
+  const empty = { key: bioKey, label: bio?.label || bioKey, unit: bio?.unit || "", target: bio ? (bio.lowerIsBetter === null ? `${bio.targetLow}-${bio.target}` : `≤ ${bio.target}`) : "", withData: 0, atTargetStable: 0, atTarget: 0, uncontrolled: 0, rising: 0, improving_count: 0, controlRate: 0, improving: { total: 0, bands: [] }, worsening: { total: 0, bands: [] }, stableOffTarget: 0, firstReading: 0, distribution: [], bandLabels: [] };
+  if (!bio || patientIds.length === 0) return empty;
 
-  const aliasValues = bio.aliases.map((a) => `'${a.replace(/'/g, "''")}'`).join(",");
+  try {
+    const aliases = bio.aliases.map((a) => a.toLowerCase());
 
-  // Latest value per patient
-  const latestR = await pool.query(
-    `SELECT DISTINCT ON (patient_id) patient_id, result, test_date
-     FROM lab_results
-     WHERE patient_id = ANY($1::int[])
-       AND COALESCE(canonical_name, test_name) IN (${aliasValues})
-       AND result IS NOT NULL
-     ORDER BY patient_id, test_date DESC, created_at DESC`,
-    [patientIds],
-  );
-
-  // Previous value per patient (for trend)
-  const prevR = await pool.query(
-    `SELECT DISTINCT ON (patient_id) patient_id, result
-     FROM (
-       SELECT *, ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY test_date DESC, created_at DESC) AS rn
+    const latestR = await pool.query(
+      `SELECT DISTINCT ON (patient_id) patient_id, result, test_date
        FROM lab_results
        WHERE patient_id = ANY($1::int[])
-         AND COALESCE(canonical_name, test_name) IN (${aliasValues})
          AND result IS NOT NULL
-     ) sub WHERE rn = 2
-     ORDER BY patient_id`,
-    [patientIds],
-  );
+         AND LOWER(COALESCE(canonical_name, test_name)) = ANY($2::text[])
+       ORDER BY patient_id, test_date DESC, created_at DESC`,
+      [patientIds, aliases],
+    );
 
-  const latestMap = new Map();
-  for (const r of latestR.rows) latestMap.set(r.patient_id, parseFloat(r.result));
-  const prevMap = new Map();
-  for (const r of prevR.rows) prevMap.set(r.patient_id, parseFloat(r.result));
+    const prevR = await pool.query(
+      `SELECT DISTINCT ON (patient_id) patient_id, result
+       FROM (
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY test_date DESC, created_at DESC) AS rn
+         FROM lab_results
+         WHERE patient_id = ANY($1::int[])
+           AND result IS NOT NULL
+           AND LOWER(COALESCE(canonical_name, test_name)) = ANY($2::text[])
+       ) sub WHERE rn = 2
+       ORDER BY patient_id`,
+      [patientIds, aliases],
+    );
 
-  let withData = 0, atTargetStable = 0, firstReading = 0;
-  const distribution = bio.bands.map(() => 0);
-  const improvingBands = bio.bands.map(() => 0);
-  const worseningBands = bio.bands.map(() => 0);
-  let improvingTotal = 0, worseningTotal = 0, stableOffTarget = 0;
+    const latestMap = new Map();
+    for (const r of latestR.rows) latestMap.set(r.patient_id, parseFloat(r.result));
+    const prevMap = new Map();
+    for (const r of prevR.rows) prevMap.set(r.patient_id, parseFloat(r.result));
 
-  function getBandIndex(val) {
-    for (let i = 0; i < bio.bands.length; i++) {
-      if (val <= bio.bands[i].max || i === bio.bands.length - 1) return i;
-    }
-    return bio.bands.length - 1;
-  }
+    let withData = 0, atTargetStable = 0, firstReading = 0;
+    let improvingTotal = 0, worseningTotal = 0, stableOffTarget = 0;
+    const distribution = bio.bands.map(() => 0);
+    const improvingBands = bio.bands.map(() => 0);
+    const worseningBands = bio.bands.map(() => 0);
 
-  function isAtTarget(val) {
-    if (bio.lowerIsBetter === null) return val >= (bio.targetLow || 0) && val <= bio.target;
-    return bio.lowerIsBetter ? val <= bio.target : val >= bio.target;
-  }
+    for (const [pid, v] of latestMap) {
+      if (isNaN(v)) continue;
+      withData++;
 
-  for (const [pid, v] of latestMap) {
-    if (isNaN(v)) continue;
-    withData++;
-    const band = getBandIndex(v);
-    distribution[band]++;
-
-    const prev = prevMap.get(pid);
-    if (prev == null || isNaN(prev)) {
-      firstReading++;
-      continue;
-    }
-
-    // Determine trajectory
-    let isImproving = false, isWorsening = false;
-    const pctChange = Math.abs(v - prev) / (prev || 1) * 100;
-    const isStable = pctChange < 3;
-
-    if (!isStable) {
-      if (bio.lowerIsBetter === true) {
-        isImproving = v < prev;
-        isWorsening = v > prev;
-      } else if (bio.lowerIsBetter === false) {
-        isImproving = v > prev;
-        isWorsening = v < prev;
-      } else {
-        // range-based: improving = moving toward target range
-        isImproving = (Math.abs(v - (bio.target + bio.targetLow) / 2) < Math.abs(prev - (bio.target + bio.targetLow) / 2));
-        isWorsening = !isImproving;
+      // Distribution band
+      let band = bio.bands.length - 1;
+      for (let i = 0; i < bio.bands.length; i++) {
+        if (v <= bio.bands[i].max || i === bio.bands.length - 1) { band = i; break; }
       }
+      distribution[band]++;
+
+      // Target check
+      const atTarget = bio.lowerIsBetter === null
+        ? (v >= (bio.targetLow || 0) && v <= bio.target)
+        : (bio.lowerIsBetter ? v <= bio.target : v >= bio.target);
+
+      // Trend
+      const prev = prevMap.get(pid);
+      if (prev == null || isNaN(prev)) { firstReading++; continue; }
+
+      const pctChange = Math.abs(v - prev) / (Math.abs(prev) || 1) * 100;
+      if (pctChange < 3) {
+        if (atTarget) atTargetStable++;
+        else stableOffTarget++;
+        continue;
+      }
+
+      let improving = false;
+      if (bio.lowerIsBetter === true) improving = v < prev;
+      else if (bio.lowerIsBetter === false) improving = v > prev;
+      else improving = Math.abs(v - (bio.target + (bio.targetLow || 0)) / 2) < Math.abs(prev - (bio.target + (bio.targetLow || 0)) / 2);
+
+      if (improving) { improvingTotal++; improvingBands[band]++; }
+      else { worseningTotal++; worseningBands[band]++; }
     }
 
-    if (isImproving) {
-      improvingTotal++;
-      improvingBands[band]++;
-    } else if (isWorsening) {
-      worseningTotal++;
-      worseningBands[band]++;
-    } else if (isAtTarget(v)) {
-      atTargetStable++;
-    } else {
-      stableOffTarget++;
-    }
+    return {
+      ...empty,
+      withData,
+      atTargetStable,
+      atTarget: atTargetStable + (improvingBands[0] || 0),
+      uncontrolled: (worseningBands[bio.bands.length - 1] || 0),
+      rising: worseningTotal,
+      improving_count: improvingTotal,
+      controlRate: withData > 0 ? Math.round(((atTargetStable + (improvingBands[0] || 0)) / withData) * 100) : 0,
+      improving: { total: improvingTotal, bands: improvingBands },
+      worsening: { total: worseningTotal, bands: worseningBands },
+      stableOffTarget,
+      firstReading,
+      distribution,
+      bandLabels: bio.bands.map((b) => b.label),
+    };
+  } catch (e) {
+    console.error(`Biomarker ${bioKey} failed:`, e.message);
+    return empty;
   }
-
-  return {
-    key: bioKey,
-    label: bio.label,
-    unit: bio.unit,
-    target: bio.lowerIsBetter === null ? `${bio.targetLow}–${bio.target}` : `≤ ${bio.target}`,
-    withData,
-    atTargetStable,
-    improving: { total: improvingTotal, bands: improvingBands },
-    worsening: { total: worseningTotal, bands: worseningBands },
-    stableOffTarget,
-    firstReading,
-    distribution,
-    bandLabels: bio.bands.map((b) => b.label),
-    // Legacy compat
-    atTarget: atTargetStable + improvingBands[0],
-    uncontrolled: (worseningBands[bio.bands.length - 1] || 0) + (worseningBands[bio.bands.length - 2] || 0),
-    rising: worseningTotal,
-    improving_count: improvingTotal,
-    controlRate: withData > 0 ? Math.round(((atTargetStable + improvingBands[0]) / withData) * 100) : 0,
-  };
 }
 
 // ── GET /api/dashboard ─────────────────────────────────────────────────────
