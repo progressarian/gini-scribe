@@ -115,4 +115,11 @@ const CANONICAL_MAP = {
   "platelet count": "Platelets",
 };
 
-export const getCanonical = (name) => CANONICAL_MAP[(name || "").toLowerCase().trim()] || null;
+function stripEmbeddedDate(str) {
+  return str.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/i, "").trim();
+}
+
+export const getCanonical = (name) => {
+  const cleaned = stripEmbeddedDate((name || "").trim());
+  return CANONICAL_MAP[cleaned.toLowerCase()] || null;
+};

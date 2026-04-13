@@ -151,10 +151,44 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 7. Consultations
+      // 7. Visit history — merge consultations (Gini native) + appointments (HealthRay)
+      // Consultations take priority when both exist for the same date.
       pool.query(
-        `SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data, exam_data
-         FROM consultations WHERE patient_id=$1
+        `WITH cons AS (
+           SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at,
+                  con_data, exam_data,
+                  NULL::jsonb  AS healthray_diagnoses,
+                  NULL::jsonb  AS healthray_medications,
+                  NULL::text   AS healthray_advice,
+                  'consultation' AS source_type
+           FROM consultations
+           WHERE patient_id = $1
+         ),
+         appts AS (
+           SELECT id, appointment_date AS visit_date, visit_type,
+                  NULL AS mo_name, doctor_name AS con_name, status, created_at,
+                  NULL::jsonb  AS con_data,
+                  NULL::jsonb  AS exam_data,
+                  healthray_diagnoses,
+                  healthray_medications,
+                  healthray_advice,
+                  'appointment' AS source_type
+           FROM appointments
+           WHERE patient_id = $1
+             AND healthray_id IS NOT NULL
+             AND appointment_date IS NOT NULL
+         ),
+         -- Prefer consultation when a consultation exists for the same date
+         deduped AS (
+           SELECT * FROM cons
+           UNION ALL
+           SELECT a.* FROM appts a
+           WHERE NOT EXISTS (
+             SELECT 1 FROM cons c
+             WHERE c.visit_date::date = a.visit_date::date
+           )
+         )
+         SELECT * FROM deduped
          ORDER BY visit_date DESC, created_at DESC`,
         [pid],
       ),

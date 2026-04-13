@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 
 // ── Lab alias map for fuzzy-matching test names ──
 export const LAB_ALIASES = {
@@ -367,107 +367,153 @@ const shortDate = (d) => {
   return `${MON[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`;
 };
 
-// ── Sparkline SVG — shows all data points with values & dates ──
-export const Sparkline = memo(function Sparkline({ values, color = "#12b981" }) {
-  if (!values || values.length === 0) return null;
-  const items = values.map((v) => (typeof v === "object" ? v : { result: v }));
-  const nums = items.map((v) => parseFloat(v.result)).filter((n) => !isNaN(n));
-  if (nums.length === 0) return null;
+// ── Biomarker Sparkline — OutcomesPage-style: fill area + hover tooltip ──
+function BiomarkerSparkline({ data, color, unit, target }) {
+  const [hoverIdx, setHoverIdx] = useState(null);
+  if (!data || data.length === 0) return null;
 
-  const W = 200,
-    H = 56,
-    PAD_T = 14,
-    PAD_B = 12,
-    PAD_L = 4,
-    PAD_R = 4;
-  const plotH = H - PAD_T - PAD_B;
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
+  const W = 260,
+    H = 52;
+  const items = data.slice(-12);
+  const values = items.map((d) => parseFloat(d.result ?? d.value ?? 0)).filter((n) => !isNaN(n));
+  const dates = items.map((d) => d.date || d.test_date);
+  if (values.length === 0) return null;
+
+  const min = Math.min(...values) * 0.92;
+  const max = Math.max(...values) * 1.08;
   const range = max - min || 1;
-  const getX = (i) =>
-    PAD_L +
-    (nums.length === 1 ? (W - PAD_L - PAD_R) / 2 : (i / (nums.length - 1)) * (W - PAD_L - PAD_R));
-  const getY = (v) => PAD_T + plotH - ((v - min) / range) * plotH;
-
-  const pts = nums.map((v, i) => `${getX(i)},${getY(v)}`).join(" ");
+  const getX = (i) => (i / Math.max(values.length - 1, 1)) * W;
+  const getY = (v) => H - ((v - min) / range) * H;
+  const points = values.map((v, i) => `${getX(i)},${getY(v)}`).join(" ");
+  const targetY = target != null ? getY(target) : null;
 
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      fill="none"
-      style={{ width: "100%", height: 60, margin: "3px 0 2px" }}
+      style={{ width: "100%", height: H, overflow: "visible", display: "block" }}
+      onMouseLeave={() => setHoverIdx(null)}
     >
-      {/* grid line */}
-      <line
-        x1={PAD_L}
-        y1={getY(min)}
-        x2={W - PAD_R}
-        y2={getY(min)}
-        stroke="#e4e9f2"
-        strokeWidth=".5"
-        strokeDasharray="3,3"
-      />
-      {nums.length > 1 && (
-        <line
-          x1={PAD_L}
-          y1={getY(max)}
-          x2={W - PAD_R}
-          y2={getY(max)}
-          stroke="#e4e9f2"
-          strokeWidth=".5"
-          strokeDasharray="3,3"
+      {targetY != null && targetY >= 0 && targetY <= H && (
+        <>
+          <line
+            x1="0"
+            y1={targetY}
+            x2={W}
+            y2={targetY}
+            stroke="#10b981"
+            strokeDasharray="3,3"
+            strokeWidth="0.8"
+            opacity="0.5"
+          />
+          <text
+            x={W - 2}
+            y={targetY - 3}
+            fill="#10b981"
+            fontSize="6.5"
+            textAnchor="end"
+            opacity="0.7"
+          >
+            target {target}
+          </text>
+        </>
+      )}
+      <polygon points={`0,${H} ${points} ${W},${H}`} fill={`${color}15`} />
+      {values.length > 1 && (
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinejoin="round"
         />
       )}
-      {/* line */}
-      {nums.length > 1 && (
-        <polyline points={pts} stroke={color} strokeWidth="1.5" fill="none" opacity=".6" />
-      )}
-      {/* dots + value labels */}
-      {nums.map((v, i) => {
-        const x = getX(i);
-        const y = getY(v);
-        const isLast = i === nums.length - 1;
-        const dt = items[i]?.date;
+      {values.map((v, i) => {
+        const cx = getX(i);
+        const cy = getY(v);
+        const isHovered = hoverIdx === i;
         return (
-          <g key={i}>
+          <g key={i} onMouseEnter={() => setHoverIdx(i)} style={{ cursor: "crosshair" }}>
+            {/* outer glow ring on hover */}
+            {isHovered && <circle cx={cx} cy={cy} r="9" fill={color} opacity="0.15" />}
             <circle
-              cx={x}
-              cy={y}
-              r={isLast ? 3 : 2}
-              fill={isLast ? color : color}
-              opacity={isLast ? 1 : 0.7}
+              cx={cx}
+              cy={cy}
+              r={isHovered ? 6 : 3}
+              fill={isHovered ? color : "white"}
+              stroke={color}
+              strokeWidth={isHovered ? 2.5 : 1.8}
             />
-            <text
-              x={x}
-              y={y - 4}
-              textAnchor="middle"
-              fontSize="7"
-              fontWeight={isLast ? 700 : 500}
-              fill={isLast ? color : "#6b7280"}
-              fontFamily="DM Sans,sans-serif"
-            >
-              {v}
-            </text>
-            {dt && (
-              <text
-                x={x}
-                y={H - 1}
-                textAnchor="middle"
-                fontSize="5.5"
-                fill="#9ca3af"
-                fontFamily="DM Sans,sans-serif"
-              >
-                {shortDate(dt)}
-              </text>
-            )}
+            {/* larger hit area */}
+            <circle cx={cx} cy={cy} r="14" fill="transparent" />
           </g>
         );
       })}
+      {hoverIdx != null &&
+        (() => {
+          const cx = getX(hoverIdx);
+          const cy = getY(values[hoverIdx]);
+          const TW = 76,
+            TH = 34;
+          // keep tooltip inside SVG bounds
+          const tipX = Math.min(Math.max(cx - TW / 2, 0), W - TW);
+          const tipY = cy > H / 2 ? Math.max(cy - TH - 10, 0) : cy + 14;
+          return (
+            <g style={{ pointerEvents: "none" }}>
+              {/* vertical crosshair */}
+              <line
+                x1={cx}
+                y1={0}
+                x2={cx}
+                y2={H}
+                stroke={color}
+                strokeWidth="1"
+                strokeDasharray="3,3"
+                opacity="0.5"
+              />
+              {/* tooltip shadow */}
+              <rect
+                x={tipX + 1}
+                y={tipY + 1}
+                width={TW}
+                height={TH}
+                rx="7"
+                fill="rgba(0,0,0,0.15)"
+              />
+              {/* tooltip bg */}
+              <rect x={tipX} y={tipY} width={TW} height={TH} rx="7" fill="#1e293b" />
+              {/* value */}
+              <text
+                x={tipX + TW / 2}
+                y={tipY + 14}
+                fill="white"
+                fontSize="11"
+                fontWeight="800"
+                textAnchor="middle"
+                fontFamily="DM Sans,sans-serif"
+              >
+                {values[hoverIdx]}
+                {unit}
+              </text>
+              {/* date */}
+              <text
+                x={tipX + TW / 2}
+                y={tipY + 27}
+                fill="#94a3b8"
+                fontSize="8.5"
+                fontWeight="500"
+                textAnchor="middle"
+                fontFamily="DM Sans,sans-serif"
+              >
+                {shortDate(dates[hoverIdx])}
+              </text>
+            </g>
+          );
+        })()}
     </svg>
   );
-});
+}
 
-// ── Biomarker Card ──
+// ── Biomarker Card — OutcomesPage visual style ──
 export const BiomarkerCard = memo(function BiomarkerCard({
   label,
   value,
@@ -479,47 +525,132 @@ export const BiomarkerCard = memo(function BiomarkerCard({
   history,
   color,
   valueColor,
+  valueDate,
+  target,
 }) {
-  const cls =
-    trendDir === "good" ? "imp" : trendDir === "bad" ? "bad" : trendDir === "warn" ? "wrn" : "ok";
-  const trendCls = trendDir === "good" ? "td" : trendDir === "bad" ? "tu" : "ts";
-  const sparkColor =
-    color || (trendDir === "good" ? "#12b981" : trendDir === "bad" ? "#ef4444" : "#f59e0b");
-  const readingCount = history?.length || 0;
+  const stateColor =
+    trendDir === "good"
+      ? "#059669"
+      : trendDir === "bad"
+        ? "#dc2626"
+        : trendDir === "warn"
+          ? "#d97706"
+          : "#64748b";
+  const sparkColor = color || stateColor;
+
+  const isNumeric = value != null && !isNaN(parseFloat(value));
+  const chartData =
+    history?.length > 0
+      ? history
+      : isNumeric
+        ? [{ result: parseFloat(value), date: valueDate || new Date().toISOString() }]
+        : [];
+
+  const totalReadings = history?.length || 0;
+  const latest = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+  const displayValue = latest?.result ?? value ?? "—";
+
+  let trendArrow = null;
+  if (chartData.length > 1) {
+    const first = parseFloat(chartData[0].result);
+    const last = parseFloat(chartData[chartData.length - 1].result);
+    trendArrow = last < first ? "↓" : last > first ? "↑" : "→";
+  }
+
+  const firstDate = chartData[0]?.date || chartData[0]?.test_date;
+  const lastDate =
+    chartData[chartData.length - 1]?.date || chartData[chartData.length - 1]?.test_date;
+
   return (
-    <div className={`bmc ${cls}`}>
+    <div
+      style={{
+        background: "white",
+        borderRadius: 12,
+        border: "1px solid #f1f5f9",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+        overflow: "hidden",
+      }}
+    >
+      {/* header */}
       <div
-        className="bml"
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "10px 14px 6px",
+        }}
       >
-        <span>{label}</span>
-        {readingCount > 0 && (
-          <span style={{ fontSize: 8, color: "var(--t4)", fontWeight: 500 }}>
-            {readingCount} readings
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>{label}</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+          <span
+            style={{
+              fontSize: 16,
+              fontWeight: 800,
+              color: valueColor || stateColor,
+              lineHeight: 1,
+            }}
+          >
+            {displayValue}
           </span>
-        )}
+          {unit && <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{unit}</span>}
+          {trendArrow && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: stateColor }}>{trendArrow}</span>
+          )}
+        </div>
       </div>
-      <div className="bmvr">
-        <span
-          className="bmv"
-          style={
-            valueColor
-              ? { color: valueColor }
-              : trendDir === "bad"
-                ? { color: "var(--red)" }
-                : undefined
-          }
+
+      {/* chart */}
+      {chartData.length > 0 && (
+        <div style={{ padding: "0 14px" }}>
+          <BiomarkerSparkline data={chartData} color={sparkColor} unit={unit} target={target} />
+        </div>
+      )}
+
+      {/* date range footer */}
+      {chartData.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "3px 14px 6px",
+            fontSize: 8,
+            color: "#94a3b8",
+          }}
         >
-          {value ?? "—"}
-        </span>
-        {unit && <span className="bmu">{unit}</span>}
-      </div>
-      {trend && <div className={`bmtr ${trendCls}`}>{trend}</div>}
-      <Sparkline values={history} color={sparkColor} />
+          <span>{shortDate(firstDate)}</span>
+          {totalReadings > 1 && <span style={{ color: "#cbd5e1" }}>{totalReadings} readings</span>}
+          <span>{shortDate(lastDate)}</span>
+        </div>
+      )}
+
+      {/* trend text */}
+      {trend && (
+        <div
+          style={{
+            padding: "4px 14px 6px",
+            fontSize: 10,
+            fontWeight: 600,
+            color: stateColor,
+            borderTop: "1px solid #f8fafc",
+          }}
+        >
+          {trend}
+        </div>
+      )}
+
+      {/* goal row */}
       {goal && (
-        <div className="bmgr">
-          <span className="bmgl">{goalLabel || "Goal"}</span>
-          <span className="bmgv">{goal}</span>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "5px 14px 8px",
+            borderTop: "1px solid #f8fafc",
+            fontSize: 10,
+          }}
+        >
+          <span style={{ color: "#94a3b8", fontWeight: 600 }}>{goalLabel || "Goal"}</span>
+          <span style={{ fontWeight: 700, color: stateColor }}>{goal}</span>
         </div>
       )}
     </div>

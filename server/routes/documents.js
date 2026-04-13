@@ -7,6 +7,7 @@ import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
 import { fetchMedicalRecords } from "../services/healthray/client.js";
+import { downloadAndStore } from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 
 const router = Router();
@@ -222,168 +223,293 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
   }
 });
 
-// Get signed URL to view/download a file
-router.get("/documents/:id/file-url", async (req, res) => {
-  try {
-    const doc = await pool.query(
-      `SELECT storage_path, file_url, mime_type, file_name, source, notes, patient_id, doc_date 
-       FROM documents 
-       WHERE id=$1`,
-      [req.params.id],
+// ── Detect MIME type from file extension ─────────────────────────────────────
+function mimeFromFileName(fileName) {
+  const ext = (fileName || "").split(".").pop().toLowerCase();
+  return (
+    {
+      pdf: "application/pdf",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      gif: "image/gif",
+      webp: "image/webp",
+      tiff: "image/tiff",
+      tif: "image/tiff",
+    }[ext] || null
+  );
+}
+
+// ── Resolve accessible URL for a document (HealthRay or Supabase) ────────────
+async function resolveDocumentUrl(docId) {
+  const doc = await pool.query(
+    `SELECT storage_path, file_url, mime_type, file_name, source, notes, patient_id, doc_date
+     FROM documents
+     WHERE id=$1`,
+    [docId],
+  );
+
+  const d = doc.rows[0];
+  if (!d) return { error: "Document not found", status: 404 };
+
+  // ── HealthRay document ─────────────────────────────────────────────
+  if (!d.storage_path && d.source === "healthray") {
+    const notesStr = d.notes || "";
+    const recordIdStr = notesStr.match(/healthray_record:(\d+)/)?.[1] || null;
+    const medicalRecordIdStr = notesStr.match(/healthray_mrid:(\d+)/)?.[1] || null;
+    // Only use stored rtype if it's in notes — never default to Prescription/Rx
+    // because old docs may be "Other" type and defaulting to Prescription causes wrong file downloads.
+    const recordTypeStr = notesStr.match(/healthray_rtype:([^|]+)/)?.[1] || null;
+    const healthrayApptId = notesStr.match(/healthray_appt:(\d+)/)?.[1] || null;
+
+    console.log(
+      `[Document ${docId}] HealthRay resolve — record=${recordIdStr} mrid=${medicalRecordIdStr} rtype=${recordTypeStr} appt=${healthrayApptId} notes="${notesStr}"`,
     );
 
-    const d = doc.rows[0];
-    if (!d) return res.status(404).json({ error: "Document not found" });
+    // Helper: download with auth and cache to Supabase
+    async function tryDownload(attachId, mrid, rtype, fileName) {
+      if (!attachId || !mrid || !rtype) return null;
+      const { downloadMedicalRecordFile } = await import("../services/healthray/client.js");
+      const result = await downloadMedicalRecordFile(attachId, rtype, mrid);
+      if (result?.buffer?.length > 0) {
+        const { downloadAndStore } = await import("../services/healthray/db.js");
+        downloadAndStore(d.patient_id, docId, d.file_url, fileName, attachId, rtype, mrid).catch(
+          () => {},
+        );
+        return { buffer: result.buffer, mimeType: result.contentType, fileName };
+      }
+      console.log(
+        `[Document ${docId}] downloadMedicalRecordFile returned null for attach=${attachId} mrid=${mrid}`,
+      );
+      return null;
+    }
 
-    // ── HealthRay document ─────────────────────────────────────────────
-    if (!d.storage_path && d.source === "healthray") {
+    // Step 0: both IDs AND rtype already in notes — fastest path (skip if rtype missing to avoid wrong type)
+    if (recordIdStr && medicalRecordIdStr && recordTypeStr) {
+      console.log(
+        `[Document ${docId}] Step 0: direct download attach=${recordIdStr} mrid=${medicalRecordIdStr} rtype=${recordTypeStr}`,
+      );
       try {
-        // Step 1: Appointment lookup
-        const apptR = await pool.query(
-          `SELECT healthray_id 
-           FROM appointments
-           WHERE patient_id = $1 
-           AND appointment_date::date = $2::date
-           AND healthray_id IS NOT NULL
-           ORDER BY appointment_date DESC
-           LIMIT 1`,
-          [d.patient_id, d.doc_date],
-        );
-
-        const healthrayApptId = apptR.rows[0]?.healthray_id;
-
-        if (!healthrayApptId) {
-          console.error("❌ No HealthRay appointment found", {
-            patient_id: d.patient_id,
-            doc_date: d.doc_date,
-          });
-          return res.status(404).json({ error: "No HealthRay appointment found" });
-        }
-
-        // Step 2: Fetch records
-        const records = await fetchMedicalRecords(healthrayApptId);
-
-        if (!records || !Array.isArray(records) || records.length === 0) {
-          console.error("❌ Empty/invalid HealthRay records", records);
-          return res.status(404).json({ error: "No records found from HealthRay" });
-        }
-
-        // ── DIAGNOSTIC: dump raw HealthRay response so we can see which URL
-        // fields are actually populated. Remove once URL extraction is fixed.
-        console.log(
-          "🔬 [HealthRay doc debug] docId=%s healthrayApptId=%s file_name=%s notes=%s",
-          req.params.id,
-          healthrayApptId,
-          d.file_name,
-          d.notes,
-        );
-        console.log(
-          "🔬 [HealthRay doc debug] records (%d total):\n%s",
-          records.length,
-          JSON.stringify(records, null, 2),
-        );
-
-        // Step 3: Extract record ID
-        const recordIdStr = (d.notes || "").match(/healthray_record:(\d+)/)?.[1];
-
-        // Step 4: Match record safely
-        let match = null;
-
-        if (recordIdStr) {
-          match = records.find((r) => String(r.id) === String(recordIdStr));
-        }
-
-        if (!match) {
-          console.warn("⚠️ No exact match found, applying fallback");
-
-          // smarter fallback: prefer record with file/url
-          match = records.find((r) => r?.url || r?.file_url || r?.attachment_url || r?.thumbnail);
-
-          // last fallback: first record
-          if (!match) {
-            match = records[0];
-          }
-        }
-
-        // Step 5: Extract URL (robust)
-        const url = match?.url || match?.file_url || match?.attachment_url || match?.thumbnail;
-
-        // ── DIAGNOSTIC: log which field won for the matched record ──
-        const chosenField = match?.url
-          ? "url"
-          : match?.file_url
-            ? "file_url"
-            : match?.attachment_url
-              ? "attachment_url"
-              : match?.thumbnail
-                ? "thumbnail"
-                : "NONE";
-        console.log(
-          "🔬 [HealthRay doc debug] matched record id=%s chosen_field=%s matched_keys=%s",
-          match?.id,
-          chosenField,
-          match ? Object.keys(match).join(",") : "(no match)",
-        );
-        console.log("🔬 [HealthRay doc debug] matched record full:\n%s", JSON.stringify(match, null, 2));
-
-        if (!url) {
-          console.error("❌ URL extraction failed", {
-            match,
-            records,
-          });
-          return res.status(404).json({
-            error: "Could not get file URL from HealthRay",
-          });
-        }
-
-        return res.json({
-          url,
-          file_name: d.file_name,
-          mime_type: d.mime_type,
-        });
-      } catch (err) {
-        console.error("❌ HealthRay fetch failed:", err);
-        return res.status(500).json({
-          error: "Failed to get fresh URL from HealthRay",
-        });
+        const r = await tryDownload(recordIdStr, medicalRecordIdStr, recordTypeStr, d.file_name);
+        if (r) return r;
+      } catch (e) {
+        console.error(`[Document ${docId}] Step 0 failed: ${e.message}`);
       }
     }
 
-    // ── Supabase storage ─────────────────────────────────────────────
-    if (!d.storage_path) return res.status(404).json({ error: "No file attached" });
-
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
-      return res.status(400).json({ error: "Storage not configured" });
-
-    const signResp = await fetch(
-      `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${d.storage_path}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ expiresIn: 3600 }),
-      },
-    );
-
-    if (!signResp.ok) {
-      console.error("❌ Supabase signing failed");
-      return res.status(500).json({ error: "Failed to generate URL" });
+    // Step 1: look up appointment ID(s) — from notes or DB by doc_date
+    const candidateApptIds = healthrayApptId ? [healthrayApptId] : [];
+    if (candidateApptIds.length === 0) {
+      const apptR = await pool
+        .query(
+          `SELECT healthray_id FROM appointments
+           WHERE patient_id=$1
+             AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day') AND ($2::date + INTERVAL '1 day')
+             AND healthray_id IS NOT NULL
+           ORDER BY appointment_date DESC`,
+          [d.patient_id, d.doc_date],
+        )
+        .catch(() => ({ rows: [] }));
+      for (const row of apptR.rows) candidateApptIds.push(row.healthray_id);
     }
 
-    const signData = await signResp.json();
-    const signedPath = signData.signedURL || signData.signedUrl || signData.token;
+    console.log(
+      `[Document ${docId}] Step 1: candidate appt IDs = [${candidateApptIds.join(", ")}]`,
+    );
 
-    const url = signedPath?.startsWith("http")
-      ? signedPath
-      : `${SUPABASE_URL}/storage/v1${signedPath}`;
+    // Step 2: fetch records list from HealthRay, get mrid, download PDF
+    for (const apptId of candidateApptIds) {
+      try {
+        const records = await fetchMedicalRecords(apptId);
+        if (!Array.isArray(records) || records.length === 0) {
+          console.log(`[Document ${docId}] Step 2: empty records for apptId=${apptId}`);
+          continue;
+        }
 
-    return res.json({
-      url,
-      mime_type: d.mime_type,
-      file_name: d.file_name,
-    });
+        // If we have a specific record ID, find exact match first.
+        // Do NOT fall back to records[0] — that could be the prescription.
+        // If not found by ID, try to match by record_type.
+        let match = recordIdStr
+          ? records.find((r) => String(r.id) === String(recordIdStr))
+          : null;
+        if (!match && recordTypeStr) {
+          match = records.find((r) => r.record_type === recordTypeStr);
+        }
+        if (!match) {
+          console.log(`[Document ${docId}] Step 2: no match found for record=${recordIdStr} rtype=${recordTypeStr} in ${records.length} records`);
+          continue;
+        }
+
+        const attachId = match?.id ? String(match.id) : recordIdStr;
+        const mrid = match?.medical_record_id ? String(match.medical_record_id) : null;
+        const rtype = match?.record_type || recordTypeStr;
+        const fileName = match?.file_name || d.file_name;
+
+        console.log(
+          `[Document ${docId}] Step 2: appt=${apptId} attach=${attachId} mrid=${mrid} rtype=${rtype}`,
+        );
+
+        // Persist mrid to notes so Step 0 hits next time
+        if (mrid && mrid !== medicalRecordIdStr) {
+          const updatedNotes = [
+            notesStr.replace(/\|?healthray_mrid:\d+/, ""),
+            `healthray_mrid:${mrid}`,
+          ]
+            .filter(Boolean)
+            .join("|");
+          pool
+            .query(`UPDATE documents SET notes=$1 WHERE id=$2`, [updatedNotes, docId])
+            .catch(() => {});
+        }
+
+        try {
+          const r = await tryDownload(attachId, mrid, rtype, fileName);
+          if (r) return r;
+
+          // tryDownload returned null (e.g. HealthRay "no record found").
+          // Fall back to the fresh URL from the records list (thumbnail/preview).
+          const freshUrl = match.url || match.file_url || match.attachment_url || match.thumbnail;
+          if (freshUrl && freshUrl.startsWith("http")) {
+            console.log(`[Document ${docId}] Step 2: tryDownload null — trying fresh match.url fallback`);
+            const { healthrayRawFetch } = await import("../services/healthray/client.js");
+            const rf = await healthrayRawFetch(freshUrl).catch(() => null);
+            if (rf) {
+              console.log(`[Document ${docId}] Step 2: match.url fallback succeeded (${rf.buffer.length} bytes)`);
+              return { buffer: rf.buffer, mimeType: rf.contentType, fileName };
+            }
+          }
+        } catch (e) {
+          console.error(
+            `[Document ${docId}] Step 2 download failed for apptId=${apptId}: ${e.message}`,
+          );
+        }
+      } catch (apiErr) {
+        console.error(
+          `[Document ${docId}] Step 2 fetchMedicalRecords failed for apptId=${apptId}: ${apiErr.message}`,
+        );
+      }
+    }
+
+    if (candidateApptIds.length === 0) {
+      console.warn(
+        `[Document ${docId}] No appointment candidates — patient=${d.patient_id} doc_date=${d.doc_date}`,
+      );
+    }
+
+    // Step 3: try fetching stored file_url (thumbnail/preview) with HealthRay auth as last resort
+    if (d.file_url && d.file_url.startsWith("http")) {
+      console.log(`[Document ${docId}] Step 3: trying file_url fallback — ${d.file_url.slice(0, 80)}`);
+      try {
+        const { healthrayRawFetch } = await import("../services/healthray/client.js");
+        const r = await healthrayRawFetch(d.file_url);
+        if (r) {
+          console.log(`[Document ${docId}] Step 3: file_url fallback succeeded (${r.buffer.length} bytes)`);
+          return { buffer: r.buffer, mimeType: r.contentType, fileName: d.file_name };
+        }
+      } catch (e) {
+        console.error(`[Document ${docId}] Step 3 file_url fallback failed: ${e.message}`);
+      }
+    }
+
+    console.error(`[Document ${docId}] All download paths failed — returning 404`);
+    return { error: "Could not retrieve file from HealthRay", status: 404 };
+  }
+
+  // ── Supabase storage ─────────────────────────────────────────────
+  if (!d.storage_path) return { error: "No file attached", status: 404 };
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
+    return { error: "Storage not configured", status: 400 };
+
+  const signResp = await fetch(
+    `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${d.storage_path}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: 3600 }),
+    },
+  );
+
+  if (!signResp.ok) {
+    return { error: "Failed to generate URL", status: 500 };
+  }
+
+  const signData = await signResp.json();
+  const signedPath = signData.signedURL || signData.signedUrl || signData.token;
+  const url = signedPath?.startsWith("http")
+    ? signedPath
+    : `${SUPABASE_URL}/storage/v1${signedPath}`;
+
+  const mimeType = mimeFromFileName(d.file_name) || d.mime_type || "application/pdf";
+  return { url, mimeType, fileName: d.file_name };
+}
+
+// Get signed URL to view/download a file
+router.get("/documents/:id/file-url", async (req, res) => {
+  try {
+    const result = await resolveDocumentUrl(req.params.id);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    return res.json({ url: result.url, mime_type: result.mimeType, file_name: result.fileName });
+  } catch (e) {
+    handleError(res, e, "Document");
+  }
+});
+
+// Stream document file — proxies through backend (avoids CORS, always fresh URL)
+router.get("/documents/:id/stream", async (req, res) => {
+  try {
+    const result = await resolveDocumentUrl(req.params.id);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+
+    // Buffer-based path: HealthRay docs downloaded with auth (no external URL fetch needed)
+    if (result.buffer) {
+      res.set("Content-Type", result.mimeType || "application/pdf");
+      res.set(
+        "Content-Disposition",
+        `inline; filename="${encodeURIComponent(result.fileName || "document")}"`,
+      );
+      res.set("Cache-Control", "private, max-age=300");
+      return res.send(result.buffer);
+    }
+
+    const fileRes = await fetch(result.url);
+    if (!fileRes.ok) {
+      console.error(
+        `[Document stream ${req.params.id}] Storage fetch failed: ${fileRes.status} ${fileRes.statusText} — URL: ${result.url.slice(0, 120)}`,
+      );
+      return res.status(502).json({ error: "Failed to fetch document from storage" });
+    }
+
+    // Detect MIME type:
+    //   1. Actual response Content-Type (most accurate)
+    //   2. result.mimeType — already URL-based detected in resolveDocumentUrl (catches JPEG thumbnails stored as "pdf" in DB)
+    //   3. Filename extension (OPD uploads with generic octet-stream)
+    //   4. Default PDF
+    const responseMime = fileRes.headers.get("content-type")?.split(";")[0].trim();
+
+    // Guard: if HealthRay returns a JSON error body (HTTP 200 but status!=200 in body), reject it
+    if (responseMime === "application/json") {
+      const body = await fileRes.json().catch(() => ({}));
+      console.error(
+        `[Document stream ${req.params.id}] URL returned JSON instead of file — status=${body.status}: ${body.message}`,
+      );
+      return res.status(502).json({ error: "Could not retrieve file from HealthRay" });
+    }
+
+    const mimeType =
+      responseMime && responseMime !== "application/octet-stream"
+        ? responseMime
+        : result.mimeType || mimeFromFileName(result.fileName) || "application/pdf";
+    const fileName = result.fileName || "document";
+    const buffer = Buffer.from(await fileRes.arrayBuffer());
+
+    res.set("Content-Type", mimeType);
+    res.set("Content-Disposition", `inline; filename="${encodeURIComponent(fileName)}"`);
+    res.set("Cache-Control", "private, max-age=300");
+    res.send(buffer);
   } catch (e) {
     handleError(res, e, "Document");
   }
@@ -778,6 +904,151 @@ router.delete("/documents/:id", async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     handleError(res, e, "Document delete");
+  }
+});
+
+// ── Backfill: re-download HealthRay docs that are blurry thumbnails or missing ─
+// POST /api/admin/backfill-healthray-docs
+// Query params: ?limit=50&patient_id=<optional>&today=1 (today's patients only)
+router.post("/admin/backfill-healthray-docs", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || "50", 10), 500);
+    let patientFilter = "";
+    if (req.query.patient_id) {
+      patientFilter = `AND patient_id = ${parseInt(req.query.patient_id, 10)}`;
+    } else if (req.query.today === "1") {
+      patientFilter = `AND patient_id IN (
+        SELECT DISTINCT patient_id FROM appointments
+        WHERE appointment_date::date = CURRENT_DATE AND patient_id IS NOT NULL
+      )`;
+    }
+
+    // Find docs that are either: blurry JPEG thumbnails stored in Supabase, or never downloaded
+    const { rows: docs } = await pool.query(
+      `SELECT id, patient_id, file_name, file_url, mime_type, storage_path, notes
+       FROM documents
+       WHERE source = 'healthray'
+         AND (storage_path IS NULL OR mime_type = 'image/jpeg')
+         ${patientFilter}
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+
+    if (docs.length === 0) {
+      return res.json({
+        message: "No documents need backfilling",
+        processed: 0,
+        success: 0,
+        failed: 0,
+      });
+    }
+
+    let success = 0;
+    let failed = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const doc of docs) {
+      try {
+        const notesStr = doc.notes || "";
+        // Parse attachment ID (healthray_record:12345)
+        const attachmentId = notesStr.match(/healthray_record:(\d+)/)?.[1];
+        // Parse medical_record_id (healthray_mrid:12345) — stored for recently synced docs
+        let medicalRecordId = notesStr.match(/healthray_mrid:(\d+)/)?.[1] || null;
+        // Parse record type (healthray_rtype:Prescription/Rx)
+        const recordType = notesStr.match(/healthray_rtype:([^|]+)/)?.[1] || "Prescription/Rx";
+        // Parse appointment ID (healthray_appt:12345)
+        const healthrayApptId = notesStr.match(/healthray_appt:(\d+)/)?.[1] || null;
+
+        if (!attachmentId) {
+          skipped++;
+          continue;
+        }
+
+        // If medical_record_id missing, try fetching from HealthRay using appointment ID
+        // Works for today's appointments only — historical ones return 422
+        if (!medicalRecordId) {
+          // Prefer appt ID from notes; fall back to today's appointment for this patient
+          let candidateApptIds = healthrayApptId ? [healthrayApptId] : [];
+          if (candidateApptIds.length === 0) {
+            const { rows: apptRows } = await pool
+              .query(
+                `SELECT healthray_id FROM appointments
+               WHERE patient_id = $1
+                 AND appointment_date::date = CURRENT_DATE
+                 AND healthray_id IS NOT NULL
+               ORDER BY appointment_date DESC`,
+                [doc.patient_id],
+              )
+              .catch(() => ({ rows: [] }));
+            for (const r of apptRows) candidateApptIds.push(r.healthray_id);
+          }
+
+          for (const apptId of candidateApptIds) {
+            try {
+              const records = await fetchMedicalRecords(apptId);
+              if (Array.isArray(records)) {
+                const match = records.find((r) => String(r.id) === String(attachmentId));
+                if (match?.medical_record_id) {
+                  medicalRecordId = String(match.medical_record_id);
+                  // Back-fill notes for future runs
+                  const newNotes = [
+                    notesStr.replace(/\|?healthray_mrid:\d+/, ""),
+                    `healthray_mrid:${medicalRecordId}`,
+                  ]
+                    .filter(Boolean)
+                    .join("|");
+                  await pool
+                    .query(`UPDATE documents SET notes = $1 WHERE id = $2`, [newNotes, doc.id])
+                    .catch(() => {});
+                  break;
+                }
+              }
+            } catch (e) {
+              // Historical appointment — API returns error, try next
+            }
+          }
+        }
+
+        if (!medicalRecordId) {
+          // Can't download actual PDF without medical_record_id — skip
+          skipped++;
+          continue;
+        }
+
+        const storagePath = await downloadAndStore(
+          doc.patient_id,
+          doc.id,
+          doc.file_url,
+          doc.file_name,
+          attachmentId,
+          recordType,
+          medicalRecordId,
+        );
+
+        if (storagePath) {
+          success++;
+        } else {
+          failed++;
+          errors.push(`doc ${doc.id}: downloadAndStore returned null`);
+        }
+      } catch (e) {
+        failed++;
+        errors.push(`doc ${doc.id}: ${e.message}`);
+      }
+    }
+
+    res.json({
+      message: `Backfill complete`,
+      total: docs.length,
+      success,
+      failed,
+      skipped,
+      errors: errors.slice(0, 20),
+    });
+  } catch (e) {
+    handleError(res, e, "Backfill healthray docs");
   }
 });
 

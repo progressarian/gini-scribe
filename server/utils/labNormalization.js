@@ -100,7 +100,9 @@ add(
   "serum insulin",
   "insulin",
   "fpi",
+  "fasting plasma insulin",
   "fasting plasma insulin (uiu/ml)",
+  "plasma insulin",
   "insulin f",
   "insulin fasting (uiu/ml)",
 );
@@ -109,6 +111,7 @@ add(
   "c-peptide",
   "c peptide",
   "c-peptide fasting",
+  "c-peptide (fasting)",
   "fasting c-peptide",
   "fcp",
   "random c-peptide",
@@ -579,12 +582,40 @@ add("Diastolic BP", "diastolic bp", "dbp", "diastolic blood pressure", "bp diast
 
 // ── Fibroscan ─────────────────────────────────────────────────────────────────
 add("FIB4", "fib4", "fib-4", "fibrosis-4", "fibrosis 4", "fib 4");
-add("Fibroscan CAP", "fibroscan cap", "cap", "controlled attenuation parameter");
-add("Fibroscan LSM", "fibroscan lsm", "lsm", "liver stiffness measurement", "liver stiffness");
+add(
+  "Fibroscan CAP",
+  "fibroscan cap",
+  "cap",
+  "cap (fibroscan)",
+  "controlled attenuation parameter",
+  "cap score",
+  "fibroscan cap score",
+  "fibroscan cap (db/m)",
+);
+add(
+  "Fibroscan LSM",
+  "fibroscan lsm",
+  "lsm",
+  "liver stiffness measurement",
+  "liver stiffness",
+  "ekpa",
+  "ekpa (fibroscan)",
+  "ekpa/f2",
+  "fibroscan ekpa",
+  "fibroscan ekpa/f2",
+  "fibroscan kpa",
+  "fibroscan e",
+  "liver stiffness (kpa)",
+  "lsm (kpa)",
+);
 
 // ── Screening tests (kept as-is for the screenings panel) ────────────────────
-add("VPT", "vpt", "vpt left", "vpt right", "vpt l", "vpt r");
-add("ABI", "abi", "abi left", "abi right");
+add("VPT", "vpt", "vibration perception threshold");
+add("VPT Left", "vpt left", "vpt l", "vpt - left", "vibration perception threshold left", "vpt (left)");
+add("VPT Right", "vpt right", "vpt r", "vpt - right", "vibration perception threshold right", "vpt (right)");
+add("ABI", "abi", "ankle brachial index");
+add("ABI Left", "abi left", "abi l", "abi - left", "ankle brachial index left", "abi (left)");
+add("ABI Right", "abi right", "abi r", "abi - right", "ankle brachial index right", "abi (right)");
 add("Retinopathy", "retinopathy");
 add("ECG", "ecg");
 add("Doppler", "doppler");
@@ -593,6 +624,27 @@ add("Ultrasound", "ultrasound");
 add("X-Ray", "x-ray");
 add("MRI", "mri");
 add("Fibroscan", "fibroscan");
+
+// ── Osmolarity ───────────────────────────────────────────────────────────────
+add(
+  "Serum Osmolarity",
+  "serum osmolarity",
+  "s osmolarity",
+  "s. osmolarity",
+  "serum osmolality",
+  "s osmolality",
+  "plasma osmolality",
+  "plasma osmolarity",
+);
+add(
+  "Urine Osmolarity",
+  "urine osmolarity",
+  "u osmolarity",
+  "u. osmolarity",
+  "urine osmolality",
+  "urinary osmolality",
+  "urinary osmolarity",
+);
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
 add("Amylase", "amylase", "s.amylase", "s amylase", "serum amylase", "ams");
@@ -611,8 +663,15 @@ add("CA 19-9", "ca 19-9", "ca 19.9", "ca19.9");
 
 export const NORMALIZE_TEST = map;
 
+// Strip embedded date suffix like "(13/12/2025)" or "(14/1/26)" before lookup.
+// Some lab reports embed the collection date in the test name itself.
+function stripEmbeddedDate(str) {
+  return str.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/i, "").trim();
+}
+
 export function normalizeTestName(name) {
   if (!name) return name;
-  const lower = name.toLowerCase().trim();
-  return map[lower] || name;
+  const cleaned = stripEmbeddedDate(name);
+  const lower = cleaned.toLowerCase().trim();
+  return map[lower] || cleaned;
 }

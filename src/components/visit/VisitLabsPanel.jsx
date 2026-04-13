@@ -1,6 +1,6 @@
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { fmtDate } from "./helpers";
-import api from "../../services/api";
+import PdfViewerModal from "./PdfViewerModal";
 
 // ── Panel grouping config ─────────────────────────────────────────────────────
 // Each panel lists lowercase substrings matched against canonical_name OR test_name
@@ -370,6 +370,8 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   labOrders,
   onUploadReport,
 }) {
+  const [viewingDoc, setViewingDoc] = useState(null);
+
   const labDocs = documents.filter(
     (d) => d.doc_type === "lab_report" || d.doc_type === "blood_test",
   );
@@ -377,15 +379,8 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     (d) => d.doc_type === "imaging" || d.doc_type === "radiology",
   );
 
-  const openDoc = useCallback(async (doc) => {
-    if (doc.storage_path) {
-      try {
-        const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
-        if (data.url) window.open(data.url, "_blank");
-      } catch {
-        /* fall through */
-      }
-    }
+  const openDoc = useCallback((doc) => {
+    setViewingDoc(doc);
   }, []);
 
   const { latestRows, sections, latestDate } = useMemo(() => {
@@ -403,125 +398,130 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   const hasResults = latestRows.length > 0;
 
   return (
-    <div className="panel-body">
-      {/* Blood Reports */}
-      <div className="sc">
-        <div className="sch">
-          <div className="sct">
-            <div className="sci ic-b">🩸</div>Blood Reports
-          </div>
-          <button className="bx bx-p" onClick={onUploadReport}>
-            + Upload Report
-          </button>
-        </div>
-        <div className="scb">
-          {labDocs.length > 0 ? (
-            labDocs.map((doc, i) => (
-              <div
-                key={doc.id || i}
-                className="report-card"
-                style={{ cursor: "pointer" }}
-                onClick={() => openDoc(doc)}
-              >
-                <div className="report-icon ri-b">🧪</div>
-                <div style={{ flex: 1 }}>
-                  <div className="report-nm">{doc.title || doc.file_name || "Lab Report"}</div>
-                  <div className="report-dt">
-                    {fmtDate(doc.doc_date)}
-                    {doc.source ? ` · ${doc.source}` : ""}
-                    {doc.created_at && (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10) ? ` · Uploaded ${fmtDate(doc.created_at)}` : ""}
-                    {doc.notes ? ` · ${doc.notes}` : ""}
-                  </div>
-                </div>
-                <span
-                  className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
-                >
-                  {doc.has_abnormal ? "Abnormal" : "Normal"}
-                </span>
-              </div>
-            ))
-          ) : (
-            <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
-              No lab reports uploaded yet
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Radiology Reports */}
-      <div className="sc">
-        <div className="sch">
-          <div className="sct">
-            <div className="sci ic-t">🩻</div>Radiology Reports
-          </div>
-          <button className="bx bx-p" onClick={onUploadReport}>
-            + Upload
-          </button>
-        </div>
-        <div className="scb">
-          {radiologyDocs.length > 0 ? (
-            radiologyDocs.map((doc, i) => (
-              <div
-                key={doc.id || i}
-                className="report-card"
-                style={{ cursor: "pointer" }}
-                onClick={() => openDoc(doc)}
-              >
-                <div className="report-icon ri-r" style={{ background: "#fff0f5" }}>
-                  {doc.title?.toLowerCase().includes("echo") ? "🫀" : "🫁"}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div className="report-nm">
-                    {doc.title || doc.file_name || "Radiology Report"}
-                  </div>
-                  <div className="report-dt">
-                    {fmtDate(doc.doc_date)}
-                    {doc.source ? ` · ${doc.source}` : ""}
-                    {doc.notes ? ` · ${doc.notes}` : ""}
-                  </div>
-                </div>
-                <span className="report-status rs-ab">Review</span>
-              </div>
-            ))
-          ) : (
-            <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
-              No radiology reports
-            </div>
-          )}
-          <div className="addr">
-            <span style={{ fontSize: 14, color: "var(--t3)" }}>+</span>
-            <span className="addr-lbl">Upload new radiology report</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Latest Test Results grouped by labOrders */}
-      {hasResults && (
+    <>
+      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
+      <div className="panel-body">
+        {/* Blood Reports */}
         <div className="sc">
           <div className="sch">
             <div className="sct">
-              <div className="sci ic-b">📋</div>
-              Latest Test Results
-              {latestDate && (
-                <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>
-                  as of {fmtDate(latestDate)}
-                </span>
-              )}
+              <div className="sci ic-b">🩸</div>Blood Reports
             </div>
+            <button className="bx bx-p" onClick={onUploadReport}>
+              + Upload Report
+            </button>
           </div>
           <div className="scb">
-            {sections.map((sec, i) => (
-              <PanelBlock
-                key={`${sec.name}-${i}`}
-                name={sec.name}
-                results={sec.results}
-                type={sec.type}
-              />
-            ))}
+            {labDocs.length > 0 ? (
+              labDocs.map((doc, i) => (
+                <div
+                  key={doc.id || i}
+                  className="report-card"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => openDoc(doc)}
+                >
+                  <div className="report-icon ri-b">🧪</div>
+                  <div style={{ flex: 1 }}>
+                    <div className="report-nm">{doc.title || doc.file_name || "Lab Report"}</div>
+                    <div className="report-dt">
+                      {fmtDate(doc.doc_date)}
+                      {doc.source ? ` · ${doc.source}` : ""}
+                      {doc.created_at && (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10) ? ` · Uploaded ${fmtDate(doc.created_at)}` : ""}
+                      {doc.notes ? ` · ${doc.notes}` : ""}
+                    </div>
+                  </div>
+                  <span
+                    className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
+                  >
+                    {i === 0 ? "Latest" : doc.has_abnormal ? "Abnormal" : "Normal"}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
+                No lab reports uploaded yet
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Radiology Reports */}
+        <div className="sc">
+          <div className="sch">
+            <div className="sct">
+              <div className="sci ic-t">🩻</div>Radiology Reports
+            </div>
+            <button className="bx bx-p" onClick={onUploadReport}>
+              + Upload
+            </button>
+          </div>
+          <div className="scb">
+            {radiologyDocs.length > 0 ? (
+              radiologyDocs.map((doc, i) => (
+                <div
+                  key={doc.id || i}
+                  className="report-card"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => openDoc(doc)}
+                >
+                  <div className="report-icon ri-r" style={{ background: "#fff0f5" }}>
+                    {doc.title?.toLowerCase().includes("echo") ? "🫀" : "🫁"}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="report-nm">
+                      {doc.title || doc.file_name || "Radiology Report"}
+                    </div>
+                    <div className="report-dt">
+                      {fmtDate(doc.doc_date)}
+                      {doc.source ? ` · ${doc.source}` : ""}
+                      {doc.notes ? ` · ${doc.notes}` : ""}
+                    </div>
+                  </div>
+                  <span className="report-status rs-ab">Review</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
+                No radiology reports
+              </div>
+            )}
+            <div className="addr">
+              <span style={{ fontSize: 14, color: "var(--t3)" }}>+</span>
+              <span className="addr-lbl">Upload new radiology report</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Latest Test Results grouped by labOrders */}
+        {hasResults && (
+          <div className="sc">
+            <div className="sch">
+              <div className="sct">
+                <div className="sci ic-b">📋</div>
+                Latest Test Results
+                {latestDate && (
+                  <span
+                    style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}
+                  >
+                    as of {fmtDate(latestDate)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="scb">
+              {sections.map((sec, i) => (
+                <PanelBlock
+                  key={`${sec.name}-${i}`}
+                  name={sec.name}
+                  results={sec.results}
+                  type={sec.type}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 });
 

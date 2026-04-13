@@ -160,9 +160,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="HbA1c"
             value={hba1c?.result}
             unit="%"
+            target={7}
             trend={
-              hba1cFirst
-                ? `${hba1c?.result < hba1cFirst.result ? "▼" : "▲"} From ${hba1cFirst.result}%`
+              hba1cH.length > 1
+                ? `${hba1c?.result < hba1cH[hba1cH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(hba1c?.result - hba1cH[hba1cH.length - 2]?.result).toFixed(1)}% from ${fmtDate(hba1cH[hba1cH.length - 2]?.date)}`
                 : null
             }
             trendDir={hba1c?.result <= 7 ? "good" : hba1c?.result <= 8 ? "warn" : "bad"}
@@ -173,9 +174,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="Fasting Blood Sugar"
             value={fbs?.result}
             unit="mg/dL"
+            target={100}
             trend={
               fbsH.length > 1
-                ? `${fbs?.result < fbsH[0]?.result ? "▼" : "▲"} From ${fbsH[0]?.result}`
+                ? `${fbs?.result < fbsH[fbsH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(fbs?.result - fbsH[fbsH.length - 2]?.result).toFixed(0)} from ${fmtDate(fbsH[fbsH.length - 2]?.date)}`
                 : null
             }
             trendDir={fbs?.result <= 100 ? "good" : fbs?.result <= 126 ? "warn" : "bad"}
@@ -265,7 +267,14 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="LDL Cholesterol"
             value={ldl?.result}
             unit="mg/dL"
-            trend={ldl?.result <= 70 ? "✓ Well at goal" : "→ Above target"}
+            target={70}
+            trend={
+              ldlH.length > 1
+                ? `${ldl?.result < ldlH[ldlH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(ldl?.result - ldlH[ldlH.length - 2]?.result).toFixed(0)} from ${fmtDate(ldlH[ldlH.length - 2]?.date)}`
+                : ldl?.result <= 70
+                  ? "✓ At goal"
+                  : "→ Above target"
+            }
             trendDir={ldl?.result <= 70 ? "good" : "warn"}
             goal="<70"
             history={ldlH}
@@ -274,7 +283,14 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="Triglycerides"
             value={tg?.result}
             unit="mg/dL"
-            trend={tg?.result > 150 ? "→ Borderline" : "✓ Normal"}
+            target={150}
+            trend={
+              tgH.length > 1
+                ? `${tg?.result < tgH[tgH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(tg?.result - tgH[tgH.length - 2]?.result).toFixed(0)} from ${fmtDate(tgH[tgH.length - 2]?.date)}`
+                : tg?.result > 150
+                  ? "→ Borderline"
+                  : "✓ Normal"
+            }
             trendDir={tg?.result > 150 ? "warn" : "good"}
             goal="<150"
             history={tgH}
@@ -283,7 +299,16 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="Creatinine / eGFR"
             value={cr?.result}
             unit="mg/dL"
-            trend={egfr ? `✓ eGFR ${egfr.result}` : cr?.result <= 1.2 ? "✓ Normal" : "↑ Review"}
+            target={1.2}
+            trend={
+              crH.length > 1
+                ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
+                : egfr
+                  ? `✓ eGFR ${egfr.result}`
+                  : cr?.result <= 1.2
+                    ? "✓ Normal"
+                    : "↑ Review"
+            }
             trendDir={cr?.result <= 1.2 ? "good" : "bad"}
             goal="<1.2"
             goalLabel="Normal"
@@ -293,7 +318,14 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="TSH (Thyroid)"
             value={tsh?.result}
             unit="µIU/mL"
-            trend={tsh?.result > 4.5 ? "↑ Elevated (needs review)" : "✓ Normal"}
+            target={4.5}
+            trend={
+              tshH.length > 1
+                ? `${tsh?.result < tshH[tshH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(tsh?.result - tshH[tshH.length - 2]?.result).toFixed(2)} from ${fmtDate(tshH[tshH.length - 2]?.date)}`
+                : tsh?.result > 4.5
+                  ? "↑ Elevated (needs review)"
+                  : "✓ Normal"
+            }
             trendDir={tsh?.result > 4.5 ? "bad" : "good"}
             goal="<4.5"
             history={tshH}
@@ -347,7 +379,15 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             label="Haemoglobin"
             value={hb?.result}
             unit="g/dL"
-            trend={hb?.result < 13 ? "→ Borderline low" : "✓ Normal"}
+            target={13}
+            lowerBetter={false}
+            trend={
+              hbH.length > 1
+                ? `${hb?.result < hbH[hbH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(hb?.result - hbH[hbH.length - 2]?.result).toFixed(1)} from ${fmtDate(hbH[hbH.length - 2]?.date)}`
+                : hb?.result < 13
+                  ? "→ Borderline low"
+                  : "✓ Normal"
+            }
             trendDir={hb?.result < 13 ? "warn" : "good"}
             goal="13–17"
             goalLabel="Normal"
@@ -360,7 +400,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
               unit="cm"
               trend={
                 waistH.length > 1
-                  ? `${(latestV?.waist ?? waistLab?.result) > waistH[0]?.result ? "▲" : "▼"} From ${waistH[0]?.result} cm`
+                  ? `${(latestV?.waist ?? waistLab?.result) > waistH[waistH.length - 2]?.result ? "▲" : "▼"} ${Math.abs((latestV?.waist ?? waistLab?.result) - waistH[waistH.length - 2]?.result).toFixed(1)} cm from ${fmtDate(waistH[waistH.length - 2]?.date)}`
                   : null
               }
               trendDir={(latestV?.waist ?? waistLab?.result) > 90 ? "warn" : "good"}

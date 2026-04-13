@@ -168,7 +168,24 @@ router.get("/patients/:id", async (req, res) => {
     const [consultations, vitals, meds, labs, diagnoses, docs, consultRx, goals, latestAppt] =
       await Promise.all([
         pool.query(
-          "SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC",
+          `WITH cons AS (
+             SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data,
+                    'consultation' AS source_type
+             FROM consultations WHERE patient_id=$1
+           ),
+           appts AS (
+             SELECT id, appointment_date AS visit_date, visit_type,
+                    NULL AS mo_name, doctor_name AS con_name, status, created_at, NULL::jsonb AS con_data,
+                    'appointment' AS source_type
+             FROM appointments WHERE patient_id=$1 AND healthray_id IS NOT NULL AND appointment_date IS NOT NULL
+           ),
+           deduped AS (
+             SELECT * FROM cons
+             UNION ALL
+             SELECT a.* FROM appts a
+             WHERE NOT EXISTS (SELECT 1 FROM cons c WHERE c.visit_date::date = a.visit_date::date)
+           )
+           SELECT * FROM deduped ORDER BY visit_date DESC, created_at DESC`,
           [id],
         ),
         pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
@@ -190,8 +207,8 @@ router.get("/patients/:id", async (req, res) => {
           [id],
         ),
         pool.query(
-          `SELECT DISTINCT ON (test_name, test_date) * FROM lab_results
-        WHERE patient_id=$1 ORDER BY test_name, test_date DESC, created_at DESC`,
+          `SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date) * FROM lab_results
+        WHERE patient_id=$1 ORDER BY COALESCE(canonical_name, test_name), test_date::date DESC, created_at DESC`,
           [id],
         ),
         pool.query(

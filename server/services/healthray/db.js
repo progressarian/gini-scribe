@@ -1,10 +1,127 @@
 // ── HealthRay Sync DB operations ────────────────────────────────────────────
 
 import pool from "../../config/db.js";
+import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
-const { log } = createLogger("HealthRay Sync");
+const { log, error } = createLogger("HealthRay Sync");
+
+// ── Download HealthRay file and store in Supabase ───────────────────────────
+export async function downloadAndStore(
+  patientId,
+  docId,
+  fileUrl,
+  fileName,
+  attachmentId,
+  recordType,
+  medicalRecordId,
+) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    log("DB", `downloadAndStore skip: storage not configured`);
+    return null;
+  }
+
+  let buffer, contentType;
+
+  // 1. Try the actual PDF download endpoint (not thumbnail)
+  if (attachmentId) {
+    try {
+      const { downloadMedicalRecordFile } = await import("./client.js");
+      const result = await downloadMedicalRecordFile(
+        attachmentId,
+        recordType || "Prescription/Rx",
+        medicalRecordId || null, // null = omit medical_record_id from URL; attachment ID in path is primary key
+      );
+      if (result?.buffer?.length > 0) {
+        buffer = result.buffer;
+        contentType = result.contentType;
+        log(
+          "DB",
+          `downloadAndStore: got actual file via download endpoint — ${buffer.length} bytes (${contentType}) for doc ${docId}`,
+        );
+      }
+    } catch (e) {
+      log("DB", `downloadAndStore: download endpoint failed for doc ${docId}: ${e.message}`);
+    }
+  }
+
+  // 2. Fallback: download from the thumbnail/file URL
+  if (!buffer && fileUrl) {
+    try {
+      const fileRes = await fetch(fileUrl);
+      if (fileRes.ok) {
+        buffer = Buffer.from(await fileRes.arrayBuffer());
+        contentType = fileRes.headers.get("content-type")?.split(";")[0].trim();
+      } else {
+        log("DB", `downloadAndStore: thumbnail fetch failed ${fileRes.status} for doc ${docId}`);
+      }
+    } catch (e) {
+      log("DB", `downloadAndStore: thumbnail fetch error for doc ${docId}: ${e.message}`);
+    }
+  }
+
+  if (!buffer || buffer.length === 0) return null;
+
+  // Reject JSON responses — HealthRay returns HTTP 200 with JSON error body when auth/params fail
+  if (contentType === "application/json" || buffer.slice(0, 1).toString() === "{") {
+    log("DB", `downloadAndStore: rejecting JSON response for doc ${docId} (HealthRay error body)`);
+    return null;
+  }
+
+  // Detect MIME from actual content or filename when S3 returns generic type
+  if (!contentType || contentType === "application/octet-stream") {
+    const urlPath = (fileUrl || "").split("?")[0];
+    const urlExt = urlPath.split(".").pop().toLowerCase();
+    const extMime = {
+      pdf: "application/pdf",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+    };
+    contentType =
+      extMime[urlExt] || extMime[fileName?.split(".").pop().toLowerCase()] || "application/pdf";
+  }
+  log("DB", `downloadAndStore: storing ${buffer.length} bytes (${contentType}) for doc ${docId}`);
+
+  try {
+    const extMap = { "application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png" };
+    const ext = extMap[contentType] || fileName?.split(".").pop() || "pdf";
+    const storageName = fileName?.replace(/\.[^.]+$/, `.${ext}`) || `healthray_${docId}.${ext}`;
+    const storagePath = `patients/${patientId}/healthray/${storageName}`;
+
+    const uploadRes = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          "Content-Type": contentType,
+          "x-upsert": "true",
+        },
+        body: buffer,
+      },
+    );
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text().catch(() => "");
+      error(
+        "downloadAndStore",
+        `Supabase upload failed ${uploadRes.status} for doc ${docId}: ${errText.slice(0, 200)}`,
+      );
+      return null;
+    }
+
+    await pool.query(`UPDATE documents SET storage_path = $1, mime_type = $2 WHERE id = $3`, [
+      storagePath,
+      contentType,
+      docId,
+    ]);
+    return storagePath;
+  } catch (e) {
+    error("downloadAndStore", `Failed for doc ${docId}: ${e.message}`);
+    return null;
+  }
+}
 
 // ── Ensure sync columns exist ───────────────────────────────────────────────
 let columnsReady = false;
@@ -374,7 +491,12 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'healthray')`,
         [patientId, apptId, labDate, lab.test, canonicalName, val, lab.unit || null],
       )
-      .catch(() => {});
+      .catch((e) =>
+        error(
+          "syncLabResults",
+          `INSERT failed for patient=${patientId} appt=${apptId} test="${lab.test}" canonical="${canonicalName}": ${e.message}`,
+        ),
+      );
   }
 }
 
@@ -468,6 +590,12 @@ function normalizeDiagnosisId(name) {
 
   // Metabolic syndrome
   if (/metabolic syndrome/.test(n)) return "metabolic_syndrome";
+
+  // Acanthosis nigricans — short "acanthosis" maps to full canonical
+  if (/acanthosis/.test(n)) return "acanthosis_nigricans";
+
+  // Hyposomatotropism — catches typo "hyposomatotropisim"
+  if (/hyposomatotropi/.test(n)) return "hyposomatotropism";
 
   // Hypertriglyceridemia (catches misspellings like hypertriglycerdemia)
   if (/hypertriglycer/.test(n)) return "hypertriglyceridemia";
@@ -568,6 +696,7 @@ const DIAGNOSIS_ID_RENAMES = {
   thallasemia_major: "thalassemia_major",
   thallasemia: "thalassemia",
   hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+  hashimotos_thyroiditis: "hashimoto_thyroiditis",
   mild_dr: "diabetic_retinopathy",
   m_a_s_l_d: "masld",
   achillis_tendinitis: "achilles_tendinitis",
@@ -580,6 +709,11 @@ const DIAGNOSIS_ID_RENAMES = {
   seronegative_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
   type_2_pge: "pge_type_2",
   hypo: "hypothyroidism",
+  // Acanthosis — short form deactivated in favour of full canonical
+  acanthosis: "acanthosis_nigricans",
+  // Hyposomatotropism typo
+  hyposomatotropisim: "hyposomatotropism",
+  hyposomatotropis: "hyposomatotropism",
 };
 
 export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
@@ -595,7 +729,9 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
          WHERE patient_id = $1 AND diagnosis_id IN (${placeholders})`,
         [patientId, ...oldIds],
       )
-      .catch(() => {});
+      .catch((e) =>
+        error("syncDiagnoses", `dedup-rename UPDATE failed for patient=${patientId}: ${e.message}`),
+      );
   }
 
   for (const dx of diagnoses) {
@@ -625,7 +761,12 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
           `healthray:${healthrayId}${dx.details ? " — " + dx.details : ""}`,
         ],
       )
-      .catch(() => {});
+      .catch((e) =>
+        error(
+          "syncDiagnoses",
+          `UPSERT failed for patient=${patientId} diagnosis_id="${diagId}" label="${cleanName}": ${e.message}`,
+        ),
+      );
   }
 }
 
@@ -638,17 +779,38 @@ export async function syncSymptoms(patientId, apptId, symptoms) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_")
       .slice(0, 100);
+
+    // Parse since_date — AI may return YYYY-MM-DD string or null
+    let sinceDate = null;
+    if (sy.since_date) {
+      const d = new Date(sy.since_date);
+      if (!isNaN(d.getTime())) sinceDate = sy.since_date.slice(0, 10);
+    }
+
+    // Normalize severity to allowed values
+    const rawSev = (sy.severity || "").toLowerCase().trim();
+    const severity = ["mild", "moderate", "severe"].includes(rawSev) ? rawSev : null;
+
     await pool
       .query(
-        `INSERT INTO visit_symptoms (patient_id, symptom_id, label, appointment_id)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO visit_symptoms
+           (patient_id, symptom_id, label, appointment_id, since_date, severity, related_to)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (patient_id, symptom_id) DO UPDATE SET
-           label = EXCLUDED.label,
+           label       = EXCLUDED.label,
            appointment_id = EXCLUDED.appointment_id,
-           updated_at = NOW()`,
-        [patientId, symptomId, sy.name, apptId],
+           since_date  = COALESCE(EXCLUDED.since_date, visit_symptoms.since_date),
+           severity    = COALESCE(EXCLUDED.severity,   visit_symptoms.severity),
+           related_to  = COALESCE(EXCLUDED.related_to, visit_symptoms.related_to),
+           updated_at  = NOW()`,
+        [patientId, symptomId, sy.name, apptId, sinceDate, severity, sy.related_to || null],
       )
-      .catch(() => {});
+      .catch((e) =>
+        error(
+          "syncSymptoms",
+          `UPSERT failed for patient=${patientId} appt=${apptId} symptom_id="${symptomId}": ${e.message}`,
+        ),
+      );
   }
 }
 
@@ -690,7 +852,13 @@ export async function syncStoppedMedications(
            AND is_active = true`,
         [patientId, reason, med.name, med.dose || null],
       )
-      .catch(() => ({ rowCount: 0 }));
+      .catch((e) => {
+        error(
+          "syncStoppedMedications",
+          `stop UPDATE failed for patient=${patientId} med="${med.name}" dose="${med.dose || ""}": ${e.message}`,
+        );
+        return { rowCount: 0 };
+      });
 
     // If no existing active medicine found, insert as a new stopped entry (for dose changes)
     // Only insert if this dose+name combo doesn't already exist
@@ -703,7 +871,13 @@ export async function syncStoppedMedications(
              AND dose = $3`,
           [patientId, med.name, med.dose || null],
         )
-        .catch(() => ({ rows: [] }));
+        .catch((e) => {
+          error(
+            "syncStoppedMedications",
+            `existence-check SELECT failed for patient=${patientId} med="${med.name}": ${e.message}`,
+          );
+          return { rows: [] };
+        });
 
       if (checkExists.rows.length === 0) {
         await pool
@@ -719,7 +893,12 @@ export async function syncStoppedMedications(
               `Previous dose (stopped)`,
             ],
           )
-          .catch(() => {});
+          .catch((e) =>
+            error(
+              "syncStoppedMedications",
+              `historical INSERT failed for patient=${patientId} med="${med.name}" dose="${med.dose || ""}": ${e.message}`,
+            ),
+          );
       }
     }
   }
@@ -783,7 +962,12 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            AND is_active = false`,
         params,
       )
-      .catch(() => {});
+      .catch((e) =>
+        error(
+          "syncMedications",
+          `reactivate UPDATE failed for patient=${patientId} med="${med.name}" canonical="${pharmacyMatch}": ${e.message}`,
+        ),
+      );
 
     // Step 2: insert or upsert the active row (pharmacy_match ensures canonical dedup).
     await pool
@@ -806,7 +990,12 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            updated_at = NOW()`,
         params,
       )
-      .catch(() => {});
+      .catch((e) =>
+        error(
+          "syncMedications",
+          `UPSERT failed for patient=${patientId} med="${med.name}" canonical="${pharmacyMatch}": ${e.message}`,
+        ),
+      );
   }
 
   // Step 3: dedup — remove older active healthray rows that are superseded.
@@ -829,7 +1018,12 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
          )`,
       [patientId],
     )
-    .catch(() => {});
+    .catch((e) =>
+      error(
+        "syncMedications",
+        `dedup pass 1 (pharmacy_match) DELETE failed for patient=${patientId}: ${e.message}`,
+      ),
+    );
 
   // Remove old null-pharmacy_match rows whose normalised name matches a row that
   // now has pharmacy_match set (i.e. the canonical version already exists).
@@ -854,7 +1048,43 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
          )`,
       [patientId],
     )
-    .catch(() => {});
+    .catch((e) =>
+      error(
+        "syncMedications",
+        `dedup pass 2 (null pharmacy_match) DELETE failed for patient=${patientId}: ${e.message}`,
+      ),
+    );
+
+  // Pass 3: pharmacy_match prefix dedup — when HealthRay sends both a short name
+  // ("CRESAR AM") and a longer one with dose appended ("CRESAR AM 5+40"), both get
+  // synced with the same healthray ID so stopStaleHealthrayMeds won't clean them up.
+  // Keep the longer/newer entry; remove the shorter one that is a leading prefix of it.
+  await pool
+    .query(
+      `DELETE FROM medications short_entry
+       WHERE short_entry.patient_id = $1
+         AND short_entry.is_active = true
+         AND short_entry.source = 'healthray'
+         AND short_entry.pharmacy_match IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM medications longer_entry
+           WHERE longer_entry.patient_id = $1
+             AND longer_entry.is_active = true
+             AND longer_entry.source = 'healthray'
+             AND longer_entry.id != short_entry.id
+             AND longer_entry.pharmacy_match IS NOT NULL
+             AND LENGTH(longer_entry.pharmacy_match) > LENGTH(short_entry.pharmacy_match)
+             AND UPPER(longer_entry.pharmacy_match) LIKE UPPER(short_entry.pharmacy_match) || ' %'
+             AND longer_entry.created_at >= short_entry.created_at
+         )`,
+      [patientId],
+    )
+    .catch((e) =>
+      error(
+        "syncMedications",
+        `dedup pass 3 (prefix match) DELETE failed for patient=${patientId}: ${e.message}`,
+      ),
+    );
 }
 
 // ── Stop stale HealthRay meds not in the current prescription ───────────────
@@ -876,7 +1106,12 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
          AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')`,
       [patientId, String(healthrayId), apptDate],
     )
-    .catch(() => {});
+    .catch((e) =>
+      error(
+        "stopStaleHealthrayMeds",
+        `UPDATE failed for patient=${patientId} healthrayId=${healthrayId}: ${e.message}`,
+      ),
+    );
 }
 
 // ── Sync opdVitals → vitals table ───────────────────────────────────────────
@@ -905,37 +1140,197 @@ export async function syncVitals(patientId, apptId, apptDate, opdVitals) {
         parseFloat(opdVitals.bodyFat) || null,
       ],
     )
-    .catch(() => {});
+    .catch((e) =>
+      error("syncVitals", `INSERT failed for patient=${patientId} appt=${apptId}: ${e.message}`),
+    );
+}
+
+// ── Sync appointments.biomarkers from latest lab_results ─────────────────────
+// Reads the most recent lab result per canonical for each OPD biomarker field
+// and merges into appointments.biomarkers. Only overwrites a key when lab_results
+// has a more-recent value than whatever is currently stored.
+export async function syncBiomarkersFromLatestLabs(patientId, apptId) {
+  if (!patientId || !apptId) return;
+
+  // Map canonical_name → biomarker key (mirrors LAB_KEY_MAP in mappers.js)
+  const CANONICAL_TO_BIO = {
+    HbA1c: "hba1c",
+    FBS: "fg",
+    LDL: "ldl",
+    Triglycerides: "tg",
+    "Microalbumin/Creatinine Ratio": "uacr",
+    Microalbumin: "uacr",
+    "Creatinine, Serum": "creatinine",
+    Creatinine: "creatinine",
+    TSH: "tsh",
+    Hemoglobin: "hb",
+    Haemoglobin: "hb",
+  };
+
+  try {
+    // Get latest result per canonical_name for this patient
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (canonical_name)
+         canonical_name, result, test_date
+       FROM lab_results
+       WHERE patient_id = $1
+         AND result IS NOT NULL
+       ORDER BY canonical_name, test_date DESC NULLS LAST`,
+      [patientId],
+    );
+
+    if (rows.length === 0) return;
+
+    // Build update object: bioKey → { value, date }
+    const updates = {};
+    for (const row of rows) {
+      const bioKey = CANONICAL_TO_BIO[row.canonical_name];
+      if (!bioKey) continue;
+      const val = parseFloat(row.result);
+      if (isNaN(val)) continue;
+      // Keep whichever date is more recent if multiple canonicals map to same key
+      if (!updates[bioKey] || row.test_date > updates[bioKey].date) {
+        updates[bioKey] = { val, date: row.test_date };
+      }
+    }
+
+    if (Object.keys(updates).length === 0) return;
+
+    // Build a JSONB patch of only the new values, but only overwrite a key when
+    // the lab_results date is >= the date already stored in biomarkers._dates
+    // Use a simple approach: read current biomarkers, compare dates, merge
+    const { rows: apptRows } = await pool.query(
+      `SELECT biomarkers FROM appointments WHERE id = $1`,
+      [apptId],
+    );
+    const existing = apptRows[0]?.biomarkers || {};
+    const existingDates = existing._lab_dates || {};
+
+    const patch = {};
+    const newDates = { ...existingDates };
+
+    for (const [bioKey, { val, date }] of Object.entries(updates)) {
+      const existingDate = existingDates[bioKey] || "";
+      // Only update if newer (or no existing date recorded)
+      if (!existingDate || date >= existingDate) {
+        patch[bioKey] = val;
+        newDates[bioKey] = date;
+      }
+    }
+
+    if (Object.keys(patch).length === 0) return;
+
+    patch._lab_dates = newDates;
+
+    await pool.query(`UPDATE appointments SET biomarkers = biomarkers || $2::jsonb WHERE id = $1`, [
+      apptId,
+      JSON.stringify(patch),
+    ]);
+
+    log(
+      "syncBiomarkers",
+      `Patient ${patientId} appt ${apptId}: updated ${Object.keys(patch).length - 1} biomarker keys`,
+    );
+  } catch (e) {
+    error("syncBiomarkers", `Patient ${patientId} appt ${apptId}: ${e.message}`);
+  }
 }
 
 // ── Sync medical records (documents) ────────────────────────────────────────
-export async function syncDocuments(patientId, records, fallbackDate) {
+export async function syncDocuments(patientId, records, fallbackDate, healthrayApptId) {
   if (!patientId || !records || records.length === 0) return;
 
   for (const rec of records) {
     const docType = mapRecordType(rec.record_type, rec.file_name);
+    const noteParts = [`healthray_record:${rec.id}`];
+    if (healthrayApptId) noteParts.unshift(`healthray_appt:${healthrayApptId}`);
+    if (rec.medical_record_id) noteParts.push(`healthray_mrid:${rec.medical_record_id}`);
+    if (rec.record_type) noteParts.push(`healthray_rtype:${rec.record_type}`);
+    const notes = noteParts.join("|");
+
     const dup = await pool.query(
-      `SELECT id FROM documents WHERE patient_id = $1 AND file_name = $2 AND source = 'healthray' LIMIT 1`,
+      `SELECT id, notes FROM documents WHERE patient_id = $1 AND file_name = $2 AND source = 'healthray' LIMIT 1`,
       [patientId, rec.file_name],
     );
-    if (dup.rows[0]) continue;
+    if (dup.rows[0]) {
+      // Refresh stored file_url + back-fill notes with appt/mrid info
+      const freshUrl = rec.url || rec.file_url || rec.attachment_url || rec.thumbnail || null;
+      const existingNotes = dup.rows[0].notes || "";
+      const needsNoteUpdate =
+        !existingNotes.includes("healthray_mrid:") || !existingNotes.includes("healthray_appt:");
+      if (freshUrl || needsNoteUpdate) {
+        await pool
+          .query(
+            `UPDATE documents SET
+               file_url = COALESCE($1, file_url),
+               notes = $2
+             WHERE id = $3`,
+            [freshUrl, notes, dup.rows[0].id],
+          )
+          .catch(() => {});
+      }
+      // Download actual PDF to Supabase if not stored or only has blurry thumbnail
+      const hasStorage = await pool.query(
+        `SELECT storage_path, mime_type FROM documents WHERE id=$1`,
+        [dup.rows[0].id],
+      );
+      const needsDownload =
+        !hasStorage.rows[0]?.storage_path || hasStorage.rows[0]?.mime_type === "image/jpeg";
+      if (needsDownload) {
+        downloadAndStore(
+          patientId,
+          dup.rows[0].id,
+          freshUrl,
+          rec.file_name,
+          rec.id,
+          rec.record_type,
+          rec.medical_record_id,
+        )
+          .then((p) => p && log("DB", `Stored file for existing doc ${dup.rows[0].id} → ${p}`))
+          .catch(() => {});
+      }
+      continue;
+    }
 
-    await pool
+    const freshUrl = rec.url || rec.file_url || rec.attachment_url || rec.thumbnail || null;
+    const insertRes = await pool
       .query(
         `INSERT INTO documents (patient_id, doc_type, title, file_name, file_url, mime_type, doc_date, source, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'healthray', $8)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'healthray', $8) RETURNING id`,
         [
           patientId,
           docType,
           `${rec.record_type} - ${rec.file_name}`,
           rec.file_name,
-          rec.url || rec.file_url || rec.attachment_url || rec.thumbnail || null,
+          freshUrl,
           rec.file_type || "application/pdf",
           rec.app_date_time ? toISTDate(rec.app_date_time) : fallbackDate,
-          `healthray_record:${rec.id}`,
+          notes,
         ],
       )
-      .catch(() => {});
+      .catch((e) => {
+        error(
+          "syncDocuments",
+          `INSERT failed for patient=${patientId} record_id=${rec.id} file_name="${rec.file_name}": ${e.message}`,
+        );
+        return null;
+      });
+
+    // Download file to Supabase for permanent storage (fire-and-forget)
+    const newDocId = insertRes?.rows?.[0]?.id;
+    if (newDocId && freshUrl) {
+      downloadAndStore(
+        patientId,
+        newDocId,
+        freshUrl,
+        rec.file_name,
+        rec.id,
+        rec.record_type,
+        rec.medical_record_id,
+      )
+        .then((p) => p && log("DB", `Stored file for new doc ${newDocId} → ${p}`))
+        .catch(() => {});
+    }
   }
 
   log("DB", `${records.length} documents synced`);

@@ -1,9 +1,9 @@
 import "./PatientScreen.css";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { docCategories, fDate } from "./constants";
-import api from "../services/api.js";
 import useCompanionStore from "../stores/companionStore";
+import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 
 const tabs = [
   ["records", "📎 Docs"],
@@ -17,6 +17,7 @@ export default function PatientScreen() {
   const navigate = useNavigate();
   const { patientData, patientTab, loading, setPatientTab, loadPatientData, selectedPatient } =
     useCompanionStore();
+  const [viewingDoc, setViewingDoc] = useState(null);
 
   useEffect(() => {
     if (id) loadPatientData(parseInt(id));
@@ -73,12 +74,14 @@ export default function PatientScreen() {
         </div>
       )}
 
+      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
       {!loading && patientData && (
         <div className="patient__body">
           {patientTab === "records" && (
             <RecordsTab
               patientData={patientData}
               onCapture={() => navigate(`/companion/capture/${id}`)}
+              onViewDoc={setViewingDoc}
             />
           )}
           {patientTab === "rx" && <MedicationsTab patientData={patientData} />}
@@ -90,7 +93,7 @@ export default function PatientScreen() {
   );
 }
 
-function RecordsTab({ patientData, onCapture }) {
+function RecordsTab({ patientData, onCapture, onViewDoc }) {
   const docs = patientData.documents || [];
 
   if (docs.length === 0) {
@@ -155,16 +158,8 @@ function RecordsTab({ patientData, onCapture }) {
                   </div>
                 )}
               </div>
-              {doc.storage_path && (
-                <button
-                  onClick={async () => {
-                    try {
-                      const r = await api.get(`/api/documents/${doc.id}/file-url`);
-                      if (r.data.url) window.open(r.data.url, "_blank");
-                    } catch (e) {}
-                  }}
-                  className="patient__doc-view-btn"
-                >
+              {(doc.storage_path || doc.source === "healthray") && (
+                <button onClick={() => onViewDoc(doc)} className="patient__doc-view-btn">
                   View
                 </button>
               )}

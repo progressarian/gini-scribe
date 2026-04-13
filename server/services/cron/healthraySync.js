@@ -33,6 +33,8 @@ import {
   stopStaleHealthrayMeds,
   syncDocuments,
   syncVitals,
+  syncSymptoms,
+  syncBiomarkersFromLatestLabs,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 const { log, error } = createLogger("HealthRay Sync");
@@ -168,7 +170,7 @@ async function fetchClinicalText(appt, healthrayId, doctorId) {
 async function syncAppointmentDocs(healthrayId, patientId, apptDate) {
   try {
     const records = await fetchMedicalRecords(healthrayId);
-    if (records?.length > 0) await syncDocuments(patientId, records, apptDate);
+    if (records?.length > 0) await syncDocuments(patientId, records, apptDate, healthrayId);
   } catch {}
 }
 
@@ -312,6 +314,7 @@ async function syncAppointment(appt, localDoctorName) {
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
+  await syncBiomarkersFromLatestLabs(patientId, localApptId);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
   await syncStoppedMedications(
     patientId,
@@ -321,6 +324,7 @@ async function syncAppointment(appt, localDoctorName) {
   );
   await stopStaleHealthrayMeds(patientId, healthrayId, apptDate);
   await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
+  await syncSymptoms(patientId, localApptId, clinical.parsedClinical?.symptoms);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
 
   return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };

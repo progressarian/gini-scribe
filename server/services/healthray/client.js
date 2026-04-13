@@ -8,6 +8,7 @@ const HEALTHRAY_LOGIN_URL = "https://node.healthray.com/api/v2/users/sign_in";
 export const ORG_ID = process.env.HEALTHRAY_ORG_ID || "1528";
 
 let sessionCookie = process.env.HEALTHRAY_SESSION || "";
+let authToken = ""; // x-auth-token from login response
 
 async function healthrayLogin() {
   const mobile = process.env.HEALTHRAY_MOBILE;
@@ -38,12 +39,17 @@ async function healthrayLogin() {
 
   const setCookie = res.headers.get("set-cookie") || "";
   const match = setCookie.match(/connect\.sid=([^;]+)/);
+  const body = await res.json().catch(() => ({}));
   if (!match) {
-    const body = await res.json().catch(() => ({}));
     throw new Error(`HealthRay login failed: ${body.message || "no session cookie returned"}`);
   }
 
   sessionCookie = match[1];
+  // Capture auth token from login response for download endpoints
+  if (body.data?.auth_token || body.data?.token) {
+    authToken = body.data.auth_token || body.data.token;
+    log("Auth", `Auth token captured: ${authToken.slice(0, 8)}...`);
+  }
   log("Auth", "Login successful, new session obtained");
   return sessionCookie;
 }
@@ -112,4 +118,107 @@ export function fetchMedicalRecords(appointmentId) {
   return healthrayFetch(
     `/medical_records?record_type=${encodeURIComponent("Invoice/Bill,Prescription/Rx,Lab Report,X-Rays,Other,Certificate")}&appointment_id=${appointmentId}`,
   );
+}
+
+// Fetch any HealthRay URL with auth (e.g. thumbnail/preview URLs stored in file_url).
+// Returns { buffer, contentType } or null on failure.
+export async function healthrayRawFetch(url, isRetry = false) {
+  if (!sessionCookie) await healthrayLogin();
+
+  const headers = { Cookie: `connect.sid=${sessionCookie}` };
+  if (authToken) headers["x-auth-token"] = authToken;
+
+  const res = await fetch(url, { headers, redirect: "follow" });
+  const ct = res.headers.get("content-type") || "";
+
+  if (!res.ok || ct.includes("text/html")) {
+    if (isRetry) return null;
+    await healthrayLogin();
+    return healthrayRawFetch(url, true);
+  }
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.length === 0) return null;
+
+  // Reject JSON error responses
+  if (ct.includes("application/json") || (buffer.length < 2000 && buffer[0] === 0x7b)) {
+    try {
+      const parsed = JSON.parse(buffer.toString("utf8"));
+      if (parsed.data !== undefined && Object.keys(parsed.data || {}).length === 0) return null;
+    } catch {}
+  }
+
+  return { buffer, contentType: ct.split(";")[0].trim() || "application/octet-stream" };
+}
+
+// Download the actual PDF/file (not thumbnail) for a medical record attachment.
+// Returns { buffer, contentType } or null on failure.
+// Endpoint: GET /medical_records/download/{attachmentId}?record_type=...&medical_record_id=...
+export async function downloadMedicalRecordFile(attachmentId, recordType, medicalRecordId) {
+  if (!sessionCookie) await healthrayLogin();
+
+  // Build URL — omit medical_record_id if not available (attachment ID in path is the primary key)
+  const mrParam = medicalRecordId ? `&medical_record_id=${medicalRecordId}` : "";
+  const url = `${HEALTHRAY_BASE}/medical_records/download/${attachmentId}?record_type=${encodeURIComponent(recordType)}${mrParam}`;
+  const headers = { Cookie: `connect.sid=${sessionCookie}` };
+  if (authToken) headers["x-auth-token"] = authToken;
+
+  const res = await fetch(url, { headers, redirect: "follow" });
+
+  // Log response details for debugging
+  const ct = res.headers.get("content-type") || "";
+  log("Download", `${res.status} ${ct.slice(0, 40)} for attachment ${attachmentId}`);
+
+  // 422 = real API error (e.g. missing medical_record_id) — don't retry
+  if (res.status === 422) {
+    const body = await res.json().catch(() => ({}));
+    log(
+      "Download",
+      `422 for attachment ${attachmentId}: ${body.message || JSON.stringify(body.data)}`,
+    );
+    return null;
+  }
+
+  // HTML response = session expired — retry after login
+  if (!res.ok || ct.includes("text/html")) {
+    await healthrayLogin();
+    const retryHeaders = { Cookie: `connect.sid=${sessionCookie}` };
+    if (authToken) retryHeaders["x-auth-token"] = authToken;
+    const retry = await fetch(url, { headers: retryHeaders, redirect: "follow" });
+    if (!retry.ok) {
+      const errBody = await retry.text().catch(() => "");
+      log("Download", `Retry failed ${retry.status}: ${errBody.slice(0, 200)}`);
+      return null;
+    }
+    const buffer = Buffer.from(await retry.arrayBuffer());
+    const contentType =
+      retry.headers.get("content-type")?.split(";")[0].trim() || "application/pdf";
+    return { buffer, contentType };
+  }
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const contentType = ct.split(";")[0].trim() || "application/pdf";
+
+  // HealthRay sometimes returns HTTP 200 with a JSON error body like
+  // {"status":200,"message":"no record found by given id","data":{}}
+  // Detect and reject these — they are not real files.
+  if (
+    contentType === "application/json" ||
+    (buffer.length < 2000 && buffer.slice(0, 1).toString() === "{")
+  ) {
+    try {
+      const parsed = JSON.parse(buffer.toString("utf8"));
+      if (
+        parsed.data !== undefined &&
+        (Object.keys(parsed.data || {}).length === 0 ||
+          (parsed.message || "").toLowerCase().includes("no record") ||
+          parsed.statusState === "success" && !parsed.data?.url)
+      ) {
+        log("Download", `JSON 'no record found' response for attachment ${attachmentId}: ${parsed.message}`);
+        return null;
+      }
+    } catch {}
+  }
+
+  return { buffer, contentType };
 }

@@ -1,10 +1,11 @@
 import "./LabPortalPage.css";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../stores/uiStore.js";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useLabPortalStore from "../stores/labPortalStore.js";
-import api from "../services/api.js";
+import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 
 export default function LabPortalPage() {
   const { currentDoctor } = useAuthStore();
@@ -18,18 +19,9 @@ export default function LabPortalPage() {
     removeLabPortalFile,
   } = useLabPortalStore();
   const navigate = useNavigate();
+  const [viewingDoc, setViewingDoc] = useState(null);
 
   const pfd = getPfd();
-
-  const viewDocumentFile = async (documentId) => {
-    try {
-      const resp = await api.get(`/api/documents/${documentId}/file-url`);
-      if (resp.data.url) window.open(resp.data.url, "_blank");
-      else toast("No file attached to this document", "warn");
-    } catch (e) {
-      toast("Failed to load file: " + (e.response?.data?.error || e.message), "error");
-    }
-  };
 
   return (
     <div>
@@ -289,9 +281,9 @@ export default function LabPortalPage() {
                       })()}
                     </span>
                   )}
-                  {doc.storage_path && (
+                  {(doc.storage_path || doc.source === "healthray") && (
                     <button
-                      onClick={() => viewDocumentFile(doc.id)}
+                      onClick={() => setViewingDoc(doc)}
                       className="lab-portal__prev-doc-view-btn"
                     >
                       📄 View
@@ -304,6 +296,7 @@ export default function LabPortalPage() {
           )}
         </div>
       )}
+      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
     </div>
   );
 }

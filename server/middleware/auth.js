@@ -34,7 +34,7 @@ const PUBLIC_PATHS = [
   "/api/sync/healthray/today",
 ];
 
-const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/"];
+const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/", "/api/admin/"];
 
 export const requireAuth = (req, res, next) => {
   if (!req.path.startsWith("/api/") || PUBLIC_PATHS.includes(req.path)) return next();

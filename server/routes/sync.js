@@ -25,6 +25,7 @@ import {
   syncMedications,
   syncStoppedMedications,
   stopStaleHealthrayMeds,
+  syncBiomarkersFromLatestLabs,
 } from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 import { normalizeTestName } from "../utils/labNormalization.js";
@@ -848,6 +849,160 @@ router.post("/sync/backfill/labs-renormalize", async (req, res) => {
     });
   } catch (e) {
     handleError(res, e, "Labs renormalize");
+  }
+});
+
+// ── Backfill biomarkers from latest lab_results for all patients ──────────────
+// POST /api/sync/backfill/biomarkers-from-labs
+// Fixes stale biomarker values in appointments.biomarkers by pulling the most
+// recent lab_results per patient and merging into their latest appointment.
+router.post("/sync/backfill/biomarkers-from-labs", async (req, res) => {
+  const startTime = Date.now();
+  const date = req.query.date || null; // optional ?date=YYYY-MM-DD — limits to today's appointments
+  try {
+    const { rows: patients } = date
+      ? await pool.query(
+          `SELECT a.patient_id, a.id AS latest_appt_id
+           FROM appointments a
+           WHERE a.appointment_date = $1
+             AND a.patient_id IS NOT NULL`,
+          [date],
+        )
+      : await pool.query(`
+          SELECT DISTINCT lr.patient_id,
+            (SELECT a.id FROM appointments a
+             WHERE a.patient_id = lr.patient_id
+               AND a.patient_id IS NOT NULL
+             ORDER BY a.appointment_date DESC NULLS LAST
+             LIMIT 1) AS latest_appt_id
+          FROM lab_results lr
+          WHERE lr.patient_id IS NOT NULL
+        `);
+
+    let updated = 0;
+    let skipped = 0;
+    for (const { patient_id, latest_appt_id } of patients) {
+      if (!latest_appt_id) {
+        skipped++;
+        continue;
+      }
+      try {
+        await syncBiomarkersFromLatestLabs(patient_id, latest_appt_id);
+        updated++;
+      } catch (e) {
+        log("BackfillBiomarkers", `Patient ${patient_id}: ${e.message}`);
+        skipped++;
+      }
+    }
+
+    res.json({
+      success: true,
+      patientsProcessed: updated,
+      patientsSkipped: skipped,
+      elapsedSeconds: ((Date.now() - startTime) / 1000).toFixed(1),
+    });
+  } catch (e) {
+    handleError(res, e, "Backfill biomarkers");
+  }
+});
+
+// ── Backfill: fix duplicate diagnoses across all patients ────────────────────
+// POST /api/sync/backfill/diagnoses-dedup
+// 1. Deactivates stale old-ID rows (DIAGNOSIS_ID_RENAMES)
+// 2. Merges duplicate rows where two diagnosis_ids map to the same canonical
+//    (keeps the canonical-ID row active, deactivates the old-ID row)
+router.post("/sync/backfill/diagnoses-dedup", async (req, res) => {
+  const startTime = Date.now();
+  try {
+    // Step 1: deactivate all known old/stale diagnosis_ids across every patient
+    const RENAMES = {
+      hashimotos_thyroiditis: "hashimoto_thyroiditis",
+      hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+      seropositive_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+      seronegative_hashimoto_s_thyroiditis: "hashimoto_thyroiditis",
+      acanthosis: "acanthosis_nigricans",
+      hyposomatotropisim: "hyposomatotropism",
+      hyposomatotropis: "hyposomatotropism",
+      osas: "obstructive_sleep_apnea",
+      type_2_dm: "type_2_diabetes_mellitus",
+      t2dm: "type_2_diabetes_mellitus",
+      dm2: "type_2_diabetes_mellitus",
+      asld: "masld",
+      nafld: "masld",
+      mafld: "masld",
+      m_a_s_l_d: "masld",
+      nephropathy: "diabetic_nephropathy",
+      neuropathy: "diabetic_neuropathy",
+      htn: "hypertension",
+      essential_hypertension: "hypertension",
+      cad: "coronary_artery_disease",
+      subclinical_hypothyroidism: "hypothyroidism",
+      subclinical_hypothyrodism: "hypothyroidism",
+      sunclinical_hypothyrodism: "hypothyroidism",
+      thallasemia_minor: "thalassemia_minor",
+      thallasemia_major: "thalassemia_major",
+      thallasemia: "thalassemia",
+      mild_dr: "diabetic_retinopathy",
+      hypo: "hypothyroidism",
+    };
+
+    const oldIds = Object.keys(RENAMES);
+    const placeholders = oldIds.map((_, i) => `$${i + 1}`).join(",");
+    const { rowCount: deactivated } = await pool.query(
+      `UPDATE diagnoses SET is_active = false, updated_at = NOW()
+       WHERE diagnosis_id IN (${placeholders})`,
+      oldIds,
+    );
+
+    // Step 2: for each rename, if the canonical row exists for the same patient,
+    // make sure it is active (the old row was just deactivated above)
+    let reactivated = 0;
+    for (const [oldId, canonicalId] of Object.entries(RENAMES)) {
+      const { rowCount } = await pool.query(
+        `UPDATE diagnoses d SET is_active = true, updated_at = NOW()
+         WHERE d.diagnosis_id = $1
+           AND EXISTS (
+             SELECT 1 FROM diagnoses old
+             WHERE old.patient_id = d.patient_id
+               AND old.diagnosis_id = $2
+           )`,
+        [canonicalId, oldId],
+      );
+      reactivated += rowCount;
+    }
+
+    // Step 3: for patients that only had the old ID (no canonical row yet),
+    // rename diagnosis_id to canonical so data isn't lost
+    let renamed = 0;
+    for (const [oldId, canonicalId] of Object.entries(RENAMES)) {
+      const { rowCount } = await pool.query(
+        `UPDATE diagnoses SET diagnosis_id = $1, updated_at = NOW()
+         WHERE diagnosis_id = $2
+           AND is_active = false
+           AND NOT EXISTS (
+             SELECT 1 FROM diagnoses d2
+             WHERE d2.patient_id = diagnoses.patient_id
+               AND d2.diagnosis_id = $1
+           )`,
+        [canonicalId, oldId],
+      );
+      renamed += rowCount;
+    }
+
+    log(
+      "DiagnosesDedup",
+      `Done — ${deactivated} stale rows deactivated, ${reactivated} canonical rows confirmed active, ${renamed} rows renamed to canonical`,
+    );
+
+    res.json({
+      success: true,
+      staleRowsDeactivated: deactivated,
+      canonicalRowsConfirmedActive: reactivated,
+      rowsRenamedToCanonical: renamed,
+      elapsedSeconds: ((Date.now() - startTime) / 1000).toFixed(1),
+    });
+  } catch (e) {
+    handleError(res, e, "Diagnoses dedup");
   }
 });
 

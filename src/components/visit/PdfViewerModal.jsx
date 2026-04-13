@@ -29,43 +29,25 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
       setError(null);
 
       try {
-        // HealthRay documents with direct URL already attached
-        if (doc.source === "healthray" && doc.file_url) {
-          setUrl(doc.file_url);
-          setLoading(false);
-          return;
-        }
-
-        // Otherwise fetch the signed URL from the server (works for both
-        // opd_upload / Supabase-backed docs and HealthRay docs without cached file_url)
-        const { data } = await api.get(`/api/documents/${doc.id}/file-url`);
+        // Stream through backend — handles HealthRay (fresh URL, no CORS) and Supabase alike
+        const resp = await api.get(`/api/documents/${doc.id}/stream`, {
+          responseType: "blob",
+        });
 
         // Mark as reviewed
         if (doc.reviewed === false) {
           api.patch(`/api/documents/${doc.id}/reviewed`).catch(() => {});
         }
 
-        if (!data.url) {
-          setError("Could not get file link");
-          setLoading(false);
-          return;
-        }
-
-        const res = await fetch(data.url);
-        const blob = await res.blob();
-
-        // Detect mime type
-        const urlPath = data.url.split("?")[0].toLowerCase();
-        let mimeType;
-        if (urlPath.endsWith(".jpg") || urlPath.endsWith(".jpeg")) {
-          mimeType = "image/jpeg";
-        } else if (urlPath.endsWith(".png")) {
-          mimeType = "image/png";
-        } else if (urlPath.endsWith(".pdf")) {
-          mimeType = "application/pdf";
-        } else {
-          mimeType = blob.type || data.mime_type || "application/pdf";
-        }
+        const blob = resp.data;
+        // MIME priority: response Content-Type header → blob's own type → default PDF
+        // Never trust doc.mime_type from props — HealthRay docs often have wrong stored mime_type
+        const headerMime = resp.headers["content-type"]?.split(";")[0].trim();
+        const blobMime = blob.type && blob.type !== "application/octet-stream" ? blob.type : null;
+        const mimeType =
+          headerMime && headerMime !== "application/octet-stream"
+            ? headerMime
+            : blobMime || "application/pdf";
 
         objectUrl = URL.createObjectURL(new Blob([blob], { type: mimeType }));
         setUrl({ url: objectUrl, mimeType, fileName: doc.file_name || doc.title });
@@ -130,7 +112,16 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
                 </a>
                 <button
                   className="pdf-btn"
-                  onClick={() => window.open(typeof url === "string" ? url : url.url, "_blank")}
+                  onClick={() => {
+                    const blobUrl = typeof url === "string" ? url : url.url;
+                    const win = window.open("", "_blank");
+                    if (win) {
+                      win.document.write(
+                        `<!DOCTYPE html><html><head><title>${doc.file_name || "Document"}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${blobUrl}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
+                      );
+                      win.document.close();
+                    }
+                  }}
                   title="Open in new tab"
                 >
                   ↗
