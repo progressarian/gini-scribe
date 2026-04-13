@@ -109,7 +109,7 @@ router.get("/patients/:id/summary", async (req, res) => {
       const row = cacheR.rows[0];
       if (row?.ai_summary && row.ai_summary_generated_at) {
         const ageMs = Date.now() - new Date(row.ai_summary_generated_at).getTime();
-        if (ageMs < 60 * 60 * 1000) {
+        if (ageMs < 10 * 60 * 1000) { // 10 min cache (was 1 hour)
           // < 1 hour — serve from cache
           return res.json({ ...row.ai_summary, cached: true });
         }

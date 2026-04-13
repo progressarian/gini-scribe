@@ -158,15 +158,21 @@ export function runSummaryRules({
     });
   }
 
-  // R4: Recently stopped medication (within 60 days) — exclude data cleanup stops
-  const CLEANUP_REASONS = ["duplicate", "data cleanup", "developer", "wrong", "error", "never started", "not prescribed"];
+  // R4: Recently stopped medication (within 60 days) — exclude non-clinical stops
+  // Skip: data cleanup, medication switches/changes, HealthRay auto-stops, external doctor continuations
+  const SKIP_PATTERNS = [
+    "duplicate", "data cleanup", "developer", "wrong", "error", "never started", "not prescribed",
+    "switched to", "changed to", "replaced by", "continue from", "continued with",
+    "previous dose", "old dose", "prior dose",
+  ];
   for (const m of stoppedMeds) {
     const d = daysSince(m.stopped_date);
     if (d > 60) continue;
     const reason = (m.stop_reason || "").toLowerCase();
     const notes = (m.notes || "").toLowerCase();
-    const isCleanup = CLEANUP_REASONS.some((c) => reason.includes(c) || notes.includes(c));
-    if (isCleanup) continue; // Skip data cleanup stops — not clinical events
+    const isNonClinical = SKIP_PATTERNS.some((p) => reason.includes(p) || notes.includes(p));
+    // Also skip if stop_reason is just a bare HealthRay ID + "stopped" (automated sync stop)
+    if (isNonClinical || /^healthray:\d+\s*[-—]?\s*stopped?$/i.test(m.stop_reason || "")) continue;
     red.push({
       id: `r4_stopped_${m.id || m.name}`,
       title: `${m.name} stopped ${d} day${d !== 1 ? "s" : ""} ago${m.stop_reason ? ` — ${m.stop_reason}` : ""}`,
