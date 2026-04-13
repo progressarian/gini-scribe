@@ -75,6 +75,23 @@ function dedup(meds) {
   return Object.values(grouped);
 }
 
+// Drug class sort order within diabetes group (from clinical brief)
+// Insulin first (highest risk), then foundation → benefit → glucose lowering
+function diabetesClassOrder(name) {
+  const n = (name || "").toLowerCase();
+  const base = n.replace(/\s*\(.*\)/, "").trim();
+  if (["insulin","ryzodeg","lantus","novorapid","novomix","humalog","humulin","tresiba","toujeo","glargine","aspart","lispro","degludec"].some(k => base.includes(k))) return 1;
+  if (["metformin","glycomet","glucophage","obimet"].some(k => base.includes(k))) return 2;
+  if (["forxiga","jardiance","dapagliflozin","empagliflozin","canagliflozin"].some(k => base.includes(k))) return 3;
+  if (["ozempic","rybelsus","mounjaro","semaglutide","tirzepatide","liraglutide","dulaglutide"].some(k => base.includes(k))) return 4;
+  if (["trajenta","januvia","galvus","sitagliptin","vildagliptin","linagliptin","teneligliptin","janumet","istavel","jalra"].some(k => base.includes(k))) return 5;
+  if (["glimepiride","gliclazide","glipizide","amaryl","diamicron","glizid","glimpid"].some(k => base.includes(k))) return 6;
+  if (["glucobay","acarbose","voglibose","pioglitazone"].some(k => base.includes(k))) return 7;
+  // Combo drugs with metformin — sort by the non-metformin component
+  if (base.includes("istamet") || base.includes("dapanorm")) return 3; // SGLT2/DPP4 + met combos
+  return 8;
+}
+
 // Group medications by med_group (auto-detect from name if not set)
 function groupMedsByCategory(meds) {
   const groups = {};
@@ -83,6 +100,10 @@ function groupMedsByCategory(meds) {
     if (!groups[group]) groups[group] = [];
     groups[group].push(m);
   });
+  // Sort within diabetes group by drug class order
+  if (groups.diabetes) {
+    groups.diabetes.sort((a, b) => diabetesClassOrder(a.name) - diabetesClassOrder(b.name));
+  }
   return groups;
 }
 
