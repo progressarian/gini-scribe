@@ -509,7 +509,7 @@ router.get("/dashboard", async (req, res) => {
         bp: {
           key: "bp", label: "Blood Pressure", unit: "mmHg", target: "< 130/80",
           withData: bpWithData, atTarget: bpAtTarget, uncontrolled: bpUncontrolled,
-          rising: bpRising, improving: bpImproving, distribution: bpDist,
+          rising: 0, improving: { total: 0 }, distribution: bpDist,
           bandLabels: ["< 130", "130–140", "140–150", "> 150"],
           controlRate: bpWithData > 0 ? Math.round((bpAtTarget / bpWithData) * 100) : 0,
         },
