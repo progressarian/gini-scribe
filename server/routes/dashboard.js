@@ -540,8 +540,9 @@ router.get("/dashboard", async (req, res) => {
       healthraySyncedAt,
     });
   } catch (err) {
-    console.error("Dashboard error:", err.message, err.stack?.split("\n").slice(0, 5).join("\n"));
-    handleError(res, err, "Dashboard");
+    console.error("Dashboard error:", err.message);
+    console.error("Dashboard stack:", err.stack?.split("\n").slice(0, 8).join("\n"));
+    res.status(500).json({ error: "Internal server error", debug: err.message, step: "unknown" });
   }
 });
 
