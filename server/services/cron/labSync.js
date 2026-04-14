@@ -60,8 +60,8 @@ async function processCase(listRow) {
 
   if (rowId === null) return { skipped: true }; // already processed
 
-  // Step b: match patient
-  const patientId = await matchLabPatient(patient.healthray_uid);
+  // Step b: match patient (try healthray_uid and patientCaseNo)
+  const patientId = await matchLabPatient(patient.healthray_uid, patientCaseNo);
 
   // Step c: fetch case detail
   let detail;
@@ -82,10 +82,12 @@ async function processCase(listRow) {
   // Step f: write to lab_results
   const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
 
-  // Step g: mark synced — only if results were written or patient is unknown (can't do better)
-  // If patient found but 0 written, results may not be ready yet; leave results_synced=false
-  // so the recovery job retries after results are available.
-  if (written > 0 || !patientId) {
+  // Step g: mark synced only when results were actually written
+  // If patient not matched or 0 written, leave results_synced=false so retry picks it up
+  if (written > 0) {
+    await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
+  } else if (patientId && results.length > 0 && written === 0) {
+    // Patient matched but all results were skipped (source priority) — mark synced to avoid infinite retry
     await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
   }
 

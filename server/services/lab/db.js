@@ -134,12 +134,35 @@ export async function getPendingLabCases() {
 }
 
 // ── Match patient by healthray_uid → patients.file_no ───────────────────────
-export async function matchLabPatient(healthrayUid) {
-  if (!healthrayUid) return null;
-  const { rows } = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-    healthrayUid,
-  ]);
-  return rows[0]?.id || null;
+export async function matchLabPatient(healthrayUid, patientCaseNo) {
+  // Try multiple matching strategies
+  if (healthrayUid) {
+    // 1. Exact file_no match
+    const r1 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [healthrayUid]);
+    if (r1.rows[0]) return r1.rows[0].id;
+
+    // 2. Match as P_ prefixed file number
+    if (!healthrayUid.startsWith("P_")) {
+      const r2 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [`P_${healthrayUid}`]);
+      if (r2.rows[0]) return r2.rows[0].id;
+    }
+
+    // 3. Match by phone
+    const r3 = await pool.query(`SELECT id FROM patients WHERE phone = $1 OR phone = $2 LIMIT 1`, [healthrayUid, `+91${healthrayUid}`]);
+    if (r3.rows[0]) return r3.rows[0].id;
+  }
+
+  // 4. Try extracting file_no from patientCaseNo (format often contains the Gini ID)
+  if (patientCaseNo) {
+    const fileMatch = patientCaseNo.match(/P[_-]?\d+/i);
+    if (fileMatch) {
+      const fileNo = fileMatch[0].replace(/-/, "_").toUpperCase();
+      const r4 = await pool.query(`SELECT id FROM patients WHERE UPPER(file_no) = $1 LIMIT 1`, [fileNo]);
+      if (r4.rows[0]) return r4.rows[0].id;
+    }
+  }
+
+  return null;
 }
 
 // ── Link appointment via healthray_order_id ──────────────────────────────────
