@@ -60,8 +60,8 @@ async function processCase(listRow) {
 
   if (rowId === null) return { skipped: true }; // already processed
 
-  // Step b: match patient (try healthray_uid and patientCaseNo)
-  const patientId = await matchLabPatient(patient.healthray_uid, patientCaseNo);
+  // Step b: match patient (try all available identifiers from patient object)
+  const patientId = await matchLabPatient(patient.healthray_uid, patientCaseNo, patient);
 
   // Step c: fetch case detail
   let detail;

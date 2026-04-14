@@ -133,41 +133,59 @@ export async function getPendingLabCases() {
   return rows;
 }
 
-// ── Match patient by healthray_uid → patients.file_no ───────────────────────
-export async function matchLabPatient(healthrayUid, patientCaseNo) {
-  // Try multiple matching strategies
-  if (healthrayUid) {
-    // 1. Exact file_no match
-    const r1 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-      healthrayUid,
-    ]);
+// ── Match patient by any available identifier ────────────────────────────────
+export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
+  // Collect all possible identifiers from every source
+  const tryIds = new Set();
+  if (healthrayUid) tryIds.add(String(healthrayUid));
+  if (patientCaseNo) tryIds.add(String(patientCaseNo));
+
+  // Extract identifiers from the full patient object (Lab API returns various fields)
+  if (patientObj && typeof patientObj === "object") {
+    for (const key of ["uhid", "patient_uhid", "registration_no", "reg_no", "file_no",
+                        "patient_id", "healthray_uid", "uid", "mr_no", "mrn", "hospital_no",
+                        "patient_code", "emr_no"]) {
+      const val = patientObj[key];
+      if (val) tryIds.add(String(val));
+    }
+    // Try phone matching
+    const phone = patientObj.phone || patientObj.mobile || patientObj.contact_no;
+    if (phone) {
+      const p = String(phone).replace(/\s+/g, "");
+      const r = await pool.query(
+        `SELECT id FROM patients WHERE phone = $1 OR phone = $2 OR phone = $3 LIMIT 1`,
+        [p, `+91${p}`, p.replace(/^\+91/, "")],
+      );
+      if (r.rows[0]) return r.rows[0].id;
+    }
+    // Name + age as last resort
+    if (patientObj.name && patientObj.age) {
+      const r = await pool.query(
+        `SELECT id FROM patients WHERE LOWER(name) = LOWER($1) AND age = $2 LIMIT 1`,
+        [String(patientObj.name).trim(), parseInt(patientObj.age)],
+      );
+      if (r.rows[0]) return r.rows[0].id;
+    }
+  }
+
+  // Try each collected identifier against file_no
+  for (const id of tryIds) {
+    // Exact match
+    const r1 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [id]);
     if (r1.rows[0]) return r1.rows[0].id;
 
-    // 2. Match as P_ prefixed file number
-    if (!healthrayUid.startsWith("P_")) {
-      const r2 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-        `P_${healthrayUid}`,
-      ]);
+    // P_ prefix match (Lab uses G14320, our DB has P_131520)
+    if (!/^P[_-]/i.test(id)) {
+      const r2 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [`P_${id}`]);
       if (r2.rows[0]) return r2.rows[0].id;
     }
 
-    // 3. Match by phone
-    const r3 = await pool.query(`SELECT id FROM patients WHERE phone = $1 OR phone = $2 LIMIT 1`, [
-      healthrayUid,
-      `+91${healthrayUid}`,
-    ]);
-    if (r3.rows[0]) return r3.rows[0].id;
-  }
-
-  // 4. Try extracting file_no from patientCaseNo (format often contains the Gini ID)
-  if (patientCaseNo) {
-    const fileMatch = patientCaseNo.match(/P[_-]?\d+/i);
-    if (fileMatch) {
-      const fileNo = fileMatch[0].replace(/-/, "_").toUpperCase();
-      const r4 = await pool.query(`SELECT id FROM patients WHERE UPPER(file_no) = $1 LIMIT 1`, [
-        fileNo,
-      ]);
-      if (r4.rows[0]) return r4.rows[0].id;
+    // Extract any P_XXXXX pattern embedded in the identifier
+    const pMatch = id.match(/P[_-]?\d+/i);
+    if (pMatch) {
+      const fileNo = pMatch[0].replace(/-/, "_").toUpperCase();
+      const r3 = await pool.query(`SELECT id FROM patients WHERE UPPER(file_no) = $1 LIMIT 1`, [fileNo]);
+      if (r3.rows[0]) return r3.rows[0].id;
     }
   }
 
