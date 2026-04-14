@@ -13,6 +13,7 @@ import AudioInput from "../components/AudioInput.jsx";
 import { ts } from "../config/constants.js";
 import { CONDITIONS } from "../config/conditions.js";
 import { CONDITION_CHIPS, LAB_ORDER_CHIPS } from "../config/chips.js";
+import { LAB_PACKAGES } from "../config/labOrder.js";
 import { toggleChip } from "../utils/helpers.js";
 
 export default function AssessPage() {
@@ -222,44 +223,13 @@ export default function AssessPage() {
         })()}
 
         <div className="assess__lab-packages">
-          {[
-            {
-              l: "📦 DM Panel",
-              tests: [
-                "HbA1c",
-                "FBS",
-                "PPBS",
-                "C-Peptide",
-                "Fasting Insulin",
-                "RFT",
-                "UACR",
-                "Lipid Panel",
-              ],
-            },
-            { l: "📦 Thyroid", tests: ["TSH", "Free T3", "Free T4", "Anti-TPO"] },
-            { l: "📦 Lipid", tests: ["Total Cholesterol", "LDL", "HDL", "Triglycerides", "VLDL"] },
-            { l: "📦 Renal", tests: ["Creatinine", "eGFR", "BUN", "Urine ACR", "Electrolytes"] },
-            {
-              l: "📦 Annual",
-              tests: [
-                "CBC",
-                "LFT",
-                "RFT",
-                "Lipid Panel",
-                "TSH",
-                "HbA1c",
-                "Vit D",
-                "Vit B12",
-                "Urine R/M",
-              ],
-            },
-          ].map((pkg) => (
+          {LAB_PACKAGES.map((pkg) => (
             <button
-              key={pkg.l}
+              key={pkg.label}
               onClick={() => setAssessLabs((prev) => [...new Set([...prev, ...pkg.tests])])}
               className="assess__lab-package-btn"
             >
-              {pkg.l}
+              {pkg.label}
             </button>
           ))}
         </div>

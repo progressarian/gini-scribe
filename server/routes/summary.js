@@ -109,7 +109,8 @@ router.get("/patients/:id/summary", async (req, res) => {
       const row = cacheR.rows[0];
       if (row?.ai_summary && row.ai_summary_generated_at) {
         const ageMs = Date.now() - new Date(row.ai_summary_generated_at).getTime();
-        if (ageMs < 10 * 60 * 1000) { // 10 min cache (was 1 hour)
+        if (ageMs < 10 * 60 * 1000) {
+          // 10 min cache (was 1 hour)
           // < 1 hour — serve from cache
           return res.json({ ...row.ai_summary, cached: true });
         }
@@ -117,18 +118,19 @@ router.get("/patients/:id/summary", async (req, res) => {
     }
 
     // ── 2. Fetch data needed for the rule engine ──
-    const [patientR, diagnosesR, labsR, vitalsR, apptR, latestReportR, activeMedsR, stoppedMedsR] = await Promise.all([
-      pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
+    const [patientR, diagnosesR, labsR, vitalsR, apptR, latestReportR, activeMedsR, stoppedMedsR] =
+      await Promise.all([
+        pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
-      pool.query(
-        `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
+        pool.query(
+          `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
            WHERE patient_id=$1 ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
-        [pid],
-      ),
+          [pid],
+        ),
 
-      // All labs deduped (same query as visit route)
-      pool.query(
-        `SELECT * FROM (
+        // All labs deduped (same query as visit route)
+        pool.query(
+          `SELECT * FROM (
              SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date)
                *
              FROM lab_results
@@ -148,47 +150,47 @@ router.get("/patients/:id/summary", async (req, res) => {
                created_at DESC
            ) deduped
            ORDER BY test_date DESC`,
-        [pid],
-      ),
+          [pid],
+        ),
 
-      pool.query(`SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 5`, [
-        pid,
-      ]),
+        pool.query(`SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 5`, [
+          pid,
+        ]),
 
-      // Prep from latest appointment (or specific appointment)
-      apptId
-        ? pool.query(`SELECT id, compliance, biomarkers FROM appointments WHERE id=$1`, [apptId])
-        : pool.query(
-            `SELECT id, compliance, biomarkers FROM appointments
+        // Prep from latest appointment (or specific appointment)
+        apptId
+          ? pool.query(`SELECT id, compliance, biomarkers FROM appointments WHERE id=$1`, [apptId])
+          : pool.query(
+              `SELECT id, compliance, biomarkers FROM appointments
                WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
                ORDER BY appointment_date DESC LIMIT 1`,
-            [pid],
-          ),
+              [pid],
+            ),
 
-      // Latest report that has extracted lab results
-      pool.query(
-        `SELECT d.id, d.title, d.file_name, d.doc_date, d.created_at
+        // Latest report that has extracted lab results
+        pool.query(
+          `SELECT d.id, d.title, d.file_name, d.doc_date, d.created_at
            FROM documents d
            WHERE d.patient_id=$1
              AND EXISTS (SELECT 1 FROM lab_results lr WHERE lr.document_id=d.id AND lr.result IS NOT NULL)
            ORDER BY d.created_at DESC
            LIMIT 1`,
-        [pid],
-      ),
+          [pid],
+        ),
 
-      // Active medications (for drug-interaction and protocol-gap rules)
-      pool.query(
-        `SELECT id, name, dose, frequency FROM medications WHERE patient_id=$1 AND is_active=true`,
-        [pid],
-      ),
+        // Active medications (for drug-interaction and protocol-gap rules)
+        pool.query(
+          `SELECT id, name, dose, frequency FROM medications WHERE patient_id=$1 AND is_active=true`,
+          [pid],
+        ),
 
-      // Recently stopped medications (for R4 rule — stopped within last 60 days)
-      pool.query(
-        `SELECT id, name, dose, stopped_date, stop_reason FROM medications
+        // Recently stopped medications (for R4 rule — stopped within last 60 days)
+        pool.query(
+          `SELECT id, name, dose, stopped_date, stop_reason FROM medications
          WHERE patient_id=$1 AND is_active=false AND stopped_date > CURRENT_DATE - INTERVAL '60 days'`,
-        [pid],
-      ),
-    ]);
+          [pid],
+        ),
+      ]);
 
     const patient = patientR.rows[0];
     if (!patient) return res.status(404).json({ error: "Patient not found" });

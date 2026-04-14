@@ -51,44 +51,7 @@ export const CONDITION_CHIPS = [
   { id: "other", l: "Other", cl: "#475569" },
 ];
 
-export const LAB_ORDER_CHIPS = [
-  "HbA1c",
-  "FBS",
-  "PPBS",
-  "RFT",
-  "UACR",
-  "Lipid Panel",
-  "Vit D",
-  "Vit B12",
-  "TSH",
-  "FT3/FT4",
-  "LFT",
-  "CBC",
-  "Urine R/M",
-  "K+",
-  "Na+",
-  "Ca+",
-  "Phosphate",
-  "PTH",
-  "Iron Studies",
-  "Fasting Insulin",
-  "C-Peptide",
-  "HOMA-IR",
-  "hs-CRP",
-  "NT-proBNP",
-  "PSA",
-  "Testosterone",
-  "AMH",
-  "LH/FSH",
-  "Cortisol",
-  "HbElectrophoresis",
-  "Fundus",
-  "ABI",
-  "VPT",
-  "Echo",
-  "ECG",
-  "DEXA",
-  "USG Abdomen",
-  "Doppler",
-  "NCS/EMG",
-];
+// LAB_ORDER_CHIPS re-exported from the canonical lab order config so every
+// consumer of "chips.js" automatically gets the unified clinical order. See
+// `src/config/labOrder.js` and `labOrder.md` at the project root.
+export { LAB_ORDER_CHIPS } from "./labOrder";

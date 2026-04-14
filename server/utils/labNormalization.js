@@ -611,8 +611,22 @@ add(
 
 // ── Screening tests (kept as-is for the screenings panel) ────────────────────
 add("VPT", "vpt", "vibration perception threshold");
-add("VPT Left", "vpt left", "vpt l", "vpt - left", "vibration perception threshold left", "vpt (left)");
-add("VPT Right", "vpt right", "vpt r", "vpt - right", "vibration perception threshold right", "vpt (right)");
+add(
+  "VPT Left",
+  "vpt left",
+  "vpt l",
+  "vpt - left",
+  "vibration perception threshold left",
+  "vpt (left)",
+);
+add(
+  "VPT Right",
+  "vpt right",
+  "vpt r",
+  "vpt - right",
+  "vibration perception threshold right",
+  "vpt (right)",
+);
 add("ABI", "abi", "ankle brachial index");
 add("ABI Left", "abi left", "abi l", "abi - left", "ankle brachial index left", "abi (left)");
 add("ABI Right", "abi right", "abi r", "abi - right", "ankle brachial index right", "abi (right)");

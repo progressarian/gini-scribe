@@ -9,6 +9,35 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 // Handles both formats:
 //   1. medical_clinical_notes: categories → topics.selected[]
 //   2. get_previous_appt_data: menus[] → categories → topics[] (flat array)
+// For visits with no structured prescription, the doctor often writes the
+// full plan (diagnoses + TREATMENT + PREVIOUS MEDICATION + labs) as free
+// text on a single topic. That text may live under dynamic_answers[].answer
+// OR on sibling fields like details / description / note / value, and
+// sometimes on nested diagnoses[]/items[] arrays. Capture all of them.
+const TEXT_FIELDS = [
+  "answer",
+  "details",
+  "description",
+  "note",
+  "notes",
+  "value",
+  "text",
+  "diagnosis_details",
+  "summary",
+  "remark",
+  "remarks",
+  "comment",
+  "comments",
+];
+
+function pullText(obj, bag) {
+  if (!obj || typeof obj !== "object") return;
+  for (const f of TEXT_FIELDS) {
+    const v = obj[f];
+    if (typeof v === "string" && v.trim().length > 0) bag.push(v.trim());
+  }
+}
+
 export function extractClinicalText(clinicalData) {
   const sections = {};
   for (const menu of clinicalData) {
@@ -21,9 +50,22 @@ export function extractClinicalText(clinicalData) {
       const allTopics = selectedTopics.length > 0 ? selectedTopics : flatTopics;
 
       for (const topic of allTopics) {
-        texts.push(topic.name);
-        for (const ans of topic.dynamic_answers || []) {
-          if (ans.answer) texts.push(ans.answer);
+        if (topic.name) texts.push(topic.name);
+
+        for (const ans of topic.dynamic_answers || []) pullText(ans, texts);
+        pullText(topic, texts);
+
+        // Some visits expose structured diagnosis/item rows on the topic —
+        // each row can carry its own name + long details text (this is how
+        // "INTENSIVE DIABETES MANAGEMENT PROGRAM ( … TREATMENT: … )" lands
+        // when there is no prescription section).
+        for (const key of ["diagnoses", "items", "rows", "entries"]) {
+          const arr = topic[key];
+          if (!Array.isArray(arr)) continue;
+          for (const row of arr) {
+            if (row?.name) texts.push(row.name);
+            pullText(row, texts);
+          }
         }
       }
     }
@@ -125,6 +167,9 @@ Return JSON with these keys:
 
 STRICT Rules:
 - NEVER invent or assume data. If a field is not explicitly mentioned in the text, set it to null. Do NOT fill fields with unrelated data.
+- NO-PRESCRIPTION FALLBACK (treat Diagnosis summary AS the prescription): Some visits have NO separate MEDICATIONS/PRESCRIPTION section — the doctor instead wraps the entire plan as free text inside a single diagnosis parenthetical after a program label, e.g. "INTENSIVE DIABETES MANAGEMENT PROGRAM ( TYPE 2 DM (SINCE 2018) … TREATMENT: -INJ. RYZODEG 8 UNIT … -TAB SITACIP DM 10+100+500MG OD … PREVIOUS MEDICATION -TAB GLIMESTAR M2 … OBSERVATION-: -FBG-:251.7 … FOLLOW UP ON 26/6/25: … HBA1C: 7 … ADVICE: … )". When you see this pattern, treat that parenthetical AS THE PRESCRIPTION — extract medications, previous_medications, labs, vitals, follow_up, investigations_to_order, and advice from the labelled sub-blocks inside it exactly as if each sub-block had been its own top-level section of the note. Do NOT discard the parenthetical because its outer name (e.g. "INTENSIVE DIABETES MANAGEMENT PROGRAM") is a program label. The inner real diagnoses (TYPE 2 DM, NEUROPATHY, NEPHROPATHY, RETINOPATHY, HYPERTENSION, MASLD, CAD, etc.) are what get extracted as diagnoses — the program label itself is skipped.
+- TREATMENT: block = CURRENT medications. Any drug listed under a "TREATMENT:" / "TREATMENT PLAN:" / "CURRENT TREATMENT:" label — whether that label sits in its own section or inside a diagnosis parenthetical — is a CURRENT medication. Put it in "medications", NOT "previous_medications". A leading "-" or "•" on each line is a bullet, not an absent marker. Example: "TREATMENT: -INJ. RYZODEG 8 UNIT ONCE DAILY 30MIN BEFORE BREAKFAST -TAB SITACIP DM 10+100+500MG ONCE DAILY 30 MINUTES BEFORE BREAKFAST -TAB GLIZID M XR 60+500MG ONCE DAILY 30 MINUTES BEFORE DINNER" → three current medications (Ryzodeg 8U SC OD before breakfast, Sitacip DM 10+100+500mg Oral OD before breakfast, Glizid M XR 60+500mg Oral OD before dinner). "REST CONTINUE AS ADVISED BY CARDIOLOGIST" is an instruction — do NOT extract as a medication.
+- PREVIOUS MEDICATION block inside a diagnosis parenthetical = previous_medications with status "stopped" (unless the text explicitly says the dose was changed, in which case status "changed"). Reason is "replaced" / "discontinued" / "dose changed" based on context; use "replaced" as the default when the TREATMENT block contains a different regimen.
 - For labs: extract ALL lab values with test name, numeric value, unit. Include HbA1c, FBG, PPBG, LDL, TG, HDL, Non-HDL, Cholesterol (Total), TSH, T3, T4, Creatinine, eGFR, UACR, Hb, Iron, Ferritin, OT/SGOT, PT/SGPT, ALP, Calcium, Albumin, GTT, Insulin, C-Peptide, HOMA-IR, HOMA-Beta, Uric Acid, FIB4, Vitamin D, Vitamin B12, AMH, Testosterone, DHEAS, Prolactin, LH, FSH, Estradiol, Progesterone, FPI, Amylase, Lipase, Fecal Elastase (FE), VPT (Vibration Perception Threshold — extract R and L values separately as "VPT Right" / "VPT Left"), ABI (Ankle-Brachial Index — extract as "ABI Right" / "ABI Left"), Hirsutism Score/FGS/H.Score, Potassium, Sodium, etc.
   IMPORTANT — do NOT extract family history values as patient labs. Lines like "FATHER - TG-329, LDL-94" / "MOTHER- TG-132" / "BROTHER - TG-510" are family history — skip entirely.
   Also extract: Urine Pus Cells (e.g. "URINE RE-8 PUS CELLS" → test: "Urine Pus Cells", value: "8"), Amylase, Lipase, Fecal Elastase, GAD65 antibody / IAA / IA2 / ZnT8 autoantibody results (e.g. "GAD65/IAA/IA2 PANEL NEGATIVE" → extract as test: "GAD65/IAA/IA2 Panel", value: "Negative"), Random C-Peptide (e.g. "RANDOM C PEPTIDE-3.47" → test: "C-Peptide (Random)", value: "3.47").

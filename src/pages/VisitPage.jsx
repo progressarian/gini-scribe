@@ -1,6 +1,6 @@
 import "./VisitPage.css";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../services/api";
 import usePatientStore from "../stores/patientStore";
 import useAuthStore from "../stores/authStore";
@@ -184,8 +184,17 @@ export default function VisitPage() {
   // ── UI state ──
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTabRaw] = useState(() => sessionStorage.getItem("gini_visit_tab") || "visit");
-  const setTab = (t) => { setTabRaw(t); sessionStorage.setItem("gini_visit_tab", t); };
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") || "visit";
+  const setTab = (t) => {
+    setSearchParams(
+      (prev) => {
+        prev.set("tab", t);
+        return prev;
+      },
+      { replace: true },
+    );
+  };
   const [jumpTarget, setJumpTarget] = useState("biomarkers");
   const [aiOpen, setAiOpen] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);

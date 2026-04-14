@@ -107,8 +107,20 @@ export function runSummaryRules({
   const isHypo = hasDx(diagnoses, "hypo", "hypothyroid");
 
   const onMetformin = hasMed(activeMeds, "metformin");
-  const hasACEorARB = hasMed(activeMeds, "ramipril", "enalapril", "lisinopril", "perindopril",
-    "captopril", "telmisartan", "losartan", "valsartan", "olmesartan", "irbesartan", "candesartan");
+  const hasACEorARB = hasMed(
+    activeMeds,
+    "ramipril",
+    "enalapril",
+    "lisinopril",
+    "perindopril",
+    "captopril",
+    "telmisartan",
+    "losartan",
+    "valsartan",
+    "olmesartan",
+    "irbesartan",
+    "candesartan",
+  );
 
   const hba1c = numVal(labResults, "HbA1c");
   const hba1cInfo = getLabVal(labResults, "HbA1c");
@@ -161,9 +173,21 @@ export function runSummaryRules({
   // R4: Recently stopped medication (within 60 days) — exclude non-clinical stops
   // Skip: data cleanup, medication switches/changes, HealthRay auto-stops, external doctor continuations
   const SKIP_PATTERNS = [
-    "duplicate", "data cleanup", "developer", "wrong", "error", "never started", "not prescribed",
-    "switched to", "changed to", "replaced by", "continue from", "continued with",
-    "previous dose", "old dose", "prior dose",
+    "duplicate",
+    "data cleanup",
+    "developer",
+    "wrong",
+    "error",
+    "never started",
+    "not prescribed",
+    "switched to",
+    "changed to",
+    "replaced by",
+    "continue from",
+    "continued with",
+    "previous dose",
+    "old dose",
+    "prior dose",
   ];
   for (const m of stoppedMeds) {
     const d = daysSince(m.stopped_date);
@@ -186,33 +210,72 @@ export function runSummaryRules({
   // FBS elevated
   const fbs = numVal(labResults, "FBS");
   if (fbs != null && fbs > 200 && isFresh(getLabVal(labResults, "FBS")?.date)) {
-    red.push({ id: "bio_fbs_critical", title: `Fasting glucose ${fbs} mg/dL — critically elevated`, detail: "Target < 130 mg/dL fasting.", action: "Review insulin/OHA regimen" });
+    red.push({
+      id: "bio_fbs_critical",
+      title: `Fasting glucose ${fbs} mg/dL — critically elevated`,
+      detail: "Target < 130 mg/dL fasting.",
+      action: "Review insulin/OHA regimen",
+    });
   } else if (fbs != null && fbs > 130 && isFresh(getLabVal(labResults, "FBS")?.date)) {
-    amber.push({ id: "bio_fbs_elevated", title: `Fasting glucose ${fbs} mg/dL — above target`, detail: "Target < 130 mg/dL.", action: "Review dose titration" });
+    amber.push({
+      id: "bio_fbs_elevated",
+      title: `Fasting glucose ${fbs} mg/dL — above target`,
+      detail: "Target < 130 mg/dL.",
+      action: "Review dose titration",
+    });
   }
 
   // LDL elevated
   if (ldl != null && isFresh(ldlInfo?.date)) {
     if (ldl > 160) {
-      red.push({ id: "bio_ldl_critical", title: `LDL ${ldl} mg/dL — significantly elevated`, detail: "Target ≤ 100 mg/dL for diabetic patients.", action: "Statin initiation or dose increase" });
+      red.push({
+        id: "bio_ldl_critical",
+        title: `LDL ${ldl} mg/dL — significantly elevated`,
+        detail: "Target ≤ 100 mg/dL for diabetic patients.",
+        action: "Statin initiation or dose increase",
+      });
     } else if (ldl > 100) {
-      amber.push({ id: "bio_ldl_elevated", title: `LDL ${ldl} mg/dL — above target`, detail: "Target ≤ 100 mg/dL.", action: "Review lipid management" });
+      amber.push({
+        id: "bio_ldl_elevated",
+        title: `LDL ${ldl} mg/dL — above target`,
+        detail: "Target ≤ 100 mg/dL.",
+        action: "Review lipid management",
+      });
     }
   }
 
   // eGFR low (kidney function declining)
   if (egfr != null && isFresh(getLabVal(labResults, "eGFR")?.date)) {
     if (egfr < 30) {
-      red.push({ id: "bio_egfr_critical", title: `eGFR ${egfr} — Stage 4 CKD`, detail: "Severe kidney impairment. Multiple drug adjustments needed.", action: "Nephrology referral; review all renally cleared medications" });
+      red.push({
+        id: "bio_egfr_critical",
+        title: `eGFR ${egfr} — Stage 4 CKD`,
+        detail: "Severe kidney impairment. Multiple drug adjustments needed.",
+        action: "Nephrology referral; review all renally cleared medications",
+      });
     } else if (egfr < 60) {
-      amber.push({ id: "bio_egfr_low", title: `eGFR ${egfr} — reduced kidney function (Stage 3)`, detail: "Target > 60 mL/min. Monitor closely.", action: "Check medication doses; consider nephroprotective agents" });
+      amber.push({
+        id: "bio_egfr_low",
+        title: `eGFR ${egfr} — reduced kidney function (Stage 3)`,
+        detail: "Target > 60 mL/min. Monitor closely.",
+        action: "Check medication doses; consider nephroprotective agents",
+      });
     }
   }
 
   // Creatinine elevated
   const creatinine = numVal(labResults, "Creatinine");
-  if (creatinine != null && creatinine > 1.5 && isFresh(getLabVal(labResults, "Creatinine")?.date)) {
-    amber.push({ id: "bio_creatinine", title: `Creatinine ${creatinine} mg/dL — elevated`, detail: "Check eGFR and renal function trend.", action: "Order urine ACR if not done" });
+  if (
+    creatinine != null &&
+    creatinine > 1.5 &&
+    isFresh(getLabVal(labResults, "Creatinine")?.date)
+  ) {
+    amber.push({
+      id: "bio_creatinine",
+      title: `Creatinine ${creatinine} mg/dL — elevated`,
+      detail: "Check eGFR and renal function trend.",
+      action: "Order urine ACR if not done",
+    });
   }
 
   // A2: Metformin + renal risk
@@ -409,27 +472,47 @@ export function runSummaryRules({
 
   // G: LDL at target
   if (ldl != null && ldl <= 100) {
-    green.push({ id: "g_ldl_target", title: `LDL ${ldl} mg/dL — at target`, detail: "Lipid management is effective." });
+    green.push({
+      id: "g_ldl_target",
+      title: `LDL ${ldl} mg/dL — at target`,
+      detail: "Lipid management is effective.",
+    });
   }
 
   // G: eGFR healthy
   if (egfr != null && egfr >= 90) {
-    green.push({ id: "g_egfr_healthy", title: `eGFR ${egfr} — normal kidney function`, detail: "No renal impairment." });
+    green.push({
+      id: "g_egfr_healthy",
+      title: `eGFR ${egfr} — normal kidney function`,
+      detail: "No renal impairment.",
+    });
   }
 
   // G: TSH in range
   if (tsh != null && tsh >= 0.5 && tsh <= 4.5) {
-    green.push({ id: "g_tsh_target", title: `TSH ${tsh} µIU/mL — in range`, detail: "Thyroid function well managed." });
+    green.push({
+      id: "g_tsh_target",
+      title: `TSH ${tsh} µIU/mL — in range`,
+      detail: "Thyroid function well managed.",
+    });
   }
 
   // G: FBS at target
   if (fbs != null && fbs <= 130) {
-    green.push({ id: "g_fbs_target", title: `Fasting glucose ${fbs} mg/dL — at target`, detail: "Glycaemic control maintained." });
+    green.push({
+      id: "g_fbs_target",
+      title: `Fasting glucose ${fbs} mg/dL — at target`,
+      detail: "Glycaemic control maintained.",
+    });
   }
 
   // G: UACR normal
   if (uacr != null && uacr < 30) {
-    green.push({ id: "g_uacr_normal", title: `UACR ${uacr} mg/g — normal`, detail: "No microalbuminuria." });
+    green.push({
+      id: "g_uacr_normal",
+      title: `UACR ${uacr} mg/g — normal`,
+      detail: "No microalbuminuria.",
+    });
   }
 
   return { red, amber, green };

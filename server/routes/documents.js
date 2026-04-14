@@ -329,14 +329,14 @@ async function resolveDocumentUrl(docId) {
         // If we have a specific record ID, find exact match first.
         // Do NOT fall back to records[0] — that could be the prescription.
         // If not found by ID, try to match by record_type.
-        let match = recordIdStr
-          ? records.find((r) => String(r.id) === String(recordIdStr))
-          : null;
+        let match = recordIdStr ? records.find((r) => String(r.id) === String(recordIdStr)) : null;
         if (!match && recordTypeStr) {
           match = records.find((r) => r.record_type === recordTypeStr);
         }
         if (!match) {
-          console.log(`[Document ${docId}] Step 2: no match found for record=${recordIdStr} rtype=${recordTypeStr} in ${records.length} records`);
+          console.log(
+            `[Document ${docId}] Step 2: no match found for record=${recordIdStr} rtype=${recordTypeStr} in ${records.length} records`,
+          );
           continue;
         }
 
@@ -370,11 +370,15 @@ async function resolveDocumentUrl(docId) {
           // Fall back to the fresh URL from the records list (thumbnail/preview).
           const freshUrl = match.url || match.file_url || match.attachment_url || match.thumbnail;
           if (freshUrl && freshUrl.startsWith("http")) {
-            console.log(`[Document ${docId}] Step 2: tryDownload null — trying fresh match.url fallback`);
+            console.log(
+              `[Document ${docId}] Step 2: tryDownload null — trying fresh match.url fallback`,
+            );
             const { healthrayRawFetch } = await import("../services/healthray/client.js");
             const rf = await healthrayRawFetch(freshUrl).catch(() => null);
             if (rf) {
-              console.log(`[Document ${docId}] Step 2: match.url fallback succeeded (${rf.buffer.length} bytes)`);
+              console.log(
+                `[Document ${docId}] Step 2: match.url fallback succeeded (${rf.buffer.length} bytes)`,
+              );
               return { buffer: rf.buffer, mimeType: rf.contentType, fileName };
             }
           }
@@ -398,12 +402,16 @@ async function resolveDocumentUrl(docId) {
 
     // Step 3: try fetching stored file_url (thumbnail/preview) with HealthRay auth as last resort
     if (d.file_url && d.file_url.startsWith("http")) {
-      console.log(`[Document ${docId}] Step 3: trying file_url fallback — ${d.file_url.slice(0, 80)}`);
+      console.log(
+        `[Document ${docId}] Step 3: trying file_url fallback — ${d.file_url.slice(0, 80)}`,
+      );
       try {
         const { healthrayRawFetch } = await import("../services/healthray/client.js");
         const r = await healthrayRawFetch(d.file_url);
         if (r) {
-          console.log(`[Document ${docId}] Step 3: file_url fallback succeeded (${r.buffer.length} bytes)`);
+          console.log(
+            `[Document ${docId}] Step 3: file_url fallback succeeded (${r.buffer.length} bytes)`,
+          );
           return { buffer: r.buffer, mimeType: r.contentType, fileName: d.file_name };
         }
       } catch (e) {

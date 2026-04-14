@@ -32,25 +32,37 @@ router.get("/patients/:id/outcomes", async (req, res) => {
        FROM vitals WHERE patient_id=$1 AND ${col} IS NOT NULL ${vf}
        ORDER BY recorded_at::date, recorded_at DESC`;
 
+    // Biomarkers fetched in canonical lab order (see src/config/labOrder.js +
+    // labOrder.md): Diabetes → Renal → Lipids → Liver → Thyroid → Cardiac/Inflam
+    // → Vitamins → Vitals/Body Composition. The destructure order, queries and
+    // JSON response below all follow this same sequence.
     const [
+      // 1. Diabetes & Glycaemic Control
       hba1c,
       fpg,
-      ldl,
-      tg,
-      hdl,
+      ppg,
+      // 2. Renal Function
       creat,
       egfr,
       uacr,
-      tsh,
-      ppg,
+      // 3. Lipid Profile
+      ldl,
+      hdl,
+      tg,
+      nonhdl,
+      // 4. Liver Function
       alt,
       ast,
       alp,
-      nonhdl,
+      // 5. Thyroid
+      tsh,
+      // 6. Cardiac / Inflammation
+      crp,
+      // 7. Vitamins & Minerals
       vitd,
       vitb12,
       ferritin,
-      crp,
+      // 8. Vitals / Body Composition
       bp,
       weight,
       waist,
@@ -60,24 +72,32 @@ router.get("/patients/:id/outcomes", async (req, res) => {
       height,
       bmi,
     ] = await Promise.all([
+      // Diabetes
       pool.query(labQ("HbA1c"), [id, "HbA1c"]),
       pool.query(labQ("FBS"), [id, "FBS"]),
-      pool.query(labQ("LDL"), [id, "LDL"]),
-      pool.query(labQ("Triglycerides"), [id, "Triglycerides"]),
-      pool.query(labQ("HDL"), [id, "HDL"]),
+      pool.query(labQ("PPBS"), [id, "PPBS"]),
+      // Renal
       pool.query(labQ("Creatinine"), [id, "Creatinine"]),
       pool.query(labQ("eGFR"), [id, "eGFR"]),
       pool.query(labQ("UACR"), [id, "UACR"]),
-      pool.query(labQ("TSH"), [id, "TSH"]),
-      pool.query(labQ("PPBS"), [id, "PPBS"]),
+      // Lipids
+      pool.query(labQ("LDL"), [id, "LDL"]),
+      pool.query(labQ("HDL"), [id, "HDL"]),
+      pool.query(labQ("Triglycerides"), [id, "Triglycerides"]),
+      pool.query(labQ("Non-HDL"), [id, "Non-HDL"]),
+      // Liver
       pool.query(labQ("SGPT (ALT)"), [id, "SGPT (ALT)"]),
       pool.query(labQ("SGOT (AST)"), [id, "SGOT (AST)"]),
       pool.query(labQ("ALP"), [id, "ALP"]),
-      pool.query(labQ("Non-HDL"), [id, "Non-HDL"]),
+      // Thyroid
+      pool.query(labQ("TSH"), [id, "TSH"]),
+      // Cardiac / Inflammation
+      pool.query(labQ("CRP"), [id, "CRP"]),
+      // Vitamins
       pool.query(labQ("Vitamin D"), [id, "Vitamin D"]),
       pool.query(labQ("Vitamin B12"), [id, "Vitamin B12"]),
       pool.query(labQ("Ferritin"), [id, "Ferritin"]),
-      pool.query(labQ("CRP"), [id, "CRP"]),
+      // Vitals / Body Composition
       pool.query(
         `SELECT DISTINCT ON (recorded_at::date) bp_sys, bp_dia, recorded_at::date as date FROM vitals WHERE patient_id=$1 AND bp_sys IS NOT NULL ${vf} ORDER BY recorded_at::date, recorded_at DESC`,
         [id],
@@ -109,52 +129,104 @@ router.get("/patients/:id/outcomes", async (req, res) => {
       [id],
     );
 
+    // For HealthRay-synced meds (consultation_id IS NULL) prefer started_date over created_at
+    // so the timeline lines up with the actual prescription/appointment date, not sync time.
     const medTimeline = await pool.query(
       `SELECT m.name, m.dose, m.frequency, m.timing, m.is_active, m.is_new, m.started_date,
-              COALESCE(c.visit_date, m.created_at::date) AS visit_date,
+              COALESCE(c.visit_date, m.started_date, m.created_at::date) AS visit_date,
               m.pharmacy_match, m.source
        FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
        WHERE m.patient_id=$1 ORDER BY UPPER(m.name), visit_date`,
       [id],
     );
 
+    // Merge consultations + HealthRay-synced appointments, matching /api/visit/:patientId
+    // and /api/patients/:id so Outcomes stays in sync with the Visit page.
     const visits = await pool.query(
-      `SELECT c.id, c.visit_date, c.visit_type, c.mo_name, c.con_name, c.status,
-       c.mo_data->'history' as history, c.mo_data->'complications' as complications,
-       c.mo_data->'symptoms' as symptoms, c.mo_data->'compliance' as compliance,
-       c.mo_data->'chief_complaints' as chief_complaints,
-       c.mo_data->'diagnoses' as diagnoses,
-       c.mo_data->'stopped_medications' as stopped_medications,
-       c.con_data->'diet_lifestyle' as lifestyle, c.con_data->'self_monitoring' as monitoring,
-       c.con_data->'assessment_summary' as summary,
-       -- Live medications from table (not stale JSONB snapshot)
-       (SELECT json_agg(json_build_object('name', m.name, 'dose', m.dose, 'frequency', m.frequency,
-          'timing', m.timing, 'pharmacy_match', m.pharmacy_match, 'is_active', m.is_active))
-        FROM medications m WHERE m.consultation_id = c.id) as medications_confirmed,
-       c.con_transcript
-       FROM consultations c WHERE c.patient_id=$1 ORDER BY c.visit_date DESC`,
+      `WITH cons AS (
+         SELECT c.id, c.visit_date, c.visit_type, c.mo_name, c.con_name, c.status, c.created_at,
+                c.mo_data->'history'           AS history,
+                c.mo_data->'complications'     AS complications,
+                c.mo_data->'symptoms'          AS symptoms,
+                c.mo_data->'compliance'        AS compliance,
+                c.mo_data->'chief_complaints'  AS chief_complaints,
+                c.mo_data->'diagnoses'         AS diagnoses,
+                c.mo_data->'stopped_medications' AS stopped_medications,
+                c.con_data->'diet_lifestyle'   AS lifestyle,
+                c.con_data->'self_monitoring'  AS monitoring,
+                c.con_data->'assessment_summary' AS summary,
+                (SELECT json_agg(json_build_object('name', m.name, 'dose', m.dose, 'frequency', m.frequency,
+                   'timing', m.timing, 'pharmacy_match', m.pharmacy_match, 'is_active', m.is_active))
+                 FROM medications m WHERE m.consultation_id = c.id)::jsonb AS medications_confirmed,
+                c.con_transcript
+         FROM consultations c WHERE c.patient_id=$1
+       ),
+       appts AS (
+         SELECT a.id,
+                a.appointment_date               AS visit_date,
+                a.visit_type,
+                NULL::text                       AS mo_name,
+                a.doctor_name                    AS con_name,
+                a.status,
+                a.created_at,
+                NULL::jsonb                      AS history,
+                NULL::jsonb                      AS complications,
+                NULL::jsonb                      AS symptoms,
+                COALESCE(a.compliance, '{}'::jsonb) AS compliance,
+                NULL::jsonb                      AS chief_complaints,
+                a.healthray_diagnoses            AS diagnoses,
+                NULL::jsonb                      AS stopped_medications,
+                NULL::jsonb                      AS lifestyle,
+                NULL::jsonb                      AS monitoring,
+                NULL::jsonb                      AS summary,
+                a.healthray_medications          AS medications_confirmed,
+                a.healthray_clinical_notes       AS con_transcript
+         FROM appointments a
+         WHERE a.patient_id=$1
+           AND a.healthray_id IS NOT NULL
+           AND a.appointment_date IS NOT NULL
+       ),
+       deduped AS (
+         SELECT * FROM cons
+         UNION ALL
+         SELECT a.* FROM appts a
+         WHERE NOT EXISTS (
+           SELECT 1 FROM cons c WHERE c.visit_date::date = a.visit_date::date
+         )
+       )
+       SELECT * FROM deduped ORDER BY visit_date DESC, created_at DESC`,
       [id],
     );
 
+    // JSON keys grouped per canonical lab order so consumers iterating over
+    // the response (debug tools, exports) see a clinically coherent sequence.
     res.json({
+      // 1. Diabetes & Glycaemic Control
       hba1c: hba1c.rows,
       fpg: fpg.rows,
       ppg: ppg.rows,
-      ldl: ldl.rows,
-      triglycerides: tg.rows,
-      hdl: hdl.rows,
-      nonhdl: nonhdl.rows,
+      // 2. Renal Function
       creatinine: creat.rows,
       egfr: egfr.rows,
       uacr: uacr.rows,
-      tsh: tsh.rows,
+      // 3. Lipid Profile
+      ldl: ldl.rows,
+      hdl: hdl.rows,
+      triglycerides: tg.rows,
+      nonhdl: nonhdl.rows,
+      // 4. Liver Function
       alt: alt.rows,
       ast: ast.rows,
       alp: alp.rows,
+      // 5. Thyroid
+      tsh: tsh.rows,
+      // 6. Cardiac / Inflammation
+      crp: crp.rows,
+      // 7. Vitamins & Minerals
       vitamin_d: vitd.rows,
       vitamin_b12: vitb12.rows,
       ferritin: ferritin.rows,
-      crp: crp.rows,
+      // 8. Vitals / Body Composition
       bp: bp.rows,
       weight: weight.rows,
       waist: waist.rows,
@@ -163,6 +235,7 @@ router.get("/patients/:id/outcomes", async (req, res) => {
       heart_rate: heartRate.rows,
       height: height.rows,
       bmi: bmi.rows,
+      // 9. Other
       screenings: screenings.rows,
       diagnosis_journey: diagJourney.rows,
       med_timeline: medTimeline.rows,

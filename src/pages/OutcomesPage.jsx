@@ -660,7 +660,10 @@ export default function OutcomesPage() {
 
               return (
                 <>
-                  {renderSection("Diabetes & Metabolic", "🩸", "#b91c1c", [
+                  {/* Sections ordered per canonical lab order
+                      (see src/config/labOrder.js + labOrder.md):
+                      Diabetes → Renal → Lipids → Liver → Thyroid → Vitamins/Inflammation → Body */}
+                  {renderSection("Diabetes & Glycaemic Control", "🩸", "#b91c1c", [
                     {
                       data: outcomesData.hba1c,
                       label: "HbA1c",
@@ -711,7 +714,34 @@ export default function OutcomesPage() {
                       biomarkerKey: "hr",
                     },
                   ])}
-                  {renderSection("Lipids & Kidney", "💧", "#1d4ed8", [
+                  {renderSection("Renal Function (RFT + UACR)", "💧", "#0d9488", [
+                    {
+                      data: outcomesData.creatinine,
+                      label: "Creatinine",
+                      unit: " mg/dl",
+                      color: "#6366f1",
+                      target: 1.2,
+                      biomarkerKey: "creatinine",
+                    },
+                    {
+                      data: outcomesData.egfr,
+                      label: "eGFR",
+                      unit: " ml/min",
+                      color: "#0d9488",
+                      target: 60,
+                      lowerBetter: false,
+                      biomarkerKey: "egfr",
+                    },
+                    {
+                      data: outcomesData.uacr,
+                      label: "UACR",
+                      unit: " mg/g",
+                      color: "#be185d",
+                      target: 30,
+                      biomarkerKey: "uacr",
+                    },
+                  ])}
+                  {renderSection("Lipid Profile", "🧈", "#1d4ed8", [
                     {
                       data: outcomesData.ldl,
                       label: "LDL",
@@ -745,40 +775,8 @@ export default function OutcomesPage() {
                       target: 130,
                       biomarkerKey: "nonhdl",
                     },
-                    {
-                      data: outcomesData.egfr,
-                      label: "eGFR",
-                      unit: " ml/min",
-                      color: "#0d9488",
-                      target: 60,
-                      lowerBetter: false,
-                      biomarkerKey: "egfr",
-                    },
-                    {
-                      data: outcomesData.creatinine,
-                      label: "Creatinine",
-                      unit: " mg/dl",
-                      color: "#6366f1",
-                      target: 1.2,
-                      biomarkerKey: "creatinine",
-                    },
-                    {
-                      data: outcomesData.uacr,
-                      label: "UACR",
-                      unit: " mg/g",
-                      color: "#be185d",
-                      target: 30,
-                      biomarkerKey: "uacr",
-                    },
-                    {
-                      data: outcomesData.tsh,
-                      label: "TSH",
-                      unit: " mIU/L",
-                      color: "#0891b2",
-                      biomarkerKey: "tsh",
-                    },
                   ])}
-                  {renderSection("Liver Function", "🫁", "#92400e", [
+                  {renderSection("Liver Function (LFT)", "🫁", "#92400e", [
                     {
                       data: outcomesData.alt,
                       label: "ALT (SGPT)",
@@ -802,6 +800,15 @@ export default function OutcomesPage() {
                       color: "#d97706",
                       target: 120,
                       biomarkerKey: "alp",
+                    },
+                  ])}
+                  {renderSection("Thyroid", "🦋", "#0891b2", [
+                    {
+                      data: outcomesData.tsh,
+                      label: "TSH",
+                      unit: " mIU/L",
+                      color: "#0891b2",
+                      biomarkerKey: "tsh",
                     },
                   ])}
                   {renderSection("Vitamins & Inflammation", "💊", "#7c3aed", [

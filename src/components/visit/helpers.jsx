@@ -364,7 +364,7 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const shortDate = (d) => {
   if (!d) return "";
   const dt = new Date(d);
-  return `${MON[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`;
+  return `${dt.getDate()} ${MON[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`;
 };
 
 // ── Biomarker Sparkline — OutcomesPage-style: fill area + hover tooltip ──

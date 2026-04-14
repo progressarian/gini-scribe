@@ -14,33 +14,173 @@ function autoDetectGroup(name) {
 
   // Keyword-based fallback for common drugs not in the database
   // Insulin
-  if (n.includes("insulin") || ["ryzodeg","lantus","novorapid","novomix","humalog","humulin","tresiba","toujeo","glargine","aspart","lispro","degludec"].some(k => baseName.includes(k))) return "diabetes";
+  if (
+    n.includes("insulin") ||
+    [
+      "ryzodeg",
+      "lantus",
+      "novorapid",
+      "novomix",
+      "humalog",
+      "humulin",
+      "tresiba",
+      "toujeo",
+      "glargine",
+      "aspart",
+      "lispro",
+      "degludec",
+    ].some((k) => baseName.includes(k))
+  )
+    return "diabetes";
   // Metformin combos
-  if (n.includes("metformin") || ["glycomet","glucophage","istamet","obimet"].some(k => baseName.includes(k))) return "diabetes";
+  if (
+    n.includes("metformin") ||
+    ["glycomet", "glucophage", "istamet", "obimet"].some((k) => baseName.includes(k))
+  )
+    return "diabetes";
   // SGLT2
-  if (["forxiga","jardiance","dapagliflozin","empagliflozin","canagliflozin","sglt2"].some(k => baseName.includes(k))) return "diabetes";
+  if (
+    ["forxiga", "jardiance", "dapagliflozin", "empagliflozin", "canagliflozin", "sglt2"].some((k) =>
+      baseName.includes(k),
+    )
+  )
+    return "diabetes";
   // DPP4 + combos
-  if (["trajenta","januvia","galvus","sitagliptin","vildagliptin","linagliptin","teneligliptin","gliptin","janumet","istavel","zita","jalra"].some(k => baseName.includes(k))) return "diabetes";
+  if (
+    [
+      "trajenta",
+      "januvia",
+      "galvus",
+      "sitagliptin",
+      "vildagliptin",
+      "linagliptin",
+      "teneligliptin",
+      "gliptin",
+      "janumet",
+      "istavel",
+      "zita",
+      "jalra",
+    ].some((k) => baseName.includes(k))
+  )
+    return "diabetes";
   // GLP1
-  if (["ozempic","rybelsus","mounjaro","semaglutide","tirzepatide","liraglutide","dulaglutide"].some(k => baseName.includes(k))) return "diabetes";
+  if (
+    [
+      "ozempic",
+      "rybelsus",
+      "mounjaro",
+      "semaglutide",
+      "tirzepatide",
+      "liraglutide",
+      "dulaglutide",
+    ].some((k) => baseName.includes(k))
+  )
+    return "diabetes";
   // Sulphonylureas
-  if (["glimepiride","gliclazide","glipizide","amaryl","diamicron","glizid","glimpid"].some(k => baseName.includes(k))) return "diabetes";
+  if (
+    ["glimepiride", "gliclazide", "glipizide", "amaryl", "diamicron", "glizid", "glimpid"].some(
+      (k) => baseName.includes(k),
+    )
+  )
+    return "diabetes";
   // Other diabetes
-  if (["glucobay","acarbose","voglibose","pioglitazone"].some(k => baseName.includes(k))) return "diabetes";
+  if (["glucobay", "acarbose", "voglibose", "pioglitazone"].some((k) => baseName.includes(k)))
+    return "diabetes";
   // ACE/ARB (kidney/BP)
-  if (["ramipril","enalapril","lisinopril","telmisartan","losartan","olmesartan","valsartan","telisatan","telma","cardace"].some(k => baseName.includes(k))) return "kidney";
+  if (
+    [
+      "ramipril",
+      "enalapril",
+      "lisinopril",
+      "telmisartan",
+      "losartan",
+      "olmesartan",
+      "valsartan",
+      "telisatan",
+      "telma",
+      "cardace",
+    ].some((k) => baseName.includes(k))
+  )
+    return "kidney";
   // BP
-  if (["amlodipine","metoprolol","atenolol","cilacar","cilnidipine","chlorthalidone","hydrochlorothiazide","bisoprolol","carvedilol","prazosin"].some(k => baseName.includes(k))) return "bp";
+  if (
+    [
+      "amlodipine",
+      "metoprolol",
+      "atenolol",
+      "cilacar",
+      "cilnidipine",
+      "chlorthalidone",
+      "hydrochlorothiazide",
+      "bisoprolol",
+      "carvedilol",
+      "prazosin",
+    ].some((k) => baseName.includes(k))
+  )
+    return "bp";
   // Lipids
-  if (["rosuvastatin","atorvastatin","rosulip","atorva","lipitas","crestor","fenofibrate","ezetimibe","statin"].some(k => baseName.includes(k))) return "lipids";
+  if (
+    [
+      "rosuvastatin",
+      "atorvastatin",
+      "rosulip",
+      "atorva",
+      "lipitas",
+      "crestor",
+      "fenofibrate",
+      "ezetimibe",
+      "statin",
+    ].some((k) => baseName.includes(k))
+  )
+    return "lipids";
   // Antiplatelet (under BP/cardiac)
-  if (["aspirin","ecospirin","clopidogrel","prasugrel","ticagrelor"].some(k => baseName.includes(k))) return "bp";
+  if (
+    ["aspirin", "ecospirin", "clopidogrel", "prasugrel", "ticagrelor"].some((k) =>
+      baseName.includes(k),
+    )
+  )
+    return "bp";
   // Thyroid
-  if (["levothyroxine","thyronorm","eltroxin","thyroxine"].some(k => baseName.includes(k))) return "thyroid";
+  if (["levothyroxine", "thyronorm", "eltroxin", "thyroxine"].some((k) => baseName.includes(k)))
+    return "thyroid";
   // Prostate / Urology (don't lump with supplements)
-  if (["tamsulosin","urimax","silodosin","dutasteride","finasteride","alfuzosin","flotral"].some(k => baseName.includes(k))) return "external";
+  if (
+    [
+      "tamsulosin",
+      "urimax",
+      "silodosin",
+      "dutasteride",
+      "finasteride",
+      "alfuzosin",
+      "flotral",
+    ].some((k) => baseName.includes(k))
+  )
+    return "external";
   // Supplements
-  if (["vitamin","aktiv","calci","calcium","shelcal","iron","folic","omega","maxepa","methylcobal","b12","d3","cospiaq","probiot","enzyme","pantop","panto","rabep","omeprazole"].some(k => baseName.includes(k))) return "supplement";
+  if (
+    [
+      "vitamin",
+      "aktiv",
+      "calci",
+      "calcium",
+      "shelcal",
+      "iron",
+      "folic",
+      "omega",
+      "maxepa",
+      "methylcobal",
+      "b12",
+      "d3",
+      "cospiaq",
+      "probiot",
+      "enzyme",
+      "pantop",
+      "panto",
+      "rabep",
+      "omeprazole",
+    ].some((k) => baseName.includes(k))
+  )
+    return "supplement";
 
   return "supplement"; // fallback
 }
@@ -52,7 +192,10 @@ function dedup(meds) {
     // Normalize: strip parenthetical composition for dedup
     // "GLIZID M XR (GLICLAZIDE/METFORMIN)" → "GLIZID M XR"
     const raw = (m.pharmacy_match || m.name || "").toUpperCase();
-    const key = raw.replace(/\s*\(.*\)/, "").replace(/\s+/g, " ").trim();
+    const key = raw
+      .replace(/\s*\(.*\)/, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (!key) return;
     if (!grouped[key]) {
       grouped[key] = { ...m, _entries: [] };
@@ -80,13 +223,65 @@ function dedup(meds) {
 function diabetesClassOrder(name) {
   const n = (name || "").toLowerCase();
   const base = n.replace(/\s*\(.*\)/, "").trim();
-  if (["insulin","ryzodeg","lantus","novorapid","novomix","humalog","humulin","tresiba","toujeo","glargine","aspart","lispro","degludec"].some(k => base.includes(k))) return 1;
-  if (["metformin","glycomet","glucophage","obimet"].some(k => base.includes(k))) return 2;
-  if (["forxiga","jardiance","dapagliflozin","empagliflozin","canagliflozin"].some(k => base.includes(k))) return 3;
-  if (["ozempic","rybelsus","mounjaro","semaglutide","tirzepatide","liraglutide","dulaglutide"].some(k => base.includes(k))) return 4;
-  if (["trajenta","januvia","galvus","sitagliptin","vildagliptin","linagliptin","teneligliptin","janumet","istavel","jalra"].some(k => base.includes(k))) return 5;
-  if (["glimepiride","gliclazide","glipizide","amaryl","diamicron","glizid","glimpid"].some(k => base.includes(k))) return 6;
-  if (["glucobay","acarbose","voglibose","pioglitazone"].some(k => base.includes(k))) return 7;
+  if (
+    [
+      "insulin",
+      "ryzodeg",
+      "lantus",
+      "novorapid",
+      "novomix",
+      "humalog",
+      "humulin",
+      "tresiba",
+      "toujeo",
+      "glargine",
+      "aspart",
+      "lispro",
+      "degludec",
+    ].some((k) => base.includes(k))
+  )
+    return 1;
+  if (["metformin", "glycomet", "glucophage", "obimet"].some((k) => base.includes(k))) return 2;
+  if (
+    ["forxiga", "jardiance", "dapagliflozin", "empagliflozin", "canagliflozin"].some((k) =>
+      base.includes(k),
+    )
+  )
+    return 3;
+  if (
+    [
+      "ozempic",
+      "rybelsus",
+      "mounjaro",
+      "semaglutide",
+      "tirzepatide",
+      "liraglutide",
+      "dulaglutide",
+    ].some((k) => base.includes(k))
+  )
+    return 4;
+  if (
+    [
+      "trajenta",
+      "januvia",
+      "galvus",
+      "sitagliptin",
+      "vildagliptin",
+      "linagliptin",
+      "teneligliptin",
+      "janumet",
+      "istavel",
+      "jalra",
+    ].some((k) => base.includes(k))
+  )
+    return 5;
+  if (
+    ["glimepiride", "gliclazide", "glipizide", "amaryl", "diamicron", "glizid", "glimpid"].some(
+      (k) => base.includes(k),
+    )
+  )
+    return 6;
+  if (["glucobay", "acarbose", "voglibose", "pioglitazone"].some((k) => base.includes(k))) return 7;
   // Combo drugs with metformin — sort by the non-metformin component
   if (base.includes("istamet") || base.includes("dapanorm")) return 3; // SGLT2/DPP4 + met combos
   return 8;
@@ -158,7 +353,11 @@ const VisitMedications = memo(function VisitMedications({
               const d = m.updated_at || m.started_date || m.created_at;
               return d && d > (max || "") ? d : max;
             }, null);
-            return latest ? <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>Updated {fmtDate(latest)}</span> : null;
+            return latest ? (
+              <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>
+                Updated {fmtDate(latest)}
+              </span>
+            ) : null;
           })()}
         </div>
         <div style={{ display: "flex", gap: 6 }}>

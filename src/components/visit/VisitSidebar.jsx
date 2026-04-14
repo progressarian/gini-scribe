@@ -1,12 +1,16 @@
 import { memo, useState, useCallback } from "react";
 import { MED_COLORS, DX_STATUS_STYLE, DX_STATUS_DEFAULT, findLab, fmtLabVal } from "./helpers";
 
+// Order matches the canonical lab order in src/config/labOrder.js
+// (Diabetes → Kidney → Lipids → Thyroid → CBC). Units and flag thresholds
+// are sidebar-specific so the rich object structure stays local; the *order*
+// of names mirrors KEY_BIOMARKERS in labOrder.js.
 const KEY_BIOMARKERS = [
   { name: "HbA1c", unit: "%", flag: (v) => (v > 7 ? "high" : "ok") },
   { name: "FBS", unit: "mg/dL", flag: (v) => (v > 126 ? "high" : "ok") },
-  { name: "LDL", unit: "mg/dL", flag: (v) => (v > 100 ? "high" : "ok") },
   { name: "Creatinine", unit: "mg/dL", flag: (v) => (v > 1.2 ? "high" : "ok") },
   { name: "eGFR", unit: "", flag: (v) => (v < 60 ? "low" : "ok") },
+  { name: "LDL", unit: "mg/dL", flag: (v) => (v > 100 ? "high" : "ok") },
   { name: "TSH", unit: "µIU/mL", flag: (v) => (v > 4.5 ? "high" : v < 0.4 ? "low" : "ok") },
   { name: "Haemoglobin", unit: "g/dL", flag: (v) => (v < 12 ? "low" : "ok") },
 ];

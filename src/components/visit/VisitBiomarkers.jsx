@@ -258,9 +258,35 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           </>
         )}
 
-        {/* ── LIPIDS / KIDNEY / THYROID ── */}
+        {/* ── KIDNEY / RENAL FUNCTION ── */}
         <div className="subsec" style={{ marginTop: 4 }}>
-          Lipids / Kidney / Thyroid
+          Renal Function (RFT + UACR)
+        </div>
+        <div className="bmg">
+          <BiomarkerCard
+            label="Creatinine / eGFR"
+            value={cr?.result}
+            unit="mg/dL"
+            target={1.2}
+            trend={
+              crH.length > 1
+                ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
+                : egfr
+                  ? `✓ eGFR ${egfr.result}`
+                  : cr?.result <= 1.2
+                    ? "✓ Normal"
+                    : "↑ Review"
+            }
+            trendDir={cr?.result <= 1.2 ? "good" : "bad"}
+            goal="<1.2"
+            goalLabel="Normal"
+            history={crH}
+          />
+        </div>
+
+        {/* ── LIPIDS ── */}
+        <div className="subsec" style={{ marginTop: 4 }}>
+          Lipid Profile
         </div>
         <div className="bmg">
           <BiomarkerCard
@@ -295,25 +321,13 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             goal="<150"
             history={tgH}
           />
-          <BiomarkerCard
-            label="Creatinine / eGFR"
-            value={cr?.result}
-            unit="mg/dL"
-            target={1.2}
-            trend={
-              crH.length > 1
-                ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
-                : egfr
-                  ? `✓ eGFR ${egfr.result}`
-                  : cr?.result <= 1.2
-                    ? "✓ Normal"
-                    : "↑ Review"
-            }
-            trendDir={cr?.result <= 1.2 ? "good" : "bad"}
-            goal="<1.2"
-            goalLabel="Normal"
-            history={crH}
-          />
+        </div>
+
+        {/* ── THYROID ── */}
+        <div className="subsec" style={{ marginTop: 4 }}>
+          Thyroid
+        </div>
+        <div className="bmg">
           <BiomarkerCard
             label="TSH (Thyroid)"
             value={tsh?.result}

@@ -212,9 +212,12 @@ export async function downloadMedicalRecordFile(attachmentId, recordType, medica
         parsed.data !== undefined &&
         (Object.keys(parsed.data || {}).length === 0 ||
           (parsed.message || "").toLowerCase().includes("no record") ||
-          parsed.statusState === "success" && !parsed.data?.url)
+          (parsed.statusState === "success" && !parsed.data?.url))
       ) {
-        log("Download", `JSON 'no record found' response for attachment ${attachmentId}: ${parsed.message}`);
+        log(
+          "Download",
+          `JSON 'no record found' response for attachment ${attachmentId}: ${parsed.message}`,
+        );
         return null;
       }
     } catch {}

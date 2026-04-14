@@ -158,14 +158,14 @@ export default function CaptureScreen() {
                   onChange={(e) => setCaptureMeta((p) => ({ ...p, date: e.target.value }))}
                   className="capture__meta-input"
                   placeholder="Report date"
-                  style={{ flex: '1 1 45%' }}
+                  style={{ flex: "1 1 45%" }}
                 />
                 <input
                   value={captureMeta.hospital}
                   onChange={(e) => setCaptureMeta((p) => ({ ...p, hospital: e.target.value }))}
                   placeholder={currentCategory === "prescription" ? "Hospital" : "Lab name"}
                   className="capture__meta-input"
-                  style={{ flex: '1 1 45%' }}
+                  style={{ flex: "1 1 45%" }}
                 />
                 {currentCategory === "prescription" && (
                   <>
@@ -226,13 +226,25 @@ export default function CaptureScreen() {
               </div>
             )}
             {categoryMismatch && (
-              <div className="capture__mismatch" style={{ borderColor: '#f59e0b', background: '#fffbeb' }}>
+              <div
+                className="capture__mismatch"
+                style={{ borderColor: "#f59e0b", background: "#fffbeb" }}
+              >
                 <div className="capture__mismatch-title">📋 Category Check</div>
                 <div className="capture__mismatch-body">{categoryMismatch.msg}</div>
                 {categoryMismatch.detected === "prescription" && (
                   <button
                     onClick={() => changeCategory("prescription")}
-                    style={{ marginTop: 8, padding: '6px 16px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 13, cursor: 'pointer' }}
+                    style={{
+                      marginTop: 8,
+                      padding: "6px 16px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#7c3aed",
+                      color: "#fff",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
                   >
                     Change to Prescription
                   </button>
@@ -240,13 +252,22 @@ export default function CaptureScreen() {
                 {categoryMismatch.detected === "lab" && (
                   <button
                     onClick={() => changeCategory("blood_test")}
-                    style={{ marginTop: 8, padding: '6px 16px', borderRadius: 8, border: 'none', background: '#0369a1', color: '#fff', fontSize: 13, cursor: 'pointer' }}
+                    style={{
+                      marginTop: 8,
+                      padding: "6px 16px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#0369a1",
+                      color: "#fff",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
                   >
                     Change to Lab Report
                   </button>
                 )}
                 {categoryMismatch.detected === "both" && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: '#92400e' }}>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#92400e" }}>
                     Both medications and lab values will be saved automatically.
                   </div>
                 )}

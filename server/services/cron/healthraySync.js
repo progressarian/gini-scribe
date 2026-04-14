@@ -111,7 +111,30 @@ function buildVitalsAndBiomarkers(appt) {
 async function fetchClinicalText(appt, healthrayId, doctorId) {
   const clinicalData = await fetchClinicalNotes(healthrayId, doctorId);
 
-  // console.log("Data of Arvinda kaur ->" ,  clinicalData)
+  // One-shot debug dump: set HEALTHRAY_DUMP_RAW=1 and optionally
+  // HEALTHRAY_DUMP_PATIENT=<file_no> (e.g. P_174857) to print the raw
+  // clinical-notes + medical-records payload for a single patient. Used to
+  // locate where Diagnosis summary text lives on a given visit's JSON.
+  if (process.env.HEALTHRAY_DUMP_RAW === "1") {
+    const wantFileNo = process.env.HEALTHRAY_DUMP_PATIENT || "";
+    const thisFileNo = appt.patient_case_id || "";
+    if (!wantFileNo || wantFileNo === thisFileNo) {
+      log(
+        "DumpRaw",
+        `${thisFileNo || healthrayId} clinicalData:\n${JSON.stringify(clinicalData, null, 2)}`,
+      );
+      try {
+        const records = await fetchMedicalRecords(healthrayId);
+        log(
+          "DumpRaw",
+          `${thisFileNo || healthrayId} medicalRecords:\n${JSON.stringify(records, null, 2)}`,
+        );
+      } catch (e) {
+        log("DumpRaw", `${thisFileNo || healthrayId} medicalRecords fetch failed: ${e.message}`);
+      }
+    }
+  }
+
   if (!clinicalData || !Array.isArray(clinicalData)) return null;
 
   const selCount = clinicalData.reduce(

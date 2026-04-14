@@ -158,7 +158,13 @@ const useCompanionStore = create((set, get) => ({
   },
 
   retryCapture: () => {
-    set({ captureStep: "categorize", extractedData: null, captureError: null, nameMismatch: null, categoryMismatch: null });
+    set({
+      captureStep: "categorize",
+      extractedData: null,
+      captureError: null,
+      nameMismatch: null,
+      categoryMismatch: null,
+    });
   },
 
   extractDocument: async () => {
@@ -249,11 +255,23 @@ const useCompanionStore = create((set, get) => ({
       const hasLabs = (parsed.labs || []).length > 0;
 
       if (isLab && hasMeds && !hasLabs) {
-        updates.categoryMismatch = { detected: "prescription", selected: currentCategory, msg: "This looks like a prescription (found medications but no lab values)." };
+        updates.categoryMismatch = {
+          detected: "prescription",
+          selected: currentCategory,
+          msg: "This looks like a prescription (found medications but no lab values).",
+        };
       } else if (isLab && hasMeds && hasLabs) {
-        updates.categoryMismatch = { detected: "both", selected: currentCategory, msg: "This document has both lab values and medications. Both will be saved." };
+        updates.categoryMismatch = {
+          detected: "both",
+          selected: currentCategory,
+          msg: "This document has both lab values and medications. Both will be saved.",
+        };
       } else if (isRx && hasLabs && !hasMeds) {
-        updates.categoryMismatch = { detected: "lab", selected: currentCategory, msg: "This looks like a lab report (found test values but no medications)." };
+        updates.categoryMismatch = {
+          detected: "lab",
+          selected: currentCategory,
+          msg: "This looks like a lab report (found test values but no medications).",
+        };
       } else {
         updates.categoryMismatch = null;
       }

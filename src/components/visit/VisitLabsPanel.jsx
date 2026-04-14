@@ -1,141 +1,11 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { fmtDate } from "./helpers";
 import PdfViewerModal from "./PdfViewerModal";
+import { LAB_PANELS as PANELS } from "../../config/labOrder";
 
-// ── Panel grouping config ─────────────────────────────────────────────────────
-// Each panel lists lowercase substrings matched against canonical_name OR test_name
-const LAB_PANELS = [
-  {
-    name: "HbA1c",
-    keys: [
-      "hb_a1c",
-      "glycated_hb",
-      "glycated hemoglobin",
-      "mean_blood_glucose",
-      "mean blood glucose",
-    ],
-  },
-  {
-    name: "Fasting Blood Sugar",
-    keys: ["fasting_blood_sugar", "fasting blood sugar", "fbg", "fbs"],
-  },
-  {
-    name: "Lipid Profile",
-    keys: [
-      "total_cholesterol",
-      "total cholesterol",
-      "triglyceride",
-      "hdl_cholesterol",
-      "hdl cholesterol",
-      "ldl_cholesterol",
-      "ldl cholesterol",
-      "vldl_cholesterol",
-      "vldl cholesterol",
-      "non_hdl",
-      "non hdl",
-      "ldl_/_hdl",
-      "ldl / hdl",
-      "total_/_hdl",
-      "total / hdl",
-    ],
-  },
-  {
-    name: "Microalbumin / Creatinine Ratio",
-    keys: [
-      "microalbumin/creatinine",
-      "microalbumin_/",
-      "microalbumin",
-      "creatinine_(urine",
-      "creatinine (urine",
-    ],
-  },
-  {
-    name: "Renal Function Test (RFT)",
-    keys: [
-      "creatinine,_serum",
-      "creatinine, serum",
-      "glomerular_filtration",
-      "glomerular filtration",
-      "egfr",
-      "e-gfr",
-      "urea",
-      "bun",
-      "uric_acid",
-      "uric acid",
-      "sodium",
-      "potassium",
-      "chloride",
-      "bicarbonate",
-    ],
-  },
-  {
-    name: "Liver Function Test (LFT)",
-    keys: [
-      "sgot",
-      "sgpt",
-      "alt",
-      "ast",
-      "alkaline_phosphatase",
-      "alkaline phosphatase",
-      "bilirubin",
-      "albumin",
-      "total_protein",
-      "total protein",
-      "gamma_gt",
-      "gamma gt",
-      "ggt",
-    ],
-  },
-  {
-    name: "Thyroid",
-    keys: ["tsh", "anti_tpo", "anti-tpo", "anti_thyro", "anti-thyro"],
-  },
-  {
-    name: "Complete Blood Count (CBC)",
-    keys: [
-      "haemoglobin",
-      "hemoglobin",
-      "rbc",
-      "wbc",
-      "platelet",
-      "hematocrit",
-      "mcv",
-      "mch",
-      "mchc",
-      "neutrophil",
-      "lymphocyte",
-      "eosinophil",
-      "basophil",
-      "monocyte",
-    ],
-  },
-  {
-    name: "Vitamins & Minerals",
-    keys: [
-      "vitamin_d",
-      "vitamin d",
-      "vitamin_b12",
-      "vitamin b12",
-      "folate",
-      "iron",
-      "ferritin",
-      "tibc",
-      "transferrin",
-    ],
-  },
-  {
-    name: "Thyroid",
-    keys: ["t3", "t4", "ft3", "ft4", "free_t3", "free_t4"],
-  },
-];
-
-// Deduplicate panels with same name
-const PANELS = LAB_PANELS.reduce((acc, p) => {
-  const existing = acc.find((x) => x.name === p.name);
-  if (existing) existing.keys = [...existing.keys, ...p.keys];
-  else acc.push({ ...p });
-  return acc;
-}, []);
+// Panel grouping config lives in src/config/labOrder.js — single source of
+// truth shared with Outcomes, Sidebar, Assess and the dashboard. See
+// labOrder.md at project root for the clinical rationale.
 
 const SOURCE_PRIORITY = {
   lab_healthray: 1,
@@ -221,7 +91,29 @@ function findResultsForOrder(orderName, rows, assigned) {
   });
 }
 
-// Build ordered sections from labOrders when available, fall back to PANELS config
+// Rank a section by its position in the canonical PANELS order so the on-screen
+// order is independent of the (arbitrary) order HealthRay returns reports/tests
+// in `investigation_summary`. Returns panelIndex*1000 + firstMatchingKeyIndex
+// so multiple sections within the same panel preserve sub-order (e.g. HbA1c
+// before FBS, both inside the Diabetes panel).
+function rankSection(name) {
+  const sn = norm(name);
+  for (let i = 0; i < PANELS.length; i++) {
+    const p = PANELS[i];
+    if (norm(p.name) === sn || sn.includes(norm(p.name)) || norm(p.name).includes(sn)) {
+      return i * 1000;
+    }
+    for (let j = 0; j < p.keys.length; j++) {
+      if (sn.includes(norm(p.keys[j]))) {
+        return i * 1000 + j;
+      }
+    }
+  }
+  return 999000; // unmatched → push to end (e.g., "Other")
+}
+
+// Build ordered sections from labOrders when available, fall back to PANELS config.
+// Result is always sorted by canonical PANELS order regardless of source.
 function buildSections(rows, labOrders) {
   const latestOrder = labOrders?.[0];
   const assigned = new Set();
@@ -260,6 +152,8 @@ function buildSections(rows, labOrders) {
     if (others.length > 0) sections.push({ type: "report", name: "Other", results: others });
   }
 
+  // Enforce canonical order regardless of which branch built the sections.
+  sections.sort((a, b) => rankSection(a.name) - rankSection(b.name));
   return sections;
 }
 
@@ -385,14 +279,18 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
 
   const { latestRows, sections, latestDate } = useMemo(() => {
     const rows = buildLatestRows(labLatest);
-    const orderDate = labOrders?.[0]?.date;
-    // Only use rows from the latest order's date if available
-    const filtered = orderDate
-      ? rows.filter((r) => r.test_date && r.test_date.slice(0, 10) === orderDate.slice(0, 10))
+    // Use the most recent actual test_date across results as the section date.
+    // Previously this used labOrders[0].date (lab case order date) which can differ
+    // from when samples were actually taken — leading to a misleading header date.
+    const latestTestDate = rows.reduce(
+      (max, r) => (r.test_date && r.test_date > max ? r.test_date : max),
+      "",
+    );
+    const filtered = latestTestDate
+      ? rows.filter((r) => r.test_date && r.test_date.slice(0, 10) === latestTestDate.slice(0, 10))
       : rows;
     const secs = buildSections(filtered, labOrders);
-    const date = orderDate || rows.reduce((max, r) => (r.test_date > max ? r.test_date : max), "");
-    return { latestRows: rows, sections: secs, latestDate: date };
+    return { latestRows: rows, sections: secs, latestDate: latestTestDate };
   }, [labLatest, labOrders]);
 
   const hasResults = latestRows.length > 0;
@@ -426,7 +324,10 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                     <div className="report-dt">
                       {fmtDate(doc.doc_date)}
                       {doc.source ? ` · ${doc.source}` : ""}
-                      {doc.created_at && (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10) ? ` · Uploaded ${fmtDate(doc.created_at)}` : ""}
+                      {doc.created_at &&
+                      (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
+                        ? ` · Uploaded ${fmtDate(doc.created_at)}`
+                        : ""}
                       {doc.notes ? ` · ${doc.notes}` : ""}
                     </div>
                   </div>
