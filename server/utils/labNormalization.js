@@ -687,5 +687,6 @@ export function normalizeTestName(name) {
   if (!name) return name;
   const cleaned = stripEmbeddedDate(name);
   const lower = cleaned.toLowerCase().trim();
-  return map[lower] || cleaned;
+  // Try exact match first, then with underscores→spaces (lab_healthray format)
+  return map[lower] || map[lower.replace(/_/g, " ")] || cleaned;
 }
