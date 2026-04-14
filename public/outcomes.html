@@ -205,6 +205,11 @@ body{font-family:var(--fb);color:var(--ink);font-size:13px;display:flex;flex-dir
   <button class="pb" data-period="lastmonth" onclick="setPeriod('lastmonth',this)">Last month</button>
   <div class="pb-sep"></div>
   <button class="pb" data-period="custom" onclick="setPeriod('custom',this)">Custom range</button>
+  <div class="pb-sep"></div>
+  <span style="font-size:10px;color:var(--ink3);font-weight:600;margin-right:2px">Show:</span>
+  <button class="pb active" id="filterAll" onclick="setFilter('all',this)">All patients</button>
+  <button class="pb" id="filterData" onclick="setFilter('with-data',this)">With lab data</button>
+  <button class="pb" id="filterAssigned" onclick="setFilter('assigned',this)">Assigned only</button>
   <div class="custom-range" id="customRange">
     <span>From</span>
     <input class="crinp" type="date" id="crFrom">
@@ -229,6 +234,7 @@ const USE_MOCK = false;
    STATE
 ══════════════════════════════════════════════════════ */
 let currentPeriod = 'today';
+let currentFilter = 'all';
 let customFrom = '', customTo = '';
 let refreshTimer = null;
 let isLoading = false;
@@ -308,8 +314,8 @@ async function fetchDashboard(period, from, to) {
     return getMockData(period);
   }
   // Real API call:
-  let url = `${API_BASE}/dashboard?period=${period}`;
-  if(period === 'custom' && from && to) url = `${API_BASE}/dashboard?from=${from}&to=${to}`;
+  let url = `${API_BASE}/dashboard?period=${period}&filter=${currentFilter}`;
+  if(period === 'custom' && from && to) url = `${API_BASE}/dashboard?from=${from}&to=${to}&filter=${currentFilter}`;
   const token = localStorage.getItem('gini_auth_token'); const res = await fetch(url, { credentials: 'include', headers: token ? { 'x-auth-token': token } : {} });
   if(!res.ok) throw new Error(`API error ${res.status}`);
   return await res.json();
@@ -325,6 +331,12 @@ function setPeriod(period, btn) {
   const cr = document.getElementById('customRange');
   cr.classList.toggle('show', period === 'custom');
   if(period !== 'custom') loadDashboard();
+}
+function setFilter(f, btn) {
+  document.querySelectorAll('#filterAll,#filterData,#filterAssigned').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = f;
+  loadDashboard();
 }
 function applyCustom() {
   customFrom = document.getElementById('crFrom').value;
@@ -417,6 +429,7 @@ function renderDashboardData(data) {
       <div class="sc-lbl">${data.period.label}</div>
       <div class="sc-sub">
         ${data.patientSplit ? `<span style="color:var(--sk);font-weight:700">${data.patientSplit.new || 0} New</span> · <span style="color:var(--tl);font-weight:700">${data.patientSplit.followUp || 0} Follow-Up</span>` : `${s.totalPatients} patients`}
+        ${data.totalAppointments && data.totalAppointments !== s.totalPatients ? `<br><span style="font-size:9px;color:var(--ink3)">${data.totalAppointments} total · showing ${s.totalPatients} ${data.filter === 'with-data' ? 'with lab data' : data.filter === 'assigned' ? 'assigned' : ''}</span>` : ''}
       </div>
     </div>
     <!-- Coverage -->

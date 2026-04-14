@@ -238,7 +238,8 @@ async function computeBiomarkerStats(patientIds, bioKey) {
 // ── GET /api/dashboard ─────────────────────────────────────────────────────
 router.get("/dashboard", async (req, res) => {
   try {
-    const { period, from, to } = req.query;
+    const { period, from, to, filter } = req.query;
+    // filter options: "all" (default), "with-data" (has HbA1c), "assigned" (has doctor)
 
     // ── 1. Determine date range ──
     const now = new Date();
@@ -333,7 +334,31 @@ router.get("/dashboard", async (req, res) => {
       [dateFrom, dateTo],
     );
 
-    const patients = apptR.rows.filter((r) => r.patient_id);
+    let allPatients = apptR.rows.filter((r) => r.patient_id);
+
+    // Apply filter: "assigned" = has doctor, "with-data" = handled after HbA1c fetch
+    if (filter === "assigned") {
+      allPatients = allPatients.filter((p) => p.doctor_name);
+    }
+
+    // For "with-data" filter, we need to check who has lab data. Pre-fetch HbA1c patient IDs.
+    let withDataPatientIds = null;
+    if (filter === "with-data" && allPatients.length > 0) {
+      const allIds = allPatients.map((p) => p.patient_id);
+      const hba1cR = await pool.query(
+        `SELECT DISTINCT patient_id FROM lab_results
+         WHERE patient_id = ANY($1::int[])
+           AND LOWER(COALESCE(canonical_name, test_name)) = ANY($2::text[])
+           AND result IS NOT NULL`,
+        [allIds, ["hba1c", "hb_a1c", "glycated hemoglobin", "a1c"]],
+      );
+      withDataPatientIds = new Set(hba1cR.rows.map((r) => r.patient_id));
+      allPatients = allPatients.filter((p) => withDataPatientIds.has(p.patient_id));
+    }
+
+    // Track total before/after filtering for context
+    const totalBeforeFilter = apptR.rows.filter((r) => r.patient_id).length;
+    const patients = allPatients;
     const patientIds = patients.map((p) => p.patient_id);
 
     // ── 3. New vs Follow-up split ──
@@ -685,6 +710,8 @@ router.get("/dashboard", async (req, res) => {
 
     res.json({
       period: { from: dateFrom, to: dateTo, label },
+      filter: filter || "all",
+      totalAppointments: totalBeforeFilter,
       patientSplit: {
         total: patients.length,
         new: newPatients.length,
