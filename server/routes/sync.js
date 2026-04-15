@@ -32,6 +32,94 @@ import { normalizeTestName } from "../utils/labNormalization.js";
 
 const router = Router();
 
+// ── Force resync a single patient by file_no ─────────────────────────────────
+// POST /api/sync/patient/:fileNo/resync
+// Clears the fast-path skip flags on all appointments for the patient,
+// then re-parses existing clinical notes (AI) + re-syncs normalized tables.
+// For today's appointments the next 5-min cron will also re-fetch from HealthRay.
+router.post("/sync/patient/:fileNo/resync", async (req, res) => {
+  const fileNo = req.params.fileNo;
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id, name FROM patients WHERE file_no = $1 LIMIT 1`,
+      [fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: `Patient ${fileNo} not found` });
+    const { id: patientId, name } = patients[0];
+
+    // Clear fast-path flags so next cron re-enriches from HealthRay
+    const { rowCount: cleared } = await pool.query(
+      `UPDATE appointments
+       SET healthray_diagnoses    = '[]'::jsonb,
+           healthray_medications  = '[]'::jsonb,
+           updated_at             = NOW()
+       WHERE patient_id = $1
+         AND healthray_clinical_notes IS NOT NULL`,
+      [patientId],
+    );
+
+    log("Force Resync", `${fileNo} (${name}): cleared fast-path on ${cleared} appointments`);
+
+    // Re-parse all appointments with clinical notes (most-recent first)
+    const { rows: appts } = await pool.query(
+      `SELECT id, healthray_id, appointment_date, healthray_clinical_notes
+       FROM appointments
+       WHERE patient_id = $1
+         AND healthray_clinical_notes IS NOT NULL
+         AND LENGTH(healthray_clinical_notes) > 20
+       ORDER BY appointment_date DESC`,
+      [patientId],
+    );
+
+    let parsed = 0, errors = 0;
+    for (const appt of appts) {
+      try {
+        const result = await parseClinicalWithAI(appt.healthray_clinical_notes);
+        if (!result) { errors++; continue; }
+
+        const diagnoses  = result.diagnoses  || [];
+        const meds       = result.medications || [];
+        const prevMeds   = result.previous_medications || [];
+
+        await pool.query(
+          `UPDATE appointments
+           SET healthray_diagnoses   = $1::jsonb,
+               healthray_medications = $2::jsonb,
+               updated_at            = NOW()
+           WHERE id = $3`,
+          [JSON.stringify(diagnoses), JSON.stringify(meds), appt.id],
+        );
+
+        if (diagnoses.length) await syncDiagnoses(patientId, appt.healthray_id, diagnoses);
+        if (meds.length) {
+          await syncMedications(patientId, appt.healthray_id, appt.appointment_date, meds);
+          await stopStaleHealthrayMeds(patientId, appt.healthray_id, appt.appointment_date);
+        }
+        if (prevMeds.length) await syncStoppedMedications(patientId, appt.healthray_id, prevMeds, meds);
+        await syncBiomarkersFromLatestLabs(patientId, appt.id);
+
+        parsed++;
+        log("Force Resync", `${fileNo}: re-parsed appt ${appt.healthray_id} (${appt.appointment_date}) — ${diagnoses.length} dx, ${meds.length} meds`);
+      } catch (e) {
+        errors++;
+        error("Force Resync", `${fileNo} appt ${appt.healthray_id}: ${e.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      fileNo,
+      name,
+      clearedAppointments: cleared,
+      reparsed: parsed,
+      errors,
+      note: "Fast-path cleared — next 5-min cron will re-fetch today's data from HealthRay",
+    });
+  } catch (e) {
+    handleError(res, e, "Force resync patient");
+  }
+});
+
 // Manual trigger: full sync
 router.post("/sync/healthray/full", async (req, res) => {
   try {

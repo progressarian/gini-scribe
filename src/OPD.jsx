@@ -2466,7 +2466,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
           .filter((d) => d.doc_type === "prescription")
           .map((d) => ({
             id: d.id,
-            doctorName: d.notes ? d.notes.replace(/^Dr\.\s*/, "") : "",
+            doctorName: d.notes && !d.notes.startsWith("healthray_") ? d.notes.replace(/^Dr\.\s*/, "") : "",
             date: d.doc_date
               ? new Date(d.doc_date).toISOString().split("T")[0]
               : new Date(d.created_at).toISOString().split("T")[0],
