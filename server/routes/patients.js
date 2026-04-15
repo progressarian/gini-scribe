@@ -43,9 +43,7 @@ router.get("/patients", async (req, res) => {
         [trimmed],
       );
       if (exactHit.rowCount > 0) {
-        conditions.push(
-          `(p.file_no = $${idx} OR p.phone = $${idx} OR p.abha_id = $${idx})`,
-        );
+        conditions.push(`(p.file_no = $${idx} OR p.phone = $${idx} OR p.abha_id = $${idx})`);
         params.push(trimmed);
         idx++;
       } else {

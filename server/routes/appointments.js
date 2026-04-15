@@ -74,10 +74,9 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
     // Auto-match or auto-create patient if patient_id not provided
     if (!patient_id && patient_name) {
       if (file_no) {
-        const match = await pool.query(
-          `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
-          [file_no],
-        );
+        const match = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+          file_no,
+        ]);
         if (match.rows[0]) {
           patient_id = match.rows[0].id;
         }

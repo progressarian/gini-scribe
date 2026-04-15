@@ -5,6 +5,8 @@
 //   2. case_reports[].reports[].report_tests[].test.parameters[]  (e.g. Microalbumin sub-params)
 //   3. case_reports[].reports[].report_tests[].test (direct)      (e.g. HbA1c, FBS, Lipids — has_sub_tests=false)
 
+import { getCanonical } from "../../utils/labCanonical.js";
+
 function mapParam(param, categoryName) {
   const result = param.result || {};
   const ref = param.test_ref_value || {};
@@ -29,7 +31,12 @@ function mapParam(param, categoryName) {
 
   return {
     name: param.name,
-    canonicalName: (param.name || "").toLowerCase().replace(/\s+/g, "_"),
+    // Map "S. Ferritin" / "Serum Creatinine" etc. onto the shared canonical
+    // key (e.g. "Ferritin") so HealthRay rows dedup against OPD / report_extract
+    // rows that were already canonicalised. Falls back to the old lowercase
+    // underscore form for test names with no canonical mapping yet.
+    canonicalName:
+      getCanonical(param.name) || (param.name || "").toLowerCase().replace(/\s+/g, "_"),
     rawValue: rawVal,
     value: isNaN(numVal) ? null : numVal, // null for text results (e.g. "Positive")
     unit: param.unit || null,

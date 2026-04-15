@@ -316,7 +316,10 @@ router.get("/visit/:patientId", async (req, res) => {
     const labHistory = {};
     const labLatest = {};
     for (const r of labsR.rows) {
-      const key = r.canonical_name || r.test_name;
+      // Fall back to on-the-fly canonicalisation so legacy rows whose
+      // canonical_name was NULL (e.g. "S. Ferritin" before the prefix-strip
+      // fix) still collapse onto the same key as "Ferritin".
+      const key = r.canonical_name || getCanonical(r.test_name) || r.test_name;
       if (!labHistory[key]) labHistory[key] = [];
       labHistory[key].push({
         result: r.result,

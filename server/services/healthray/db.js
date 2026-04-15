@@ -235,10 +235,9 @@ export async function upsertPatient({
       // phone (shared family number) — retry without phone so we create a
       // distinct patient instead of merging into the phone owner's record.
       if (fileNo) {
-        const byFile = await pool.query(
-          `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
-          [fileNo],
-        );
+        const byFile = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+          fileNo,
+        ]);
         if (byFile.rows[0]) return byFile.rows[0].id;
       }
       const res2 = await pool

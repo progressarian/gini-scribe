@@ -292,8 +292,7 @@ export async function retryPendingLabCases() {
 
       // Recompute source from richer detail payload
       const detailSource = classifyCaseSource(detail);
-      const caseSource =
-        detailSource === "unknown" ? row.case_source || "unknown" : detailSource;
+      const caseSource = detailSource === "unknown" ? row.case_source || "unknown" : detailSource;
       if (caseSource && caseSource !== row.case_source) {
         await setLabCaseSource(row.case_no, caseSource);
       }

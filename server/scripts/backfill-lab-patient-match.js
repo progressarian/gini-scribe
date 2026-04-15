@@ -25,11 +25,8 @@ const {
   setLabCaseSource,
   abandonLabCase,
 } = await import("../services/lab/db.js");
-const {
-  parseLabCaseResults,
-  classifyCaseSource,
-  countInhouseProgress,
-} = await import("../services/lab/labHealthrayParser.js");
+const { parseLabCaseResults, classifyCaseSource, countInhouseProgress } =
+  await import("../services/lab/labHealthrayParser.js");
 
 const dryRun = process.argv.includes("--dry-run");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
@@ -79,11 +76,7 @@ for (const row of rows) {
   }
 
   // Match patient
-  let patientId = await matchLabPatient(
-    patientObj.healthray_uid,
-    row.patient_case_no,
-    patientObj,
-  );
+  let patientId = await matchLabPatient(patientObj.healthray_uid, row.patient_case_no, patientObj);
   let didCreate = false;
   if (!patientId) {
     if (dryRun) {

@@ -125,9 +125,7 @@ function stripEmbeddedDate(str) {
 // Strips "Serum", "S.", "Sr.", "B." lab-report prefixes so variants like
 // "S. Ferritin" and "Serum Calcium" collapse onto the same canonical name.
 function stripReportPrefix(str) {
-  return str
-    .replace(/^(serum|plasma|s\.?|sr\.?|b\.?)\s+/i, "")
-    .trim();
+  return str.replace(/^(serum|plasma|s\.?|sr\.?|b\.?)\s+/i, "").trim();
 }
 
 export const getCanonical = (name) => {

@@ -188,11 +188,7 @@ function buildPatientName(patientObj) {
   if (direct && String(direct).trim() && String(direct).trim() !== ".") {
     return String(direct).trim();
   }
-  const parts = [
-    patientObj.first_name,
-    patientObj.middle_name,
-    patientObj.last_name,
-  ]
+  const parts = [patientObj.first_name, patientObj.middle_name, patientObj.last_name]
     .filter((s) => s && String(s).trim() && String(s).trim() !== ".")
     .map((s) => String(s).trim());
   return parts.length ? parts.join(" ") : null;
@@ -297,9 +293,7 @@ export async function ensureLabPatient(patientObj) {
   if (!uid || !/^P_\d+$/i.test(uid)) return null;
   const fileNo = uid.toUpperCase();
 
-  const existing = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-    fileNo,
-  ]);
+  const existing = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo]);
   if (existing.rows[0]) return existing.rows[0].id;
 
   const name = buildPatientName(patientObj) || fileNo;
@@ -321,16 +315,9 @@ export async function ensureLabPatient(patientObj) {
     const cols = withPhone
       ? `(name, phone, file_no, age, sex, dob)`
       : `(name, file_no, age, sex, dob)`;
-    const placeholders = withPhone
-      ? `$1, $2, $3, $4, $5, $6::date`
-      : `$1, $2, $3, $4, $5::date`;
-    const params = withPhone
-      ? [name, phone, fileNo, age, sex, dob]
-      : [name, fileNo, age, sex, dob];
-    return pool.query(
-      `INSERT INTO patients ${cols} VALUES (${placeholders}) RETURNING id`,
-      params,
-    );
+    const placeholders = withPhone ? `$1, $2, $3, $4, $5, $6::date` : `$1, $2, $3, $4, $5::date`;
+    const params = withPhone ? [name, phone, fileNo, age, sex, dob] : [name, fileNo, age, sex, dob];
+    return pool.query(`INSERT INTO patients ${cols} VALUES (${placeholders}) RETURNING id`, params);
   };
 
   try {
@@ -339,9 +326,7 @@ export async function ensureLabPatient(patientObj) {
   } catch (e) {
     if (e.code !== "23505") throw e;
     // file_no race — return whoever already has it
-    const byFile = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-      fileNo,
-    ]);
+    const byFile = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo]);
     if (byFile.rows[0]) return byFile.rows[0].id;
     // Phone collision — retry without phone to keep distinct patient
     try {

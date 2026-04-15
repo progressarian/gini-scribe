@@ -146,10 +146,7 @@ export async function syncTodaysShow() {
       const timeSlot = pickTimeSlot(row);
 
       // Resolve patient_id by file_no only (hospital-unique).
-      const pat = await pool.query(
-        `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
-        [fileNo],
-      );
+      const pat = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo]);
       let patientId = pat.rows[0]?.id || null;
 
       // No patient in DB yet — create one so the appointment can be linked.
@@ -169,18 +166,17 @@ export async function syncTodaysShow() {
             // Otherwise the conflict is on phone (family shared number) —
             // retry the insert without phone to create a distinct patient
             // rather than merging into the phone-owner's record.
-            const byFile = await pool.query(
-              `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
-              [fileNo],
-            );
+            const byFile = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+              fileNo,
+            ]);
             if (byFile.rows[0]) {
               patientId = byFile.rows[0].id;
             } else {
               const ins2 = await pool
-                .query(
-                  `INSERT INTO patients (name, file_no) VALUES ($1, $2) RETURNING id`,
-                  [name || null, fileNo],
-                )
+                .query(`INSERT INTO patients (name, file_no) VALUES ($1, $2) RETURNING id`, [
+                  name || null,
+                  fileNo,
+                ])
                 .catch(() => null);
               patientId = ins2?.rows[0]?.id || null;
             }

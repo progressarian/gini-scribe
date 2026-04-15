@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { fmtDate } from "./helpers";
 import PdfViewerModal from "./PdfViewerModal";
 import { LAB_PANELS as PANELS } from "../../config/labOrder";
+import { getFallbackRange } from "../../config/labRanges";
 
 // Panel grouping config lives in src/config/labOrder.js — single source of
 // truth shared with Outcomes, Sidebar, Assess and the dashboard. See
@@ -43,15 +44,25 @@ function buildLatestRows(labLatest) {
   }));
 
   // Cross-source dedup: if two rows have the same numeric result + unit on same date,
-  // and nearly same test_name (case/punct insensitive), keep the higher-priority source
-  const normalize = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const kept = new Map(); // key: normalized_test_name → row
+  // and nearly same test_name (case/punct insensitive), keep the higher-priority source.
+  // Strip "Serum", "S.", "Sr.", "Plasma", "B." prefixes so variants like
+  // "S. Ferritin" and "Ferritin" collapse onto one dedup key even when the
+  // server's canonical_name hasn't caught up. Match both whitespace and
+  // underscore separators — legacy HealthRay ingest stored canonical names
+  // as "s._ferritin", so an underscore-aware prefix strip is required.
+  const PREFIX_RE = /^(serum|plasma|s\.?|sr\.?|b\.?)[\s_]+/i;
+  const normalize = (s) =>
+    (s || "")
+      .toLowerCase()
+      .replace(PREFIX_RE, "")
+      .replace(/[^a-z0-9]/g, "");
+  const kept = new Map();
 
   // Sort by source priority so best source is processed first
   rows.sort((a, b) => (SOURCE_PRIORITY[a.source] ?? 9) - (SOURCE_PRIORITY[b.source] ?? 9));
 
   for (const row of rows) {
-    const nk = normalize(row.test_name);
+    const nk = normalize(row.canonical) || normalize(row.test_name);
     if (!kept.has(nk)) {
       kept.set(nk, row);
     }
@@ -180,6 +191,8 @@ function buildSections(rows, labOrders) {
 // ── Row ───────────────────────────────────────────────────────────────────────
 function ResultRow({ r }) {
   const isAbnormal = r.flag === "HIGH" || r.flag === "LOW";
+  const fallbackRange = r.ref_range ? null : getFallbackRange(r.canonical, r.test_name);
+  const displayRange = r.ref_range || fallbackRange || "";
   return (
     <div
       style={{
@@ -198,7 +211,16 @@ function ResultRow({ r }) {
         {r.flag && <span style={{ fontSize: 9, marginLeft: 3 }}>({r.flag})</span>}
       </span>
       <span style={{ color: "var(--t3)" }}>{r.unit || ""}</span>
-      <span style={{ color: "var(--t4)", fontSize: 11 }}>{r.ref_range || ""}</span>
+      <span
+        style={{
+          color: fallbackRange ? "var(--t5, #9aa0a6)" : "var(--t4)",
+          fontSize: 11,
+          fontStyle: fallbackRange ? "italic" : "normal",
+        }}
+        title={fallbackRange ? "Typical reference range (lab did not provide one)" : undefined}
+      >
+        {displayRange}
+      </span>
     </div>
   );
 }
@@ -279,7 +301,6 @@ function PanelBlock({ name, results, type }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 const VisitLabsPanel = memo(function VisitLabsPanel({
   documents,
-  labResults,
   labLatest,
   labOrders,
   onUploadReport,
