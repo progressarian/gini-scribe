@@ -6,6 +6,8 @@ import {
   parseLabCaseResults,
   extractTestNames,
   extractCaseDate,
+  classifyCaseSource,
+  countInhouseProgress,
 } from "../lab/labHealthrayParser.js";
 import {
   ensureLabCasesTable,
@@ -13,9 +15,13 @@ import {
   markLabCaseSynced,
   getPendingLabCases,
   matchLabPatient,
+  ensureLabPatient,
   linkLabAppointment,
   syncLabCaseResults,
   patchLabRanges,
+  setLabCaseSource,
+  bumpLabCaseRetry,
+  abandonLabCase,
 } from "../lab/db.js";
 import { createLogger } from "../logger.js";
 
@@ -60,8 +66,16 @@ async function processCase(listRow) {
 
   if (rowId === null) return { skipped: true }; // already processed
 
-  // Step b: match patient (try all available identifiers from patient object)
-  const patientId = await matchLabPatient(patient.healthray_uid, patientCaseNo, patient);
+  // Classify outsource vs in-house from the list row (saves an API call when
+  // the case is fully outsourced — we still record the case but skip retries).
+  const sourceFromList = classifyCaseSource(listRow);
+  await setLabCaseSource(caseNo, sourceFromList);
+
+  // Step b: match patient — universal P_ ID first; auto-create stub if missing
+  let patientId = await matchLabPatient(patient.healthray_uid, patientCaseNo, patient);
+  if (!patientId) {
+    patientId = await ensureLabPatient(patient);
+  }
 
   // Step c: fetch case detail
   let detail;
@@ -73,27 +87,40 @@ async function processCase(listRow) {
     // row stays results_synced=false → recovery will retry
   }
 
+  // Refine source classification using the richer detail payload
+  const detailSource = classifyCaseSource(detail);
+  const caseSource = detailSource === "unknown" ? sourceFromList : detailSource;
+  if (caseSource && caseSource !== sourceFromList) {
+    await setLabCaseSource(caseNo, caseSource);
+  }
+
   // Step d: parse results
   const results = parseLabCaseResults(detail);
 
   // Step e: link appointment
   const appointmentId = await linkLabAppointment(detail.healthray_order_id);
 
-  // Step f: write to lab_results
+  // Step f: write to lab_results (no-op when no patient — kept for symmetry)
   const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
 
-  // Step g: mark synced only when results were actually written
-  // If patient not matched or 0 written, leave results_synced=false so retry picks it up
-  if (written > 0) {
+  // Step g: decide whether the case is terminal
+  const { expected, ready } = countInhouseProgress(detail);
+  const inhouseComplete = expected > 0 && ready >= expected;
+
+  if (caseSource === "outsource") {
+    // Nothing more will arrive on this API channel for an outsource-only case.
     await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
-  } else if (patientId && results.length > 0 && written === 0) {
-    // Patient matched but all results were skipped (source priority) — mark synced to avoid infinite retry
+    await abandonLabCase(caseNo, "outsource-only");
+  } else if (patientId && (written > 0 || inhouseComplete)) {
+    // Either we wrote rows OR all in-house tests have results (even if nothing
+    // landed because of source-priority skips). Either way, terminal.
     await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
   }
+  // Otherwise leave results_synced=false so the recovery loop keeps trying.
 
   log(
     "Sync",
-    `${patientCaseNo} | patient=${patient.healthray_uid || "unknown"} | ${results.length} params | ${written} written`,
+    `${patientCaseNo} | patient=${patient.healthray_uid || "unknown"} | src=${caseSource} | ${ready}/${expected} ready | ${written} written`,
   );
 
   return { caseNo, patientId, appointmentId, total: results.length, written };
@@ -230,12 +257,30 @@ export async function retryPendingLabCases() {
 
   for (const row of pending) {
     try {
-      const patientId = row.patient_id;
       const caseDate = row.case_date
         ? typeof row.case_date === "string"
-          ? row.case_date.slice(0, 10) // already a string, just trim time if any
+          ? row.case_date.slice(0, 10)
           : row.case_date.toISOString().slice(0, 10)
         : null;
+
+      // Bump retry counter first; if the cap is hit the row will be marked
+      // abandoned and skipped on subsequent ticks.
+      const bump = await bumpLabCaseRetry(row.case_no);
+      if (bump?.retry_abandoned) {
+        log("Recovery", `${row.patient_case_no}: retry cap reached, abandoning`);
+        continue;
+      }
+
+      // Re-attempt patient match — covers orphan rows from before file_no
+      // matching was prioritised (and rows where the OPD sync hadn't yet
+      // created the patient on the first pass).
+      let patientId = row.patient_id;
+      const patientObj = row.raw_list_json?.patient || null;
+      if (!patientId && patientObj) {
+        patientId =
+          (await matchLabPatient(patientObj.healthray_uid, row.patient_case_no, patientObj)) ||
+          (await ensureLabPatient(patientObj));
+      }
 
       let detail;
       try {
@@ -245,18 +290,33 @@ export async function retryPendingLabCases() {
         continue;
       }
 
+      // Recompute source from richer detail payload
+      const detailSource = classifyCaseSource(detail);
+      const caseSource =
+        detailSource === "unknown" ? row.case_source || "unknown" : detailSource;
+      if (caseSource && caseSource !== row.case_source) {
+        await setLabCaseSource(row.case_no, caseSource);
+      }
+
       const results = parseLabCaseResults(detail);
       const appointmentId =
         row.appointment_id || (await linkLabAppointment(detail.healthray_order_id));
       const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
 
-      // Only mark synced if results were written or patient is unknown (can't do better)
-      // If patient found but 0 written, results may not be ready — leave for next retry
-      if (written > 0 || !patientId) {
+      const { expected, ready } = countInhouseProgress(detail);
+      const inhouseComplete = expected > 0 && ready >= expected;
+
+      if (caseSource === "outsource") {
+        await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
+        await abandonLabCase(row.case_no, "outsource-only");
+      } else if (patientId && (written > 0 || inhouseComplete)) {
         await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
       }
 
-      log("Recovery", `${row.patient_case_no} recovered | ${written} results written`);
+      log(
+        "Recovery",
+        `${row.patient_case_no} | src=${caseSource} | ${ready}/${expected} ready | ${written} written | retry=${bump?.retry_count}`,
+      );
     } catch (e) {
       log("Recovery", `${row.patient_case_no} error: ${e.message}`);
     }

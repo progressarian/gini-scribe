@@ -163,14 +163,16 @@ export async function ensureSyncColumns() {
 }
 
 // ── Find previous appointment with clinical notes for same patient ──────────
-export async function findAppointmentWithNotes(fileNo, phone, excludeHealthrayId) {
+// Matches by file_no only — phone is shared across family members.
+export async function findAppointmentWithNotes(fileNo, _phone, excludeHealthrayId) {
+  if (!fileNo) return { rows: [] };
   return pool.query(
     `SELECT healthray_id FROM appointments
      WHERE healthray_clinical_notes IS NOT NULL AND LENGTH(healthray_clinical_notes) > 20
-       AND healthray_id != $3
-       AND (($1::text IS NOT NULL AND file_no = $1) OR ($2::text IS NOT NULL AND phone = $2))
+       AND healthray_id != $2
+       AND file_no = $1
      ORDER BY appointment_date DESC LIMIT 1`,
-    [fileNo || null, phone || null, excludeHealthrayId],
+    [fileNo, excludeHealthrayId],
   );
 }
 
@@ -211,14 +213,11 @@ export async function upsertPatient({
   abhaId,
   healthId,
 }) {
-  const existing = await pool.query(
-    `SELECT id, file_no FROM patients
-     WHERE ($1::text IS NOT NULL AND file_no = $1)
-        OR ($2::text IS NOT NULL AND phone = $2)
-     ORDER BY (file_no = $1::text) DESC NULLS LAST
-     LIMIT 1`,
-    [fileNo, phone],
-  );
+  // Match by file_no only. Phone is shared across family members so matching
+  // on phone would merge unrelated patients.
+  const existing = fileNo
+    ? await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo])
+    : { rows: [] };
 
   if (existing.rows[0]) return existing.rows[0].id;
 
@@ -232,11 +231,25 @@ export async function upsertPatient({
     return res.rows[0].id;
   } catch (e) {
     if (e.code === "23505") {
-      const dup = await pool.query(
-        `SELECT id FROM patients WHERE phone = $1 OR file_no = $2 LIMIT 1`,
-        [phone, fileNo],
-      );
-      return dup.rows[0]?.id || null;
+      // If file_no already exists, use it. Otherwise the conflict is on
+      // phone (shared family number) — retry without phone so we create a
+      // distinct patient instead of merging into the phone owner's record.
+      if (fileNo) {
+        const byFile = await pool.query(
+          `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+          [fileNo],
+        );
+        if (byFile.rows[0]) return byFile.rows[0].id;
+      }
+      const res2 = await pool
+        .query(
+          `INSERT INTO patients (name, file_no, age, sex, address, dob, email, blood_group, abha_id, health_id)
+           VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, $9, $10)
+           RETURNING id`,
+          [name, fileNo, age, sex, address, dob, email, bloodGroup, abhaId, healthId],
+        )
+        .catch(() => null);
+      return res2?.rows[0]?.id || null;
     }
     throw e;
   }

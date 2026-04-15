@@ -338,6 +338,7 @@ router.get("/visit/:patientId", async (req, res) => {
           ref_range: r.ref_range,
           is_critical: r.is_critical,
           source: r.source,
+          panel_name: r.panel_name,
         };
       }
     }

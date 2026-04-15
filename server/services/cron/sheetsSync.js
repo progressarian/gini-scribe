@@ -170,7 +170,8 @@ async function importSheetPatient(patient, tabDate) {
   // ── Upsert patient ──
   let patientId = null;
 
-  // Try file_no match first (most reliable), then phone
+  // Match by file_no only (hospital-unique). Phone is unreliable because
+  // family members frequently share a number.
   const byFileNo = fileNo
     ? await pool.query(
         `SELECT id, phone, address, email, dob, age, sex FROM patients WHERE file_no = $1`,
@@ -178,16 +179,7 @@ async function importSheetPatient(patient, tabDate) {
       )
     : { rows: [] };
 
-  const existingPatient =
-    byFileNo.rows[0] ||
-    (phone
-      ? (
-          await pool.query(
-            `SELECT id, phone, address, email, dob, age, sex FROM patients WHERE phone = $1`,
-            [phone],
-          )
-        ).rows[0]
-      : null);
+  const existingPatient = byFileNo.rows[0] || null;
 
   if (existingPatient) {
     patientId = existingPatient.id;

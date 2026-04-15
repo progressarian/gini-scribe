@@ -35,11 +35,31 @@ router.get("/patients", async (req, res) => {
     const params = [];
     let idx = 1;
     if (q) {
-      conditions.push(
-        `(p.name ILIKE $${idx} OR p.phone LIKE $${idx} OR p.file_no ILIKE $${idx} OR p.abha_id ILIKE $${idx})`,
+      const trimmed = String(q).trim();
+      // Exact-match short-circuit: file_no/phone/abha_id are unique identifiers,
+      // so a full paste of one should return only that patient (not substring matches).
+      const exactHit = await pool.query(
+        `SELECT 1 FROM patients WHERE file_no = $1 OR phone = $1 OR abha_id = $1 LIMIT 1`,
+        [trimmed],
       );
-      params.push(`%${q}%`);
-      idx++;
+      if (exactHit.rowCount > 0) {
+        conditions.push(
+          `(p.file_no = $${idx} OR p.phone = $${idx} OR p.abha_id = $${idx})`,
+        );
+        params.push(trimmed);
+        idx++;
+      } else {
+        conditions.push(
+          `(p.name ILIKE $${idx} OR p.phone LIKE $${idx} OR p.file_no ILIKE $${idx} OR p.abha_id ILIKE $${idx}
+            OR EXISTS (
+              SELECT 1 FROM appointments a
+               WHERE a.patient_id = p.id
+                 AND (a.file_no ILIKE $${idx} OR a.patient_name ILIKE $${idx} OR a.phone LIKE $${idx})
+            ))`,
+        );
+        params.push(`%${trimmed}%`);
+        idx++;
+      }
     }
     if (doctor) {
       conditions.push(
@@ -129,20 +149,13 @@ router.get("/stats", async (req, res) => {
 // Check duplicate (must be before /:id route)
 router.get("/patients/check-duplicate", async (req, res) => {
   try {
-    const { file_no, phone, name, age, sex } = req.query;
+    const { file_no, name, age, sex } = req.query;
     let match = null;
     if (file_no)
       match = (
         await pool.query(
           "SELECT id, name, phone, file_no, age, sex FROM patients WHERE file_no=$1 LIMIT 1",
           [file_no],
-        )
-      ).rows[0];
-    if (!match && phone)
-      match = (
-        await pool.query(
-          "SELECT id, name, phone, file_no, age, sex FROM patients WHERE phone=$1 LIMIT 1",
-          [phone],
         )
       ).rows[0];
     if (!match && name && age && sex)
@@ -352,9 +365,7 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
   try {
     const p = req.body;
     let existing = null;
-    if (n(p.phone))
-      existing = (await pool.query("SELECT id FROM patients WHERE phone=$1", [p.phone])).rows[0];
-    if (!existing && n(p.file_no))
+    if (n(p.file_no))
       existing = (await pool.query("SELECT id FROM patients WHERE file_no=$1", [p.file_no]))
         .rows[0];
     if (!existing && n(p.abha_id))

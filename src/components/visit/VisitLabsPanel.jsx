@@ -39,6 +39,7 @@ function buildLatestRows(labLatest) {
     ref_range: v.ref_range,
     test_date: v.date,
     source: v.source || "healthray",
+    panel_name: v.panel_name || null,
   }));
 
   // Cross-source dedup: if two rows have the same numeric result + unit on same date,
@@ -148,9 +149,28 @@ function buildSections(rows, labOrders) {
         sections.push({ type: "report", name: panel.name, results: matches });
       }
     }
-    const others = rows.filter((r) => !assigned.has(r.canonical));
-    if (others.length > 0) sections.push({ type: "report", name: "Other", results: others });
   }
+
+  // Group remaining rows by server-provided panel_name (e.g. "Haematology",
+  // "Biochemistry" from HealthRay category). Runs regardless of branch above
+  // so orphan rows from `investigation_summary` still get categorised.
+  const byPanel = new Map();
+  for (const r of rows) {
+    if (assigned.has(r.canonical)) continue;
+    const key = r.panel_name && String(r.panel_name).trim();
+    if (!key) continue;
+    if (!byPanel.has(key)) byPanel.set(key, []);
+    byPanel.get(key).push(r);
+  }
+  for (const [name, results] of byPanel) {
+    results.forEach((r) => assigned.add(r.canonical));
+    sections.push({ type: "report", name, results });
+  }
+
+  // Catch-all "Other" — shows every test the user paid for, even if it doesn't
+  // match any known panel or carry a server-side category.
+  const others = rows.filter((r) => !assigned.has(r.canonical));
+  if (others.length > 0) sections.push({ type: "report", name: "Other", results: others });
 
   // Enforce canonical order regardless of which branch built the sections.
   sections.sort((a, b) => rankSection(a.name) - rankSection(b.name));

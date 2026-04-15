@@ -31,7 +31,12 @@ router.get("/appointments", async (req, res) => {
     const [countResult, dataResult] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total FROM appointments a ${where}`, params),
       pool.query(
-        `SELECT a.*, p.age, p.sex FROM appointments a LEFT JOIN patients p ON p.id = a.patient_id ${where}${orderBy} LIMIT $${countIdx} OFFSET $${countIdx + 1}`,
+        `SELECT a.*, COALESCE(p.id, a.patient_id) AS patient_id, p.age, p.sex
+         FROM appointments a
+         LEFT JOIN patients p
+           ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
+           OR (a.file_no IS NULL AND p.id = a.patient_id)
+         ${where}${orderBy} LIMIT $${countIdx} OFFSET $${countIdx + 1}`,
         [...params, limit, offset],
       ),
     ]);
@@ -68,15 +73,10 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
 
     // Auto-match or auto-create patient if patient_id not provided
     if (!patient_id && patient_name) {
-      // Try to find existing patient by file_no or phone
-      if (file_no || phone) {
+      if (file_no) {
         const match = await pool.query(
-          `SELECT id FROM patients
-            WHERE ($1::text IS NOT NULL AND file_no = $1)
-               OR ($2::text IS NOT NULL AND phone = $2)
-            ORDER BY (file_no = $1::text) DESC NULLS LAST
-            LIMIT 1`,
-          [file_no || null, phone || null],
+          `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+          [file_no],
         );
         if (match.rows[0]) {
           patient_id = match.rows[0].id;
@@ -102,10 +102,9 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
           patient_id = newPt.rows[0].id;
           file_no = newPt.rows[0].file_no;
         } catch (dupErr) {
-          // Duplicate file_no or phone — link to existing patient instead
           const existing = await pool.query(
-            `SELECT id, file_no FROM patients WHERE file_no = $1 OR phone = $2 LIMIT 1`,
-            [autoFileNo, phone || null],
+            `SELECT id, file_no FROM patients WHERE file_no = $1 LIMIT 1`,
+            [autoFileNo],
           );
           if (existing.rows[0]) {
             patient_id = existing.rows[0].id;
@@ -141,7 +140,15 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
 // Get single appointment
 router.get("/appointments/:id", async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM appointments WHERE id=$1", [req.params.id]);
+    const { rows } = await pool.query(
+      `SELECT a.*, COALESCE(p.id, a.patient_id) AS patient_id
+       FROM appointments a
+       LEFT JOIN patients p
+         ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
+         OR (a.file_no IS NULL AND p.id = a.patient_id)
+       WHERE a.id=$1`,
+      [req.params.id],
+    );
     if (!rows[0]) return res.status(404).json({ error: "Not found" });
     res.json(rows[0]);
   } catch (e) {

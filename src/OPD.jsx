@@ -5883,13 +5883,17 @@ export default function OPD() {
   const fetchAppts = useCallback(() => {
     setLoading(true);
     setAppointments([]);
-    apiFetch(`/api/opd/appointments?date=${date}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setAppointments(Array.isArray(d) ? d : []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    apiFetch("/api/opd/sync-noshow", { method: "POST" })
+      .catch(() => {})
+      .finally(() => {
+        apiFetch(`/api/opd/appointments?date=${date}`)
+          .then((r) => r.json())
+          .then((d) => {
+            setAppointments(Array.isArray(d) ? d : []);
+            setLoading(false);
+          })
+          .catch(() => setLoading(false));
+      });
   }, [date]);
 
   useEffect(() => {
@@ -5993,7 +5997,11 @@ export default function OPD() {
       (!isReady(a) || ["checkedin", "in_visit", "seen"].includes(a.status))
     )
       return false;
-    if (filterDoc !== "all" && a.doctor_name !== filterDoc) return false;
+    if (filterDoc === "__noshow__") {
+      if (a.status !== "no_show") return false;
+    } else if (filterDoc !== "all") {
+      if (a.doctor_name !== filterDoc) return false;
+    }
     if (filterCat === "complex" && a.category !== "complex") return false;
     if (filterCat === "maint" && a.category !== "maint") return false;
     if (filterCat === "ctrl" && a.category !== "ctrl") return false;
@@ -6007,10 +6015,10 @@ export default function OPD() {
     return true;
   });
 
-  // Group by doctor
+  // Group by doctor — no-show patients get their own group regardless of doctor
   const grouped = {};
   filtered.forEach((a) => {
-    const k = a.doctor_name || "Unassigned";
+    const k = a.status === "no_show" ? "No-Show" : a.doctor_name || "Unassigned";
     if (!grouped[k]) grouped[k] = [];
     grouped[k].push(a);
   });
@@ -6273,6 +6281,13 @@ export default function OPD() {
             filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
               setFilterDoc(d === filterDoc ? "all" : d),
             ),
+          )}
+          {filterBtn(
+            `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
+            "__noshow__",
+            filterDoc === "__noshow__",
+            () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
+            "#6b7280",
           )}
           <div style={{ width: 1, height: 18, background: BD, margin: "0 10px" }} />
           <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>

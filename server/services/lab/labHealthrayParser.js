@@ -105,6 +105,66 @@ export function extractInvestigationSummary(caseDetail) {
   return { reports, tests };
 }
 
+// ── Outsource classification ────────────────────────────────────────────────
+// HealthRay marks each test inside case_reports[].tests[] with
+// investigation_type: "lab" (in-house) or "outsource_lab" (sent out).
+// Cases sometimes also expose outsource_lab_id / outsource_lab.
+function isOutsourceTest(test) {
+  if (!test) return false;
+  if (test.investigation_type === "outsource_lab") return true;
+  if (test.outsource_lab_id != null) return true;
+  if (test.outsource_lab && typeof test.outsource_lab === "object") return true;
+  return false;
+}
+
+function* iterCaseTests(listRowOrDetail) {
+  for (const cat of listRowOrDetail?.case_reports || []) {
+    for (const test of cat.tests || []) yield test;
+    for (const report of cat.reports || []) {
+      for (const rt of report.report_tests || []) {
+        if (rt?.test) yield rt.test;
+      }
+    }
+  }
+}
+
+// Returns 'inhouse' | 'mixed' | 'outsource' | 'unknown' (no tests visible).
+export function classifyCaseSource(listRowOrDetail) {
+  let inhouse = 0;
+  let outsource = 0;
+  for (const test of iterCaseTests(listRowOrDetail)) {
+    if (isOutsourceTest(test)) outsource++;
+    else inhouse++;
+  }
+  if (inhouse === 0 && outsource === 0) return "unknown";
+  if (outsource === 0) return "inhouse";
+  if (inhouse === 0) return "outsource";
+  return "mixed";
+}
+
+// Counts of in-house tests expected vs in-house tests with a usable result,
+// from a case detail object. Used by the retry loop to decide if results are
+// still pending.
+export function countInhouseProgress(caseDetail) {
+  let expected = 0;
+  let ready = 0;
+  for (const test of iterCaseTests(caseDetail)) {
+    if (isOutsourceTest(test)) continue;
+    if (test.parameters && test.parameters.length > 0) {
+      for (const p of test.parameters) {
+        expected++;
+        const v = p?.result?.test_result;
+        if (v != null && v !== "") ready++;
+      }
+    } else {
+      expected++;
+      const v = test?.result?.test_result;
+      if (v != null && v !== "") ready++;
+    }
+  }
+  return { expected, ready };
+}
+
 // Determine best date for the case
 export function extractCaseDate(listRow) {
   const raw = listRow.collected_on || listRow.registered_at || listRow.created_at;

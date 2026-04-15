@@ -9,6 +9,7 @@ import useLabStore from "./labStore.js";
 import useExamStore from "./examStore.js";
 
 let searchTimer = null;
+let searchReqId = 0;
 let _toastFn = null;
 
 // Global toast — callable from stores, components, anywhere
@@ -70,13 +71,27 @@ const useUiStore = create((set, get) => ({
 
   // ── searchPatientsDB (paginated, resets to page 1) ──
   searchPatientsDB: async (q, period, doctor, toast) => {
+    const myId = ++searchReqId;
+    const trimmed = (q || "").trim();
+    // Mid-typing: non-empty but too short. Don't fall back to "all patients".
+    if (trimmed && trimmed.length < 2) {
+      set({
+        dbPatients: [],
+        searchLoading: false,
+        searchPage: 1,
+        searchTotalPages: 1,
+        searchTotal: 0,
+      });
+      return;
+    }
     set({ searchLoading: true });
     try {
       const params = new URLSearchParams({ limit: "30", page: "1" });
-      if (q && q.length >= 2) params.set("q", q);
+      if (trimmed) params.set("q", trimmed);
       if (period) params.set("period", period);
       if (doctor) params.set("doctor", doctor);
       const { data: res } = await api.get(`/api/patients?${params}`);
+      if (myId !== searchReqId) return;
       set({
         dbPatients: res.data || [],
         searchPage: res.page || 1,
@@ -84,15 +99,17 @@ const useUiStore = create((set, get) => ({
         searchTotal: res.total || 0,
       });
     } catch (err) {
+      if (myId !== searchReqId) return;
       if (toast) toast("Patient search failed", "warn");
       set({ dbPatients: [], searchPage: 1, searchTotalPages: 1, searchTotal: 0 });
     }
-    set({ searchLoading: false });
+    if (myId === searchReqId) set({ searchLoading: false });
   },
 
   // ── debounced search (for typing) ──
   debouncedSearch: (q, period, doctor) => {
     clearTimeout(searchTimer);
+    searchReqId++;
     set({ searchQuery: q });
     searchTimer = setTimeout(() => {
       get().searchPatientsDB(q, period, doctor);
@@ -104,13 +121,16 @@ const useUiStore = create((set, get) => ({
     const { searchPage, searchTotalPages, searchQuery, searchPeriod, searchDoctor } = get();
     if (searchPage >= searchTotalPages) return;
     const nextPage = searchPage + 1;
+    const myId = searchReqId;
     set({ searchLoadingMore: true });
     try {
       const params = new URLSearchParams({ limit: "30", page: String(nextPage) });
-      if (searchQuery && searchQuery.length >= 2) params.set("q", searchQuery);
+      const trimmed = (searchQuery || "").trim();
+      if (trimmed && trimmed.length >= 2) params.set("q", trimmed);
       if (searchPeriod) params.set("period", searchPeriod);
       if (searchDoctor) params.set("doctor", searchDoctor);
       const { data: res } = await api.get(`/api/patients?${params}`);
+      if (myId !== searchReqId) return;
       set((s) => ({
         dbPatients: [...s.dbPatients, ...(res.data || [])],
         searchPage: res.page || nextPage,
@@ -120,7 +140,7 @@ const useUiStore = create((set, get) => ({
     } catch {
       /* silent */
     }
-    set({ searchLoadingMore: false });
+    if (myId === searchReqId) set({ searchLoadingMore: false });
   },
 
   // ── openSearch ──
@@ -153,16 +173,19 @@ const useUiStore = create((set, get) => ({
   // ── initFind: called when FindPage mounts ──
   initFind: async () => {
     const { searchQuery, searchPeriod, searchDoctor } = get();
+    const myId = ++searchReqId;
     set({ searchLoading: true });
     try {
       const params = new URLSearchParams({ limit: "30", page: "1" });
-      if (searchQuery && searchQuery.length >= 2) params.set("q", searchQuery);
+      const trimmed = (searchQuery || "").trim();
+      if (trimmed && trimmed.length >= 2) params.set("q", trimmed);
       if (searchPeriod) params.set("period", searchPeriod);
       if (searchDoctor) params.set("doctor", searchDoctor);
       const [pResp, sResp] = await Promise.all([
         api.get(`/api/patients?${params}`),
         api.get("/api/stats"),
       ]);
+      if (myId !== searchReqId) return;
       const res = pResp.data;
       set({
         dbPatients: res.data || [],
@@ -175,7 +198,7 @@ const useUiStore = create((set, get) => ({
     } catch {
       /* silent */
     }
-    set({ searchLoading: false });
+    if (myId === searchReqId) set({ searchLoading: false });
   },
 
   // ── saveConsultation: persist patient + vitals + clinical data ──

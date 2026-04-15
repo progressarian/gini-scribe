@@ -54,10 +54,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
 
     let patientId,
       existing = null;
-    if (n(patient.phone))
-      existing = (await client.query("SELECT id FROM patients WHERE phone=$1", [patient.phone]))
-        .rows[0];
-    if (!existing && n(patient.fileNo))
+    if (n(patient.fileNo))
       existing = (await client.query("SELECT id FROM patients WHERE file_no=$1", [patient.fileNo]))
         .rows[0];
     if (!existing && n(patient.name) && patient.age && patient.sex) {

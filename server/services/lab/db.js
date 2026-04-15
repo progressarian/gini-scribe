@@ -40,6 +40,10 @@ export async function ensureLabCasesTable() {
       synced_at       TIMESTAMPTZ
     );
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS investigation_summary JSONB;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS case_source TEXT;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMPTZ;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS retry_abandoned BOOLEAN DEFAULT FALSE;
     CREATE INDEX IF NOT EXISTS idx_lab_cases_patient    ON lab_cases(patient_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_appt       ON lab_cases(appointment_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_date       ON lab_cases(case_date);
@@ -121,11 +125,17 @@ export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawD
   );
 }
 
-// ── Get cases pending retry (results_synced=false, older than 10 min) ────────
+// ── Get cases pending retry ─────────────────────────────────────────────────
+// Skip outsource-only cases (results never come through this API) and rows
+// already abandoned after the retry cap. Throttle each row to one attempt per
+// 10 minutes to avoid hammering the API.
 export async function getPendingLabCases() {
   const { rows } = await pool.query(
     `SELECT * FROM lab_cases
      WHERE results_synced = FALSE
+       AND COALESCE(retry_abandoned, FALSE) = FALSE
+       AND (case_source IS NULL OR case_source IN ('inhouse', 'mixed', 'unknown'))
+       AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '10 minutes')
        AND fetched_at < NOW() - INTERVAL '10 minutes'
      ORDER BY fetched_at ASC
      LIMIT 50`,
@@ -133,14 +143,94 @@ export async function getPendingLabCases() {
   return rows;
 }
 
-// ── Match patient by any available identifier ────────────────────────────────
-export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
-  // Collect all possible identifiers from every source
-  const tryIds = new Set();
-  if (healthrayUid) tryIds.add(String(healthrayUid));
-  if (patientCaseNo) tryIds.add(String(patientCaseNo));
+// Retry budget: ~14 days at one effective attempt per hour (cron is 15 min,
+// gated by 10-min last_retry_at — so ~4/hour theoretical, ~1/hour practical).
+const RETRY_CAP = 336;
 
-  // Extract identifiers from the full patient object (Lab API returns various fields)
+export async function bumpLabCaseRetry(caseNo) {
+  const { rows } = await pool.query(
+    `UPDATE lab_cases
+       SET retry_count = COALESCE(retry_count, 0) + 1,
+           last_retry_at = NOW(),
+           retry_abandoned = (COALESCE(retry_count, 0) + 1) >= $2
+     WHERE case_no = $1
+     RETURNING retry_count, retry_abandoned`,
+    [caseNo, RETRY_CAP],
+  );
+  return rows[0] || null;
+}
+
+export async function setLabCaseSource(caseNo, source) {
+  if (!source) return;
+  await pool.query(
+    `UPDATE lab_cases SET case_source = $2 WHERE case_no = $1 AND (case_source IS DISTINCT FROM $2)`,
+    [caseNo, source],
+  );
+}
+
+// Mark an outsource-only case as terminal — nothing further to fetch.
+export async function abandonLabCase(caseNo, reason) {
+  await pool.query(
+    `UPDATE lab_cases
+       SET retry_abandoned = TRUE,
+           results_synced = TRUE,
+           synced_at = COALESCE(synced_at, NOW())
+     WHERE case_no = $1`,
+    [caseNo],
+  );
+  void reason;
+}
+
+// ── Patient name normalization (lab patient → name string) ──────────────────
+function buildPatientName(patientObj) {
+  if (!patientObj) return null;
+  const direct = patientObj.patient_name || patientObj.name;
+  if (direct && String(direct).trim() && String(direct).trim() !== ".") {
+    return String(direct).trim();
+  }
+  const parts = [
+    patientObj.first_name,
+    patientObj.middle_name,
+    patientObj.last_name,
+  ]
+    .filter((s) => s && String(s).trim() && String(s).trim() !== ".")
+    .map((s) => String(s).trim());
+  return parts.length ? parts.join(" ") : null;
+}
+
+function ageFromDob(dob) {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d)) return null;
+  const ms = Date.now() - d.getTime();
+  return Math.floor(ms / (365.25 * 24 * 3600 * 1000));
+}
+
+function normalizeSex(g) {
+  if (!g) return null;
+  const s = String(g).trim().toLowerCase();
+  if (s.startsWith("m")) return "Male";
+  if (s.startsWith("f")) return "Female";
+  if (s.startsWith("o")) return "Other";
+  return null;
+}
+
+// ── Match patient — universal P_ file_no first, never phone-only ────────────
+// HealthRay's patient.healthray_uid is the authoritative per-patient ID
+// (e.g. "P_179589") and is mirrored as patients.file_no in our DB.
+// Phone matching is intentionally demoted: shared family/clinic numbers cause
+// wrong-patient links (e.g. one phone → many distinct P_XXXXX patients).
+export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
+  // 1) Exact file_no = healthray_uid (the universal P_ ID)
+  if (healthrayUid) {
+    const uid = String(healthrayUid).trim();
+    const r = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [uid]);
+    if (r.rows[0]) return r.rows[0].id;
+  }
+
+  // 2) Other identifier-ish fields → file_no exact / P_ prefixed / embedded P_\d+
+  const tryIds = new Set();
+  if (patientCaseNo) tryIds.add(String(patientCaseNo));
   if (patientObj && typeof patientObj === "object") {
     for (const key of [
       "uhid",
@@ -149,7 +239,6 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
       "reg_no",
       "file_no",
       "patient_id",
-      "healthray_uid",
       "uid",
       "mr_no",
       "mrn",
@@ -160,33 +249,11 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
       const val = patientObj[key];
       if (val) tryIds.add(String(val));
     }
-    // Try phone matching
-    const phone = patientObj.phone || patientObj.mobile || patientObj.contact_no;
-    if (phone) {
-      const p = String(phone).replace(/\s+/g, "");
-      const r = await pool.query(
-        `SELECT id FROM patients WHERE phone = $1 OR phone = $2 OR phone = $3 LIMIT 1`,
-        [p, `+91${p}`, p.replace(/^\+91/, "")],
-      );
-      if (r.rows[0]) return r.rows[0].id;
-    }
-    // Name + age as last resort
-    if (patientObj.name && patientObj.age) {
-      const r = await pool.query(
-        `SELECT id FROM patients WHERE LOWER(name) = LOWER($1) AND age = $2 LIMIT 1`,
-        [String(patientObj.name).trim(), parseInt(patientObj.age)],
-      );
-      if (r.rows[0]) return r.rows[0].id;
-    }
   }
-
-  // Try each collected identifier against file_no
   for (const id of tryIds) {
-    // Exact match
     const r1 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [id]);
     if (r1.rows[0]) return r1.rows[0].id;
 
-    // P_ prefix match (Lab uses G14320, our DB has P_131520)
     if (!/^P[_-]/i.test(id)) {
       const r2 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
         `P_${id}`,
@@ -194,7 +261,6 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
       if (r2.rows[0]) return r2.rows[0].id;
     }
 
-    // Extract any P_XXXXX pattern embedded in the identifier
     const pMatch = id.match(/P[_-]?\d+/i);
     if (pMatch) {
       const fileNo = pMatch[0].replace(/-/, "_").toUpperCase();
@@ -205,7 +271,92 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
     }
   }
 
+  // 3) Name + DOB (strong identifier when both present)
+  const name = buildPatientName(patientObj);
+  const dob = patientObj?.birth_date || patientObj?.dob || null;
+  if (name && dob) {
+    const r = await pool.query(
+      `SELECT id FROM patients
+         WHERE LOWER(name) = LOWER($1) AND dob = $2::date
+         LIMIT 1`,
+      [name, dob],
+    );
+    if (r.rows[0]) return r.rows[0].id;
+  }
+
+  // Phone is intentionally NOT used as a match key — family members often
+  // share a number, so matching on phone merges unrelated patients.
   return null;
+}
+
+// ── Auto-create a stub patient from the lab API patient object ──────────────
+// Only triggers when healthray_uid looks like a real "P_XXXXX" universal ID.
+// Avoids merging on phone (would re-create the shared-phone collision).
+export async function ensureLabPatient(patientObj) {
+  const uid = patientObj?.healthray_uid ? String(patientObj.healthray_uid).trim() : null;
+  if (!uid || !/^P_\d+$/i.test(uid)) return null;
+  const fileNo = uid.toUpperCase();
+
+  const existing = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+    fileNo,
+  ]);
+  if (existing.rows[0]) return existing.rows[0].id;
+
+  const name = buildPatientName(patientObj) || fileNo;
+  const phoneRaw =
+    patientObj?.mobile_number ||
+    patientObj?.phone ||
+    patientObj?.mobile ||
+    patientObj?.contact_no ||
+    null;
+  const phone = phoneRaw ? String(phoneRaw).replace(/\s+/g, "") : null;
+  const dob = patientObj?.birth_date || patientObj?.dob || null;
+  const age = ageFromDob(dob);
+  const sex = normalizeSex(patientObj?.gender);
+
+  // Two unique constraints on patients: file_no and phone. The phone is shared
+  // across families/patients in HealthRay, so on phone conflict we INSERT
+  // without phone — keeping a distinct row per P_XXXXX, never merging by phone.
+  const tryInsert = async (withPhone) => {
+    const cols = withPhone
+      ? `(name, phone, file_no, age, sex, dob)`
+      : `(name, file_no, age, sex, dob)`;
+    const placeholders = withPhone
+      ? `$1, $2, $3, $4, $5, $6::date`
+      : `$1, $2, $3, $4, $5::date`;
+    const params = withPhone
+      ? [name, phone, fileNo, age, sex, dob]
+      : [name, fileNo, age, sex, dob];
+    return pool.query(
+      `INSERT INTO patients ${cols} VALUES (${placeholders}) RETURNING id`,
+      params,
+    );
+  };
+
+  try {
+    const ins = await tryInsert(!!phone);
+    return ins.rows[0].id;
+  } catch (e) {
+    if (e.code !== "23505") throw e;
+    // file_no race — return whoever already has it
+    const byFile = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+      fileNo,
+    ]);
+    if (byFile.rows[0]) return byFile.rows[0].id;
+    // Phone collision — retry without phone to keep distinct patient
+    try {
+      const ins2 = await tryInsert(false);
+      return ins2.rows[0].id;
+    } catch (e2) {
+      if (e2.code === "23505") {
+        const recheck = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+          fileNo,
+        ]);
+        return recheck.rows[0]?.id || null;
+      }
+      throw e2;
+    }
+  }
 }
 
 // ── Link appointment via healthray_order_id ──────────────────────────────────
@@ -285,8 +436,8 @@ export async function syncLabCaseResults(patientId, appointmentId, caseDate, res
     await pool
       .query(
         `INSERT INTO lab_results
-         (patient_id, appointment_id, test_date, test_name, canonical_name, result, unit, ref_range, flag, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'lab_healthray')`,
+         (patient_id, appointment_id, test_date, test_name, canonical_name, result, unit, ref_range, flag, panel_name, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'lab_healthray')`,
         [
           patientId,
           appointmentId || null,
@@ -297,6 +448,7 @@ export async function syncLabCaseResults(patientId, appointmentId, caseDate, res
           r.unit || null,
           r.refRange || null,
           r.flag || null,
+          r.category || null,
         ],
       )
       .catch(() => {});

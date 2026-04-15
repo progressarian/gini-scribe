@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
+import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
 
 const router = Router();
 
@@ -241,58 +242,72 @@ const num = (v) => {
   return isNaN(n) ? null : n;
 };
 
+// ── POST /api/opd/sync-noshow — trigger Google Sheet no-show sync on demand ──
+router.post("/opd/sync-noshow", async (_req, res) => {
+  try {
+    const result = await syncTodaysShow();
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    handleError(res, e, "Sync no-show failed");
+  }
+});
+
 // ── GET /api/opd/appointments — OPD list (flat array, by date) ───────────────
 router.get("/opd/appointments", async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split("T")[0];
     const { rows } = await pool.query(
       `SELECT a.*,
+              rp.pid AS patient_id,
               COALESCE(a.age, EXTRACT(YEAR FROM AGE(p.dob))::INTEGER, p.age) AS age,
               COALESCE(a.sex, p.sex) AS sex,
               COALESCE(
                 (SELECT COUNT(*) FROM consultations c
-                  WHERE c.patient_id = a.patient_id
-                    AND a.patient_id IS NOT NULL)
+                  WHERE c.patient_id = rp.pid
+                    AND rp.pid IS NOT NULL)
                 +
                 (SELECT COUNT(*) FROM appointments a2
-                  WHERE a2.patient_id = a.patient_id
-                    AND a2.patient_id IS NOT NULL
+                  WHERE a2.patient_id = rp.pid
+                    AND rp.pid IS NOT NULL
                     AND a2.appointment_date <= a.appointment_date
                     AND COALESCE(a2.status, 'scheduled') NOT IN ('cancelled', 'no_show')),
                 a.visit_count, 1
               )::INTEGER AS visit_count,
               (SELECT MAX(a3.appointment_date) FROM appointments a3
-                WHERE a3.patient_id = a.patient_id
-                  AND a3.patient_id IS NOT NULL
+                WHERE a3.patient_id = rp.pid
+                  AND rp.pid IS NOT NULL
                   AND a3.appointment_date < a.appointment_date
               ) AS last_visit_date,
               COALESCE(
                 NULLIF(a.healthray_diagnoses, '[]'::jsonb),
                 (SELECT a4.healthray_diagnoses FROM appointments a4
-                  WHERE a4.patient_id = a.patient_id
-                    AND a4.patient_id IS NOT NULL
+                  WHERE a4.patient_id = rp.pid
+                    AND rp.pid IS NOT NULL
                     AND a4.healthray_diagnoses IS NOT NULL
                     AND jsonb_array_length(a4.healthray_diagnoses) > 0
                   ORDER BY a4.appointment_date DESC LIMIT 1)
               ) AS healthray_diagnoses,
               (SELECT COUNT(*) FROM lab_cases lc
-                WHERE lc.patient_id = a.patient_id
+                WHERE lc.patient_id = rp.pid
                   AND lc.results_synced = FALSE
               )::INTEGER AS pending_labs,
               (SELECT COUNT(*) FROM lab_cases lc2
-                WHERE lc2.patient_id = a.patient_id
+                WHERE lc2.patient_id = rp.pid
                   AND lc2.results_synced = TRUE
                   AND lc2.case_date >= CURRENT_DATE - INTERVAL '7 days'
               )::INTEGER AS recent_labs,
               (SELECT lr.result FROM lab_results lr
-                WHERE lr.patient_id = a.patient_id
+                WHERE lr.patient_id = rp.pid
                   AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
                   AND lr.result IS NOT NULL
                 ORDER BY lr.test_date DESC, lr.created_at DESC
                 OFFSET 1 LIMIT 1
               ) AS prev_hba1c
          FROM appointments a
-         LEFT JOIN patients p ON p.id = a.patient_id
+         LEFT JOIN patients p
+           ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
+           OR (a.file_no IS NULL AND p.id = a.patient_id)
+         LEFT JOIN LATERAL (SELECT COALESCE(p.id, a.patient_id) AS pid) rp ON TRUE
         WHERE a.appointment_date = $1
         ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
       [date],

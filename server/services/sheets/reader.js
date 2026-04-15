@@ -106,6 +106,39 @@ export async function readTodaysPatients() {
   return { date, waitTimeThresholds, statusNotes, patients };
 }
 
+// ── "Today's Appt" tab ──────────────────────────────────────────────────────
+// Layout differs from "LIVE View of Today's patients":
+//   Row 0: summary ("Date","15/Apr/2026","# Patients:41",...)
+//   Row 1: headers (Appointment Date, File No, Patient Name, ..., Show/No-Show)
+//   Row 2+: patient rows
+
+export async function readTodaysAppt() {
+  const sheets = getClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: "Today's Appt",
+  });
+  const rows = res.data.values || [];
+  if (rows.length < 2) return { date: null, patients: [] };
+
+  const date = rows[0]?.[1] || null;
+  const headers = (rows[1] || []).map((h) => (h || "").replace(/\n/g, " ").trim());
+
+  const patients = [];
+  for (let i = 2; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every((c) => !(c || "").toString().trim())) continue;
+    const p = {};
+    for (let j = 0; j < headers.length; j++) {
+      const key = headers[j];
+      const val = (row[j] || "").toString().trim();
+      if (key && val) p[key] = val;
+    }
+    if (Object.keys(p).length >= 2) patients.push(p);
+  }
+  return { date, headers, patients };
+}
+
 // ── New: Read a single upcoming tab ─────────────────────────────────────────
 
 export async function readSheetTab(tabName) {
