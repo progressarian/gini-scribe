@@ -27,6 +27,7 @@ import summaryRoutes from "./routes/summary.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
+import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,4 +105,5 @@ app.listen(PORT, () => {
   console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`);
   startCronJobs();
   startSheetsCron();
+  startTodaysShowCron();
 });

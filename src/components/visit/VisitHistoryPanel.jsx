@@ -217,7 +217,10 @@ const VisitHistoryPanel = memo(function VisitHistoryPanel({ consultations }) {
         <div className="scb">
           {consultations.map((c, i) => {
             const visitNum = consultations.length - i;
-            const isToday = i === 0;
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+            const visitDateStr = c.visit_date ? String(c.visit_date).slice(0, 10) : null;
+            const isToday = visitDateStr === todayStr;
             return (
               <VisitCard
                 key={`${c.source_type}-${c.id}`}
