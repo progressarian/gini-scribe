@@ -860,46 +860,33 @@ export async function syncStoppedMedications(
         return { rowCount: 0 };
       });
 
-    // If no existing active medicine found, insert as a new stopped entry (for dose changes)
-    // Only insert if this dose+name combo doesn't already exist
+    // If no existing active medicine found, insert as a new stopped entry (for dose changes).
+    // Use ON CONFLICT DO NOTHING so duplicate canonical names (patient_inactive_name_uniq)
+    // are silently skipped — avoids a flawed check-then-insert that breaks on NULL dose.
     if (updateRes.rowCount === 0) {
-      const checkExists = await pool
+      await pool
         .query(
-          `SELECT id FROM medications
-           WHERE patient_id = $1
-             AND UPPER(name) = UPPER($2)
-             AND dose = $3`,
-          [patientId, med.name, med.dose || null],
+          `INSERT INTO medications
+             (patient_id, name, pharmacy_match, dose, frequency, is_active, stopped_date, stop_reason, notes)
+           VALUES ($1, $2, $3, $4, $5, false, CURRENT_DATE, $6, $7)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+           DO NOTHING`,
+          [
+            patientId,
+            med.name,
+            normalizeMedName(med.name),
+            med.dose || null,
+            med.frequency || null,
+            reason,
+            `Previous dose (stopped)`,
+          ],
         )
-        .catch((e) => {
+        .catch((e) =>
           error(
             "syncStoppedMedications",
-            `existence-check SELECT failed for patient=${patientId} med="${med.name}": ${e.message}`,
-          );
-          return { rows: [] };
-        });
-
-      if (checkExists.rows.length === 0) {
-        await pool
-          .query(
-            `INSERT INTO medications (patient_id, name, dose, frequency, is_active, stopped_date, stop_reason, notes)
-             VALUES ($1, $2, $3, $4, false, CURRENT_DATE, $5, $6)`,
-            [
-              patientId,
-              med.name,
-              med.dose || null,
-              med.frequency || null,
-              reason,
-              `Previous dose (stopped)`,
-            ],
-          )
-          .catch((e) =>
-            error(
-              "syncStoppedMedications",
-              `historical INSERT failed for patient=${patientId} med="${med.name}" dose="${med.dose || ""}": ${e.message}`,
-            ),
-          );
-      }
+            `historical INSERT failed for patient=${patientId} med="${med.name}" dose="${med.dose || ""}": ${e.message}`,
+          ),
+        );
     }
   }
 }
@@ -943,24 +930,42 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     // Also clear consultation_id/document_id so HealthRay takes ownership —
     // otherwise old consultation-linked rows stay filtered out by latest_cons.
     // Step 1: reactivate any existing inactive row with the same canonical name.
+    // Note: use a separate param array without med.name ($2 in the INSERT params)
+    // so PostgreSQL doesn't complain about an untyped unused parameter.
+    const updateParams = [
+      patientId, // $1
+      pharmacyMatch, // $2
+      med.dose || null, // $3
+      med.frequency || null, // $4
+      med.timing || null, // $5
+      med.route || "Oral", // $6
+      apptDate, // $7
+      `healthray:${healthrayId}`, // $8
+    ];
     await pool
       .query(
         `UPDATE medications
          SET is_active = true,
-             pharmacy_match = $3,
-             dose = COALESCE($4, dose),
-             frequency = COALESCE($5, frequency),
-             timing = COALESCE($6, timing),
-             route = COALESCE($7, route),
-             started_date = COALESCE($8, started_date),
-             notes = $9,
+             pharmacy_match = $2,
+             dose = COALESCE($3, dose),
+             frequency = COALESCE($4, frequency),
+             timing = COALESCE($5, timing),
+             route = COALESCE($6, route),
+             started_date = COALESCE($7, started_date),
+             notes = $8,
              consultation_id = NULL,
              document_id = NULL,
              updated_at = NOW()
          WHERE patient_id = $1
-           AND UPPER(COALESCE(pharmacy_match, name)) = $3
-           AND is_active = false`,
-        params,
+           AND UPPER(COALESCE(pharmacy_match, name)) = $2
+           AND is_active = false
+           AND NOT EXISTS (
+             SELECT 1 FROM medications
+             WHERE patient_id = $1
+               AND UPPER(COALESCE(pharmacy_match, name)) = $2
+               AND is_active = true
+           )`,
+        updateParams,
       )
       .catch((e) =>
         error(
@@ -1093,6 +1098,54 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
 // This handles meds that were prescribed before but dropped from the current note.
 export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
   if (!patientId || !healthrayId) return;
+  // Two-statement approach so the UPDATE sees the effects of the DELETE:
+  //
+  // Problem A: a pre-existing inactive row with the same canonical as a stale
+  //   active row → flipping the active row to inactive creates a duplicate.
+  // Problem B: two active rows share the same canonical (no unique constraint on
+  //   active rows) → deactivating both creates two inactive rows that collide.
+  //
+  // Fix: one DELETE removes both kinds of conflict rows, then the UPDATE runs
+  // clean against a de-duped set.
+  await pool
+    .query(
+      `DELETE FROM medications
+       WHERE patient_id = $1
+         AND (
+           -- (A) pre-existing inactive rows whose canonical matches a stale active row
+           (is_active = false
+            AND UPPER(COALESCE(pharmacy_match, name)) IN (
+              SELECT UPPER(COALESCE(pharmacy_match, name))
+              FROM medications
+              WHERE patient_id = $1
+                AND is_active = true
+                AND source = 'healthray'
+                AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
+            ))
+           OR
+           -- (B) duplicate active rows per canonical — keep only the lowest id
+           (is_active = true
+            AND source = 'healthray'
+            AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
+            AND id NOT IN (
+              SELECT MIN(id)
+              FROM medications
+              WHERE patient_id = $1
+                AND is_active = true
+                AND source = 'healthray'
+                AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
+              GROUP BY UPPER(COALESCE(pharmacy_match, name))
+            ))
+         )`,
+      [patientId, String(healthrayId)],
+    )
+    .catch((e) =>
+      error(
+        "stopStaleHealthrayMeds",
+        `pre-deactivation DELETE failed for patient=${patientId}: ${e.message}`,
+      ),
+    );
+
   await pool
     .query(
       `UPDATE medications

@@ -325,18 +325,23 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
 
     // Auto-stop previous meds from same doctor not in new plan
     if ((conData?.medications_confirmed || []).length > 0 && n(conName)) {
-      const newMedNames = (conData.medications_confirmed || []).map((m) =>
-        (m.name || "").toUpperCase().replace(/\s+/g, ""),
+      // Use pharmacy_match (same key as the UPSERT conflict index) so slight AI name
+      // variations between visits don't cause medicines to be incorrectly stopped.
+      const newMedKeys = (conData.medications_confirmed || []).map((m) =>
+        (m._matched || m.name || "").toUpperCase().replace(/\s+/g, ""),
       );
       const prevMeds = (
         await client.query(
-          `SELECT id, name FROM medications WHERE patient_id=$1 AND consultation_id != $2 AND is_active=true
+          `SELECT id, name, pharmacy_match FROM medications WHERE patient_id=$1 AND consultation_id != $2 AND is_active=true
          AND consultation_id IN (SELECT id FROM consultations WHERE patient_id=$1 AND con_name=$3)`,
           [patientId, consultationId, conName],
         )
       ).rows;
       const toStop = prevMeds.filter(
-        (m) => !newMedNames.includes((m.name || "").toUpperCase().replace(/\s+/g, "")),
+        (m) =>
+          !newMedKeys.includes(
+            (m.pharmacy_match || m.name || "").toUpperCase().replace(/\s+/g, ""),
+          ),
       );
       if (toStop.length > 0) {
         await client.query(`UPDATE medications SET is_active=false WHERE id = ANY($1::int[])`, [

@@ -142,9 +142,21 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
 
   // Extract identifiers from the full patient object (Lab API returns various fields)
   if (patientObj && typeof patientObj === "object") {
-    for (const key of ["uhid", "patient_uhid", "registration_no", "reg_no", "file_no",
-                        "patient_id", "healthray_uid", "uid", "mr_no", "mrn", "hospital_no",
-                        "patient_code", "emr_no"]) {
+    for (const key of [
+      "uhid",
+      "patient_uhid",
+      "registration_no",
+      "reg_no",
+      "file_no",
+      "patient_id",
+      "healthray_uid",
+      "uid",
+      "mr_no",
+      "mrn",
+      "hospital_no",
+      "patient_code",
+      "emr_no",
+    ]) {
       const val = patientObj[key];
       if (val) tryIds.add(String(val));
     }
@@ -176,7 +188,9 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
 
     // P_ prefix match (Lab uses G14320, our DB has P_131520)
     if (!/^P[_-]/i.test(id)) {
-      const r2 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [`P_${id}`]);
+      const r2 = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+        `P_${id}`,
+      ]);
       if (r2.rows[0]) return r2.rows[0].id;
     }
 
@@ -184,7 +198,9 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
     const pMatch = id.match(/P[_-]?\d+/i);
     if (pMatch) {
       const fileNo = pMatch[0].replace(/-/, "_").toUpperCase();
-      const r3 = await pool.query(`SELECT id FROM patients WHERE UPPER(file_no) = $1 LIMIT 1`, [fileNo]);
+      const r3 = await pool.query(`SELECT id FROM patients WHERE UPPER(file_no) = $1 LIMIT 1`, [
+        fileNo,
+      ]);
       if (r3.rows[0]) return r3.rows[0].id;
     }
   }

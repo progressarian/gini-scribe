@@ -71,15 +71,19 @@ router.post("/sync/patient/:fileNo/resync", async (req, res) => {
       [patientId],
     );
 
-    let parsed = 0, errors = 0;
+    let parsed = 0,
+      errors = 0;
     for (const appt of appts) {
       try {
         const result = await parseClinicalWithAI(appt.healthray_clinical_notes);
-        if (!result) { errors++; continue; }
+        if (!result) {
+          errors++;
+          continue;
+        }
 
-        const diagnoses  = result.diagnoses  || [];
-        const meds       = result.medications || [];
-        const prevMeds   = result.previous_medications || [];
+        const diagnoses = result.diagnoses || [];
+        const meds = result.medications || [];
+        const prevMeds = result.previous_medications || [];
 
         await pool.query(
           `UPDATE appointments
@@ -95,11 +99,15 @@ router.post("/sync/patient/:fileNo/resync", async (req, res) => {
           await syncMedications(patientId, appt.healthray_id, appt.appointment_date, meds);
           await stopStaleHealthrayMeds(patientId, appt.healthray_id, appt.appointment_date);
         }
-        if (prevMeds.length) await syncStoppedMedications(patientId, appt.healthray_id, prevMeds, meds);
+        if (prevMeds.length)
+          await syncStoppedMedications(patientId, appt.healthray_id, prevMeds, meds);
         await syncBiomarkersFromLatestLabs(patientId, appt.id);
 
         parsed++;
-        log("Force Resync", `${fileNo}: re-parsed appt ${appt.healthray_id} (${appt.appointment_date}) — ${diagnoses.length} dx, ${meds.length} meds`);
+        log(
+          "Force Resync",
+          `${fileNo}: re-parsed appt ${appt.healthray_id} (${appt.appointment_date}) — ${diagnoses.length} dx, ${meds.length} meds`,
+        );
       } catch (e) {
         errors++;
         error("Force Resync", `${fileNo} appt ${appt.healthray_id}: ${e.message}`);

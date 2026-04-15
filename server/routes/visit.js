@@ -93,17 +93,11 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 4. Active medications (use m.started_date for documents, c.visit_date for consultations)
+      // 4. Active medications — all active meds; frontend picks the latest prescription date
       pool.query(
-        `WITH latest_cons AS (
-           SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id
-           FROM consultations WHERE patient_id=$1
-           ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
-         )
-         SELECT m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
+        `SELECT m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = true
-           AND (m.consultation_id IN (SELECT id FROM latest_cons) OR m.consultation_id IS NULL)
          ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
         [pid],
       ),
