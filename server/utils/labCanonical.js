@@ -46,6 +46,9 @@ const CANONICAL_MAP = {
   ppbs: "PPBS",
   "post prandial": "PPBS",
   ferritin: "Ferritin",
+  "s. ferritin": "Ferritin",
+  "s.ferritin": "Ferritin",
+  "serum ferritin": "Ferritin",
   crp: "CRP",
   alp: "ALP",
   "non-hdl": "Non-HDL",
@@ -119,7 +122,17 @@ function stripEmbeddedDate(str) {
   return str.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/i, "").trim();
 }
 
+// Strips "Serum", "S.", "Sr.", "B." lab-report prefixes so variants like
+// "S. Ferritin" and "Serum Calcium" collapse onto the same canonical name.
+function stripReportPrefix(str) {
+  return str
+    .replace(/^(serum|plasma|s\.?|sr\.?|b\.?)\s+/i, "")
+    .trim();
+}
+
 export const getCanonical = (name) => {
-  const cleaned = stripEmbeddedDate((name || "").trim());
-  return CANONICAL_MAP[cleaned.toLowerCase()] || null;
+  const cleaned = stripEmbeddedDate((name || "").trim()).toLowerCase();
+  if (CANONICAL_MAP[cleaned]) return CANONICAL_MAP[cleaned];
+  const stripped = stripReportPrefix(cleaned);
+  return CANONICAL_MAP[stripped] || null;
 };
