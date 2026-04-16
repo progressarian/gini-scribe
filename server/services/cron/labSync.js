@@ -22,6 +22,7 @@ import {
   setLabCaseSource,
   bumpLabCaseRetry,
   abandonLabCase,
+  downloadAndStoreLabPdf,
 } from "../lab/db.js";
 import { createLogger } from "../logger.js";
 
@@ -117,6 +118,19 @@ async function processCase(listRow) {
     await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
   }
   // Otherwise leave results_synced=false so the recovery loop keeps trying.
+
+  // Step h: download lab report PDF (fire-and-forget — never blocks sync)
+  if (patientId && listRow.case_attachment_file_name) {
+    downloadAndStoreLabPdf(
+      patientId,
+      caseNo,
+      caseUid,
+      labCaseId,
+      labUserId,
+      listRow.case_attachment_file_name,
+      caseDate,
+    ).catch((e) => log("PDF", `${patientCaseNo}: PDF download failed — ${e.message}`));
+  }
 
   log(
     "Sync",
@@ -310,6 +324,19 @@ export async function retryPendingLabCases() {
         await abandonLabCase(row.case_no, "outsource-only");
       } else if (patientId && (written > 0 || inhouseComplete)) {
         await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
+      }
+
+      // Download PDF if not already stored
+      if (patientId && !row.pdf_storage_path && row.pdf_file_name) {
+        downloadAndStoreLabPdf(
+          patientId,
+          row.case_no,
+          row.case_uid,
+          row.lab_case_id,
+          row.lab_user_id,
+          row.pdf_file_name,
+          caseDate,
+        ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
       }
 
       log(

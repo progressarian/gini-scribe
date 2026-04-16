@@ -2,6 +2,10 @@
 
 import pool from "../../config/db.js";
 import { extractInvestigationSummary } from "./labHealthrayParser.js";
+import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
+import { createLogger } from "../logger.js";
+
+const { log: labLog } = createLogger("Lab PDF");
 
 // Source priority — lower number wins (lab_healthray = 3, between report_extract and vitals_sheet)
 const SOURCE_PRIORITY = {
@@ -44,6 +48,7 @@ export async function ensureLabCasesTable() {
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMPTZ;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS retry_abandoned BOOLEAN DEFAULT FALSE;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_storage_path TEXT;
     CREATE INDEX IF NOT EXISTS idx_lab_cases_patient    ON lab_cases(patient_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_appt       ON lab_cases(appointment_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_date       ON lab_cases(case_date);
@@ -123,6 +128,103 @@ export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawD
       summary ? JSON.stringify(summary) : null,
     ],
   );
+}
+
+// ── Download lab report PDF and store in Supabase ──────────────────────────
+export async function downloadAndStoreLabPdf(
+  patientId,
+  caseNo,
+  caseUid,
+  caseId,
+  userId,
+  pdfFileName,
+  caseDate,
+) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    labLog("Skip", "Storage not configured");
+    return null;
+  }
+  if (!patientId) return null;
+
+  // Avoid re-downloading if already stored
+  const existing = await pool.query(
+    `SELECT pdf_storage_path FROM lab_cases WHERE case_no = $1 AND pdf_storage_path IS NOT NULL`,
+    [caseNo],
+  );
+  if (existing.rows[0]?.pdf_storage_path) return existing.rows[0].pdf_storage_path;
+
+  let result;
+  try {
+    const { fetchLabReportPdf } = await import("./labHealthrayApi.js");
+    result = await fetchLabReportPdf(caseUid, caseId, userId);
+  } catch (e) {
+    labLog("Error", `PDF fetch failed for case ${caseNo}: ${e.message}`);
+    return null;
+  }
+  if (!result?.buffer?.length) return null;
+
+  const { buffer, contentType } = result;
+
+  // Reject JSON error bodies
+  if (contentType === "application/json" || (buffer.length < 2000 && buffer[0] === 0x7b)) {
+    labLog("Reject", `JSON response for case ${caseNo}`);
+    return null;
+  }
+
+  const ext = contentType === "image/jpeg" ? "jpg" : contentType === "image/png" ? "png" : "pdf";
+  const fileName = pdfFileName || `lab_case_${caseNo}.${ext}`;
+  const storagePath = `patients/${patientId}/lab/${fileName}`;
+
+  try {
+    const uploadRes = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+          "Content-Type": contentType || "application/pdf",
+          "x-upsert": "true",
+        },
+        body: buffer,
+      },
+    );
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text().catch(() => "");
+      labLog(
+        "Error",
+        `Supabase upload failed ${uploadRes.status} for case ${caseNo}: ${errText.slice(0, 200)}`,
+      );
+      return null;
+    }
+
+    // Create a documents record for the lab report PDF
+    await pool.query(
+      `INSERT INTO documents (patient_id, doc_type, title, file_name, storage_path, mime_type, doc_date, source, notes)
+       VALUES ($1, 'lab_report', $2, $3, $4, $5, $6, 'lab_healthray', $7)
+       ON CONFLICT DO NOTHING`,
+      [
+        patientId,
+        `Lab Report - ${caseNo}`,
+        fileName,
+        storagePath,
+        contentType || "application/pdf",
+        caseDate || null,
+        `lab_case:${caseNo}`,
+      ],
+    );
+
+    // Update lab_cases with storage path
+    await pool.query(`UPDATE lab_cases SET pdf_storage_path = $1 WHERE case_no = $2`, [
+      storagePath,
+      caseNo,
+    ]);
+
+    labLog("Stored", `${buffer.length} bytes for case ${caseNo} → ${storagePath}`);
+    return storagePath;
+  } catch (e) {
+    labLog("Error", `Storage failed for case ${caseNo}: ${e.message}`);
+    return null;
+  }
 }
 
 // ── Get cases pending retry ─────────────────────────────────────────────────

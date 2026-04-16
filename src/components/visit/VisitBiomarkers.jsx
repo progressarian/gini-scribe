@@ -1,8 +1,9 @@
 import { memo, useMemo } from "react";
-import { BiomarkerCard, getLabVal, getLabHist, fmtDate } from "./helpers";
+import { BiomarkerCard, getLabVal, getLabValFromLatest, getLabHist, fmtDate } from "./helpers";
 
 const VisitBiomarkers = memo(function VisitBiomarkers({
   labResults,
+  labLatest,
   labHistory,
   vitals,
   flags,
@@ -18,23 +19,23 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   const markers = useMemo(() => {
     const hba1cH = getLabHist(labHistory, "HbA1c");
     const hba1cFirst = hba1cH.length > 0 ? hba1cH[0] : null;
-    const hba1c = getLabVal(labResults, "HbA1c");
-    const fbs = getLabVal(labResults, "FBS");
+    const hba1c = getLabValFromLatest(labLatest, "HbA1c");
+    const fbs = getLabValFromLatest(labLatest, "FBS");
     const fbsH = getLabHist(labHistory, "FBS");
-    const ldl = getLabVal(labResults, "LDL");
+    const ldl = getLabValFromLatest(labLatest, "LDL");
     const ldlH = getLabHist(labHistory, "LDL");
-    const tsh = getLabVal(labResults, "TSH");
+    const tsh = getLabValFromLatest(labLatest, "TSH");
     const tshH = getLabHist(labHistory, "TSH");
-    const tg = getLabVal(labResults, "TG");
+    const tg = getLabValFromLatest(labLatest, "TG");
     const tgH = getLabHist(labHistory, "TG");
-    const cr = getLabVal(labResults, "Creatinine");
+    const cr = getLabValFromLatest(labLatest, "Creatinine");
     const crH = getLabHist(labHistory, "Creatinine");
-    const egfr = getLabVal(labResults, "eGFR");
-    const hb = getLabVal(labResults, "Haemoglobin");
+    const egfr = getLabValFromLatest(labLatest, "eGFR");
+    const hb = getLabValFromLatest(labLatest, "Haemoglobin");
     const hbH = getLabHist(labHistory, "Haemoglobin");
-    const insulin = getLabVal(labResults, "Insulin");
-    const fbsForHoma = getLabVal(labResults, "FBS");
-    const homaIrLab = getLabVal(labResults, "HOMA-IR");
+    const insulin = getLabValFromLatest(labLatest, "Insulin");
+    const fbsForHoma = getLabValFromLatest(labLatest, "FBS");
+    const homaIrLab = getLabValFromLatest(labLatest, "HOMA-IR");
     // Auto-calculate HOMA-IR = (Fasting Insulin × FBS) / 405 if not directly available
     const homaIrCalc =
       !homaIrLab && insulin?.result && fbsForHoma?.result
@@ -62,13 +63,13 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       .reverse();
 
     // Weight: prefer vitals table, fall back to lab_results canonical_name='Weight'
-    const weightLab = getLabVal(labResults, "Weight");
+    const weightLab = getLabValFromLatest(labLatest, "Weight");
     const weightLabH = getLabHist(labHistory, "Weight");
     const vitalWeightH = vitalHist("weight");
     const weightH = vitalWeightH.length > 0 ? vitalWeightH : weightLabH;
 
     // Waist: prefer vitals table, fall back to lab_results
-    const waistLab = getLabVal(labResults, "Waist");
+    const waistLab = getLabValFromLatest(labLatest, "Waist");
     const vitalWaistH = vitalHist("waist");
 
     return {
@@ -99,7 +100,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       bpH,
       pulseH: vitalHist("pulse"),
     };
-  }, [labResults, labHistory, vitals]);
+  }, [labLatest, labHistory, vitals]);
 
   const {
     hba1c,

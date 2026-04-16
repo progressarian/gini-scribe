@@ -149,3 +149,50 @@ export async function fetchLabCaseDetail(caseUid, caseId, userId) {
     `/patient_case/case_detail/${caseUid}?case_id=${caseId}&user_id=${userId || LAB_USER_ID}`,
   );
 }
+
+// ── Binary fetch with auto-retry on 401 (for PDF downloads) ─────────────────
+async function labFetchBinary(path, isRetry = false) {
+  if (!authToken) {
+    await labLogin();
+  }
+
+  const res = await fetch(`${LAB_API_BASE}${path}`, { headers: LAB_HEADERS() });
+
+  if (res.status === 401 && !isRetry) {
+    log("Auth", "401 (binary) — refreshing tokens...");
+    await labLogin();
+    return labFetchBinary(path, true);
+  }
+
+  if (!res.ok) throw new Error(`Lab API HTTP ${res.status} at ${path}`);
+
+  const ct = res.headers.get("content-type") || "";
+  const buffer = Buffer.from(await res.arrayBuffer());
+
+  // Reject JSON error bodies disguised as 200 OK
+  if (ct.includes("application/json") || (buffer.length < 2000 && buffer[0] === 0x7b)) {
+    try {
+      const parsed = JSON.parse(buffer.toString("utf8"));
+      if (parsed.status && parsed.status !== 200) {
+        throw new Error(`Lab API error (binary): ${parsed.message || "unknown"}`);
+      }
+    } catch (e) {
+      if (e.message.startsWith("Lab API")) throw e;
+    }
+  }
+
+  return { buffer, contentType: ct.split(";")[0].trim() || "application/pdf" };
+}
+
+// ── Fetch lab report PDF for a case ─────────────────────────────────────────
+// Endpoint TBD — update the path once the exact HealthRay Lab API URL is confirmed.
+export async function fetchLabReportPdf(caseUid, caseId, userId) {
+  try {
+    return await labFetchBinary(
+      `/patient_case/generate_report/${caseUid}?case_id=${caseId}&user_id=${userId || LAB_USER_ID}`,
+    );
+  } catch (e) {
+    log("PDF", `fetchLabReportPdf failed for ${caseUid}: ${e.message}`);
+    return null;
+  }
+}

@@ -283,6 +283,31 @@ export default function VisitPage() {
     }
   }, [dbPatientId, opdApptId]);
 
+  // ── Poll for new lab data (background sync) and auto-refresh biomarkers ──
+  const labCountRef = useRef(null);
+  useEffect(() => {
+    if (!dbPatientId) return;
+    // Seed the ref from currently loaded data
+    labCountRef.current = data?.labResults?.length ?? null;
+
+    const interval = setInterval(async () => {
+      try {
+        const { data: counts } = await api.get(`/api/visit/${dbPatientId}/lab-count`);
+        if (labCountRef.current !== null && counts.total > labCountRef.current) {
+          console.log("[LabPoll] New lab data detected, refreshing...");
+          await refreshData();
+          labCountRef.current = counts.total;
+        } else if (labCountRef.current === null) {
+          labCountRef.current = counts.total;
+        }
+      } catch {
+        // silent — polling is non-critical
+      }
+    }, 60_000);
+
+    return () => clearInterval(interval);
+  }, [dbPatientId, refreshData, data?.labResults?.length]);
+
   const mutations = useVisitMutations(dbPatientId, refreshData, opdApptId);
   const closeModal = useCallback(() => setModal(null), []);
 
@@ -679,6 +704,7 @@ export default function VisitPage() {
               <VisitSummaryPanel patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitBiomarkers
                 labResults={labResults}
+                labLatest={data.labLatest}
                 labHistory={labHistory}
                 vitals={vitals}
                 flags={flags}

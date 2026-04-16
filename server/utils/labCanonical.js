@@ -116,6 +116,39 @@ const CANONICAL_MAP = {
   "red blood cells": "RBC",
   platelets: "Platelets",
   "platelet count": "Platelets",
+  // HealthRay lab-specific variants
+  "blood glucose fasting": "FBS",
+  "fasting blood glucose": "FBS",
+  fbg: "FBS",
+  "insulin fasting": "Fasting Insulin",
+  "fasting insulin": "Fasting Insulin",
+  "insulin f": "Fasting Insulin",
+  insulin: "Fasting Insulin",
+  "homa-ir": "HOMA-IR",
+  "homa - ir": "HOMA-IR",
+  "homa ir": "HOMA-IR",
+  "homa-b": "HOMA-Beta",
+  "homa beta": "HOMA-Beta",
+  "homa-beta": "HOMA-Beta",
+  "c-peptide": "C-Peptide",
+  "c peptide": "C-Peptide",
+  triglyceride: "Triglycerides",
+  "non hdl cholestrol": "Non-HDL",
+  "non-hdl cholesterol": "Non-HDL",
+  nonhdl: "Non-HDL",
+  "glomerular filtration rate": "eGFR",
+  "microalbumin/creatinine ratio": "UACR",
+  "urine albumin to creatinine ratio": "UACR",
+  "mean blood glucose": "Mean Blood Glucose",
+  "rbc count": "RBC",
+  tlc: "WBC",
+  "total leucocyte count": "WBC",
+  "post prandial blood sugar": "PPBS",
+  "post prandial blood glucose": "PPBS",
+  pp: "PPBS",
+  "creatinine, serum": "Creatinine",
+  "vldl cholesterol": "VLDL",
+  vldl: "VLDL",
 };
 
 function stripEmbeddedDate(str) {
@@ -129,8 +162,33 @@ function stripReportPrefix(str) {
 }
 
 export const getCanonical = (name) => {
-  const cleaned = stripEmbeddedDate((name || "").trim()).toLowerCase();
+  const cleaned = stripEmbeddedDate((name || "").trim())
+    .replace(/[\s.]+$/, "") // strip trailing dots/spaces ("Fasting Blood Sugar ." → "Fasting Blood Sugar")
+    .toLowerCase();
   if (CANONICAL_MAP[cleaned]) return CANONICAL_MAP[cleaned];
   const stripped = stripReportPrefix(cleaned);
-  return CANONICAL_MAP[stripped] || null;
+  if (CANONICAL_MAP[stripped]) return CANONICAL_MAP[stripped];
+
+  // Strip parenthetical suffixes — report extraction often returns names like
+  // "Glycated Hemoglobin (HbA1c)" or "HbA1c (%)" that don't match the map.
+  // But skip stripping when the parenthetical content is a clinical qualifier
+  // that changes the test identity (e.g. "Creatinine (Urine)" ≠ "Creatinine").
+  const parenMatch = stripped.match(/\(([^)]+)\)/);
+  const CLINICAL_QUALIFIER = /\b(urine|random|fasting|post\s*prandial|pp\b|gtt|\d+\s*h(ou)?r)\b/i;
+  const parenIsClinical = parenMatch && CLINICAL_QUALIFIER.test(parenMatch[1]);
+
+  if (!parenIsClinical) {
+    const noParens = stripped.replace(/\s*\([^)]*\)\s*/g, "").trim();
+    if (noParens && noParens !== stripped && CANONICAL_MAP[noParens])
+      return CANONICAL_MAP[noParens];
+
+    // Try the content inside parentheses as a standalone lookup, e.g.
+    // "Glycated Hemoglobin (HbA1c)" → try "hba1c"
+    if (parenMatch) {
+      const inside = parenMatch[1].trim().toLowerCase();
+      if (CANONICAL_MAP[inside]) return CANONICAL_MAP[inside];
+    }
+  }
+
+  return null;
 };

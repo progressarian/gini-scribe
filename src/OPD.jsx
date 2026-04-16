@@ -479,23 +479,23 @@ function ApptRow({ a, sel, onSelect }) {
                 );
               return <span style={{ color: GN, fontWeight: 700, fontSize: 9 }}>✓ at target</span>;
             })()}
-          {/* Lab pending indicator */}
+          {/* Lab status tags */}
           {a.pending_labs > 0 && (
             <span
               style={{
-                background: "#eff6ff",
-                color: "#2563eb",
+                background: SKL,
+                color: SK,
                 fontSize: 9,
                 fontWeight: 700,
                 padding: "1px 5px",
                 borderRadius: 4,
-                border: "1px solid #bfdbfe",
+                border: `1px solid ${SKB}`,
               }}
             >
-              🔬 {a.pending_labs} lab{a.pending_labs > 1 ? "s" : ""} pending
+              🔬 Gini Lab Processing
             </span>
           )}
-          {a.recent_labs > 0 && !a.pending_labs && (
+          {a.recent_labs > 0 && (
             <span
               style={{
                 background: GNL,
@@ -507,7 +507,22 @@ function ApptRow({ a, sel, onSelect }) {
                 border: `1px solid ${GNB}`,
               }}
             >
-              ✅ Labs received
+              ✅ Gini Lab Received
+            </span>
+          )}
+          {a.uploaded_labs > 0 && (
+            <span
+              style={{
+                background: "#f5f3ff",
+                color: "#7c3aed",
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: "1px solid #ddd6fe",
+              }}
+            >
+              📄 Lab Uploaded
             </span>
           )}
         </div>

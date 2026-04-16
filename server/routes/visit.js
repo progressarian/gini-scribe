@@ -315,6 +315,7 @@ router.get("/visit/:patientId", async (req, res) => {
     // Build lab history grouped by test name
     const labHistory = {};
     const labLatest = {};
+    const _latestRaw = {}; // track raw lab_test_date per key for comparison
     for (const r of labsR.rows) {
       // Fall back to on-the-fly canonicalisation so legacy rows whose
       // canonical_name was NULL (e.g. "S. Ferritin" before the prefix-strip
@@ -330,7 +331,16 @@ router.get("/visit/:patientId", async (req, res) => {
         ref_range: r.ref_range,
         panel_name: r.panel_name,
       });
-      if (!labLatest[key]) {
+      // Use raw lab_test_date for "latest" comparison — the outer ORDER BY
+      // uses COALESCE(appointment_date, test_date) which can push old results
+      // ahead of genuinely newer ones when linked to a recent appointment.
+      const rawDate = r.lab_test_date || r.test_date;
+      const prevRaw = _latestRaw[key];
+      if (
+        !labLatest[key] ||
+        rawDate > prevRaw ||
+        (rawDate === prevRaw && r.created_at > labLatest[key]._ca)
+      ) {
         labLatest[key] = {
           test_name: r.test_name,
           result: r.result,
@@ -342,9 +352,13 @@ router.get("/visit/:patientId", async (req, res) => {
           is_critical: r.is_critical,
           source: r.source,
           panel_name: r.panel_name,
+          _ca: r.created_at,
         };
+        _latestRaw[key] = rawDate;
       }
     }
+    // Strip internal tracking field before sending to client
+    for (const v of Object.values(labLatest)) delete v._ca;
 
     // Compute summary
     const totalVisits = consultations.length;
@@ -454,6 +468,22 @@ router.get("/visit/:patientId", async (req, res) => {
     });
   } catch (err) {
     handleError(res, err, "Failed to load visit data");
+  }
+});
+
+// ── GET /visit/:patientId/lab-count — Lightweight change-detection for polling ──
+router.get("/visit/:patientId/lab-count", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::INTEGER AS total, MAX(created_at) AS latest_at
+       FROM lab_results WHERE patient_id = $1`,
+      [pid],
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    handleError(res, e, "Lab count");
   }
 });
 

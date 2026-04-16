@@ -288,14 +288,24 @@ router.get("/opd/appointments", async (req, res) => {
                   ORDER BY a4.appointment_date DESC LIMIT 1)
               ) AS healthray_diagnoses,
               (SELECT COUNT(*) FROM lab_cases lc
-                WHERE lc.patient_id = rp.pid
+                WHERE (lc.patient_id = rp.pid
+                       OR (lc.patient_id IS NULL AND p.file_no IS NOT NULL
+                           AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
                   AND lc.results_synced = FALSE
+                  AND COALESCE(lc.retry_abandoned, FALSE) = FALSE
               )::INTEGER AS pending_labs,
               (SELECT COUNT(*) FROM lab_cases lc2
-                WHERE lc2.patient_id = rp.pid
+                WHERE (lc2.patient_id = rp.pid
+                       OR (lc2.patient_id IS NULL AND p.file_no IS NOT NULL
+                           AND lc2.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
                   AND lc2.results_synced = TRUE
                   AND lc2.case_date >= CURRENT_DATE - INTERVAL '7 days'
               )::INTEGER AS recent_labs,
+              (SELECT COUNT(DISTINCT lr3.canonical_name) FROM lab_results lr3
+                WHERE lr3.patient_id = rp.pid
+                  AND lr3.source = 'report_extract'
+                  AND lr3.test_date >= CURRENT_DATE - INTERVAL '7 days'
+              )::INTEGER AS uploaded_labs,
               (SELECT lr.result FROM lab_results lr
                 WHERE lr.patient_id = rp.pid
                   AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
@@ -318,6 +328,62 @@ router.get("/opd/appointments", async (req, res) => {
         r.healthray_diagnoses = sortDiagnoses(r.healthray_diagnoses);
       }
     }
+
+    // Enrich biomarkers with latest lab_results so OPD always shows fresh data
+    const patientIds = [...new Set(rows.filter((r) => r.patient_id).map((r) => r.patient_id))];
+    if (patientIds.length > 0) {
+      const CANONICAL_TO_BIO = {
+        HbA1c: "hba1c",
+        FBS: "fg",
+        LDL: "ldl",
+        Triglycerides: "tg",
+        UACR: "uacr",
+        Microalbumin: "uacr",
+        Creatinine: "creatinine",
+        TSH: "tsh",
+        Haemoglobin: "hb",
+        Hemoglobin: "hb",
+        eGFR: "egfr",
+      };
+      const labR = await pool.query(
+        `SELECT DISTINCT ON (patient_id, canonical_name)
+           patient_id, canonical_name, result, test_date
+         FROM lab_results
+         WHERE patient_id = ANY($1)
+           AND result IS NOT NULL AND canonical_name IS NOT NULL
+         ORDER BY patient_id, canonical_name, test_date DESC NULLS LAST`,
+        [patientIds],
+      );
+      // Group by patient
+      const labByPt = {};
+      for (const r of labR.rows) {
+        const bioKey = CANONICAL_TO_BIO[r.canonical_name];
+        if (!bioKey) continue;
+        const val = parseFloat(r.result);
+        if (isNaN(val)) continue;
+        if (!labByPt[r.patient_id]) labByPt[r.patient_id] = {};
+        const prev = labByPt[r.patient_id][bioKey];
+        if (!prev || r.test_date > prev.date) {
+          labByPt[r.patient_id][bioKey] = { val, date: r.test_date };
+        }
+      }
+      // Merge into each appointment's biomarkers
+      for (const row of rows) {
+        const labs = labByPt[row.patient_id];
+        if (!labs) continue;
+        const bio = row.biomarkers || {};
+        const dates = bio._lab_dates || {};
+        for (const [bioKey, { val, date: d }] of Object.entries(labs)) {
+          if (!dates[bioKey] || d >= dates[bioKey]) {
+            bio[bioKey] = val;
+            if (!bio._lab_dates) bio._lab_dates = {};
+            bio._lab_dates[bioKey] = d;
+          }
+        }
+        row.biomarkers = bio;
+      }
+    }
+
     res.json(rows);
   } catch (e) {
     handleError(res, e, "OPD appointments list");

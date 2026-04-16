@@ -146,6 +146,20 @@ export const getLabVal = (labResults, name) => {
   return r ? { result: r.result, unit: r.unit || "", flag: r.flag, date: r.test_date } : null;
 };
 
+// ── Get latest lab value from labLatest object (canonical-key based) ──
+export const getLabValFromLatest = (labLatest, name) => {
+  if (!labLatest) return null;
+  const aliases = LAB_ALIASES[name] || [name];
+  for (const alias of aliases) {
+    const key = Object.keys(labLatest).find((k) => k.toLowerCase() === alias.toLowerCase());
+    if (key && labLatest[key]) {
+      const v = labLatest[key];
+      return { result: v.result, unit: v.unit || "", flag: v.flag, date: v.date };
+    }
+  }
+  return null;
+};
+
 // ── Get lab history as reversed array (oldest-first for sparklines) ──
 export const getLabHist = (labHistory, name) => {
   const h = findLabHistory(labHistory, name);
