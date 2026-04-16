@@ -495,16 +495,31 @@ router.post("/visit/:patientId/lab", async (req, res) => {
     const { test_name, result, unit, test_date, appointment_id } = req.body;
     if (!test_name) return res.status(400).json({ error: "test_name is required" });
     const canonical = getCanonical(test_name);
+    const numResult = num(result);
+    const finalDate = n(test_date) || new Date().toISOString().split("T")[0];
+
+    // Skip if exact same data already exists (same test + value + date)
+    if (numResult !== null) {
+      const dup = await pool.query(
+        `SELECT * FROM lab_results
+         WHERE patient_id = $1 AND canonical_name = $2
+           AND result::numeric = $3::numeric AND test_date::date = $4::date
+         LIMIT 1`,
+        [pid, canonical, numResult, finalDate],
+      );
+      if (dup.rows[0]) return res.json(dup.rows[0]);
+    }
+
     const r = await pool.query(
       `INSERT INTO lab_results (patient_id, test_name, canonical_name, result, unit, test_date, source, appointment_id)
-       VALUES ($1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),'manual',$7) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6::date,'manual',$7) RETURNING *`,
       [
         pid,
         t(test_name, 200),
         canonical,
-        num(result),
+        numResult,
         t(unit, 50),
-        n(test_date),
+        finalDate,
         appointment_id || null,
       ],
     );

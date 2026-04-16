@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { BiomarkerCard, getLabVal, getLabValFromLatest, getLabHist, fmtDate } from "./helpers";
+import { BiomarkerCard, getLabVal, getLabValFromLatest, getLabHist, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 
 const VisitBiomarkers = memo(function VisitBiomarkers({
   labResults,
@@ -11,7 +11,6 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   onAddLab,
   onPasteBiomarkers,
 }) {
-  const today = new Date().toISOString().split("T")[0];
   const latestV = vitals?.[0];
   const prevV = vitals?.[1];
 
@@ -131,6 +130,35 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     pulseH,
   } = markers;
 
+  const biomarkerSummary = useMemo(() => {
+    if (!labLatest) return null;
+    const entries = [];
+    for (const [testName, v] of Object.entries(labLatest)) {
+      if (v?.date) entries.push({ name: testName, date: v.date, result: v.result, unit: v.unit, flag: v.flag });
+    }
+    if (!entries.length) return null;
+
+    entries.sort((a, b) => (b.date > a.date ? 1 : -1));
+    const latestDate = entries[0].date;
+
+    const updatedTests = entries.filter((e) => isSameDate(e.date, latestDate));
+
+    let text;
+    if (updatedTests.length <= 3) {
+      text = updatedTests.map((e) => e.name).join(", ") + " updated";
+    } else {
+      text = updatedTests.slice(0, 2).map((e) => e.name).join(", ") + ` +${updatedTests.length - 2} more updated`;
+    }
+
+    const tooltip = `Updated on ${fmtDate(latestDate)}:\n` +
+      updatedTests.map((e) => {
+        const flag = e.flag === "H" ? " (HIGH)" : e.flag === "L" ? " (LOW)" : "";
+        return `  ${e.name}: ${e.result}${e.unit ? " " + e.unit : ""}${flag}`;
+      }).join("\n");
+
+    return { text, date: latestDate, tooltip };
+  }, [labLatest]);
+
   return (
     <div className="sc" id="biomarkers">
       <div className="sch">
@@ -138,9 +166,11 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           <div className="sci ic-b">📊</div>Biomarkers &amp; Lab Values
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500 }}>
-            Updated: {fmtDate(today)}
-          </span>
+          {biomarkerSummary && (
+            <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500, cursor: "default" }} title={biomarkerSummary.tooltip}>
+              {biomarkerSummary.text} — {fmtDateShort(biomarkerSummary.date)}
+            </span>
+          )}
           <button
             className="bx"
             onClick={onPasteBiomarkers}

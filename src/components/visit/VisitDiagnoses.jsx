@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { DX_STATUS_STYLE, DX_STATUS_DEFAULT, getDxSuggestion, fmtDate } from "./helpers";
+import { DX_STATUS_STYLE, DX_STATUS_DEFAULT, getDxSuggestion, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 import { sortDiagnoses, detectDiagnosisCategory } from "../../server-utils/diagnosisSort";
 
 const DX_STATUS_OPTS = [
@@ -313,23 +313,61 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
 
   const categoryOrder = ["primary", "complication", "comorbidity", "external", "monitoring"];
 
+  const dxSummary = useMemo(() => {
+    const allDx = Object.values(grouped).flat();
+    if (!allDx.length) return null;
+
+    const latest = allDx.reduce((max, dx) => {
+      const d = dx.updated_at || dx.created_at;
+      return d && d > (max || "") ? d : max;
+    }, null);
+    if (!latest) return null;
+
+    const onDate = allDx.filter((dx) => {
+      const d = dx.updated_at || dx.created_at;
+      return d && isSameDate(d, latest);
+    });
+
+    const added = onDate.filter((dx) => isSameDate(dx.created_at, latest));
+    const modified = onDate.filter((dx) => !isSameDate(dx.created_at, latest));
+
+    const parts = [];
+    if (added.length === 1) {
+      parts.push(`${added[0].label} added`);
+    } else if (added.length > 1) {
+      parts.push(`${added.length} diagnoses added`);
+    }
+    if (modified.length === 1) {
+      parts.push(`${modified[0].label} → ${modified[0].status || "Active"}`);
+    } else if (modified.length > 1) {
+      parts.push(`${modified.length} statuses updated`);
+    }
+
+    const text = parts.length > 0 ? parts.join(", ") : "Updated";
+
+    const tooltipLines = [`Updated on ${fmtDate(latest)}:`];
+    if (added.length > 0) {
+      tooltipLines.push("Added:");
+      added.forEach((dx) => tooltipLines.push(`  + ${dx.label} (${dx.status || "Active"})`));
+    }
+    if (modified.length > 0) {
+      tooltipLines.push("Status changed:");
+      modified.forEach((dx) => tooltipLines.push(`  ${dx.label} → ${dx.status || "Active"}`));
+    }
+
+    return { text, date: latest, tooltip: tooltipLines.join("\n") };
+  }, [grouped]);
+
   return (
     <div className="sc" id="diagnoses">
       <div className="sch">
         <div className="sct">
           <div className="sci ic-p">🏷</div>Diagnoses
-          {(() => {
-            const allDx = Object.values(grouped).flat();
-            const latest = allDx.reduce((max, dx) => {
-              const d = dx.updated_at || dx.created_at;
-              return d && d > (max || "") ? d : max;
-            }, null);
-            return latest ? (
-              <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>
-                Updated {fmtDate(latest)}
-              </span>
-            ) : null;
-          })()}
+          {dxSummary && (
+            <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8, cursor: "default" }} title={dxSummary.tooltip}>
+              {dxSummary.text} — {fmtDateShort(dxSummary.date)}
+            </span>
+          )}
         </div>
         <button className="bx bx-p" onClick={onAddDiagnosis}>
           + Add Diagnosis

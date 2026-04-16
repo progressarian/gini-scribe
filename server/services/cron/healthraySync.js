@@ -16,7 +16,6 @@ import {
   mapStatus,
   extractTimeSlot,
   toISTDate,
-  mapLabsToBiomarkers,
   buildCompliance,
 } from "../healthray/mappers.js";
 import {
@@ -275,7 +274,9 @@ async function syncAppointment(appt, localDoctorName) {
           if (opdVitals.bpSys) biomarkers.bpSys = opdVitals.bpSys;
           if (opdVitals.bpDia) biomarkers.bpDia = opdVitals.bpDia;
 
-          mapLabsToBiomarkers(clinical.healthrayLabs, biomarkers);
+          // Lab values (hba1c, fg, ldl, etc.) are synced to lab_results by syncLabResults()
+          // and then merged into appointments.biomarkers by syncBiomarkersFromLatestLabs().
+          // No direct mapLabsToBiomarkers() call needed — avoids duplicate writes.
 
           log(
             "Enrich",

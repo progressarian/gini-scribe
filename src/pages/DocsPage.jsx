@@ -18,9 +18,12 @@ export default function DocsPage() {
 
   useEffect(() => {
     if (dbPatientId && (!patientFullData || patientFullData.id !== dbPatientId)) {
-      api.get(`/api/patients/${dbPatientId}`).then(({ data }) => {
-        setPatientFullData(data);
-      }).catch(() => {});
+      api
+        .get(`/api/patients/${dbPatientId}`)
+        .then(({ data }) => {
+          setPatientFullData(data);
+        })
+        .catch(() => {});
     }
   }, [dbPatientId, patientFullData, setPatientFullData]);
 

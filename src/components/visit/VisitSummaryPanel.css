@@ -255,3 +255,43 @@
   font-size: 12px;
   color: var(--t3);
 }
+
+/* ── Shimmer / loading skeleton ── */
+.sp-panel-loading {
+  border-left-color: #e2e8f0;
+}
+.sp-shimmer-zone-hd {
+  padding: 8px 13px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+}
+.sp-shimmer-zone-hd--alt {
+  background: #f8fafc;
+}
+.sp-shimmer-hd-text {
+  height: 14px;
+  width: 55%;
+  border-radius: 4px;
+}
+.sp-shimmer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+}
+.sp-shimmer-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sp-shimmer-title {
+  height: 12px;
+  border-radius: 4px;
+}
+.sp-shimmer-footer {
+  height: 9px;
+  width: 40%;
+  border-radius: 3px;
+  margin-left: auto;
+}

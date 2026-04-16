@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef } from "react";
 import { fmtDate } from "./helpers";
 import api from "../../services/api";
 import "./VisitSummaryPanel.css";
+import "../Shimmer.css";
 
 // ── Alert row (rule engine mode) ──────────────────────────────────────────────
 
@@ -73,7 +74,43 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
       .finally(() => setLoading(false));
   }, [patientId, appointmentId]);
 
-  if (loading || dismissed || !rules) return null;
+  if (dismissed) return null;
+
+  if (loading) {
+    return (
+      <div className="sp-panel sp-panel-loading">
+        <div className="sp-body">
+          {/* Zone header shimmer */}
+          <div className="sp-shimmer-zone-hd">
+            <div className="shimmer sp-shimmer-hd-text" />
+          </div>
+          {/* Alert row shimmers */}
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="sp-shimmer-row">
+              <div className="shimmer sp-shimmer-icon" />
+              <div className="shimmer sp-shimmer-title" style={{ width: i === 2 ? "75%" : "90%" }} />
+            </div>
+          ))}
+          <div className="sp-divider" />
+          {/* Second zone */}
+          <div className="sp-shimmer-zone-hd sp-shimmer-zone-hd--alt">
+            <div className="shimmer sp-shimmer-hd-text" style={{ width: "30%" }} />
+          </div>
+          {[1, 2].map((i) => (
+            <div key={i} className="sp-shimmer-row">
+              <div className="shimmer sp-shimmer-icon" />
+              <div className="shimmer sp-shimmer-title" style={{ width: i === 1 ? "85%" : "60%" }} />
+            </div>
+          ))}
+        </div>
+        <div className="sp-footer">
+          <div className="shimmer sp-shimmer-footer" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!rules) return null;
 
   const display = ai ?? rules;
   const hasRed = display.red.length > 0;

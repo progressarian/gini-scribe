@@ -63,6 +63,21 @@ router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) =>
 
     const numericResult = num(result);
     const resultText = numericResult === null && result ? String(result) : null;
+    const canonical = getCanonical(test_name);
+    const finalDate = parseIndianDate(test_date) || new Date().toISOString().split("T")[0];
+
+    // Skip if exact same data already exists (same test + value + date)
+    if (numericResult !== null) {
+      const dup = await pool.query(
+        `SELECT id FROM lab_results
+         WHERE patient_id = $1 AND canonical_name = $2
+           AND result::numeric = $3::numeric AND test_date::date = $4::date
+         LIMIT 1`,
+        [req.params.id, canonical, numericResult, finalDate],
+      );
+      if (dup.rows[0]) return res.json(dup.rows[0]);
+    }
+
     const r = await pool.query(
       `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, result_text, unit, flag, ref_range, test_date, source)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
@@ -70,14 +85,13 @@ router.post("/patients/:id/labs", validate(labCreateSchema), async (req, res) =>
         req.params.id,
         n(consultation_id),
         test_name,
-        getCanonical(test_name),
+        canonical,
         numericResult,
         resultText,
         n(unit),
         n(flag) || "N",
         n(ref_range),
-        parseIndianDate(test_date) || new Date().toISOString().split("T")[0],
-
+        finalDate,
         (source || "lab").slice(0, 50),
       ],
     );

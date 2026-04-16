@@ -1,5 +1,5 @@
 import { memo, useState, useMemo } from "react";
-import { MED_COLORS, fmtDate } from "./helpers";
+import { MED_COLORS, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 import { MED_GROUPS, findDrug } from "../../config/drugDatabase";
 
 // Auto-detect med group from name when med_group is not set
@@ -343,22 +343,60 @@ const VisitMedications = memo(function VisitMedications({
   // Group order
   const groupOrder = ["diabetes", "kidney", "bp", "lipids", "thyroid", "supplement", "external"];
 
+  const medSummary = useMemo(() => {
+    if (!activeMeds?.length) return null;
+
+    const latest = activeMeds.reduce((max, m) => {
+      const d = m.updated_at || m.started_date || m.created_at;
+      return d && d > (max || "") ? d : max;
+    }, null);
+    if (!latest) return null;
+
+    const onDate = activeMeds.filter((m) => {
+      const d = m.updated_at || m.started_date || m.created_at;
+      return d && isSameDate(d, latest);
+    });
+
+    const added = onDate.filter((m) => isSameDate(m.created_at, latest));
+    const changed = onDate.filter((m) => !isSameDate(m.created_at, latest));
+
+    const parts = [];
+    if (added.length === 1) {
+      parts.push(`${added[0].name} added`);
+    } else if (added.length > 1) {
+      parts.push(`${added.length} meds added`);
+    }
+    if (changed.length === 1) {
+      parts.push(`${changed[0].name} updated`);
+    } else if (changed.length > 1) {
+      parts.push(`${changed.length} meds changed`);
+    }
+
+    const text = parts.length > 0 ? parts.join(", ") : "Updated";
+
+    const tooltipLines = [`Updated on ${fmtDate(latest)}:`];
+    if (added.length > 0) {
+      tooltipLines.push("Added:");
+      added.forEach((m) => tooltipLines.push(`  + ${m.name} ${m.dose || ""} ${m.frequency || ""}`));
+    }
+    if (changed.length > 0) {
+      tooltipLines.push("Changed:");
+      changed.forEach((m) => tooltipLines.push(`  ${m.name} ${m.dose || ""} ${m.frequency || ""}`));
+    }
+
+    return { text, date: latest, tooltip: tooltipLines.join("\n") };
+  }, [activeMeds]);
+
   return (
     <div className="sc" id="medications">
       <div className="sch">
         <div className="sct">
           <div className="sci ic-g">💊</div>Medications
-          {(() => {
-            const latest = (activeMeds || []).reduce((max, m) => {
-              const d = m.updated_at || m.started_date || m.created_at;
-              return d && d > (max || "") ? d : max;
-            }, null);
-            return latest ? (
-              <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}>
-                Updated {fmtDate(latest)}
-              </span>
-            ) : null;
-          })()}
+          {medSummary && (
+            <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8, cursor: "default" }} title={medSummary.tooltip}>
+              {medSummary.text} — {fmtDateShort(medSummary.date)}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {prevVisitMeds.length > 0 && (

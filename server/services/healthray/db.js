@@ -458,7 +458,29 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     apptId,
   ]);
 
+  // Deduplicate: when the same test+value appears multiple times (e.g. once in
+  // OBSERVATIONS with no date and once under FOLLOW UP with a specific date),
+  // keep only the entry with the specific date to avoid duplicate rows.
+  const seen = new Map();
+  const dedupedLabs = [];
   for (const lab of labs) {
+    const v = parseFloat(lab.value);
+    if (isNaN(v)) continue;
+    const cn = normalizeCanonicalName(lab.test);
+    const key = `${cn}|${v}`;
+    const prev = seen.get(key);
+    if (!prev) {
+      seen.set(key, { lab, index: dedupedLabs.length });
+      dedupedLabs.push(lab);
+    } else if (!prev.lab.date && lab.date) {
+      // Replace fallback-date entry with specific-date entry
+      dedupedLabs[prev.index] = lab;
+      seen.set(key, { lab, index: prev.index });
+    }
+    // If prev already has a specific date, keep it (skip current)
+  }
+
+  for (const lab of dedupedLabs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
@@ -481,20 +503,28 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
       if (existingPriority <= SOURCE_PRIORITY.healthray) continue;
     }
 
-    // Skip if this lab has no specific date (fell back to apptDate) AND the same
-    // test+value already exists for this patient within the last 365 days —
-    // this prevents carry-forward values from being re-inserted each visit.
-    if (!lab.date) {
-      const carryForward = await pool.query(
-        `SELECT id FROM lab_results
-         WHERE patient_id = $1 AND canonical_name = $2
-           AND result::numeric = $3::numeric
-           AND test_date >= NOW() - INTERVAL '365 days'
-         LIMIT 1`,
-        [patientId, canonicalName, val],
-      );
-      if (carryForward.rows[0]) continue;
-    }
+    // Skip if exact same data already exists (any source) — same test + value + date
+    const exact = await pool.query(
+      `SELECT id FROM lab_results
+       WHERE patient_id = $1 AND canonical_name = $2
+         AND result::numeric = $3::numeric AND test_date::date = $4::date
+       LIMIT 1`,
+      [patientId, canonicalName, val, labDate],
+    );
+    if (exact.rows[0]) continue;
+
+    // Skip if same test+value already exists for this patient within the last
+    // 365 days (any date) — doctors carry-forward old lab values in follow-up
+    // notes, so the AI may extract the same result with different dates.
+    const carryForward = await pool.query(
+      `SELECT id FROM lab_results
+       WHERE patient_id = $1 AND canonical_name = $2
+         AND result::numeric = $3::numeric
+         AND test_date >= NOW() - INTERVAL '365 days'
+       LIMIT 1`,
+      [patientId, canonicalName, val],
+    );
+    if (carryForward.rows[0]) continue;
 
     await pool
       .query(

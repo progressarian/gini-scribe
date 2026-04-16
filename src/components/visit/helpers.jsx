@@ -347,6 +347,21 @@ export const fmtDateLong = (d) => {
   return `${DAYS_L[dt.getDay()]}, ${dt.getDate()} ${MONTHS_L[dt.getMonth()]} ${dt.getFullYear()}`;
 };
 
+export const fmtDateShort = (d) => {
+  if (!d) return "";
+  const dt = new Date(d);
+  const now = new Date();
+  const month = MONTHS_S[dt.getMonth()];
+  return dt.getFullYear() === now.getFullYear()
+    ? `${dt.getDate()} ${month}`
+    : `${dt.getDate()} ${month} ${dt.getFullYear()}`;
+};
+
+export const isSameDate = (a, b) => {
+  if (!a || !b) return false;
+  return new Date(a).toDateString() === new Date(b).toDateString();
+};
+
 // ── Compute clinical flags from visit data ──
 export const computeFlags = (data) => {
   if (!data) return [];
