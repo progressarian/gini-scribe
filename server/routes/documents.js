@@ -658,6 +658,38 @@ router.patch("/documents/:id", async (req, res) => {
           );
         }
       }
+
+      // Sync vitals from extracted data (Weight, Height, BMI, BP) — same as HealthRay flow
+      try {
+        const { syncVitalsFromExtraction } = await import("../services/healthray/db.js");
+        const reportDate =
+          extracted_data.report_date ||
+          extracted_data.collection_date ||
+          (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : null);
+        await syncVitalsFromExtraction(doc.patient_id, extracted_data, reportDate);
+      } catch (syncErr) {
+        console.error(
+          `[DocSync] Vitals sync failed for patient ${doc.patient_id}:`,
+          syncErr.message,
+        );
+      }
+
+      // Sync biomarkers to latest appointment so OPD page reflects new values
+      try {
+        const { rows: apptRows } = await client.query(
+          `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+          [doc.patient_id],
+        );
+        if (apptRows[0]) {
+          const { syncBiomarkersFromLatestLabs } = await import("../services/healthray/db.js");
+          await syncBiomarkersFromLatestLabs(doc.patient_id, apptRows[0].id);
+        }
+      } catch (syncErr) {
+        console.error(
+          `[DocSync] Biomarker sync failed for patient ${doc.patient_id}:`,
+          syncErr.message,
+        );
+      }
     }
 
     // ── Sync extracted prescription data (diagnoses + medications) ──

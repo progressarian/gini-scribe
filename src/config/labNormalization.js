@@ -185,6 +185,42 @@ export const NORMALIZE_TEST = (() => {
   add("C-Peptide", "c-peptide", "c peptide", "c-peptide fasting");
   add("PSA", "psa", "prostate specific antigen");
   add("Phosphorus", "phosphorus", "phosphate", "serum phosphorus", "inorganic phosphorus");
+  add(
+    "Total Testosterone",
+    "total testosterone",
+    "testosterone total",
+    "testosterone, total",
+    "serum testosterone",
+    "testosterone",
+  );
+  add("Free Testosterone", "free testosterone", "testosterone free", "testosterone, free");
+  add("Cortisol", "cortisol", "serum cortisol", "cortisol morning", "cortisol am");
+  add("LH", "lh", "luteinizing hormone", "luteinising hormone");
+  add("FSH", "fsh", "follicle stimulating hormone");
+  add("Prolactin", "prolactin", "serum prolactin");
+  add("AMH", "amh", "anti mullerian hormone", "anti-mullerian hormone", "anti müllerian hormone");
+  add("Estradiol", "estradiol", "e2", "oestradiol", "serum estradiol");
+  add("Progesterone", "progesterone", "serum progesterone");
+  add("DHEAS", "dheas", "dhea-s", "dehydroepiandrosterone sulfate", "dhea sulfate");
+  add("IGF-1", "igf-1", "igf1", "insulin-like growth factor", "insulin like growth factor 1");
+  add(
+    "Mean Plasma Glucose",
+    "mean plasma glucose",
+    "mean blood glucose",
+    "average blood glucose",
+    "estimated average glucose",
+  );
+  add("RBS", "rbs", "random blood sugar", "random glucose", "random blood glucose");
+  add("Indirect Bilirubin", "indirect bilirubin", "unconjugated bilirubin", "bilirubin indirect");
+  add("PCV", "pcv", "packed cell volume", "hematocrit", "haematocrit", "hct");
+  add("Homocysteine", "homocysteine", "serum homocysteine");
+  add("Lipoprotein(a)", "lipoprotein(a)", "lp(a)", "lpa", "lipoprotein a");
+  add("D-Dimer", "d-dimer", "d dimer");
+  add("Procalcitonin", "procalcitonin", "pct");
+  add("Fructosamine", "fructosamine", "glycated albumin");
+  add("MCV", "mcv", "mean corpuscular volume");
+  add("MCH", "mch", "mean corpuscular hemoglobin", "mean corpuscular haemoglobin");
+  add("MCHC", "mchc", "mean corpuscular hemoglobin concentration");
   return map;
 })();
 

@@ -1,5 +1,13 @@
 import { memo, useMemo } from "react";
-import { BiomarkerCard, getLabVal, getLabValFromLatest, getLabHist, fmtDate, fmtDateShort, isSameDate } from "./helpers";
+import {
+  BiomarkerCard,
+  getLabVal,
+  getLabValFromLatest,
+  getLabHist,
+  fmtDate,
+  fmtDateShort,
+  isSameDate,
+} from "./helpers";
 
 const VisitBiomarkers = memo(function VisitBiomarkers({
   labResults,
@@ -134,7 +142,14 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     if (!labLatest) return null;
     const entries = [];
     for (const [testName, v] of Object.entries(labLatest)) {
-      if (v?.date) entries.push({ name: testName, date: v.date, result: v.result, unit: v.unit, flag: v.flag });
+      if (v?.date)
+        entries.push({
+          name: testName,
+          date: v.date,
+          result: v.result,
+          unit: v.unit,
+          flag: v.flag,
+        });
     }
     if (!entries.length) return null;
 
@@ -147,14 +162,21 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     if (updatedTests.length <= 3) {
       text = updatedTests.map((e) => e.name).join(", ") + " updated";
     } else {
-      text = updatedTests.slice(0, 2).map((e) => e.name).join(", ") + ` +${updatedTests.length - 2} more updated`;
+      text =
+        updatedTests
+          .slice(0, 2)
+          .map((e) => e.name)
+          .join(", ") + ` +${updatedTests.length - 2} more updated`;
     }
 
-    const tooltip = `Updated on ${fmtDate(latestDate)}:\n` +
-      updatedTests.map((e) => {
-        const flag = e.flag === "H" ? " (HIGH)" : e.flag === "L" ? " (LOW)" : "";
-        return `  ${e.name}: ${e.result}${e.unit ? " " + e.unit : ""}${flag}`;
-      }).join("\n");
+    const tooltip =
+      `Updated on ${fmtDate(latestDate)}:\n` +
+      updatedTests
+        .map((e) => {
+          const flag = e.flag === "H" ? " (HIGH)" : e.flag === "L" ? " (LOW)" : "";
+          return `  ${e.name}: ${e.result}${e.unit ? " " + e.unit : ""}${flag}`;
+        })
+        .join("\n");
 
     return { text, date: latestDate, tooltip };
   }, [labLatest]);
@@ -167,7 +189,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
           {biomarkerSummary && (
-            <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500, cursor: "default" }} title={biomarkerSummary.tooltip}>
+            <span
+              style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500, cursor: "default" }}
+              title={biomarkerSummary.tooltip}
+            >
               {biomarkerSummary.text} — {fmtDateShort(biomarkerSummary.date)}
             </span>
           )}

@@ -54,7 +54,7 @@ export async function extractLab(base64, mediaType) {
     const { data: d } = await api.post("/api/ai/complete", {
       messages: [{ role: "user", content: [block, { type: "text", text: LAB_PROMPT }] }],
       model: "sonnet",
-      maxTokens: 3000,
+      maxTokens: 8000,
     });
     if (d.error) return { data: null, error: d.error };
     return parseVisionResponse(d.text);
@@ -75,7 +75,7 @@ export async function extractImaging(base64, mediaType) {
     const { data: d } = await api.post("/api/ai/complete", {
       messages: [{ role: "user", content: [block, { type: "text", text: IMAGING_PROMPT }] }],
       model: "sonnet",
-      maxTokens: 3000,
+      maxTokens: 8000,
     });
     if (d.error) return { data: null, error: d.error };
     return parseVisionResponse(d.text);

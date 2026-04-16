@@ -1247,6 +1247,12 @@ export default function VisitPage() {
                 } else if (!extracted?.panels?.length) {
                   toast("No lab values found in report", "warn");
                 } else {
+                  // PATCH document with extracted_data to trigger backend sync (labs + vitals + biomarkers)
+                  if (r.docId) {
+                    api
+                      .patch(`/api/documents/${r.docId}`, { extracted_data: extracted })
+                      .catch(() => {});
+                  }
                   setModal({ type: "labReview", data: { extracted, doc_date: d.doc_date } });
                 }
               } catch (e) {
@@ -1305,6 +1311,8 @@ export default function VisitPage() {
             setLabExtractSaving(false);
             closeModal();
             toast(`${saved} lab value${saved !== 1 ? "s" : ""} saved`, "success");
+            // Delayed second refresh to catch async backend autoExtractLab results
+            setTimeout(() => refreshData(), 3000);
           }}
         />
       )}

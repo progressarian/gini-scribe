@@ -393,7 +393,16 @@ const VisitMedications = memo(function VisitMedications({
         <div className="sct">
           <div className="sci ic-g">💊</div>Medications
           {medSummary && (
-            <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8, cursor: "default" }} title={medSummary.tooltip}>
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--t3)",
+                fontWeight: 400,
+                marginLeft: 8,
+                cursor: "default",
+              }}
+              title={medSummary.tooltip}
+            >
               {medSummary.text} — {fmtDateShort(medSummary.date)}
             </span>
           )}

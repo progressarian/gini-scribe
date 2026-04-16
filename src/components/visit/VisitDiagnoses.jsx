@@ -1,5 +1,12 @@
 import { memo, useMemo } from "react";
-import { DX_STATUS_STYLE, DX_STATUS_DEFAULT, getDxSuggestion, fmtDate, fmtDateShort, isSameDate } from "./helpers";
+import {
+  DX_STATUS_STYLE,
+  DX_STATUS_DEFAULT,
+  getDxSuggestion,
+  fmtDate,
+  fmtDateShort,
+  isSameDate,
+} from "./helpers";
 import { sortDiagnoses, detectDiagnosisCategory } from "../../server-utils/diagnosisSort";
 
 const DX_STATUS_OPTS = [
@@ -364,7 +371,16 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
         <div className="sct">
           <div className="sci ic-p">🏷</div>Diagnoses
           {dxSummary && (
-            <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8, cursor: "default" }} title={dxSummary.tooltip}>
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--t3)",
+                fontWeight: 400,
+                marginLeft: 8,
+                cursor: "default",
+              }}
+              title={dxSummary.tooltip}
+            >
               {dxSummary.text} — {fmtDateShort(dxSummary.date)}
             </span>
           )}

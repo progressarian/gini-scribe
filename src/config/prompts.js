@@ -46,15 +46,19 @@ CRITICAL MEDICATION RULES:
 export const LAB_PROMPT = `Extract ALL test results from this lab report image. Return ONLY valid JSON, no backticks.
 {"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
 CRITICAL RULES:
+- Extract EVERY test result on the report without exception, even if there are more than 50 tests. Do not skip or truncate.
 - report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD.
 - lab_name: Extract the laboratory/hospital name from the report header.
 - test_name: Use SHORT STANDARD names. Map to these canonical names when applicable:
-  HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
+  HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Mean Plasma Glucose, RBS, Fructosamine,
+  Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
   Creatinine, BUN, Uric Acid, eGFR, UACR, Sodium, Potassium, Calcium, Phosphorus,
   TSH, T3, T4, Free T3, Free T4,
-  SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Albumin, Total Protein,
-  Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, ESR, CRP,
+  SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Indirect Bilirubin, Albumin, Total Protein,
+  Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, PCV, ESR, CRP, hs-CRP,
   Vitamin D, Vitamin B12, Ferritin, Iron, TIBC, Folate,
+  Total Testosterone, Free Testosterone, Cortisol, LH, FSH, Prolactin, AMH, Estradiol, Progesterone, DHEAS, IGF-1,
+  Homocysteine, Lipoprotein(a), D-Dimer, Procalcitonin,
   PSA, Urine Routine, Microalbumin
   Example: "Glycated Hemoglobin" \u2192 "HbA1c", "Fasting Blood Sugar" \u2192 "FBS", "Fasting Plasma Glucose" \u2192 "FBS", "Post Prandial Blood Sugar" \u2192 "PPBS"
 - flag: "H" high, "L" low, null normal.

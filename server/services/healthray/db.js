@@ -1240,6 +1240,83 @@ export async function syncVitals(patientId, apptId, apptDate, opdVitals) {
     );
 }
 
+// ── Sync vitals from extracted lab report data ────────────────────────────────
+// Scans extracted panels for vital-sign values (Weight, Height, BMI, BP) and
+// writes them to the vitals table — same pattern as HealthRay's syncVitals().
+// Called after lab extraction from any upload path.
+export async function syncVitalsFromExtraction(patientId, extractedData, recordedAt) {
+  if (!patientId || !extractedData?.panels) return;
+
+  const VITAL_CANONICAL = {
+    Weight: "weight",
+    "Weight (Kg)": "weight",
+    BMI: "bmi",
+    "Body Mass Index": "bmi",
+    "Systolic BP": "bp_sys",
+    "Diastolic BP": "bp_dia",
+    Height: "height",
+    Waist: "waist",
+    "Waist Circumference": "waist",
+  };
+
+  const vitals = {};
+  for (const panel of extractedData.panels) {
+    for (const test of panel.tests || []) {
+      const cn = test.test_name?.trim();
+      if (!cn) continue;
+      // Check direct match or case-insensitive match
+      const key =
+        VITAL_CANONICAL[cn] ||
+        VITAL_CANONICAL[
+          Object.keys(VITAL_CANONICAL).find((k) => k.toLowerCase() === cn.toLowerCase())
+        ];
+      if (key && test.result != null) {
+        const val = parseFloat(test.result);
+        if (!isNaN(val)) vitals[key] = val;
+      }
+    }
+  }
+
+  // Nothing vital-like found
+  if (!vitals.weight && !vitals.bp_sys && !vitals.height && !vitals.bmi) return;
+
+  // Auto-calculate BMI if weight and height present but BMI missing
+  if (vitals.weight && vitals.height && !vitals.bmi) {
+    const hm = vitals.height / 100;
+    if (hm > 0) vitals.bmi = Math.round((vitals.weight / (hm * hm)) * 10) / 10;
+  }
+
+  const dateVal =
+    recordedAt ||
+    extractedData.report_date ||
+    extractedData.collection_date ||
+    new Date().toISOString().split("T")[0];
+
+  try {
+    await pool.query(
+      `INSERT INTO vitals
+       (patient_id, recorded_at, bp_sys, bp_dia, weight, height, bmi, waist)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        patientId,
+        dateVal,
+        vitals.bp_sys || null,
+        vitals.bp_dia || null,
+        vitals.weight || null,
+        vitals.height || null,
+        vitals.bmi || null,
+        vitals.waist || null,
+      ],
+    );
+    log(
+      "syncVitalsFromExtraction",
+      `Patient ${patientId}: wrote vitals from extraction (${Object.keys(vitals).join(", ")})`,
+    );
+  } catch (e) {
+    error("syncVitalsFromExtraction", `Patient ${patientId}: ${e.message}`);
+  }
+}
+
 // ── Sync appointments.biomarkers from latest lab_results ─────────────────────
 // Reads the most recent lab result per canonical for each OPD biomarker field
 // and merges into appointments.biomarkers. Only overwrites a key when lab_results

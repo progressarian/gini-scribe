@@ -227,24 +227,11 @@ const useLabStore = create((set, get) => ({
       // 2. Upload file to storage
       if (savedDoc.id && rpt.base64)
         await get().uploadFileToStorage(savedDoc.id, rpt.base64, rpt.mediaType, rpt.fileName);
-      // 3. Save lab results with normalized names
-      if (isLab && data.panels) {
-        for (const panel of data.panels) {
-          for (const test of panel.tests || []) {
-            await api
-              .post(`/api/patients/${patientId}/labs`, {
-                test_name: normalizeTestName(test.test_name),
-                result: String(test.result_text || test.result),
-                unit: test.unit || "",
-                flag: test.flag || "N",
-                ref_range: test.ref_range || "",
-                test_date: effectiveDate,
-              })
-              .catch(() => {
-                console.warn("Failed to save lab result");
-              });
-          }
-        }
+      // 3. PATCH document with extracted_data — triggers backend lab sync, vitals sync, biomarker sync
+      if (savedDoc.id && data && (data.panels || data.medications)) {
+        await api
+          .patch(`/api/documents/${savedDoc.id}`, { extracted_data: data })
+          .catch((e) => console.warn("PATCH extracted_data failed:", e.message));
       }
       set((state) => ({
         intakeReports: state.intakeReports.map((r) =>

@@ -5,6 +5,10 @@ import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
+import {
+  syncBiomarkersFromLatestLabs,
+  syncVitalsFromExtraction,
+} from "../services/healthray/db.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import {
   sortMedications,
@@ -775,15 +779,19 @@ router.post("/visit/:patientId/referral", async (req, res) => {
 const LAB_PROMPT = `Extract ALL test results from this lab report image. Return ONLY valid JSON, no backticks.
 {"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
 CRITICAL RULES:
+- Extract EVERY test result on the report without exception, even if there are more than 50 tests. Do not skip or truncate.
 - report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD.
 - lab_name: Extract the laboratory/hospital name from the report header.
 - test_name: Use SHORT STANDARD names. Map to these canonical names when applicable:
-  HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
+  HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Mean Plasma Glucose, RBS, Fructosamine,
+  Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
   Creatinine, BUN, Uric Acid, eGFR, UACR, Sodium, Potassium, Calcium, Phosphorus,
   TSH, T3, T4, Free T3, Free T4,
-  SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Albumin, Total Protein,
-  Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, ESR, CRP,
+  SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Indirect Bilirubin, Albumin, Total Protein,
+  Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, PCV, ESR, CRP, hs-CRP,
   Vitamin D, Vitamin B12, Ferritin, Iron, TIBC, Folate,
+  Total Testosterone, Free Testosterone, Cortisol, LH, FSH, Prolactin, AMH, Estradiol, Progesterone, DHEAS, IGF-1,
+  Homocysteine, Lipoprotein(a), D-Dimer, Procalcitonin,
   PSA, Urine Routine, Microalbumin
   Example: "Glycated Hemoglobin" → "HbA1c", "Fasting Blood Sugar" → "FBS", "Fasting Plasma Glucose" → "FBS", "Post Prandial Blood Sugar" → "PPBS"
 - flag: "H" high, "L" low, null normal.
@@ -814,7 +822,7 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
       headers,
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 3000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: [block, { type: "text", text: LAB_PROMPT }] }],
       }),
     });
@@ -850,6 +858,9 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
       docId,
     ]);
 
+    // Remove previous entries synced from this document (avoid duplicates)
+    await pool.query(`DELETE FROM lab_results WHERE document_id = $1`, [docId]);
+
     // Save lab results
     const testDate =
       extracted.report_date ||
@@ -882,6 +893,25 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
         );
       }
     }
+    // Sync vitals from extracted data (Weight, Height, BMI, BP) — same as HealthRay flow
+    await syncVitalsFromExtraction(patientId, extracted, docDate);
+
+    // Sync biomarkers to latest appointment so OPD page reflects new values
+    try {
+      const { rows: apptRows } = await pool.query(
+        `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+        [patientId],
+      );
+      if (apptRows[0]) {
+        await syncBiomarkersFromLatestLabs(patientId, apptRows[0].id);
+      }
+    } catch (syncErr) {
+      console.error(
+        `[AutoExtract] Biomarker sync failed for patient ${patientId}:`,
+        syncErr.message,
+      );
+    }
+
     console.log(
       `[AutoExtract] Doc ${docId}: extracted ${extracted.panels.length} panels for patient ${patientId}`,
     );

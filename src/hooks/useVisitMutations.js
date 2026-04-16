@@ -157,10 +157,10 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   const uploadDocument = useCallback(
     async (data) => {
       try {
-        await api.post(`/api/visit/${patientId}/document`, data);
+        const { data: doc } = await api.post(`/api/visit/${patientId}/document`, data);
         toast("Document uploaded", "success");
         await refreshData();
-        return { success: true };
+        return { success: true, docId: doc?.id };
       } catch {
         toast("Failed to upload document", "error");
         return { success: false };

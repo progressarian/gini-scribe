@@ -88,7 +88,10 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
           {[1, 2, 3].map((i) => (
             <div key={i} className="sp-shimmer-row">
               <div className="shimmer sp-shimmer-icon" />
-              <div className="shimmer sp-shimmer-title" style={{ width: i === 2 ? "75%" : "90%" }} />
+              <div
+                className="shimmer sp-shimmer-title"
+                style={{ width: i === 2 ? "75%" : "90%" }}
+              />
             </div>
           ))}
           <div className="sp-divider" />
@@ -99,7 +102,10 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
           {[1, 2].map((i) => (
             <div key={i} className="sp-shimmer-row">
               <div className="shimmer sp-shimmer-icon" />
-              <div className="shimmer sp-shimmer-title" style={{ width: i === 1 ? "85%" : "60%" }} />
+              <div
+                className="shimmer sp-shimmer-title"
+                style={{ width: i === 1 ? "85%" : "60%" }}
+              />
             </div>
           ))}
         </div>

@@ -1984,7 +1984,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                   {(() => {
                                     const rKey = r.id || r.name;
                                     const isExpanded = expandedReports[rKey];
-                                    const shown = isExpanded ? tests : tests.slice(0, 12);
+                                    const shown = isExpanded ? tests : tests.slice(0, 25);
                                     return (
                                       <>
                                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -2010,7 +2010,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                             </span>
                                           ))}
                                         </div>
-                                        {tests.length > 12 && (
+                                        {tests.length > 25 && (
                                           <button
                                             onClick={() =>
                                               setExpandedReports((p) => ({
@@ -2031,7 +2031,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                           >
                                             {isExpanded
                                               ? "Show less ↑"
-                                              : `+${tests.length - 12} more — Show all ↓`}
+                                              : `+${tests.length - 25} more — Show all ↓`}
                                           </button>
                                         )}
                                       </>
