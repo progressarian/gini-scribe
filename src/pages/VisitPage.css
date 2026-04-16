@@ -521,6 +521,20 @@
   overflow-x: auto;
   overflow-y: hidden;
 }
+.slim-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.slim-scroll-x::-webkit-scrollbar {
+  height: 4px;
+}
+.slim-scroll-x::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.slim-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
 .stabs::-webkit-scrollbar {
   height: 0;
 }

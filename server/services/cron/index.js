@@ -11,6 +11,7 @@ import {
   retryPendingLabCases,
   getLabSyncStatus,
   backfillLabRanges,
+  backfillLabPdfs,
 } from "./labSync.js";
 
 // ── Sync interval (every 5 minutes) ────────────────────────────────────────
@@ -105,5 +106,6 @@ export {
   runLabSync,
   getLabSyncStatus,
   backfillLabRanges,
+  backfillLabPdfs,
   runDailyOpdBackfill,
 };

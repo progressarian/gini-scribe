@@ -298,14 +298,54 @@ function PanelBlock({ name, results, type }) {
   );
 }
 
+// Build rows from labResults for a specific date (same shape as buildLatestRows)
+function buildHistoricalRows(labResults, dateStr) {
+  if (!labResults?.length || !dateStr) return [];
+  const dayResults = labResults.filter((r) => r.test_date && r.test_date.slice(0, 10) === dateStr);
+  const rows = dayResults.map((r) => ({
+    canonical: r.canonical_name || r.test_name,
+    test_name: r.test_name,
+    result: r.result,
+    result_text: r.result_text,
+    unit: r.unit,
+    flag: r.flag,
+    ref_range: r.ref_range,
+    test_date: r.test_date,
+    source: r.source || "healthray",
+    panel_name: r.panel_name || null,
+  }));
+  // Same cross-source dedup as buildLatestRows
+  const PREFIX_RE = /^(serum|plasma|s\.?|sr\.?|b\.?)[\s_]+/i;
+  const normalize = (s) =>
+    (s || "")
+      .toLowerCase()
+      .replace(PREFIX_RE, "")
+      .replace(/[^a-z0-9]/g, "");
+  const kept = new Map();
+  rows.sort((a, b) => (SOURCE_PRIORITY[a.source] ?? 9) - (SOURCE_PRIORITY[b.source] ?? 9));
+  for (const row of rows) {
+    const nk = normalize(row.canonical) || normalize(row.test_name);
+    if (!kept.has(nk)) kept.set(nk, row);
+  }
+  return Array.from(kept.values());
+}
+
+// Find the labOrder whose case_date matches a given date
+function findLabOrderForDate(labOrders, dateStr) {
+  if (!labOrders?.length || !dateStr) return null;
+  return labOrders.find((o) => o.date && o.date.slice(0, 10) === dateStr) || null;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 const VisitLabsPanel = memo(function VisitLabsPanel({
   documents,
+  labResults,
   labLatest,
   labOrders,
   onUploadReport,
 }) {
   const [viewingDoc, setViewingDoc] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null); // null = "Latest"
 
   const labDocs = documents.filter(
     (d) => d.doc_type === "lab_report" || d.doc_type === "blood_test",
@@ -318,23 +358,40 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     setViewingDoc(doc);
   }, []);
 
-  const { latestRows, sections, latestDate } = useMemo(() => {
-    const rows = buildLatestRows(labLatest);
-    // Use the most recent actual test_date across results as the section date.
-    // Previously this used labOrders[0].date (lab case order date) which can differ
-    // from when samples were actually taken — leading to a misleading header date.
-    const latestTestDate = rows.reduce(
-      (max, r) => (r.test_date && r.test_date > max ? r.test_date : max),
-      "",
-    );
-    const filtered = latestTestDate
-      ? rows.filter((r) => r.test_date && r.test_date.slice(0, 10) === latestTestDate.slice(0, 10))
-      : rows;
-    const secs = buildSections(filtered, labOrders);
-    return { latestRows: rows, sections: secs, latestDate: latestTestDate };
-  }, [labLatest, labOrders]);
+  // Extract unique lab dates from all results, newest first
+  const availableDates = useMemo(() => {
+    if (!labResults?.length) return [];
+    const dateSet = new Set();
+    for (const r of labResults) {
+      if (r.test_date) dateSet.add(r.test_date.slice(0, 10));
+    }
+    return Array.from(dateSet).sort((a, b) => b.localeCompare(a));
+  }, [labResults]);
 
-  const hasResults = latestRows.length > 0;
+  const { displayRows, sections, displayDate } = useMemo(() => {
+    if (selectedDate === null) {
+      // "Latest" mode — existing behaviour
+      const rows = buildLatestRows(labLatest);
+      const latestTestDate = rows.reduce(
+        (max, r) => (r.test_date && r.test_date > max ? r.test_date : max),
+        "",
+      );
+      const filtered = latestTestDate
+        ? rows.filter(
+            (r) => r.test_date && r.test_date.slice(0, 10) === latestTestDate.slice(0, 10),
+          )
+        : rows;
+      const secs = buildSections(filtered, labOrders);
+      return { displayRows: rows, sections: secs, displayDate: latestTestDate };
+    }
+    // Historical mode
+    const rows = buildHistoricalRows(labResults, selectedDate);
+    const matchingOrder = findLabOrderForDate(labOrders, selectedDate);
+    const secs = buildSections(rows, matchingOrder ? [matchingOrder] : []);
+    return { displayRows: rows, sections: secs, displayDate: selectedDate };
+  }, [selectedDate, labLatest, labResults, labOrders]);
+
+  const hasResults = displayRows.length > 0;
 
   return (
     <>
@@ -427,38 +484,114 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                 No radiology reports
               </div>
             )}
-            <div className="addr">
+            {/* <div className="addr">
               <span style={{ fontSize: 14, color: "var(--t3)" }}>+</span>
               <span className="addr-lbl">Upload new radiology report</span>
-            </div>
+            </div> */}
           </div>
         </div>
 
-        {/* Latest Test Results grouped by labOrders */}
-        {hasResults && (
+        {/* Test Results — latest by default, historical via date pills */}
+        {(hasResults || availableDates.length > 0) && (
           <div className="sc">
-            <div className="sch">
-              <div className="sct">
-                <div className="sci ic-b">📋</div>
-                Latest Test Results
-                {latestDate && (
-                  <span
-                    style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}
-                  >
-                    as of {fmtDate(latestDate)}
-                  </span>
-                )}
+            <div
+              className="sch"
+              style={{ flexDirection: "column", alignItems: "stretch", gap: 8, overflow: "hidden" }}
+            >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <div className="sct">
+                  <div className="sci ic-b">📋</div>
+                  Test Results
+                  {displayDate && (
+                    <span
+                      style={{ fontSize: 11, color: "var(--t3)", fontWeight: 400, marginLeft: 8 }}
+                    >
+                      {selectedDate === null ? "Latest — " : ""}
+                      {fmtDate(displayDate)}
+                    </span>
+                  )}
+                </div>
               </div>
+              {availableDates.length > 1 && (
+                <div
+                  className="slim-scroll-x"
+                  style={{
+                    display: "flex",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    overflowX: "auto",
+                    overflowY: "hidden",
+                    WebkitOverflowScrolling: "touch",
+                    maxWidth: "100%",
+                    minWidth: 0,
+                  }}
+                >
+                  {availableDates.map((d, i) => {
+                    const isLatest = i === 0;
+                    const isActive = isLatest
+                      ? selectedDate === null || selectedDate === d
+                      : selectedDate === d;
+                    return (
+                      <button
+                        key={d}
+                        onClick={() =>
+                          setSelectedDate(isLatest && isActive ? null : isActive ? null : d)
+                        }
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          border: "none",
+                          borderRight: "1px solid #e2e8f0",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          flexShrink: 0,
+                          background: isActive ? "#0f172a" : "white",
+                          color: isActive ? "white" : "#64748b",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        {fmtDate(d)}
+                        {isLatest && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "1px 5px",
+                              borderRadius: 3,
+                              background: isActive ? "rgba(255,255,255,0.2)" : "#e0f2fe",
+                              color: isActive ? "white" : "#0284c7",
+                              textTransform: "uppercase",
+                              letterSpacing: 0.3,
+                            }}
+                          >
+                            Latest
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div className="scb">
-              {sections.map((sec, i) => (
-                <PanelBlock
-                  key={`${sec.name}-${i}`}
-                  name={sec.name}
-                  results={sec.results}
-                  type={sec.type}
-                />
-              ))}
+              {sections.length > 0 ? (
+                sections.map((sec, i) => (
+                  <PanelBlock
+                    key={`${sec.name}-${i}`}
+                    name={sec.name}
+                    results={sec.results}
+                    type={sec.type}
+                  />
+                ))
+              ) : (
+                <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
+                  No results for this date
+                </div>
+              )}
             </div>
           </div>
         )}

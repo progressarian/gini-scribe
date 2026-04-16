@@ -388,7 +388,17 @@ function BiomarkerSparkline({ data, color, unit, target }) {
 
   const W = 260,
     H = 52;
-  const items = data.slice(-12);
+  // Deduplicate by date — keep only the latest value per date
+  const seenDates = new Set();
+  const dedupedData = [];
+  for (let i = data.length - 1; i >= 0; i--) {
+    const dateKey = (data[i].date || data[i].test_date || "").slice(0, 10);
+    if (!seenDates.has(dateKey)) {
+      seenDates.add(dateKey);
+      dedupedData.unshift(data[i]);
+    }
+  }
+  const items = dedupedData.slice(-12);
   const values = items.map((d) => parseFloat(d.result ?? d.value ?? 0)).filter((n) => !isNaN(n));
   const dates = items.map((d) => d.date || d.test_date);
   if (values.length === 0) return null;
@@ -466,11 +476,12 @@ function BiomarkerSparkline({ data, color, unit, target }) {
         (() => {
           const cx = getX(hoverIdx);
           const cy = getY(values[hoverIdx]);
-          const TW = 76,
-            TH = 34;
+          const TW = 88,
+            TH = 38;
           // keep tooltip inside SVG bounds
           const tipX = Math.min(Math.max(cx - TW / 2, 0), W - TW);
-          const tipY = cy > H / 2 ? Math.max(cy - TH - 10, 0) : cy + 14;
+          // Always place tooltip above the chart area to avoid overlapping data points
+          const tipY = Math.max(cy - TH - 14, -TH - 4);
           return (
             <g style={{ pointerEvents: "none" }}>
               {/* vertical crosshair */}
@@ -498,20 +509,19 @@ function BiomarkerSparkline({ data, color, unit, target }) {
               {/* value */}
               <text
                 x={tipX + TW / 2}
-                y={tipY + 14}
+                y={tipY + 15}
                 fill="white"
                 fontSize="11"
                 fontWeight="800"
                 textAnchor="middle"
                 fontFamily="DM Sans,sans-serif"
               >
-                {values[hoverIdx]}
-                {unit}
+                {values[hoverIdx]} {unit}
               </text>
               {/* date */}
               <text
                 x={tipX + TW / 2}
-                y={tipY + 27}
+                y={tipY + 29}
                 fill="#94a3b8"
                 fontSize="8.5"
                 fontWeight="500"

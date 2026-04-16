@@ -150,9 +150,12 @@ export default function Sparkline({
           (() => {
             const cx = (hoverIdx / Math.max(values.length - 1, 1)) * width;
             const cy = height - ((values[hoverIdx] - min) / range) * height;
-            const tooltipX = cx < width / 2 ? cx + 8 : cx - 65;
+            const TW = 74,
+              TH = 28;
+            const tooltipX = Math.min(Math.max(cx - TW / 2, 0), width - TW);
+            const tooltipY = Math.max(cy - TH - 12, -TH - 2);
             return (
-              <g>
+              <g style={{ pointerEvents: "none" }}>
                 <line
                   x1={cx}
                   y1={0}
@@ -164,30 +167,29 @@ export default function Sparkline({
                   opacity="0.4"
                 />
                 <rect
-                  x={tooltipX}
-                  y={Math.max(cy - 28, 0)}
-                  width="60"
-                  height="22"
-                  rx="4"
-                  fill="#1e293b"
-                  opacity="0.9"
+                  x={tooltipX + 1}
+                  y={tooltipY + 1}
+                  width={TW}
+                  height={TH}
+                  rx="5"
+                  fill="rgba(0,0,0,0.12)"
                 />
+                <rect x={tooltipX} y={tooltipY} width={TW} height={TH} rx="5" fill="#1e293b" />
                 <text
-                  x={tooltipX + 30}
-                  y={Math.max(cy - 18, 10)}
+                  x={tooltipX + TW / 2}
+                  y={tooltipY + 12}
                   fill="white"
-                  fontSize="8"
+                  fontSize="9"
                   fontWeight="700"
                   textAnchor="middle"
                 >
-                  {values[hoverIdx]}
-                  {unit}
+                  {values[hoverIdx]} {unit}
                 </text>
                 <text
-                  x={tooltipX + 30}
-                  y={Math.max(cy - 10, 18)}
+                  x={tooltipX + TW / 2}
+                  y={tooltipY + 22}
                   fill="#94a3b8"
-                  fontSize="6"
+                  fontSize="7"
                   textAnchor="middle"
                 >
                   {fmtDate(dates[hoverIdx])}

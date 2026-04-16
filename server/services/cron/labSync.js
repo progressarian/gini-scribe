@@ -120,7 +120,7 @@ async function processCase(listRow) {
   // Otherwise leave results_synced=false so the recovery loop keeps trying.
 
   // Step h: download lab report PDF (fire-and-forget — never blocks sync)
-  if (patientId && listRow.case_attachment_file_name) {
+  if (patientId) {
     downloadAndStoreLabPdf(
       patientId,
       caseNo,
@@ -327,7 +327,7 @@ export async function retryPendingLabCases() {
       }
 
       // Download PDF if not already stored
-      if (patientId && !row.pdf_storage_path && row.pdf_file_name) {
+      if (patientId && !row.pdf_storage_path) {
         downloadAndStoreLabPdf(
           patientId,
           row.case_no,
@@ -347,4 +347,60 @@ export async function retryPendingLabCases() {
       log("Recovery", `${row.patient_case_no} error: ${e.message}`);
     }
   }
+}
+
+// ── Backfill PDFs for synced cases that are missing them ────────────────────
+export async function backfillLabPdfs({ concurrency = 2 } = {}) {
+  const pool = (await import("../../config/db.js")).default;
+
+  const { rows } = await pool.query(
+    `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
+            patient_id, pdf_file_name, case_date
+     FROM lab_cases
+     WHERE patient_id IS NOT NULL
+       AND pdf_storage_path IS NULL
+       AND COALESCE(retry_abandoned, FALSE) = FALSE
+     ORDER BY case_date DESC`,
+  );
+
+  log("PDF Backfill", `${rows.length} cases missing PDFs`);
+
+  if (rows.length === 0) return { total: 0, downloaded: 0, skipped: 0, errors: 0 };
+
+  let downloaded = 0,
+    skipped = 0,
+    errors = 0;
+
+  await runBatch(rows, concurrency, async (row) => {
+    try {
+      const caseDate = row.case_date
+        ? typeof row.case_date === "string"
+          ? row.case_date.slice(0, 10)
+          : row.case_date.toISOString().slice(0, 10)
+        : null;
+
+      const path = await downloadAndStoreLabPdf(
+        row.patient_id,
+        row.case_no,
+        row.case_uid,
+        row.lab_case_id,
+        row.lab_user_id,
+        row.pdf_file_name,
+        caseDate,
+      );
+
+      if (path) {
+        downloaded++;
+        log("PDF Backfill", `${row.patient_case_no} -> ${path}`);
+      } else {
+        skipped++;
+      }
+    } catch (e) {
+      errors++;
+      log("PDF Backfill", `${row.patient_case_no} error: ${e.message}`);
+    }
+  });
+
+  log("PDF Backfill", `Done — ${downloaded} downloaded, ${skipped} skipped, ${errors} errors`);
+  return { total: rows.length, downloaded, skipped, errors };
 }

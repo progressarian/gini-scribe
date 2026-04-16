@@ -756,6 +756,111 @@ router.post("/visit/:patientId/referral", async (req, res) => {
   }
 });
 
+// ── Lab report auto-extraction (fire-and-forget after upload) ──
+const LAB_PROMPT = `Extract ALL test results from this lab report image. Return ONLY valid JSON, no backticks.
+{"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
+CRITICAL RULES:
+- report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD.
+- lab_name: Extract the laboratory/hospital name from the report header.
+- test_name: Use SHORT STANDARD names. Map to these canonical names when applicable:
+  HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
+  Creatinine, BUN, Uric Acid, eGFR, UACR, Sodium, Potassium, Calcium, Phosphorus,
+  TSH, T3, T4, Free T3, Free T4,
+  SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Albumin, Total Protein,
+  Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, ESR, CRP,
+  Vitamin D, Vitamin B12, Ferritin, Iron, TIBC, Folate,
+  PSA, Urine Routine, Microalbumin
+  Example: "Glycated Hemoglobin" → "HbA1c", "Fasting Blood Sugar" → "FBS", "Fasting Plasma Glucose" → "FBS", "Post Prandial Blood Sugar" → "PPBS"
+- flag: "H" high, "L" low, null normal.
+- ref_range: extract reference range as shown (e.g. "4.0-6.5").
+- result: numeric value. result_text: only if result is non-numeric (e.g. "Positive", "Reactive").`;
+
+async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
+  const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_KEY) return;
+  try {
+    const block =
+      mediaType === "application/pdf"
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
+        : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+    };
+    if (mediaType === "application/pdf") headers["anthropic-beta"] = "pdfs-2024-09-25";
+
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 3000,
+        messages: [{ role: "user", content: [block, { type: "text", text: LAB_PROMPT }] }],
+      }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const text = (data.content || []).map((c) => c.text || "").join("");
+    if (!text) return;
+
+    // Parse JSON from AI response
+    let clean = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    let extracted;
+    try {
+      extracted = JSON.parse(clean);
+    } catch {
+      clean = clean.replace(/,\s*([}\]])/g, "$1");
+      const ob = (clean.match(/{/g) || []).length;
+      const cb = (clean.match(/}/g) || []).length;
+      for (let i = 0; i < ob - cb; i++) clean += "}";
+      try { extracted = JSON.parse(clean); } catch { return; }
+    }
+    if (!extracted?.panels) return;
+
+    // Save extracted_data to document
+    await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+      JSON.stringify(extracted),
+      docId,
+    ]);
+
+    // Save lab results
+    const testDate =
+      extracted.report_date ||
+      extracted.collection_date ||
+      (docDate ? new Date(docDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
+
+    for (const panel of extracted.panels) {
+      for (const test of panel.tests || []) {
+        if (test.result == null && !test.result_text) continue;
+        const numResult = typeof test.result === "number" ? test.result : parseFloat(test.result);
+        await pool.query(
+          `INSERT INTO lab_results
+             (patient_id, document_id, test_date, panel_name, test_name, canonical_name, result, result_text, unit, flag, ref_range, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'report_extract')`,
+          [
+            patientId,
+            docId,
+            testDate,
+            panel.panel_name || null,
+            test.test_name,
+            getCanonical(test.test_name) || test.test_name,
+            isNaN(numResult) ? null : numResult,
+            test.result_text || null,
+            test.unit || null,
+            test.flag || null,
+            test.ref_range || null,
+          ],
+        );
+      }
+    }
+    console.log(`[AutoExtract] Doc ${docId}: extracted ${extracted.panels.length} panels for patient ${patientId}`);
+  } catch (err) {
+    console.error(`[AutoExtract] Doc ${docId} failed:`, err.message);
+  }
+}
+
 // ── POST /visit/:patientId/document — Upload document ──
 router.post("/visit/:patientId/document", async (req, res) => {
   const pid = Number(req.params.patientId);
@@ -777,9 +882,10 @@ router.post("/visit/:patientId/document", async (req, res) => {
       ],
     );
     const doc = r.rows[0];
+    let mediaType = "application/octet-stream";
     // Upload file to Supabase if provided
     if (base64 && fileName && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-      const mediaType = fileName.match(/\.pdf$/i)
+      mediaType = fileName.match(/\.pdf$/i)
         ? "application/pdf"
         : fileName.match(/\.png$/i)
           ? "image/png"
@@ -808,6 +914,10 @@ router.post("/visit/:patientId/document", async (req, res) => {
         ]);
         doc.storage_path = storagePath;
       }
+    }
+    // Fire-and-forget: auto-extract lab results from uploaded lab reports
+    if (doc_type === "lab_report" && base64) {
+      autoExtractLab(doc.id, pid, base64, mediaType, doc_date).catch(() => {});
     }
     res.json(doc);
   } catch (e) {

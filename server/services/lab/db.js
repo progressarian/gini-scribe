@@ -144,7 +144,10 @@ export async function downloadAndStoreLabPdf(
     labLog("Skip", "Storage not configured");
     return null;
   }
-  if (!patientId) return null;
+  if (!patientId) {
+    labLog("Skip", `case ${caseNo}: no patientId`);
+    return null;
+  }
 
   // Avoid re-downloading if already stored
   const existing = await pool.query(
@@ -161,7 +164,13 @@ export async function downloadAndStoreLabPdf(
     labLog("Error", `PDF fetch failed for case ${caseNo}: ${e.message}`);
     return null;
   }
-  if (!result?.buffer?.length) return null;
+  if (!result?.buffer?.length) {
+    labLog(
+      "Skip",
+      `case ${caseNo}: API returned empty/null (uid=${caseUid}, id=${caseId}, user=${userId})`,
+    );
+    return null;
+  }
 
   const { buffer, contentType } = result;
 

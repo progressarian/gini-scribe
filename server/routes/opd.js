@@ -301,11 +301,30 @@ router.get("/opd/appointments", async (req, res) => {
                   AND lc2.results_synced = TRUE
                   AND lc2.case_date >= CURRENT_DATE - INTERVAL '7 days'
               )::INTEGER AS recent_labs,
-              (SELECT COUNT(DISTINCT lr3.canonical_name) FROM lab_results lr3
-                WHERE lr3.patient_id = rp.pid
-                  AND lr3.source = 'report_extract'
-                  AND lr3.test_date >= CURRENT_DATE - INTERVAL '7 days'
+              GREATEST(
+                (SELECT COUNT(DISTINCT lr3.canonical_name) FROM lab_results lr3
+                  WHERE lr3.patient_id = rp.pid
+                    AND lr3.source = 'report_extract'
+                    AND lr3.test_date >= CURRENT_DATE - INTERVAL '7 days'
+                ),
+                (SELECT COUNT(*) FROM documents d
+                  WHERE d.patient_id = rp.pid
+                    AND d.doc_type IN ('lab_report', 'blood_test')
+                    AND d.source NOT IN ('healthray', 'lab_healthray')
+                    AND COALESCE(d.doc_date, d.created_at::date) >= CURRENT_DATE - INTERVAL '7 days'
+                )
               )::INTEGER AS uploaded_labs,
+              (SELECT GREATEST(
+                (SELECT MAX(lr4.test_date) FROM lab_results lr4
+                  WHERE lr4.patient_id = rp.pid
+                    AND lr4.source = 'report_extract'
+                    AND lr4.test_date >= CURRENT_DATE - INTERVAL '7 days'),
+                (SELECT MAX(COALESCE(d2.doc_date, d2.created_at::date)) FROM documents d2
+                  WHERE d2.patient_id = rp.pid
+                    AND d2.doc_type IN ('lab_report', 'blood_test')
+                    AND d2.source NOT IN ('healthray', 'lab_healthray')
+                    AND COALESCE(d2.doc_date, d2.created_at::date) >= CURRENT_DATE - INTERVAL '7 days')
+              )) AS uploaded_labs_date,
               (SELECT lr.result FROM lab_results lr
                 WHERE lr.patient_id = rp.pid
                   AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
@@ -396,7 +415,7 @@ router.get("/opd/patient-docs/:patientId", async (req, res) => {
     const { rows } = await pool.query(
       `SELECT id, doc_type, title, file_name, doc_date, source, notes, storage_path, extracted_data, created_at
          FROM documents
-        WHERE patient_id = $1 AND source IN ('opd_upload', 'healthray')
+        WHERE patient_id = $1
         ORDER BY created_at DESC`,
       [req.params.patientId],
     );

@@ -522,7 +522,7 @@ function ApptRow({ a, sel, onSelect }) {
                 border: "1px solid #ddd6fe",
               }}
             >
-              📄 Lab Uploaded
+              📄 Lab Uploaded{a.uploaded_labs_date ? ` · ${new Date(a.uploaded_labs_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
             </span>
           )}
         </div>

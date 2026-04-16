@@ -407,6 +407,14 @@ export default function DashboardPage() {
                       {display}: <b>{lab.result}</b>
                       {lab.unit ? " " + lab.unit : ""}{" "}
                       {lab.flag === "H" ? "↑" : lab.flag === "L" ? "↓" : ""}
+                      {lab.test_date && (
+                        <span style={{ color: "#94a3b8", fontSize: 8, marginLeft: 2 }}>
+                          {new Date(lab.test_date).toLocaleDateString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                        </span>
+                      )}
                     </span>
                   );
                 })}
@@ -418,9 +426,19 @@ export default function DashboardPage() {
           {(pfd?.lab_results || []).length > 0 &&
             (() => {
               const allLabs = pfd.lab_results;
+              // Deduplicate: keep only latest value per test
+              const seenTests = new Set();
+              const dedupedLabs = allLabs.filter((l) => {
+                const key = (l.canonical_name || l.test_name || "")
+                  .toUpperCase()
+                  .replace(/\s+/g, "");
+                if (seenTests.has(key)) return false;
+                seenTests.add(key);
+                return true;
+              });
               // Group by panel_name or source
               const panels = {};
-              for (const l of allLabs) {
+              for (const l of dedupedLabs) {
                 const pn = l.panel_name || "Other Tests";
                 if (!panels[pn]) panels[pn] = [];
                 panels[pn].push(l);
@@ -428,7 +446,7 @@ export default function DashboardPage() {
               return (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", marginBottom: 4 }}>
-                    📋 ALL LAB RESULTS ({allLabs.length})
+                    📋 ALL LAB RESULTS ({dedupedLabs.length})
                   </div>
                   {Object.entries(panels).map(([panelName, tests]) => (
                     <div key={panelName} style={{ marginBottom: 6 }}>
@@ -487,22 +505,17 @@ export default function DashboardPage() {
                                 {l.unit || ""}
                               </span>
                               {l.flag === "H" ? " ↑" : l.flag === "L" ? " ↓" : ""}
+                              {l.test_date && (
+                                <span style={{ color: "#94a3b8", fontSize: 8, marginLeft: 3 }}>
+                                  {`(${new Date(l.test_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })})`}
+                                </span>
+                              )}
                             </span>
                           </div>
                         ))}
                       </div>
                     </div>
                   ))}
-                  {allLabs[0]?.test_date && (
-                    <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 3 }}>
-                      Latest:{" "}
-                      {new Date(allLabs[0].test_date).toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </div>
-                  )}
                 </div>
               );
             })()}

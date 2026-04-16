@@ -11,6 +11,7 @@ import {
   runLabSync,
   getLabSyncStatus,
   backfillLabRanges,
+  backfillLabPdfs,
   runDailyOpdBackfill,
 } from "../services/cron/index.js";
 import { retryPendingLabCases } from "../services/cron/labSync.js";
@@ -2031,6 +2032,297 @@ router.post("/sync/lab/backfill-patient-match", async (req, res) => {
       `Done — ${labPatientMatchStatus.reprocessed} cases, ${labPatientMatchStatus.written} results written, ${labPatientMatchStatus.errors} errors`,
     );
   })();
+});
+
+// ── Backfill lab PDFs for cases missing them ─────────────────────────────────
+// POST /api/sync/lab/backfill-pdfs
+const labPdfBackfillStatus = {
+  running: false,
+  total: 0,
+  downloaded: 0,
+  skipped: 0,
+  errors: 0,
+  startedAt: null,
+};
+
+router.get("/sync/lab/backfill-pdfs/status", (_req, res) => {
+  const elapsed = labPdfBackfillStatus.startedAt
+    ? Math.round((Date.now() - labPdfBackfillStatus.startedAt) / 1000)
+    : 0;
+  res.json({ ...labPdfBackfillStatus, elapsed: `${elapsed}s` });
+});
+
+router.post("/sync/lab/backfill-pdfs", async (req, res) => {
+  if (labPdfBackfillStatus.running) {
+    return res.status(409).json({
+      error: "PDF backfill already running",
+      status: labPdfBackfillStatus,
+    });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM lab_cases
+       WHERE patient_id IS NOT NULL
+         AND pdf_storage_path IS NULL
+         AND COALESCE(retry_abandoned, FALSE) = FALSE`,
+    );
+    const total = parseInt(rows[0].cnt, 10);
+
+    Object.assign(labPdfBackfillStatus, {
+      running: true,
+      total,
+      downloaded: 0,
+      skipped: 0,
+      errors: 0,
+      startedAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      started: true,
+      total,
+      statusUrl: "/api/sync/lab/backfill-pdfs/status",
+    });
+
+    (async () => {
+      try {
+        const result = await backfillLabPdfs({ concurrency: 2 });
+        Object.assign(labPdfBackfillStatus, {
+          downloaded: result.downloaded,
+          skipped: result.skipped,
+          errors: result.errors,
+        });
+      } catch (e) {
+        log("PDF Backfill", `Fatal error: ${e.message}`);
+        labPdfBackfillStatus.errors++;
+      } finally {
+        labPdfBackfillStatus.running = false;
+        log(
+          "PDF Backfill",
+          `Complete — ${labPdfBackfillStatus.downloaded} downloaded, ${labPdfBackfillStatus.skipped} skipped, ${labPdfBackfillStatus.errors} errors`,
+        );
+      }
+    })();
+  } catch (e) {
+    labPdfBackfillStatus.running = false;
+    handleError(res, e, "Lab PDF backfill");
+  }
+});
+
+// ── Clear stored PDFs so they can be re-imported ─────────────────────────────
+// POST /api/sync/lab/clear-pdfs?file_no=P_177488  (single patient)
+// POST /api/sync/lab/clear-pdfs                    (all patients)
+router.post("/sync/lab/clear-pdfs", async (req, res) => {
+  try {
+    const fileNo = req.query.file_no || req.body.file_no;
+    let cleared, docsDeleted;
+
+    if (fileNo) {
+      const { rows: patients } = await pool.query(
+        `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+        [fileNo],
+      );
+      if (!patients[0]) return res.status(404).json({ error: `Patient ${fileNo} not found` });
+      const patientId = patients[0].id;
+
+      const r1 = await pool.query(
+        `UPDATE lab_cases SET pdf_storage_path = NULL WHERE patient_id = $1 AND pdf_storage_path IS NOT NULL`,
+        [patientId],
+      );
+      cleared = r1.rowCount;
+
+      const r2 = await pool.query(
+        `DELETE FROM documents WHERE patient_id = $1 AND source = 'lab_healthray' AND doc_type = 'lab_report'`,
+        [patientId],
+      );
+      docsDeleted = r2.rowCount;
+    } else {
+      const r1 = await pool.query(
+        `UPDATE lab_cases SET pdf_storage_path = NULL WHERE pdf_storage_path IS NOT NULL`,
+      );
+      cleared = r1.rowCount;
+
+      const r2 = await pool.query(
+        `DELETE FROM documents WHERE source = 'lab_healthray' AND doc_type = 'lab_report'`,
+      );
+      docsDeleted = r2.rowCount;
+    }
+
+    res.json({ success: true, patient: fileNo || "all", casesCleared: cleared, docsDeleted });
+  } catch (e) {
+    handleError(res, e, "Clear lab PDFs");
+  }
+});
+
+// ── Import PDF for a single patient ──────────────────────────────────────────
+// POST /api/sync/lab/import-pdf?file_no=P_177437
+router.post("/sync/lab/import-pdf", async (req, res) => {
+  const fileNo = req.query.file_no || req.body.file_no;
+  if (!fileNo) return res.status(400).json({ error: "file_no required" });
+
+  try {
+    const { rows: patients } = await pool.query(
+      `SELECT id FROM patients WHERE file_no = $1 LIMIT 1`,
+      [fileNo],
+    );
+    if (!patients[0]) return res.status(404).json({ error: `Patient ${fileNo} not found` });
+    const patientId = patients[0].id;
+
+    const { rows } = await pool.query(
+      `SELECT case_no, case_uid, lab_case_id, lab_user_id, pdf_file_name, case_date
+       FROM lab_cases
+       WHERE patient_id = $1 AND pdf_storage_path IS NULL
+       ORDER BY case_date DESC`,
+      [patientId],
+    );
+
+    if (!rows.length) return res.json({ message: "No cases missing PDFs for this patient" });
+
+    const { downloadAndStoreLabPdf } = await import("../services/lab/db.js");
+    const results = [];
+
+    for (const row of rows) {
+      const caseDate = row.case_date
+        ? typeof row.case_date === "string"
+          ? row.case_date.slice(0, 10)
+          : row.case_date.toISOString().slice(0, 10)
+        : null;
+
+      try {
+        const path = await downloadAndStoreLabPdf(
+          patientId,
+          row.case_no,
+          row.case_uid,
+          row.lab_case_id,
+          row.lab_user_id,
+          row.pdf_file_name,
+          caseDate,
+        );
+        results.push({ case_no: row.case_no, status: path ? "downloaded" : "skipped", path });
+      } catch (e) {
+        results.push({ case_no: row.case_no, status: "error", error: e.message });
+      }
+    }
+
+    res.json({ patient: fileNo, cases: results });
+  } catch (e) {
+    handleError(res, e, "Import PDF for patient");
+  }
+});
+
+// ── Debug: inspect raw API data for PDF-related fields ───────────────────────
+// GET /api/sync/lab/debug-pdf-fields
+// Scans raw_list_json and raw_detail_json for any keys related to PDF/attachment/file/URL
+router.get("/sync/lab/debug-pdf-fields", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT case_no, patient_case_no, raw_list_json, raw_detail_json
+       FROM lab_cases
+       WHERE raw_list_json IS NOT NULL
+       ORDER BY fetched_at DESC LIMIT 1`,
+    );
+    if (!rows.length) return res.json({ message: "No lab cases found" });
+
+    const row = rows[0];
+    const keywords = /pdf|attachment|file|url|download|report_url|document|link|path|media/i;
+
+    function scanObject(obj, prefix = "") {
+      const matches = {};
+      if (!obj || typeof obj !== "object") return matches;
+      for (const [key, val] of Object.entries(obj)) {
+        const fullKey = prefix ? `${prefix}.${key}` : key;
+        if (keywords.test(key)) {
+          matches[fullKey] = val;
+        }
+        if (val && typeof val === "object" && !Array.isArray(val)) {
+          Object.assign(matches, scanObject(val, fullKey));
+        }
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object") {
+          Object.assign(matches, scanObject(val[0], `${fullKey}[0]`));
+        }
+      }
+      return matches;
+    }
+
+    const listFields = scanObject(row.raw_list_json);
+    const detailFields = row.raw_detail_json ? scanObject(row.raw_detail_json) : {};
+
+    // Also return ALL top-level keys from both JSONs for reference
+    const listTopKeys = row.raw_list_json ? Object.keys(row.raw_list_json) : [];
+    const detailTopKeys = row.raw_detail_json ? Object.keys(row.raw_detail_json) : [];
+
+    res.json({
+      case_no: row.case_no,
+      patient_case_no: row.patient_case_no,
+      list_pdf_fields: listFields,
+      detail_pdf_fields: detailFields,
+      list_top_level_keys: listTopKeys,
+      detail_top_level_keys: detailTopKeys,
+    });
+  } catch (e) {
+    handleError(res, e, "Lab debug PDF fields");
+  }
+});
+
+// ── Debug: test PDF download for a single case ──────────────────────────────
+// GET /api/sync/lab/test-pdf?limit=1
+// Tries to fetch a PDF for one case missing it and returns full diagnostics.
+router.get("/sync/lab/test-pdf", async (_req, res) => {
+  try {
+    const limit = parseInt(_req.query.limit, 10) || 1;
+    const { rows } = await pool.query(
+      `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
+              patient_id, pdf_file_name, case_date
+       FROM lab_cases
+       WHERE patient_id IS NOT NULL
+         AND pdf_storage_path IS NULL
+         AND COALESCE(retry_abandoned, FALSE) = FALSE
+       ORDER BY case_date DESC
+       LIMIT $1`,
+      [limit],
+    );
+
+    if (!rows.length) return res.json({ message: "No cases missing PDFs" });
+
+    const results = [];
+    const { fetchLabReportPdf } = await import("../services/lab/labHealthrayApi.js");
+
+    for (const row of rows) {
+      const diag = {
+        case_no: row.case_no,
+        patient_case_no: row.patient_case_no,
+        case_uid: row.case_uid,
+        lab_case_id: row.lab_case_id,
+        lab_user_id: row.lab_user_id,
+        patient_id: row.patient_id,
+      };
+
+      try {
+        const result = await fetchLabReportPdf(row.case_uid, row.lab_case_id, row.lab_user_id);
+        if (!result) {
+          diag.status = "null_response";
+        } else {
+          diag.status = "ok";
+          diag.contentType = result.contentType;
+          diag.bufferLength = result.buffer?.length || 0;
+          // Show first 200 chars if it looks like text/JSON
+          if (result.buffer?.length < 2000 && result.buffer?.[0] === 0x7b) {
+            diag.bodyPreview = result.buffer.toString("utf8").slice(0, 500);
+          }
+        }
+      } catch (e) {
+        diag.status = "error";
+        diag.error = e.message;
+      }
+
+      results.push(diag);
+    }
+
+    res.json({ cases: results });
+  } catch (e) {
+    handleError(res, e, "Lab test PDF");
+  }
 });
 
 // Manual token refresh: POST /api/sync/lab/refresh-auth

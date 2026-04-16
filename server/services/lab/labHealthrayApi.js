@@ -150,49 +150,199 @@ export async function fetchLabCaseDetail(caseUid, caseId, userId) {
   );
 }
 
-// ── Binary fetch with auto-retry on 401 (for PDF downloads) ─────────────────
-async function labFetchBinary(path, isRetry = false) {
-  if (!authToken) {
-    await labLogin();
-  }
+// ── Puppeteer singleton ─────────────────────────────────────────────────────
+let browserInstance = null;
 
-  const res = await fetch(`${LAB_API_BASE}${path}`, { headers: LAB_HEADERS() });
-
-  if (res.status === 401 && !isRetry) {
-    log("Auth", "401 (binary) — refreshing tokens...");
-    await labLogin();
-    return labFetchBinary(path, true);
-  }
-
-  if (!res.ok) throw new Error(`Lab API HTTP ${res.status} at ${path}`);
-
-  const ct = res.headers.get("content-type") || "";
-  const buffer = Buffer.from(await res.arrayBuffer());
-
-  // Reject JSON error bodies disguised as 200 OK
-  if (ct.includes("application/json") || (buffer.length < 2000 && buffer[0] === 0x7b)) {
-    try {
-      const parsed = JSON.parse(buffer.toString("utf8"));
-      if (parsed.status && parsed.status !== 200) {
-        throw new Error(`Lab API error (binary): ${parsed.message || "unknown"}`);
-      }
-    } catch (e) {
-      if (e.message.startsWith("Lab API")) throw e;
-    }
-  }
-
-  return { buffer, contentType: ct.split(";")[0].trim() || "application/pdf" };
+async function getBrowser() {
+  if (browserInstance && browserInstance.connected) return browserInstance;
+  const puppeteer = await import("puppeteer");
+  browserInstance = await puppeteer.default.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
+  const cleanup = () => {
+    if (browserInstance) browserInstance.close().catch(() => {});
+    browserInstance = null;
+  };
+  process.once("exit", cleanup);
+  process.once("SIGINT", cleanup);
+  return browserInstance;
 }
 
-// ── Fetch lab report PDF for a case ─────────────────────────────────────────
-// Endpoint TBD — update the path once the exact HealthRay Lab API URL is confirmed.
-export async function fetchLabReportPdf(caseUid, caseId, userId) {
+// ── Capture the exact HealthRay PDF via authenticated headless browser ───────
+// The report page generates a PDF client-side but needs auth tokens for its
+// internal API calls. We inject tokens via localStorage + request interception,
+// then capture the resulting blob from the <iframe src="blob:...">.
+export async function fetchLabReportPdf(caseUid, caseId) {
+  const reportUrl = `https://lab.healthray.com/download-report/pt/1/${caseUid}/${caseId}`;
+  let page;
   try {
-    return await labFetchBinary(
-      `/patient_case/generate_report/${caseUid}?case_id=${caseId}&user_id=${userId || LAB_USER_ID}`,
+    // Ensure we have fresh auth tokens
+    if (!authToken) await labLogin();
+
+    const browser = await getBrowser();
+    page = await browser.newPage();
+
+    // ── Step 1: Intercept all API requests and inject auth headers ────
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (req.url().includes("labapi.healthray.com")) {
+        req.continue({
+          headers: {
+            ...req.headers(),
+            "x-auth-token": authToken,
+            "x-device-token": DEVICE_TOKEN || "",
+            "x-healthray-access-token": accessToken || "",
+          },
+        });
+      } else {
+        req.continue();
+      }
+    });
+
+    // ── Step 2: Hook blob creation to capture the PDF ─────────────────
+    await page.evaluateOnNewDocument(() => {
+      window.__pdfBlob = null;
+      window.__pdfBlobUrl = null;
+      const orig = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        const url = orig.call(URL, blob);
+        if (blob && blob.size > 5000) {
+          window.__pdfBlob = blob;
+          window.__pdfBlobUrl = url;
+        }
+        return url;
+      };
+    });
+
+    // ── Step 3: Navigate to lab.healthray.com to set domain context ───
+    await page.goto("https://lab.healthray.com", { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    // ── Step 4: Inject auth tokens into localStorage ──────────────────
+    await page.evaluate(
+      (tokens) => {
+        // Try all common key patterns HealthRay might use
+        const keys = [
+          "auth_token",
+          "access_token",
+          "authToken",
+          "accessToken",
+          "healthray_auth_token",
+          "healthray_access_token",
+          "x-auth-token",
+          "x-healthray-access-token",
+          "token",
+          "user_token",
+        ];
+        for (const k of keys) {
+          if (k.includes("access")) {
+            localStorage.setItem(k, tokens.accessToken || "");
+          } else {
+            localStorage.setItem(k, tokens.authToken || "");
+          }
+        }
+        // Also store as a user object (common pattern)
+        try {
+          const existing = JSON.parse(localStorage.getItem("user") || "{}");
+          existing.authentication_token = tokens.authToken;
+          existing.healthray_access_token = tokens.accessToken;
+          existing.healthray_auth_token = tokens.authToken;
+          localStorage.setItem("user", JSON.stringify(existing));
+        } catch {}
+        try {
+          const existing = JSON.parse(localStorage.getItem("persist:root") || "{}");
+          if (typeof existing === "object") {
+            existing.auth_token = JSON.stringify(tokens.authToken);
+            existing.access_token = JSON.stringify(tokens.accessToken);
+            localStorage.setItem("persist:root", JSON.stringify(existing));
+          }
+        } catch {}
+      },
+      { authToken, accessToken },
     );
+
+    // ── Step 5: Navigate to the report page ───────────────────────────
+    log("PDF", `Navigating to ${reportUrl} (with auth)`);
+    await page.goto(reportUrl, { waitUntil: "networkidle2", timeout: 90000 });
+
+    // ── Step 6: Wait for blob capture or iframe ───────────────────────
+    log("PDF", `Waiting for PDF for case ${caseId}...`);
+    try {
+      await page.waitForFunction(
+        () =>
+          window.__pdfBlobUrl ||
+          document.querySelector('iframe[src^="blob:"]') ||
+          document.querySelector('iframe[src^="data:application/pdf"]'),
+        { timeout: 60000 },
+      );
+    } catch {
+      const debug = await page.evaluate(() => ({
+        bodySnippet: document.body?.innerText?.slice(0, 500),
+        iframes: [...document.querySelectorAll("iframe")].map((f) => f.src?.slice(0, 120)),
+        blobUrl: window.__pdfBlobUrl,
+        localStorage: Object.keys(localStorage).join(", "),
+      }));
+      log("PDF", `Timeout for case ${caseId}: ${JSON.stringify(debug)}`);
+      return null;
+    }
+
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // ── Step 7: Extract the PDF blob ──────────────────────────────────
+    const pdfArray = await page.evaluate(async () => {
+      // Try hooked blob first
+      if (window.__pdfBlob) {
+        try {
+          const ab = await window.__pdfBlob.arrayBuffer();
+          if (ab.byteLength > 1000) return Array.from(new Uint8Array(ab));
+        } catch {}
+      }
+      if (window.__pdfBlobUrl) {
+        try {
+          const r = await fetch(window.__pdfBlobUrl);
+          const ab = await r.arrayBuffer();
+          if (ab.byteLength > 1000) return Array.from(new Uint8Array(ab));
+        } catch {}
+      }
+      const iframe = document.querySelector('iframe[src^="blob:"]');
+      if (iframe?.src) {
+        try {
+          const r = await fetch(iframe.src);
+          const ab = await r.arrayBuffer();
+          if (ab.byteLength > 1000) return Array.from(new Uint8Array(ab));
+        } catch {}
+      }
+      // Try data: URI iframe (HealthRay sometimes embeds PDF as base64 data URI)
+      const dataIframe = document.querySelector('iframe[src^="data:application/pdf"]');
+      if (dataIframe?.src) {
+        try {
+          const commaIdx = dataIframe.src.indexOf(",");
+          if (commaIdx !== -1) {
+            const b64 = dataIframe.src.substring(commaIdx + 1);
+            const binary = atob(b64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            if (bytes.byteLength > 1000) return Array.from(bytes);
+          }
+        } catch {}
+      }
+      return null;
+    });
+
+    if (!pdfArray || pdfArray.length === 0) {
+      log("PDF", `No PDF data extracted for case ${caseId}`);
+      return null;
+    }
+
+    const buffer = Buffer.from(pdfArray);
+    log("PDF", `Captured ${buffer.length} bytes for case ${caseId} (exact HealthRay PDF)`);
+    return { buffer, contentType: "application/pdf" };
   } catch (e) {
-    log("PDF", `fetchLabReportPdf failed for ${caseUid}: ${e.message}`);
+    log("PDF", `FAIL case ${caseId}: ${e.message}`);
     return null;
+  } finally {
+    if (page) await page.close().catch(() => {});
   }
 }
