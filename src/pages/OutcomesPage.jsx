@@ -1712,7 +1712,7 @@ export default function OutcomesPage() {
                                             : "#2563eb",
                                     }}
                                   >
-                                    {d.label.replace(/\s*\(.*?\)/, "")} — {d.status}
+                                    {(d.label || "").replace(/\s*\(.*?\)/, "")} — {d.status}
                                   </span>
                                 ))}
                               </div>
