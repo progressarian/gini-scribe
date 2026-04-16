@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import api from "../services/api.js";
+import { extractLab } from "../services/extraction.js";
 import { toast } from "./uiStore.js";
 import { docCategories } from "../companion/constants";
 
@@ -16,6 +17,30 @@ const retryPost = async (url, body, maxRetries = 3) => {
     }
   }
 };
+
+// Convert extractLab() panels output → flat labs[] for companion review UI
+function labPanelsToFlatLabs(extractedLab) {
+  if (!extractedLab?.panels) return { labs: [], patient_name: null };
+  const labs = [];
+  for (const panel of extractedLab.panels) {
+    for (const test of panel.tests || []) {
+      labs.push({
+        test_name: test.test_name,
+        result: test.result_text || test.result,
+        unit: test.unit || "",
+        flag: test.flag === "H" ? "HIGH" : test.flag === "L" ? "LOW" : "NORMAL",
+        ref_range: test.ref_range || "",
+      });
+    }
+  }
+  return {
+    labs,
+    patient_name: extractedLab.patient_on_report?.name || null,
+    report_date: extractedLab.report_date || null,
+    lab_name: extractedLab.lab_name || null,
+    summary: null,
+  };
+}
 
 const useCompanionStore = create((set, get) => ({
   // Patient list (server-paginated)
@@ -178,105 +203,128 @@ const useCompanionStore = create((set, get) => ({
         currentCategory,
       );
 
-      const prompt = isRx
-        ? `Extract from this prescription image. Return JSON:
+      if (isLab) {
+        // Use the same extractLab() as /opd and /visit for consistent, comprehensive extraction
+        const imgData = currentCapture.base64;
+        const mediaType = currentCapture.mediaType === "application/pdf"
+          ? "application/pdf"
+          : currentCapture.mediaType?.startsWith("image/")
+            ? currentCapture.mediaType
+            : "image/jpeg";
+
+        const { data: labResult, error } = await extractLab(imgData, mediaType);
+        if (error) throw new Error(error);
+        if (!labResult?.panels?.length) throw new Error("No lab values found in report");
+
+        // Convert panels format to flat labs format for review UI
+        const uiData = labPanelsToFlatLabs(labResult);
+        // Stash raw panels so saveCapture() can send to PATCH for full cascade sync
+        uiData._rawExtraction = labResult;
+
+        const updates = { extractedData: uiData, captureStep: "review" };
+
+        if (uiData.report_date) {
+          updates.captureMeta = { ...get().captureMeta, date: uiData.report_date };
+        }
+        if (uiData.lab_name) {
+          updates.captureMeta = {
+            ...(updates.captureMeta || get().captureMeta),
+            hospital: uiData.lab_name,
+          };
+        }
+
+        const mismatch = get().checkNameMismatch(uiData);
+        if (mismatch) updates.nameMismatch = mismatch;
+        updates.categoryMismatch = null;
+
+        set(updates);
+      } else {
+        // Prescription and other categories — existing inline prompt extraction
+        const prompt = isRx
+          ? `Extract from this prescription image. Return JSON:
 {"patient_name":"name on document","doctor_name":"","specialty":"","hospital_name":"","visit_date":"YYYY-MM-DD","diagnoses":[{"id":"dm2","label":"Type 2 DM","status":"Active"}],"medications":[{"name":"BRAND","composition":"Generic","dose":"dose","frequency":"OD","timing":"Morning"}],"labs":[{"test_name":"HbA1c","result":"7.2","unit":"%","flag":"HIGH","ref_range":"<6.5"}],"vitals":{"bp_sys":null,"bp_dia":null,"weight":null},"follow_up":"date or duration","advice":"key advice"}`
-        : isLab
-          ? `Extract lab values from this report image. Return JSON:
-{"patient_name":"name on document","labs":[{"test_name":"","result":"","unit":"","flag":"HIGH/LOW/NORMAL","ref_range":""}],"report_date":"YYYY-MM-DD","lab_name":"","summary":"brief clinical interpretation"}`
           : `Extract key findings from this medical document. Return JSON:
 {"patient_name":"name on document","doc_type":"${currentCategory}","findings":"","date":"YYYY-MM-DD","doctor":"","notes":""}`;
 
-      const imgData = currentCapture.base64;
-      const isPdf = currentCapture.mediaType === "application/pdf";
-      const mediaType = isPdf
-        ? "application/pdf"
-        : currentCapture.mediaType?.startsWith("image/")
-          ? currentCapture.mediaType
-          : "image/jpeg";
+        const imgData = currentCapture.base64;
+        const isPdf = currentCapture.mediaType === "application/pdf";
+        const mediaType = isPdf
+          ? "application/pdf"
+          : currentCapture.mediaType?.startsWith("image/")
+            ? currentCapture.mediaType
+            : "image/jpeg";
 
-      const docBlock = isPdf
-        ? {
-            type: "document",
-            source: { type: "base64", media_type: "application/pdf", data: imgData },
-          }
-        : { type: "image", source: { type: "base64", media_type: mediaType, data: imgData } };
+        const docBlock = isPdf
+          ? {
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: imgData },
+            }
+          : { type: "image", source: { type: "base64", media_type: mediaType, data: imgData } };
 
-      const r = await retryPost("/api/ai/complete", {
-        messages: [
-          {
-            role: "user",
-            content: [
-              docBlock,
-              {
-                type: "text",
-                text: prompt + "\n\nReturn ONLY valid JSON. No markdown, no backticks.",
-              },
-            ],
-          },
-        ],
-        model: "sonnet",
-        maxTokens: 2000,
-      });
+        const r = await retryPost("/api/ai/complete", {
+          messages: [
+            {
+              role: "user",
+              content: [
+                docBlock,
+                {
+                  type: "text",
+                  text: prompt + "\n\nReturn ONLY valid JSON. No markdown, no backticks.",
+                },
+              ],
+            },
+          ],
+          model: "sonnet",
+          maxTokens: 2000,
+        });
 
-      const data = r.data;
-      const text = data.text || "";
-      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+        const data = r.data;
+        const text = data.text || "";
+        const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
 
-      const updates = { extractedData: parsed, captureStep: "review" };
+        const updates = { extractedData: parsed, captureStep: "review" };
 
-      if (parsed.doctor_name) {
-        updates.captureMeta = {
-          ...get().captureMeta,
-          doctor: parsed.doctor_name,
-          hospital: parsed.hospital_name || "",
-          specialty: parsed.specialty || "",
-          date: parsed.visit_date || "",
-        };
+        if (parsed.doctor_name) {
+          updates.captureMeta = {
+            ...get().captureMeta,
+            doctor: parsed.doctor_name,
+            hospital: parsed.hospital_name || "",
+            specialty: parsed.specialty || "",
+            date: parsed.visit_date || "",
+          };
+        }
+        if (parsed.report_date) {
+          updates.captureMeta = {
+            ...(updates.captureMeta || get().captureMeta),
+            date: parsed.report_date,
+          };
+        }
+        if (parsed.lab_name) {
+          updates.captureMeta = {
+            ...(updates.captureMeta || get().captureMeta),
+            hospital: parsed.lab_name,
+          };
+        }
+
+        const mismatch = get().checkNameMismatch(parsed);
+        if (mismatch) updates.nameMismatch = mismatch;
+
+        // Detect category mismatch for prescriptions
+        const hasMeds = (parsed.medications || []).length > 0;
+        const hasLabs = (parsed.labs || []).length > 0;
+
+        if (isRx && hasLabs && !hasMeds) {
+          updates.categoryMismatch = {
+            detected: "lab",
+            selected: currentCategory,
+            msg: "This looks like a lab report (found test values but no medications).",
+          };
+        } else {
+          updates.categoryMismatch = null;
+        }
+
+        set(updates);
       }
-      if (parsed.report_date) {
-        updates.captureMeta = {
-          ...(updates.captureMeta || get().captureMeta),
-          date: parsed.report_date,
-        };
-      }
-      if (parsed.lab_name) {
-        updates.captureMeta = {
-          ...(updates.captureMeta || get().captureMeta),
-          hospital: parsed.lab_name,
-        };
-      }
-
-      const mismatch = get().checkNameMismatch(parsed);
-      if (mismatch) updates.nameMismatch = mismatch;
-
-      // Detect category mismatch: user picked lab but doc has medications, or vice versa
-      const hasMeds = (parsed.medications || []).length > 0;
-      const hasLabs = (parsed.labs || []).length > 0;
-
-      if (isLab && hasMeds && !hasLabs) {
-        updates.categoryMismatch = {
-          detected: "prescription",
-          selected: currentCategory,
-          msg: "This looks like a prescription (found medications but no lab values).",
-        };
-      } else if (isLab && hasMeds && hasLabs) {
-        updates.categoryMismatch = {
-          detected: "both",
-          selected: currentCategory,
-          msg: "This document has both lab values and medications. Both will be saved.",
-        };
-      } else if (isRx && hasLabs && !hasMeds) {
-        updates.categoryMismatch = {
-          detected: "lab",
-          selected: currentCategory,
-          msg: "This looks like a lab report (found test values but no medications).",
-        };
-      } else {
-        updates.categoryMismatch = null;
-      }
-
-      set(updates);
     } catch (e) {
       console.error("Extraction:", e);
       set({ captureError: e.message, captureStep: "review" });
@@ -340,32 +388,46 @@ const useCompanionStore = create((set, get) => ({
         });
       }
 
-      // Save lab values if present (regardless of selected category)
-      if (hasLabValues && extractedData?.labs?.length) {
-        // Map extracted lab names to vitals fields
-        const VITALS_MAP = {
-          "blood pressure": { sys: true, dia: true },
-          bp: { sys: true, dia: true },
-          systolic: { field: "bp_sys" },
-          diastolic: { field: "bp_dia" },
-          pulse: { field: "pulse" },
-          "heart rate": { field: "pulse" },
-          spo2: { field: "spo2" },
-          "oxygen saturation": { field: "spo2" },
-          "spo₂": { field: "spo2" },
-          weight: { field: "weight" },
-          "body weight": { field: "weight" },
-          height: { field: "height" },
-          temperature: { field: "temp" },
-          temp: { field: "temp" },
-          "body temperature": { field: "temp" },
-          waist: { field: "waist" },
-          "waist circumference": { field: "waist" },
-          bmi: { field: "bmi" },
-        };
+      // Save lab values — use PATCH cascade (same as /opd and /visit) for proper sync
+      if (hasLabValues && extractedData?._rawExtraction) {
+        // 3-step flow: POST create doc → POST upload-file → PATCH extracted_data
+        set({ saveStatus: "Saving document..." });
+        const docR = await api.post(`/api/patients/${selectedPatient.id}/documents`, {
+          doc_type: currentCategory,
+          title: `${(docCategories.find((c) => c.id === currentCategory)?.label || currentCategory).replace(/^[^\s]+\s/, "")} — ${captureMeta.date || "Today"}`,
+          doc_date: captureMeta.date || new Date().toISOString().split("T")[0],
+          source: "Companion Upload",
+          notes: captureMeta.hospital ? `Lab: ${captureMeta.hospital}` : "",
+          extracted_data: extractedData._rawExtraction,
+        });
 
-        const vitalsPayload = {};
+        const docData = docR.data;
+        if (currentCapture.base64 && docData.id) {
+          set({ saveStatus: "Uploading image..." });
+          try {
+            await api.post(`/api/documents/${docData.id}/upload-file`, {
+              base64: currentCapture.base64,
+              mediaType: currentCapture.mediaType || "image/jpeg",
+              fileName: currentCapture.fileName || `capture_${Date.now()}.jpg`,
+            });
+          } catch (uploadErr) {
+            console.warn("Image upload failed (doc still saved):", uploadErr);
+          }
+        }
 
+        // PATCH triggers cascade: lab_results sync, vitals sync, biomarker sync
+        if (docData.id) {
+          set({ saveStatus: "Syncing labs & vitals..." });
+          try {
+            await api.patch(`/api/documents/${docData.id}`, {
+              extracted_data: extractedData._rawExtraction,
+            });
+          } catch (patchErr) {
+            console.warn("PATCH extracted_data failed:", patchErr);
+          }
+        }
+      } else if (hasLabValues && extractedData?.labs?.length) {
+        // Fallback for prescription-extracted labs (no panels format)
         set({ saveStatus: `Saving ${extractedData.labs.length} lab values...` });
         for (const lab of extractedData.labs) {
           await api.post(`/api/patients/${selectedPatient.id}/labs`, {
@@ -377,55 +439,35 @@ const useCompanionStore = create((set, get) => ({
             ref_range: lab.ref_range,
             source: captureMeta.hospital || "companion",
           });
-
-          // Also extract vitals-type results into vitalsPayload
-          const nameLower = (lab.test_name || "").toLowerCase().trim();
-          const mapped = VITALS_MAP[nameLower];
-          if (mapped?.field) {
-            const val = parseFloat(lab.result);
-            if (!isNaN(val)) vitalsPayload[mapped.field] = val;
-          } else if (mapped?.sys) {
-            const bpMatch = String(lab.result).match(/(\d+)\s*\/\s*(\d+)/);
-            if (bpMatch) {
-              vitalsPayload.bp_sys = parseFloat(bpMatch[1]);
-              vitalsPayload.bp_dia = parseFloat(bpMatch[2]);
-            }
-          }
-        }
-
-        if (Object.keys(vitalsPayload).length > 0) {
-          set({ saveStatus: "Saving vitals..." });
-          try {
-            await api.post(`/api/visit/${selectedPatient.id}/vitals`, vitalsPayload);
-          } catch (vitalsErr) {
-            console.warn("Vitals save failed (labs still saved):", vitalsErr);
-          }
         }
       }
 
-      set({ saveStatus: "Saving document..." });
-      const docR = await api.post(`/api/patients/${selectedPatient.id}/documents`, {
-        doc_type: currentCategory,
-        title: isRx
-          ? `${captureMeta.doctor || "External"} — ${captureMeta.specialty || currentCategory}`
-          : `${(docCategories.find((c) => c.id === currentCategory)?.label || currentCategory).replace(/^[^\s]+\s/, "")} — ${captureMeta.date || "Today"}`,
-        doc_date: captureMeta.date || new Date().toISOString().split("T")[0],
-        source: "Companion Upload",
-        notes: captureMeta.doctor ? `Doctor: ${captureMeta.doctor}` : extractedData?.summary || "",
-        extracted_data: JSON.stringify(extractedData || {}),
-      });
+      // Save document for non-lab categories (Rx, imaging, other)
+      if (!extractedData?._rawExtraction) {
+        set({ saveStatus: "Saving document..." });
+        const docR = await api.post(`/api/patients/${selectedPatient.id}/documents`, {
+          doc_type: currentCategory,
+          title: isRx
+            ? `${captureMeta.doctor || "External"} — ${captureMeta.specialty || currentCategory}`
+            : `${(docCategories.find((c) => c.id === currentCategory)?.label || currentCategory).replace(/^[^\s]+\s/, "")} — ${captureMeta.date || "Today"}`,
+          doc_date: captureMeta.date || new Date().toISOString().split("T")[0],
+          source: "Companion Upload",
+          notes: captureMeta.doctor ? `Doctor: ${captureMeta.doctor}` : extractedData?.summary || "",
+          extracted_data: extractedData || {},
+        });
 
-      const docData = docR.data;
-      if (currentCapture.base64 && docData.id) {
-        set({ saveStatus: "Uploading image..." });
-        try {
-          await api.post(`/api/documents/${docData.id}/upload-file`, {
-            base64: currentCapture.base64,
-            mediaType: currentCapture.mediaType || "image/jpeg",
-            fileName: currentCapture.fileName || `capture_${Date.now()}.jpg`,
-          });
-        } catch (uploadErr) {
-          console.warn("Image upload failed (doc still saved):", uploadErr);
+        const docData = docR.data;
+        if (currentCapture.base64 && docData.id) {
+          set({ saveStatus: "Uploading image..." });
+          try {
+            await api.post(`/api/documents/${docData.id}/upload-file`, {
+              base64: currentCapture.base64,
+              mediaType: currentCapture.mediaType || "image/jpeg",
+              fileName: currentCapture.fileName || `capture_${Date.now()}.jpg`,
+            });
+          } catch (uploadErr) {
+            console.warn("Image upload failed (doc still saved):", uploadErr);
+          }
         }
       }
 

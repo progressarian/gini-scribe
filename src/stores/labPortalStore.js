@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import api from "../services/api.js";
-import { normalizeTestName } from "../config/labNormalization.js";
 import { extractLab, extractImaging, convertHeicToJpeg, isHeic } from "../services/extraction.js";
 import useAuthStore from "./authStore.js";
 
@@ -153,20 +152,11 @@ const useLabPortalStore = create((set, get) => ({
             console.log("File upload failed:", e.response?.data?.error || e.message);
           }
         }
-        // Save lab results to lab_results table too
-        if (isLab && data.panels) {
-          for (const panel of data.panels) {
-            for (const test of panel.tests) {
-              await api.post(`/api/patients/${dbPatientId}/labs`, {
-                test_name: normalizeTestName(test.test_name),
-                result: String(test.result_text || test.result),
-                unit: test.unit || "",
-                flag: test.flag || "N",
-                ref_range: test.ref_range || "",
-                test_date: effectiveDate,
-              });
-            }
-          }
+        // PATCH triggers cascade: lab_results sync (with document_id + canonical_name), vitals sync, biomarker sync
+        if (savedDoc.id && data && (data.panels || data.medications)) {
+          await api
+            .patch(`/api/documents/${savedDoc.id}`, { extracted_data: data })
+            .catch((e) => console.warn("PATCH extracted_data failed:", e.message));
         }
         set((state) => ({
           labPortalFiles: state.labPortalFiles.map((f) =>
