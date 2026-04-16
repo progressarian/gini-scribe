@@ -1,17 +1,28 @@
 import "./DocsPage.css";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import usePatientStore from "../stores/patientStore";
 import useLabPortalStore from "../stores/labPortalStore";
+import api from "../services/api.js";
 import { ts } from "../config/constants.js";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 
 export default function DocsPage() {
   const patient = usePatientStore((s) => s.patient);
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
+  const patientFullData = usePatientStore((s) => s.patientFullData);
+  const setPatientFullData = usePatientStore((s) => s.setPatientFullData);
   const pfd = usePatientStore((s) => s.getPfd());
   const expandedDocId = useLabPortalStore((s) => s.expandedDocId);
   const setExpandedDocId = useLabPortalStore((s) => s.setExpandedDocId);
   const [viewingDoc, setViewingDoc] = useState(null);
+
+  useEffect(() => {
+    if (dbPatientId && (!patientFullData || patientFullData.id !== dbPatientId)) {
+      api.get(`/api/patients/${dbPatientId}`).then(({ data }) => {
+        setPatientFullData(data);
+      }).catch(() => {});
+    }
+  }, [dbPatientId, patientFullData, setPatientFullData]);
 
   return (
     <>

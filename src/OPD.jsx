@@ -522,7 +522,10 @@ function ApptRow({ a, sel, onSelect }) {
                 border: "1px solid #ddd6fe",
               }}
             >
-              📄 Lab Uploaded{a.uploaded_labs_date ? ` · ${new Date(a.uploaded_labs_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
+              📄 Lab Uploaded
+              {a.uploaded_labs_date
+                ? ` · ${new Date(a.uploaded_labs_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
             </span>
           )}
         </div>
@@ -1351,13 +1354,15 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
   });
   // reports: { [typeId]: [{name, date, uploading, docId?, storagePath?}] }
   const [reports, setReports] = useState({});
-  const [activeType, setActiveType] = useState(null);
+  const [activeType, setActiveType] = useState("blood");
   const [expandedReports, setExpandedReports] = useState({});
+  const [loadingDocs, setLoadingDocs] = useState(false);
   const fileRefs = useRef({});
 
   // Load previously uploaded docs from DB
   useEffect(() => {
     if (!appt.patient_id) return;
+    setLoadingDocs(true);
     apiFetch(`/api/opd/patient-docs/${appt.patient_id}`)
       .then((r) => r.json())
       .then((docs) => {
@@ -1401,7 +1406,8 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
           return merged;
         });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingDocs(false));
   }, [appt.patient_id]);
 
   const fields = [
@@ -1642,6 +1648,34 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
     .filter((r) => !r.uploading).length;
 
   const [viewingDoc, setViewingDoc] = useState(null);
+
+  if (loadingDocs) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "60px 20px",
+          gap: 14,
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            border: `3px solid ${BD}`,
+            borderTopColor: T,
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <span style={{ fontSize: 13, fontWeight: 500, color: INK3 }}>Loading lab reports...</span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div>

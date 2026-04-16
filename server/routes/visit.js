@@ -781,7 +781,10 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
   try {
     const block =
       mediaType === "application/pdf"
-        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
+        ? {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: base64 },
+          }
         : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
 
     const headers = {
@@ -806,7 +809,10 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
     if (!text) return;
 
     // Parse JSON from AI response
-    let clean = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    let clean = text
+      .replace(/```json\s*/g, "")
+      .replace(/```\s*/g, "")
+      .trim();
     let extracted;
     try {
       extracted = JSON.parse(clean);
@@ -815,7 +821,11 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
       const ob = (clean.match(/{/g) || []).length;
       const cb = (clean.match(/}/g) || []).length;
       for (let i = 0; i < ob - cb; i++) clean += "}";
-      try { extracted = JSON.parse(clean); } catch { return; }
+      try {
+        extracted = JSON.parse(clean);
+      } catch {
+        return;
+      }
     }
     if (!extracted?.panels) return;
 
@@ -829,7 +839,9 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
     const testDate =
       extracted.report_date ||
       extracted.collection_date ||
-      (docDate ? new Date(docDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
+      (docDate
+        ? new Date(docDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0]);
 
     for (const panel of extracted.panels) {
       for (const test of panel.tests || []) {
@@ -855,7 +867,9 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
         );
       }
     }
-    console.log(`[AutoExtract] Doc ${docId}: extracted ${extracted.panels.length} panels for patient ${patientId}`);
+    console.log(
+      `[AutoExtract] Doc ${docId}: extracted ${extracted.panels.length} panels for patient ${patientId}`,
+    );
   } catch (err) {
     console.error(`[AutoExtract] Doc ${docId} failed:`, err.message);
   }
