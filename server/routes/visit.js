@@ -86,8 +86,12 @@ router.get("/visit/:patientId", async (req, res) => {
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
-      // 2. All vitals (for history/trends)
-      pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [pid]),
+      // 2. Vitals (for history/trends) — cap at the most recent 500 to bound memory;
+      //    frontend charts down-sample anyway.
+      pool.query(
+        "SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 500",
+        [pid],
+      ),
 
       // 3. Diagnoses (deduplicated — one per diagnosis_id, active rows preferred, then latest)
       pool.query(
@@ -138,6 +142,7 @@ router.get("/visit/:patientId", async (req, res) => {
            FROM lab_results lr
            LEFT JOIN appointments a ON a.id = lr.appointment_id
            WHERE lr.patient_id = $1
+             AND lr.test_date >= NOW() - INTERVAL '5 years'
            ORDER BY
              COALESCE(lr.canonical_name, lr.test_name),
              lr.test_date::date,
@@ -194,14 +199,16 @@ router.get("/visit/:patientId", async (req, res) => {
            )
          )
          SELECT * FROM deduped
-         ORDER BY visit_date DESC, created_at DESC`,
+         ORDER BY visit_date DESC, created_at DESC
+         LIMIT 200`,
         [pid],
       ),
 
       // 8. Documents
       pool.query(
         `SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, file_url, reviewed, created_at
-         FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC NULLS LAST, created_at DESC`,
+         FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC NULLS LAST, created_at DESC
+         LIMIT 200`,
         [pid],
       ),
 
@@ -1156,6 +1163,19 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
   try {
     const { bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist } =
       req.body;
+    // Prevent duplicate if same vitals already recorded today
+    const existing = await pool.query(
+      `SELECT id FROM vitals
+       WHERE patient_id = $1
+         AND recorded_at::date = CURRENT_DATE
+         AND COALESCE(bp_sys, -1) = COALESCE($2::real, -1)
+         AND COALESCE(weight, -1) = COALESCE($3::real, -1)
+       LIMIT 1`,
+      [pid, num(bp_sys), num(weight)],
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ ok: true, id: existing.rows[0].id, deduplicated: true });
+    }
     const { rows } = await pool.query(
       `INSERT INTO vitals (patient_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,

@@ -3,6 +3,8 @@ import api from "../services/api.js";
 import { extractLab } from "../services/extraction.js";
 import { toast } from "./uiStore.js";
 import { docCategories } from "../companion/constants";
+import queryClient from "../queries/client.js";
+import { qk } from "../queries/keys.js";
 
 const retryPost = async (url, body, maxRetries = 3) => {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -115,10 +117,10 @@ const useCompanionStore = create((set, get) => ({
     set({ loading: true });
     try {
       const r = await api.get(`/api/patients/${patientId}`);
-      set((s) => ({
+      set({
         patientData: r.data,
-        selectedPatient: s.selectedPatient ?? r.data,
-      }));
+        selectedPatient: r.data,
+      });
     } catch (e) {
       console.error("Load patient:", e);
     }
@@ -206,11 +208,12 @@ const useCompanionStore = create((set, get) => ({
       if (isLab) {
         // Use the same extractLab() as /opd and /visit for consistent, comprehensive extraction
         const imgData = currentCapture.base64;
-        const mediaType = currentCapture.mediaType === "application/pdf"
-          ? "application/pdf"
-          : currentCapture.mediaType?.startsWith("image/")
-            ? currentCapture.mediaType
-            : "image/jpeg";
+        const mediaType =
+          currentCapture.mediaType === "application/pdf"
+            ? "application/pdf"
+            : currentCapture.mediaType?.startsWith("image/")
+              ? currentCapture.mediaType
+              : "image/jpeg";
 
         const { data: labResult, error } = await extractLab(imgData, mediaType);
         if (error) throw new Error(error);
@@ -452,7 +455,9 @@ const useCompanionStore = create((set, get) => ({
             : `${(docCategories.find((c) => c.id === currentCategory)?.label || currentCategory).replace(/^[^\s]+\s/, "")} — ${captureMeta.date || "Today"}`,
           doc_date: captureMeta.date || new Date().toISOString().split("T")[0],
           source: "Companion Upload",
-          notes: captureMeta.doctor ? `Doctor: ${captureMeta.doctor}` : extractedData?.summary || "",
+          notes: captureMeta.doctor
+            ? `Doctor: ${captureMeta.doctor}`
+            : extractedData?.summary || "",
           extracted_data: extractedData || {},
         });
 
@@ -483,6 +488,9 @@ const useCompanionStore = create((set, get) => ({
         nameMismatch: null,
         categoryMismatch: null,
       }));
+      // Invalidate the React Query cache for this patient so PatientScreen's
+      // hook refetches the newly-saved docs/labs/meds automatically.
+      queryClient.invalidateQueries({ queryKey: qk.companion.patient(selectedPatient.id) });
       get().loadPatientData(selectedPatient.id);
     } catch (e) {
       console.error("Save:", e);

@@ -158,6 +158,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     }
 
     if (vitals && (num(vitals.bp_sys) || num(vitals.weight))) {
+      await client.query(`DELETE FROM vitals WHERE consultation_id = $1`, [consultationId]);
       await client.query(
         `INSERT INTO vitals (patient_id, consultation_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, waist, body_fat, muscle_mass, recorded_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::timestamptz, NOW()))`,
@@ -180,12 +181,30 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       );
     }
 
-    for (const d of moData?.diagnoses || []) {
-      if (d?.id && d?.label) {
+    {
+      // Dedupe by diagnosis_id — Postgres ON CONFLICT cannot touch the same row twice in one statement.
+      const dxMap = new Map();
+      for (const d of moData?.diagnoses || []) {
+        if (d?.id && d?.label) dxMap.set(t(d.id, 100), d);
+      }
+      const dxRows = Array.from(dxMap.values()).filter((d) => d?.id && d?.label);
+      if (dxRows.length) {
         await client.query(
-          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status) VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET consultation_id = EXCLUDED.consultation_id, label = EXCLUDED.label, status = EXCLUDED.status, updated_at = NOW()`,
-          [patientId, consultationId, t(d.id, 100), t(d.label, 500), t(d.status, 100) || "New"],
+          `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
+           SELECT $1, $2, d_id, d_label, d_status
+             FROM UNNEST($3::text[], $4::text[], $5::text[]) AS t(d_id, d_label, d_status)
+           ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
+             SET consultation_id = EXCLUDED.consultation_id,
+                 label = EXCLUDED.label,
+                 status = EXCLUDED.status,
+                 updated_at = NOW()`,
+          [
+            patientId,
+            consultationId,
+            dxRows.map((d) => t(d.id, 100)),
+            dxRows.map((d) => t(d.label, 500)),
+            dxRows.map((d) => t(d.status, 100) || "New"),
+          ],
         );
       }
     }
@@ -196,50 +215,72 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     //      visit or HealthRay sync), flip it to inactive and record why.
     //   2) Upsert a historical record into the inactive partial index so the
     //      doctor still sees the med in the patient's history.
-    for (const m of moData?.previous_medications || []) {
-      if (!m?.name) continue;
-      const stopReason = t(m.reason || m.status, 200);
-      await client.query(
-        `UPDATE medications
-            SET is_active   = false,
-                stopped_date = COALESCE(stopped_date, CURRENT_DATE),
-                stop_reason  = COALESCE(stop_reason, $3),
-                updated_at   = NOW()
-          WHERE patient_id = $1
-            AND UPPER(COALESCE(pharmacy_match, name)) = UPPER(COALESCE($2, $4))
-            AND is_active = true`,
-        [patientId, t(m._matched, 200), stopReason, t(m.name, 200)],
-      );
-      await client.query(
-        `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, stopped_date, is_new, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,CURRENT_DATE,false,false)
-         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
-         DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
-           composition = COALESCE(EXCLUDED.composition, medications.composition),
-           dose = COALESCE(EXCLUDED.dose, medications.dose),
-           frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
-           timing = COALESCE(EXCLUDED.timing, medications.timing),
-           stop_reason = COALESCE(EXCLUDED.stop_reason, medications.stop_reason),
-           stopped_date = COALESCE(medications.stopped_date, CURRENT_DATE),
-           updated_at = NOW()`,
-        [
-          patientId,
-          consultationId,
-          t(m.name, 200),
-          t(m._matched, 200),
-          t(m.composition, 200),
-          t(m.dose, 100),
-          t(m.frequency, 100),
-          t(m.timing, 100),
-          stopReason,
-        ],
-      );
+    {
+      // Dedupe by the upsert conflict key (UPPER(pharmacy_match OR name)).
+      const prevMap = new Map();
+      for (const m of moData?.previous_medications || []) {
+        if (!m?.name) continue;
+        const key = (m._matched || m.name || "").toUpperCase();
+        if (key) prevMap.set(key, m);
+      }
+      const prevMedsRows = Array.from(prevMap.values());
+      if (prevMedsRows.length) {
+        const names = prevMedsRows.map((m) => t(m.name, 200));
+        const matched = prevMedsRows.map((m) => t(m._matched, 200));
+        const compositions = prevMedsRows.map((m) => t(m.composition, 200));
+        const doses = prevMedsRows.map((m) => t(m.dose, 100));
+        const freqs = prevMedsRows.map((m) => t(m.frequency, 100));
+        const timings = prevMedsRows.map((m) => t(m.timing, 100));
+        const stopReasons = prevMedsRows.map((m) => t(m.reason || m.status, 200));
+
+        // 1) Flip any matching active rows to inactive in one pass.
+        await client.query(
+          `UPDATE medications m
+              SET is_active   = false,
+                  stopped_date = COALESCE(m.stopped_date, CURRENT_DATE),
+                  stop_reason  = COALESCE(m.stop_reason, t.stop_reason),
+                  updated_at   = NOW()
+            FROM UNNEST($2::text[], $3::text[], $4::text[]) AS t(name_key, matched_key, stop_reason)
+            WHERE m.patient_id = $1
+              AND m.is_active = true
+              AND UPPER(COALESCE(m.pharmacy_match, m.name)) = UPPER(COALESCE(t.matched_key, t.name_key))`,
+          [patientId, names, matched, stopReasons],
+        );
+
+        // 2) Upsert the historical/inactive rows in one pass.
+        await client.query(
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, stopped_date, is_new, is_active)
+           SELECT $1, $2, name, pharm, composition, dose, freq, timing, stop_reason, CURRENT_DATE, false, false
+             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+                  AS t(name, pharm, composition, dose, freq, timing, stop_reason)
+           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+           DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+             composition = COALESCE(EXCLUDED.composition, medications.composition),
+             dose = COALESCE(EXCLUDED.dose, medications.dose),
+             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+             timing = COALESCE(EXCLUDED.timing, medications.timing),
+             stop_reason = COALESCE(EXCLUDED.stop_reason, medications.stop_reason),
+             stopped_date = COALESCE(medications.stopped_date, CURRENT_DATE),
+             updated_at = NOW()`,
+          [patientId, consultationId, names, matched, compositions, doses, freqs, timings, stopReasons],
+        );
+      }
     }
-    for (const m of conData?.medications_confirmed || []) {
-      if (m?.name) {
+    {
+      // Dedupe by upsert conflict key.
+      const confMap = new Map();
+      for (const m of conData?.medications_confirmed || []) {
+        if (!m?.name) continue;
+        const key = (m._matched || m.name || "").toUpperCase();
+        if (key) confMap.set(key, m);
+      }
+      const confRows = Array.from(confMap.values());
+      if (confRows.length) {
         await client.query(
           `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
+           SELECT $1, $2, name, pharm, comp, dose, freq, timing, route, is_new, true
+             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::boolean[])
+                  AS t(name, pharm, comp, dose, freq, timing, route, is_new)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
              pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -253,14 +294,14 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
           [
             patientId,
             consultationId,
-            t(m.name, 200),
-            t(m._matched, 200),
-            t(m.composition, 200),
-            t(m.dose, 100),
-            t(m.frequency, 100),
-            t(m.timing, 100),
-            t(m.route, 50) || "Oral",
-            m.isNew === true,
+            confRows.map((m) => t(m.name, 200)),
+            confRows.map((m) => t(m._matched, 200)),
+            confRows.map((m) => t(m.composition, 200)),
+            confRows.map((m) => t(m.dose, 100)),
+            confRows.map((m) => t(m.frequency, 100)),
+            confRows.map((m) => t(m.timing, 100)),
+            confRows.map((m) => t(m.route, 50) || "Oral"),
+            confRows.map((m) => m.isNew === true),
           ],
         );
       }
@@ -268,53 +309,66 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     await client.query(`DELETE FROM lab_results WHERE consultation_id=$1 AND source='scribe'`, [
       consultationId,
     ]);
-    for (const inv of moData?.investigations || []) {
-      if (inv?.test && num(inv.value) !== null && !inv.from_report) {
-        const invDate = inv.date || vDate || null;
+    {
+      const invRows = (moData?.investigations || []).filter(
+        (inv) => inv?.test && num(inv.value) !== null && !inv.from_report,
+      );
+      if (invRows.length) {
         await client.query(
-          `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, unit, flag, is_critical, ref_range, source, test_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'scribe',COALESCE($10::date, CURRENT_DATE))`,
+          `INSERT INTO lab_results (patient_id, consultation_id, test_name, canonical_name, result, unit, flag, is_critical, ref_range, source, test_date)
+           SELECT $1, $2, test_name, canonical, result, unit, flag, is_critical, ref_range, 'scribe', COALESCE(test_date::date, CURRENT_DATE)
+             FROM UNNEST($3::text[], $4::text[], $5::numeric[], $6::text[], $7::text[], $8::boolean[], $9::text[], $10::text[])
+                  AS t(test_name, canonical, result, unit, flag, is_critical, ref_range, test_date)`,
           [
             patientId,
             consultationId,
-            t(inv.test, 200),
-            getCanonical(inv.test),
-            num(inv.value),
-            t(inv.unit, 50),
-            t(inv.flag, 50),
-            inv.critical === true,
-            t(inv.ref, 100),
-            invDate,
+            invRows.map((inv) => t(inv.test, 200)),
+            invRows.map((inv) => getCanonical(inv.test)),
+            invRows.map((inv) => num(inv.value)),
+            invRows.map((inv) => t(inv.unit, 50)),
+            invRows.map((inv) => t(inv.flag, 50)),
+            invRows.map((inv) => inv.critical === true),
+            invRows.map((inv) => t(inv.ref, 100)),
+            invRows.map((inv) => inv.date || vDate || null),
           ],
         );
       }
     }
-    for (const g of conData?.goals || []) {
-      if (g?.marker) {
+    {
+      const goalRows = (conData?.goals || []).filter((g) => g?.marker);
+      if (goalRows.length) {
         await client.query(
-          `INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          `INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority)
+           SELECT $1, $2, marker, current_value, target_value, timeline, priority
+             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+                  AS t(marker, current_value, target_value, timeline, priority)`,
           [
             patientId,
             consultationId,
-            t(g.marker, 200),
-            t(g.current, 200),
-            t(g.target, 200),
-            t(g.timeline, 200),
-            t(g.priority, 100),
+            goalRows.map((g) => t(g.marker, 200)),
+            goalRows.map((g) => t(g.current, 200)),
+            goalRows.map((g) => t(g.target, 200)),
+            goalRows.map((g) => t(g.timeline, 200)),
+            goalRows.map((g) => t(g.priority, 100)),
           ],
         );
       }
     }
-    for (const c of moData?.complications || []) {
-      if (c?.name) {
+    {
+      const compRows = (moData?.complications || []).filter((c) => c?.name);
+      if (compRows.length) {
         await client.query(
-          `INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity) VALUES ($1,$2,$3,$4,$5,$6)`,
+          `INSERT INTO complications (patient_id, consultation_id, name, status, detail, severity)
+           SELECT $1, $2, name, status, detail, severity
+             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[])
+                  AS t(name, status, detail, severity)`,
           [
             patientId,
             consultationId,
-            t(c.name, 200),
-            t(c.status, 100),
-            t(c.detail, 500),
-            t(c.severity, 100),
+            compRows.map((c) => t(c.name, 200)),
+            compRows.map((c) => t(c.status, 100)),
+            compRows.map((c) => t(c.detail, 500)),
+            compRows.map((c) => t(c.severity, 100)),
           ],
         );
       }
@@ -354,8 +408,9 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     console.log(`✅ Saved: patient=${patientId} consultation=${consultationId}`);
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
 
-    // Auto-mark today's appointment as completed (non-blocking)
-    pool
+    // Non-blocking side-effects fired in parallel so one slow call (Genie API)
+    // doesn't delay the appointment status update.
+    const markAppt = pool
       .query(
         `UPDATE appointments SET status='completed', updated_at=NOW()
        WHERE patient_id=$1 AND appointment_date=CURRENT_DATE AND status='scheduled'`,
@@ -386,20 +441,22 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     };
     const doctorInfo = { con_name: conName, mo_name: moName };
     const syncPatient = { ...patient, id: patientId, file_no: patient.fileNo };
-    if (syncVisitToGenie)
-      syncVisitToGenie(visit, syncPatient, doctorInfo)
-        .then((r) => {
-          if (r) console.log("📱 Genie sync:", r);
-
-          if (syncPatientLogsFromGenie) {
-            syncPatientLogsFromGenie(patientId, pool)
-              .then((res) => {
-                if (res) console.log("📲 Genie logs sync:", res);
-              })
-              .catch((e) => console.log("Genie logs sync background:", e.message));
-          }
-        })
-        .catch((e) => console.log("Genie sync background:", e.message));
+    const genieSync = syncVisitToGenie
+      ? syncVisitToGenie(visit, syncPatient, doctorInfo)
+          .then((r) => {
+            if (r) console.log("📱 Genie sync:", r);
+            if (syncPatientLogsFromGenie) {
+              return syncPatientLogsFromGenie(patientId, pool)
+                .then((res) => {
+                  if (res) console.log("📲 Genie logs sync:", res);
+                })
+                .catch((e) => console.log("Genie logs sync background:", e.message));
+            }
+          })
+          .catch((e) => console.log("Genie sync background:", e.message))
+      : Promise.resolve();
+    // Explicitly swallow rejections; both promises fire concurrently.
+    Promise.all([markAppt, genieSync]).catch(() => {});
   } catch (e) {
     await client.query("ROLLBACK");
     console.error("❌ Save error:", e.message, e.detail || "");
@@ -445,6 +502,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     const cid = con.rows[0].id;
 
     if (vitals && Object.keys(vitals).length > 0) {
+      await client.query(`DELETE FROM vitals WHERE consultation_id = $1`, [cid]);
       await client.query(
         "INSERT INTO vitals (patient_id, consultation_id, recorded_at, bp_sys, bp_dia, pulse, weight, height, bmi, waist, body_fat, muscle_mass) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
         [

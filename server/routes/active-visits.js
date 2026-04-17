@@ -37,9 +37,14 @@ router.get("/active-visit", async (req, res) => {
         [doctorId || 0, doctorName || "", patient_id],
       ));
     } else {
+      // Only restore visits started within the last 12 hours — older "in-progress"
+      // rows are almost always abandoned sessions that were never closed, and
+      // would otherwise auto-select a random old patient on page load.
       ({ rows } = await pool.query(
         `${select}
-         WHERE (av.doctor_id = $1 OR av.doctor_name = $2) AND av.status = 'in-progress'
+         WHERE (av.doctor_id = $1 OR av.doctor_name = $2)
+           AND av.status = 'in-progress'
+           AND av.started_at > NOW() - INTERVAL '12 hours'
          ORDER BY av.started_at DESC LIMIT 1`,
         [doctorId || 0, doctorName || ""],
       ));

@@ -3,6 +3,7 @@ import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
+import { markAppointmentAsSeen } from "../services/healthray/db.js";
 
 const router = Router();
 
@@ -41,6 +42,8 @@ pool
     console.log("✅ OPD columns ready");
     // Backfill existing OPD consultations with prescription data from documents
     backfillOpdConsultations().catch((e) => console.log("OPD backfill:", e.message));
+    // Auto-mark completed HealthRay appointments as "seen" if not already
+    backfillHealthraySeenStatus().catch((e) => console.log("HealthRay seen backfill:", e.message));
     // One-time patch: copy weight/waist/BP from opd_vitals into biomarkers for Labs tab
     pool
       .query(
@@ -189,15 +192,25 @@ async function backfillOpdConsultations() {
         [con.id, JSON.stringify(moData), JSON.stringify(conData), conTranscript || null],
       );
 
-      // Insert diagnoses
-      for (const d of mergedDiags) {
-        if (!d?.id || !d?.label) continue;
+      // Insert diagnoses (batched — diagMap dedup above already guarantees
+      // unique diagnosis_id per consultation, so ON CONFLICT is safe).
+      const dxRows = mergedDiags.filter((d) => d?.id && d?.label);
+      if (dxRows.length) {
         await client.query(
           `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
-           VALUES ($1, $2, $3, $4, $5)
+           SELECT $1, $2, d_id, d_label, d_status
+             FROM UNNEST($3::text[], $4::text[], $5::text[]) AS t(d_id, d_label, d_status)
            ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
-             SET label = EXCLUDED.label, status = EXCLUDED.status, consultation_id = EXCLUDED.consultation_id`,
-          [con.patient_id, con.id, d.id, d.label, d.status || "Controlled"],
+             SET label = EXCLUDED.label,
+                 status = EXCLUDED.status,
+                 consultation_id = EXCLUDED.consultation_id`,
+          [
+            con.patient_id,
+            con.id,
+            dxRows.map((d) => String(d.id)),
+            dxRows.map((d) => d.label),
+            dxRows.map((d) => d.status || "Controlled"),
+          ],
         );
       }
 
@@ -217,6 +230,34 @@ async function backfillOpdConsultations() {
     }
   }
   console.log("✅ OPD backfill complete");
+}
+
+// ── Backfill: auto-mark completed HealthRay appointments as "seen" ──────────
+async function backfillHealthraySeenStatus() {
+  const { rows } = await pool.query(
+    `SELECT id FROM appointments
+     WHERE healthray_id IS NOT NULL
+       AND status IN ('completed', 'seen')
+       AND patient_id IS NOT NULL
+       AND healthray_diagnoses IS NOT NULL
+       AND jsonb_array_length(healthray_diagnoses) > 0
+       AND (
+         consultation_id IS NULL
+         OR prep_steps->>'biomarkers' != 'true'
+         OR prep_steps->>'compliance' != 'true'
+         OR prep_steps->>'categorized' != 'true'
+         OR prep_steps->>'assigned' != 'true'
+       )`,
+  );
+  if (!rows.length) return;
+  console.log(`🔄 Auto-marking ${rows.length} HealthRay appointments as seen...`);
+
+  let marked = 0;
+  for (const row of rows) {
+    const result = await markAppointmentAsSeen(row.id);
+    if (result) marked++;
+  }
+  console.log(`✅ Marked ${marked}/${rows.length} HealthRay appointments as seen`);
 }
 
 // ── Lab test mapping: OPD biomarker keys → lab_results fields ────────────────
@@ -253,118 +294,153 @@ router.post("/opd/sync-noshow", async (_req, res) => {
 });
 
 // ── GET /api/opd/appointments — OPD list (flat array, by date) ───────────────
+//
+// Previously this was one SELECT with 11 correlated subqueries per row. On a
+// 30-patient list that meant ~330 extra lookups. We now fetch core appointment
+// rows once and aggregate the rest with two patient-scoped queries, then merge
+// in JS. All per-appointment subqueries (visit_count, last_visit, etc.)
+// reduced to per-patient because every row in the list shares the same
+// appointment_date = $1.
 router.get("/opd/appointments", async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    // 1) Core appointment rows + joined patient fields (no aggregation).
     const { rows } = await pool.query(
       `SELECT a.*,
-              rp.pid AS patient_id,
+              COALESCE(p.id, a.patient_id) AS patient_id,
               COALESCE(a.age, EXTRACT(YEAR FROM AGE(p.dob))::INTEGER, p.age) AS age,
               COALESCE(a.sex, p.sex) AS sex,
-              COALESCE(
-                (SELECT COUNT(*) FROM consultations c
-                  WHERE c.patient_id = rp.pid
-                    AND rp.pid IS NOT NULL)
-                +
-                (SELECT COUNT(*) FROM appointments a2
-                  WHERE a2.patient_id = rp.pid
-                    AND rp.pid IS NOT NULL
-                    AND a2.appointment_date <= a.appointment_date
-                    AND COALESCE(a2.status, 'scheduled') NOT IN ('cancelled', 'no_show')),
-                a.visit_count, 1
-              )::INTEGER AS visit_count,
-              (SELECT MAX(a3.appointment_date) FROM appointments a3
-                WHERE a3.patient_id = rp.pid
-                  AND rp.pid IS NOT NULL
-                  AND a3.appointment_date < a.appointment_date
-              ) AS last_visit_date,
-              COALESCE(
-                NULLIF(a.healthray_diagnoses, '[]'::jsonb),
-                (SELECT a4.healthray_diagnoses FROM appointments a4
-                  WHERE a4.patient_id = rp.pid
-                    AND rp.pid IS NOT NULL
-                    AND a4.healthray_diagnoses IS NOT NULL
-                    AND jsonb_array_length(a4.healthray_diagnoses) > 0
-                  ORDER BY a4.appointment_date DESC LIMIT 1)
-              ) AS healthray_diagnoses,
-              (SELECT COUNT(*) FROM lab_cases lc
-                WHERE (lc.patient_id = rp.pid
-                       OR (lc.patient_id IS NULL AND p.file_no IS NOT NULL
-                           AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
-                  AND lc.results_synced = FALSE
-                  AND COALESCE(lc.retry_abandoned, FALSE) = FALSE
-              )::INTEGER AS pending_labs,
-              (SELECT COUNT(*) FROM lab_cases lc2
-                WHERE (lc2.patient_id = rp.pid
-                       OR (lc2.patient_id IS NULL AND p.file_no IS NOT NULL
-                           AND lc2.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
-                  AND lc2.results_synced = TRUE
-                  AND lc2.case_date >= CURRENT_DATE - INTERVAL '7 days'
-              )::INTEGER AS recent_labs,
-              GREATEST(
-                (SELECT COUNT(DISTINCT lr3.canonical_name) FROM lab_results lr3
-                  WHERE lr3.patient_id = rp.pid
-                    AND lr3.source = 'report_extract'
-                    AND lr3.test_date >= CURRENT_DATE - INTERVAL '7 days'
-                ),
-                (SELECT COUNT(*) FROM documents d
-                  WHERE d.patient_id = rp.pid
-                    AND d.doc_type IN ('lab_report', 'blood_test')
-                    AND d.source NOT IN ('healthray', 'lab_healthray')
-                    AND COALESCE(d.doc_date, d.created_at::date) >= CURRENT_DATE - INTERVAL '7 days'
-                )
-              )::INTEGER AS uploaded_labs,
-              (SELECT GREATEST(
-                (SELECT MAX(lr4.test_date) FROM lab_results lr4
-                  WHERE lr4.patient_id = rp.pid
-                    AND lr4.source = 'report_extract'
-                    AND lr4.test_date >= CURRENT_DATE - INTERVAL '7 days'),
-                (SELECT MAX(COALESCE(d2.doc_date, d2.created_at::date)) FROM documents d2
-                  WHERE d2.patient_id = rp.pid
-                    AND d2.doc_type IN ('lab_report', 'blood_test')
-                    AND d2.source NOT IN ('healthray', 'lab_healthray')
-                    AND COALESCE(d2.doc_date, d2.created_at::date) >= CURRENT_DATE - INTERVAL '7 days')
-              )) AS uploaded_labs_date,
-              (SELECT lr.result FROM lab_results lr
-                WHERE lr.patient_id = rp.pid
-                  AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
-                  AND lr.result IS NOT NULL
-                ORDER BY lr.test_date DESC, lr.created_at DESC
-                OFFSET 1 LIMIT 1
-              ) AS prev_hba1c
+              p.file_no AS _resolved_file_no
          FROM appointments a
          LEFT JOIN patients p
            ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
            OR (a.file_no IS NULL AND p.id = a.patient_id)
-         LEFT JOIN LATERAL (SELECT COALESCE(p.id, a.patient_id) AS pid) rp ON TRUE
         WHERE a.appointment_date = $1
         ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
       [date],
     );
-    // Apply clinical sort to HealthRay diagnoses on each row
-    for (const r of rows) {
-      if (Array.isArray(r.healthray_diagnoses) && r.healthray_diagnoses.length > 0) {
-        r.healthray_diagnoses = sortDiagnoses(r.healthray_diagnoses);
+
+    const patientIds = [...new Set(rows.map((r) => r.patient_id).filter((x) => x != null))];
+    const fileNos = [
+      ...new Set(
+        rows
+          .map((r) => r._resolved_file_no)
+          .filter((x) => x != null && x !== ""),
+      ),
+    ];
+
+    // 2) Per-patient aggregates (visit counts, last visit, healthray_diagnoses
+    //    fallback, prev_hba1c, uploaded_labs from lab_results + documents).
+    //    One query, one round-trip, all keyed on patient_id.
+    const aggMap = new Map();
+    if (patientIds.length) {
+      const { rows: agg } = await pool.query(
+        `WITH pids AS (
+           SELECT UNNEST($1::int[]) AS pid
+         )
+         SELECT pids.pid AS patient_id,
+           (SELECT COUNT(*) FROM consultations c WHERE c.patient_id = pids.pid)::int AS c_count,
+           (SELECT COUNT(*) FROM appointments a2
+              WHERE a2.patient_id = pids.pid
+                AND a2.appointment_date <= $2
+                AND COALESCE(a2.status, 'scheduled') NOT IN ('cancelled', 'no_show'))::int AS a_count,
+           (SELECT MAX(a3.appointment_date) FROM appointments a3
+              WHERE a3.patient_id = pids.pid
+                AND a3.appointment_date < $2) AS last_visit_date,
+           (SELECT a4.healthray_diagnoses FROM appointments a4
+              WHERE a4.patient_id = pids.pid
+                AND a4.healthray_diagnoses IS NOT NULL
+                AND jsonb_array_length(a4.healthray_diagnoses) > 0
+              ORDER BY a4.appointment_date DESC LIMIT 1) AS latest_healthray_dx,
+           (SELECT lr.result FROM lab_results lr
+              WHERE lr.patient_id = pids.pid
+                AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
+                AND lr.result IS NOT NULL
+              ORDER BY lr.test_date DESC, lr.created_at DESC
+              OFFSET 1 LIMIT 1) AS prev_hba1c,
+           (SELECT COUNT(DISTINCT lr3.canonical_name)::int FROM lab_results lr3
+              WHERE lr3.patient_id = pids.pid
+                AND lr3.source = 'report_extract'
+                AND lr3.test_date >= CURRENT_DATE - INTERVAL '7 days') AS uploaded_lab_canonicals,
+           (SELECT COUNT(*)::int FROM documents d
+              WHERE d.patient_id = pids.pid
+                AND d.doc_type IN ('lab_report', 'blood_test')
+                AND d.source NOT IN ('healthray', 'lab_healthray')
+                AND COALESCE(d.doc_date, d.created_at::date) >= CURRENT_DATE - INTERVAL '7 days') AS uploaded_lab_docs,
+           (SELECT MAX(lr4.test_date) FROM lab_results lr4
+              WHERE lr4.patient_id = pids.pid
+                AND lr4.source = 'report_extract'
+                AND lr4.test_date >= CURRENT_DATE - INTERVAL '7 days') AS upl_lab_date_lr,
+           (SELECT MAX(COALESCE(d2.doc_date, d2.created_at::date)) FROM documents d2
+              WHERE d2.patient_id = pids.pid
+                AND d2.doc_type IN ('lab_report', 'blood_test')
+                AND d2.source NOT IN ('healthray', 'lab_healthray')
+                AND COALESCE(d2.doc_date, d2.created_at::date) >= CURRENT_DATE - INTERVAL '7 days') AS upl_lab_date_doc
+         FROM pids`,
+        [patientIds, date],
+      );
+      for (const r of agg) aggMap.set(r.patient_id, r);
+    }
+
+    // 3) lab_cases counts. These need both patient_id AND file_no (for
+    //    unlinked cases), so aggregate separately and merge.
+    const labCasesByPid = new Map();
+    const labCasesByFile = new Map();
+    if (patientIds.length || fileNos.length) {
+      const { rows: lc } = await pool.query(
+        `SELECT
+           lc.patient_id,
+           lc.raw_list_json->'patient'->>'healthray_uid' AS healthray_uid,
+           COUNT(*) FILTER (
+             WHERE lc.results_synced = FALSE
+               AND COALESCE(lc.retry_abandoned, FALSE) = FALSE
+           )::int AS pending_labs,
+           COUNT(*) FILTER (
+             WHERE lc.results_synced = TRUE
+               AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
+           )::int AS recent_labs
+         FROM lab_cases lc
+         WHERE lc.patient_id = ANY($1::int[])
+            OR (lc.patient_id IS NULL AND lc.raw_list_json->'patient'->>'healthray_uid' = ANY($2::text[]))
+         GROUP BY lc.patient_id, lc.raw_list_json->'patient'->>'healthray_uid'`,
+        [patientIds, fileNos],
+      );
+      for (const r of lc) {
+        if (r.patient_id != null) {
+          const prev = labCasesByPid.get(r.patient_id) || { pending_labs: 0, recent_labs: 0 };
+          prev.pending_labs += r.pending_labs;
+          prev.recent_labs += r.recent_labs;
+          labCasesByPid.set(r.patient_id, prev);
+        } else if (r.healthray_uid) {
+          const prev = labCasesByFile.get(r.healthray_uid) || {
+            pending_labs: 0,
+            recent_labs: 0,
+          };
+          prev.pending_labs += r.pending_labs;
+          prev.recent_labs += r.recent_labs;
+          labCasesByFile.set(r.healthray_uid, prev);
+        }
       }
     }
 
-    // Enrich biomarkers with latest lab_results so OPD always shows fresh data
-    const patientIds = [...new Set(rows.filter((r) => r.patient_id).map((r) => r.patient_id))];
-    if (patientIds.length > 0) {
-      const CANONICAL_TO_BIO = {
-        HbA1c: "hba1c",
-        FBS: "fg",
-        LDL: "ldl",
-        Triglycerides: "tg",
-        UACR: "uacr",
-        Microalbumin: "uacr",
-        Creatinine: "creatinine",
-        TSH: "tsh",
-        Haemoglobin: "hb",
-        Hemoglobin: "hb",
-        eGFR: "egfr",
-      };
-      const labR = await pool.query(
+    // 4) Latest lab_results by canonical for biomarker enrichment.
+    const CANONICAL_TO_BIO = {
+      HbA1c: "hba1c",
+      FBS: "fg",
+      LDL: "ldl",
+      Triglycerides: "tg",
+      UACR: "uacr",
+      Microalbumin: "uacr",
+      Creatinine: "creatinine",
+      TSH: "tsh",
+      Haemoglobin: "hb",
+      Hemoglobin: "hb",
+      eGFR: "egfr",
+    };
+    const labByPt = {};
+    if (patientIds.length) {
+      const { rows: labR } = await pool.query(
         `SELECT DISTINCT ON (patient_id, canonical_name)
            patient_id, canonical_name, result, test_date
          FROM lab_results
@@ -373,9 +449,7 @@ router.get("/opd/appointments", async (req, res) => {
          ORDER BY patient_id, canonical_name, test_date DESC NULLS LAST`,
         [patientIds],
       );
-      // Group by patient
-      const labByPt = {};
-      for (const r of labR.rows) {
+      for (const r of labR) {
         const bioKey = CANONICAL_TO_BIO[r.canonical_name];
         if (!bioKey) continue;
         const val = parseFloat(r.result);
@@ -386,10 +460,49 @@ router.get("/opd/appointments", async (req, res) => {
           labByPt[r.patient_id][bioKey] = { val, date: r.test_date };
         }
       }
-      // Merge into each appointment's biomarkers
-      for (const row of rows) {
-        const labs = labByPt[row.patient_id];
-        if (!labs) continue;
+    }
+
+    // 5) Merge aggregates back into each appointment row.
+    for (const row of rows) {
+      const a = aggMap.get(row.patient_id);
+      const lc =
+        labCasesByPid.get(row.patient_id) ||
+        (row._resolved_file_no ? labCasesByFile.get(row._resolved_file_no) : null) ||
+        { pending_labs: 0, recent_labs: 0 };
+
+      const upl = Math.max(
+        a?.uploaded_lab_canonicals || 0,
+        a?.uploaded_lab_docs || 0,
+      );
+      const uplDate = [a?.upl_lab_date_lr, a?.upl_lab_date_doc]
+        .filter(Boolean)
+        .sort()
+        .pop() || null;
+
+      row.visit_count =
+        (a?.c_count || 0) + (a?.a_count || 0) || row.visit_count || 1;
+      row.last_visit_date = a?.last_visit_date || null;
+      // Fall back to latest non-empty healthray_diagnoses if this row's is empty.
+      if (
+        !row.healthray_diagnoses ||
+        (Array.isArray(row.healthray_diagnoses) && row.healthray_diagnoses.length === 0)
+      ) {
+        row.healthray_diagnoses = a?.latest_healthray_dx || row.healthray_diagnoses;
+      }
+      row.pending_labs = lc.pending_labs;
+      row.recent_labs = lc.recent_labs;
+      row.uploaded_labs = upl;
+      row.uploaded_labs_date = uplDate;
+      row.prev_hba1c = a?.prev_hba1c || null;
+
+      // Apply clinical sort to HealthRay diagnoses.
+      if (Array.isArray(row.healthray_diagnoses) && row.healthray_diagnoses.length > 0) {
+        row.healthray_diagnoses = sortDiagnoses(row.healthray_diagnoses);
+      }
+
+      // Biomarker enrichment from latest labs.
+      const labs = labByPt[row.patient_id];
+      if (labs) {
         const bio = row.biomarkers || {};
         const dates = bio._lab_dates || {};
         for (const [bioKey, { val, date: d }] of Object.entries(labs)) {
@@ -401,6 +514,8 @@ router.get("/opd/appointments", async (req, res) => {
         }
         row.biomarkers = bio;
       }
+
+      delete row._resolved_file_no;
     }
 
     res.json(rows);
@@ -806,22 +921,25 @@ router.post("/appointments/:id/biomarkers", async (req, res) => {
 
       const testDate = appt.appointment_date || new Date().toISOString().split("T")[0];
 
-      for (const [key, meta] of Object.entries(LAB_MAP)) {
-        const val = num(req.body[key]);
-        if (val === null) continue;
+      const labEntries = Object.entries(LAB_MAP)
+        .map(([key, meta]) => ({ meta, val: num(req.body[key]) }))
+        .filter((e) => e.val !== null);
+      if (labEntries.length) {
         await client.query(
           `INSERT INTO lab_results
              (patient_id, appointment_id, test_date, panel_name, test_name, canonical_name, result, unit, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'opd')`,
+           SELECT $1, $2, $3, panel, test_name, canonical, result, unit, 'opd'
+             FROM UNNEST($4::text[], $5::text[], $6::text[], $7::numeric[], $8::text[])
+                  AS t(panel, test_name, canonical, result, unit)`,
           [
             appt.patient_id,
             appt.id,
             testDate,
-            meta.panel,
-            meta.test_name,
-            meta.canonical,
-            val,
-            meta.unit,
+            labEntries.map((e) => e.meta.panel),
+            labEntries.map((e) => e.meta.test_name),
+            labEntries.map((e) => e.meta.canonical),
+            labEntries.map((e) => e.val),
+            labEntries.map((e) => e.meta.unit),
           ],
         );
       }
@@ -879,62 +997,96 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         [appt.patient_id, appt.id],
       );
 
-      // Insert active medicines (upsert — update if same drug already active)
-      for (const m of medications || []) {
-        if (!m?.name) continue;
-        await client.query(
-          `INSERT INTO medications
-             (patient_id, appointment_id, name, composition, dose, frequency, timing, route, is_new, is_active, source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'opd')
-           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
-           DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
-             composition = COALESCE(EXCLUDED.composition, medications.composition),
-             dose = COALESCE(EXCLUDED.dose, medications.dose),
-             frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
-             timing = COALESCE(EXCLUDED.timing, medications.timing),
-             route = COALESCE(EXCLUDED.route, medications.route),
-             source = EXCLUDED.source,
-             updated_at = NOW()`,
-          [
-            appt.patient_id,
-            appt.id,
-            (m.name || "").slice(0, 200),
-            (m.composition || "").slice(0, 200),
-            (m.dose || "").slice(0, 100),
-            (m.frequency || "").slice(0, 100),
-            (m.timing || "").slice(0, 100),
-            (m.route || "Oral").slice(0, 50),
-          ],
-        );
+      // Active medicines — dedupe on the ON CONFLICT key (UPPER(name)).
+      {
+        const active = new Map();
+        for (const m of medications || []) {
+          if (!m?.name) continue;
+          const key = (m.name || "").toUpperCase();
+          if (key) active.set(key, m);
+        }
+        const rows = Array.from(active.values());
+        if (rows.length) {
+          await client.query(
+            `INSERT INTO medications
+               (patient_id, appointment_id, name, composition, dose, frequency, timing, route, is_new, is_active, source)
+             SELECT $1, $2, name, composition, dose, freq, timing, route, false, true, 'opd'
+               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
+                    AS t(name, composition, dose, freq, timing, route)
+             ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+             DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
+               composition = COALESCE(EXCLUDED.composition, medications.composition),
+               dose = COALESCE(EXCLUDED.dose, medications.dose),
+               frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+               timing = COALESCE(EXCLUDED.timing, medications.timing),
+               route = COALESCE(EXCLUDED.route, medications.route),
+               source = EXCLUDED.source,
+               updated_at = NOW()`,
+            [
+              appt.patient_id,
+              appt.id,
+              rows.map((m) => (m.name || "").slice(0, 200)),
+              rows.map((m) => (m.composition || "").slice(0, 200)),
+              rows.map((m) => (m.dose || "").slice(0, 100)),
+              rows.map((m) => (m.frequency || "").slice(0, 100)),
+              rows.map((m) => (m.timing || "").slice(0, 100)),
+              rows.map((m) => (m.route || "Oral").slice(0, 50)),
+            ],
+          );
+        }
       }
 
-      // Insert stopped/omitted medicines as inactive
-      for (const m of stopped_medications || []) {
-        if (!m?.name) continue;
-        await client.query(
-          `INSERT INTO medications
-             (patient_id, appointment_id, name, dose, is_new, is_active, source)
-           VALUES ($1, $2, $3, $4, false, false, 'opd')
-           ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
-           DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
-             dose = COALESCE(EXCLUDED.dose, medications.dose),
-             source = EXCLUDED.source,
-             updated_at = NOW()`,
-          [appt.patient_id, appt.id, (m.name || "").slice(0, 200), (m.reason || "").slice(0, 100)],
-        );
+      // Stopped/omitted meds — same dedupe.
+      {
+        const stopped = new Map();
+        for (const m of stopped_medications || []) {
+          if (!m?.name) continue;
+          const key = (m.name || "").toUpperCase();
+          if (key) stopped.set(key, m);
+        }
+        const rows = Array.from(stopped.values());
+        if (rows.length) {
+          await client.query(
+            `INSERT INTO medications
+               (patient_id, appointment_id, name, dose, is_new, is_active, source)
+             SELECT $1, $2, name, dose, false, false, 'opd'
+               FROM UNNEST($3::text[], $4::text[]) AS t(name, dose)
+             ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+             DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
+               dose = COALESCE(EXCLUDED.dose, medications.dose),
+               source = EXCLUDED.source,
+               updated_at = NOW()`,
+            [
+              appt.patient_id,
+              appt.id,
+              rows.map((m) => (m.name || "").slice(0, 200)),
+              rows.map((m) => (m.reason || "").slice(0, 100)),
+            ],
+          );
+        }
       }
 
-      // ── Sync diagnoses to diagnoses table ──
+      // Diagnoses sync — dedupe on diagnosis_id.
       if (Array.isArray(diagnoses) && diagnoses.length > 0) {
+        const dxMap = new Map();
         for (const d of diagnoses) {
-          if (!d?.id || !d?.label) continue;
+          if (d?.id && d?.label) dxMap.set(String(d.id), d);
+        }
+        const rows = Array.from(dxMap.values());
+        if (rows.length) {
           await client.query(
             `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status)
-             VALUES ($1, $2, $3, $4)
+             SELECT $1, d_id, d_label, d_status
+               FROM UNNEST($2::text[], $3::text[], $4::text[]) AS t(d_id, d_label, d_status)
              ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
                SET label = EXCLUDED.label,
                    status = EXCLUDED.status`,
-            [appt.patient_id, d.id, d.label, d.status || "Controlled"],
+            [
+              appt.patient_id,
+              rows.map((d) => String(d.id)),
+              rows.map((d) => d.label),
+              rows.map((d) => d.status || "Controlled"),
+            ],
           );
         }
       }

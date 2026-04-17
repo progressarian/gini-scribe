@@ -34,6 +34,8 @@ import {
   syncVitals,
   syncSymptoms,
   syncBiomarkersFromLatestLabs,
+  markAppointmentAsSeen,
+  markAppointmentAsCheckedIn,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 const { log, error } = createLogger("HealthRay Sync");
@@ -213,6 +215,8 @@ async function syncAppointment(appt, localDoctorName) {
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
   if (existing && isCompleted && existing.healthray_clinical_notes && alreadyEnriched) {
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+    // Auto-mark as seen if not already done
+    await markAppointmentAsSeen(existing.id);
     return { skipped: true, id: existing.id };
   }
 
@@ -259,15 +263,40 @@ async function syncAppointment(appt, localDoctorName) {
           clinical.healthrayInvestigations = parsed.investigations_to_order || [];
           clinical.healthrayFollowUp = parsed.follow_up || null;
 
-          // Merge vitals
+          // Merge vitals — parseFloat to strip units like "137 mmHg" → 137
           const v = parsed.vitals || {};
-          if (v.height && !opdVitals.height) opdVitals.height = v.height;
-          if (v.weight && !opdVitals.weight) opdVitals.weight = v.weight;
-          if (v.bmi && !opdVitals.bmi) opdVitals.bmi = v.bmi;
-          if (v.bpSys) opdVitals.bpSys = v.bpSys;
-          if (v.bpDia) opdVitals.bpDia = v.bpDia;
-          if (v.waist) opdVitals.waist = v.waist;
-          if (v.bodyFat) opdVitals.bodyFat = v.bodyFat;
+          const cleanNum = (val) => {
+            const n = parseFloat(val);
+            return isNaN(n) ? null : n;
+          };
+          if (v.height && !opdVitals.height) {
+            const n = cleanNum(v.height);
+            if (n) opdVitals.height = n;
+          }
+          if (v.weight && !opdVitals.weight) {
+            const n = cleanNum(v.weight);
+            if (n) opdVitals.weight = n;
+          }
+          if (v.bmi && !opdVitals.bmi) {
+            const n = cleanNum(v.bmi);
+            if (n) opdVitals.bmi = n;
+          }
+          if (v.bpSys) {
+            const n = cleanNum(v.bpSys);
+            if (n) opdVitals.bpSys = n;
+          }
+          if (v.bpDia) {
+            const n = cleanNum(v.bpDia);
+            if (n) opdVitals.bpDia = n;
+          }
+          if (v.waist) {
+            const n = cleanNum(v.waist);
+            if (n) opdVitals.waist = n;
+          }
+          if (v.bodyFat) {
+            const n = cleanNum(v.bodyFat);
+            if (n) opdVitals.bodyFat = n;
+          }
 
           if (opdVitals.weight) biomarkers.weight = opdVitals.weight;
           if (opdVitals.waist) biomarkers.waist = opdVitals.waist;
@@ -350,6 +379,15 @@ async function syncAppointment(appt, localDoctorName) {
   await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
   await syncSymptoms(patientId, localApptId, clinical.parsedClinical?.symptoms);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
+
+  // ── Auto-mark status based on HealthRay data ──
+  if (isCompleted && clinical.healthrayDiagnoses?.length > 0) {
+    // Prescription exists → mark as "seen" (creates consultation + fills prep steps)
+    await markAppointmentAsSeen(localApptId);
+  } else if (!isCompleted && status !== "cancelled" && status !== "no_show") {
+    // Appointment exists in HealthRay but no prescription yet → patient checked in
+    await markAppointmentAsCheckedIn(localApptId);
+  }
 
   return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };
 }

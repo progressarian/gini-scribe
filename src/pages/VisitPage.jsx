@@ -2,6 +2,7 @@ import "./VisitPage.css";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../services/api";
+import { useVisit } from "../queries/hooks/useVisit";
 import usePatientStore from "../stores/patientStore";
 import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
@@ -230,58 +231,65 @@ export default function VisitPage() {
     [saveDoctorNote],
   );
 
-  // ── Redirect if no patient ──
+  // ── Redirect if no patient — restore is handled by the patient store ──
   useEffect(() => {
     const savedId = sessionStorage.getItem("gini_active_patient");
-    if (!dbPatientId && !savedId) {
-      navigate("/");
-      return;
-    }
-    if (!dbPatientId) return; // restore in progress — wait
-    (async () => {
-      setLoading(true);
-      try {
-        const { data: d } = await api.get(
-          `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
-        );
-
-        setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
-        if (d.appt_doctor_note) {
-          setDoctorNote(d.appt_doctor_note);
-        } else if (d.consultations?.[0]?.con_data?.assessment_summary) {
-          setDoctorNote(d.consultations[0].con_data.assessment_summary);
-        }
-        // Stop active meds from older visits in DB, then refresh if any were stopped
-        try {
-          const rec = await api.patch(`/api/visit/${dbPatientId}/medications/reconcile`);
-          if (rec.data?.stopped > 0) {
-            const { data: d2 } = await api.get(
-              `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
-            );
-            setData({ ...d2, examFindings: buildExamFindings(d2.consultations?.[0]?.exam_data) });
-          }
-        } catch {
-          // non-critical — don't block the page
-        }
-      } catch {
-        toast("Failed to load visit data", "error");
-      }
-      setLoading(false);
-    })();
+    if (!dbPatientId && !savedId) navigate("/");
   }, [dbPatientId, navigate]);
 
-  // ── Refresh data after mutations ──
-  const refreshData = useCallback(async () => {
-    try {
-      const { data: d } = await api.get(
-        `/api/visit/${dbPatientId}${opdApptId ? `?appointment_id=${opdApptId}` : ""}`,
-      );
-      console.log("[RefreshData] Updated labs:", d.labResults?.length);
-      setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
-    } catch (e) {
-      console.error("[RefreshData] Error:", e.message);
+  // ── React Query owns the visit fetch ──
+  // - Auto-refetches on mount (staleTime: 0) and on window focus.
+  // - Mutations elsewhere (saveConsultation, biomarkers, compliance) invalidate
+  //   this key and trigger a background refetch without any manual refreshData call.
+  const visitQuery = useVisit(dbPatientId, opdApptId);
+
+  // Run the one-time medication reconcile after the first successful load.
+  // If any rows are stopped, invalidate the visit cache so it refetches with
+  // the new state. The reconcile call is non-critical — silent on error.
+  const reconciledOnceRef = useRef(null);
+  useEffect(() => {
+    if (!visitQuery.data || !dbPatientId) return;
+    if (reconciledOnceRef.current === dbPatientId) return;
+    reconciledOnceRef.current = dbPatientId;
+    (async () => {
+      try {
+        const rec = await api.patch(`/api/visit/${dbPatientId}/medications/reconcile`);
+        if (rec.data?.stopped > 0) {
+          visitQuery.refetch();
+        }
+      } catch {
+        // non-critical
+      }
+    })();
+  }, [dbPatientId, visitQuery.data, visitQuery.refetch]);
+
+  // Sync query data → local `data` state so the existing transforms
+  // (examFindings, doctorNote seed) keep working unchanged. When the query
+  // updates (refetch / invalidation), this effect re-runs and `setData` is
+  // called with the freshest payload.
+  useEffect(() => {
+    const d = visitQuery.data;
+    if (!d) return;
+    setData({ ...d, examFindings: buildExamFindings(d.consultations?.[0]?.exam_data) });
+    if (d.appt_doctor_note) {
+      setDoctorNote(d.appt_doctor_note);
+    } else if (d.consultations?.[0]?.con_data?.assessment_summary) {
+      setDoctorNote(d.consultations[0].con_data.assessment_summary);
     }
-  }, [dbPatientId, opdApptId]);
+  }, [visitQuery.data]);
+
+  useEffect(() => {
+    setLoading(visitQuery.isPending);
+  }, [visitQuery.isPending]);
+
+  useEffect(() => {
+    if (visitQuery.isError) toast("Failed to load visit data", "error");
+  }, [visitQuery.isError]);
+
+  // ── Refresh data after mutations — delegate to React Query ──
+  const refreshData = useCallback(async () => {
+    await visitQuery.refetch();
+  }, [visitQuery]);
 
   // ── Poll for new lab data (background sync) and auto-refresh biomarkers ──
   const labCountRef = useRef(null);

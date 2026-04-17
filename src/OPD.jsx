@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import * as XLSX from "xlsx";
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
+import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
+import { qk } from "./queries/keys.js";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -71,6 +74,70 @@ function apiFetchRaw(path, opts = {}) {
     ...opts,
     headers: { "x-auth-token": getToken(), ...(opts.headers || {}) },
   });
+}
+
+// ─── Shimmer skeleton ────────────────────────────────────────
+if (!document.getElementById("opd-shimmer-style")) {
+  const s = document.createElement("style");
+  s.id = "opd-shimmer-style";
+  s.textContent = `@keyframes opdShimmer { 0% { background-position: -400px 0 } 100% { background-position: 400px 0 } }`;
+  document.head.appendChild(s);
+}
+function Shimmer({ w = "100%", h = 12, r = 6, style = {} }) {
+  return (
+    <div
+      style={{
+        width: w,
+        height: h,
+        borderRadius: r,
+        background: `linear-gradient(90deg, ${BG} 0%, #e5ebf1 50%, ${BG} 100%)`,
+        backgroundSize: "800px 100%",
+        animation: "opdShimmer 1.2s linear infinite",
+        ...style,
+      }}
+    />
+  );
+}
+function TabShimmer({ rows = 4 }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div
+        style={{
+          background: WH,
+          border: `1px solid ${BD}`,
+          borderRadius: 10,
+          padding: 14,
+          boxShadow: SH,
+        }}
+      >
+        <Shimmer w={140} h={14} style={{ marginBottom: 12 }} />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Shimmer key={i} w={72} h={26} r={8} />
+          ))}
+        </div>
+        {Array.from({ length: rows }).map((_, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 0",
+              borderTop: i === 0 ? "none" : `1px solid ${BD}`,
+            }}
+          >
+            <Shimmer w={36} h={36} r={8} />
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+              <Shimmer w="55%" h={11} />
+              <Shimmer w="35%" h={9} />
+            </div>
+            <Shimmer w={60} h={22} r={6} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -1650,31 +1717,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
   const [viewingDoc, setViewingDoc] = useState(null);
 
   if (loadingDocs) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "60px 20px",
-          gap: 14,
-        }}
-      >
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            border: `3px solid ${BD}`,
-            borderTopColor: T,
-            borderRadius: "50%",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        <span style={{ fontSize: 13, fontWeight: 500, color: INK3 }}>Loading lab reports...</span>
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-      </div>
-    );
+    return <TabShimmer rows={4} />;
   }
 
   return (
@@ -2497,6 +2540,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
 
   // Prescriptions: [{id, doctorName, date, fileName, uploading, docId?}]
   const [prescriptions, setPrescriptions] = useState([]);
+  const [loadingRx, setLoadingRx] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const [addingRx, setAddingRx] = useState(false);
   const [rxForm, setRxForm] = useState({
@@ -2508,6 +2552,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
   // Load previously uploaded prescriptions from DB
   useEffect(() => {
     if (!appt.patient_id) return;
+    setLoadingRx(true);
     apiFetch(`/api/opd/patient-docs/${appt.patient_id}`)
       .then((r) => r.json())
       .then((docs) => {
@@ -2533,7 +2578,8 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
           return [...rxDocs, ...active];
         });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingRx(false));
   }, [appt.patient_id]);
 
   const handleAddRx = () => {
@@ -2644,6 +2690,10 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
       apiFetch(`/api/documents/${docId}`, { method: "DELETE" }).catch(() => {});
     }
   };
+
+  if (loadingRx) {
+    return <TabShimmer rows={3} />;
+  }
 
   return (
     <div>
@@ -5881,7 +5931,6 @@ const SAMPLE_DOCTORS = [
 // MAIN OPD PAGE
 // ══════════════════════════════════════════════════════════════
 export default function OPD() {
-  const [appointments, setAppointments] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [filterStatus, setFilterStatus] = useState("all");
@@ -5891,10 +5940,29 @@ export default function OPD() {
   const [selAppt, setSelAppt] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [view, setView] = useState("list");
-  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [clock, setClock] = useState("");
   const doctor = getDoctor();
+
+  // React Query owns the OPD list. `updateLocal` below writes into the cache
+  // directly via setQueryData so every subscriber sees the optimistic update.
+  const qc = useQueryClient();
+  const apptsQuery = useOpdAppointments(date);
+  const appointments = apptsQuery.data || [];
+  // Only show the full-page loading state when there's no cached data yet
+  // (isPending). Background refetches (isFetching while cache is warm) should
+  // NOT blank the list — the user should see cached rows and have them swap
+  // in place when the new response arrives.
+  const loading = apptsQuery.isPending;
+  const setAppointments = useCallback(
+    (updater) => {
+      qc.setQueryData(qk.opd.appointments(date), (prev) => {
+        const base = Array.isArray(prev) ? prev : [];
+        return typeof updater === "function" ? updater(base) : updater;
+      });
+    },
+    [qc, date],
+  );
 
   useEffect(() => {
     const tick = () => {
@@ -5929,25 +5997,12 @@ export default function OPD() {
     setTimeout(() => setToast(null), 2800);
   };
 
+  // Manual refetch helper — keeps the old call sites working. React Query
+  // already fetches on mount/date-change/focus, so this is only needed when
+  // something external (e.g. a save elsewhere) should force a refresh.
   const fetchAppts = useCallback(() => {
-    setLoading(true);
-    setAppointments([]);
-    apiFetch("/api/opd/sync-noshow", { method: "POST" })
-      .catch(() => {})
-      .finally(() => {
-        apiFetch(`/api/opd/appointments?date=${date}`)
-          .then((r) => r.json())
-          .then((d) => {
-            setAppointments(Array.isArray(d) ? d : []);
-            setLoading(false);
-          })
-          .catch(() => setLoading(false));
-      });
-  }, [date]);
-
-  useEffect(() => {
-    fetchAppts();
-  }, [fetchAppts]);
+    apptsQuery.refetch();
+  }, [apptsQuery]);
   useEffect(() => {
     apiFetch("/api/doctors")
       .then((r) => r.json())

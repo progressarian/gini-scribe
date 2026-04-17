@@ -1,9 +1,10 @@
 import "./PatientScreen.css";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { docCategories, fDate } from "./constants";
 import useCompanionStore from "../stores/companionStore";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
+import { useCompanionPatient } from "../queries/hooks/useCompanionPatient.js";
 
 const tabs = [
   ["records", "📎 Docs"],
@@ -15,15 +16,30 @@ const tabs = [
 export default function PatientScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { patientData, patientTab, loading, setPatientTab, loadPatientData, selectedPatient } =
-    useCompanionStore();
+  const { patientTab, setPatientTab, selectedPatient } = useCompanionStore();
+  const setStorePatient = useCompanionStore((s) => s.setSelectedPatient);
   const [viewingDoc, setViewingDoc] = useState(null);
 
-  useEffect(() => {
-    if (id) loadPatientData(parseInt(id));
-  }, [id]);
+  const idNum = id ? parseInt(id) : null;
+  const { data: patientData, isLoading } = useCompanionPatient(idNum);
+  const loading = isLoading;
 
-  const patient = selectedPatient || patientData;
+  // Keep other companion screens (list, capture) in sync with the currently
+  // selected patient — they still read from the zustand store.
+  useEffect(() => {
+    if (patientData && patientData.id === idNum) {
+      setStorePatient(patientData);
+    }
+  }, [patientData, idNum, setStorePatient]);
+
+  // Guard against rendering stale header info from a previously-selected
+  // patient while a new id is still loading.
+  const patient =
+    selectedPatient?.id === idNum
+      ? selectedPatient
+      : patientData?.id === idNum
+        ? patientData
+        : null;
 
   if (!patient && !loading) {
     return (
@@ -93,8 +109,32 @@ export default function PatientScreen() {
   );
 }
 
-function RecordsTab({ patientData, onCapture, onViewDoc }) {
+const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc }) {
   const docs = patientData.documents || [];
+
+  // Parse extracted_data once per docs array identity; avoids re-parsing JSON
+  // on every parent re-render (tab switch, store update).
+  const parsedDocs = useMemo(() => {
+    return docs.map((doc) => {
+      const cat = docCategories.find((c) => c.id === doc.doc_type) || {
+        label: "📄",
+        color: "#64748b",
+      };
+      let ext = null;
+      if (doc.extracted_data) {
+        if (typeof doc.extracted_data === "string") {
+          try {
+            ext = JSON.parse(doc.extracted_data);
+          } catch {
+            ext = null;
+          }
+        } else {
+          ext = doc.extracted_data;
+        }
+      }
+      return { doc, cat, ext };
+    });
+  }, [docs]);
 
   if (docs.length === 0) {
     return (
@@ -110,23 +150,7 @@ function RecordsTab({ patientData, onCapture, onViewDoc }) {
 
   return (
     <div>
-      {docs.map((doc) => {
-        const cat = docCategories.find((c) => c.id === doc.doc_type) || {
-          label: "📄",
-          color: "#64748b",
-        };
-        const ext = doc.extracted_data
-          ? typeof doc.extracted_data === "string"
-            ? (() => {
-                try {
-                  return JSON.parse(doc.extracted_data);
-                } catch (e) {
-                  return null;
-                }
-              })()
-            : doc.extracted_data
-          : null;
-
+      {parsedDocs.map(({ doc, cat, ext }) => {
         return (
           <div key={doc.id} className="patient__doc-card">
             <div className="patient__doc-row">
@@ -169,9 +193,9 @@ function RecordsTab({ patientData, onCapture, onViewDoc }) {
       })}
     </div>
   );
-}
+});
 
-function MedicationsTab({ patientData }) {
+const MedicationsTab = memo(function MedicationsTab({ patientData }) {
   const activeMeds = (patientData.medications || []).filter((m) => m.is_active);
 
   return (
@@ -200,9 +224,9 @@ function MedicationsTab({ patientData }) {
       )}
     </div>
   );
-}
+});
 
-function LabsTab({ patientData }) {
+const LabsTab = memo(function LabsTab({ patientData }) {
   const labs = patientData.lab_results || [];
 
   return (
@@ -235,9 +259,9 @@ function LabsTab({ patientData }) {
       )}
     </div>
   );
-}
+});
 
-function VisitsTab({ patientData }) {
+const VisitsTab = memo(function VisitsTab({ patientData }) {
   const visits = patientData.consultations || [];
 
   if (visits.length === 0) {
@@ -275,4 +299,4 @@ function VisitsTab({ patientData }) {
       })}
     </div>
   );
-}
+});

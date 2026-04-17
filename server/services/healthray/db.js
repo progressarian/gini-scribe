@@ -255,8 +255,31 @@ export async function upsertPatient({
 }
 
 // ── Sync doctors ────────────────────────────────────────────────────────────
+// Optimization: we used to issue up to 3 SELECTs per HealthRay doctor. For a
+// 50-doctor sync that was ~150 round-trips. Now we pull the local doctor table
+// once and match in memory; only missing rows produce an INSERT.
 export async function syncDoctors(rayDoctors) {
   const mapping = new Map();
+
+  const { rows: localRows } = await pool.query(
+    `SELECT id, name, short_name, phone, healthray_id FROM doctors`,
+  );
+
+  const stripName = (s) =>
+    (s || "")
+      .replace(/^Dr\.?\s*/i, "")
+      .trim()
+      .toLowerCase();
+
+  const byHrid = new Map();
+  const byPhone = new Map();
+  const normalizedLocals = localRows.map((r) => {
+    const n1 = stripName(r.name);
+    const n2 = (r.short_name || "").trim().toLowerCase();
+    if (r.healthray_id != null) byHrid.set(String(r.healthray_id), r);
+    if (r.phone) byPhone.set(String(r.phone), r);
+    return { row: r, n1, n2 };
+  });
 
   for (const rd of rayDoctors) {
     if (rd.is_deactivated) continue;
@@ -266,32 +289,24 @@ export async function syncDoctors(rayDoctors) {
     const specialty = rd.specialty_name || null;
     const phone = rd.mobile_no || null;
 
-    let local = await pool.query(`SELECT id, name FROM doctors WHERE healthray_id = $1`, [hrid]);
-
-    if (!local.rows[0] && phone) {
-      local = await pool.query(`SELECT id, name FROM doctors WHERE phone = $1`, [phone]);
+    let local = byHrid.get(String(hrid)) || null;
+    if (!local && phone) local = byPhone.get(String(phone)) || null;
+    if (!local) {
+      const needle = stripName(rayName);
+      if (needle) {
+        const hit = normalizedLocals.find(
+          (x) => (x.n1 && x.n1.includes(needle)) || (x.n2 && x.n2.includes(needle)),
+        );
+        if (hit) local = hit.row;
+      }
     }
 
-    if (!local.rows[0]) {
-      const stripped = rayName
-        .replace(/^Dr\.?\s*/i, "")
-        .trim()
-        .toLowerCase();
-      local = await pool.query(
-        `SELECT id, name FROM doctors
-         WHERE LOWER(REPLACE(name, 'Dr. ', '')) ILIKE $1
-            OR LOWER(short_name) ILIKE $1
-         LIMIT 1`,
-        [`%${stripped}%`],
-      );
-    }
-
-    if (local.rows[0]) {
+    if (local) {
       await pool.query(
         `UPDATE doctors SET healthray_id = $2, specialty = COALESCE(specialty, $3) WHERE id = $1`,
-        [local.rows[0].id, hrid, specialty],
+        [local.id, hrid, specialty],
       );
-      mapping.set(hrid, local.rows[0].name);
+      mapping.set(hrid, local.name);
     } else {
       const res = await pool.query(
         `INSERT INTO doctors (name, specialty, phone, role, healthray_id, is_active)
@@ -1293,6 +1308,19 @@ export async function syncVitalsFromExtraction(patientId, extractedData, recorde
     new Date().toISOString().split("T")[0];
 
   try {
+    // Skip if an identical row already exists for this patient + date
+    const existing = await pool.query(
+      `SELECT id FROM vitals
+       WHERE patient_id = $1
+         AND recorded_at::date = $2::date
+         AND COALESCE(bp_sys, -1) = COALESCE($3::real, -1)
+         AND COALESCE(weight, -1) = COALESCE($4::real, -1)
+         AND COALESCE(height, -1) = COALESCE($5::real, -1)
+       LIMIT 1`,
+      [patientId, dateVal, vitals.bp_sys || null, vitals.weight || null, vitals.height || null],
+    );
+    if (existing.rows.length > 0) return;
+
     await pool.query(
       `INSERT INTO vitals
        (patient_id, recorded_at, bp_sys, bp_dia, weight, height, bmi, waist)
@@ -1508,4 +1536,311 @@ export async function syncDocuments(patientId, records, fallbackDate, healthrayA
   }
 
   log("DB", `${records.length} documents synced`);
+}
+
+// ── Auto-mark a HealthRay appointment as "checkedin" ────────────────────────
+// Patient appears in HealthRay but no prescription yet — mark as checked in.
+export async function markAppointmentAsCheckedIn(appointmentId) {
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE appointments
+         SET status = 'checkedin',
+             checked_in_at = COALESCE(checked_in_at, NOW()),
+             updated_at = NOW()
+       WHERE id = $1 AND status IN ('scheduled', 'in-progress')`,
+      [appointmentId],
+    );
+    if (rowCount > 0) {
+      log("DB", `Auto-checked-in appointment ${appointmentId}`);
+    }
+  } catch (e) {
+    error("markAppointmentAsCheckedIn", `Failed for appointment ${appointmentId}: ${e.message}`);
+  }
+}
+
+// ── Auto-mark a completed HealthRay appointment as "seen" ──────────────────
+// Creates a consultation and links all OPD records, mirroring the manual
+// "mark as seen" flow in /api/appointments/:id PATCH.
+export async function markAppointmentAsSeen(appointmentId) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // ── Auto-assign category based on HbA1c (mirrors frontend AI suggestion) ──
+    const autoCategory = (bio, visitType) => {
+      const hba1c = parseFloat(bio?.hba1c);
+      if (!isNaN(hba1c)) {
+        if (hba1c > 9) return "complex";    // Uncontrolled
+        if (hba1c > 7) return "maint";      // Maintenance
+        return "ctrl";                       // Continuous Care
+      }
+      if (visitType === "New Patient") return "new";
+      return null;
+    };
+
+    const { rows } = await client.query(
+      `SELECT * FROM appointments WHERE id = $1 FOR UPDATE`,
+      [appointmentId],
+    );
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    // Update status to 'seen' if not already
+    if (rows[0].status !== 'seen') {
+      await client.query(
+        `UPDATE appointments SET status = 'seen', updated_at = NOW() WHERE id = $1`,
+        [appointmentId],
+      );
+    }
+
+    const appt = rows[0];
+    const bio = appt.biomarkers || {};
+    const comp = appt.compliance || {};
+
+    // ── Auto-fill prep steps based on available data ──
+    const category = appt.category || autoCategory(bio, appt.visit_type);
+    const prepSteps = appt.prep_steps || {};
+    const newSteps = {};
+
+    // Biomarkers: mark done if any biomarker value exists
+    if (!prepSteps.biomarkers && Object.keys(bio).some((k) => bio[k] != null && bio[k] !== "")) {
+      newSteps.biomarkers = true;
+    }
+    // Compliance: mark done if compliance data or medications/diagnoses exist
+    if (!prepSteps.compliance && (Object.keys(comp).length > 0 || appt.healthray_medications?.length > 0 || appt.healthray_diagnoses?.length > 0)) {
+      newSteps.compliance = true;
+    }
+    // Categorized: mark done if category is set
+    if (!prepSteps.categorized && category) {
+      newSteps.categorized = true;
+    }
+    // Assigned: mark done if doctor is assigned
+    if (!prepSteps.assigned && appt.doctor_name) {
+      newSteps.assigned = true;
+    }
+
+    if (Object.keys(newSteps).length > 0 || (category && category !== appt.category)) {
+      await client.query(
+        `UPDATE appointments
+           SET category = COALESCE($1, category),
+               prep_steps = COALESCE(prep_steps, '{}'::jsonb) || $2::jsonb
+         WHERE id = $3`,
+        [category, JSON.stringify(newSteps), appt.id],
+      );
+      appt.category = category || appt.category;
+      Object.assign(prepSteps, newSteps);
+    }
+
+    if (!appt.patient_id || appt.consultation_id) {
+      await client.query("COMMIT");
+      return appt.id;
+    }
+
+    const compliance = appt.compliance || {};
+    const biomarkers = appt.biomarkers || {};
+    const notes = [];
+    if (compliance.diet) notes.push(`Diet: ${compliance.diet}`);
+    if (compliance.exercise) notes.push(`Exercise: ${compliance.exercise}`);
+    if (compliance.stress) notes.push(`Stress: ${compliance.stress}`);
+    if (compliance.medPct != null) notes.push(`Med adherence: ${compliance.medPct}%`);
+    if (compliance.missed) notes.push(`Missed: ${compliance.missed}`);
+    if (compliance.notes) notes.push(`Notes: ${compliance.notes}`);
+
+    // Read current truth from normalized tables
+    const liveMedsR = await client.query(
+      `SELECT name, dose, frequency, timing, route, is_active FROM medications
+       WHERE patient_id = $1 AND is_active = true ORDER BY created_at DESC`,
+      [appt.patient_id],
+    );
+    const liveStoppedR = await client.query(
+      `SELECT name, dose, stop_reason FROM medications
+       WHERE patient_id = $1 AND is_active = false AND stopped_date >= CURRENT_DATE - INTERVAL '30 days'
+       ORDER BY stopped_date DESC`,
+      [appt.patient_id],
+    );
+    const liveDiagsR = await client.query(
+      `SELECT diagnosis_id AS id, label, status FROM diagnoses
+       WHERE patient_id = $1 AND is_active != false ORDER BY created_at DESC`,
+      [appt.patient_id],
+    );
+    const opdMeds = liveMedsR.rows;
+    const opdDiags = liveDiagsR.rows;
+    const opdStopped = liveStoppedR.rows;
+
+    // Build con_transcript from OPD prescription documents
+    const rxDocs = await client.query(
+      `SELECT extracted_data FROM documents
+       WHERE patient_id = $1 AND source = 'opd_upload' AND doc_type = 'prescription'
+         AND extracted_data IS NOT NULL
+       ORDER BY doc_date DESC NULLS LAST, created_at DESC`,
+      [appt.patient_id],
+    );
+    const transcriptParts = [];
+    for (const doc of rxDocs.rows) {
+      const rx = doc.extracted_data || {};
+      const parts = [];
+      if (rx.diagnoses?.length)
+        parts.push(
+          "DIAGNOSIS:\n" +
+            rx.diagnoses.map((d) => `${d.label}${d.status ? ` (${d.status})` : ""}`).join("\n"),
+        );
+      if (rx.medications?.length) {
+        parts.push(
+          "TREATMENT:\n" +
+            rx.medications
+              .map(
+                (m) =>
+                  `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+              )
+              .join("\n"),
+        );
+      }
+      if (rx.stopped_medications?.length)
+        parts.push(
+          "STOPPED:\n" +
+            rx.stopped_medications
+              .map((m) => `-${m.name}${m.reason ? " (" + m.reason + ")" : ""}`)
+              .join("\n"),
+        );
+      if (rx.advice?.length) parts.push("ADVICE:\n" + rx.advice.join("\n"));
+      if (rx.follow_up) parts.push("FOLLOW UP: " + rx.follow_up);
+      if (rx.doctor_name)
+        transcriptParts.push(
+          `Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`,
+        );
+      if (parts.length) transcriptParts.push(parts.join("\n\n"));
+      transcriptParts.push("");
+    }
+    // Add biomarker notes
+    if (Object.keys(biomarkers).length > 0) {
+      const bioLines = [];
+      const bioLabels = {
+        hba1c: "HbA1c",
+        fg: "FPG",
+        bpSys: "BP Sys",
+        bpDia: "BP Dia",
+        ldl: "LDL",
+        tg: "TG",
+        uacr: "UACR",
+        weight: "Weight",
+        waist: "Waist",
+        creatinine: "Creatinine",
+        tsh: "TSH",
+        hb: "Hb",
+      };
+      for (const [k, v] of Object.entries(biomarkers)) {
+        if (v != null && v !== "" && bioLabels[k]) bioLines.push(`${bioLabels[k]}: ${v}`);
+      }
+      if (bioLines.length) transcriptParts.push("BIOMARKERS:\n" + bioLines.join("\n"));
+    }
+    if (notes.length) transcriptParts.push("COMPLIANCE:\n" + notes.join("\n"));
+    const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
+
+    const conRes = await client.query(
+      `INSERT INTO consultations
+         (patient_id, visit_date, visit_type, con_name, status, mo_data, con_data, con_transcript)
+       VALUES ($1, $2, 'OPD', $3, 'completed', $4, $5, $6)
+       RETURNING id`,
+      [
+        appt.patient_id,
+        appt.appointment_date,
+        appt.doctor_name || null,
+        JSON.stringify({
+          compliance,
+          coordinator_notes: appt.coordinator_notes || [],
+          category: appt.category,
+          diagnoses: opdDiags,
+          previous_medications: opdMeds,
+          stopped_medications: opdStopped,
+          chief_complaints: opdDiags.map((d) => d.label),
+        }),
+        JSON.stringify({
+          biomarkers,
+          opd_notes: notes.join("\n"),
+          medications_confirmed: opdMeds,
+          investigations_to_order: (() => {
+            const inv = appt.healthray_investigations || [];
+            return inv.map((t) =>
+              typeof t === "string"
+                ? { name: t, urgency: "routine" }
+                : { name: t.name || t.test || String(t), urgency: t.urgency || "routine" },
+            );
+          })(),
+          diet_lifestyle: (() => {
+            const c = appt.compliance || {};
+            const lines = [];
+            if (c.diet) lines.push(c.diet);
+            if (c.exercise) lines.push(c.exercise);
+            if (c.stress) lines.push(c.stress);
+            return lines;
+          })(),
+          follow_up: appt.healthray_follow_up || null,
+        }),
+        conTranscript || null,
+      ],
+    );
+    const consultationId = conRes.rows[0].id;
+
+    // Link all patient records to this consultation
+    await client.query(
+      `UPDATE diagnoses SET consultation_id = $1
+       WHERE patient_id = $2 AND (consultation_id IS NULL OR consultation_id = $1)`,
+      [consultationId, appt.patient_id],
+    );
+    await client.query(`UPDATE lab_results SET consultation_id = $1 WHERE appointment_id = $2`, [
+      consultationId,
+      appt.id,
+    ]);
+    await client.query(`UPDATE vitals SET consultation_id = $1 WHERE appointment_id = $2`, [
+      consultationId,
+      appt.id,
+    ]);
+    await client.query(`UPDATE medications SET consultation_id = $1 WHERE appointment_id = $2`, [
+      consultationId,
+      appt.id,
+    ]);
+    await client.query(
+      `UPDATE medications SET consultation_id = $1
+       WHERE patient_id = $2 AND is_active = true AND consultation_id IS NULL`,
+      [consultationId, appt.patient_id],
+    );
+    await client.query(
+      `UPDATE documents SET consultation_id = $1 WHERE patient_id = $2 AND source = 'opd_upload' AND consultation_id IS NULL`,
+      [consultationId, appt.patient_id],
+    );
+    await client.query(
+      `UPDATE documents SET consultation_id = $1
+       WHERE patient_id = $2 AND consultation_id IS NULL AND created_at > $3`,
+      [consultationId, appt.patient_id, appt.checked_in_at || appt.created_at],
+    );
+
+    // Store consultation_id and sync live data back to JSONB
+    await client.query(
+      `UPDATE appointments SET
+         consultation_id = $1,
+         opd_medications = $2::jsonb,
+         opd_diagnoses = $3::jsonb,
+         opd_stopped_medications = $4::jsonb
+       WHERE id = $5`,
+      [
+        consultationId,
+        JSON.stringify(opdMeds),
+        JSON.stringify(opdDiags),
+        JSON.stringify(opdStopped),
+        appt.id,
+      ],
+    );
+
+    await client.query("COMMIT");
+    log("DB", `Auto-marked appointment ${appointmentId} as seen → consultation ${consultationId}`);
+    return consultationId;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    error("markAppointmentAsSeen", `Failed for appointment ${appointmentId}: ${e.message}`);
+    return null;
+  } finally {
+    client.release();
+  }
 }
