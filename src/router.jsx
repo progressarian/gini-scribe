@@ -1,39 +1,69 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
-import Companion from "./Companion";
-import HomeScreen from "./companion/HomeScreen";
-import PatientScreen from "./companion/PatientScreen";
-import CaptureScreen from "./companion/CaptureScreen";
-import HomePage from "./pages/HomePage";
-import DashboardPage from "./pages/DashboardPage";
-import QuickPage from "./pages/QuickPage";
-import PatientPage from "./pages/PatientPage";
-import IntakePage from "./pages/IntakePage";
-import FULoadPage from "./pages/FULoadPage";
-import FUReviewPage from "./pages/FUReviewPage";
-import FUEditPage from "./pages/FUEditPage";
-import FUSymptomsPage from "./pages/FUSymptomsPage";
-import FUGenPage from "./pages/FUGenPage";
-import HistoryClinicalPage from "./pages/HistoryClinicalPage";
-import ExamPage from "./pages/ExamPage";
-import AssessPage from "./pages/AssessPage";
-import VitalsPage from "./pages/VitalsPage";
-import MOPage from "./pages/MOPage";
-import ConsultantPage from "./pages/ConsultantPage";
-import PlanPage from "./pages/PlanPage";
-import DocsPage from "./pages/DocsPage";
-import MessagesPage from "./pages/MessagesPage";
-import LabPortalPage from "./pages/LabPortalPage";
-import HistoryPage from "./pages/HistoryPage";
-import OutcomesPage from "./pages/OutcomesPage";
-import AIPage from "./pages/AIPage";
-import ReportsPage from "./pages/ReportsPage";
-import CIPage from "./pages/CIPage";
-import FindPage from "./pages/FindPage";
-import OPD from "./OPD";
-import VisitPage from "./pages/VisitPage";
+
+// Route-level code-splitting. Each page becomes its own async chunk so a user
+// who only visits /opd doesn't download /lab-portal, /fu-gen, etc. Kept the
+// shell (AppLayout, ProtectedRoute, LoginPage) eager because they render on
+// every route and gate navigation.
+const Companion = lazy(() => import("./Companion"));
+const HomeScreen = lazy(() => import("./companion/HomeScreen"));
+const PatientScreen = lazy(() => import("./companion/PatientScreen"));
+const CaptureScreen = lazy(() => import("./companion/CaptureScreen"));
+const HomePage = lazy(() => import("./pages/HomePage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const QuickPage = lazy(() => import("./pages/QuickPage"));
+const PatientPage = lazy(() => import("./pages/PatientPage"));
+const IntakePage = lazy(() => import("./pages/IntakePage"));
+const FULoadPage = lazy(() => import("./pages/FULoadPage"));
+const FUReviewPage = lazy(() => import("./pages/FUReviewPage"));
+const FUEditPage = lazy(() => import("./pages/FUEditPage"));
+const FUSymptomsPage = lazy(() => import("./pages/FUSymptomsPage"));
+const FUGenPage = lazy(() => import("./pages/FUGenPage"));
+const HistoryClinicalPage = lazy(() => import("./pages/HistoryClinicalPage"));
+const ExamPage = lazy(() => import("./pages/ExamPage"));
+const AssessPage = lazy(() => import("./pages/AssessPage"));
+const VitalsPage = lazy(() => import("./pages/VitalsPage"));
+const MOPage = lazy(() => import("./pages/MOPage"));
+const ConsultantPage = lazy(() => import("./pages/ConsultantPage"));
+const PlanPage = lazy(() => import("./pages/PlanPage"));
+const DocsPage = lazy(() => import("./pages/DocsPage"));
+const MessagesPage = lazy(() => import("./pages/MessagesPage"));
+const LabPortalPage = lazy(() => import("./pages/LabPortalPage"));
+const HistoryPage = lazy(() => import("./pages/HistoryPage"));
+const OutcomesPage = lazy(() => import("./pages/OutcomesPage"));
+const AIPage = lazy(() => import("./pages/AIPage"));
+const ReportsPage = lazy(() => import("./pages/ReportsPage"));
+const CIPage = lazy(() => import("./pages/CIPage"));
+const FindPage = lazy(() => import("./pages/FindPage"));
+const OPD = lazy(() => import("./OPD"));
+const VisitPage = lazy(() => import("./pages/VisitPage"));
+
+// Minimal fallback — matches the visual tone of the app without pulling in
+// extra CSS. Each page typically fetches data on mount anyway, so this only
+// shows for the few hundred ms of chunk download on first visit.
+const RouteFallback = () => (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: "60vh",
+      color: "#6b7d90",
+      fontSize: 14,
+    }}
+  >
+    Loading…
+  </div>
+);
+
+const lazyEl = (Component) => (
+  <Suspense fallback={<RouteFallback />}>
+    <Component />
+  </Suspense>
+);
 
 const router = createBrowserRouter([
   // Public routes
@@ -46,51 +76,51 @@ const router = createBrowserRouter([
       // Companion — own layout, no AppLayout
       {
         path: "/companion",
-        element: <Companion />,
+        element: lazyEl(Companion),
         children: [
-          { index: true, element: <HomeScreen /> },
-          { path: "record/:id", element: <PatientScreen /> },
-          { path: "capture/:id", element: <CaptureScreen /> },
+          { index: true, element: lazyEl(HomeScreen) },
+          { path: "record/:id", element: lazyEl(PatientScreen) },
+          { path: "capture/:id", element: lazyEl(CaptureScreen) },
         ],
       },
       {
         element: <AppLayout />,
         children: [
-          { path: "/", element: <HomePage /> },
-          { path: "/find", element: <FindPage /> },
-          { path: "/dashboard", element: <DashboardPage /> },
-          { path: "/quick", element: <QuickPage /> },
-          { path: "/patient", element: <PatientPage /> },
+          { path: "/", element: lazyEl(HomePage) },
+          { path: "/find", element: lazyEl(FindPage) },
+          { path: "/dashboard", element: lazyEl(DashboardPage) },
+          { path: "/quick", element: lazyEl(QuickPage) },
+          { path: "/patient", element: lazyEl(PatientPage) },
           // Visit workflow - Follow-up
-          { path: "/fu-load", element: <FULoadPage /> },
-          { path: "/fu-review", element: <FUReviewPage /> },
-          { path: "/fu-edit", element: <FUEditPage /> },
-          { path: "/fu-symptoms", element: <FUSymptomsPage /> },
-          { path: "/fu-gen", element: <FUGenPage /> },
+          { path: "/fu-load", element: lazyEl(FULoadPage) },
+          { path: "/fu-review", element: lazyEl(FUReviewPage) },
+          { path: "/fu-edit", element: lazyEl(FUEditPage) },
+          { path: "/fu-symptoms", element: lazyEl(FUSymptomsPage) },
+          { path: "/fu-gen", element: lazyEl(FUGenPage) },
           // Visit workflow - New patient
-          { path: "/intake", element: <IntakePage /> },
-          { path: "/history-clinical", element: <HistoryClinicalPage /> },
-          { path: "/exam", element: <ExamPage /> },
-          { path: "/assess", element: <AssessPage /> },
+          { path: "/intake", element: lazyEl(IntakePage) },
+          { path: "/history-clinical", element: lazyEl(HistoryClinicalPage) },
+          { path: "/exam", element: lazyEl(ExamPage) },
+          { path: "/assess", element: lazyEl(AssessPage) },
           // Clinical
-          { path: "/vitals", element: <VitalsPage /> },
-          { path: "/mo", element: <MOPage /> },
-          { path: "/consultant", element: <ConsultantPage /> },
-          { path: "/plan", element: <PlanPage /> },
+          { path: "/vitals", element: lazyEl(VitalsPage) },
+          { path: "/mo", element: lazyEl(MOPage) },
+          { path: "/consultant", element: lazyEl(ConsultantPage) },
+          { path: "/plan", element: lazyEl(PlanPage) },
           // Tools
-          { path: "/docs", element: <DocsPage /> },
-          { path: "/messages", element: <MessagesPage /> },
-          { path: "/lab-portal", element: <LabPortalPage /> },
+          { path: "/docs", element: lazyEl(DocsPage) },
+          { path: "/messages", element: lazyEl(MessagesPage) },
+          { path: "/lab-portal", element: lazyEl(LabPortalPage) },
           // Analysis
-          { path: "/history", element: <HistoryPage /> },
-          { path: "/outcomes", element: <OutcomesPage /> },
-          { path: "/ai", element: <AIPage /> },
-          { path: "/reports", element: <ReportsPage /> },
-          { path: "/ci", element: <CIPage /> },
+          { path: "/history", element: lazyEl(HistoryPage) },
+          { path: "/outcomes", element: lazyEl(OutcomesPage) },
+          { path: "/ai", element: lazyEl(AIPage) },
+          { path: "/reports", element: lazyEl(ReportsPage) },
+          { path: "/ci", element: lazyEl(CIPage) },
           // OPD Manager
-          { path: "/opd", element: <OPD /> },
+          { path: "/opd", element: lazyEl(OPD) },
           // Visit view
-          { path: "/visit", element: <VisitPage /> },
+          { path: "/visit", element: lazyEl(VisitPage) },
         ],
       },
     ],

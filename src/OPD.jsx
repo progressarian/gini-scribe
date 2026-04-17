@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import * as XLSX from "xlsx";
+// xlsx is lazy-loaded inside the Excel-upload handler below to keep it out
+// of the main bundle (~900 KB pre-gzip). Nothing else in this file touches it.
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
@@ -5329,8 +5330,9 @@ function ExcelImportView({ doctors, onDone, showToast }) {
 
     if (ext === "xlsx" || ext === "xls") {
       const rd = new FileReader();
-      rd.onload = (e) => {
+      rd.onload = async (e) => {
         try {
+          const XLSX = await import("xlsx");
           const workbook = XLSX.read(e.target.result, { type: "array" });
           const sheet = workbook.Sheets[workbook.SheetNames[0]];
           const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });

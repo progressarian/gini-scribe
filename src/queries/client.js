@@ -6,13 +6,14 @@ import { QueryClient } from "@tanstack/react-query";
 // refetchOnWindowFocus: true — when the user tabs back to the app, re-pull
 // anything they're currently looking at. Important for a clinical app where
 // stale data can mislead.
-// gcTime: 5min — evict cached entries 5 minutes after the last subscriber
-// unmounts. Keeps memory bounded without killing back-nav caching.
+// gcTime: 30min — keep cached entries for 30 minutes after the last subscriber
+// unmounts so back-nav (and re-opening a patient during the same session)
+// paints instantly from cache. Memory footprint is small for JSON of this size.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 0,
-      gcTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
       refetchOnWindowFocus: true,
       retry: 1,
     },

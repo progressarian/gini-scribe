@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -35,6 +36,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.set("trust proxy", 1); // trust first proxy (Railway/Render) for accurate IP
 app.use(cors());
+
+// Gzip compression — shrinks JSON API payloads 5-10x on the wire. threshold:0
+// forces compression even for small responses; level 6 is the sweet spot for
+// CPU vs. size. No filter override — compression's default skips already-
+// compressed media types (images, video, gzipped uploads).
+app.use(compression({ threshold: 1024, level: 6 }));
 
 // Route-aware body size limits — only upload/transcript routes get large limits
 app.use((req, res, next) => {
