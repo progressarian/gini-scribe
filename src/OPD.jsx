@@ -4184,20 +4184,20 @@ function PatientDetail({
           </div>
         </div>
         {/* Step bar */}
-        <div style={{ display: "flex", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {STEPS.map((s, i) => (
             <React.Fragment key={s.k}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <div
                   style={{
-                    width: 20,
-                    height: 20,
+                    width: 24,
+                    height: 24,
                     borderRadius: "50%",
                     flexShrink: 0,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: 9,
+                    fontSize: 11,
                     fontWeight: 700,
                     border: `2px solid ${ps[s.k] ? T : BD2}`,
                     background: ps[s.k] ? T : WH,
@@ -4208,7 +4208,7 @@ function PatientDetail({
                 </div>
                 <span
                   style={{
-                    fontSize: 9,
+                    fontSize: 12,
                     fontWeight: 600,
                     color: ps[s.k] ? T : INK3,
                     whiteSpace: "nowrap",
@@ -4223,8 +4223,9 @@ function PatientDetail({
                     flex: 1,
                     height: 2,
                     background: ps[s.k] ? T : BD,
-                    margin: "0 4px",
-                    maxWidth: 24,
+                    margin: "0 8px",
+                    minWidth: 16,
+                    borderRadius: 1,
                   }}
                 />
               )}

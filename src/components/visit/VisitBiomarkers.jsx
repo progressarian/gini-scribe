@@ -79,6 +79,14 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     const waistLab = getLabValFromLatest(labLatest, "Waist");
     const vitalWaistH = vitalHist("waist");
 
+    // UACR — from lab results
+    const uacr = getLabValFromLatest(labLatest, "UACR");
+    const uacrH = getLabHist(labHistory, "UACR");
+
+    // BMI & Muscle Mass — from vitals table
+    const bmiH = vitalHist("bmi");
+    const muscleMassH = vitalHist("muscle_mass");
+
     return {
       hba1c,
       hba1cH,
@@ -104,6 +112,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       bodyFatH: vitalHist("body_fat"),
       waistLab,
       waistH: vitalWaistH.length > 0 ? vitalWaistH : getLabHist(labHistory, "Waist"),
+      uacr,
+      uacrH,
+      bmiH,
+      muscleMassH,
       bpH,
       pulseH: vitalHist("pulse"),
     };
@@ -134,6 +146,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     bodyFatH,
     waistLab,
     waistH,
+    uacr,
+    uacrH,
+    bmiH,
+    muscleMassH,
     bpH,
     pulseH,
   } = markers;
@@ -338,6 +354,27 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             goalLabel="Normal"
             history={crH}
           />
+          {uacr?.result != null && (
+            <BiomarkerCard
+              label="UACR"
+              value={uacr.result}
+              unit={uacr.unit || "mg/g"}
+              target={30}
+              trend={
+                uacrH.length > 1
+                  ? `${uacr.result < uacrH[uacrH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(uacr.result - uacrH[uacrH.length - 2]?.result).toFixed(1)} from ${fmtDate(uacrH[uacrH.length - 2]?.date)}`
+                  : uacr.result < 30
+                    ? "✓ Normal"
+                    : uacr.result < 300
+                      ? "→ Microalbuminuria"
+                      : "↑ Macroalbuminuria"
+              }
+              trendDir={uacr.result < 30 ? "good" : uacr.result < 300 ? "warn" : "bad"}
+              goal="<30"
+              goalLabel="Normal"
+              history={uacrH}
+            />
+          )}
         </div>
 
         {/* ── LIPIDS ── */}
@@ -477,6 +514,42 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
               goal="<90 cm"
               goalLabel="Target"
               history={waistH}
+            />
+          )}
+          {latestV?.bmi && (
+            <BiomarkerCard
+              label="BMI"
+              value={latestV.bmi}
+              unit="kg/m²"
+              trend={
+                bmiH.length > 1
+                  ? `${latestV.bmi > bmiH[bmiH.length - 2]?.result ? "▲" : "▼"} ${Math.abs(latestV.bmi - bmiH[bmiH.length - 2]?.result).toFixed(1)} from ${fmtDate(bmiH[bmiH.length - 2]?.date)}`
+                  : latestV.bmi >= 25
+                    ? "→ Overweight"
+                    : latestV.bmi < 18.5
+                      ? "↓ Underweight"
+                      : "✓ Normal"
+              }
+              trendDir={latestV.bmi >= 25 || latestV.bmi < 18.5 ? "warn" : "good"}
+              goal="18.5–24.9"
+              goalLabel="Normal"
+              history={bmiH}
+            />
+          )}
+          {latestV?.muscle_mass && (
+            <BiomarkerCard
+              label="Muscle Mass"
+              value={latestV.muscle_mass}
+              unit="kg"
+              lowerBetter={false}
+              trend={
+                muscleMassH.length > 1
+                  ? `${latestV.muscle_mass < muscleMassH[muscleMassH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(latestV.muscle_mass - muscleMassH[muscleMassH.length - 2]?.result).toFixed(1)} kg from ${fmtDate(muscleMassH[muscleMassH.length - 2]?.date)}`
+                  : null
+              }
+              trendDir="good"
+              goalLabel="Track"
+              history={muscleMassH}
             />
           )}
         </div>

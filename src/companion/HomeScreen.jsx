@@ -123,14 +123,13 @@ export default function HomeScreen() {
     });
   }, [appointments, apptSearch, doctorFilter]);
 
-  // Decide default tab once appointments load on first mount
+  // Default tab is appointments on first mount
   useEffect(() => {
     if (homeTab) return;
-    if (apptLoading) return;
-    setHomeTab(appointments.length > 0 ? "appointments" : "patients");
-  }, [homeTab, apptLoading, appointments.length, setHomeTab]);
+    setHomeTab("appointments");
+  }, [homeTab, setHomeTab]);
 
-  const tab = homeTab || "patients";
+  const tab = homeTab || "appointments";
 
   // Debounce search → server
   const handleSearch = (val) => {

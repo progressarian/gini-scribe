@@ -8,7 +8,15 @@ import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
 import useClinicalStore from "../stores/clinicalStore";
 import { toast } from "../stores/uiStore";
-import { findLab, getLabVal, getLabHist, computeFlags, fmtDate } from "../components/visit/helpers";
+import {
+  findLab,
+  getLabVal,
+  getLabHist,
+  computeFlags,
+  fmtDate,
+  fmtDateShort,
+  isSameDate,
+} from "../components/visit/helpers";
 import { extractLab } from "../services/extraction";
 import { normalizeTestName } from "../config/labNormalization";
 import { EXAM_SECTIONS } from "../config/exam.js";
@@ -74,11 +82,69 @@ const sySelStyle = (s) => {
 };
 
 function VisitSymptomsSection({ symptoms = [], onAddSymptom, onStatusChange }) {
+  const symptomSummary = useMemo(() => {
+    if (!symptoms.length) return null;
+
+    const latest = symptoms.reduce((max, sy) => {
+      const d = sy.updated_at || sy.created_at;
+      return d && d > (max || "") ? d : max;
+    }, null);
+    if (!latest) return null;
+
+    const onDate = symptoms.filter((sy) => {
+      const d = sy.updated_at || sy.created_at;
+      return d && isSameDate(d, latest);
+    });
+
+    const added = onDate.filter((sy) => isSameDate(sy.created_at, latest));
+    const modified = onDate.filter((sy) => !isSameDate(sy.created_at, latest));
+
+    const parts = [];
+    if (added.length === 1) {
+      parts.push(`${added[0].label} added`);
+    } else if (added.length > 1) {
+      parts.push(`${added.length} symptoms added`);
+    }
+    if (modified.length === 1) {
+      parts.push(`${modified[0].label} → ${modified[0].status || "Active"}`);
+    } else if (modified.length > 1) {
+      parts.push(`${modified.length} statuses updated`);
+    }
+
+    const text = parts.length > 0 ? parts.join(", ") : "Updated";
+
+    const tooltipLines = [`Updated on ${fmtDate(latest)}:`];
+    if (added.length > 0) {
+      tooltipLines.push("Added:");
+      added.forEach((sy) => tooltipLines.push(`  + ${sy.label} (${sy.status || "Active"})`));
+    }
+    if (modified.length > 0) {
+      tooltipLines.push("Status changed:");
+      modified.forEach((sy) => tooltipLines.push(`  ${sy.label} → ${sy.status || "Active"}`));
+    }
+
+    return { text, date: latest, tooltip: tooltipLines.join("\n") };
+  }, [symptoms]);
+
   return (
     <div className="sc" id="symptoms">
       <div className="sch">
         <div className="sct">
           <div className="sci ic-a">🩹</div>Symptoms &amp; Concerns
+          {symptomSummary && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--t3)",
+                fontWeight: 400,
+                marginLeft: 8,
+                cursor: "default",
+              }}
+              title={symptomSummary.tooltip}
+            >
+              {symptomSummary.text} — {fmtDateShort(symptomSummary.date)}
+            </span>
+          )}
         </div>
         <button className="bx bx-p" onClick={onAddSymptom}>
           + Add Symptom
