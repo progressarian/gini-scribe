@@ -1,0 +1,273 @@
+.appt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.appt-list__loading,
+.appt-list__empty {
+  text-align: center;
+  padding: 30px 20px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.appt-list__empty-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+
+.appt-list__empty-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.appt-list__empty-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+/* ── Card ───────────────────────────────────────────────── */
+.appt-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.appt-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.appt-card__time {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e293b;
+  background: #f1f5f9;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.appt-card__status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.appt-card__status--scheduled {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.appt-card__status--checkedin {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.appt-card__status--in_visit {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.appt-card__status--seen,
+.appt-card__status--completed {
+  background: #dcfce7;
+  color: #059669;
+}
+
+.appt-card__status--cancelled,
+.appt-card__status--no_show {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* ── Row ─────────────────────────────────────────────────── */
+.appt-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.appt-card__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  color: white;
+  font-size: 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.appt-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.appt-card__name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appt-card__details {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.appt-card__doctor {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Badges ──────────────────────────────────────────────── */
+.appt-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.appt-card__badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.appt-card__badge--lab {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* ── Actions ─────────────────────────────────────────────── */
+.appt-card__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.appt-card__btn {
+  flex: 1;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.1s ease,
+    opacity 0.15s ease;
+}
+
+.appt-card__btn:active {
+  transform: scale(0.98);
+}
+
+.appt-card__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.appt-card__btn--upload {
+  background: #2563eb;
+  color: white;
+}
+
+.appt-card__btn--view {
+  background: #f1f5f9;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+}
+
+/* ── Skeleton (first-load shimmer) ───────────────────── */
+.appt-skel {
+  pointer-events: none;
+}
+
+.appt-skel__block {
+  background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%);
+  background-size: 200% 100%;
+  animation: appt-shimmer 1.3s ease-in-out infinite;
+  border-radius: 4px;
+  height: 10px;
+}
+
+.appt-skel__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%);
+  background-size: 200% 100%;
+  animation: appt-shimmer 1.3s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.appt-skel__block--time {
+  width: 56px;
+  height: 18px;
+  border-radius: 6px;
+}
+
+.appt-skel__block--status {
+  width: 64px;
+  height: 16px;
+  border-radius: 10px;
+}
+
+.appt-skel__block--name {
+  width: 60%;
+  height: 13px;
+  margin-bottom: 6px;
+}
+
+.appt-skel__block--meta {
+  width: 45%;
+  height: 10px;
+  margin-bottom: 6px;
+}
+
+.appt-skel__block--doctor {
+  width: 70%;
+  height: 10px;
+}
+
+.appt-skel__block--btn {
+  flex: 1;
+  height: 34px;
+  border-radius: 8px;
+}
+
+@keyframes appt-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

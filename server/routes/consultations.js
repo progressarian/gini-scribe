@@ -262,7 +262,17 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
              stop_reason = COALESCE(EXCLUDED.stop_reason, medications.stop_reason),
              stopped_date = COALESCE(medications.stopped_date, CURRENT_DATE),
              updated_at = NOW()`,
-          [patientId, consultationId, names, matched, compositions, doses, freqs, timings, stopReasons],
+          [
+            patientId,
+            consultationId,
+            names,
+            matched,
+            compositions,
+            doses,
+            freqs,
+            timings,
+            stopReasons,
+          ],
         );
       }
     }

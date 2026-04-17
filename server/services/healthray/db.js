@@ -1570,25 +1570,24 @@ export async function markAppointmentAsSeen(appointmentId) {
     const autoCategory = (bio, visitType) => {
       const hba1c = parseFloat(bio?.hba1c);
       if (!isNaN(hba1c)) {
-        if (hba1c > 9) return "complex";    // Uncontrolled
-        if (hba1c > 7) return "maint";      // Maintenance
-        return "ctrl";                       // Continuous Care
+        if (hba1c > 9) return "complex"; // Uncontrolled
+        if (hba1c > 7) return "maint"; // Maintenance
+        return "ctrl"; // Continuous Care
       }
       if (visitType === "New Patient") return "new";
       return null;
     };
 
-    const { rows } = await client.query(
-      `SELECT * FROM appointments WHERE id = $1 FOR UPDATE`,
-      [appointmentId],
-    );
+    const { rows } = await client.query(`SELECT * FROM appointments WHERE id = $1 FOR UPDATE`, [
+      appointmentId,
+    ]);
     if (!rows[0]) {
       await client.query("ROLLBACK");
       return null;
     }
 
     // Update status to 'seen' if not already
-    if (rows[0].status !== 'seen') {
+    if (rows[0].status !== "seen") {
       await client.query(
         `UPDATE appointments SET status = 'seen', updated_at = NOW() WHERE id = $1`,
         [appointmentId],
@@ -1609,7 +1608,12 @@ export async function markAppointmentAsSeen(appointmentId) {
       newSteps.biomarkers = true;
     }
     // Compliance: mark done if compliance data or medications/diagnoses exist
-    if (!prepSteps.compliance && (Object.keys(comp).length > 0 || appt.healthray_medications?.length > 0 || appt.healthray_diagnoses?.length > 0)) {
+    if (
+      !prepSteps.compliance &&
+      (Object.keys(comp).length > 0 ||
+        appt.healthray_medications?.length > 0 ||
+        appt.healthray_diagnoses?.length > 0)
+    ) {
       newSteps.compliance = true;
     }
     // Categorized: mark done if category is set

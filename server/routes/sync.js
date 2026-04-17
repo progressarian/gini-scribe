@@ -13,6 +13,7 @@ import {
   backfillLabRanges,
   backfillLabPdfs,
   runDailyOpdBackfill,
+  runStuckStatusRecovery,
 } from "../services/cron/index.js";
 import { retryPendingLabCases } from "../services/cron/labSync.js";
 import { labLogin } from "../services/lab/labHealthrayApi.js";
@@ -149,6 +150,18 @@ router.post("/sync/opd/daily-backfill", async (req, res) => {
     runDailyOpdBackfill(date).catch((e) => error("Daily OPD Backfill", e.message));
   } catch (e) {
     handleError(res, e, "Daily OPD backfill");
+  }
+});
+
+// Manual trigger: stuck-status recovery (enriched appts not marked 'seen')
+// POST /api/sync/stuck-status?days=5  (defaults to STUCK_STATUS_WINDOW_DAYS or 5)
+router.post("/sync/stuck-status", async (req, res) => {
+  try {
+    const days = req.query.days || req.body.days;
+    const result = await runStuckStatusRecovery(days);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    handleError(res, e, "Stuck status recovery");
   }
 });
 

@@ -127,3 +127,234 @@
   color: #94a3b8;
   font-size: 11px;
 }
+
+/* ── Appointment filters ───────────────────────────── */
+.home__appt-filters {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home__appt-date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.home__appt-date-nav {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f1f5f9;
+  color: #1e293b;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.home__appt-date-nav:active {
+  background: #e2e8f0;
+}
+
+.home__appt-date-label {
+  flex: 1;
+  position: relative;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  background: #f8fafc;
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  transition: background 0.15s ease;
+  font-family: inherit;
+}
+
+.home__appt-date-label:active {
+  background: #eff6ff;
+}
+
+.home__appt-date-text {
+  font-size: 12px;
+  font-weight: 800;
+  color: #1e293b;
+  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home__appt-date-caret {
+  color: #64748b;
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+.home__appt-date-input {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.home__appt-date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.home__appt-today-btn {
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #2563eb;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.home__appt-today-btn:active:not(:disabled) {
+  background: #dbeafe;
+}
+
+.home__appt-today-btn:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.home__appt-search-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.home__search--compact {
+  padding: 9px 12px;
+  font-size: 12px;
+}
+
+.home__appt-refresh {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563eb;
+}
+
+.home__appt-refresh:active {
+  background: #f1f5f9;
+}
+
+.home__appt-refresh:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.home__appt-refresh-icon {
+  display: inline-block;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  transform-origin: 50% 50%;
+}
+
+.home__appt-refresh-icon--spinning {
+  animation: home-spin 0.9s linear infinite;
+}
+
+@keyframes home-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.home__appt-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.home__appt-select {
+  flex: 1;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e293b;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.home__appt-chip {
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.home__appt-chip:active {
+  transform: scale(0.97);
+}
+
+.home__appt-chip--active {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
+.home__appt-chip--clear {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.home__appt-filter-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-align: center;
+  padding: 4px;
+}

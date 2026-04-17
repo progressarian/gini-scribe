@@ -1,10 +1,95 @@
 import { create } from "zustand";
 import api from "../services/api.js";
-import { extractLab } from "../services/extraction.js";
+import {
+  extractLab,
+  extractImaging,
+  extractRx,
+  isHeic,
+  convertHeicToJpeg,
+} from "../services/extraction.js";
+import { classifyDocument } from "../services/classification.js";
 import { toast } from "./uiStore.js";
 import { docCategories } from "../companion/constants";
 import queryClient from "../queries/client.js";
 import { qk } from "../queries/keys.js";
+
+const LAB_CATEGORIES = ["blood_test", "thyroid", "lipid", "kidney", "hba1c", "urine"];
+const IMAGING_CATEGORIES = ["xray", "usg", "mri", "dexa", "ecg", "ncs", "eye"];
+
+const deriveCategory = (classification) => {
+  if (!classification?.doc_type) return "other";
+  const { doc_type, subtype } = classification;
+  if (doc_type === "prescription") return "prescription";
+  if (doc_type === "lab_report") {
+    const map = {
+      blood_test: "blood_test",
+      thyroid: "thyroid",
+      lipid: "lipid",
+      kidney: "kidney",
+      hba1c: "hba1c",
+      urine: "urine",
+    };
+    return map[subtype] || "blood_test";
+  }
+  if (doc_type === "imaging") {
+    const map = {
+      xray: "xray",
+      usg: "usg",
+      mri: "mri",
+      dexa: "dexa",
+      ecg: "ecg",
+      ncs: "ncs",
+      eye: "eye",
+    };
+    return map[subtype] || "other";
+  }
+  return "other";
+};
+
+const normalizeMediaType = (mediaType) => {
+  if (mediaType === "application/pdf") return "application/pdf";
+  if (mediaType?.startsWith("image/")) return mediaType;
+  return "image/jpeg";
+};
+
+const readFileToItem = async (file) => {
+  let base64;
+  let mediaType;
+  let preview;
+
+  if (isHeic(file)) {
+    const jpegBase64 = await convertHeicToJpeg(file);
+    base64 = jpegBase64;
+    mediaType = "image/jpeg";
+    preview = `data:image/jpeg;base64,${jpegBase64}`;
+  } else {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("File read failed"));
+      reader.readAsDataURL(file);
+    });
+    base64 = dataUrl.split(",")[1];
+    mediaType = file.type || "image/jpeg";
+    preview = dataUrl;
+  }
+
+  return {
+    id: `item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    file,
+    base64,
+    preview,
+    mediaType,
+    fileName: file.name,
+    classification: null,
+    category: null,
+    extraction: null,
+    extractError: null,
+    saveError: null,
+    expanded: false,
+    status: "pending",
+  };
+};
 
 const retryPost = async (url, body, maxRetries = 3) => {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -497,6 +582,412 @@ const useCompanionStore = create((set, get) => ({
       set({ captureError: "Save failed: " + e.message, saveStatus: null });
     }
     set({ loading: false });
+  },
+
+  // ── Home tab (appointments | patients) ───────────────────
+  homeTab: null,
+  setHomeTab: (t) => set({ homeTab: t }),
+
+  // ── Active appointment linkage (companion_appt:<id> in notes) ────
+  activeAppointmentId: null,
+  setActiveAppointmentId: (id) => set({ activeAppointmentId: id }),
+
+  // ── Multi-Capture ─────────────────────────────────────────
+  multiCapture: {
+    step: "pick", // 'pick'|'preview'|'classifying'|'extracting'|'review'|'saving'|'done'
+    items: [],
+    error: null,
+    saveProgress: { done: 0, total: 0, currentLabel: "" },
+  },
+
+  _patchMultiItem: (itemId, updates) =>
+    set((s) => ({
+      multiCapture: {
+        ...s.multiCapture,
+        items: s.multiCapture.items.map((it) => (it.id === itemId ? { ...it, ...updates } : it)),
+      },
+    })),
+
+  _patchMultiState: (updates) => set((s) => ({ multiCapture: { ...s.multiCapture, ...updates } })),
+
+  multiReset: () =>
+    set({
+      multiCapture: {
+        step: "pick",
+        items: [],
+        error: null,
+        saveProgress: { done: 0, total: 0, currentLabel: "" },
+      },
+    }),
+
+  multiHandleFilesSelect: async (files) => {
+    const arr = Array.from(files || []).filter((f) => {
+      if (f.size > 10 * 1024 * 1024) {
+        toast(`Skipped ${f.name}: larger than 10MB`, "error");
+        return false;
+      }
+      return true;
+    });
+    if (!arr.length) return;
+
+    try {
+      const newItems = await Promise.all(arr.map(readFileToItem));
+      set((s) => ({
+        multiCapture: {
+          ...s.multiCapture,
+          items: [...s.multiCapture.items, ...newItems],
+          step: "preview",
+          error: null,
+        },
+      }));
+    } catch (e) {
+      console.error("Read files:", e);
+      set((s) => ({
+        multiCapture: { ...s.multiCapture, error: `Failed to read files: ${e.message}` },
+      }));
+    }
+  },
+
+  multiRemoveItem: (itemId) =>
+    set((s) => {
+      const items = s.multiCapture.items.filter((it) => it.id !== itemId);
+      return {
+        multiCapture: {
+          ...s.multiCapture,
+          items,
+          step: items.length === 0 ? "pick" : s.multiCapture.step,
+        },
+      };
+    }),
+
+  multiToggleExpand: (itemId) =>
+    set((s) => ({
+      multiCapture: {
+        ...s.multiCapture,
+        items: s.multiCapture.items.map((it) =>
+          it.id === itemId ? { ...it, expanded: !it.expanded } : it,
+        ),
+      },
+    })),
+
+  _extractForItem: async (item, category) => {
+    const mediaType = normalizeMediaType(item.mediaType);
+
+    if (LAB_CATEGORIES.includes(category)) {
+      const { data, error } = await extractLab(item.base64, mediaType);
+      if (error) return { data: null, error };
+      if (!data?.panels?.length) return { data: null, error: "No lab values found" };
+      const uiData = labPanelsToFlatLabs(data);
+      uiData._rawExtraction = data;
+      return { data: uiData, error: null };
+    }
+
+    if (category === "prescription") {
+      const { data, error } = await extractRx(item.base64, mediaType);
+      if (error) return { data: null, error };
+      if (!data) return { data: null, error: "No prescription data extracted" };
+      return { data, error: null };
+    }
+
+    if (IMAGING_CATEGORIES.includes(category)) {
+      const { data, error } = await extractImaging(item.base64, mediaType);
+      if (error) return { data: null, error };
+      return { data: data || {}, error: null };
+    }
+
+    // Generic "other" — lightweight inline prompt
+    try {
+      const isPdf = mediaType === "application/pdf";
+      const docBlock = isPdf
+        ? {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: item.base64 },
+          }
+        : { type: "image", source: { type: "base64", media_type: mediaType, data: item.base64 } };
+      const r = await retryPost("/api/ai/complete", {
+        messages: [
+          {
+            role: "user",
+            content: [
+              docBlock,
+              {
+                type: "text",
+                text: `Extract key findings from this medical document. Return ONLY valid JSON (no backticks):
+{"patient_name":"","doc_type":"${category}","findings":"","date":"YYYY-MM-DD","doctor":"","notes":""}`,
+              },
+            ],
+          },
+        ],
+        model: "sonnet",
+        maxTokens: 1500,
+      });
+      const text = (r.data.text || "").replace(/```json|```/g, "").trim();
+      return { data: JSON.parse(text), error: null };
+    } catch (e) {
+      return { data: null, error: e.message || "Extraction failed" };
+    }
+  },
+
+  multiClassifyAll: async () => {
+    const items = get().multiCapture.items;
+    if (!items.length) return;
+
+    // Phase 1: classify all in parallel (Haiku, cheap & fast)
+    set((s) => ({ multiCapture: { ...s.multiCapture, step: "classifying", error: null } }));
+    items.forEach((it) => get()._patchMultiItem(it.id, { status: "classifying" }));
+
+    await Promise.allSettled(
+      items.map(async (item) => {
+        const mediaType = normalizeMediaType(item.mediaType);
+        const { data, error } = await classifyDocument(item.base64, mediaType);
+        const classification = error
+          ? {
+              doc_type: "other",
+              subtype: null,
+              confidence: 0,
+              rationale: `Classification unavailable: ${error}`,
+            }
+          : data;
+        const category = deriveCategory(classification);
+        get()._patchMultiItem(item.id, {
+          classification,
+          category,
+          status: "classified",
+        });
+      }),
+    );
+
+    // Phase 2: extract in chunks of 3 (Sonnet heavier, avoid 529s)
+    set((s) => ({ multiCapture: { ...s.multiCapture, step: "extracting" } }));
+    const current = get().multiCapture.items;
+    for (let i = 0; i < current.length; i += 3) {
+      const chunk = current.slice(i, i + 3);
+      await Promise.allSettled(
+        chunk.map(async (it) => {
+          get()._patchMultiItem(it.id, { status: "extracting" });
+          const { data, error } = await get()._extractForItem(it, it.category);
+          if (error) {
+            get()._patchMultiItem(it.id, { extractError: error, status: "failed" });
+          } else {
+            get()._patchMultiItem(it.id, {
+              extraction: data,
+              extractError: null,
+              status: "extracted",
+            });
+          }
+        }),
+      );
+    }
+
+    set((s) => ({ multiCapture: { ...s.multiCapture, step: "review" } }));
+  },
+
+  multiOverrideCategory: async (itemId, newCategory) => {
+    const item = get().multiCapture.items.find((it) => it.id === itemId);
+    if (!item) return;
+    get()._patchMultiItem(itemId, {
+      category: newCategory,
+      status: "extracting",
+      extractError: null,
+    });
+    const { data, error } = await get()._extractForItem(item, newCategory);
+    if (error) {
+      get()._patchMultiItem(itemId, { extractError: error, status: "failed" });
+    } else {
+      get()._patchMultiItem(itemId, {
+        extraction: data,
+        extractError: null,
+        status: "extracted",
+      });
+    }
+  },
+
+  multiRetryExtract: async (itemId) => {
+    const item = get().multiCapture.items.find((it) => it.id === itemId);
+    if (!item) return;
+    return get().multiOverrideCategory(itemId, item.category);
+  },
+
+  _saveOneMultiItem: async (item, patientId, apptId) => {
+    const { category, extraction } = item;
+    const date =
+      extraction?.report_date ||
+      extraction?.visit_date ||
+      extraction?.date ||
+      new Date().toISOString().slice(0, 10);
+    const hospital = extraction?.lab_name || extraction?.hospital_name || "";
+    const doctor = extraction?.doctor_name || "";
+    const specialty = extraction?.specialty || "";
+
+    const isRx = category === "prescription";
+    const isLab = LAB_CATEGORIES.includes(category);
+    const hasMeds = (extraction?.medications || []).length > 0;
+    const hasLabValues = (extraction?.labs || []).length > 0;
+    const catLabel = docCategories.find((c) => c.id === category)?.label || category;
+
+    const noteParts = [];
+    if (apptId) noteParts.push(`companion_appt:${apptId}`);
+    if (hospital) noteParts.push(`Lab:${hospital}`);
+    if (doctor) noteParts.push(`Doctor:${doctor}`);
+    const notes = noteParts.join("|");
+
+    // Prescription: save history (medications + diagnoses cascade)
+    if (hasMeds) {
+      await api.post(`/api/patients/${patientId}/history`, {
+        visit_date: date,
+        visit_type: "OPD",
+        doctor_name: doctor,
+        specialty,
+        hospital_name: hospital,
+        diagnoses: extraction.diagnoses || [],
+        medications: extraction.medications || [],
+        labs: (extraction.labs || []).map((l) => ({
+          test_name: l.test_name,
+          result: l.result,
+          unit: l.unit,
+          flag: l.flag,
+          ref_range: l.ref_range,
+        })),
+        vitals: extraction.vitals || {},
+      });
+    }
+
+    // Lab with panels: 3-step cascade
+    if (isLab && extraction?._rawExtraction) {
+      const docR = await api.post(`/api/patients/${patientId}/documents`, {
+        doc_type: category,
+        title: `${catLabel.replace(/^[^\s]+\s/, "")} — ${date}`,
+        doc_date: date,
+        source: "Companion Upload",
+        notes,
+        extracted_data: extraction._rawExtraction,
+      });
+      const docId = docR.data.id;
+      if (docId && item.base64) {
+        try {
+          await api.post(`/api/documents/${docId}/upload-file`, {
+            base64: item.base64,
+            mediaType: item.mediaType || "image/jpeg",
+            fileName: item.fileName || `capture_${Date.now()}.jpg`,
+          });
+        } catch (e) {
+          console.warn("Upload failed:", e);
+        }
+        try {
+          await api.patch(`/api/documents/${docId}`, {
+            extracted_data: extraction._rawExtraction,
+          });
+        } catch (e) {
+          console.warn("PATCH failed:", e);
+        }
+      }
+      return;
+    }
+
+    // Fallback: inline labs without panel format
+    if (hasLabValues && !extraction?._rawExtraction && !isRx) {
+      for (const lab of extraction.labs) {
+        await api.post(`/api/patients/${patientId}/labs`, {
+          test_date: date,
+          test_name: lab.test_name,
+          result: lab.result,
+          unit: lab.unit,
+          flag: lab.flag,
+          ref_range: lab.ref_range,
+          source: hospital || "companion",
+        });
+      }
+    }
+
+    // Document record for prescription / imaging / other
+    const title = isRx
+      ? `${doctor || "External"} — ${specialty || category}`
+      : `${catLabel.replace(/^[^\s]+\s/, "")} — ${date}`;
+
+    const docR = await api.post(`/api/patients/${patientId}/documents`, {
+      doc_type: category,
+      title,
+      doc_date: date,
+      source: "Companion Upload",
+      notes,
+      extracted_data: extraction || {},
+    });
+    const docId = docR.data.id;
+    if (docId && item.base64) {
+      try {
+        await api.post(`/api/documents/${docId}/upload-file`, {
+          base64: item.base64,
+          mediaType: item.mediaType || "image/jpeg",
+          fileName: item.fileName || `capture_${Date.now()}.jpg`,
+        });
+      } catch (e) {
+        console.warn("Upload failed:", e);
+      }
+    }
+  },
+
+  multiSaveAll: async () => {
+    const { selectedPatient, activeAppointmentId, multiCapture } = get();
+    if (!selectedPatient?.id) return;
+
+    // Savable = items with extraction data that haven't been saved yet.
+    // Covers first-time saves AND retries of previously-failed saves.
+    const pending = multiCapture.items.filter((it) => it.extraction && it.status !== "saved");
+    if (!pending.length) return;
+
+    set((s) => ({
+      multiCapture: {
+        ...s.multiCapture,
+        step: "saving",
+        saveProgress: { done: 0, total: pending.length, currentLabel: "" },
+      },
+    }));
+
+    let done = 0;
+    for (const item of pending) {
+      const catLabel = docCategories.find((c) => c.id === item.category)?.label || item.category;
+      set((s) => ({
+        multiCapture: {
+          ...s.multiCapture,
+          saveProgress: { done, total: pending.length, currentLabel: catLabel },
+        },
+      }));
+
+      try {
+        get()._patchMultiItem(item.id, { status: "saving", saveError: null });
+        await get()._saveOneMultiItem(item, selectedPatient.id, activeAppointmentId);
+        get()._patchMultiItem(item.id, { status: "saved", saveError: null });
+      } catch (e) {
+        console.error("Multi save item failed:", e);
+        get()._patchMultiItem(item.id, {
+          status: "failed",
+          saveError: e.response?.data?.error || e.message,
+        });
+      }
+      done += 1;
+    }
+
+    queryClient.invalidateQueries({ queryKey: qk.companion.patient(selectedPatient.id) });
+    const today = new Date().toISOString().slice(0, 10);
+    queryClient.invalidateQueries({ queryKey: qk.companion.appointments(today) });
+
+    const items = get().multiCapture.items;
+    const savedCount = items.filter((it) => it.status === "saved").length;
+    const failedCount = items.filter((it) => it.status === "failed" && it.saveError).length;
+
+    set((s) => ({
+      multiCapture: {
+        ...s.multiCapture,
+        step: failedCount > 0 ? "review" : "done",
+        saveProgress: { done: savedCount, total: pending.length, currentLabel: "" },
+      },
+    }));
+
+    if (failedCount === 0 && savedCount > 0) {
+      toast(`Saved ${savedCount} document${savedCount === 1 ? "" : "s"}`, "success");
+    } else if (failedCount > 0) {
+      toast(`Saved ${savedCount}, ${failedCount} failed — retry in review`, "error");
+    }
   },
 }));
 

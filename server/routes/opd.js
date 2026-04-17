@@ -323,11 +323,7 @@ router.get("/opd/appointments", async (req, res) => {
 
     const patientIds = [...new Set(rows.map((r) => r.patient_id).filter((x) => x != null))];
     const fileNos = [
-      ...new Set(
-        rows
-          .map((r) => r._resolved_file_no)
-          .filter((x) => x != null && x !== ""),
-      ),
+      ...new Set(rows.map((r) => r._resolved_file_no).filter((x) => x != null && x !== "")),
     ];
 
     // 2) Per-patient aggregates (visit counts, last visit, healthray_diagnoses
@@ -465,22 +461,17 @@ router.get("/opd/appointments", async (req, res) => {
     // 5) Merge aggregates back into each appointment row.
     for (const row of rows) {
       const a = aggMap.get(row.patient_id);
-      const lc =
-        labCasesByPid.get(row.patient_id) ||
-        (row._resolved_file_no ? labCasesByFile.get(row._resolved_file_no) : null) ||
-        { pending_labs: 0, recent_labs: 0 };
+      const lc = labCasesByPid.get(row.patient_id) ||
+        (row._resolved_file_no ? labCasesByFile.get(row._resolved_file_no) : null) || {
+          pending_labs: 0,
+          recent_labs: 0,
+        };
 
-      const upl = Math.max(
-        a?.uploaded_lab_canonicals || 0,
-        a?.uploaded_lab_docs || 0,
-      );
-      const uplDate = [a?.upl_lab_date_lr, a?.upl_lab_date_doc]
-        .filter(Boolean)
-        .sort()
-        .pop() || null;
+      const upl = Math.max(a?.uploaded_lab_canonicals || 0, a?.uploaded_lab_docs || 0);
+      const uplDate =
+        [a?.upl_lab_date_lr, a?.upl_lab_date_doc].filter(Boolean).sort().pop() || null;
 
-      row.visit_count =
-        (a?.c_count || 0) + (a?.a_count || 0) || row.visit_count || 1;
+      row.visit_count = (a?.c_count || 0) + (a?.a_count || 0) || row.visit_count || 1;
       row.last_visit_date = a?.last_visit_date || null;
       // Fall back to latest non-empty healthray_diagnoses if this row's is empty.
       if (

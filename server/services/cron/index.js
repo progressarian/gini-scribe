@@ -5,6 +5,7 @@ import {
   syncDateRange,
   getRangeSyncStatus,
   runDailyOpdBackfill,
+  runStuckStatusRecovery,
 } from "./healthraySync.js";
 import {
   runLabSync,
@@ -22,6 +23,7 @@ let intervalId = null;
 let labIntervalId = null;
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
+let stuckStatusIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -72,6 +74,22 @@ export function startCronJobs() {
       );
     }, DAILY_BACKFILL_INTERVAL_MS);
   }, DAILY_BACKFILL_DELAY_MS);
+
+  // ── Stuck-status recovery: appointments enriched but never marked 'seen' ──
+  // Window defaults to 5 days, override via STUCK_STATUS_WINDOW_DAYS.
+  // Runs 2 min after startup, then every 30 min.
+  const STUCK_STATUS_DELAY_MS = 2 * 60 * 1000;
+  const STUCK_STATUS_INTERVAL_MS = 30 * 60 * 1000;
+  setTimeout(() => {
+    runStuckStatusRecovery().catch((e) =>
+      console.error("[Cron] Stuck status recovery failed:", e.message),
+    );
+    stuckStatusIntervalId = setInterval(() => {
+      runStuckStatusRecovery().catch((e) =>
+        console.error("[Cron] Stuck status recovery failed:", e.message),
+      );
+    }, STUCK_STATUS_INTERVAL_MS);
+  }, STUCK_STATUS_DELAY_MS);
 }
 
 export function stopCronJobs() {
@@ -94,6 +112,11 @@ export function stopCronJobs() {
     dailyBackfillIntervalId = null;
     console.log("[Cron] Daily OPD backfill stopped");
   }
+  if (stuckStatusIntervalId) {
+    clearInterval(stuckStatusIntervalId);
+    stuckStatusIntervalId = null;
+    console.log("[Cron] Stuck status recovery stopped");
+  }
 }
 
 // Manual trigger exports
@@ -108,4 +131,5 @@ export {
   backfillLabRanges,
   backfillLabPdfs,
   runDailyOpdBackfill,
+  runStuckStatusRecovery,
 };

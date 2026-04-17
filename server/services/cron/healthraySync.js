@@ -78,17 +78,29 @@ function buildPatientData(appt) {
 }
 
 // ── Build vitals & biomarkers from appointment data ─────────────────────────
-function buildVitalsAndBiomarkers(appt) {
-  let weight = null,
-    height = null,
-    bmi = null;
-  try {
-    weight = JSON.parse(appt.weight || "{}").weight || null;
-  } catch {}
-  try {
-    height = JSON.parse(appt.height || "{}").height || null;
-  } catch {}
-  if (weight && height) bmi = +(weight / (height / 100) ** 2).toFixed(2);
+// HealthRay returns the patient's last-recorded weight/height on every
+// appointment, even when no fresh measurement was taken. Each JSON blob
+// carries an `updated_at` — accept the value only if it was recorded on
+// the appointment date itself. Otherwise the value is a stale carry-forward
+// from a previous visit and must be dropped.
+function buildVitalsAndBiomarkers(appt, apptDate) {
+  const pickFresh = (raw, key) => {
+    try {
+      const j = JSON.parse(raw || "{}");
+      const v = j?.[key];
+      if (v == null || v === "") return null;
+      if (!j.updated_at) return null;
+      if (toISTDate(j.updated_at) !== apptDate) return null;
+      const n = parseFloat(v);
+      return isNaN(n) ? null : n;
+    } catch {
+      return null;
+    }
+  };
+
+  const weight = pickFresh(appt.weight, "weight");
+  const height = pickFresh(appt.height, "height");
+  const bmi = weight && height ? +(weight / (height / 100) ** 2).toFixed(2) : null;
 
   const opdVitals = {};
   if (weight) opdVitals.weight = weight;
@@ -213,7 +225,7 @@ async function syncAppointment(appt, localDoctorName) {
   // If either JSONB is empty despite having notes, fall through to re-parse.
   const alreadyEnriched =
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
-  if (existing && isCompleted && existing.healthray_clinical_notes && alreadyEnriched) {
+  if (existing && existing.healthray_clinical_notes && alreadyEnriched) {
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
     // Auto-mark as seen if not already done
     await markAppointmentAsSeen(existing.id);
@@ -223,7 +235,7 @@ async function syncAppointment(appt, localDoctorName) {
   // ── Build patient & vitals ──
   const patientData = buildPatientData(appt);
   const patientId = await upsertPatient(patientData);
-  const { opdVitals, biomarkers } = buildVitalsAndBiomarkers(appt);
+  const { opdVitals, biomarkers } = buildVitalsAndBiomarkers(appt, apptDate);
 
   // ── Fetch clinical text ──
   // API calls: 1 fetchClinicalNotes + (maybe 1 fetchPreviousAppointmentData if show_previous)
@@ -263,45 +275,30 @@ async function syncAppointment(appt, localDoctorName) {
           clinical.healthrayInvestigations = parsed.investigations_to_order || [];
           clinical.healthrayFollowUp = parsed.follow_up || null;
 
-          // Merge vitals — parseFloat to strip units like "137 mmHg" → 137
-          const v = parsed.vitals || {};
-          const cleanNum = (val) => {
-            const n = parseFloat(val);
-            return isNaN(n) ? null : n;
-          };
-          if (v.height && !opdVitals.height) {
-            const n = cleanNum(v.height);
-            if (n) opdVitals.height = n;
+          // Merge prescription-parsed BP / waist / bodyFat, but ONLY from the
+          // vitals entry whose date matches apptDate. Weight / height / BMI
+          // stay owned by appt.weight/appt.height (date-gated in
+          // buildVitalsAndBiomarkers via updated_at) — we don't override them
+          // with the parser's guess.
+          const datedVitals = Array.isArray(parsed.vitals) ? parsed.vitals : [];
+          const todaysVitals = datedVitals.find((v) => v && v.date === apptDate);
+          if (todaysVitals) {
+            const cleanNum = (val) => {
+              const n = parseFloat(val);
+              return isNaN(n) ? null : n;
+            };
+            const bpSys = cleanNum(todaysVitals.bpSys);
+            const bpDia = cleanNum(todaysVitals.bpDia);
+            const waist = cleanNum(todaysVitals.waist);
+            const bodyFat = cleanNum(todaysVitals.bodyFat);
+            if (bpSys) opdVitals.bpSys = bpSys;
+            if (bpDia) opdVitals.bpDia = bpDia;
+            if (waist) opdVitals.waist = waist;
+            if (bodyFat) opdVitals.bodyFat = bodyFat;
+            if (opdVitals.bpSys) biomarkers.bpSys = opdVitals.bpSys;
+            if (opdVitals.bpDia) biomarkers.bpDia = opdVitals.bpDia;
+            if (opdVitals.waist) biomarkers.waist = opdVitals.waist;
           }
-          if (v.weight && !opdVitals.weight) {
-            const n = cleanNum(v.weight);
-            if (n) opdVitals.weight = n;
-          }
-          if (v.bmi && !opdVitals.bmi) {
-            const n = cleanNum(v.bmi);
-            if (n) opdVitals.bmi = n;
-          }
-          if (v.bpSys) {
-            const n = cleanNum(v.bpSys);
-            if (n) opdVitals.bpSys = n;
-          }
-          if (v.bpDia) {
-            const n = cleanNum(v.bpDia);
-            if (n) opdVitals.bpDia = n;
-          }
-          if (v.waist) {
-            const n = cleanNum(v.waist);
-            if (n) opdVitals.waist = n;
-          }
-          if (v.bodyFat) {
-            const n = cleanNum(v.bodyFat);
-            if (n) opdVitals.bodyFat = n;
-          }
-
-          if (opdVitals.weight) biomarkers.weight = opdVitals.weight;
-          if (opdVitals.waist) biomarkers.waist = opdVitals.waist;
-          if (opdVitals.bpSys) biomarkers.bpSys = opdVitals.bpSys;
-          if (opdVitals.bpDia) biomarkers.bpDia = opdVitals.bpDia;
 
           // Lab values (hba1c, fg, ldl, etc.) are synced to lab_results by syncLabResults()
           // and then merged into appointments.biomarkers by syncBiomarkersFromLatestLabs().
@@ -381,7 +378,7 @@ async function syncAppointment(appt, localDoctorName) {
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
 
   // ── Auto-mark status based on HealthRay data ──
-  if (isCompleted && clinical.healthrayDiagnoses?.length > 0) {
+  if (clinical.healthrayDiagnoses?.length > 0 && clinical.healthrayMedications?.length > 0) {
     // Prescription exists → mark as "seen" (creates consultation + fills prep steps)
     await markAppointmentAsSeen(localApptId);
   } else if (!isCompleted && status !== "cancelled" && status !== "no_show") {
@@ -610,6 +607,54 @@ export async function runDailyOpdBackfill(dateStr) {
 
   log("Daily Backfill", `Done ${date} — ${done} patients, ${fixed} re-parsed, ${errors} errors`);
   return { date, total: patients.length, done, fixed, errors };
+}
+
+// ── Stuck-status recovery ──────────────────────────────────────────────────
+// Finds appointments within the last `windowDays` whose HealthRay enrichment
+// is complete (diagnoses + medications present) but status was never promoted
+// to 'seen' — typically because the doctor never clicked "Checkout" in
+// HealthRay, so mapStatus() kept returning in-progress/scheduled.
+// Calls markAppointmentAsSeen() to create the consultation and fix status.
+export async function runStuckStatusRecovery(windowDays) {
+  const days = Number.isFinite(+windowDays)
+    ? Math.max(1, +windowDays)
+    : Math.max(1, +(process.env.STUCK_STATUS_WINDOW_DAYS || 5));
+
+  log("Stuck Recovery", `Scanning last ${days} days for enriched-but-unseen appointments...`);
+
+  const { rows } = await pool.query(
+    `SELECT id, file_no
+       FROM appointments
+      WHERE status NOT IN ('seen', 'cancelled', 'no_show')
+        AND appointment_date >= (CURRENT_DATE - ($1 || ' days')::interval)
+        AND jsonb_array_length(COALESCE(healthray_diagnoses,'[]'::jsonb))  > 0
+        AND jsonb_array_length(COALESCE(healthray_medications,'[]'::jsonb)) > 0
+      ORDER BY appointment_date DESC`,
+    [String(days)],
+  );
+
+  if (!rows.length) {
+    log("Stuck Recovery", "No stuck appointments found");
+    return { windowDays: days, total: 0, fixed: 0, errors: 0 };
+  }
+
+  log("Stuck Recovery", `Found ${rows.length} stuck appointments`);
+
+  let fixed = 0;
+  let errors = 0;
+  for (const r of rows) {
+    try {
+      const result = await markAppointmentAsSeen(r.id);
+      if (result) fixed++;
+    } catch (e) {
+      errors++;
+      error("Stuck Recovery", `id=${r.id} (${r.file_no}): ${e.message}`);
+    }
+    await new Promise((res) => setTimeout(res, 100));
+  }
+
+  log("Stuck Recovery", `Done — ${fixed} fixed, ${errors} errors (window=${days}d)`);
+  return { windowDays: days, total: rows.length, fixed, errors };
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

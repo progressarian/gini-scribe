@@ -1,7 +1,7 @@
 .patient__header {
   background: linear-gradient(135deg, #1e293b, #334155);
   color: white;
-  padding: 10px 16px;
+  padding: 12px 14px 0 14px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -14,54 +14,115 @@
 }
 
 .patient__back {
-  background: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
   border: none;
   color: white;
   font-size: 18px;
+  font-weight: 700;
   cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.patient__back:active {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .patient__header-info {
   flex: 1;
+  min-width: 0;
 }
 
 .patient__header-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 800;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .patient__header-details {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   opacity: 0.7;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.patient__capture-btn {
-  background: #2563eb;
+.patient__header-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.patient__action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
   border: none;
+  border-radius: 10px;
   color: white;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
   cursor: pointer;
+  transition:
+    transform 0.1s ease,
+    filter 0.15s ease;
+}
+
+.patient__action-btn:active {
+  transform: scale(0.98);
+  filter: brightness(0.95);
+}
+
+.patient__action-btn--multi {
+  background: linear-gradient(135deg, #059669, #047857);
+}
+
+.patient__action-btn--capture {
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+}
+
+.patient__action-icon {
+  font-size: 16px;
+}
+
+.patient__action-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
 }
 
 .patient__tabs {
   display: flex;
-  margin-top: 8px;
-  gap: 2px;
+  margin-top: 12px;
+  gap: 3px;
 }
 
 .patient__tab {
   flex: 1;
-  padding: 6px;
+  padding: 9px 4px;
   border: none;
-  border-radius: 6px 6px 0 0;
-  font-size: 10px;
+  border-radius: 8px 8px 0 0;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .patient__tab--active {
@@ -118,10 +179,10 @@
 }
 
 .patient__doc-card {
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: white;
-  border-radius: 8px;
-  margin-bottom: 6px;
+  border-radius: 10px;
+  margin-bottom: 8px;
   border: 1px solid #e2e8f0;
 }
 
@@ -132,41 +193,49 @@
 }
 
 .patient__doc-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 18px;
   flex-shrink: 0;
 }
 
 .patient__doc-info {
   flex: 1;
+  min-width: 0;
 }
 
 .patient__doc-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .patient__doc-meta {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 600;
   color: #64748b;
+  margin-top: 2px;
 }
 
 .patient__doc-badges {
   display: flex;
   gap: 4px;
-  margin-top: 2px;
+  margin-top: 5px;
+  flex-wrap: wrap;
 }
 
 .patient__doc-badge {
-  font-size: 8px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-weight: 600;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
 }
 
 .patient__doc-badge--med {
@@ -185,22 +254,25 @@
 }
 
 .patient__doc-view-btn {
-  font-size: 9px;
+  font-size: 11px;
   background: #2563eb;
   color: white;
   border: none;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
 /* Medications tab */
 .patient__section-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
-  margin-bottom: 8px;
+  color: #1e293b;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 
 .patient__table {
@@ -211,87 +283,118 @@
 }
 
 .patient__med-row {
-  padding: 6px 10px;
+  padding: 9px 12px;
   border-bottom: 1px solid #f1f5f9;
-  font-size: 11px;
+  font-size: 12px;
+}
+
+.patient__med-row:last-child {
+  border-bottom: none;
 }
 
 .patient__med-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 6px;
 }
 
 .patient__med-name {
-  font-weight: 700;
+  font-weight: 800;
+  color: #1e293b;
+  font-size: 13px;
 }
 
 .patient__med-source {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 600;
   color: #7c3aed;
 }
 
 .patient__med-details {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   color: #64748b;
+  margin-top: 3px;
 }
 
 /* Labs tab */
 .patient__lab-row {
   display: flex;
   justify-content: space-between;
-  padding: 5px 10px;
+  align-items: center;
+  padding: 9px 12px;
   border-bottom: 1px solid #f1f5f9;
-  font-size: 11px;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.patient__lab-row:last-child {
+  border-bottom: none;
 }
 
 .patient__lab-name {
-  font-weight: 600;
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 12px;
 }
 
 .patient__lab-date {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 600;
   color: #94a3b8;
-  margin-left: 4px;
+  margin-left: 6px;
 }
 
 .patient__lab-result {
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 13px;
 }
 
 .patient__lab-unit {
   color: #94a3b8;
+  font-weight: 600;
   margin-left: 3px;
+  font-size: 11px;
 }
 
 /* Visits tab */
 .patient__visit-card {
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: white;
-  border-radius: 8px;
-  margin-bottom: 6px;
+  border-radius: 10px;
+  margin-bottom: 8px;
   border: 1px solid #e2e8f0;
-  border-left: 3px solid;
+  border-left: 4px solid;
 }
 
 .patient__visit-row {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .patient__visit-name {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
 }
 
 .patient__visit-meta {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   color: #64748b;
+  margin-top: 2px;
 }
 
 .patient__visit-status {
-  font-size: 9px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 5px;
   font-weight: 700;
   align-self: flex-start;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
 }

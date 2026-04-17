@@ -1,0 +1,162 @@
+.dsel {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.dsel__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e293b;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dsel__trigger:active,
+.dsel__trigger--open {
+  border-color: #2563eb;
+  background: #f8fafc;
+}
+
+.dsel__trigger-icon {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dsel__trigger-label {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dsel__trigger-caret {
+  color: #64748b;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ── Popover ───────────────────────────────────── */
+.dsel__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.18),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+  padding: 8px;
+  animation: dsel-pop 0.12s ease-out;
+}
+
+@keyframes dsel-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dsel__search {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  background: #f8fafc;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.dsel__search:focus {
+  border-color: #2563eb;
+  background: white;
+}
+
+.dsel__list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dsel__opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e293b;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.1s ease;
+}
+
+.dsel__opt:hover {
+  background: #f1f5f9;
+}
+
+.dsel__opt--sel {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.dsel__opt--sel:hover {
+  background: #dbeafe;
+}
+
+.dsel__opt-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dsel__opt-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dsel__check {
+  color: #2563eb;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.dsel__empty {
+  padding: 16px 10px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}

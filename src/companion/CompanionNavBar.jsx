@@ -8,13 +8,13 @@ export default function CompanionNavBar() {
   const location = useLocation();
   const selectedPatient = useCompanionStore((s) => s.selectedPatient);
 
-  // Extract patient ID from path like /companion/record/123 or /companion/capture/123
-  const pathMatch = location.pathname.match(/\/companion\/(?:record|capture)\/(\d+)/);
+  // Extract patient ID from path like /companion/record/123, /companion/capture/123, or /companion/multi-capture/123
+  const pathMatch = location.pathname.match(/\/companion\/(?:record|capture|multi-capture)\/(\d+)/);
   const patientId = pathMatch?.[1] || selectedPatient?.id;
   const path = location.pathname;
 
   const isHome = path === "/companion";
-  const isCapture = path.includes("/capture/");
+  const isCapture = path.includes("/capture/") || path.includes("/multi-capture/");
   const isRecord = path.includes("/record/");
 
   const goHome = () => navigate("/companion");

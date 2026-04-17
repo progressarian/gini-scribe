@@ -88,10 +88,9 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 2. Vitals (for history/trends) — cap at the most recent 500 to bound memory;
       //    frontend charts down-sample anyway.
-      pool.query(
-        "SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 500",
-        [pid],
-      ),
+      pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 500", [
+        pid,
+      ]),
 
       // 3. Diagnoses (deduplicated — one per diagnosis_id, active rows preferred, then latest)
       pool.query(

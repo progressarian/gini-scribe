@@ -12,6 +12,7 @@ const Companion = lazy(() => import("./Companion"));
 const HomeScreen = lazy(() => import("./companion/HomeScreen"));
 const PatientScreen = lazy(() => import("./companion/PatientScreen"));
 const CaptureScreen = lazy(() => import("./companion/CaptureScreen"));
+const MultiCaptureScreen = lazy(() => import("./companion/MultiCaptureScreen"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const QuickPage = lazy(() => import("./pages/QuickPage"));
@@ -81,6 +82,7 @@ const router = createBrowserRouter([
           { index: true, element: lazyEl(HomeScreen) },
           { path: "record/:id", element: lazyEl(PatientScreen) },
           { path: "capture/:id", element: lazyEl(CaptureScreen) },
+          { path: "multi-capture/:id", element: lazyEl(MultiCaptureScreen) },
         ],
       },
       {

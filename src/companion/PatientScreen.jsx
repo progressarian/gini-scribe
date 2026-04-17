@@ -60,15 +60,28 @@ export default function PatientScreen() {
             <div className="patient__header-info">
               <div className="patient__header-name">{patient.name}</div>
               <div className="patient__header-details">
-                {patient.age}Y/{patient.sex?.[0]} • {patient.file_no}
+                {patient.age ? `${patient.age}Y` : ""}
+                {patient.sex ? `/${patient.sex[0]}` : ""}
+                {patient.file_no ? ` · ${patient.file_no}` : ""}
+                {patient.phone ? ` · ${patient.phone}` : ""}
               </div>
             </div>
           )}
+        </div>
+        <div className="patient__header-actions">
+          <button
+            onClick={() => navigate(`/companion/multi-capture/${id}`)}
+            className="patient__action-btn patient__action-btn--multi"
+          >
+            <span className="patient__action-icon">📤</span>
+            <span className="patient__action-label">Multi Upload</span>
+          </button>
           <button
             onClick={() => navigate(`/companion/capture/${id}`)}
-            className="patient__capture-btn"
+            className="patient__action-btn patient__action-btn--capture"
           >
-            📸 Capture
+            <span className="patient__action-icon">📸</span>
+            <span className="patient__action-label">Capture</span>
           </button>
         </div>
         <div className="patient__tabs">

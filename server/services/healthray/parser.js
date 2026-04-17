@@ -158,7 +158,7 @@ Return JSON with these keys:
   "labs": [{"test": "...", "value": "...", "unit": "...", "date": "..."}],
   "medications": [{"name": "...", "dose": "...", "frequency": "...", "timing": "...", "route": "Oral", "is_new": false}],
   "previous_medications": [{"name": "...", "dose": "...", "frequency": "...", "status": "stopped/changed", "reason": "..."}],
-  "vitals": {"height": null, "weight": null, "bmi": null, "bpSys": null, "bpDia": null, "waist": null, "bodyFat": null},
+  "vitals": [{"date": "YYYY-MM-DD or null", "height": null, "weight": null, "bmi": null, "bpSys": null, "bpDia": null, "waist": null, "bodyFat": null}],
   "lifestyle": {"diet": null, "exercise": null, "smoking": null, "alcohol": null, "stress": null},
   "investigations_to_order": [{"name": "...", "urgency": "urgent/routine/next_visit"}],
   "follow_up": {"date": null, "timing": null, "notes": null},
@@ -215,7 +215,19 @@ STRICT Rules:
   • "ACNE: GRADE 2" → name: "ACNE", details: "Grade 2", status: "Present". "SECONDARY AMENORRHEA" as a sub-bullet under PCOS → Present diagnosis.
   • "USG: PCOM+" or "USG: PCOM" → this is a USG finding (Polycystic Ovarian Morphology on ultrasound) that confirms PCOS — do NOT create a separate diagnosis entry for PCOM. Add it as details on the PCOS diagnosis instead.
   • "FGS - 14/36" in the DIAGNOSIS section is a Ferriman-Gallwey Score value, NOT an absent diagnosis. Extract as a lab result (test: "FGS", value: "14/36") — do NOT create a diagnosis entry for it.
-- For vitals: use the most complete and most recent set. Prefer the "FOLLOW UP TODAY:<date>" section (current visit) or "VITAL SIGNS" section over the OBSERVATIONS section (which is historical baseline). Extract HT/WT/BMI/BP/WC(waist circumference)/BF(body fat). If "FOLLOW UP TODAY:<currentDate>" has HT/WT/BMI/WC/BF/BP, use those as the current vitals. For BP: "BP SITTING: 165/97 SITTING" — the trailing word "SITTING" is a label duplication error, extract bpSys:165, bpDia:97. "BP STANDING: 152/93 SITTING" — "SITTING" at end is a typo for the label, extract as standing BP only (do not include in vitals object, which uses sitting BP).
+- For vitals: return an ARRAY with ONE entry per DATED section that contains vital values. Each entry must carry the date of the section it came from.
+  • "FOLLOW UP TODAY ON <date>" / "FOLLOW UP TODAY:<date>" → date = that date
+  • "FOLLOW UP ON <date>" / "FOLLOW UP NOTES(<date>)" → date = that date
+  • Any other dated section that contains vital values → date = that date
+  Dates come in DD/MM/YYYY (Indian format) — convert to YYYY-MM-DD.
+  Extract HT/WT/BMI/BP(sitting)/WC(waist circumference)/BF(body fat) into the entry for that date.
+  For BP: "BP SITTING: 165/97 SITTING" — the trailing word "SITTING" is a label duplication error, extract bpSys:165, bpDia:97. "BP STANDING: 152/93" is standing BP — SKIP, do not emit into vitals (we track sitting BP only).
+  DO NOT emit entries from:
+    • "OBSERVATIONS" / "OBSERVATION-:" sections (undated historical baseline)
+    • "VITAL SIGNS" blocks with no associated date
+    • "TARGET" / "GOAL" / "YOUR NEXT FOLLOW UP IS SCHEDULED ON <date>" sections (these are future targets, not measurements)
+    • Numbers inside a diagnosis parenthetical (e.g. "TYPE 2 DM (HBA1C:7)") — those are diagnosis context, not a measurement event
+  If no dated section contains vitals, return [] (empty array).
 - For lifestyle: SPLIT into separate fields. Set to null if not found — do NOT put medication instructions, monitoring instructions, or follow-up advice here:
   - diet: ONLY calorie/protein/food plan (e.g. "1400 kcal with 60g protein"). Must mention kcal/calories/protein/food. Null if not found
   - exercise: ONLY physical activity like steps, walking, gym (e.g. "10,000 steps daily"). Must mention steps/walk/exercise. Null if not found
