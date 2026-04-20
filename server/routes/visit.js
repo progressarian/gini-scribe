@@ -1142,31 +1142,49 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
   }
 });
 
-// ── POST /visit/:patientId/vitals — Create new vitals record for today ──
+// ── POST /visit/:patientId/vitals — Create new vitals record ──
+// Accepts optional recorded_at (ISO date or timestamptz) for historical backfill
+// from pasted-text extractions. When omitted, inserts with default NOW().
 router.post("/visit/:patientId/vitals", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const { bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist } =
-      req.body;
-    // Prevent duplicate if same vitals already recorded today
+    const {
+      bp_sys,
+      bp_dia,
+      pulse,
+      temp,
+      spo2,
+      weight,
+      height,
+      bmi,
+      body_fat,
+      muscle_mass,
+      waist,
+      recorded_at,
+    } = req.body;
+    const recordedAt = n(recorded_at) || null;
+    // Prevent duplicate if same vitals already recorded for this date (today when
+    // recorded_at not given, else the supplied date)
     const existing = await pool.query(
       `SELECT id FROM vitals
        WHERE patient_id = $1
-         AND recorded_at::date = CURRENT_DATE
-         AND COALESCE(bp_sys, -1) = COALESCE($2::real, -1)
-         AND COALESCE(weight, -1) = COALESCE($3::real, -1)
+         AND recorded_at::date = COALESCE($2::date, CURRENT_DATE)
+         AND COALESCE(bp_sys, -1) = COALESCE($3::real, -1)
+         AND COALESCE(weight, -1) = COALESCE($4::real, -1)
+         AND COALESCE(bmi, -1) = COALESCE($5::real, -1)
        LIMIT 1`,
-      [pid, num(bp_sys), num(weight)],
+      [pid, recordedAt, num(bp_sys), num(weight), num(bmi)],
     );
     if (existing.rows.length > 0) {
       return res.json({ ok: true, id: existing.rows[0].id, deduplicated: true });
     }
     const { rows } = await pool.query(
-      `INSERT INTO vitals (patient_id, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      `INSERT INTO vitals (patient_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist)
+       VALUES ($1, COALESCE($2::timestamptz, NOW()), $3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
       [
         pid,
+        recordedAt,
         num(bp_sys),
         num(bp_dia),
         num(pulse),

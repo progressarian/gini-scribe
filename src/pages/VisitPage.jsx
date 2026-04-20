@@ -1359,10 +1359,11 @@ export default function VisitPage() {
           doc_date={modal.data.doc_date}
           saving={labExtractSaving}
           onClose={closeModal}
-          onSave={async (tests, doc_date) => {
+          onSave={async (tests, doc_date, vitals = []) => {
             setLabExtractSaving(true);
             const source = modal.data.source || "lab";
-            let saved = 0;
+            let savedLabs = 0;
+            let savedVitals = 0;
             for (const test of tests) {
               try {
                 await api.post(`/api/patients/${dbPatientId}/labs`, {
@@ -1371,12 +1372,29 @@ export default function VisitPage() {
                   unit: test.unit || "",
                   flag: test.flag || "N",
                   ref_range: test.ref_range || "",
-                  test_date: doc_date || null,
+                  test_date: test.test_date || doc_date || null,
                   source,
                 });
-                saved++;
+                savedLabs++;
               } catch (e) {
                 console.error("Failed to save lab:", e.message);
+              }
+            }
+            for (const v of vitals) {
+              try {
+                await api.post(`/api/visit/${dbPatientId}/vitals`, {
+                  bp_sys: v.bpSys ?? null,
+                  bp_dia: v.bpDia ?? null,
+                  weight: v.weight ?? null,
+                  height: v.height ?? null,
+                  bmi: v.bmi ?? null,
+                  waist: v.waist ?? null,
+                  body_fat: v.bodyFat ?? null,
+                  recorded_at: v.date || doc_date || null,
+                });
+                savedVitals++;
+              } catch (e) {
+                console.error("Failed to save vitals:", e.message);
               }
             }
             // Refresh data and wait a moment for state to update
@@ -1384,7 +1402,11 @@ export default function VisitPage() {
             await new Promise((r) => setTimeout(r, 500));
             setLabExtractSaving(false);
             closeModal();
-            toast(`${saved} lab value${saved !== 1 ? "s" : ""} saved`, "success");
+            const parts = [];
+            if (savedLabs > 0) parts.push(`${savedLabs} lab${savedLabs !== 1 ? "s" : ""}`);
+            if (savedVitals > 0)
+              parts.push(`${savedVitals} vitals reading${savedVitals !== 1 ? "s" : ""}`);
+            toast(parts.length ? `${parts.join(" + ")} saved` : "Nothing saved", "success");
             // Delayed second refresh to catch async backend autoExtractLab results
             setTimeout(() => refreshData(), 3000);
           }}

@@ -18,21 +18,48 @@ function PasteBiomarkersModal({ patientId, onClose, onExtracted }) {
     try {
       const { data } = await api.post(`/api/visit/${patientId}/parse-text`, { text });
 
-      // Filter to numeric lab values only
-      const labs = (data?.labs || []).filter(
-        (l) => l.value !== null && l.value !== undefined && !isNaN(parseFloat(l.value)),
-      );
+      // Keep only labs with a finite numeric value; preserve AI-extracted date
+      // per lab (fallback to the modal's date only when the AI didn't resolve one).
+      const labs = (data?.labs || [])
+        .map((l) => ({
+          test: l.test,
+          value: l.value,
+          unit: l.unit || "",
+          date: l.date || date,
+        }))
+        .filter((l) => l.test && Number.isFinite(parseFloat(l.value)));
 
-      if (!labs.length) {
+      // Keep dated vitals rows. The parser returns { date, height, weight, bmi,
+      // bpSys, bpDia, waist, bodyFat } per dated follow-up section.
+      const vitals = (data?.vitals || [])
+        .map((v) => ({
+          date: v.date || date,
+          bpSys: v.bpSys ?? null,
+          bpDia: v.bpDia ?? null,
+          weight: v.weight ?? null,
+          height: v.height ?? null,
+          bmi: v.bmi ?? null,
+          waist: v.waist ?? null,
+          bodyFat: v.bodyFat ?? null,
+        }))
+        .filter(
+          (v) =>
+            v.bpSys != null ||
+            v.bpDia != null ||
+            v.weight != null ||
+            v.height != null ||
+            v.bmi != null ||
+            v.waist != null ||
+            v.bodyFat != null,
+        );
+
+      if (!labs.length && !vitals.length) {
         setError(
-          "No numeric lab values found. Make sure you pasted text that contains lab results.",
+          "No numeric lab values or vitals found. Make sure you pasted text that contains lab results or dated follow-up vitals.",
         );
         setLoading(false);
         return;
       }
-
-      // Always use the user's explicitly selected date — AI-extracted dates are unreliable
-      const detectedDate = date;
 
       const extracted = {
         panels: [
@@ -42,15 +69,19 @@ function PasteBiomarkersModal({ patientId, onClose, onExtracted }) {
               test_name: l.test,
               result: parseFloat(l.value),
               result_text: String(l.value),
-              unit: l.unit || "",
+              unit: l.unit,
               flag: null,
               ref_range: null,
+              test_date: l.date,
             })),
           },
         ],
+        vitals,
       };
 
-      onExtracted({ extracted, doc_date: detectedDate });
+      // Hand off to the review modal — it renders the per-row dates and the
+      // vitals section so the clinician can confirm before we write.
+      onExtracted({ extracted, doc_date: date });
     } catch (e) {
       setError("Extraction failed: " + (e.response?.data?.error || e.message));
       setLoading(false);
@@ -63,11 +94,12 @@ function PasteBiomarkersModal({ patientId, onClose, onExtracted }) {
         <div className="mttl">📋 Paste from HealthRay</div>
         <div style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
           Go to HealthRay → open the patient → copy the Diagnoses / clinical notes text and paste
-          below. AI will extract all biomarker values.
+          below. AI will extract all biomarker values and dated vitals, preserving the original
+          follow-up dates.
         </div>
 
         <div className="mf">
-          <label className="ml">Report / Visit Date</label>
+          <label className="ml">Fallback Date (used only if AI can't detect a date)</label>
           <input
             type="date"
             className="mi"
