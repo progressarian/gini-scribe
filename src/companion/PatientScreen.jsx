@@ -122,8 +122,16 @@ export default function PatientScreen() {
   );
 }
 
+const PHASE_BADGE = {
+  classifying: { label: "🏷️ Classifying…", color: "#f59e0b" },
+  extracting: { label: "⏳ Extracting…", color: "#7c3aed" },
+  syncing: { label: "💾 Saving data…", color: "#2563eb" },
+};
+
 const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc }) {
   const docs = patientData.documents || [];
+  const pendingExtractions = useCompanionStore((s) => s.pendingExtractions);
+  const retryExtraction = useCompanionStore((s) => s.retryExtraction);
 
   // Parse extracted_data once per docs array identity; avoids re-parsing JSON
   // on every parent re-render (tab switch, store update).
@@ -164,6 +172,17 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
   return (
     <div>
       {parsedDocs.map(({ doc, cat, ext }) => {
+        const pending = pendingExtractions[doc.id];
+        const sentinelPending =
+          !pending && ext?.extraction_status === "pending"
+            ? { status: "extracting", phase: "extracting" }
+            : null;
+        const state = pending || sentinelPending;
+        const phaseChip =
+          state && state.status !== "failed"
+            ? PHASE_BADGE[state.phase] || PHASE_BADGE.extracting
+            : null;
+
         return (
           <div key={doc.id} className="patient__doc-card">
             <div className="patient__doc-row">
@@ -175,7 +194,32 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
                 <div className="patient__doc-meta">
                   {doc.source} • {fDate(doc.doc_date)}
                 </div>
-                {ext && (
+                {(phaseChip || state?.status === "failed") && (
+                  <div className="patient__doc-badges">
+                    {phaseChip && (
+                      <span
+                        className="patient__doc-badge"
+                        style={{ color: phaseChip.color, borderColor: phaseChip.color }}
+                      >
+                        {phaseChip.label}
+                      </span>
+                    )}
+                    {state?.status === "failed" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          retryExtraction(doc.id);
+                        }}
+                        className="patient__doc-badge patient__doc-badge--retry"
+                        title={state.error || "Retry extraction"}
+                      >
+                        ⚠️ Retry
+                      </button>
+                    )}
+                  </div>
+                )}
+                {ext && !state && (
                   <div className="patient__doc-badges">
                     {ext.medications?.length > 0 && (
                       <span className="patient__doc-badge patient__doc-badge--med">

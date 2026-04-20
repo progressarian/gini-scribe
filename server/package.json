@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "worker": "node worker.js",
+    "dev:worker": "nodemon worker.js",
     "db:init": "node db-init.js"
   },
   "dependencies": {

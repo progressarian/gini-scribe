@@ -9,6 +9,8 @@
     "dev:server": "npm run dev --prefix server",
     "build": "vite build",
     "start": "node server/index.js",
+    "worker": "node server/worker.js",
+    "dev:worker": "nodemon server/worker.js",
     "format": "prettier --write \"src/**/*.{js,jsx,css}\" \"server/**/*.js\" \"*.{js,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,css}\" \"server/**/*.js\" \"*.{js,json}\""
   },

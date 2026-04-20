@@ -178,6 +178,30 @@ router.get("/documents/:id", async (req, res) => {
   }
 });
 
+// Supabase storage keys must be ASCII-only and URL-safe; filenames that come
+// from the OS (especially after renaming) often contain em-dashes, smart
+// quotes, or other unicode that Supabase rejects with InvalidKey. Sanitize
+// for the key while preserving the extension.
+function sanitizeForStorageKey(name) {
+  if (!name) return `file_${Date.now()}`;
+  const lastDot = name.lastIndexOf(".");
+  const base = lastDot > 0 ? name.slice(0, lastDot) : name;
+  const ext = lastDot > 0 ? name.slice(lastDot + 1).toLowerCase() : "";
+  const cleanBase = base
+    .normalize("NFKD")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^\w.\-]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^[_.-]+|[_.-]+$/g, "")
+    .slice(0, 120);
+  const cleanExt = ext.replace(/[^a-z0-9]/g, "").slice(0, 8);
+  const safeBase = cleanBase || `file_${Date.now()}`;
+  return cleanExt ? `${safeBase}.${cleanExt}` : safeBase;
+}
+
 // Upload file to Supabase Storage
 router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req, res) => {
   try {
@@ -191,7 +215,8 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
 
     const docType = doc.rows[0].doc_type || "other";
     const ts = Date.now();
-    const storagePath = `patients/${patientId}/${docType}/${ts}_${fileName}`;
+    const safeName = sanitizeForStorageKey(fileName);
+    const storagePath = `patients/${patientId}/${docType}/${ts}_${safeName}`;
 
     const fileBuffer = Buffer.from(base64, "base64");
     const uploadResp = await fetch(
@@ -212,12 +237,11 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
       return res.status(500).json({ error: "Upload failed: " + err });
     }
 
-    await pool.query("UPDATE documents SET storage_path=$1, mime_type=$2 WHERE id=$3", [
-      storagePath,
-      mediaType,
-      req.params.id,
-    ]);
-    res.json({ success: true, storage_path: storagePath });
+    await pool.query(
+      "UPDATE documents SET storage_path=$1, mime_type=$2, file_name=COALESCE(NULLIF($3,''),file_name) WHERE id=$4",
+      [storagePath, mediaType, fileName || null, req.params.id],
+    );
+    res.json({ success: true, storage_path: storagePath, file_name: fileName });
   } catch (e) {
     handleError(res, e, "Document");
   }
@@ -591,7 +615,7 @@ router.patch("/documents/:id", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const { extracted_data, notes } = req.body;
+    const { extracted_data, notes, doc_type } = req.body;
     const sets = [];
     const vals = [req.params.id];
     let idx = 2;
@@ -603,6 +627,11 @@ router.patch("/documents/:id", async (req, res) => {
     if (notes !== undefined) {
       sets.push(`notes = $${idx}`);
       vals.push(notes);
+      idx++;
+    }
+    if (doc_type !== undefined) {
+      sets.push(`doc_type = $${idx}`);
+      vals.push(doc_type);
       idx++;
     }
     if (!sets.length) {

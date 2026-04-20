@@ -14,20 +14,13 @@ export default function CaptureScreen() {
     currentCapture,
     currentCategory,
     captureMeta,
-    extractedData,
-    captureError,
-    nameMismatch,
-    categoryMismatch,
     loading,
     saveStatus,
     handleFileSelect,
     setCurrentCategory,
-    changeCategory,
     setCaptureMeta,
-    extractDocument,
     saveCapture,
     discardCapture,
-    retryCapture,
     loadPatientData,
   } = useCompanionStore();
 
@@ -190,203 +183,9 @@ export default function CaptureScreen() {
                 ✕ Cancel
               </button>
               <button
-                onClick={extractDocument}
-                disabled={!currentCategory}
-                className={`capture__action-extract ${!currentCategory ? "capture__action-extract--disabled" : ""}`}
-              >
-                🧠 Extract with AI
-              </button>
-            </div>
-          </div>
-        )}
-
-        {captureStep === "extracting" && (
-          <div className="capture__extracting">
-            <div className="capture__extracting-icon">🧠</div>
-            <div className="capture__extracting-title">AI is reading the document...</div>
-            <div className="capture__extracting-sub">
-              Extracting diagnoses, medications, lab values
-            </div>
-          </div>
-        )}
-
-        {captureStep === "review" && (
-          <div>
-            {nameMismatch && (
-              <div className="capture__mismatch">
-                <div className="capture__mismatch-title">⚠️ Name Mismatch</div>
-                <div className="capture__mismatch-body">
-                  Report says: <b>{nameMismatch.reportName}</b>
-                  <br />
-                  Selected patient: <b>{nameMismatch.selectedName}</b>
-                </div>
-                <div className="capture__mismatch-hint">
-                  Please verify this is the correct patient before saving.
-                </div>
-              </div>
-            )}
-            {categoryMismatch && (
-              <div
-                className="capture__mismatch"
-                style={{ borderColor: "#f59e0b", background: "#fffbeb" }}
-              >
-                <div className="capture__mismatch-title">📋 Category Check</div>
-                <div className="capture__mismatch-body">{categoryMismatch.msg}</div>
-                {categoryMismatch.detected === "prescription" && (
-                  <button
-                    onClick={() => changeCategory("prescription")}
-                    style={{
-                      marginTop: 8,
-                      padding: "6px 16px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "#7c3aed",
-                      color: "#fff",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Change to Prescription
-                  </button>
-                )}
-                {categoryMismatch.detected === "lab" && (
-                  <button
-                    onClick={() => changeCategory("blood_test")}
-                    style={{
-                      marginTop: 8,
-                      padding: "6px 16px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "#0369a1",
-                      color: "#fff",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Change to Lab Report
-                  </button>
-                )}
-                {categoryMismatch.detected === "both" && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: "#92400e" }}>
-                    Both medications and lab values will be saved automatically.
-                  </div>
-                )}
-              </div>
-            )}
-            {captureError && (
-              <div className="capture__error">
-                <div className="capture__error-text">⚠️ {captureError}</div>
-              </div>
-            )}
-            {currentCapture?.preview && (
-              <div className="capture__preview">
-                {currentCapture.mediaType === "application/pdf" ? (
-                  <iframe
-                    src={currentCapture.preview}
-                    title="PDF Preview"
-                    className="capture__preview-pdf"
-                  />
-                ) : (
-                  <img
-                    src={currentCapture.preview}
-                    alt="Captured"
-                    className="capture__preview-img"
-                  />
-                )}
-              </div>
-            )}
-            {extractedData && (
-              <div>
-                {extractedData.doctor_name && (
-                  <div className="capture__doctor-card">
-                    <div className="capture__doctor-name">
-                      {extractedData.doctor_name}{" "}
-                      {extractedData.specialty ? `(${extractedData.specialty})` : ""}
-                    </div>
-                    {extractedData.hospital_name && (
-                      <div className="capture__doctor-hospital">{extractedData.hospital_name}</div>
-                    )}
-                  </div>
-                )}
-                {extractedData.diagnoses?.length > 0 && (
-                  <div className="capture__section">
-                    <div className="capture__section-title">DIAGNOSES</div>
-                    <div className="capture__diagnoses">
-                      {extractedData.diagnoses.map((d, i) => (
-                        <span key={i} className="capture__diagnosis-tag">
-                          {typeof d === "string" ? d : d.label || d.id || ""}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {extractedData.medications?.length > 0 && (
-                  <div className="capture__section">
-                    <div className="capture__section-title">
-                      MEDICATIONS ({extractedData.medications.length})
-                    </div>
-                    {extractedData.medications.map((m, i) => (
-                      <div key={i} className="capture__med-row">
-                        <span className="capture__med-name">{m.name}</span>
-                        <span className="capture__med-details">
-                          {m.dose} {m.frequency} {m.timing}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {extractedData.labs?.length > 0 && (
-                  <div className="capture__section">
-                    <div className="capture__section-title">
-                      LAB VALUES ({extractedData.labs.length})
-                    </div>
-                    <div className="capture__labs-table">
-                      {extractedData.labs.map((l, i) => (
-                        <div key={i} className="capture__lab-row">
-                          <span className="capture__lab-name">{l.test_name}</span>
-                          <span>
-                            <span
-                              className="capture__lab-result"
-                              style={{
-                                color:
-                                  l.flag === "HIGH"
-                                    ? "#dc2626"
-                                    : l.flag === "LOW"
-                                      ? "#f59e0b"
-                                      : "#059669",
-                              }}
-                            >
-                              {l.result}
-                            </span>
-                            <span className="capture__lab-unit">{l.unit}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {extractedData.summary && (
-                      <div className="capture__summary">💡 {extractedData.summary}</div>
-                    )}
-                  </div>
-                )}
-                {extractedData.findings && (
-                  <div className="capture__findings">
-                    <div className="capture__findings-title">FINDINGS</div>
-                    {extractedData.findings}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="capture__review-actions">
-              <button onClick={discardCapture} className="capture__review-discard">
-                ✕ Discard
-              </button>
-              <button onClick={retryCapture} className="capture__review-retry">
-                🔄 Retry
-              </button>
-              <button
                 onClick={saveCapture}
-                disabled={loading}
-                className={`capture__review-save ${loading ? "capture__review-save--loading" : ""}`}
+                disabled={!currentCategory || loading}
+                className={`capture__action-extract ${!currentCategory || loading ? "capture__action-extract--disabled" : ""}`}
               >
                 {loading ? saveStatus || "Saving..." : "✅ Save"}
               </button>

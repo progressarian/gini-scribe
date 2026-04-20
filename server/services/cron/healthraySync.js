@@ -399,9 +399,19 @@ async function runBatch(items, concurrency, fn) {
   return results;
 }
 
+// ── Overlap guard — prevents scheduled syncs from stacking when one run
+// takes longer than the 5-minute interval. Date-range backfill (passes
+// `prefetched`) bypasses the guard since it owns its own orchestration.
+let syncInFlight = false;
+
 // ── Run sync for a given date ───────────────────────────────────────────────
 // Accepts optional pre-fetched doctors to avoid redundant API calls in range sync
 async function runSync(date, prefetched = null) {
+  if (!prefetched && syncInFlight) {
+    log("Sync", `Skipping ${date} — previous run still in progress`);
+    return { date, skippedRun: true };
+  }
+  if (!prefetched) syncInFlight = true;
   const startTime = Date.now();
   log("Sync", `Starting for ${date}...`);
 
@@ -438,7 +448,7 @@ async function runSync(date, prefetched = null) {
       if (!appointments.length) continue;
       log("Sync", `${localName}: ${appointments.length} appointments`);
 
-      const results = await runBatch(appointments, 5, (appt) => syncAppointment(appt, localName));
+      const results = await runBatch(appointments, 3, (appt) => syncAppointment(appt, localName));
       for (const r of results) {
         if (r.status === "rejected") {
           totalErrors++;
@@ -462,6 +472,8 @@ async function runSync(date, prefetched = null) {
   } catch (e) {
     error("Sync", `Fatal: ${e.message}`);
     throw e;
+  } finally {
+    if (!prefetched) syncInFlight = false;
   }
 }
 
@@ -496,9 +508,9 @@ export async function syncDateRange(from, to) {
     const prefetched = { rayDoctors, doctorMap };
     log("Range", `${doctorMap.size} doctors cached for range`);
 
-    // Process 3 dates concurrently
-    for (let i = 0; i < dates.length; i += 3) {
-      const batch = dates.slice(i, i + 3);
+    // Process 2 dates concurrently (keeps DB pool + AI calls predictable)
+    for (let i = 0; i < dates.length; i += 2) {
+      const batch = dates.slice(i, i + 2);
       await Promise.allSettled(
         batch.map(async (date) => {
           try {
@@ -524,9 +536,16 @@ export async function syncDateRange(from, to) {
 // Runs once per day — does NOT use the fast-path skip.
 import pool from "../../config/db.js";
 
+let dailyBackfillInFlight = false;
 export async function runDailyOpdBackfill(dateStr) {
+  if (dailyBackfillInFlight) {
+    log("Daily Backfill", "Skipping — previous run still in progress");
+    return { skippedRun: true };
+  }
+  dailyBackfillInFlight = true;
   const date = dateStr || toISTDate(new Date().toISOString());
   log("Daily Backfill", `Starting OPD re-parse for ${date}...`);
+  try {
 
   const { rows: patients } = await pool.query(
     `SELECT DISTINCT patient_id FROM appointments
@@ -607,6 +626,9 @@ export async function runDailyOpdBackfill(dateStr) {
 
   log("Daily Backfill", `Done ${date} — ${done} patients, ${fixed} re-parsed, ${errors} errors`);
   return { date, total: patients.length, done, fixed, errors };
+  } finally {
+    dailyBackfillInFlight = false;
+  }
 }
 
 // ── Stuck-status recovery ──────────────────────────────────────────────────
@@ -615,12 +637,19 @@ export async function runDailyOpdBackfill(dateStr) {
 // to 'seen' — typically because the doctor never clicked "Checkout" in
 // HealthRay, so mapStatus() kept returning in-progress/scheduled.
 // Calls markAppointmentAsSeen() to create the consultation and fix status.
+let stuckRecoveryInFlight = false;
 export async function runStuckStatusRecovery(windowDays) {
+  if (stuckRecoveryInFlight) {
+    log("Stuck Recovery", "Skipping — previous run still in progress");
+    return { skippedRun: true };
+  }
+  stuckRecoveryInFlight = true;
   const days = Number.isFinite(+windowDays)
     ? Math.max(1, +windowDays)
     : Math.max(1, +(process.env.STUCK_STATUS_WINDOW_DAYS || 5));
 
   log("Stuck Recovery", `Scanning last ${days} days for enriched-but-unseen appointments...`);
+  try {
 
   const { rows } = await pool.query(
     `SELECT id, file_no
@@ -655,6 +684,9 @@ export async function runStuckStatusRecovery(windowDays) {
 
   log("Stuck Recovery", `Done — ${fixed} fixed, ${errors} errors (window=${days}d)`);
   return { windowDays: days, total: rows.length, fixed, errors };
+  } finally {
+    stuckRecoveryInFlight = false;
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

@@ -127,36 +127,23 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 6. All lab results (deduped: one per test per date, best source wins)
+      // 6. All lab results — every reading is returned, even when the same
+      // test appears multiple times on the same date across different uploads.
+      // Display layer is responsible for any grouping/collapsing it wants.
       // When a row is linked to an appointment, prefer the appointment_date for display
       // so labs line up with the clinical visit date instead of the lab-case (received) date.
       pool.query(
-        `SELECT * FROM (
-           SELECT DISTINCT ON (COALESCE(lr.canonical_name, lr.test_name), lr.test_date::date)
-             lr.id, lr.patient_id, lr.appointment_id,
-             COALESCE(a.appointment_date::date, lr.test_date) AS test_date,
-             lr.test_date AS lab_test_date,
-             lr.test_name, lr.canonical_name, lr.result, lr.result_text, lr.unit,
-             lr.ref_range, lr.flag, lr.is_critical, lr.source, lr.panel_name, lr.created_at
-           FROM lab_results lr
-           LEFT JOIN appointments a ON a.id = lr.appointment_id
-           WHERE lr.patient_id = $1
-             AND lr.test_date >= NOW() - INTERVAL '5 years'
-           ORDER BY
-             COALESCE(lr.canonical_name, lr.test_name),
-             lr.test_date::date,
-             CASE lr.source
-               WHEN 'opd'                THEN 1
-               WHEN 'report_extract'     THEN 2
-               WHEN 'lab_healthray'      THEN 3
-               WHEN 'vitals_sheet'       THEN 4
-               WHEN 'prescription_parsed' THEN 5
-               WHEN 'healthray'          THEN 6
-               ELSE 7
-             END ASC,
-             lr.created_at DESC
-         ) deduped
-         ORDER BY test_date DESC, created_at DESC`,
+        `SELECT
+           lr.id, lr.patient_id, lr.appointment_id,
+           COALESCE(a.appointment_date::date, lr.test_date) AS test_date,
+           lr.test_date AS lab_test_date,
+           lr.test_name, lr.canonical_name, lr.result, lr.result_text, lr.unit,
+           lr.ref_range, lr.flag, lr.is_critical, lr.source, lr.panel_name, lr.created_at
+         FROM lab_results lr
+         LEFT JOIN appointments a ON a.id = lr.appointment_id
+         WHERE lr.patient_id = $1
+           AND lr.test_date >= NOW() - INTERVAL '5 years'
+         ORDER BY test_date DESC, lr.created_at DESC`,
         [pid],
       ),
 

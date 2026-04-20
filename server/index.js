@@ -30,6 +30,11 @@ import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
 
+// Cron/sync jobs run in a separate worker process (see server/worker.js) so
+// heavy HealthRay sync work cannot starve the API's DB pool or event loop.
+// Set RUN_CRON_IN_API=1 to fall back to the old single-process behavior.
+const RUN_CRON_IN_API = process.env.RUN_CRON_IN_API === "1";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -110,7 +115,12 @@ app.get("*", (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`);
-  startCronJobs();
-  startSheetsCron();
-  startTodaysShowCron();
+  if (RUN_CRON_IN_API) {
+    console.log("⚠️  RUN_CRON_IN_API=1 — running cron jobs inside API process");
+    startCronJobs();
+    startSheetsCron();
+    startTodaysShowCron();
+  } else {
+    console.log("ℹ️  cron jobs disabled in API process — run `npm run worker` separately");
+  }
 });
