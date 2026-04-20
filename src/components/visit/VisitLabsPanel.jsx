@@ -339,19 +339,11 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   const [viewingDoc, setViewingDoc] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null); // null = "Latest"
 
-  // All lab sub-categories surfaced by the Companion multi-capture flow —
-  // any of these should appear under "Blood Reports". Previously the filter
-  // accepted only `lab_report` / `blood_test`, silently dropping HbA1c,
-  // thyroid, lipid, kidney, urine uploads.
-  const LAB_DOC_TYPES = new Set([
-    "lab_report",
-    "blood_test",
-    "thyroid",
-    "lipid",
-    "kidney",
-    "hba1c",
-    "urine",
-  ]);
+  // On the Labs tab we want every uploaded document to be visible except
+  // prescriptions (those belong to the Rx / visit history, not the lab view).
+  // Radiology sub-categories get their own section; everything else — including
+  // lab_report, all lab sub-categories, "other", and any unexpected values —
+  // falls under "Blood Reports" so nothing silently disappears from the UI.
   const RADIOLOGY_DOC_TYPES = new Set([
     "imaging",
     "radiology",
@@ -363,7 +355,9 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     "ncs",
     "eye",
   ]);
-  const labDocs = documents.filter((d) => LAB_DOC_TYPES.has(d.doc_type));
+  const labDocs = documents.filter(
+    (d) => d.doc_type !== "prescription" && !RADIOLOGY_DOC_TYPES.has(d.doc_type),
+  );
   const radiologyDocs = documents.filter((d) => RADIOLOGY_DOC_TYPES.has(d.doc_type));
 
   const openDoc = useCallback((doc) => {
@@ -393,7 +387,9 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
         (max, r) => (r.test_date && r.test_date > max ? r.test_date : max),
         "",
       );
-      const rows = latestTestDate ? buildHistoricalRows(labResults, latestTestDate.slice(0, 10)) : [];
+      const rows = latestTestDate
+        ? buildHistoricalRows(labResults, latestTestDate.slice(0, 10))
+        : [];
       const matchingOrder = latestTestDate
         ? findLabOrderForDate(labOrders, latestTestDate.slice(0, 10))
         : null;

@@ -493,10 +493,11 @@ function BiomarkerSparkline({ data, color, unit, target }) {
           const cy = getY(values[hoverIdx]);
           const TW = 88,
             TH = 38;
-          // keep tooltip inside SVG bounds
+          // keep tooltip horizontally inside SVG bounds
           const tipX = Math.min(Math.max(cx - TW / 2, 0), W - TW);
-          // Always place tooltip above the chart area to avoid overlapping data points
-          const tipY = Math.max(cy - TH - 14, -TH - 4);
+          // Always render above the point; SVG has overflow:visible and the
+          // parent card no longer clips, so it stays fully visible.
+          const tipY = cy - TH - 14;
           return (
             <g style={{ pointerEvents: "none" }}>
               {/* vertical crosshair */}
@@ -607,7 +608,6 @@ export const BiomarkerCard = memo(function BiomarkerCard({
         borderRadius: 12,
         border: "1px solid #f1f5f9",
         boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-        overflow: "hidden",
       }}
     >
       {/* header */}
