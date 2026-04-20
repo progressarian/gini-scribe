@@ -339,12 +339,32 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   const [viewingDoc, setViewingDoc] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null); // null = "Latest"
 
-  const labDocs = documents.filter(
-    (d) => d.doc_type === "lab_report" || d.doc_type === "blood_test",
-  );
-  const radiologyDocs = documents.filter(
-    (d) => d.doc_type === "imaging" || d.doc_type === "radiology",
-  );
+  // All lab sub-categories surfaced by the Companion multi-capture flow —
+  // any of these should appear under "Blood Reports". Previously the filter
+  // accepted only `lab_report` / `blood_test`, silently dropping HbA1c,
+  // thyroid, lipid, kidney, urine uploads.
+  const LAB_DOC_TYPES = new Set([
+    "lab_report",
+    "blood_test",
+    "thyroid",
+    "lipid",
+    "kidney",
+    "hba1c",
+    "urine",
+  ]);
+  const RADIOLOGY_DOC_TYPES = new Set([
+    "imaging",
+    "radiology",
+    "xray",
+    "usg",
+    "mri",
+    "dexa",
+    "ecg",
+    "ncs",
+    "eye",
+  ]);
+  const labDocs = documents.filter((d) => LAB_DOC_TYPES.has(d.doc_type));
+  const radiologyDocs = documents.filter((d) => RADIOLOGY_DOC_TYPES.has(d.doc_type));
 
   const openDoc = useCallback((doc) => {
     setViewingDoc(doc);
