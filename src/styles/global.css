@@ -25,3 +25,20 @@
   border-bottom-color: #3b82f6 !important;
   background: #eff6ff;
 }
+
+/* ============ OPD FULLSCREEN ============ */
+/* Break OPD page out of the 1100px .app shell, mirroring /visit. Lets the
+   OPD topbar + dashboard own the full viewport with a single inner scroll. */
+.app:has(.opd-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  max-width: none;
+  padding: 0;
+}
+.opd-page {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}

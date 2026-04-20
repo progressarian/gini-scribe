@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 // xlsx is lazy-loaded inside the Excel-upload handler below to keep it out
 // of the main bundle (~900 KB pre-gzip). Nothing else in this file touches it.
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
+import LiveDashboard from "./components/opd/LiveDashboard.jsx";
 import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
 import { qk } from "./queries/keys.js";
 
@@ -733,7 +734,7 @@ function DocSection({ docName, appts, selAppt, onSelect }) {
 // ══════════════════════════════════════════════════════════════
 // EMPTY STATE
 // ══════════════════════════════════════════════════════════════
-function EmptyState({ onNew, onImport, stats }) {
+function EmptyState({ onNew, onImport, onDashboard, stats }) {
   return (
     <div
       style={{
@@ -807,9 +808,9 @@ function EmptyState({ onNew, onImport, stats }) {
           Labs → Compliance → Categorize → Assign → Check In → Vitals
         </div>
       </div>
-      <div style={{ display: "flex", gap: 9 }}>
+      <div style={{ display: "flex", gap: 9, flexWrap: "wrap", justifyContent: "center" }}>
         <button
-          onClick={onNew}
+          onClick={onDashboard}
           style={{
             padding: "9px 20px",
             borderRadius: 8,
@@ -821,6 +822,22 @@ function EmptyState({ onNew, onImport, stats }) {
             cursor: "pointer",
             fontFamily: FB,
             boxShadow: "0 2px 8px rgba(0,158,140,.3)",
+          }}
+        >
+          📊 View Live Dashboard
+        </button>
+        <button
+          onClick={onNew}
+          style={{
+            padding: "9px 20px",
+            borderRadius: 8,
+            background: WH,
+            color: INK2,
+            border: `1px solid ${BD}`,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: FB,
           }}
         >
           + New Appointment
@@ -5942,7 +5959,23 @@ export default function OPD() {
   const [searchQ, setSearchQ] = useState("");
   const [selAppt, setSelAppt] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
-  const [view, setView] = useState("list");
+
+  // URL-driven tab: ?tab=schedule|dashboard|new-appt|excel. "schedule" maps to
+  // the internal "list" view so shareable links read naturally.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const TAB_TO_VIEW = { schedule: "list", dashboard: "dashboard", "new-appt": "new-appt", excel: "excel" };
+  const VIEW_TO_TAB = { list: "schedule", dashboard: "dashboard", "new-appt": "new-appt", excel: "excel" };
+  const view = TAB_TO_VIEW[searchParams.get("tab")] || "list";
+  const setView = useCallback(
+    (v) => {
+      const next = new URLSearchParams(searchParams);
+      const tab = VIEW_TO_TAB[v] || "schedule";
+      if (tab === "schedule") next.delete("tab");
+      else next.set("tab", tab);
+      setSearchParams(next, { replace: false });
+    },
+    [searchParams, setSearchParams],
+  );
   const [toast, setToast] = useState(null);
   const [clock, setClock] = useState("");
   const doctor = getDoctor();
@@ -5950,7 +5983,13 @@ export default function OPD() {
   // React Query owns the OPD list. `updateLocal` below writes into the cache
   // directly via setQueryData so every subscriber sees the optimistic update.
   const qc = useQueryClient();
-  const apptsQuery = useOpdAppointments(date);
+  // 30s polling keeps the Live Dashboard counters in sync without a manual
+  // reload. refetchIntervalInBackground:false means we stop polling when the
+  // tab is hidden — the focus-refetch will catch us up when it returns.
+  const apptsQuery = useOpdAppointments(date, {
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  });
   const appointments = apptsQuery.data || [];
   // Only show the full-page loading state when there's no cached data yet
   // (isPending). Background refetches (isFetching while cache is warm) should
@@ -6170,8 +6209,8 @@ export default function OPD() {
 
   return (
     <div
+      className="opd-page"
       style={{
-        height: "100vh",
         display: "flex",
         flexDirection: "column",
         background: BG,
@@ -6203,6 +6242,7 @@ export default function OPD() {
         <div style={{ display: "flex", gap: 2, marginLeft: 6 }}>
           {[
             ["list", "📋 Schedule"],
+            ["dashboard", "📊 Live Dashboard"],
             ["new-appt", "➕ New Appointment"],
             ["excel", "📊 Import Excel"],
           ].map(([v, l]) => (
@@ -6277,25 +6317,11 @@ export default function OPD() {
               </div>
             </div>
           )}
-          <a
-            href="/"
-            style={{
-              padding: "4px 11px",
-              borderRadius: 6,
-              background: "rgba(255,255,255,.08)",
-              color: "rgba(255,255,255,.6)",
-              fontSize: 11,
-              textDecoration: "none",
-              fontWeight: 500,
-              border: "1px solid rgba(255,255,255,.12)",
-            }}
-          >
-            ← Scribe
-          </a>
         </div>
       </div>
 
-      {/* Sub-nav */}
+      {/* Sub-nav — only visible on Schedule tab */}
+      {view === "list" && (
       <div
         style={{
           background: WH,
@@ -6424,6 +6450,7 @@ export default function OPD() {
           )}
         </div>
       </div>
+      )}
 
       {/* Main */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -6447,6 +6474,20 @@ export default function OPD() {
               showToast("✓ Appointment created");
             }}
           />
+        ) : view === "dashboard" ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", background: BG }}>
+            <LiveDashboard
+              appointments={appointments}
+              updatedAt={apptsQuery.dataUpdatedAt}
+              isFetching={apptsQuery.isFetching}
+              onRefresh={() => apptsQuery.refetch()}
+              onSelectAppt={(a) => {
+                setSelAppt(a);
+                setActiveTab("overview");
+                setView("list");
+              }}
+            />
+          </div>
         ) : (
           <>
             {/* Left schedule */}
@@ -6678,6 +6719,7 @@ export default function OPD() {
                 <EmptyState
                   onNew={() => setView("new-appt")}
                   onImport={() => setView("excel")}
+                  onDashboard={() => setView("dashboard")}
                   stats={stats}
                 />
               ) : (

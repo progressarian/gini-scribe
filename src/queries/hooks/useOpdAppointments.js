@@ -9,10 +9,11 @@ async function fetchOpdAppointments(date) {
   return Array.isArray(data) ? data : [];
 }
 
-export function useOpdAppointments(date) {
+export function useOpdAppointments(date, options = {}) {
   return useQuery({
     queryKey: qk.opd.appointments(date),
     queryFn: () => fetchOpdAppointments(date),
     enabled: !!date,
+    ...options,
   });
 }
