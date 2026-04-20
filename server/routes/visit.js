@@ -484,6 +484,26 @@ router.get("/visit/:patientId/lab-count", async (req, res) => {
   }
 });
 
+// ── POST /visit/:patientId/biomarkers/refresh — Recompute appointment biomarkers
+// from the latest lab_results rows and update the OPD chip JSONB. Called by the
+// paste-biomarkers flow after saving a batch of labs so OPD + Outcomes reflect the
+// new values immediately without a full HealthRay sync.
+router.post("/visit/:patientId/biomarkers/refresh", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+      [pid],
+    );
+    if (!rows[0]) return res.json({ ok: true, reason: "no_appointments" });
+    await syncBiomarkersFromLatestLabs(pid, rows[0].id);
+    res.json({ ok: true, appointment_id: rows[0].id });
+  } catch (e) {
+    handleError(res, e, "Biomarker refresh");
+  }
+});
+
 // ── POST /visit/:patientId/lab — Add a lab value ──
 router.post("/visit/:patientId/lab", async (req, res) => {
   const pid = Number(req.params.patientId);

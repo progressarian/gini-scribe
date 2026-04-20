@@ -18,16 +18,25 @@ function PasteBiomarkersModal({ patientId, onClose, onExtracted }) {
     try {
       const { data } = await api.post(`/api/visit/${patientId}/parse-text`, { text });
 
-      // Keep only labs with a finite numeric value; preserve AI-extracted date
-      // per lab (fallback to the modal's date only when the AI didn't resolve one).
+      // Skip vital-sign fields that also live in `vitals[]` — otherwise they
+      // would get saved twice (once as lab_results rows, once as vitals rows)
+      // and the labs tab + sparklines would double-count.
+      const vitalNameRe =
+        /^(height|weight|bmi|body\s*mass\s*index|body\s*fat|waist|waist\s*circumference|bp\s*systolic|bp\s*diastolic|systolic\s*bp|diastolic\s*bp|pulse|heart\s*rate|hr)\b/i;
+
+      // Preserve AI-extracted date per lab (fallback to modal's date only when
+      // the AI didn't resolve one). Allow non-numeric values (Positive/Negative
+      // etc) — the backend stores them as result_text. Multi-value readings
+      // like "FBG: 71,80" are already split into separate rows by the parser.
       const labs = (data?.labs || [])
+        .filter((l) => l && l.test && l.value != null && String(l.value).trim() !== "")
+        .filter((l) => !vitalNameRe.test(l.test))
         .map((l) => ({
           test: l.test,
           value: l.value,
           unit: l.unit || "",
           date: l.date || date,
-        }))
-        .filter((l) => l.test && Number.isFinite(parseFloat(l.value)));
+        }));
 
       // Keep dated vitals rows. The parser returns { date, height, weight, bmi,
       // bpSys, bpDia, waist, bodyFat } per dated follow-up section.
@@ -65,15 +74,20 @@ function PasteBiomarkersModal({ patientId, onClose, onExtracted }) {
         panels: [
           {
             panel_name: "Pasted from HealthRay",
-            tests: labs.map((l) => ({
-              test_name: l.test,
-              result: parseFloat(l.value),
-              result_text: String(l.value),
-              unit: l.unit,
-              flag: null,
-              ref_range: null,
-              test_date: l.date,
-            })),
+            tests: labs.map((l) => {
+              const raw = String(l.value).trim();
+              // Strict numeric — rejects ranges like "6-8" or mixed text
+              const isNumeric = /^-?\d+(\.\d+)?$/.test(raw);
+              return {
+                test_name: l.test,
+                result: isNumeric ? parseFloat(raw) : null,
+                result_text: raw,
+                unit: l.unit,
+                flag: null,
+                ref_range: null,
+                test_date: l.date,
+              };
+            }),
           },
         ],
         vitals,

@@ -1,8 +1,10 @@
 import "./VisitPage.css";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
 import { useVisit } from "../queries/hooks/useVisit";
+import { qk } from "../queries/keys";
 import usePatientStore from "../stores/patientStore";
 import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
@@ -232,6 +234,7 @@ function buildExamFindings(rawExam) {
 
 export default function VisitPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
   const doctor = useAuthStore((s) => s.currentDoctor);
   const endVisitAction = useVisitStore((s) => s.endVisit);
@@ -1397,8 +1400,21 @@ export default function VisitPage() {
                 console.error("Failed to save vitals:", e.message);
               }
             }
+            // Refresh the OPD biomarker chip strip from the new lab_results
+            // so /opd reflects the latest values alongside /visit and /outcomes.
+            if (savedLabs > 0) {
+              try {
+                await api.post(`/api/visit/${dbPatientId}/biomarkers/refresh`);
+              } catch (e) {
+                console.error("Biomarker refresh failed:", e.message);
+              }
+            }
             // Refresh data and wait a moment for state to update
             await refreshData();
+            // Invalidate OPD appointments cache so the chip strip repaints when
+            // the user navigates there. Outcomes page refetches on mount (no
+            // cache invalidation needed there).
+            qc.invalidateQueries({ queryKey: qk.opd.all });
             await new Promise((r) => setTimeout(r, 500));
             setLabExtractSaving(false);
             closeModal();
