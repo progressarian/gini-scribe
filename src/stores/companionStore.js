@@ -615,8 +615,7 @@ const useCompanionStore = create((set, get) => ({
     })),
 
   // Per-item category / metadata editors used by the multi-capture preview form.
-  multiSetItemCategory: (itemId, category) =>
-    get()._patchMultiItem(itemId, { category }),
+  multiSetItemCategory: (itemId, category) => get()._patchMultiItem(itemId, { category }),
 
   multiSetItemMeta: (itemId, patch) =>
     set((s) => ({
@@ -648,9 +647,7 @@ const useCompanionStore = create((set, get) => ({
             get()._patchMultiItem(item.id, { classifying: false });
             return;
           }
-          const classification = error
-            ? { doc_type: "other", subtype: null, confidence: 0 }
-            : data;
+          const classification = error ? { doc_type: "other", subtype: null, confidence: 0 } : data;
           get()._patchMultiItem(item.id, {
             classifying: false,
             classification,

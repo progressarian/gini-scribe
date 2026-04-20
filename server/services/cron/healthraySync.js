@@ -546,86 +546,85 @@ export async function runDailyOpdBackfill(dateStr) {
   const date = dateStr || toISTDate(new Date().toISOString());
   log("Daily Backfill", `Starting OPD re-parse for ${date}...`);
   try {
-
-  const { rows: patients } = await pool.query(
-    `SELECT DISTINCT patient_id FROM appointments
+    const { rows: patients } = await pool.query(
+      `SELECT DISTINCT patient_id FROM appointments
      WHERE appointment_date = $1 AND patient_id IS NOT NULL`,
-    [date],
-  );
+      [date],
+    );
 
-  if (!patients.length) {
-    log("Daily Backfill", `No patients found for ${date}`);
-    return { date, total: 0, done: 0, errors: 0 };
-  }
+    if (!patients.length) {
+      log("Daily Backfill", `No patients found for ${date}`);
+      return { date, total: 0, done: 0, errors: 0 };
+    }
 
-  let done = 0,
-    errors = 0,
-    fixed = 0;
+    let done = 0,
+      errors = 0,
+      fixed = 0;
 
-  for (const { patient_id } of patients) {
-    try {
-      // Find latest appointment with clinical notes for this patient
-      const { rows } = await pool.query(
-        `SELECT id, healthray_id, appointment_date, healthray_clinical_notes
+    for (const { patient_id } of patients) {
+      try {
+        // Find latest appointment with clinical notes for this patient
+        const { rows } = await pool.query(
+          `SELECT id, healthray_id, appointment_date, healthray_clinical_notes
          FROM appointments
          WHERE patient_id = $1
            AND healthray_clinical_notes IS NOT NULL
            AND LENGTH(healthray_clinical_notes) > 20
          ORDER BY appointment_date DESC LIMIT 1`,
-        [patient_id],
-      );
+          [patient_id],
+        );
 
-      if (!rows[0]) {
-        done++;
-        continue;
-      }
-      const appt = rows[0];
+        if (!rows[0]) {
+          done++;
+          continue;
+        }
+        const appt = rows[0];
 
-      const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
-      if (!parsed) {
-        errors++;
-        done++;
-        continue;
-      }
+        const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+        if (!parsed) {
+          errors++;
+          done++;
+          continue;
+        }
 
-      const diagnoses = parsed.diagnoses || [];
-      const medications = parsed.medications || [];
-      const previousMeds = parsed.previous_medications || [];
+        const diagnoses = parsed.diagnoses || [];
+        const medications = parsed.medications || [];
+        const previousMeds = parsed.previous_medications || [];
 
-      // Update JSONB on appointment
-      await pool.query(
-        `UPDATE appointments
+        // Update JSONB on appointment
+        await pool.query(
+          `UPDATE appointments
          SET healthray_diagnoses = $1::jsonb,
              healthray_medications = $2::jsonb,
              updated_at = NOW()
          WHERE id = $3`,
-        [JSON.stringify(diagnoses), JSON.stringify(medications), appt.id],
-      );
+          [JSON.stringify(diagnoses), JSON.stringify(medications), appt.id],
+        );
 
-      // Sync to normalized tables
-      if (diagnoses.length > 0) {
-        await syncDiagnoses(patient_id, appt.healthray_id, diagnoses);
-      }
-      if (medications.length > 0) {
-        await syncMedications(patient_id, appt.healthray_id, appt.appointment_date, medications);
-        await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
-      }
-      if (previousMeds.length > 0) {
-        await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds, medications);
-      }
+        // Sync to normalized tables
+        if (diagnoses.length > 0) {
+          await syncDiagnoses(patient_id, appt.healthray_id, diagnoses);
+        }
+        if (medications.length > 0) {
+          await syncMedications(patient_id, appt.healthray_id, appt.appointment_date, medications);
+          await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
+        }
+        if (previousMeds.length > 0) {
+          await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds, medications);
+        }
 
-      fixed++;
-    } catch (e) {
-      error("Daily Backfill", `Patient ${patient_id}: ${e.message}`);
-      errors++;
+        fixed++;
+      } catch (e) {
+        error("Daily Backfill", `Patient ${patient_id}: ${e.message}`);
+        errors++;
+      }
+      done++;
+      // Small delay to avoid connection pressure during long backfill runs
+      await new Promise((r) => setTimeout(r, 200));
     }
-    done++;
-    // Small delay to avoid connection pressure during long backfill runs
-    await new Promise((r) => setTimeout(r, 200));
-  }
 
-  log("Daily Backfill", `Done ${date} — ${done} patients, ${fixed} re-parsed, ${errors} errors`);
-  return { date, total: patients.length, done, fixed, errors };
+    log("Daily Backfill", `Done ${date} — ${done} patients, ${fixed} re-parsed, ${errors} errors`);
+    return { date, total: patients.length, done, fixed, errors };
   } finally {
     dailyBackfillInFlight = false;
   }
@@ -650,40 +649,39 @@ export async function runStuckStatusRecovery(windowDays) {
 
   log("Stuck Recovery", `Scanning last ${days} days for enriched-but-unseen appointments...`);
   try {
-
-  const { rows } = await pool.query(
-    `SELECT id, file_no
+    const { rows } = await pool.query(
+      `SELECT id, file_no
        FROM appointments
       WHERE status NOT IN ('seen', 'cancelled', 'no_show')
         AND appointment_date >= (CURRENT_DATE - ($1 || ' days')::interval)
         AND jsonb_array_length(COALESCE(healthray_diagnoses,'[]'::jsonb))  > 0
         AND jsonb_array_length(COALESCE(healthray_medications,'[]'::jsonb)) > 0
       ORDER BY appointment_date DESC`,
-    [String(days)],
-  );
+      [String(days)],
+    );
 
-  if (!rows.length) {
-    log("Stuck Recovery", "No stuck appointments found");
-    return { windowDays: days, total: 0, fixed: 0, errors: 0 };
-  }
-
-  log("Stuck Recovery", `Found ${rows.length} stuck appointments`);
-
-  let fixed = 0;
-  let errors = 0;
-  for (const r of rows) {
-    try {
-      const result = await markAppointmentAsSeen(r.id);
-      if (result) fixed++;
-    } catch (e) {
-      errors++;
-      error("Stuck Recovery", `id=${r.id} (${r.file_no}): ${e.message}`);
+    if (!rows.length) {
+      log("Stuck Recovery", "No stuck appointments found");
+      return { windowDays: days, total: 0, fixed: 0, errors: 0 };
     }
-    await new Promise((res) => setTimeout(res, 100));
-  }
 
-  log("Stuck Recovery", `Done — ${fixed} fixed, ${errors} errors (window=${days}d)`);
-  return { windowDays: days, total: rows.length, fixed, errors };
+    log("Stuck Recovery", `Found ${rows.length} stuck appointments`);
+
+    let fixed = 0;
+    let errors = 0;
+    for (const r of rows) {
+      try {
+        const result = await markAppointmentAsSeen(r.id);
+        if (result) fixed++;
+      } catch (e) {
+        errors++;
+        error("Stuck Recovery", `id=${r.id} (${r.file_no}): ${e.message}`);
+      }
+      await new Promise((res) => setTimeout(res, 100));
+    }
+
+    log("Stuck Recovery", `Done — ${fixed} fixed, ${errors} errors (window=${days}d)`);
+    return { windowDays: days, total: rows.length, fixed, errors };
   } finally {
     stuckRecoveryInFlight = false;
   }

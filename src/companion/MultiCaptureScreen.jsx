@@ -287,12 +287,7 @@ function ItemCard({ item, onOpen, onRemove, onCategoryChange, onMetaChange }) {
   return (
     <div className={`mcap__card ${needsCategory ? "mcap__card--needs-cat" : ""}`}>
       <div className="mcap__card-top">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="mcap__card-thumb"
-          title="Tap to preview"
-        >
+        <button type="button" onClick={onOpen} className="mcap__card-thumb" title="Tap to preview">
           {item.mediaType === "application/pdf" ? (
             <div className="mcap__thumb-pdf">
               <div className="mcap__thumb-pdf-icon">📄</div>
@@ -306,12 +301,7 @@ function ItemCard({ item, onOpen, onRemove, onCategoryChange, onMetaChange }) {
           <div className="mcap__card-name" title={item.fileName}>
             {item.fileName}
           </div>
-          <button
-            type="button"
-            className="mcap__thumb-remove"
-            onClick={onRemove}
-            title="Remove"
-          >
+          <button type="button" className="mcap__thumb-remove" onClick={onRemove} title="Remove">
             ✕
           </button>
         </div>

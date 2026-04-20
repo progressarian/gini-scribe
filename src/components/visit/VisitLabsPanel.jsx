@@ -292,17 +292,23 @@ function PanelBlock({ name, results, type }) {
         <span className="mthl">Range</span>
       </div>
       {results.map((r, i) => (
-        <ResultRow key={r.canonical ?? i} r={r} />
+        // Key on the row's lab_results.id — canonical alone collapses React
+        // renders when multiple reports on the same day carry the same test.
+        <ResultRow key={r.id ?? `${r.canonical}-${i}`} r={r} />
       ))}
     </div>
   );
 }
 
-// Build rows from labResults for a specific date (same shape as buildLatestRows)
+// Build rows from labResults for a specific date (same shape as buildLatestRows).
+// No canonical-name dedup: if the user uploaded multiple reports on the same
+// day that each contain the same test, every reading is shown so the user
+// can compare values / spot data-entry errors across reports.
 function buildHistoricalRows(labResults, dateStr) {
   if (!labResults?.length || !dateStr) return [];
   const dayResults = labResults.filter((r) => r.test_date && r.test_date.slice(0, 10) === dateStr);
-  const rows = dayResults.map((r) => ({
+  return dayResults.map((r) => ({
+    id: r.id,
     canonical: r.canonical_name || r.test_name,
     test_name: r.test_name,
     result: r.result,
@@ -314,20 +320,6 @@ function buildHistoricalRows(labResults, dateStr) {
     source: r.source || "healthray",
     panel_name: r.panel_name || null,
   }));
-  // Same cross-source dedup as buildLatestRows
-  const PREFIX_RE = /^(serum|plasma|s\.?|sr\.?|b\.?)[\s_]+/i;
-  const normalize = (s) =>
-    (s || "")
-      .toLowerCase()
-      .replace(PREFIX_RE, "")
-      .replace(/[^a-z0-9]/g, "");
-  const kept = new Map();
-  rows.sort((a, b) => (SOURCE_PRIORITY[a.source] ?? 9) - (SOURCE_PRIORITY[b.source] ?? 9));
-  for (const row of rows) {
-    const nk = normalize(row.canonical) || normalize(row.test_name);
-    if (!kept.has(nk)) kept.set(nk, row);
-  }
-  return Array.from(kept.values());
 }
 
 // Find the labOrder whose case_date matches a given date
@@ -370,18 +362,22 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
 
   const { displayRows, sections, displayDate } = useMemo(() => {
     if (selectedDate === null) {
-      // "Latest" mode — existing behaviour
-      const rows = buildLatestRows(labLatest);
-      const latestTestDate = rows.reduce(
+      // "Latest" mode — derive every reading on the most-recent test date
+      // straight from labResults. This keeps multiple readings visible when
+      // the user uploaded several reports on the same day (previously,
+      // labLatest collapsed these to a single entry per canonical name).
+      if (!labResults?.length) {
+        return { displayRows: [], sections: [], displayDate: "" };
+      }
+      const latestTestDate = labResults.reduce(
         (max, r) => (r.test_date && r.test_date > max ? r.test_date : max),
         "",
       );
-      const filtered = latestTestDate
-        ? rows.filter(
-            (r) => r.test_date && r.test_date.slice(0, 10) === latestTestDate.slice(0, 10),
-          )
-        : rows;
-      const secs = buildSections(filtered, labOrders);
+      const rows = latestTestDate ? buildHistoricalRows(labResults, latestTestDate.slice(0, 10)) : [];
+      const matchingOrder = latestTestDate
+        ? findLabOrderForDate(labOrders, latestTestDate.slice(0, 10))
+        : null;
+      const secs = buildSections(rows, matchingOrder ? [matchingOrder] : labOrders);
       return { displayRows: rows, sections: secs, displayDate: latestTestDate };
     }
     // Historical mode
@@ -389,7 +385,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     const matchingOrder = findLabOrderForDate(labOrders, selectedDate);
     const secs = buildSections(rows, matchingOrder ? [matchingOrder] : []);
     return { displayRows: rows, sections: secs, displayDate: selectedDate };
-  }, [selectedDate, labLatest, labResults, labOrders]);
+  }, [selectedDate, labResults, labOrders]);
 
   const hasResults = displayRows.length > 0;
 
