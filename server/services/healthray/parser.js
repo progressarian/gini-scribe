@@ -175,7 +175,16 @@ STRICT Rules:
   Also extract: Urine Pus Cells (e.g. "URINE RE-8 PUS CELLS" → test: "Urine Pus Cells", value: "8"), Amylase, Lipase, Fecal Elastase, GAD65 antibody / IAA / IA2 / ZnT8 autoantibody results (e.g. "GAD65/IAA/IA2 PANEL NEGATIVE" → extract as test: "GAD65/IAA/IA2 Panel", value: "Negative"), Random C-Peptide (e.g. "RANDOM C PEPTIDE-3.47" → test: "C-Peptide (Random)", value: "3.47").
   BRIEF HISTORY section may contain historical HbA1c or glucose readings — extract these as real lab results with whatever date context is available (e.g. "HBA1C-8 IN SEPT,25" → test: "HbA1c", value: "8", date: "2025-09-01"). If no date given, use date: null.
   IMPORTANT — DEDUPLICATION: If the same test with the SAME numeric value appears in both an OBSERVATIONS section (no date) AND a FOLLOW UP section (with a specific date), extract it ONLY ONCE using the follow-up date (which is more specific). Do NOT create two entries for the same value. Example: OBSERVATIONS has "HBA1C-7" (no date) and FOLLOW UP ON 26/6/25 has "HBA1C-7" → extract ONE entry: {test: "HbA1c", value: "7", date: "2025-06-26"}. However, if the same test appears with DIFFERENT values in different sections (e.g. HbA1c 8 in history vs. HbA1c 7 in follow-up), extract EACH as a separate entry — these are genuinely different measurements from different time points.
-  When a lab value appears under a "FOLLOW UP ON <date>" or "FOLLOW UP TODAY ON <date>" header, ALWAYS set that lab's date to the follow-up date in YYYY-MM-DD format.
+  DATE-ATTRIBUTION FOR LABS — every lab in the note sits under (or after) some date header. Find the nearest preceding date header and use its date as that lab's date (YYYY-MM-DD). Recognised date headers include:
+    • "FOLLOW UP ON <date>" / "FOLLOW UP TODAY ON <date>" / "FOLLOW UP TODAY:<date>"
+    • "FOLLOW UP NOTES(<date>)" / "FOLLOW UP NOTES ON <date>"
+    • "FOLLOW UP WITH <date>" (treat same as FOLLOW UP ON)
+    • "PREVIOUS RECORD ON <date>" / "RECORD ON <date>"
+    • A standalone "ON <date>" line (e.g. "ON 4TH JUNE 2023") — treat as a date header for labs that follow it
+    • Natural-language dates: "5TH MARCH 2023", "24th DECEMBER 2024", "6th NOVEMBER 2023", "3rd APRIL 2024" — parse to YYYY-MM-DD
+    • Dash-separated Indian dates: "26-03-24", "11-11-23" = DD-MM-YY → YYYY-MM-DD
+    • Parenthesised dates: "(18/06/2024)", "(03-08-24)"
+  NEVER fall back to today's date or the visit_date for labs that don't have a clear date header. If a lab is listed under no dated section at all (OBSERVATION-: baseline, "BRIEF HISTORY" with no date, free-floating values), set date: null.
   CRITICAL — distinguish measured results vs. target goals:
   • "FOLLOW UP TODAY ON <date>" / "FOLLOW UP NOTES(<date>)" / "FOLLOW UP ON <date>" sections that contain lab values ALONGSIDE clinical notes, C/O complaints, or symptoms = REAL HISTORICAL MEASUREMENTS from that date — extract as labs with that date.
   • "YOUR NEXT FOLLOW UP IS SCHEDULED ON <date>" / a plain date-only header followed only by FBG-X / PP-X target numbers (no clinical context) / sections explicitly labelled "TARGET" or "GOAL" = TARGET GOALS — do NOT extract as labs.

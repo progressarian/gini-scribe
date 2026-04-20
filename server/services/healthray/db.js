@@ -499,14 +499,17 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
-    // Use lab's own date if the AI extracted a specific date (e.g. "FOLLOW UP TODAY: 31/1/26" labs)
-    // otherwise fall back to appointment date
-    const labDate = lab.date || apptDate;
+    // Use the AI-extracted date when present. If the note is truly undated
+    // (OBSERVATION baseline, unlabelled historical values) store NULL rather
+    // than defaulting to apptDate — force-attributing old values to "today"
+    // pollutes the latest-biomarker picker.
+    const labDate = lab.date || null;
 
-    // Skip if a better-or-equal source already exists for same patient + test + date
+    // Skip if a better-or-equal source already exists for same patient + test + date.
+    // IS NOT DISTINCT FROM handles the null-date case (undated OBSERVATION labs) too.
     const existing = await pool.query(
       `SELECT source FROM lab_results
-       WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+       WHERE patient_id = $1 AND canonical_name = $2 AND test_date IS NOT DISTINCT FROM $3::date
        ORDER BY CASE source
          WHEN 'opd' THEN 1 WHEN 'report_extract' THEN 2 WHEN 'lab_healthray' THEN 3
          WHEN 'vitals_sheet' THEN 4 WHEN 'prescription_parsed' THEN 5 WHEN 'healthray' THEN 6 ELSE 7
@@ -522,7 +525,7 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     const exact = await pool.query(
       `SELECT id FROM lab_results
        WHERE patient_id = $1 AND canonical_name = $2
-         AND result::numeric = $3::numeric AND test_date::date = $4::date
+         AND result::numeric = $3::numeric AND test_date IS NOT DISTINCT FROM $4::date
        LIMIT 1`,
       [patientId, canonicalName, val, labDate],
     );
