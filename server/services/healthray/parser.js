@@ -178,14 +178,16 @@ STRICT Rules:
   BRIEF HISTORY section may contain historical HbA1c or glucose readings — extract these as real lab results with whatever date context is available (e.g. "HBA1C-8 IN SEPT,25" → test: "HbA1c", value: "8", date: "2025-09-01"). If no date given, use date: null.
   IMPORTANT — DEDUPLICATION: If the same test with the SAME numeric value appears in both an OBSERVATIONS section (no date) AND a FOLLOW UP section (with a specific date), extract it ONLY ONCE using the follow-up date (which is more specific). Do NOT create two entries for the same value. Example: OBSERVATIONS has "HBA1C-7" (no date) and FOLLOW UP ON 26/6/25 has "HBA1C-7" → extract ONE entry: {test: "HbA1c", value: "7", date: "2025-06-26"}. However, if the same test appears with DIFFERENT values in different sections (e.g. HbA1c 8 in history vs. HbA1c 7 in follow-up), extract EACH as a separate entry — these are genuinely different measurements from different time points.
   DATE-ATTRIBUTION FOR LABS — every lab in the note sits under (or after) some date header. Find the nearest preceding date header and use its date as that lab's date (YYYY-MM-DD). Recognised date headers include:
-    • "FOLLOW UP ON <date>" / "FOLLOW UP TODAY ON <date>" / "FOLLOW UP TODAY:<date>"
-    • "FOLLOW UP NOTES(<date>)" / "FOLLOW UP NOTES ON <date>"
-    • "FOLLOW UP WITH <date>" (treat same as FOLLOW UP ON)
-    • "PREVIOUS RECORD ON <date>" / "RECORD ON <date>"
+    • "FOLLOW UP ON <date>" / "FOLLOW UP TODAY ON <date>" / "FOLLOW UP TODAY:<date>" / "FOLLOW UP TODAY - <date>" / "FOLLOW UP TODAY <date>" (no separator) / "FOLLOW UP TODAY(<date>)" / "FU TODAY <date>" / "F/U TODAY <date>"
+    • "FOLLOW UP NOTES(<date>)" / "FOLLOW UP NOTES ON <date>" / "FOLLOW UP NOTES:<date>" / "FOLLOW UP NOTES <date>"
+    • "FOLLOW UP WITH <date>" / "FOLLOW UP:<date>" / "FOLLOW UP - <date>" (treat same as FOLLOW UP ON)
+    • "PREVIOUS RECORD ON <date>" / "RECORD ON <date>" / "VISIT ON <date>" / "SEEN ON <date>"
     • A standalone "ON <date>" line (e.g. "ON 4TH JUNE 2023") — treat as a date header for labs that follow it
     • Natural-language dates: "5TH MARCH 2023", "24th DECEMBER 2024", "6th NOVEMBER 2023", "3rd APRIL 2024" — parse to YYYY-MM-DD
     • Dash-separated Indian dates: "26-03-24", "11-11-23" = DD-MM-YY → YYYY-MM-DD
     • Parenthesised dates: "(18/06/2024)", "(03-08-24)"
+  CRITICAL — "FOLLOW UP TODAY: <date>" / "FOLLOW UP TODAY ON <date>" is the MOST COMMON pattern and is FREQUENTLY MIS-ATTRIBUTED. The word "TODAY" does NOT mean use today's actual calendar date — it means "the date listed on this header IS the visit date for everything below it". EVERY lab, vital, biomarker, BP, weight, HbA1c, FBG, etc. that appears AFTER such a header and BEFORE the next date header MUST carry the header's date. Do NOT use today's date. Do NOT use the note's overall visit_date. Use the EXACT date written in the FOLLOW UP TODAY header. This rule is absolute.
+  EXAMPLE: Note contains "FOLLOW UP TODAY: 15/03/2025\nBP-130/80\nHBA1C-7.2\nWT-82". ALL three values get date "2025-03-15", not today's date, not the note's header visit_date. If later the note also has "FOLLOW UP TODAY ON 20/04/2025\nBP-125/78\nHBA1C-6.8", those three carry "2025-04-20". These are TWO separate dated visit logs inside one note — emit TWO vitals entries and six lab entries with their respective dates.
   NEVER fall back to today's date or the visit_date for labs that don't have a clear date header. If a lab is listed under no dated section at all (OBSERVATION-: baseline, "BRIEF HISTORY" with no date, free-floating values), set date: null.
   CRITICAL — distinguish measured results vs. target goals:
   • "FOLLOW UP TODAY ON <date>" / "FOLLOW UP NOTES(<date>)" / "FOLLOW UP ON <date>" sections that contain lab values ALONGSIDE clinical notes, C/O complaints, or symptoms = REAL HISTORICAL MEASUREMENTS from that date — extract as labs with that date.
@@ -227,9 +229,10 @@ STRICT Rules:
   • "USG: PCOM+" or "USG: PCOM" → this is a USG finding (Polycystic Ovarian Morphology on ultrasound) that confirms PCOS — do NOT create a separate diagnosis entry for PCOM. Add it as details on the PCOS diagnosis instead.
   • "FGS - 14/36" in the DIAGNOSIS section is a Ferriman-Gallwey Score value, NOT an absent diagnosis. Extract as a lab result (test: "FGS", value: "14/36") — do NOT create a diagnosis entry for it.
 - For vitals: return an ARRAY with ONE entry per DATED section that contains vital values. Each entry must carry the date of the section it came from.
-  • "FOLLOW UP TODAY ON <date>" / "FOLLOW UP TODAY:<date>" → date = that date
-  • "FOLLOW UP ON <date>" / "FOLLOW UP NOTES(<date>)" → date = that date
+  • "FOLLOW UP TODAY ON <date>" / "FOLLOW UP TODAY:<date>" / "FOLLOW UP TODAY - <date>" / "FOLLOW UP TODAY <date>" / "FOLLOW UP TODAY(<date>)" / "FU TODAY <date>" / "F/U TODAY <date>" → date = that date (NOT today's calendar date — use the literal date written after "FOLLOW UP TODAY")
+  • "FOLLOW UP ON <date>" / "FOLLOW UP:<date>" / "FOLLOW UP NOTES(<date>)" / "FOLLOW UP NOTES:<date>" → date = that date
   • Any other dated section that contains vital values → date = that date
+  CRITICAL — "FOLLOW UP TODAY: <date>" (and all its variants above) means "this is the log from the visit on <date>" — the word TODAY refers to that date, not the current real-world date. Any HT/WT/BMI/BP/WC/BF written underneath such a header MUST be emitted as a vitals entry whose date equals that header's date. If the note has multiple "FOLLOW UP TODAY" blocks at different dates, emit ONE vitals entry per block. Never collapse them; never assign today's calendar date.
   Dates come in DD/MM/YYYY (Indian format) — convert to YYYY-MM-DD.
   Extract HT/WT/BMI/BP(sitting)/WC(waist circumference)/BF(body fat) into the entry for that date.
   For BP: "BP SITTING: 165/97 SITTING" — the trailing word "SITTING" is a label duplication error, extract bpSys:165, bpDia:97. "BP STANDING: 152/93" is standing BP — SKIP, do not emit into vitals (we track sitting BP only).
@@ -264,7 +267,7 @@ STRICT Rules:
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-sonnet-4-20250514",
         max_tokens: 16000,
         messages: [{ role: "user", content: rawText }],
         system: prompt,
