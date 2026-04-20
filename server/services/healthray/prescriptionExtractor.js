@@ -9,11 +9,21 @@ const EXTRACT_PROMPT = `Extract all prescription data from this file. Return JSO
 {
   "visit_date": "YYYY-MM-DD or null",
   "medications": [{"name": "...", "dose": "...", "frequency": "OD/BD/TDS/QID", "timing": "before food/after food/empty stomach", "route": "Oral"}],
-  "stopped_medications": [{"name": "...", "reason": "..."}]
+  "stopped_medications": [{"name": "...", "reason": "..."}],
+  "follow_up": {"date": "YYYY-MM-DD or null", "timing": "1 week/2 weeks/1 month/3 months etc or null", "notes": "any follow-up instructions or null"}
 }
 Rules:
 - Extract ALL medicines with name, dose, frequency, timing, route
 - stopped_medications: only medicines explicitly marked stopped/discontinued/crossed out
+- visit_date: the date this prescription was written (header date / date next to doctor signature / top-of-page date). Indian DD/MM/YYYY format.
+- follow_up: the NEXT scheduled follow-up the doctor has booked for this patient from THIS visit. Extract carefully — this is the field that is most commonly mis-extracted.
+  • Look for explicit future booking phrases: "NEXT FOLLOW UP", "NEXT FOLLOW UP ON", "NEXT FU", "NEXT VISIT", "REVIEW ON", "REVISIT ON", "F/U ON", "RTC ON" (Return To Clinic), "YOUR NEXT FOLLOW UP IS SCHEDULED ON", or free text like "Come back after 1 month", "Review after 2 weeks".
+  • CRITICAL — a header like "FOLLOW UP ON <date>:" or "FOLLOW UP TODAY ON <date>" followed by lab values / complaints / observations is a PAST visit log entry (the doctor is recording what happened at an earlier follow-up). It is NOT the next follow-up. IGNORE these when picking the next follow-up.
+  • If multiple dated "FOLLOW UP" sections exist, the NEXT follow-up is the one whose date is AFTER the prescription's visit_date AND which is NOT followed by lab/observation data. If in doubt, pick the date that is chronologically LATEST AND strictly greater than visit_date.
+  • If a specific next-visit date is written, put it in "date" (YYYY-MM-DD). If only a relative period is written (e.g. "after 1 month"), put that phrase in "timing" and leave "date" null — do NOT compute the date yourself.
+  • notes: any qualifier like "with HbA1c report", "with fasting sugar", "if symptoms persist". Null otherwise.
+  • If no next follow-up is scheduled anywhere on the prescription, return {"date": null, "timing": null, "notes": null}.
+- DATES: Indian prescriptions use DD/MM/YYYY. "06/04/2026" = 6 April 2026 → output 2026-04-06. NEVER interpret as MM/DD/YYYY. Two-digit years like "26/6/25" = 26 June 2025 → 2025-06-26.
 - Return ONLY valid JSON, no markdown`;
 
 // Detect actual file format from magic bytes — S3 Content-Type is unreliable

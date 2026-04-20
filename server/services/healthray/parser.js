@@ -236,8 +236,11 @@ STRICT Rules:
   - stress: ONLY if explicitly mentioned. Null if not found
 - For advice: glucose monitoring instructions (e.g. "D1-FASTING AND 2HR POST BREAKFAST, D3-..., D5-..."), insulin titration rules (e.g. "increase evening dose by 1 unit per day till post dinner 150 and fasting 100"), TSH targets, medication holds, other clinical instructions. Null if not found. Do NOT put glucose monitoring schedules into medications.
 - For investigations_to_order: extract ALL tests/investigations ordered or recommended. Set urgency to "urgent" if marked urgent, "next_visit" if scheduled for next visit, "routine" otherwise. [] if none found
-- For follow_up: extract follow-up date (YYYY-MM-DD if exact date given), timing (e.g. "1 month", "3 months"), and any notes. Null fields if not found
-- Only include the LATEST follow-up data if multiple follow-ups exist
+- For follow_up: extract the NEXT scheduled follow-up (the appointment the doctor is booking AT THE END OF this visit, for a future date). Fields: date (YYYY-MM-DD if exact date given), timing (e.g. "1 month", "3 months"), notes. Null fields if not found.
+  • The NEXT follow-up is signalled by phrases like "NEXT FOLLOW UP", "NEXT FOLLOW UP ON", "YOUR NEXT FOLLOW UP IS SCHEDULED ON", "REVIEW ON", "REVISIT ON", "F/U ON", "RTC ON", "come back after X weeks/months", or a plain future date under a "NEXT FOLLOW UP" / "PLAN" header.
+  • CRITICAL — a header like "FOLLOW UP TODAY ON <date>" / "FOLLOW UP ON <past date>:" / "FOLLOW UP NOTES(<past date>)" that is followed by lab values, vitals, or C/O complaints is a PAST visit log entry (the doctor is recording what happened previously). Those are NOT the next follow-up and must be IGNORED when choosing follow_up.
+  • If multiple "FOLLOW UP" sections appear, pick the one whose date is chronologically LATEST AND is strictly in the future relative to the note's own visit date. If every dated "FOLLOW UP" section is a past log entry, then follow_up.date = null (use timing/notes only if the note also says something like "come back after 1 month").
+  • If only a relative phrase is given (e.g. "review in 2 weeks"), put that in timing and leave date null — do NOT compute the date.
 - CRITICAL — all dates in these notes are in DD/MM/YYYY format (Indian standard). "06/04/2026" means April 6 2026 → output as 2026-04-06. NEVER interpret as MM/DD/YYYY.
 - Return ONLY valid JSON, no markdown`;
 

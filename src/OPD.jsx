@@ -1435,8 +1435,13 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
     creatinine: "",
     tsh: "",
     hb: "",
-    ...Object.fromEntries(Object.entries(ex).map(([k, v]) => [k, v != null ? String(v) : ""])),
+    ...Object.fromEntries(
+      Object.entries(ex)
+        .filter(([k, v]) => !k.startsWith("_") && typeof v !== "object")
+        .map(([k, v]) => [k, v != null ? String(v) : ""]),
+    ),
   });
+  const [labDates, setLabDates] = useState(ex._lab_dates || {});
   // reports: { [typeId]: [{name, date, uploading, docId?, storagePath?}] }
   const [reports, setReports] = useState({});
   const [activeType, setActiveType] = useState("blood");
@@ -1536,6 +1541,11 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
       const n = parseFloat(p[k]);
       if (!isNaN(n)) p[k] = n;
     });
+    const cleanDates = {};
+    for (const [k, d] of Object.entries(labDates)) {
+      if (p[k] != null && d) cleanDates[k] = d;
+    }
+    if (Object.keys(cleanDates).length) p._lab_dates = cleanDates;
     onSave(p);
   };
 
@@ -2284,7 +2294,14 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                   type="number"
                   step="0.1"
                   value={v}
-                  onChange={(e) => setVals((p) => ({ ...p, [f.k]: e.target.value }))}
+                  onChange={(e) => {
+                    const newVal = e.target.value;
+                    setVals((p) => ({ ...p, [f.k]: newVal }));
+                    setLabDates((p) => ({
+                      ...p,
+                      [f.k]: new Date().toISOString().split("T")[0],
+                    }));
+                  }}
                   placeholder="—"
                   style={{
                     border: "none",
@@ -2302,6 +2319,19 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                 <div style={{ fontSize: 9, color: INK3, marginTop: 3 }}>
                   {f.u} · {f.ref}
                 </div>
+                {v && labDates[f.k] && (
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: INK3,
+                      marginTop: 2,
+                      fontStyle: "italic",
+                    }}
+                    title={`Added on ${fmtDate(labDates[f.k])}`}
+                  >
+                    📅 {fmtDate(labDates[f.k])}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -5963,8 +5993,18 @@ export default function OPD() {
   // URL-driven tab: ?tab=schedule|dashboard|new-appt|excel. "schedule" maps to
   // the internal "list" view so shareable links read naturally.
   const [searchParams, setSearchParams] = useSearchParams();
-  const TAB_TO_VIEW = { schedule: "list", dashboard: "dashboard", "new-appt": "new-appt", excel: "excel" };
-  const VIEW_TO_TAB = { list: "schedule", dashboard: "dashboard", "new-appt": "new-appt", excel: "excel" };
+  const TAB_TO_VIEW = {
+    schedule: "list",
+    dashboard: "dashboard",
+    "new-appt": "new-appt",
+    excel: "excel",
+  };
+  const VIEW_TO_TAB = {
+    list: "schedule",
+    dashboard: "dashboard",
+    "new-appt": "new-appt",
+    excel: "excel",
+  };
   const view = TAB_TO_VIEW[searchParams.get("tab")] || "list";
   const setView = useCallback(
     (v) => {
@@ -6322,134 +6362,138 @@ export default function OPD() {
 
       {/* Sub-nav — only visible on Schedule tab */}
       {view === "list" && (
-      <div
-        style={{
-          background: WH,
-          borderBottom: `1px solid ${BD}`,
-          padding: "0 18px",
-          flexShrink: 0,
-        }}
-      >
-        {/* Status filters */}
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 2,
-            height: 38,
+            background: WH,
             borderBottom: `1px solid ${BD}`,
+            padding: "0 18px",
+            flexShrink: 0,
           }}
         >
-          {[
-            ["all", "All"],
-            ["pending", "Pending"],
-            ["ready", "Ready"],
-            ["checkedin", "Checked In"],
-            ["in_visit", "In Visit"],
-            ["seen", "Seen"],
-          ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
-          <div style={{ width: 1, height: 18, background: BD, margin: "0 8px" }} />
-          <span style={{ fontFamily: FM, fontSize: 11, color: AM, fontWeight: 500 }}>
-            {stats.pending} pending
-          </span>
-          <span style={{ fontFamily: FM, fontSize: 11, color: SK, fontWeight: 500, marginLeft: 8 }}>
-            {stats.checkedin} waiting
-          </span>
-          <span
+          {/* Status filters */}
+          <div
             style={{
-              fontFamily: FM,
-              fontSize: 11,
-              color: "#7c3aed",
-              fontWeight: 500,
-              marginLeft: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              height: 38,
+              borderBottom: `1px solid ${BD}`,
             }}
           >
-            {stats.in_visit} in visit
-          </span>
-          <span style={{ fontFamily: FM, fontSize: 11, color: GN, fontWeight: 500, marginLeft: 8 }}>
-            {stats.seen} seen
-          </span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
-            <button
-              onClick={fetchAppts}
+            {[
+              ["all", "All"],
+              ["pending", "Pending"],
+              ["ready", "Ready"],
+              ["checkedin", "Checked In"],
+              ["in_visit", "In Visit"],
+              ["seen", "Seen"],
+            ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
+            <div style={{ width: 1, height: 18, background: BD, margin: "0 8px" }} />
+            <span style={{ fontFamily: FM, fontSize: 11, color: AM, fontWeight: 500 }}>
+              {stats.pending} pending
+            </span>
+            <span
+              style={{ fontFamily: FM, fontSize: 11, color: SK, fontWeight: 500, marginLeft: 8 }}
+            >
+              {stats.checkedin} waiting
+            </span>
+            <span
               style={{
-                padding: "3px 10px",
-                borderRadius: 5,
-                fontSize: 10,
+                fontFamily: FM,
+                fontSize: 11,
+                color: "#7c3aed",
                 fontWeight: 500,
-                background: "transparent",
-                border: `1px solid ${BD}`,
-                cursor: "pointer",
-                color: INK3,
-                fontFamily: FB,
+                marginLeft: 8,
               }}
             >
-              ↺ Refresh
-            </button>
-            <button
-              onClick={() => setView("new-appt")}
-              style={{
-                padding: "3px 10px",
-                borderRadius: 5,
-                fontSize: 10,
-                fontWeight: 600,
-                background: T,
-                color: "#fff",
-                border: "none",
-                cursor: "pointer",
-                fontFamily: FB,
-              }}
+              {stats.in_visit} in visit
+            </span>
+            <span
+              style={{ fontFamily: FM, fontSize: 11, color: GN, fontWeight: 500, marginLeft: 8 }}
             >
-              + New
-            </button>
+              {stats.seen} seen
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
+              <button
+                onClick={fetchAppts}
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 5,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  background: "transparent",
+                  border: `1px solid ${BD}`,
+                  cursor: "pointer",
+                  color: INK3,
+                  fontFamily: FB,
+                }}
+              >
+                ↺ Refresh
+              </button>
+              <button
+                onClick={() => setView("new-appt")}
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 5,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  background: T,
+                  color: "#fff",
+                  border: "none",
+                  cursor: "pointer",
+                  fontFamily: FB,
+                }}
+              >
+                + New
+              </button>
+            </div>
+          </div>
+          {/* Doctor + category filters */}
+          <div style={{ display: "flex", alignItems: "center", gap: 3, height: 34 }}>
+            <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>
+              Doctor:
+            </span>
+            {filterBtn("All", null, filterDoc === "all", () => setFilterDoc("all"))}
+            {apptDoctors.map((d) =>
+              filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
+                setFilterDoc(d === filterDoc ? "all" : d),
+              ),
+            )}
+            {filterBtn(
+              `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
+              "__noshow__",
+              filterDoc === "__noshow__",
+              () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
+              "#6b7280",
+            )}
+            <div style={{ width: 1, height: 18, background: BD, margin: "0 10px" }} />
+            <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>
+              Category:
+            </span>
+            {filterBtn("All", null, filterCat === "all", () => setFilterCat("all"))}
+            {filterBtn(
+              "⚠ Uncontrolled",
+              "complex",
+              filterCat === "complex",
+              () => setFilterCat(filterCat === "complex" ? "all" : "complex"),
+              RE,
+            )}
+            {filterBtn(
+              "↑ Maintenance",
+              "maint",
+              filterCat === "maint",
+              () => setFilterCat(filterCat === "maint" ? "all" : "maint"),
+              AM,
+            )}
+            {filterBtn(
+              "✓ Continuous Care",
+              "ctrl",
+              filterCat === "ctrl",
+              () => setFilterCat(filterCat === "ctrl" ? "all" : "ctrl"),
+              GN,
+            )}
           </div>
         </div>
-        {/* Doctor + category filters */}
-        <div style={{ display: "flex", alignItems: "center", gap: 3, height: 34 }}>
-          <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>
-            Doctor:
-          </span>
-          {filterBtn("All", null, filterDoc === "all", () => setFilterDoc("all"))}
-          {apptDoctors.map((d) =>
-            filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
-              setFilterDoc(d === filterDoc ? "all" : d),
-            ),
-          )}
-          {filterBtn(
-            `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
-            "__noshow__",
-            filterDoc === "__noshow__",
-            () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
-            "#6b7280",
-          )}
-          <div style={{ width: 1, height: 18, background: BD, margin: "0 10px" }} />
-          <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>
-            Category:
-          </span>
-          {filterBtn("All", null, filterCat === "all", () => setFilterCat("all"))}
-          {filterBtn(
-            "⚠ Uncontrolled",
-            "complex",
-            filterCat === "complex",
-            () => setFilterCat(filterCat === "complex" ? "all" : "complex"),
-            RE,
-          )}
-          {filterBtn(
-            "↑ Maintenance",
-            "maint",
-            filterCat === "maint",
-            () => setFilterCat(filterCat === "maint" ? "all" : "maint"),
-            AM,
-          )}
-          {filterBtn(
-            "✓ Continuous Care",
-            "ctrl",
-            filterCat === "ctrl",
-            () => setFilterCat(filterCat === "ctrl" ? "all" : "ctrl"),
-            GN,
-          )}
-        </div>
-      </div>
       )}
 
       {/* Main */}

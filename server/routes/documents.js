@@ -129,6 +129,37 @@ async function refreshOpdConsultations(client, patientId) {
   }
 }
 
+// ── Write an extracted follow-up onto the appointment that matches this
+// prescription (by patient + doc/visit date ±1 day). Silently no-ops if the
+// follow-up is empty or no matching appointment can be found, so we never
+// clobber an unrelated appointment's follow_up.
+async function syncFollowUpToAppointment(client, patientId, followUp, anchorDate) {
+  if (!patientId || !followUp || !anchorDate) return;
+  const hasAny =
+    followUp.date ||
+    (followUp.timing && String(followUp.timing).trim()) ||
+    (followUp.notes && String(followUp.notes).trim());
+  if (!hasAny) return;
+
+  const { rows } = await client.query(
+    `SELECT id FROM appointments
+     WHERE patient_id = $1
+       AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day') AND ($2::date + INTERVAL '1 day')
+     ORDER BY appointment_date DESC
+     LIMIT 1`,
+    [patientId, anchorDate],
+  );
+  const apptId = rows[0]?.id;
+  if (!apptId) return;
+
+  await client.query(
+    `UPDATE appointments
+     SET healthray_follow_up = $1::jsonb, updated_at = NOW()
+     WHERE id = $2`,
+    [JSON.stringify(followUp), apptId],
+  );
+}
+
 // Save document metadata
 router.post("/patients/:id/documents", validate(documentCreateSchema), async (req, res) => {
   try {
@@ -802,6 +833,14 @@ router.patch("/documents/:id", async (req, res) => {
         );
       }
 
+      // Sync follow-up to the matching appointment
+      if (extracted_data.follow_up) {
+        const anchor =
+          extracted_data.visit_date ||
+          (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : null);
+        await syncFollowUpToAppointment(client, doc.patient_id, extracted_data.follow_up, anchor);
+      }
+
       // ── Refresh OPD consultations with latest prescription data ──
       await refreshOpdConsultations(client, doc.patient_id);
     }
@@ -860,14 +899,18 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
         docId,
       ]);
 
+      const rxDate =
+        extracted.visit_date ||
+        (doc.doc_date
+          ? new Date(doc.doc_date).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0]);
+
+      if (doc.patient_id && extracted.follow_up) {
+        await syncFollowUpToAppointment(client, doc.patient_id, extracted.follow_up, rxDate);
+      }
+
       if (doc.patient_id && extracted.medications?.length > 0) {
         await client.query(`DELETE FROM medications WHERE document_id = $1`, [docId]);
-
-        const rxDate =
-          extracted.visit_date ||
-          (doc.doc_date
-            ? new Date(doc.doc_date).toISOString().split("T")[0]
-            : new Date().toISOString().split("T")[0]);
 
         for (const m of extracted.medications) {
           if (!m?.name) continue;
