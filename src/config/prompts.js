@@ -44,7 +44,7 @@ CRITICAL MEDICATION RULES:
    Fill titration based on consultant's instructions. If not specified, use standard protocols.`;
 
 export const LAB_PROMPT = `Extract ALL test results from this lab report image. Return ONLY valid JSON, no backticks.
-{"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
+{"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":"","patient_id":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
 CRITICAL RULES:
 - Extract EVERY test result on the report without exception, even if there are more than 50 tests. Do not skip or truncate.
 - report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD.
@@ -68,7 +68,7 @@ CRITICAL RULES:
 export const IMAGING_PROMPT = `Extract findings from this medical imaging/diagnostic report. Return ONLY valid JSON, no backticks.
 {
   "report_type":"DEXA|X-Ray|MRI|Ultrasound|ABI|VPT|Fundus|ECG|Echo|CT|PFT|NCS",
-  "patient_on_report":{"name":"","age":"","sex":""},
+  "patient_on_report":{"name":"","age":"","sex":"","patient_id":""},
   "date":"YYYY-MM-DD or null",
   "findings":[{"parameter":"","value":"","unit":"","interpretation":"Normal|Abnormal|Borderline","detail":""}],
   "impression":"overall summary string",
@@ -138,7 +138,7 @@ export const REPORT_EXTRACT_PROMPT = `Extract ALL test results from this medical
   "report_type":"Blood Test|Thyroid Panel|Lipid Profile|Kidney Function|Liver Function|HbA1c|CBC|Urine|Other",
   "lab_name":"string or null",
   "report_date":"YYYY-MM-DD or null",
-  "patient_on_report":{"name":"","age":"","sex":""},
+  "patient_on_report":{"name":"","age":"","sex":"","patient_id":""},
   "tests":[{"test_name":"HbA1c","result":8.2,"unit":"%","flag":"HIGH","ref_range":"4.0-6.5","critical":false}]
 }
 RULES:

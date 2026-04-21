@@ -1,4 +1,5 @@
 import api from "./api.js";
+import { parseVisionResponse } from "./extraction.js";
 
 const CLASSIFY_PROMPT = `You are a medical document classifier. Look at this image and identify what type of medical document it is.
 
@@ -49,14 +50,19 @@ export async function classifyDocument(base64, mediaType) {
 
     const { data } = await api.post("/api/ai/complete", {
       messages: [{ role: "user", content: [block, { type: "text", text: CLASSIFY_PROMPT }] }],
-      model: "haiku",
+      model: "sonnet",
       maxTokens: 400,
     });
 
     if (data.error) return { data: null, error: data.error };
 
-    const text = (data.text || "").replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(text);
+    const { data: parsed, error: parseErr } = parseVisionResponse(data.text);
+    if (parseErr || !parsed) {
+      return {
+        data: null,
+        error: `Classification parse failed. Raw: ${String(data.text || "").slice(0, 200)}`,
+      };
+    }
 
     if (!parsed.doc_type) {
       return { data: null, error: "Classification missing doc_type" };

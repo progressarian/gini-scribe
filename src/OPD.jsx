@@ -1043,7 +1043,9 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
               />
               <VitalChip
                 label="BP (standing)"
-                value={vitals.bpStandingSys ? `${vitals.bpStandingSys}/${vitals.bpStandingDia}` : null}
+                value={
+                  vitals.bpStandingSys ? `${vitals.bpStandingSys}/${vitals.bpStandingDia}` : null
+                }
               />
             </div>
           </div>
@@ -1911,15 +1913,40 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {rpts.map((r, i) => (
+                    {rpts.map((r, i) => {
+                      const edParsed =
+                        typeof r.extractedData === "string"
+                          ? (() => {
+                              try {
+                                return JSON.parse(r.extractedData);
+                              } catch {
+                                return null;
+                              }
+                            })()
+                          : r.extractedData;
+                      const needsReview =
+                        edParsed?.extraction_status === "mismatch_review";
+                      return (
                       <div key={r.id || i}>
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
                             gap: 9,
-                            background: r.uploading || r.extracting ? BG : WH,
-                            border: `1px solid ${r.uploading || r.extracting ? BD : r.extractedData ? SKB : GNB}`,
+                            background: needsReview
+                              ? "#fef2f2"
+                              : r.uploading || r.extracting
+                                ? BG
+                                : WH,
+                            border: `1px solid ${
+                              needsReview
+                                ? "#fecaca"
+                                : r.uploading || r.extracting
+                                  ? BD
+                                  : r.extractedData
+                                    ? SKB
+                                    : GNB
+                            }`,
                             borderRadius: r.extractedData ? "7px 7px 0 0" : 7,
                             padding: "8px 11px",
                           }}
@@ -1929,16 +1956,18 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                               ? "⏳"
                               : r.extracting
                                 ? "🔬"
-                                : r.extractedData
-                                  ? "✅"
-                                  : "📋"}
+                                : needsReview
+                                  ? "⚠️"
+                                  : r.extractedData
+                                    ? "✅"
+                                    : "📋"}
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div
                               style={{
                                 fontSize: 11,
                                 fontWeight: 600,
-                                color: INK,
+                                color: needsReview ? "#b91c1c" : INK,
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
                                 whiteSpace: "nowrap",
@@ -1946,29 +1975,54 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                             >
                               {r.name}
                             </div>
-                            <div style={{ fontSize: 9, color: INK3 }}>
+                            <div
+                              style={{
+                                fontSize: 9,
+                                color: needsReview ? "#b91c1c" : INK3,
+                                fontWeight: needsReview ? 600 : 400,
+                              }}
+                            >
                               {r.uploading
                                 ? "Uploading…"
                                 : r.extracting
                                   ? "AI extracting data…"
                                   : r.extractError
                                     ? `Extraction failed: ${r.extractError}`
-                                    : r.extractedData
-                                      ? (() => {
-                                          const d = r.extractedData;
-                                          if (d.panels) {
-                                            const tc = d.panels.reduce(
-                                              (a, p) => a + p.tests.length,
-                                              0,
-                                            );
-                                            return `${r.date} · AI extracted ${tc} test${tc !== 1 ? "s" : ""}`;
-                                          }
-                                          if (d.report_type) return `${r.date} · ${d.report_type}`;
-                                          return r.date;
-                                        })()
-                                      : r.date}
+                                    : needsReview
+                                      ? `${r.date} · Needs review in Companion — extraction not applied`
+                                      : r.extractedData
+                                        ? (() => {
+                                            const d = r.extractedData;
+                                            if (d.panels) {
+                                              const tc = d.panels.reduce(
+                                                (a, p) => a + p.tests.length,
+                                                0,
+                                              );
+                                              return `${r.date} · AI extracted ${tc} test${tc !== 1 ? "s" : ""}`;
+                                            }
+                                            if (d.report_type) return `${r.date} · ${d.report_type}`;
+                                            return r.date;
+                                          })()
+                                        : r.date}
                             </div>
                           </div>
+                          {needsReview && (
+                            <span
+                              style={{
+                                fontSize: 9,
+                                padding: "3px 7px",
+                                borderRadius: 10,
+                                background: "#fee2e2",
+                                color: "#b91c1c",
+                                border: "1px solid #fecaca",
+                                fontWeight: 700,
+                                whiteSpace: "nowrap",
+                              }}
+                              title="Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
+                            >
+                              Needs Review
+                            </span>
+                          )}
                           {r.extracting && (
                             <span
                               style={{
@@ -2196,7 +2250,8 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                             return null;
                           })()}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2989,28 +3044,60 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
         {/* Prescription list */}
         {prescriptions.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {prescriptions.map((p) => (
+            {prescriptions.map((p) => {
+              const edParsed =
+                typeof p.extractedData === "string"
+                  ? (() => {
+                      try {
+                        return JSON.parse(p.extractedData);
+                      } catch {
+                        return null;
+                      }
+                    })()
+                  : p.extractedData;
+              const needsReview = edParsed?.extraction_status === "mismatch_review";
+              return (
               <div key={p.id}>
                 <div
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: 10,
-                    background: p.uploading || p.extracting ? BG : WH,
-                    border: `1px solid ${p.uploading || p.extracting ? BD : p.extractedData ? SKB : GNB}`,
+                    background: needsReview
+                      ? "#fef2f2"
+                      : p.uploading || p.extracting
+                        ? BG
+                        : WH,
+                    border: `1px solid ${
+                      needsReview
+                        ? "#fecaca"
+                        : p.uploading || p.extracting
+                          ? BD
+                          : p.extractedData
+                            ? SKB
+                            : GNB
+                    }`,
                     borderRadius: p.extractedData ? "8px 8px 0 0" : 8,
                     padding: "10px 12px",
                   }}
                 >
                   <span style={{ fontSize: 22, flexShrink: 0 }}>
-                    {p.uploading ? "⏳" : p.extracting ? "🔬" : p.extractedData ? "✅" : "💊"}
+                    {p.uploading
+                      ? "⏳"
+                      : p.extracting
+                        ? "🔬"
+                        : needsReview
+                          ? "⚠️"
+                          : p.extractedData
+                            ? "✅"
+                            : "💊"}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
                         fontSize: 12,
                         fontWeight: 600,
-                        color: INK,
+                        color: needsReview ? "#b91c1c" : INK,
                         marginBottom: 2,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -3019,7 +3106,15 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                     >
                       {p.fileName}
                     </div>
-                    <div style={{ display: "flex", gap: 10, fontSize: 10, color: INK3 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        fontSize: 10,
+                        color: needsReview ? "#b91c1c" : INK3,
+                        fontWeight: needsReview ? 600 : 400,
+                      }}
+                    >
                       {p.doctorName && <span>By {p.doctorName}</span>}
                       <span>
                         {p.uploading
@@ -3028,12 +3123,31 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                             ? "AI extracting medicines…"
                             : p.extractError
                               ? `Extraction failed`
-                              : p.extractedData
-                                ? `${fmtDate(p.date)} · ${(p.extractedData.medications || []).length} medicine${(p.extractedData.medications || []).length !== 1 ? "s" : ""} found`
-                                : fmtDate(p.date)}
+                              : needsReview
+                                ? `${fmtDate(p.date)} · Needs review in Companion — extraction not applied`
+                                : p.extractedData
+                                  ? `${fmtDate(p.date)} · ${(p.extractedData.medications || []).length} medicine${(p.extractedData.medications || []).length !== 1 ? "s" : ""} found`
+                                  : fmtDate(p.date)}
                       </span>
                     </div>
                   </div>
+                  {needsReview && (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        padding: "3px 7px",
+                        borderRadius: 10,
+                        background: "#fee2e2",
+                        color: "#b91c1c",
+                        border: "1px solid #fecaca",
+                        fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                      title="Extraction not applied — review in the Companion app"
+                    >
+                      Needs Review
+                    </span>
+                  )}
                   {p.extracting && (
                     <span
                       style={{ fontSize: 10, color: SK, fontWeight: 600, whiteSpace: "nowrap" }}
@@ -3238,7 +3352,8 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                     );
                   })()}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           !addingRx && (
@@ -5991,7 +6106,13 @@ const SAMPLE_DOCTORS = [
 // ══════════════════════════════════════════════════════════════
 export default function OPD() {
   const [doctors, setDoctors] = useState([]);
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${y}-${mo}-${da}`;
+  });
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDoc, setFilterDoc] = useState("all");
   const [filterCat, setFilterCat] = useState("all");
@@ -6533,7 +6654,12 @@ export default function OPD() {
               appointments={appointments}
               updatedAt={apptsQuery.dataUpdatedAt}
               isFetching={apptsQuery.isFetching}
+              isPending={apptsQuery.isPending}
+              isError={apptsQuery.isError}
+              error={apptsQuery.error}
               onRefresh={() => apptsQuery.refetch()}
+              date={date}
+              onDateChange={setDate}
               onSelectAppt={(a) => {
                 setSelAppt(a);
                 setActiveTab("overview");

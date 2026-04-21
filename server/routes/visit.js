@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { n, num, t } from "../utils/helpers.js";
@@ -16,6 +17,9 @@ import {
   detectMedGroup,
   detectDrugClass,
 } from "../utils/medicationSort.js";
+
+const require = createRequire(import.meta.url);
+const { syncPatientLogsFromGenie } = require("../genie-sync.cjs");
 
 const router = Router();
 
@@ -54,10 +58,25 @@ pool
 // Add appointment_id column if table already exists without it
 pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS appointment_id INTEGER`).catch(() => {});
 
+// Ensure medications.history column exists (timeline of edits)
+pool
+  .query(`ALTER TABLE medications ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb`)
+  .catch(() => {});
+
 // GET /api/visit/:patientId — comprehensive visit-page data
 router.get("/visit/:patientId", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+
+  // Pull the patient's fresh Track logs from Genie before we SELECT. Awaiting
+  // keeps the doctor from seeing stale data on page load; if Genie is down or
+  // credentials are missing, the function returns a soft { synced:false }
+  // result and we carry on.
+  try {
+    await syncPatientLogsFromGenie(pid, pool);
+  } catch (e) {
+    console.warn("[Visit] Genie log sync skipped:", e.message);
+  }
 
   try {
     const [
@@ -699,12 +718,44 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
   if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
   try {
     const { dose, frequency, timing, reason } = req.body;
+
+    // Load existing row so we can snapshot the pre-edit state into history
+    const existing = await pool.query(
+      "SELECT dose, frequency, timing FROM medications WHERE id=$1 AND patient_id=$2 AND is_active=true",
+      [mid, pid],
+    );
+    if (!existing.rows[0]) return res.status(404).json({ error: "Medication not found" });
+    const prev = existing.rows[0];
+
+    const nextDose = dose !== undefined ? t(dose, 100) : prev.dose;
+    const nextFreq = frequency !== undefined ? t(frequency, 100) : prev.frequency;
+    const nextTiming = timing !== undefined ? t(timing, 200) : prev.timing;
+
+    const changed =
+      (prev.dose || "") !== (nextDose || "") ||
+      (prev.frequency || "") !== (nextFreq || "") ||
+      (prev.timing || "") !== (nextTiming || "");
+
+    const historyEntry = changed
+      ? JSON.stringify([
+          {
+            at: new Date().toISOString(),
+            reason: t(reason, 500) || null,
+            from: { dose: prev.dose, frequency: prev.frequency, timing: prev.timing },
+            to: { dose: nextDose, frequency: nextFreq, timing: nextTiming },
+          },
+        ])
+      : null;
+
     const r = await pool.query(
       `UPDATE medications SET
-         dose = COALESCE($1, dose), frequency = COALESCE($2, frequency),
-         timing = COALESCE($3, timing), notes = COALESCE($4, notes), updated_at = NOW()
-       WHERE id = $5 AND patient_id = $6 AND is_active = true RETURNING *`,
-      [t(dose, 100), t(frequency, 100), t(timing, 200), t(reason, 500), mid, pid],
+         dose = $1, frequency = $2, timing = $3,
+         notes = COALESCE($4, notes),
+         history = CASE WHEN $5::jsonb IS NULL THEN COALESCE(history, '[]'::jsonb)
+                        ELSE COALESCE(history, '[]'::jsonb) || $5::jsonb END,
+         updated_at = NOW()
+       WHERE id = $6 AND patient_id = $7 AND is_active = true RETURNING *`,
+      [nextDose, nextFreq, nextTiming, t(reason, 500), historyEntry, mid, pid],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
     res.json(r.rows[0]);

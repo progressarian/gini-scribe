@@ -85,6 +85,247 @@ function hasMed(meds, ...names) {
   );
 }
 
+// Classify a medication by drug class so stopped-med alerts can carry
+// class-specific clinical implications instead of a generic "treatment gap" note.
+// Matches on brand AND generic names commonly seen in Indian outpatient scripts.
+const MED_CLASSES = [
+  {
+    className: "thyroid",
+    label: "thyroid hormone",
+    weight: "high",
+    keywords: [
+      "thyronorm",
+      "eltroxin",
+      "thyrox",
+      "levothyrox",
+      "levothyroxine",
+      "liothyronine",
+      "thyroxine",
+    ],
+    implication: "Thyroid cover lost — expect TSH to drift within 2–4 weeks.",
+    action: "Confirm replacement script or reason for stop",
+  },
+  {
+    className: "antihypertensive",
+    label: "antihypertensive",
+    weight: "high",
+    keywords: [
+      "cilacar",
+      "telma",
+      "telmisartan",
+      "amlodipine",
+      "amlopres",
+      "amlong",
+      "losartan",
+      "losar",
+      "olmesartan",
+      "olmezest",
+      "olmy",
+      "ramipril",
+      "cardace",
+      "enalapril",
+      "perindopril",
+      "coversyl",
+      "lisinopril",
+      "valsartan",
+      "candesartan",
+      "irbesartan",
+      "metoprolol",
+      "metolar",
+      "bisoprolol",
+      "concor",
+      "atenolol",
+      "carvedilol",
+      "nebivolol",
+      "nebicard",
+      "prazosin",
+      "hydrochlorothiazide",
+      "hctz",
+      "chlorthalidone",
+      "indapamide",
+      "nitrendipine",
+      "nifedipine",
+      "cilnidipine",
+    ],
+    implication: "Antihypertensive cover lost — BP likely to rise; check today's reading vs. prior.",
+    action: "Restart or substitute today if BP trending up",
+  },
+  {
+    className: "antidiabetic",
+    label: "antidiabetic",
+    weight: "high",
+    keywords: [
+      "metformin",
+      "glycomet",
+      "gluconorm",
+      "obimet",
+      "glimepiride",
+      "amaryl",
+      "gliclazide",
+      "diamicron",
+      "glipizide",
+      "sitagliptin",
+      "januvia",
+      "vildagliptin",
+      "galvus",
+      "linagliptin",
+      "trajenta",
+      "teneligliptin",
+      "tenepride",
+      "dapagliflozin",
+      "forxiga",
+      "empagliflozin",
+      "jardiance",
+      "canagliflozin",
+      "pioglitazone",
+      "pioglit",
+      "insulin",
+      "lantus",
+      "novomix",
+      "humalog",
+      "trulicity",
+      "ozempic",
+      "liraglutide",
+    ],
+    implication: "Glycaemic cover lost — expect FBS/HbA1c drift without substitute.",
+    action: "Confirm replacement or reintroduce today",
+  },
+  {
+    className: "statin",
+    label: "statin",
+    weight: "high",
+    keywords: [
+      "atorvastatin",
+      "atorva",
+      "atorlip",
+      "lipitor",
+      "rosuvastatin",
+      "rosuvas",
+      "crestor",
+      "simvastatin",
+      "simvotin",
+      "pravastatin",
+      "fluvastatin",
+    ],
+    implication: "Lipid cover lost — LDL will climb back toward untreated baseline.",
+    action: "Restart or swap if intolerance",
+  },
+  {
+    className: "antiplatelet",
+    label: "antiplatelet",
+    weight: "high",
+    keywords: [
+      "aspirin",
+      "ecosprin",
+      "disprin",
+      "clopidogrel",
+      "clopilet",
+      "plavix",
+      "prasugrel",
+      "ticagrelor",
+      "brilinta",
+    ],
+    implication: "Cardiovascular platelet protection paused — re-check indication.",
+    action: "Confirm whether hold is intentional",
+  },
+  {
+    className: "anticoagulant",
+    label: "anticoagulant",
+    weight: "high",
+    keywords: [
+      "warfarin",
+      "acitrom",
+      "apixaban",
+      "eliquis",
+      "rivaroxaban",
+      "xarelto",
+      "dabigatran",
+      "pradaxa",
+      "enoxaparin",
+      "clexane",
+      "heparin",
+    ],
+    implication: "Anticoagulation paused — thrombotic risk depending on indication.",
+    action: "Confirm plan urgently",
+  },
+  {
+    className: "supplement",
+    label: "supplement",
+    weight: "low",
+    keywords: [
+      "aktiv d",
+      "calcirol",
+      "cholecalciferol",
+      "vitamin d",
+      "uprise",
+      "d3 must",
+      "b12",
+      "methylcobalamin",
+      "nurokind",
+      "neurobion",
+      "iron",
+      "orofer",
+      "ferrous",
+      "livogen",
+      "dexorange",
+      "calcium",
+      "shelcal",
+      "cipcal",
+      "gemcal",
+      "folic",
+      "folvite",
+      "multivitamin",
+      "zincovit",
+      "becosules",
+    ],
+    implication: "Nutritional supplement paused — low urgency unless symptomatic.",
+    action: "Reconfirm at visit",
+  },
+  {
+    className: "symptomatic",
+    label: "symptomatic",
+    weight: "low",
+    keywords: [
+      "paracetamol",
+      "crocin",
+      "dolo",
+      "ibuprofen",
+      "brufen",
+      "diclofenac",
+      "pantoprazole",
+      "pan 40",
+      "pan-d",
+      "omeprazole",
+      "rabeprazole",
+      "razo",
+      "cough",
+      "cheston",
+      "ascoril",
+      "antacid",
+      "digene",
+      "gelusil",
+    ],
+    implication: "Short-course symptomatic drug — stop usually expected.",
+    action: "No action unless symptoms persist",
+  },
+];
+
+function classifyMed(name) {
+  const n = (name || "").toLowerCase();
+  for (const c of MED_CLASSES) {
+    if (c.keywords.some((k) => n.includes(k))) {
+      return { className: c.className, label: c.label, weight: c.weight, implication: c.implication, action: c.action };
+    }
+  }
+  return {
+    className: "other",
+    label: "",
+    weight: "medium",
+    implication: "Treatment gap — clinical cover may be incomplete.",
+    action: "Discuss replacement or resumption",
+  };
+}
+
 export function runSummaryRules({
   diagnoses = [],
   activeMeds = [],
@@ -197,12 +438,23 @@ export function runSummaryRules({
     const isNonClinical = SKIP_PATTERNS.some((p) => reason.includes(p) || notes.includes(p));
     // Also skip if stop_reason is just a bare HealthRay ID + "stopped" (automated sync stop)
     if (isNonClinical || /^healthray:\d+\s*[-—]?\s*stopped?$/i.test(m.stop_reason || "")) continue;
-    red.push({
+
+    const cls = classifyMed(m.name);
+    const alert = {
       id: `r4_stopped_${m.id || m.name}`,
-      title: `${m.name} stopped ${d} day${d !== 1 ? "s" : ""} ago${m.stop_reason ? ` — ${m.stop_reason}` : ""}`,
-      detail: "Treatment gap — clinical cover may be incomplete.",
-      action: "Discuss replacement or resumption",
-    });
+      title: `${m.name}${cls.label ? ` (${cls.label})` : ""} stopped ${d} day${d !== 1 ? "s" : ""} ago${m.stop_reason ? ` — ${m.stop_reason}` : ""}`,
+      detail: cls.implication,
+      action: cls.action,
+      medClass: cls.className,
+      medWeight: cls.weight,
+      gapDays: d,
+    };
+    // Route supplements and symptomatic drugs to amber; critical classes to red
+    if (cls.weight === "low") {
+      amber.push(alert);
+    } else {
+      red.push(alert);
+    }
   }
 
   // ── Biomarker range alerts (beyond HbA1c) ──

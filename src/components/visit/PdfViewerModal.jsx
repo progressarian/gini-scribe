@@ -12,14 +12,28 @@ const ICON_MAP = {
   radiology: "🫁",
 };
 
-const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
+const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose }) {
   const [url, setUrl] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!src);
   const [error, setError] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [imgZoomed, setImgZoomed] = useState(false);
 
+  const srcUrl = src?.url || null;
+  const srcMime = src?.mimeType || null;
+  const srcFileName = src?.fileName || null;
+
   useEffect(() => {
+    if (srcUrl) {
+      setUrl({
+        url: srcUrl,
+        mimeType: srcMime || "application/pdf",
+        fileName: srcFileName || "document",
+      });
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!doc) return;
 
     let objectUrl = null;
@@ -66,9 +80,17 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [doc]);
+  }, [doc, srcUrl, srcMime, srcFileName]);
 
-  if (!doc) return null;
+  if (!doc && !src) return null;
+
+  const viewDoc = doc || {
+    doc_type: (src?.mimeType || "").startsWith("image/") ? "imaging" : "prescription",
+    title: src?.title || src?.fileName,
+    file_name: src?.fileName,
+    doc_date: src?.docDate,
+    source: src?.source,
+  };
 
   const isPdf =
     url?.mimeType === "application/pdf" || (typeof url === "string" && url.includes(".pdf"));
@@ -82,12 +104,14 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
       >
         <div className="pdf-modal-header">
           <div className="pdf-modal-title">
-            <span className="pdf-modal-icon">{ICON_MAP[doc.doc_type] || "📄"}</span>
+            <span className="pdf-modal-icon">{ICON_MAP[viewDoc.doc_type] || "📄"}</span>
             <div>
-              <div className="pdf-modal-name">{doc.title || doc.file_name || doc.doc_type}</div>
+              <div className="pdf-modal-name">
+                {viewDoc.title || viewDoc.file_name || viewDoc.doc_type}
+              </div>
               <div className="pdf-modal-meta">
-                {fmtDate(doc.doc_date || doc.created_at)}
-                {doc.source ? ` · ${doc.source}` : ""}
+                {fmtDate(viewDoc.doc_date || viewDoc.created_at)}
+                {viewDoc.source ? ` · ${viewDoc.source}` : ""}
               </div>
             </div>
           </div>
@@ -104,7 +128,7 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
                 <a
                   className="pdf-btn"
                   href={typeof url === "string" ? url : url.url}
-                  download={doc.file_name || "document"}
+                  download={viewDoc.file_name || "document"}
                   onClick={(e) => e.stopPropagation()}
                   title="Download"
                 >
@@ -117,7 +141,7 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
                     const win = window.open("", "_blank");
                     if (win) {
                       win.document.write(
-                        `<!DOCTYPE html><html><head><title>${doc.file_name || "Document"}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${blobUrl}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
+                        `<!DOCTYPE html><html><head><title>${viewDoc.file_name || "Document"}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${blobUrl}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
                       );
                       win.document.close();
                     }
@@ -149,14 +173,14 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
               {isPdf && (
                 <iframe
                   src={typeof url === "string" ? url : url.url}
-                  title={doc.title || "PDF Document"}
+                  title={viewDoc.title || "PDF Document"}
                   className="pdf-iframe"
                 />
               )}
               {isImage && (
                 <img
                   src={typeof url === "string" ? url : url.url}
-                  alt={doc.title || "Document"}
+                  alt={viewDoc.title || "Document"}
                   className={`pdf-image ${imgZoomed ? "zoomed" : ""}`}
                   onClick={() => setImgZoomed((z) => !z)}
                   title={imgZoomed ? "Click to fit" : "Click to zoom to full resolution"}
@@ -165,7 +189,7 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, onClose }) {
               {!isPdf && !isImage && (
                 <iframe
                   src={typeof url === "string" ? url : url.url}
-                  title={doc.title || "Document"}
+                  title={viewDoc.title || "Document"}
                   className="pdf-iframe"
                 />
               )}

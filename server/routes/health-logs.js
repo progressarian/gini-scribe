@@ -104,10 +104,8 @@ router.get("/patients/:id/health-logs", async (req, res) => {
 
     // Fetch based on type
     if (!type || type === "vitals") {
-      if (!type || type === "vitals") {
-        const { rows } = await pool.query(queries.vitals, values);
-        result.vitals = rows;
-      }
+      const { rows } = await pool.query(queries.vitals, values);
+      result.vitals = rows;
     }
 
     if (!type || type === "activities") {

@@ -541,19 +541,6 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     );
     if (exact.rows[0]) continue;
 
-    // Skip if same test+value already exists for this patient within the last
-    // 365 days (any date) — doctors carry-forward old lab values in follow-up
-    // notes, so the AI may extract the same result with different dates.
-    const carryForward = await pool.query(
-      `SELECT id FROM lab_results
-       WHERE patient_id = $1 AND canonical_name = $2
-         AND result::numeric = $3::numeric
-         AND test_date >= NOW() - INTERVAL '365 days'
-       LIMIT 1`,
-      [patientId, canonicalName, val],
-    );
-    if (carryForward.rows[0]) continue;
-
     await pool
       .query(
         `INSERT INTO lab_results

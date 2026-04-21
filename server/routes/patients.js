@@ -302,7 +302,10 @@ router.get("/patients/:id", async (req, res) => {
         };
       });
 
-    // Merge and sort all docs by date newest first
+    // Merge and sort all docs by date newest first. Mismatch-review docs are
+    // returned as-is — doctor-facing UIs surface them with a "Needs review"
+    // flag and skip their extracted fields; companion UIs render the
+    // Accept/Reject banner.
     const allDocs = [...docs.rows, ...synthDocs].sort((a, b) => {
       const da = a.doc_date ? new Date(a.doc_date) : new Date(0);
       const db = b.doc_date ? new Date(b.doc_date) : new Date(0);

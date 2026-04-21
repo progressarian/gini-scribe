@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 import usePatientStore from "../stores/patientStore";
+import { getDocStatus } from "../utils/docStatus.js";
 import useVitalsStore from "../stores/vitalsStore";
 import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
@@ -578,32 +579,88 @@ export default function DashboardPage() {
               <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", marginBottom: 4 }}>
                 📎 RECENT DOCUMENTS
               </div>
-              {(pfd?.documents || []).slice(0, 4).map((d, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "3px 0",
-                    fontSize: 10,
-                    borderBottom: i < 3 ? "1px solid #f1f5f9" : "none",
-                  }}
-                >
-                  <span>
-                    {d.doc_type === "lab" ? "🔬" : d.doc_type === "prescription" ? "💊" : "📋"}
-                  </span>
-                  <span style={{ fontWeight: 700, flex: 1 }}>{d.title || d.doc_type}</span>
-                  <span style={{ fontSize: 9, color: "#94a3b8" }}>
-                    {d.doc_date
-                      ? new Date(d.doc_date).toLocaleDateString("en-IN", {
-                          day: "2-digit",
-                          month: "short",
-                        })
-                      : ""}
-                  </span>
-                </div>
-              ))}
+              {(pfd?.documents || []).slice(0, 4).map((d, i) => {
+                const status = getDocStatus(d);
+                const needsReview = status.kind === "mismatch";
+                const isPending = status.kind === "pending";
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 0",
+                      fontSize: 10,
+                      borderBottom: i < 3 ? "1px solid #f1f5f9" : "none",
+                      background: needsReview
+                        ? "#fef2f2"
+                        : isPending
+                          ? "#f5f3ff"
+                          : undefined,
+                    }}
+                  >
+                    <span>
+                      {needsReview
+                        ? "⚠️"
+                        : isPending
+                          ? "⏳"
+                          : d.doc_type === "lab"
+                            ? "🔬"
+                            : d.doc_type === "prescription"
+                              ? "💊"
+                              : "📋"}
+                    </span>
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        flex: 1,
+                        color: needsReview
+                          ? "#b91c1c"
+                          : isPending
+                            ? "#7c3aed"
+                            : undefined,
+                      }}
+                    >
+                      {d.title || d.doc_type}
+                    </span>
+                    {status.label && (
+                      <span
+                        style={{
+                          fontSize: 8,
+                          padding: "1px 5px",
+                          borderRadius: 8,
+                          background: status.bg,
+                          color: status.color,
+                          border: `1px solid ${status.border}`,
+                          fontWeight: 700,
+                        }}
+                        title={
+                          needsReview
+                            ? "Needs review in Companion app"
+                            : isPending
+                              ? "Extraction in progress"
+                              : "Extracted"
+                        }
+                      >
+                        {needsReview
+                          ? "REVIEW"
+                          : isPending
+                            ? "EXTRACTING"
+                            : "DONE"}
+                      </span>
+                    )}
+                    <span style={{ fontSize: 9, color: "#94a3b8" }}>
+                      {d.doc_date
+                        ? new Date(d.doc_date).toLocaleDateString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                          })
+                        : ""}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

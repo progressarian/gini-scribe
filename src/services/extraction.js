@@ -21,7 +21,7 @@ export function isHeic(file) {
   );
 }
 
-function parseVisionResponse(text) {
+export function parseVisionResponse(text) {
   if (!text) return { data: null, error: "Empty response" };
   let clean = text
     .replace(/```json\s*/g, "")

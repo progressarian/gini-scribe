@@ -336,11 +336,26 @@ router.get("/opd/appointments", async (req, res) => {
            SELECT UNNEST($1::int[]) AS pid
          )
          SELECT pids.pid AS patient_id,
-           (SELECT COUNT(*) FROM consultations c WHERE c.patient_id = pids.pid)::int AS c_count,
-           (SELECT COUNT(*) FROM appointments a2
-              WHERE a2.patient_id = pids.pid
-                AND a2.appointment_date <= $2
-                AND COALESCE(a2.status, 'scheduled') NOT IN ('cancelled', 'no_show'))::int AS a_count,
+           -- Mirror /api/visit/:patientId dedup: consultations UNION appointments
+           -- (only HealthRay-linked), dropping appointments whose date already
+           -- has a consultation, then distinct on (date, status).
+           (SELECT COUNT(*) FROM (
+              SELECT DISTINCT v_date, v_status FROM (
+                SELECT c.visit_date::date AS v_date, c.status AS v_status
+                  FROM consultations c WHERE c.patient_id = pids.pid
+                UNION ALL
+                SELECT a2.appointment_date::date AS v_date, a2.status AS v_status
+                  FROM appointments a2
+                  WHERE a2.patient_id = pids.pid
+                    AND a2.healthray_id IS NOT NULL
+                    AND a2.appointment_date IS NOT NULL
+                    AND NOT EXISTS (
+                      SELECT 1 FROM consultations c2
+                       WHERE c2.patient_id = pids.pid
+                         AND c2.visit_date::date = a2.appointment_date::date
+                    )
+              ) u
+            ))::int AS visit_count,
            (SELECT MAX(a3.appointment_date) FROM appointments a3
               WHERE a3.patient_id = pids.pid
                 AND a3.appointment_date < $2) AS last_visit_date,
@@ -471,7 +486,7 @@ router.get("/opd/appointments", async (req, res) => {
       const uplDate =
         [a?.upl_lab_date_lr, a?.upl_lab_date_doc].filter(Boolean).sort().pop() || null;
 
-      row.visit_count = (a?.c_count || 0) + (a?.a_count || 0) || row.visit_count || 1;
+      row.visit_count = a?.visit_count || row.visit_count || 1;
       row.last_visit_date = a?.last_visit_date || null;
       // Fall back to latest non-empty healthray_diagnoses if this row's is empty.
       if (

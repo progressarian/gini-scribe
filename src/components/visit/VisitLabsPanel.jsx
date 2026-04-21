@@ -3,6 +3,7 @@ import { fmtDate } from "./helpers";
 import PdfViewerModal from "./PdfViewerModal";
 import { LAB_PANELS as PANELS } from "../../config/labOrder";
 import { getFallbackRange } from "../../config/labRanges";
+import { getDocStatus } from "../../utils/docStatus";
 
 // Panel grouping config lives in src/config/labOrder.js — single source of
 // truth shared with Outcomes, Sidebar, Assess and the dashboard. See
@@ -15,6 +16,21 @@ const SOURCE_PRIORITY = {
   healthray: 4,
   prescription_parsed: 5,
 };
+
+const parseExt = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+};
+
+const isMismatchReview = (doc) =>
+  parseExt(doc.extracted_data)?.extraction_status === "mismatch_review";
 
 function formatTestName(name) {
   if (!name) return "—";
@@ -421,33 +437,78 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
           </div>
           <div className="scb">
             {labDocs.length > 0 ? (
-              labDocs.map((doc, i) => (
-                <div
-                  key={doc.id || i}
-                  className="report-card"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => openDoc(doc)}
-                >
-                  <div className="report-icon ri-b">🧪</div>
-                  <div style={{ flex: 1 }}>
-                    <div className="report-nm">{doc.title || doc.file_name || "Lab Report"}</div>
-                    <div className="report-dt">
-                      {fmtDate(doc.doc_date)}
-                      {doc.source ? ` · ${doc.source}` : ""}
-                      {doc.created_at &&
-                      (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
-                        ? ` · Uploaded ${fmtDate(doc.created_at)}`
-                        : ""}
-                      {doc.notes ? ` · ${doc.notes}` : ""}
-                    </div>
-                  </div>
-                  <span
-                    className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
+              labDocs.map((doc, i) => {
+                const status = getDocStatus(doc);
+                const needsReview = status.kind === "mismatch";
+                const isPending = status.kind === "pending";
+                return (
+                  <div
+                    key={doc.id || i}
+                    className="report-card"
+                    style={{
+                      cursor: "pointer",
+                      border: needsReview
+                        ? "1px solid #fecaca"
+                        : isPending
+                          ? "1px solid #c4b5fd"
+                          : undefined,
+                      background: needsReview
+                        ? "#fef2f2"
+                        : isPending
+                          ? "#f5f3ff"
+                          : undefined,
+                    }}
+                    onClick={() => openDoc(doc)}
                   >
-                    {i === 0 ? "Latest" : doc.has_abnormal ? "Abnormal" : "Normal"}
-                  </span>
-                </div>
-              ))
+                    <div className="report-icon ri-b">{needsReview ? "⚠️" : "🧪"}</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="report-nm">
+                        {doc.title || doc.file_name || "Lab Report"}
+                      </div>
+                      <div className="report-dt">
+                        {fmtDate(doc.doc_date)}
+                        {doc.source ? ` · ${doc.source}` : ""}
+                        {doc.created_at &&
+                        (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
+                          ? ` · Uploaded ${fmtDate(doc.created_at)}`
+                          : ""}
+                        {doc.notes ? ` · ${doc.notes}` : ""}
+                      </div>
+                      {needsReview && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#b91c1c",
+                            fontWeight: 600,
+                            marginTop: 3,
+                          }}
+                          title="Extraction not applied — review in the Companion app"
+                        >
+                          ⚠️ Awaiting review — extraction not applied
+                        </div>
+                      )}
+                    </div>
+                    {status.label ? (
+                      <span
+                        className="report-status"
+                        style={{
+                          background: status.bg,
+                          color: status.color,
+                          borderColor: status.border,
+                        }}
+                      >
+                        {status.label}
+                      </span>
+                    ) : (
+                      <span
+                        className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
+                      >
+                        {i === 0 ? "Latest" : doc.has_abnormal ? "Abnormal" : "Normal"}
+                      </span>
+                    )}
+                  </div>
+                );
+              })
             ) : (
               <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
                 No lab reports uploaded yet
@@ -468,29 +529,76 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
           </div>
           <div className="scb">
             {radiologyDocs.length > 0 ? (
-              radiologyDocs.map((doc, i) => (
-                <div
-                  key={doc.id || i}
-                  className="report-card"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => openDoc(doc)}
-                >
-                  <div className="report-icon ri-r" style={{ background: "#fff0f5" }}>
-                    {doc.title?.toLowerCase().includes("echo") ? "🫀" : "🫁"}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div className="report-nm">
-                      {doc.title || doc.file_name || "Radiology Report"}
+              radiologyDocs.map((doc, i) => {
+                const status = getDocStatus(doc);
+                const needsReview = status.kind === "mismatch";
+                const isPending = status.kind === "pending";
+                return (
+                  <div
+                    key={doc.id || i}
+                    className="report-card"
+                    style={{
+                      cursor: "pointer",
+                      border: needsReview
+                        ? "1px solid #fecaca"
+                        : isPending
+                          ? "1px solid #c4b5fd"
+                          : undefined,
+                      background: needsReview
+                        ? "#fef2f2"
+                        : isPending
+                          ? "#f5f3ff"
+                          : undefined,
+                    }}
+                    onClick={() => openDoc(doc)}
+                  >
+                    <div className="report-icon ri-r" style={{ background: "#fff0f5" }}>
+                      {needsReview
+                        ? "⚠️"
+                        : doc.title?.toLowerCase().includes("echo")
+                          ? "🫀"
+                          : "🫁"}
                     </div>
-                    <div className="report-dt">
-                      {fmtDate(doc.doc_date)}
-                      {doc.source ? ` · ${doc.source}` : ""}
-                      {doc.notes ? ` · ${doc.notes}` : ""}
+                    <div style={{ flex: 1 }}>
+                      <div className="report-nm">
+                        {doc.title || doc.file_name || "Radiology Report"}
+                      </div>
+                      <div className="report-dt">
+                        {fmtDate(doc.doc_date)}
+                        {doc.source ? ` · ${doc.source}` : ""}
+                        {doc.notes ? ` · ${doc.notes}` : ""}
+                      </div>
+                      {needsReview && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#b91c1c",
+                            fontWeight: 600,
+                            marginTop: 3,
+                          }}
+                          title="Extraction not applied — review in the Companion app"
+                        >
+                          ⚠️ Awaiting review — extraction not applied
+                        </div>
+                      )}
                     </div>
+                    {status.label ? (
+                      <span
+                        className="report-status"
+                        style={{
+                          background: status.bg,
+                          color: status.color,
+                          borderColor: status.border,
+                        }}
+                      >
+                        {status.label}
+                      </span>
+                    ) : (
+                      <span className="report-status rs-ab">Review</span>
+                    )}
                   </div>
-                  <span className="report-status rs-ab">Review</span>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
                 No radiology reports

@@ -8,6 +8,7 @@ import {
   isSameDate,
 } from "./helpers";
 import { sortDiagnoses, detectDiagnosisCategory } from "../../server-utils/diagnosisSort";
+import ChangesPopover from "./ChangesPopover";
 
 const DX_STATUS_OPTS = [
   "Newly Diagnosed",
@@ -345,24 +346,28 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
       parts.push(`${added.length} diagnoses added`);
     }
     if (modified.length === 1) {
-      parts.push(`${modified[0].label} → ${modified[0].status || "Active"}`);
+      const dx = modified[0];
+      parts.push(
+        dx.prev_status
+          ? `${dx.label} ${dx.prev_status} → ${dx.status || "Active"}`
+          : `${dx.label} → ${dx.status || "Active"}`,
+      );
     } else if (modified.length > 1) {
       parts.push(`${modified.length} statuses updated`);
     }
 
     const text = parts.length > 0 ? parts.join(", ") : "Updated";
 
-    const tooltipLines = [`Updated on ${fmtDate(latest)}:`];
-    if (added.length > 0) {
-      tooltipLines.push("Added:");
-      added.forEach((dx) => tooltipLines.push(`  + ${dx.label} (${dx.status || "Active"})`));
-    }
-    if (modified.length > 0) {
-      tooltipLines.push("Status changed:");
-      modified.forEach((dx) => tooltipLines.push(`  ${dx.label} → ${dx.status || "Active"}`));
-    }
+    const addedDetails = added.map((dx) => ({
+      name: dx.label,
+      diff: [dx.status || "Active"],
+    }));
+    const changedDetails = modified.map((dx) => ({
+      name: dx.label,
+      diff: [`${dx.prev_status || "—"} → ${dx.status || "Active"}`],
+    }));
 
-    return { text, date: latest, tooltip: tooltipLines.join("\n") };
+    return { text, date: latest, added: addedDetails, changed: changedDetails };
   }, [grouped]);
 
   return (
@@ -371,18 +376,12 @@ const VisitDiagnoses = memo(function VisitDiagnoses({
         <div className="sct">
           <div className="sci ic-p">🏷</div>Diagnoses
           {dxSummary && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--t3)",
-                fontWeight: 400,
-                marginLeft: 8,
-                cursor: "default",
-              }}
-              title={dxSummary.tooltip}
-            >
-              {dxSummary.text} — {fmtDateShort(dxSummary.date)}
-            </span>
+            <ChangesPopover
+              date={dxSummary.date}
+              label={`${dxSummary.text} — ${fmtDateShort(dxSummary.date)}`}
+              added={dxSummary.added}
+              changed={dxSummary.changed}
+            />
           )}
         </div>
         <button className="bx bx-p" onClick={onAddDiagnosis}>

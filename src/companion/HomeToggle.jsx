@@ -10,7 +10,7 @@ export default function HomeToggle({ value, onChange, apptCount, patientCount })
       >
         <span className="home-toggle__icon">📅</span>
         <span className="home-toggle__label">Today</span>
-        <span className="home-toggle__count">{apptCount}</span>
+        {/* <span className="home-toggle__count">{apptCount}</span> */}
       </button>
       <button
         type="button"
@@ -19,7 +19,7 @@ export default function HomeToggle({ value, onChange, apptCount, patientCount })
       >
         <span className="home-toggle__icon">👥</span>
         <span className="home-toggle__label">Patients</span>
-        <span className="home-toggle__count">{patientCount}</span>
+        {/* <span className="home-toggle__count">{patientCount}</span> */}
       </button>
     </div>
   );

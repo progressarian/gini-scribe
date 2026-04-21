@@ -115,6 +115,13 @@ app.get("*", (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Gini Scribe API + Frontend running on port ${PORT}`);
+  if (process.env.GENIE_SUPABASE_URL && process.env.GENIE_SUPABASE_SERVICE_KEY) {
+    console.log("✓ Genie sync: enabled");
+  } else {
+    console.warn(
+      "⚠️  Genie sync: DISABLED — set GENIE_SUPABASE_URL and GENIE_SUPABASE_SERVICE_KEY in .env to enable Track data sync",
+    );
+  }
   if (RUN_CRON_IN_API) {
     console.log("⚠️  RUN_CRON_IN_API=1 — running cron jobs inside API process");
     startCronJobs();

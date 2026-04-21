@@ -27,9 +27,7 @@ const LabExtractionReviewModal = memo(function LabExtractionReviewModal({
   const allVitals = extracted?.vitals || [];
 
   const [selected, setSelected] = useState(() => new Set(allTests.map((_, i) => i)));
-  const [selectedVitals, setSelectedVitals] = useState(
-    () => new Set(allVitals.map((_, i) => i)),
-  );
+  const [selectedVitals, setSelectedVitals] = useState(() => new Set(allVitals.map((_, i) => i)));
 
   const toggle = (i) =>
     setSelected((s) => {
@@ -338,9 +336,7 @@ const LabExtractionReviewModal = memo(function LabExtractionReviewModal({
             {saving
               ? "Saving..."
               : `Save ${selectedTests.length} Test${selectedTests.length !== 1 ? "s" : ""}` +
-                (selectedVitalsList.length > 0
-                  ? ` + ${selectedVitalsList.length} Vitals`
-                  : "")}
+                (selectedVitalsList.length > 0 ? ` + ${selectedVitalsList.length} Vitals` : "")}
           </button>
         </div>
       </div>

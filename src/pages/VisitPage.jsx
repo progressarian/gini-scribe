@@ -26,7 +26,8 @@ import VisitTopbar from "../components/visit/VisitTopbar";
 import VisitStrip from "../components/visit/VisitStrip";
 import VisitSidebar from "../components/visit/VisitSidebar";
 import VisitBiomarkers from "../components/visit/VisitBiomarkers";
-import VitalsTrendChart from "../components/visit/VitalsTrendChart";
+import ChangesPopover from "../components/visit/ChangesPopover";
+// import VitalsTrendChart from "../components/visit/VitalsTrendChart";
 import VisitDiagnoses from "../components/visit/VisitDiagnoses";
 import VisitMedications from "../components/visit/VisitMedications";
 import VisitPlan from "../components/visit/VisitPlan";
@@ -109,24 +110,28 @@ function VisitSymptomsSection({ symptoms = [], onAddSymptom, onStatusChange }) {
       parts.push(`${added.length} symptoms added`);
     }
     if (modified.length === 1) {
-      parts.push(`${modified[0].label} → ${modified[0].status || "Active"}`);
+      const sy = modified[0];
+      parts.push(
+        sy.prev_status
+          ? `${sy.label} ${sy.prev_status} → ${sy.status || "Active"}`
+          : `${sy.label} → ${sy.status || "Active"}`,
+      );
     } else if (modified.length > 1) {
       parts.push(`${modified.length} statuses updated`);
     }
 
     const text = parts.length > 0 ? parts.join(", ") : "Updated";
 
-    const tooltipLines = [`Updated on ${fmtDate(latest)}:`];
-    if (added.length > 0) {
-      tooltipLines.push("Added:");
-      added.forEach((sy) => tooltipLines.push(`  + ${sy.label} (${sy.status || "Active"})`));
-    }
-    if (modified.length > 0) {
-      tooltipLines.push("Status changed:");
-      modified.forEach((sy) => tooltipLines.push(`  ${sy.label} → ${sy.status || "Active"}`));
-    }
+    const addedDetails = added.map((sy) => ({
+      name: sy.label,
+      diff: [sy.status || "Active"],
+    }));
+    const changedDetails = modified.map((sy) => ({
+      name: sy.label,
+      diff: [`${sy.prev_status || "—"} → ${sy.status || "Active"}`],
+    }));
 
-    return { text, date: latest, tooltip: tooltipLines.join("\n") };
+    return { text, date: latest, added: addedDetails, changed: changedDetails };
   }, [symptoms]);
 
   return (
@@ -135,18 +140,12 @@ function VisitSymptomsSection({ symptoms = [], onAddSymptom, onStatusChange }) {
         <div className="sct">
           <div className="sci ic-a">🩹</div>Symptoms &amp; Concerns
           {symptomSummary && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--t3)",
-                fontWeight: 400,
-                marginLeft: 8,
-                cursor: "default",
-              }}
-              title={symptomSummary.tooltip}
-            >
-              {symptomSummary.text} — {fmtDateShort(symptomSummary.date)}
-            </span>
+            <ChangesPopover
+              date={symptomSummary.date}
+              label={`${symptomSummary.text} — ${fmtDateShort(symptomSummary.date)}`}
+              added={symptomSummary.added}
+              changed={symptomSummary.changed}
+            />
           )}
         </div>
         <button className="bx bx-p" onClick={onAddSymptom}>
@@ -790,7 +789,7 @@ export default function VisitPage() {
                 onAddLab={() => setModal({ type: "addLab" })}
                 onPasteBiomarkers={() => setModal({ type: "pasteText" })}
               />
-              <VitalsTrendChart vitals={vitals} />
+              {/* <VitalsTrendChart vitals={vitals} /> */}
               {/* <VisitCoordPrep prep={data.prep} /> */}
               <VisitSymptomsSection
                 symptoms={data.symptoms || []}

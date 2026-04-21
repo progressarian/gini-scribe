@@ -1,5 +1,6 @@
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
-import { fmtDate, fmtDateLong, getLabVal, MED_COLORS } from "./helpers";
+import { fmtDate, fmtDateLong, fmtDateShort, getLabVal, MED_COLORS } from "./helpers";
+import ChangesPopover from "./ChangesPopover";
 import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard";
 import { LAB_ORDER_CHIPS } from "../../config/chips";
 
@@ -294,6 +295,55 @@ const VisitPlan = memo(function VisitPlan({
     (m) => m.stopped_date && m.stopped_date.startsWith(new Date().toISOString().slice(0, 7)),
   );
 
+  // Plan update summary — compare latest consultation's plan vs the previous one
+  const planSummary = useMemo(() => {
+    const latest = consultations?.[0];
+    if (!latest) return null;
+    const latestCon = latest.con_data || {};
+    const prevCon = consultations?.[1]?.con_data || {};
+    const latestTests = (latestCon.investigations_to_order || latestCon.tests_ordered || []).map(
+      (t) => (typeof t === "string" ? t : t.name || t.test),
+    );
+    const prevTests = (prevCon.investigations_to_order || prevCon.tests_ordered || []).map((t) =>
+      typeof t === "string" ? t : t.name || t.test,
+    );
+    const addedTests = latestTests.filter((t) => t && !prevTests.includes(t));
+    const removedTests = prevTests.filter((t) => t && !latestTests.includes(t));
+
+    const prevFU = prevCon.follow_up?.date || null;
+    const latestFU = latestCon.follow_up?.date || null;
+    const fuChanged = prevFU !== latestFU;
+
+    const parts = [];
+    if (addedTests.length === 1) parts.push(`${addedTests[0]} ordered`);
+    else if (addedTests.length > 1) parts.push(`${addedTests.length} tests ordered`);
+    if (removedTests.length > 0) parts.push(`${removedTests.length} removed`);
+    if (fuChanged && latestFU) {
+      parts.push(
+        prevFU
+          ? `follow-up ${fmtDateShort(prevFU)} → ${fmtDateShort(latestFU)}`
+          : `follow-up ${fmtDateShort(latestFU)}`,
+      );
+    }
+
+    const text = parts.length ? parts.join(", ") : "Plan updated";
+    const date = latest.updated_at || latest.visit_date || latest.created_at;
+    if (!date) return null;
+
+    const addedDetails = addedTests.map((t) => ({ name: t, diff: ["ordered"] }));
+    const changedDetails = [];
+    removedTests.forEach((t) =>
+      changedDetails.push({ name: t, diff: ["ordered → —"] }),
+    );
+    if (fuChanged) {
+      changedDetails.push({
+        name: "Follow-up",
+        diff: [`${prevFU ? fmtDate(prevFU) : "—"} → ${latestFU ? fmtDate(latestFU) : "—"}`],
+      });
+    }
+    return { text, date, added: addedDetails, changed: changedDetails };
+  }, [consultations]);
+
   const getInitials = (name) => {
     if (!name) return "EN";
     const parts = name.replace(/^Dr\.\s*/i, "").split(" ");
@@ -308,6 +358,14 @@ const VisitPlan = memo(function VisitPlan({
         <div className="sch">
           <div className="sct">
             <div className="sci ic-b">📝</div>Plan for This Visit
+            {planSummary && (
+              <ChangesPopover
+                date={planSummary.date}
+                label={`${planSummary.text} — ${fmtDateShort(planSummary.date)}`}
+                added={planSummary.added}
+                changed={planSummary.changed}
+              />
+            )}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn" onClick={() => onOpenTemplate(null)}>
@@ -835,6 +893,17 @@ const VisitPlan = memo(function VisitPlan({
         <div className="sch">
           <div className="sct">
             <div className="sci ic-b">📄</div>Visit Summary &amp; Print
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--t3)",
+                fontWeight: 400,
+                marginLeft: 8,
+                cursor: "default",
+              }}
+            >
+              Generated — {fmtDateShort(today)}
+            </span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn" onClick={handlePrintRx}>

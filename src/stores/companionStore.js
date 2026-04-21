@@ -17,8 +17,9 @@ const LAB_CATEGORIES = ["blood_test", "thyroid", "lipid", "kidney", "hba1c", "ur
 const IMAGING_CATEGORIES = ["xray", "usg", "mri", "dexa", "ecg", "ncs", "eye"];
 
 const deriveCategory = (classification) => {
-  if (!classification?.doc_type) return "other";
-  const { doc_type, subtype } = classification;
+  if (!classification?.doc_type) return null;
+  const { doc_type, subtype, confidence } = classification;
+  const conf = typeof confidence === "number" ? confidence : 0.5;
   if (doc_type === "prescription") return "prescription";
   if (doc_type === "lab_report") {
     const map = {
@@ -29,7 +30,8 @@ const deriveCategory = (classification) => {
       hba1c: "hba1c",
       urine: "urine",
     };
-    return map[subtype] || "blood_test";
+    if (subtype && map[subtype]) return map[subtype];
+    return conf >= 0.6 ? "blood_test" : null;
   }
   if (doc_type === "imaging") {
     const map = {
@@ -41,9 +43,12 @@ const deriveCategory = (classification) => {
       ncs: "ncs",
       eye: "eye",
     };
-    return map[subtype] || "other";
+    if (subtype && map[subtype]) return map[subtype];
+    return conf >= 0.6 ? "other" : null;
   }
-  return "other";
+  if (doc_type === "discharge") return "other";
+  if (doc_type === "other") return "other";
+  return null;
 };
 
 const normalizeMediaType = (mediaType) => {
@@ -126,9 +131,24 @@ function labPanelsToFlatLabs(extractedLab) {
   return {
     labs,
     patient_name: extractedLab.patient_on_report?.name || null,
+    patient_id: extractedLab.patient_on_report?.patient_id || null,
     report_date: extractedLab.report_date || null,
     lab_name: extractedLab.lab_name || null,
     summary: null,
+  };
+}
+
+function extractPatientFromRaw(raw) {
+  if (!raw) return { patient_name: null, patient_id: null };
+  if (raw.patient_on_report) {
+    return {
+      patient_name: raw.patient_on_report.name || null,
+      patient_id: raw.patient_on_report.patient_id || null,
+    };
+  }
+  return {
+    patient_name: raw.patient_name || null,
+    patient_id: raw.patient_id || null,
   };
 }
 
@@ -273,21 +293,50 @@ const useCompanionStore = create((set, get) => ({
   },
 
   checkNameMismatch: (extracted) => {
-    const { selectedPatient } = get();
-    const reportName = (extracted.patient_name || extracted.name || "").toLowerCase().trim();
-    const selectedName = (selectedPatient?.name || "").toLowerCase().trim();
+    // Legacy alias — kept for /capture (single) flow; delegates to the new
+    // checker but returns only the name-mismatch subset.
+    const res = get().checkPatientMismatch(extracted);
+    if (!res || !res.mismatchedFields.includes("name")) return null;
+    return { reportName: res.reportName, selectedName: res.selectedName };
+  },
+
+  checkPatientMismatch: (extracted, patientOverride) => {
+    const selectedPatient = patientOverride || get().selectedPatient;
+    if (!selectedPatient) return null;
+
+    // Primary check is NAME. If the printed patient name matches the
+    // selected patient, the doc is considered safe to attach even if the
+    // ID/UHID on the report differs (scanning artifacts, manual edits,
+    // multiple IDs per patient). Only flag for review when the name does
+    // not match. The ID is still captured and shown in the review modal
+    // for context.
+    const reportName = (extracted?.patient_name || extracted?.name || "").trim();
+    const selectedName = (selectedPatient.name || "").trim();
+    const reportId = String(extracted?.patient_id || extracted?.patient_uhid || "").trim();
+    const selectedId = String(selectedPatient.file_no || "").trim();
+
     if (!reportName || !selectedName || reportName.length < 3) return null;
-    const reportParts = reportName.split(/\s+/);
-    const selectedParts = selectedName.split(/\s+/);
-    const hasMatch = reportParts.some(
-      (rp) => rp.length > 2 && selectedParts.some((sp) => sp.includes(rp) || rp.includes(sp)),
+
+    const rp = reportName.toLowerCase().split(/\s+/);
+    const sp = selectedName.toLowerCase().split(/\s+/);
+    const nameMatches = rp.some(
+      (a) => a.length > 2 && sp.some((b) => b.includes(a) || a.includes(b)),
     );
-    if (!hasMatch)
-      return {
-        reportName: extracted.patient_name || extracted.name,
-        selectedName: selectedPatient.name,
-      };
-    return null;
+    if (nameMatches) return null;
+
+    const mismatchedFields = ["name"];
+    if (reportId && selectedId) {
+      const norm = (x) => x.replace(/[^a-z0-9]/gi, "").toLowerCase();
+      if (norm(reportId) !== norm(selectedId)) mismatchedFields.push("id");
+    }
+
+    return {
+      reportName,
+      selectedName,
+      reportId: reportId || null,
+      selectedId: selectedId || null,
+      mismatchedFields,
+    };
   },
 
   // ── Fast-save: persist doc + file to server, reset UI, enqueue extraction
@@ -456,6 +505,47 @@ const useCompanionStore = create((set, get) => ({
       if (!extraction) throw new Error("Extraction returned no data");
 
       // Phase 3: sync to server — history (meds) + PATCH extracted_data
+      // BUT: if patient name/id mismatch is detected, short-circuit and
+      // leave the doc awaiting user Accept/Reject on the doc card.
+      const mismatch = get().checkPatientMismatch(extraction);
+      if (mismatch) {
+        // Persist mismatch state to the DB so it survives a page refresh.
+        // Server PATCH cascade only fires on top-level `panels`/`medications`;
+        // nesting them under `pending_payload` keeps the cascade off until
+        // the user clicks Accept.
+        const reviewWrapper = {
+          extraction_status: "mismatch_review",
+          mismatch,
+          pending_payload: extraction._rawExtraction || extraction,
+          pending_meta: meta,
+          category,
+          file_name: fileName,
+          reviewed_at: null,
+        };
+        try {
+          await api.patch(`/api/documents/${docId}`, { extracted_data: reviewWrapper });
+        } catch (e) {
+          console.warn(`Persist mismatch state failed for doc ${docId}:`, e);
+        }
+
+        get()._setPending(docId, {
+          status: "mismatch",
+          phase: "awaiting_review",
+          category,
+          mismatch,
+          pendingPayload: extraction,
+          pendingMeta: meta,
+          error: null,
+        });
+        toast(
+          `⚠️ Mismatch on ${fileName || "document"} — review on the document card`,
+          "warn",
+        );
+        queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
+        queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
+        return;
+      }
+
       get()._setPending(docId, { phase: "syncing" });
 
       const hasMeds = (extraction.medications || []).length > 0;
@@ -491,15 +581,6 @@ const useCompanionStore = create((set, get) => ({
       if (payload.extraction_status === "pending") delete payload.extraction_status;
       await api.patch(`/api/documents/${docId}`, { extracted_data: payload });
 
-      // Non-blocking warnings surfaced as toasts.
-      const mismatch = get().checkNameMismatch(extraction);
-      if (mismatch) {
-        toast(
-          `Name mismatch: "${mismatch.reportName}" vs "${mismatch.selectedName}" — verify doc`,
-          "warn",
-        );
-      }
-
       get()._clearPending(docId);
       queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
     } catch (e) {
@@ -526,6 +607,103 @@ const useCompanionStore = create((set, get) => ({
     });
     set((s) => ({ _bgQueue: [...s._bgQueue, entry.task] }));
     get()._drainBg();
+  },
+
+  // Accept a mismatched document: run the sync phase that was skipped in
+  // _runExtractionTask (history POST + PATCH extracted_data), then clear
+  // the pending entry. `opts` may be supplied by the UI after reading the
+  // doc's extracted_data (used when the page was refreshed and the store
+  // no longer has the payload).
+  acceptMismatchedExtraction: async (docId, opts = {}) => {
+    const entry = get().pendingExtractions[docId];
+    const extraction = opts.pendingPayload || entry?.pendingPayload;
+    const meta = opts.pendingMeta || entry?.pendingMeta || {};
+    const patientId = opts.patientId || entry?.patientId;
+    const fileName = opts.fileName || entry?.fileName;
+
+    if (!extraction) {
+      toast("Nothing to accept — extraction payload is gone", "error");
+      return;
+    }
+
+    get()._setPending(docId, { status: "extracting", phase: "syncing", error: null });
+
+    try {
+      const hasMeds = (extraction.medications || []).length > 0;
+      if (hasMeds) {
+        try {
+          await api.post(`/api/patients/${patientId}/history`, {
+            visit_date:
+              meta?.date || extraction.visit_date || new Date().toISOString().slice(0, 10),
+            visit_type: "OPD",
+            doctor_name: meta?.doctor || extraction.doctor_name || "",
+            specialty: meta?.specialty || extraction.specialty || "",
+            hospital_name: meta?.hospital || extraction.hospital_name || "",
+            diagnoses: extraction.diagnoses || [],
+            medications: extraction.medications || [],
+            labs: (extraction.labs || []).map((l) => ({
+              test_name: l.test_name,
+              result: l.result,
+              unit: l.unit,
+              flag: l.flag,
+              ref_range: l.ref_range,
+            })),
+            vitals: extraction.vitals || {},
+          });
+        } catch (e) {
+          console.warn(`History POST failed for doc ${docId}:`, e);
+        }
+      }
+
+      const payload = extraction._rawExtraction
+        ? { ...extraction._rawExtraction }
+        : { ...extraction };
+      if (payload.extraction_status === "pending") delete payload.extraction_status;
+      await api.patch(`/api/documents/${docId}`, { extracted_data: payload });
+
+      get()._clearPending(docId);
+      if (patientId) {
+        queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
+      }
+      queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
+      toast(`Accepted extraction for ${fileName || "document"}`, "success");
+    } catch (e) {
+      console.error(`Accept mismatched failed for doc ${docId}:`, e);
+      get()._setPending(docId, {
+        status: "mismatch",
+        phase: "awaiting_review",
+        error: e.message || "Accept failed",
+      });
+      toast(`Failed to accept: ${e.message || "error"}`, "error");
+    }
+  },
+
+  // Reject a mismatched document: delete the doc row (server cascades to
+  // storage cleanup), clear the pending entry, and remove the matching
+  // multi-capture item if present.
+  rejectMismatchedExtraction: async (docId, opts = {}) => {
+    const entry = get().pendingExtractions[docId];
+    const patientId = opts.patientId || entry?.patientId;
+    const fileName = opts.fileName || entry?.fileName;
+
+    try {
+      await api.delete(`/api/documents/${docId}`);
+      get()._clearPending(docId);
+      set((s) => ({
+        multiCapture: {
+          ...s.multiCapture,
+          items: s.multiCapture.items.filter((it) => it.docId !== docId),
+        },
+      }));
+      if (patientId) {
+        queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
+      }
+      queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
+      toast(`Rejected & deleted ${fileName || "document"}`, "success");
+    } catch (e) {
+      console.error(`Reject mismatched failed for doc ${docId}:`, e);
+      toast(`Failed to reject: ${e.response?.data?.error || e.message}`, "error");
+    }
   },
 
   // ── Home tab (appointments | patients) ───────────────────
@@ -647,15 +825,28 @@ const useCompanionStore = create((set, get) => ({
             get()._patchMultiItem(item.id, { classifying: false });
             return;
           }
-          const classification = error ? { doc_type: "other", subtype: null, confidence: 0 } : data;
+          if (error || !data) {
+            console.warn("Auto-classify returned no data:", error);
+            get()._patchMultiItem(item.id, {
+              classifying: false,
+              classifyError: error || "No classification data",
+              category: null,
+            });
+            return;
+          }
+          const derived = deriveCategory(data);
           get()._patchMultiItem(item.id, {
             classifying: false,
-            classification,
-            category: deriveCategory(classification),
+            classification: data,
+            classifyError: null,
+            category: derived,
           });
         } catch (e) {
           console.warn("Auto-classify failed:", e);
-          get()._patchMultiItem(item.id, { classifying: false });
+          get()._patchMultiItem(item.id, {
+            classifying: false,
+            classifyError: e.message || "Auto-classify failed",
+          });
         }
       }),
     );
@@ -677,13 +868,16 @@ const useCompanionStore = create((set, get) => ({
       const { data, error } = await extractRx(item.base64, mediaType);
       if (error) return { data: null, error };
       if (!data) return { data: null, error: "No prescription data extracted" };
-      return { data, error: null };
+      const pat = extractPatientFromRaw(data);
+      return { data: { ...data, patient_name: pat.patient_name, patient_id: pat.patient_id }, error: null };
     }
 
     if (IMAGING_CATEGORIES.includes(category)) {
       const { data, error } = await extractImaging(item.base64, mediaType);
       if (error) return { data: null, error };
-      return { data: data || {}, error: null };
+      const d = data || {};
+      const pat = extractPatientFromRaw(d);
+      return { data: { ...d, patient_name: pat.patient_name, patient_id: pat.patient_id }, error: null };
     }
 
     // Generic "other" — lightweight inline prompt
@@ -704,7 +898,7 @@ const useCompanionStore = create((set, get) => ({
               {
                 type: "text",
                 text: `Extract key findings from this medical document. Return ONLY valid JSON (no backticks):
-{"patient_name":"","doc_type":"${category}","findings":"","date":"YYYY-MM-DD","doctor":"","notes":""}`,
+{"patient_name":"","patient_id":"","doc_type":"${category}","findings":"","date":"YYYY-MM-DD","doctor":"","notes":""}`,
               },
             ],
           },
@@ -792,7 +986,7 @@ const useCompanionStore = create((set, get) => ({
           needsClassify: false,
         });
 
-        get()._patchMultiItem(item.id, { status: "saved", saveError: null });
+        get()._patchMultiItem(item.id, { status: "saved", saveError: null, docId });
       } catch (e) {
         console.error(`Multi save failed for ${item.fileName}:`, e);
         get()._patchMultiItem(item.id, {

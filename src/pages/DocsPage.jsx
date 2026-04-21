@@ -1,37 +1,59 @@
 import "./DocsPage.css";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import usePatientStore from "../stores/patientStore";
 import useLabPortalStore from "../stores/labPortalStore";
-import api from "../services/api.js";
 import { ts } from "../config/constants.js";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
+import { getDocStatus } from "../utils/docStatus.js";
+import { usePatientFullData } from "../queries/hooks/usePatientFullData.js";
 
 export default function DocsPage() {
   const patient = usePatientStore((s) => s.patient);
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
-  const patientFullData = usePatientStore((s) => s.patientFullData);
-  const setPatientFullData = usePatientStore((s) => s.setPatientFullData);
-  const pfd = usePatientStore((s) => s.getPfd());
   const expandedDocId = useLabPortalStore((s) => s.expandedDocId);
   const setExpandedDocId = useLabPortalStore((s) => s.setExpandedDocId);
   const [viewingDoc, setViewingDoc] = useState(null);
 
-  useEffect(() => {
-    if (dbPatientId && (!patientFullData || patientFullData.id !== dbPatientId)) {
-      api
-        .get(`/api/patients/${dbPatientId}`)
-        .then(({ data }) => {
-          setPatientFullData(data);
-        })
-        .catch(() => {});
-    }
-  }, [dbPatientId, patientFullData, setPatientFullData]);
+  // Refetches on mount (every time user navigates to /docs), on window
+  // focus, and polls every 5s while any doc is still extracting so status
+  // pills update live.
+  const { data: pfd, isFetching } = usePatientFullData(dbPatientId);
 
   return (
     <>
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
       <div>
-        <div className="docs__title">📎 Patient Documents</div>
+        <div
+          className="docs__title"
+          style={{ display: "flex", alignItems: "center", gap: 10 }}
+        >
+          <span>📎 Patient Documents</span>
+          {isFetching && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#7c3aed",
+              }}
+            >
+              <span
+                style={{
+                  width: 12,
+                  height: 12,
+                  border: "2px solid currentColor",
+                  borderTopColor: "transparent",
+                  borderRadius: "50%",
+                  display: "inline-block",
+                  animation: "docs-spin 0.7s linear infinite",
+                }}
+              />
+              Refreshing…
+            </span>
+          )}
+        </div>
         {!dbPatientId ? (
           <div className="docs__empty">
             <div className="docs__empty-icon">📎</div>
@@ -290,14 +312,58 @@ export default function DocsPage() {
                     {cat} ({items.length})
                   </div>
                   {items.map((doc) => {
-                    const ed = doc.extracted_data;
+                    let ed = doc.extracted_data;
+                    if (typeof ed === "string") {
+                      try {
+                        ed = JSON.parse(ed);
+                      } catch {
+                        ed = null;
+                      }
+                    }
+                    const status = getDocStatus(doc);
+                    const needsReview = status.kind === "mismatch";
+                    const isPending = status.kind === "pending";
                     return (
-                      <div key={doc.id} className="docs__doc-card">
+                      <div
+                        key={doc.id}
+                        className="docs__doc-card"
+                        style={
+                          needsReview
+                            ? { border: "1px solid #fecaca", background: "#fef2f2" }
+                            : isPending
+                              ? { border: "1px solid #c4b5fd", background: "#f5f3ff" }
+                              : undefined
+                        }
+                      >
                         <div className="docs__doc-header">
                           <div>
                             <strong className="docs__doc-title">{doc.title || doc.doc_type}</strong>
                             {doc.file_name && (
                               <span className="docs__doc-filename">{doc.file_name}</span>
+                            )}
+                            {status.label && (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  marginLeft: 8,
+                                  padding: "2px 8px",
+                                  background: status.bg,
+                                  color: status.color,
+                                  border: `1px solid ${status.border}`,
+                                  borderRadius: 10,
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                }}
+                                title={
+                                  needsReview
+                                    ? "Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
+                                    : isPending
+                                      ? "Extraction is still running — data will appear here once complete."
+                                      : "Data has been extracted and applied."
+                                }
+                              >
+                                {status.label}
+                              </span>
                             )}
                           </div>
                           <div className="docs__doc-date-area">

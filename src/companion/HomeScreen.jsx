@@ -7,6 +7,7 @@ import HomeToggle from "./HomeToggle";
 import AppointmentsList from "./AppointmentsList";
 import DatePicker from "./DatePicker";
 import DoctorSelect from "./DoctorSelect";
+import CompanionBell from "./CompanionBell";
 
 const STATUS_ORDER = {
   in_visit: 0,
@@ -207,9 +208,10 @@ export default function HomeScreen() {
               • Gini Advanced Care
             </div>
           </div>
-          <div className="home__badge">
+          <CompanionBell />
+          {/* <div className="home__badge">
             {tab === "appointments" ? `${appointments.length} appts` : `${totalPatients} patients`}
-          </div>
+          </div> */}
         </div>
       </div>
 

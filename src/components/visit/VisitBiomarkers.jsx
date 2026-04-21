@@ -8,6 +8,7 @@ import {
   fmtDateShort,
   isSameDate,
 } from "./helpers";
+import ChangesPopover from "./ChangesPopover";
 
 const VisitBiomarkers = memo(function VisitBiomarkers({
   labResults,
@@ -172,46 +173,62 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     entries.sort((a, b) => (b.date > a.date ? 1 : -1));
     const latestDate = entries[0].date;
 
-    const updatedTests = entries.filter((e) => isSameDate(e.date, latestDate));
+    const updatedTests = entries
+      .filter((e) => isSameDate(e.date, latestDate))
+      .map((e) => {
+        const hist = labHistory?.[e.name] || [];
+        const prev = hist.find((h) => !isSameDate(h.date, latestDate));
+        return { ...e, prev: prev?.result ?? null };
+      });
+
+    const fmtChange = (e) => {
+      if (e.prev != null && String(e.prev) !== String(e.result)) {
+        const a = parseFloat(e.result);
+        const b = parseFloat(e.prev);
+        const arrow = !isNaN(a) && !isNaN(b) ? (a < b ? " ↓" : a > b ? " ↑" : "") : "";
+        return `${e.name} ${e.prev}→${e.result}${arrow}`;
+      }
+      return `${e.name} ${e.result}`;
+    };
 
     let text;
-    if (updatedTests.length <= 3) {
-      text = updatedTests.map((e) => e.name).join(", ") + " updated";
+    if (updatedTests.length <= 2) {
+      text = updatedTests.map(fmtChange).join(", ");
     } else {
-      text =
-        updatedTests
-          .slice(0, 2)
-          .map((e) => e.name)
-          .join(", ") + ` +${updatedTests.length - 2} more updated`;
+      text = updatedTests.slice(0, 2).map(fmtChange).join(", ") + ` +${updatedTests.length - 2} more`;
     }
 
-    const tooltip =
-      `Updated on ${fmtDate(latestDate)}:\n` +
-      updatedTests
-        .map((e) => {
-          const flag = e.flag === "H" ? " (HIGH)" : e.flag === "L" ? " (LOW)" : "";
-          return `  ${e.name}: ${e.result}${e.unit ? " " + e.unit : ""}${flag}`;
-        })
-        .join("\n");
+    const added = updatedTests
+      .filter((e) => e.prev == null)
+      .map((e) => ({
+        name: e.name,
+        diff: [`${e.result}${e.unit ? " " + e.unit : ""}`],
+      }));
+    const changed = updatedTests
+      .filter((e) => e.prev != null && String(e.prev) !== String(e.result))
+      .map((e) => ({
+        name: e.name,
+        diff: [`${e.prev} → ${e.result}${e.unit ? " " + e.unit : ""}`],
+      }));
 
-    return { text, date: latestDate, tooltip };
-  }, [labLatest]);
+    return { text, date: latestDate, added, changed };
+  }, [labLatest, labHistory]);
 
   return (
     <div className="sc" id="biomarkers">
       <div className="sch">
         <div className="sct">
           <div className="sci ic-b">📊</div>Biomarkers &amp; Lab Values
+          {biomarkerSummary && (
+            <ChangesPopover
+              date={biomarkerSummary.date}
+              label={`${biomarkerSummary.text} — ${fmtDateShort(biomarkerSummary.date)}`}
+              added={biomarkerSummary.added}
+              changed={biomarkerSummary.changed}
+            />
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          {biomarkerSummary && (
-            <span
-              style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500, cursor: "default" }}
-              title={biomarkerSummary.tooltip}
-            >
-              {biomarkerSummary.text} — {fmtDateShort(biomarkerSummary.date)}
-            </span>
-          )}
           <button
             className="bx"
             onClick={onPasteBiomarkers}

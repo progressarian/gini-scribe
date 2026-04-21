@@ -6,6 +6,7 @@ import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useLabPortalStore from "../stores/labPortalStore.js";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
+import { getDocStatus } from "../utils/docStatus.js";
 
 export default function LabPortalPage() {
   const { currentDoctor } = useAuthStore();
@@ -259,39 +260,91 @@ export default function LabPortalPage() {
               <div className="lab-portal__prev-docs-title">
                 📂 PREVIOUS DOCUMENTS ({pfd?.documents?.length || 0})
               </div>
-              {(pfd?.documents || []).slice(0, 10).map((doc) => (
-                <div key={doc.id} className="lab-portal__prev-doc-row">
-                  <span>
-                    {doc.doc_type === "lab_report"
-                      ? "🔬"
-                      : doc.doc_type === "prescription"
-                        ? "📄"
-                        : "🩻"}
-                  </span>
-                  <span className="lab-portal__prev-doc-title">{doc.title || doc.doc_type}</span>
-                  {doc.doc_date && (
-                    <span className="lab-portal__prev-doc-date">
-                      {(() => {
-                        const d = new Date(String(doc.doc_date).slice(0, 10) + "T12:00:00");
-                        return d.toLocaleDateString("en-IN", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "2-digit",
-                        });
-                      })()}
+              {(pfd?.documents || []).slice(0, 10).map((doc) => {
+                const status = getDocStatus(doc);
+                const needsReview = status.kind === "mismatch";
+                const isPending = status.kind === "pending";
+                return (
+                  <div
+                    key={doc.id}
+                    className="lab-portal__prev-doc-row"
+                    style={
+                      needsReview
+                        ? { background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6 }
+                        : isPending
+                          ? { background: "#f5f3ff", border: "1px solid #c4b5fd", borderRadius: 6 }
+                          : undefined
+                    }
+                  >
+                    <span>
+                      {needsReview
+                        ? "⚠️"
+                        : isPending
+                          ? "⏳"
+                          : doc.doc_type === "lab_report"
+                            ? "🔬"
+                            : doc.doc_type === "prescription"
+                              ? "📄"
+                              : "🩻"}
                     </span>
-                  )}
-                  {(doc.storage_path || doc.source === "healthray") && (
-                    <button
-                      onClick={() => setViewingDoc(doc)}
-                      className="lab-portal__prev-doc-view-btn"
+                    <span
+                      className="lab-portal__prev-doc-title"
+                      style={
+                        needsReview
+                          ? { color: "#b91c1c" }
+                          : isPending
+                            ? { color: "#7c3aed" }
+                            : undefined
+                      }
                     >
-                      📄 View
-                    </button>
-                  )}
-                  <span className="lab-portal__prev-doc-source">{doc.source || ""}</span>
-                </div>
-              ))}
+                      {doc.title || doc.doc_type}
+                    </span>
+                    {status.label && (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          padding: "2px 6px",
+                          borderRadius: 8,
+                          background: status.bg,
+                          color: status.color,
+                          border: `1px solid ${status.border}`,
+                          fontWeight: 700,
+                        }}
+                        title={
+                          needsReview
+                            ? "Extraction not applied — review in Companion app"
+                            : isPending
+                              ? "Extraction is still running"
+                              : "Data extracted and applied"
+                        }
+                      >
+                        {status.label}
+                      </span>
+                    )}
+                    {doc.doc_date && (
+                      <span className="lab-portal__prev-doc-date">
+                        {(() => {
+                          const d = new Date(String(doc.doc_date).slice(0, 10) + "T12:00:00");
+                          return d.toLocaleDateString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "2-digit",
+                          });
+                        })()}
+                      </span>
+                    )}
+                    {(doc.storage_path || doc.source === "healthray") && (
+                      <button
+                        onClick={() => setViewingDoc(doc)}
+                        className="lab-portal__prev-doc-view-btn"
+                      >
+                        📄 View
+                      </button>
+                    )}
+                    <span className="lab-portal__prev-doc-source">{doc.source || ""}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

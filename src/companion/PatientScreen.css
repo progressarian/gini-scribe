@@ -140,6 +140,16 @@
   animation: companion-pulse 1s infinite;
 }
 
+.patient__loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  margin: 0 auto;
+  animation: spin 0.7s linear infinite;
+}
+
 .patient__body {
   padding: 12px;
 }
@@ -408,4 +418,10 @@
   text-transform: uppercase;
   letter-spacing: 0.3px;
   flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

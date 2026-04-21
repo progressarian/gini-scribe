@@ -3,6 +3,8 @@ import { useRef, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import useCompanionStore from "../stores/companionStore";
 import { docCategories } from "./constants";
+import MismatchReviewModal from "../components/companion/MismatchReviewModal.jsx";
+import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 
 export default function MultiCaptureScreen() {
   const { id } = useParams();
@@ -19,7 +21,16 @@ export default function MultiCaptureScreen() {
     multiSaveAll,
     multiReset,
     loadPatientData,
+    pendingExtractions,
+    acceptMismatchedExtraction,
+    rejectMismatchedExtraction,
   } = useCompanionStore();
+
+  const [mismatchReview, setMismatchReview] = useState(null);
+  // Holds { item, blobUrl }. Chromium blocks data: URIs for PDF in iframes,
+  // so we convert the item's data URI to a blob URL before passing it to the
+  // viewer modal.
+  const [viewingItem, setViewingItem] = useState(null);
 
   const { step, items, error, saveProgress } = multiCapture;
 
@@ -30,6 +41,29 @@ export default function MultiCaptureScreen() {
   useEffect(() => {
     return () => multiReset();
   }, []);
+
+  // Revoke the preview blob URL when the modal closes or the component unmounts.
+  useEffect(() => {
+    const url = viewingItem?.blobUrl;
+    if (!url) return;
+    return () => URL.revokeObjectURL(url);
+  }, [viewingItem?.blobUrl]);
+
+  const openViewingItem = (item) => {
+    try {
+      const base64 = item.base64 || (item.preview || "").split(",")[1];
+      const mediaType = item.mediaType || "application/octet-stream";
+      if (!base64) return;
+      const bin = atob(base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mediaType });
+      const blobUrl = URL.createObjectURL(blob);
+      setViewingItem({ item, blobUrl });
+    } catch (e) {
+      console.warn("Preview failed:", e);
+    }
+  };
 
   // Auto-classify in background whenever we enter or add to the preview step.
   // Safe to call repeatedly — it skips items that already have a category.
@@ -42,17 +76,6 @@ export default function MultiCaptureScreen() {
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
   const addMoreRef = useRef(null);
-
-  const [previewItem, setPreviewItem] = useState(null);
-
-  useEffect(() => {
-    if (!previewItem) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") setPreviewItem(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [previewItem]);
 
   const handleBack = () => {
     if (step === "saving") return;
@@ -150,10 +173,29 @@ export default function MultiCaptureScreen() {
                 <ItemCard
                   key={item.id}
                   item={item}
-                  onOpen={() => setPreviewItem(item)}
+                  pending={item.docId ? pendingExtractions[item.docId] : null}
+                  onOpen={() => openViewingItem(item)}
                   onRemove={() => multiRemoveItem(item.id)}
                   onCategoryChange={(cat) => multiSetItemCategory(item.id, cat)}
                   onMetaChange={(patch) => multiSetItemMeta(item.id, patch)}
+                  onAccept={() =>
+                    setMismatchReview({
+                      action: "accept",
+                      docId: item.docId,
+                      fileName: item.fileName,
+                      category: item.category,
+                      mismatch: pendingExtractions[item.docId]?.mismatch,
+                    })
+                  }
+                  onReject={() =>
+                    setMismatchReview({
+                      action: "reject",
+                      docId: item.docId,
+                      fileName: item.fileName,
+                      category: item.category,
+                      mismatch: pendingExtractions[item.docId]?.mismatch,
+                    })
+                  }
                 />
               ))}
               <button
@@ -214,37 +256,35 @@ export default function MultiCaptureScreen() {
           </div>
         )}
 
-        {previewItem && (
-          <div className="mcap__preview-modal" onClick={() => setPreviewItem(null)}>
-            <div className="mcap__preview-box" onClick={(e) => e.stopPropagation()}>
-              <div className="mcap__preview-header">
-                <div className="mcap__preview-title">{previewItem.fileName}</div>
-                <button
-                  type="button"
-                  onClick={() => setPreviewItem(null)}
-                  className="mcap__preview-close"
-                  aria-label="Close preview"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="mcap__preview-body">
-                {previewItem.mediaType === "application/pdf" ? (
-                  <iframe
-                    src={previewItem.preview}
-                    title={previewItem.fileName}
-                    className="mcap__preview-pdf"
-                  />
-                ) : (
-                  <img
-                    src={previewItem.preview}
-                    alt={previewItem.fileName}
-                    className="mcap__preview-img"
-                  />
-                )}
-              </div>
-            </div>
-          </div>
+        {viewingItem && (
+          <PdfViewerModal
+            src={{
+              url: viewingItem.blobUrl,
+              mimeType: viewingItem.item.mediaType || "application/pdf",
+              fileName: viewingItem.item.fileName,
+              title: viewingItem.item.fileName,
+            }}
+            onClose={() => setViewingItem(null)}
+          />
+        )}
+
+        {mismatchReview && (
+          <MismatchReviewModal
+            action={mismatchReview.action}
+            fileName={mismatchReview.fileName}
+            category={mismatchReview.category}
+            mismatch={mismatchReview.mismatch}
+            selectedPatient={selectedPatient}
+            onClose={() => setMismatchReview(null)}
+            onConfirm={async () => {
+              if (mismatchReview.action === "accept") {
+                await acceptMismatchedExtraction(mismatchReview.docId);
+              } else {
+                await rejectMismatchedExtraction(mismatchReview.docId);
+              }
+              setMismatchReview(null);
+            }}
+          />
         )}
 
         {step === "done" && (
@@ -279,10 +319,20 @@ export default function MultiCaptureScreen() {
   );
 }
 
-function ItemCard({ item, onOpen, onRemove, onCategoryChange, onMetaChange }) {
+function ItemCard({
+  item,
+  pending,
+  onOpen,
+  onRemove,
+  onCategoryChange,
+  onMetaChange,
+  onAccept,
+  onReject,
+}) {
   const meta = item.meta || {};
   const isRx = item.category === "prescription";
   const needsCategory = !item.category;
+  const isMismatch = pending?.status === "mismatch";
 
   return (
     <div className={`mcap__card ${needsCategory ? "mcap__card--needs-cat" : ""}`}>
@@ -301,9 +351,6 @@ function ItemCard({ item, onOpen, onRemove, onCategoryChange, onMetaChange }) {
           <div className="mcap__card-name" title={item.fileName}>
             {item.fileName}
           </div>
-          <button type="button" className="mcap__thumb-remove" onClick={onRemove} title="Remove">
-            ✕
-          </button>
         </div>
       </div>
 
@@ -324,6 +371,77 @@ function ItemCard({ item, onOpen, onRemove, onCategoryChange, onMetaChange }) {
           ))}
         </select>
       </div>
+      {item.classifyError && !item.category && !item.classifying && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "#b45309",
+            padding: "2px 4px 6px",
+          }}
+        >
+          ⚠️ Couldn't auto-detect — please pick one
+        </div>
+      )}
+      {isMismatch && pending?.mismatch && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "8px 10px",
+            border: "1px solid var(--red-bd, #fecaca)",
+            background: "var(--red-lt, #fef2f2)",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "var(--red, #991b1b)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+            ⚠️ Patient mismatch —{" "}
+            {pending.mismatch.mismatchedFields?.includes("name") ? "name" : ""}
+            {pending.mismatch.mismatchedFields?.length > 1 ? " & " : ""}
+            {pending.mismatch.mismatchedFields?.includes("id") ? "id" : ""}
+          </div>
+          <div style={{ fontSize: 11, marginBottom: 6 }}>
+            Doc: {pending.mismatch.reportName || "—"}
+            {pending.mismatch.reportId ? ` · #${pending.mismatch.reportId}` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={onAccept}
+              style={{
+                flex: 1,
+                padding: "6px 10px",
+                background: "#16a34a",
+                color: "#fff",
+                border: 0,
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ✅ Accept
+            </button>
+            <button
+              type="button"
+              onClick={onReject}
+              style={{
+                flex: 1,
+                padding: "6px 10px",
+                background: "var(--red, #dc2626)",
+                color: "#fff",
+                border: 0,
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              🗑️ Reject
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mcap__card-grid">
         <input
@@ -356,6 +474,25 @@ function ItemCard({ item, onOpen, onRemove, onCategoryChange, onMetaChange }) {
           </>
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={onRemove}
+        style={{
+          marginTop: 10,
+          width: "100%",
+          padding: "8px 12px",
+          border: "1px solid #fecaca",
+          background: "#fef2f2",
+          color: "#b91c1c",
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        🗑️ Remove Doc
+      </button>
     </div>
   );
 }

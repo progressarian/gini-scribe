@@ -25,7 +25,17 @@ Be concise, specific, and clinical. Use exact numbers from the data provided.
 Never be vague. Never use generic language.
 Format output as JSON with three arrays: red_alerts, amber_alerts, green_notes.
 Each item is a single sentence. Maximum 3 items per zone.
-Do not hallucinate — only use information explicitly provided in the rule alerts.`;
+
+Use BOTH the rule-engine alerts AND the lab panel below as source material.
+When a lab has a prior value, compare: note direction (↑/↓), magnitude, and whether it crossed into/out of target range.
+Prefer lab-grounded observations (with exact numbers, units, and delta vs. previous) over generic rule restatements.
+Do not hallucinate — only use numbers that appear in the data below.
+
+Handling stopped medications:
+- Never lump different drug classes into one sentence like "multiple medications discontinued". Each stopped drug of a high-weight class (thyroid, antihypertensive, antidiabetic, statin, antiplatelet, anticoagulant) gets its own specific red_alert naming the drug, days since stop, and the class-specific consequence.
+- When a stop coincides with a corroborating lab/vital change (BP up after an antihypertensive stop, TSH up after thyroid stop, LDL up after statin stop, FBS up after antidiabetic stop), state the link explicitly with exact numbers from the data.
+- Supplements and symptomatic drugs (already flagged [AMBER] by the rule engine) belong in amber_alerts, never red_alerts. Do not promote them.
+- If there are more high-weight stops than red slots, keep the ones with visible clinical consequence first, then longest gap, then most critical class. Drop the lowest-priority stop entirely rather than merging it into a generic bullet.`;
 
 function formatAlerts(alerts) {
   const lines = [];
@@ -35,7 +45,60 @@ function formatAlerts(alerts) {
   return lines.join("\n");
 }
 
-async function generateAiBrief(patient, diagnoses, alerts) {
+// Format labHistory as a compact table with latest + previous values for comparison.
+// labHistory: { [testName]: [{ result, unit, flag, date }, ...] }  (newest-first)
+function formatLabs(labHistory) {
+  if (!labHistory || typeof labHistory !== "object") return "No labs available.";
+  const entries = Object.entries(labHistory);
+  if (entries.length === 0) return "No labs available.";
+
+  const fmtDate = (d) => {
+    if (!d) return "?";
+    try {
+      return new Date(d).toISOString().slice(0, 10);
+    } catch {
+      return String(d);
+    }
+  };
+  const numeric = (v) => {
+    if (v == null) return null;
+    const m = String(v).match(/-?\d+(?:\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  };
+
+  // Sort by recency of latest value, keep up to 25 tests to bound prompt size.
+  const ranked = entries
+    .map(([name, hist]) => ({ name, hist: Array.isArray(hist) ? hist : [] }))
+    .filter((e) => e.hist.length > 0)
+    .sort((a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0))
+    .slice(0, 25);
+
+  const lines = ranked.map(({ name, hist }) => {
+    const latest = hist[0];
+    const prev = hist[1];
+    const unit = latest.unit || "";
+    const flag = latest.flag ? ` [${latest.flag}]` : "";
+    let line = `${name}: ${latest.result ?? "?"} ${unit}${flag} (${fmtDate(latest.date)})`;
+    if (prev) {
+      const ln = numeric(latest.result);
+      const pn = numeric(prev.result);
+      let delta = "";
+      if (ln != null && pn != null) {
+        const diff = ln - pn;
+        const pct = pn !== 0 ? ((diff / pn) * 100).toFixed(1) : null;
+        const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
+        delta = ` ${arrow} ${diff > 0 ? "+" : ""}${diff.toFixed(2)}${pct != null ? ` (${pct}%)` : ""}`;
+      }
+      line += ` | prev ${prev.result ?? "?"} ${prev.unit || ""}${prev.flag ? ` [${prev.flag}]` : ""} on ${fmtDate(prev.date)}${delta}`;
+    } else {
+      line += ` | no prior value`;
+    }
+    return line;
+  });
+  return lines.join("\n");
+}
+
+async function generateAiBrief(patient, diagnoses, alerts, labHistory) {
   if (!ANTHROPIC_KEY) return null;
   const total = alerts.red.length + alerts.amber.length + alerts.green.length;
   if (total === 0) return null;
@@ -52,7 +115,10 @@ async function generateAiBrief(patient, diagnoses, alerts) {
     `Rule engine alerts:`,
     formatAlerts(alerts),
     ``,
-    `Generate a clinical briefing. Return only valid JSON.`,
+    `Lab panel (latest vs. previous, newest tests first):`,
+    formatLabs(labHistory),
+    ``,
+    `Generate a clinical briefing. Return only valid JSON. When labs have changed meaningfully vs. previous, surface that in the appropriate zone with exact numbers and delta.`,
   ].join("\n");
 
   try {
@@ -226,7 +292,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     });
 
     // ── 6. Generate AI brief (async, non-blocking for cache write) ──
-    const ai = await generateAiBrief(patient, sortedDiagnoses, rules);
+    const ai = await generateAiBrief(patient, sortedDiagnoses, rules, labHistory);
 
     const generatedAt = new Date().toISOString();
     const latestReport = latestReportR.rows[0] || null;

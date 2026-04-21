@@ -25,4 +25,8 @@ export const qk = {
     patients: (params) => ["companion", "patients", params],
     appointments: (date) => ["companion", "appointments", date],
   },
+  patient: {
+    all: ["patient"],
+    full: (id) => ["patient", "full", String(id)],
+  },
 };

@@ -1,10 +1,14 @@
 import "./PatientScreen.css";
 import { memo, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { docCategories, fDate } from "./constants";
 import useCompanionStore from "../stores/companionStore";
+import MismatchReviewModal from "../components/companion/MismatchReviewModal.jsx";
+import CompanionBell from "./CompanionBell.jsx";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 import { useCompanionPatient } from "../queries/hooks/useCompanionPatient.js";
+import { qk } from "../queries/keys.js";
 
 const tabs = [
   ["records", "📎 Docs"],
@@ -18,6 +22,7 @@ export default function PatientScreen() {
   const navigate = useNavigate();
   const { patientTab, setPatientTab, selectedPatient } = useCompanionStore();
   const setStorePatient = useCompanionStore((s) => s.setSelectedPatient);
+
   const [viewingDoc, setViewingDoc] = useState(null);
 
   const idNum = id ? parseInt(id) : null;
@@ -44,7 +49,7 @@ export default function PatientScreen() {
   if (!patient && !loading) {
     return (
       <div className="patient__loading">
-        <div className="patient__loading-icon">⏳</div>
+        <div className="patient__loading-spinner" />
       </div>
     );
   }
@@ -52,12 +57,15 @@ export default function PatientScreen() {
   return (
     <div>
       <div className="patient__header">
-        <div className="patient__header-row">
+        <div
+          className="patient__header-row"
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
           <button onClick={() => navigate("/companion")} className="patient__back">
             ←
           </button>
           {patient && (
-            <div className="patient__header-info">
+            <div className="patient__header-info" style={{ flex: 1, minWidth: 0 }}>
               <div className="patient__header-name">{patient.name}</div>
               <div className="patient__header-details">
                 {patient.age ? `${patient.age}Y` : ""}
@@ -67,6 +75,7 @@ export default function PatientScreen() {
               </div>
             </div>
           )}
+          <CompanionBell />
         </div>
         <div className="patient__header-actions">
           <button
@@ -99,11 +108,10 @@ export default function PatientScreen() {
 
       {loading && (
         <div className="patient__loading">
-          <div className="patient__loading-icon">⏳</div>
+          <div className="patient__loading-spinner" />
         </div>
       )}
 
-      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
       {!loading && patientData && (
         <div className="patient__body">
           {patientTab === "records" && (
@@ -118,6 +126,8 @@ export default function PatientScreen() {
           {patientTab === "visits" && <VisitsTab patientData={patientData} />}
         </div>
       )}
+
+      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
     </div>
   );
 }
@@ -126,12 +136,58 @@ const PHASE_BADGE = {
   classifying: { label: "🏷️ Classifying…", color: "#f59e0b" },
   extracting: { label: "⏳ Extracting…", color: "#7c3aed" },
   syncing: { label: "💾 Saving data…", color: "#2563eb" },
+  awaiting_review: { label: "⚠️ Needs review", color: "#dc2626" },
 };
 
 const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc }) {
   const docs = patientData.documents || [];
   const pendingExtractions = useCompanionStore((s) => s.pendingExtractions);
   const retryExtraction = useCompanionStore((s) => s.retryExtraction);
+  const acceptMismatchedExtraction = useCompanionStore((s) => s.acceptMismatchedExtraction);
+  const rejectMismatchedExtraction = useCompanionStore((s) => s.rejectMismatchedExtraction);
+  const [mismatchReview, setMismatchReview] = useState(null);
+  const [processing, setProcessing] = useState({}); // { [docId]: "accept"|"reject" }
+  const queryClient = useQueryClient();
+
+  // Refetch patient docs + mismatch list every time the Records tab mounts
+  // (user switches tabs → RecordsTab remounts → effect fires).
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientData.id) });
+    queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const acceptMutation = useMutation({
+    mutationFn: ({ docId, opts }) => acceptMismatchedExtraction(docId, opts),
+    onMutate: ({ docId }) => {
+      setProcessing((p) => ({ ...p, [docId]: "accept" }));
+    },
+    onSettled: (_d, _e, { docId }) => {
+      setProcessing((p) => {
+        const n = { ...p };
+        delete n[docId];
+        return n;
+      });
+      queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientData.id) });
+      queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: ({ docId, opts }) => rejectMismatchedExtraction(docId, opts),
+    onMutate: ({ docId }) => {
+      setProcessing((p) => ({ ...p, [docId]: "reject" }));
+    },
+    onSettled: (_d, _e, { docId }) => {
+      setProcessing((p) => {
+        const n = { ...p };
+        delete n[docId];
+        return n;
+      });
+      queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientData.id) });
+      queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
+    },
+  });
 
   // Parse extracted_data once per docs array identity; avoids re-parsing JSON
   // on every parent re-render (tab switch, store update).
@@ -173,18 +229,64 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
     <div>
       {parsedDocs.map(({ doc, cat, ext }) => {
         const pending = pendingExtractions[doc.id];
+        const sentinelMismatch =
+          !pending && ext?.extraction_status === "mismatch_review"
+            ? {
+                status: "mismatch",
+                phase: "awaiting_review",
+                mismatch: ext.mismatch,
+                pendingPayload: ext.pending_payload,
+                pendingMeta: ext.pending_meta || {},
+                category: ext.category || doc.doc_type,
+                fileName: ext.file_name || doc.title,
+              }
+            : null;
         const sentinelPending =
-          !pending && ext?.extraction_status === "pending"
+          !pending && !sentinelMismatch && ext?.extraction_status === "pending"
             ? { status: "extracting", phase: "extracting" }
             : null;
-        const state = pending || sentinelPending;
+        const state = pending || sentinelMismatch || sentinelPending;
         const phaseChip =
           state && state.status !== "failed"
             ? PHASE_BADGE[state.phase] || PHASE_BADGE.extracting
             : null;
 
+        const proc = processing[doc.id];
+
         return (
-          <div key={doc.id} className="patient__doc-card">
+          <div key={doc.id} className="patient__doc-card" style={{ position: "relative" }}>
+            {proc && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(255,255,255,0.85)",
+                  backdropFilter: "blur(1px)",
+                  zIndex: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  borderRadius: 8,
+                  color: proc === "accept" ? "#15803d" : "#b91c1c",
+                  fontWeight: 700,
+                  fontSize: 13,
+                }}
+              >
+                <span
+                  style={{
+                    width: 18,
+                    height: 18,
+                    border: "2px solid currentColor",
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    display: "inline-block",
+                    animation: "spin 0.7s linear infinite",
+                  }}
+                />
+                {proc === "accept" ? "Saving extraction…" : "Deleting document…"}
+              </div>
+            )}
             <div className="patient__doc-row">
               <div className="patient__doc-icon" style={{ background: cat.color + "15" }}>
                 {cat.label?.split(" ")[0]}
@@ -245,9 +347,119 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
                 </button>
               )}
             </div>
+            {state?.status === "mismatch" && state.mismatch && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: "10px 12px",
+                  border: "1px solid var(--red-bd, #fecaca)",
+                  background: "var(--red-lt, #fef2f2)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  color: "var(--red, #991b1b)",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  ⚠️ Patient mismatch ({(state.mismatch.mismatchedFields || []).join(" + ")})
+                </div>
+                <div style={{ fontSize: 11, marginBottom: 8 }}>
+                  Doc: <strong>{state.mismatch.reportName || "—"}</strong>
+                  {state.mismatch.reportId ? ` · #${state.mismatch.reportId}` : ""} vs Selected:{" "}
+                  <strong>{state.mismatch.selectedName || "—"}</strong>
+                  {state.mismatch.selectedId ? ` · #${state.mismatch.selectedId}` : ""}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMismatchReview({
+                        action: "accept",
+                        docId: doc.id,
+                        fileName: state.fileName || doc.title || doc.doc_type,
+                        category: state.category || doc.doc_type,
+                        mismatch: state.mismatch,
+                        pendingPayload: state.pendingPayload,
+                        pendingMeta: state.pendingMeta,
+                        patientId: doc.patient_id,
+                      })
+                    }
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      background: "#16a34a",
+                      color: "#fff",
+                      border: 0,
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✅ Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMismatchReview({
+                        action: "reject",
+                        docId: doc.id,
+                        fileName: state.fileName || doc.title || doc.doc_type,
+                        category: state.category || doc.doc_type,
+                        mismatch: state.mismatch,
+                        patientId: doc.patient_id,
+                      })
+                    }
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      background: "var(--red, #dc2626)",
+                      color: "#fff",
+                      border: 0,
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    🗑️ Reject
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
+      {mismatchReview && (
+        <MismatchReviewModal
+          action={mismatchReview.action}
+          fileName={mismatchReview.fileName}
+          category={mismatchReview.category}
+          mismatch={mismatchReview.mismatch}
+          selectedPatient={patientData}
+          onClose={() => setMismatchReview(null)}
+          onConfirm={() => {
+            const r = mismatchReview;
+            setMismatchReview(null);
+            if (!r) return;
+            if (r.action === "accept") {
+              acceptMutation.mutate({
+                docId: r.docId,
+                opts: {
+                  pendingPayload: r.pendingPayload,
+                  pendingMeta: r.pendingMeta,
+                  patientId: r.patientId,
+                  fileName: r.fileName,
+                },
+              });
+            } else {
+              rejectMutation.mutate({
+                docId: r.docId,
+                opts: { patientId: r.patientId, fileName: r.fileName },
+              });
+            }
+          }}
+        />
+      )}
     </div>
   );
 });

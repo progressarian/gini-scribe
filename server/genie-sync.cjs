@@ -360,8 +360,7 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
       db.from("vitals")
         .select("*")
         .eq("patient_id", genieUUID)
-        .neq("source", "doctor")
-        .neq("source", "scribe")
+        .or("source.is.null,source.not.in.(doctor,scribe)")
         .order("recorded_date", { ascending: false })
         .limit(500),
 

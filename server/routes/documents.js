@@ -1050,6 +1050,32 @@ router.patch("/documents/:id/reviewed", async (req, res) => {
   }
 });
 
+// List all docs across patients that are awaiting mismatch review.
+// Used by the companion bell/notification icon.
+router.get("/companion/mismatch-reviews", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT d.id,
+              d.patient_id,
+              d.title,
+              d.doc_type,
+              d.doc_date,
+              d.extracted_data,
+              d.created_at,
+              p.name AS patient_name,
+              p.file_no AS patient_file_no
+         FROM documents d
+         JOIN patients p ON p.id = d.patient_id
+        WHERE d.extracted_data->>'extraction_status' = 'mismatch_review'
+        ORDER BY d.created_at DESC
+        LIMIT 100`,
+    );
+    res.json(rows);
+  } catch (e) {
+    handleError(res, e, "List mismatch reviews");
+  }
+});
+
 // Delete a document and its file from storage
 router.delete("/documents/:id", async (req, res) => {
   try {

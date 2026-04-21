@@ -35,6 +35,26 @@ if (typeof document !== "undefined" && !document.getElementById("live-dash-kf"))
 .ld-dot { animation: ldPulse 1.8s ease-out infinite; }
 .ld-row { transition: background .12s; }
 .ld-row:hover { background: rgba(0,158,140,.06); cursor: pointer; }
+@keyframes ldShimmer {
+  0%   { background-position: -150% 0; }
+  100% { background-position: 150% 0; }
+}
+.ld-shim {
+  position: relative;
+  background-color: #e8edf2;
+  background-image: linear-gradient(
+    90deg,
+    rgba(232,237,242,0) 0%,
+    rgba(255,255,255,.85) 50%,
+    rgba(232,237,242,0) 100%
+  );
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  animation: ldShimmer 1.4s ease-in-out infinite;
+  overflow: hidden;
+}
+.ld-cal-day { transition: background .1s; }
+.ld-cal-day:hover:not(:disabled) { background: #e6f6f4; }
 `;
   document.head.appendChild(s);
 }
@@ -181,6 +201,179 @@ function SectionTitle({ children, right }) {
   );
 }
 
+function Shim({ w = "100%", h = 12, r = 6, style }) {
+  return (
+    <div
+      className="ld-shim"
+      style={{ width: w, height: h, borderRadius: r, ...style }}
+    />
+  );
+}
+
+function CustomCalendar({ value, maxDate, onSelect, onClose }) {
+  const initial = value ? new Date(value + "T00:00:00") : new Date();
+  const [view, setView] = useState(() => ({
+    y: initial.getFullYear(),
+    m: initial.getMonth(),
+  }));
+  const max = maxDate ? new Date(maxDate + "T00:00:00") : null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const first = new Date(view.y, view.m, 1);
+  const startDow = first.getDay(); // 0 = Sun
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const prevMonthDays = new Date(view.y, view.m, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startDow; i++) {
+    cells.push({ day: prevMonthDays - startDow + 1 + i, outside: true, date: null });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(view.y, view.m, d);
+    cells.push({ day: d, outside: false, date: dateObj });
+  }
+  while (cells.length % 7 !== 0 || cells.length < 42) {
+    const d = cells.length - startDow - daysInMonth + 1;
+    cells.push({ day: d, outside: true, date: null });
+    if (cells.length >= 42) break;
+  }
+  const step = (delta) => {
+    const next = new Date(view.y, view.m + delta, 1);
+    setView({ y: next.getFullYear(), m: next.getMonth() });
+  };
+  const selected = value ? new Date(value + "T00:00:00") : null;
+  const sameDay = (a, b) =>
+    a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        right: 0,
+        zIndex: 50,
+        background: WH,
+        border: `1px solid ${BD}`,
+        borderRadius: 10,
+        boxShadow: "0 8px 24px rgba(0,0,0,.12)",
+        padding: 12,
+        width: 260,
+        fontFamily: FB,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => step(-1)}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: INK2,
+            fontSize: 16,
+            padding: "2px 8px",
+          }}
+        >
+          ‹
+        </button>
+        <div style={{ fontSize: 12, fontWeight: 700, color: INK }}>
+          {monthNames[view.m]} {view.y}
+        </div>
+        <button
+          type="button"
+          onClick={() => step(1)}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: INK2,
+            fontSize: 16,
+            padding: "2px 8px",
+          }}
+        >
+          ›
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <div
+            key={i}
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              textAlign: "center",
+              color: INK3,
+              padding: "4px 0",
+              letterSpacing: ".06em",
+            }}
+          >
+            {d}
+          </div>
+        ))}
+        {cells.map((c, i) => {
+          const disabled = c.outside || (max && c.date && c.date > max);
+          const isSel = !c.outside && sameDay(c.date, selected);
+          const isToday = !c.outside && sameDay(c.date, today);
+          return (
+            <button
+              key={i}
+              type="button"
+              className="ld-cal-day"
+              disabled={disabled}
+              onClick={() => {
+                if (disabled || !c.date) return;
+                const y = c.date.getFullYear();
+                const mo = String(c.date.getMonth() + 1).padStart(2, "0");
+                const da = String(c.date.getDate()).padStart(2, "0");
+                onSelect(`${y}-${mo}-${da}`);
+                onClose();
+              }}
+              style={{
+                fontFamily: FM,
+                fontSize: 11,
+                padding: "7px 0",
+                border: isToday && !isSel ? `1px solid ${T}` : "1px solid transparent",
+                borderRadius: 6,
+                background: isSel ? T : "transparent",
+                color: isSel ? WH : c.outside ? "#c4cdd8" : disabled ? "#c4cdd8" : INK,
+                cursor: disabled ? "default" : "pointer",
+                fontWeight: isSel || isToday ? 700 : 500,
+              }}
+            >
+              {c.day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Biomarker directionality map (true = lower value is better).
+// Mirrors the logic in src/pages/FUReviewPage.jsx so improving/worsening
+// stays consistent across the app.
+const BIO_DIR = { hba1c: true, ldl: true, tg: true, fg: true, ppbs: true, hdl: false };
+
+function classifyTrend(cur, prev, lowerIsBetter = true) {
+  if (!cur || !prev) return "unknown";
+  const diff = cur - prev;
+  const pct = Math.abs(diff / prev) * 100;
+  if (pct <= 5) return "stable";
+  const down = diff < 0;
+  if (lowerIsBetter) return down ? "better" : "worse";
+  return down ? "worse" : "better";
+}
+
 function Card({ children, style }) {
   return (
     <div
@@ -202,9 +395,29 @@ export default function LiveDashboard({
   appointments = [],
   updatedAt,
   isFetching,
+  isPending = false,
+  isError = false,
+  error,
   onRefresh,
   onSelectAppt,
+  date,
+  onDateChange,
 }) {
+  const toLocalIso = (d) => {
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${y}-${mo}-${da}`;
+  };
+  const todayIso = toLocalIso(new Date());
+  const isToday = !date || date === todayIso;
+  const [calOpen, setCalOpen] = useState(false);
+  useEffect(() => {
+    if (!calOpen) return;
+    const close = () => setCalOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [calOpen]);
   useTick(1000);
 
   const m = useMemo(() => {
@@ -264,6 +477,28 @@ export default function LiveDashboard({
       .filter((r) => r.hba1c && r.hba1c <= 7.5 && (!r.prevHba1c || r.hba1c <= r.prevHba1c))
       .sort((a, b) => a.hba1c - b.hba1c);
 
+    const gettingBetter = rows
+      .filter((r) => classifyTrend(r.hba1c, r.prevHba1c, BIO_DIR.hba1c) === "better")
+      .sort((a, b) => b.prevHba1c - b.hba1c - (a.prevHba1c - a.hba1c));
+
+    const gettingWorse = rows
+      .filter((r) => classifyTrend(r.hba1c, r.prevHba1c, BIO_DIR.hba1c) === "worse")
+      .sort((a, b) => b.hba1c - b.prevHba1c - (a.hba1c - a.prevHba1c));
+
+    // Trendable = patients who have both current and previous HbA1c so a
+    // direction can be computed. Stable = within ±5% threshold.
+    const trendable = rows.filter((r) => r.hba1c && r.prevHba1c).length;
+    const stableTrend = trendable - gettingBetter.length - gettingWorse.length;
+    const pctBetter = trendable ? Math.round((gettingBetter.length / trendable) * 100) : 0;
+    const pctWorse = trendable ? Math.round((gettingWorse.length / trendable) * 100) : 0;
+    const pctStable = trendable ? Math.max(0, 100 - pctBetter - pctWorse) : 0;
+    const avgDeltaBetter = gettingBetter.length
+      ? gettingBetter.reduce((s, r) => s + (r.hba1c - r.prevHba1c), 0) / gettingBetter.length
+      : 0;
+    const avgDeltaWorse = gettingWorse.length
+      ? gettingWorse.reduce((s, r) => s + (r.hba1c - r.prevHba1c), 0) / gettingWorse.length
+      : 0;
+
     const buckets = [
       rows.filter((r) => r.hba1c && r.hba1c <= 7).length,
       rows.filter((r) => r.hba1c && r.hba1c > 7 && r.hba1c <= 8).length,
@@ -290,6 +525,15 @@ export default function LiveDashboard({
       needsAttention,
       missingBio,
       onTrack,
+      gettingBetter,
+      gettingWorse,
+      trendable,
+      stableTrend,
+      pctBetter,
+      pctWorse,
+      pctStable,
+      avgDeltaBetter,
+      avgDeltaWorse,
       buckets,
     };
   }, [appointments]);
@@ -297,7 +541,8 @@ export default function LiveDashboard({
   const coverageColor = m.pctCoverage >= 80 ? GN : m.pctCoverage >= 60 ? AM : RE;
   const controlColor = m.pctControlled >= 60 ? GN : m.pctControlled >= 30 ? AM : RE;
 
-  const todayStr = new Date().toLocaleDateString("en-IN", {
+  const displayDate = date ? new Date(date + "T00:00:00") : new Date();
+  const todayStr = displayDate.toLocaleDateString("en-IN", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -336,6 +581,13 @@ export default function LiveDashboard({
     if (onSelectAppt) onSelectAppt(row.raw);
   };
 
+  const [showAllWorse, setShowAllWorse] = useState(false);
+  const [showAllBetter, setShowAllBetter] = useState(false);
+  const [showAllAttention, setShowAllAttention] = useState(false);
+  const [showAllMissing, setShowAllMissing] = useState(false);
+  const [showAllOnTrack, setShowAllOnTrack] = useState(false);
+  const LIMIT = 5;
+
   return (
     <div
       style={{
@@ -360,7 +612,7 @@ export default function LiveDashboard({
       >
         <div>
           <div style={{ fontFamily: FD, fontSize: 22, color: INK }}>
-            Today&apos;s Clinical Dashboard
+            {isToday ? "Today's Clinical Dashboard" : "Clinical Dashboard"}
           </div>
           <div style={{ fontSize: 11, color: INK3 }}>{todayStr}</div>
         </div>
@@ -370,12 +622,12 @@ export default function LiveDashboard({
               display: "flex",
               alignItems: "center",
               gap: 7,
-              background: GNL,
-              border: `1px solid ${GN}22`,
+              background: isToday ? GNL : AML,
+              border: `1px solid ${isToday ? GN : AM}22`,
               borderRadius: 16,
               padding: "4px 11px",
               fontSize: 11,
-              color: GN,
+              color: isToday ? GN : AM,
               fontWeight: 600,
             }}
           >
@@ -385,13 +637,120 @@ export default function LiveDashboard({
                 width: 7,
                 height: 7,
                 borderRadius: "50%",
-                background: GN,
+                background: isToday ? GN : AM,
                 display: "inline-block",
                 opacity: isFetching ? 1 : 0.85,
               }}
             />
-            Live · Updated {fmtTime(updatedAt)}
+            {isToday ? `Live · Updated ${fmtTime(updatedAt)}` : "Historical view"}
           </div>
+          {onDateChange && !isToday && (
+            <button
+              type="button"
+              onClick={() => onDateChange(todayIso)}
+              style={{
+                background: TL,
+                border: `1px solid ${TB}`,
+                color: T,
+                borderRadius: 6,
+                padding: "5px 11px",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: FB,
+              }}
+            >
+              Today
+            </button>
+          )}
+          {onDateChange && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                background: WH,
+                border: `1px solid ${BD}`,
+                borderRadius: 6,
+                padding: "2px 4px",
+                position: "relative",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  const d = new Date(displayDate);
+                  d.setDate(d.getDate() - 1);
+                  onDateChange(toLocalIso(d));
+                }}
+                title="Previous day"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px 6px",
+                  fontSize: 13,
+                  color: INK2,
+                  cursor: "pointer",
+                  fontFamily: FB,
+                }}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCalOpen((v) => !v);
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  outline: "none",
+                  fontFamily: FM,
+                  fontSize: 11,
+                  color: INK,
+                  padding: "3px 6px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                📅 {date || todayIso}
+              </button>
+              <button
+                type="button"
+                disabled={isToday}
+                onClick={() => {
+                  const d = new Date(displayDate);
+                  d.setDate(d.getDate() + 1);
+                  const next = toLocalIso(d);
+                  if (next <= todayIso) onDateChange(next);
+                }}
+                title="Next day"
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px 6px",
+                  fontSize: 13,
+                  color: isToday ? INK3 : INK2,
+                  cursor: isToday ? "default" : "pointer",
+                  opacity: isToday ? 0.4 : 1,
+                  fontFamily: FB,
+                }}
+              >
+                ›
+              </button>
+              {calOpen && (
+                <CustomCalendar
+                  value={date || todayIso}
+                  maxDate={todayIso}
+                  onSelect={(v) => onDateChange(v)}
+                  onClose={() => setCalOpen(false)}
+                />
+              )}
+            </div>
+          )}
           <button
             onClick={onRefresh}
             disabled={isFetching}
@@ -413,6 +772,77 @@ export default function LiveDashboard({
         </div>
       </div>
 
+      {isError && (
+        <Card style={{ borderLeft: `3px solid ${RE}` }}>
+          <div style={{ fontSize: 12, color: RE, fontWeight: 600, marginBottom: 4 }}>
+            Failed to load dashboard
+          </div>
+          <div style={{ fontSize: 11, color: INK2, marginBottom: 8 }}>
+            {error?.message || "Network error. Please try again."}
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            style={{
+              background: T,
+              color: WH,
+              border: "none",
+              borderRadius: 6,
+              padding: "6px 12px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            ⟳ Retry
+          </button>
+        </Card>
+      )}
+
+      {isPending ? (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Card key={i}>
+                <Shim w="60%" h={24} />
+                <div style={{ height: 8 }} />
+                <Shim w="80%" h={10} />
+              </Card>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Card key={i}>
+                <Shim w="50%" h={12} />
+                <div style={{ height: 10 }} />
+                <Shim w="100%" h={70} r={8} />
+              </Card>
+            ))}
+          </div>
+          <Card>
+            <Shim w="40%" h={12} />
+            <div style={{ height: 12 }} />
+            <Shim w="100%" h={12} />
+            <div style={{ height: 6 }} />
+            <Shim w="90%" h={10} />
+          </Card>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {Array.from({ length: 2 }).map((_, col) => (
+              <Card key={col}>
+                <Shim w="45%" h={12} />
+                <div style={{ height: 10 }} />
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <Shim w="100%" h={34} r={7} />
+                  </div>
+                ))}
+              </Card>
+            ))}
+          </div>
+        </>
+      ) : (
+      <>
       {/* ── 5-stat row ────────────────────────────────────────── */}
       <div
         style={{
@@ -424,20 +854,26 @@ export default function LiveDashboard({
       >
         <Stat val={m.total} label="Today's patients" />
         <Stat val={m.withHba1c} subVal={m.total} label="HbA1c on file" valColor={coverageColor} />
-        <Stat val={m.controlled} label="At target (≤7%)" valColor={GN} bg={GNL} labelColor={GN} />
         <Stat
-          val={m.uncontrolled}
-          label="Uncontrolled (>9%)"
-          valColor={m.uncontrolled ? RE : INK3}
-          bg={m.uncontrolled ? REL : WH}
-          labelColor={m.uncontrolled ? RE : INK3}
+          val={m.gettingWorse.length}
+          label="Getting worse ↑"
+          valColor={m.gettingWorse.length ? RE : INK3}
+          bg={m.gettingWorse.length ? REL : WH}
+          labelColor={m.gettingWorse.length ? RE : INK3}
         />
         <Stat
-          val={m.rising}
-          label="HbA1c rising ↑"
-          valColor={m.rising ? AM : INK3}
-          bg={m.rising ? AML : WH}
-          labelColor={m.rising ? AM : INK3}
+          val={m.stableTrend}
+          label="Stable (±5%)"
+          valColor={m.stableTrend ? AM : INK3}
+          bg={m.stableTrend ? AML : WH}
+          labelColor={m.stableTrend ? AM : INK3}
+        />
+        <Stat
+          val={m.gettingBetter.length}
+          label="Getting better ↓"
+          valColor={m.gettingBetter.length ? GN : INK3}
+          bg={m.gettingBetter.length ? GNL : WH}
+          labelColor={m.gettingBetter.length ? GN : INK3}
         />
       </div>
 
@@ -468,17 +904,31 @@ export default function LiveDashboard({
         </Card>
 
         <Card style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Ring pct={m.pctControlled} color={controlColor} centerLabel="goal" />
+          <Ring pct={m.pctBetter} color={GN} centerLabel="better" />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Control Rate</div>
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>HbA1c Trend</div>
             <div style={{ fontSize: 11, color: INK3, marginBottom: 6 }}>
-              {m.controlled} at target · {m.improving} improving
+              {m.trendable} patients with prior value
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <div style={{ flex: 1, maxWidth: 140 }}>
-                <Bar pct={m.pctControlled} color={controlColor} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <span style={{ color: GN, fontWeight: 600 }}>📈 Better</span>
+                <span style={{ fontFamily: FM, color: GN, fontWeight: 600 }}>
+                  {m.gettingBetter.length} · {m.pctBetter}%
+                </span>
               </div>
-              <span style={{ fontSize: 10, color: INK3 }}>Goal 100%</span>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <span style={{ color: AM, fontWeight: 600 }}>→ Stable</span>
+                <span style={{ fontFamily: FM, color: AM, fontWeight: 600 }}>
+                  {m.stableTrend} · {m.pctStable}%
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                <span style={{ color: RE, fontWeight: 600 }}>📉 Worse</span>
+                <span style={{ fontFamily: FM, color: RE, fontWeight: 600 }}>
+                  {m.gettingWorse.length} · {m.pctWorse}%
+                </span>
+              </div>
             </div>
           </div>
         </Card>
@@ -490,6 +940,257 @@ export default function LiveDashboard({
           {flowRow("checkedin", "Checked in", SK)}
           {flowRow("pending", "Pending", INK3)}
           {m.total === 0 && <div style={{ fontSize: 11, color: INK3 }}>No appointments today</div>}
+        </Card>
+      </div>
+
+      {/* ── Getting worse / Getting better (HbA1c) ────────────── */}
+      {/* Shared trend summary bar */}
+      <Card>
+        <SectionTitle
+          right={
+            <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+              {m.trendable} of {m.total} with prior HbA1c
+            </span>
+          }
+        >
+          HbA1c trend — today
+        </SectionTitle>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 14, flex: "0 0 auto" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: RE, lineHeight: 1 }}>
+                {m.pctWorse}%
+              </div>
+              <div style={{ fontSize: 9, color: INK3, marginTop: 3, textTransform: "uppercase", letterSpacing: ".06em" }}>
+                Worse · {m.gettingWorse.length}
+              </div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: AM, lineHeight: 1 }}>
+                {m.pctStable}%
+              </div>
+              <div style={{ fontSize: 9, color: INK3, marginTop: 3, textTransform: "uppercase", letterSpacing: ".06em" }}>
+                Stable · {m.stableTrend}
+              </div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: GN, lineHeight: 1 }}>
+                {m.pctBetter}%
+              </div>
+              <div style={{ fontSize: 9, color: INK3, marginTop: 3, textTransform: "uppercase", letterSpacing: ".06em" }}>
+                Better · {m.gettingBetter.length}
+              </div>
+            </div>
+          </div>
+          <div style={{ flex: 1, marginLeft: 4 }}>
+            <div
+              style={{
+                height: 10,
+                display: "flex",
+                borderRadius: 5,
+                overflow: "hidden",
+                background: BG,
+              }}
+            >
+              {m.pctWorse > 0 && (
+                <div style={{ width: `${m.pctWorse}%`, background: RE, transition: "width .6s" }} />
+              )}
+              {m.pctStable > 0 && (
+                <div style={{ width: `${m.pctStable}%`, background: AM, transition: "width .6s" }} />
+              )}
+              {m.pctBetter > 0 && (
+                <div style={{ width: `${m.pctBetter}%`, background: GN, transition: "width .6s" }} />
+              )}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 9, color: INK3 }}>
+              <span>Avg Δ worse: <span style={{ color: RE, fontFamily: FM, fontWeight: 600 }}>+{m.avgDeltaWorse.toFixed(2)}%</span></span>
+              <span>Avg Δ better: <span style={{ color: GN, fontFamily: FM, fontWeight: 600 }}>{m.avgDeltaBetter.toFixed(2)}%</span></span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Card>
+          <SectionTitle
+            right={
+              <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                {m.gettingWorse.length} patients · {m.pctWorse}%
+              </span>
+            }
+          >
+            📉 Getting worse — HbA1c
+          </SectionTitle>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 8,
+              marginBottom: 8,
+              paddingBottom: 8,
+              borderBottom: `1px solid ${BD}`,
+            }}
+          >
+            <div style={{ fontFamily: FM, fontSize: 24, fontWeight: 500, color: RE, lineHeight: 1 }}>
+              {m.gettingWorse.length}
+            </div>
+            <div style={{ fontSize: 10, color: INK3 }}>
+              of {m.trendable} trended · avg{" "}
+              <span style={{ color: RE, fontFamily: FM, fontWeight: 600 }}>
+                +{m.avgDeltaWorse.toFixed(2)}%
+              </span>
+            </div>
+          </div>
+          <Bar pct={m.pctWorse} color={RE} />
+          <div style={{ height: 8 }} />
+          {m.gettingWorse.length === 0 ? (
+            <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
+              No HbA1c deterioration today
+            </div>
+          ) : (
+            (showAllWorse ? m.gettingWorse : m.gettingWorse.slice(0, LIMIT)).map((r) => {
+              const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+              return (
+                <div
+                  key={r.id}
+                  className="ld-row"
+                  onClick={() => select(r)}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "7px 10px",
+                    background: REL,
+                    border: `1px solid ${RE}22`,
+                    borderRadius: 7,
+                    marginBottom: 6,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                    <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: FM, fontSize: 12, color: INK2 }}>
+                      {r.prevHba1c}% → <span style={{ color: RE, fontWeight: 600 }}>{r.hba1c}%</span>
+                    </div>
+                    <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}>
+                      +{delta} ↑
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          {m.gettingWorse.length > LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAllWorse((v) => !v)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: "4px 0",
+                marginTop: 2,
+                fontSize: 10,
+                color: RE,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {showAllWorse ? "Show less" : `+${m.gettingWorse.length - LIMIT} more`}
+            </button>
+          )}
+        </Card>
+
+        <Card>
+          <SectionTitle
+            right={
+              <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                {m.gettingBetter.length} patients · {m.pctBetter}%
+              </span>
+            }
+          >
+            📈 Getting better — HbA1c
+          </SectionTitle>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 8,
+              marginBottom: 8,
+              paddingBottom: 8,
+              borderBottom: `1px solid ${BD}`,
+            }}
+          >
+            <div style={{ fontFamily: FM, fontSize: 24, fontWeight: 500, color: GN, lineHeight: 1 }}>
+              {m.gettingBetter.length}
+            </div>
+            <div style={{ fontSize: 10, color: INK3 }}>
+              of {m.trendable} trended · avg{" "}
+              <span style={{ color: GN, fontFamily: FM, fontWeight: 600 }}>
+                {m.avgDeltaBetter.toFixed(2)}%
+              </span>
+            </div>
+          </div>
+          <Bar pct={m.pctBetter} color={GN} />
+          <div style={{ height: 8 }} />
+          {m.gettingBetter.length === 0 ? (
+            <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
+              No HbA1c improvement today
+            </div>
+          ) : (
+            (showAllBetter ? m.gettingBetter : m.gettingBetter.slice(0, LIMIT)).map((r) => {
+              const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+              return (
+                <div
+                  key={r.id}
+                  className="ld-row"
+                  onClick={() => select(r)}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "7px 10px",
+                    background: GNL,
+                    border: `1px solid ${GN}22`,
+                    borderRadius: 7,
+                    marginBottom: 6,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                    <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: FM, fontSize: 12, color: INK2 }}>
+                      {r.prevHba1c}% → <span style={{ color: GN, fontWeight: 600 }}>{r.hba1c}%</span>
+                    </div>
+                    <div style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}>
+                      {delta} ↓
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          {m.gettingBetter.length > LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAllBetter((v) => !v)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: "4px 0",
+                marginTop: 2,
+                fontSize: 10,
+                color: GN,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {showAllBetter ? "Show less" : `+${m.gettingBetter.length - LIMIT} more`}
+            </button>
+          )}
         </Card>
       </div>
 
@@ -510,7 +1211,7 @@ export default function LiveDashboard({
               ✓ All controlled patients today
             </div>
           ) : (
-            m.needsAttention.map((r) => {
+            (showAllAttention ? m.needsAttention : m.needsAttention.slice(0, LIMIT)).map((r) => {
               const trend =
                 r.prevHba1c && r.hba1c > r.prevHba1c
                   ? "↑"
@@ -552,6 +1253,24 @@ export default function LiveDashboard({
               );
             })
           )}
+          {m.needsAttention.length > LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAllAttention((v) => !v)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: "4px 0",
+                marginTop: 2,
+                fontSize: 10,
+                color: RE,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {showAllAttention ? "Show less" : `+${m.needsAttention.length - LIMIT} more`}
+            </button>
+          )}
 
           {m.missingBio.length > 0 && (
             <div style={{ borderTop: `1px solid ${BD}`, paddingTop: 8, marginTop: 4 }}>
@@ -567,7 +1286,7 @@ export default function LiveDashboard({
               >
                 ⚠ No biomarkers entered yet
               </div>
-              {m.missingBio.map((r) => (
+              {(showAllMissing ? m.missingBio : m.missingBio.slice(0, LIMIT)).map((r) => (
                 <div
                   key={r.id}
                   className="ld-row"
@@ -590,6 +1309,24 @@ export default function LiveDashboard({
                   <div style={{ fontSize: 10, color: INK3, fontFamily: FM }}>{r.time}</div>
                 </div>
               ))}
+              {m.missingBio.length > LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllMissing((v) => !v)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: "4px 0",
+                    marginTop: 2,
+                    fontSize: 10,
+                    color: AM,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {showAllMissing ? "Show less" : `+${m.missingBio.length - LIMIT} more`}
+                </button>
+              )}
             </div>
           )}
         </Card>
@@ -608,7 +1345,7 @@ export default function LiveDashboard({
             {m.onTrack.length === 0 ? (
               <div style={{ fontSize: 12, color: INK3 }}>No patients at target today</div>
             ) : (
-              m.onTrack.map((r) => {
+              (showAllOnTrack ? m.onTrack : m.onTrack.slice(0, LIMIT)).map((r) => {
                 const trend =
                   r.prevHba1c && r.hba1c > r.prevHba1c
                     ? "↑"
@@ -644,128 +1381,30 @@ export default function LiveDashboard({
                 );
               })
             )}
+            {m.onTrack.length > LIMIT && (
+              <button
+                type="button"
+                onClick={() => setShowAllOnTrack((v) => !v)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "4px 0",
+                  marginTop: 2,
+                  fontSize: 10,
+                  color: GN,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {showAllOnTrack ? "Show less" : `+${m.onTrack.length - LIMIT} more`}
+              </button>
+            )}
           </Card>
 
-          <Card>
-            <SectionTitle>HbA1c distribution — today</SectionTitle>
-            <div
-              style={{
-                display: "flex",
-                gap: 7,
-                alignItems: "flex-end",
-                height: 56,
-                marginBottom: 6,
-              }}
-            >
-              {m.buckets.map((count, i) => {
-                const max = Math.max(...m.buckets, 1);
-                const h = Math.max(4, Math.round((count / max) * 50));
-                const colors = [GN, "#5aad5a", AM, "#e07030", RE];
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 3,
-                    }}
-                  >
-                    <div style={{ fontFamily: FM, fontSize: 10, color: colors[i] }}>{count}</div>
-                    <div
-                      style={{
-                        width: "100%",
-                        background: colors[i],
-                        borderRadius: "3px 3px 0 0",
-                        height: h,
-                        transition: "height .5s",
-                      }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", gap: 7 }}>
-              {["≤7%", "7–8", "8–9", "9–10", ">10%"].map((r) => (
-                <div key={r} style={{ flex: 1, textAlign: "center", fontSize: 9, color: INK3 }}>
-                  {r}
-                </div>
-              ))}
-            </div>
-          </Card>
         </div>
       </div>
-
-      {/* ── Programme goal ────────────────────────────────────── */}
-      <Card
-        style={{
-          borderLeft: `3px solid ${T}`,
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 10,
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>
-              Programme Goal — 100% Patients in Control
-            </div>
-            <div style={{ fontSize: 11, color: INK3 }}>
-              Today&apos;s progress toward the programme mission
-            </div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div
-              style={{
-                fontFamily: FM,
-                fontSize: 28,
-                fontWeight: 500,
-                color: controlColor,
-              }}
-            >
-              {m.pctControlled}%
-            </div>
-            <div style={{ fontSize: 10, color: INK3 }}>of {m.withHba1c} with data at target</div>
-          </div>
-        </div>
-        <div
-          style={{
-            height: 10,
-            background: BG,
-            borderRadius: 5,
-            overflow: "hidden",
-            marginBottom: 8,
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: `${m.pctControlled}%`,
-              background: `linear-gradient(90deg, ${RE}, ${AM}, ${GN})`,
-              borderRadius: 5,
-              transition: "width .8s",
-            }}
-          />
-        </div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 10,
-            color: INK3,
-          }}
-        >
-          <span>0%</span>
-          <span style={{ color: AM, fontWeight: 600 }}>Today: {m.pctControlled}%</span>
-          <span style={{ color: GN, fontWeight: 600 }}>Goal: 100%</span>
-        </div>
-      </Card>
+      </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { memo, useState, useMemo } from "react";
 import { MED_COLORS, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 import { MED_GROUPS, findDrug } from "../../config/drugDatabase";
+import ChangesPopover from "./ChangesPopover";
 
 // Auto-detect med group from name when med_group is not set
 function autoDetectGroup(name) {
@@ -308,6 +309,108 @@ function getGroupLabel(group) {
   return found ? found.label : group.charAt(0).toUpperCase() + group.slice(1);
 }
 
+// Build a concise summary line for a single history entry.
+// `h` shape: { at, reason, from:{dose,frequency,timing}, to:{...} }
+function summarizeHistoryEntry(h) {
+  if (!h || !h.from || !h.to) return "Updated";
+  const parts = [];
+  if ((h.from.dose || "") !== (h.to.dose || ""))
+    parts.push(`Dose: ${h.from.dose || "—"} → ${h.to.dose || "—"}`);
+  if ((h.from.frequency || "") !== (h.to.frequency || ""))
+    parts.push(`Freq: ${h.from.frequency || "—"} → ${h.to.frequency || "—"}`);
+  if ((h.from.timing || "") !== (h.to.timing || ""))
+    parts.push(`Timing: ${h.from.timing || "—"} → ${h.to.timing || "—"}`);
+  return parts.length ? parts.join(" · ") : "Updated";
+}
+
+function MedHistoryPanel({ history, current }) {
+  if (!history?.length) return null;
+  const sorted = [...history].sort((a, b) => (a.at < b.at ? 1 : -1));
+  const fmtRx = (s) =>
+    [s?.dose, s?.frequency, s?.timing].filter(Boolean).join(" · ") || "—";
+
+  // Build version list newest→oldest: current state, then each "from" snapshot
+  const versions = [
+    {
+      label: "Current",
+      at: null,
+      rx: fmtRx({ dose: current?.dose, frequency: current?.frequency, timing: current?.timing }),
+      reason: null,
+    },
+    ...sorted.map((h, i) => ({
+      label: i === 0 ? "Previous" : `v${sorted.length - i}`,
+      at: h.at,
+      rx: fmtRx(h.from),
+      reason: h.reason,
+      change: summarizeHistoryEntry(h),
+    })),
+  ];
+
+  return (
+    <div
+      style={{
+        background: "#fafafa",
+        borderBottom: "1px solid var(--border)",
+        padding: "8px 10px 10px 40px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--t4)",
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          marginBottom: 6,
+        }}
+      >
+        Medication history ({sorted.length} edit{sorted.length === 1 ? "" : "s"})
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {versions.map((v, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              padding: "6px 8px",
+              background: i === 0 ? "#ecfdf5" : "#ffffff",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontSize: 12,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: i === 0 ? "#047857" : "var(--t3)",
+                minWidth: 64,
+                paddingTop: 2,
+              }}
+            >
+              {v.label}
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: "var(--text)" }}>{v.rx}</div>
+              {v.change && (
+                <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 2 }}>
+                  Changed → {v.change}
+                </div>
+              )}
+              <div style={{ fontSize: 10, color: "var(--t4)", marginTop: 2 }}>
+                {v.at ? fmtDate(v.at) : "In use now"}
+                {v.reason ? ` · ${v.reason}` : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const VisitMedications = memo(function VisitMedications({
   activeMeds,
   stoppedMeds,
@@ -318,6 +421,8 @@ const VisitMedications = memo(function VisitMedications({
 }) {
   const [showStopped, setShowStopped] = useState(false);
   const [showPrev, setShowPrev] = useState(false);
+  const [expandedHist, setExpandedHist] = useState({});
+  const toggleHist = (key) => setExpandedHist((s) => ({ ...s, [key]: !s[key] }));
 
   const uniqueActive = useMemo(() => dedup(activeMeds), [activeMeds]);
   const uniqueStopped = useMemo(() => dedup(stoppedMeds), [stoppedMeds]);
@@ -360,31 +465,101 @@ const VisitMedications = memo(function VisitMedications({
     const added = onDate.filter((m) => isSameDate(m.created_at, latest));
     const changed = onDate.filter((m) => !isSameDate(m.created_at, latest));
 
+    // Build a lookup of prior versions of each med (by name key) so we can
+    // compare dose/frequency/timing and surface what actually changed.
+    const normKey = (m) =>
+      (m.pharmacy_match || m.name || "")
+        .toUpperCase()
+        .replace(/\s*\(.*\)/, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const priorByKey = {};
+    for (const m of activeMeds) {
+      if (isSameDate(m.updated_at || m.started_date || m.created_at, latest)) continue;
+      const k = normKey(m);
+      if (!k) continue;
+      const d = m.updated_at || m.started_date || m.created_at;
+      if (!priorByKey[k] || (d && d > priorByKey[k]._d)) priorByKey[k] = { ...m, _d: d };
+    }
+
+    const fmtRx = (m) =>
+      [m.dose, m.frequency, m.timing].filter(Boolean).join(" · ") || "—";
+
+    // Build a diff field list for a changed med vs its prior version.
+    // Only include fields that actually changed — no extracted details.
+    const diffLines = (m) => {
+      const prior = priorByKey[normKey(m)];
+      if (!prior) return [fmtRx(m)];
+      const out = [];
+      if ((prior.dose || "") !== (m.dose || ""))
+        out.push(`dose: ${prior.dose || "—"} → ${m.dose || "—"}`);
+      if ((prior.frequency || "") !== (m.frequency || ""))
+        out.push(`freq: ${prior.frequency || "—"} → ${m.frequency || "—"}`);
+      if ((prior.timing || "") !== (m.timing || ""))
+        out.push(`timing: ${prior.timing || "—"} → ${m.timing || "—"}`);
+      return out.length ? out : [`${fmtRx(prior)} → ${fmtRx(m)}`];
+    };
+
+    // Short inline change label for the left-of-title pill
+    const shortChange = (m) => {
+      const prior = priorByKey[normKey(m)];
+      if (prior && (prior.dose || "") !== (m.dose || "")) {
+        return `${m.name} ${prior.dose || "—"}→${m.dose || "—"}`;
+      }
+      if (prior && (prior.frequency || "") !== (m.frequency || "")) {
+        return `${m.name} ${prior.frequency || "—"}→${m.frequency || "—"}`;
+      }
+      if (prior && (prior.timing || "") !== (m.timing || "")) {
+        return `${m.name} timing→${m.timing || "—"}`;
+      }
+      return `${m.name} updated`;
+    };
+
     const parts = [];
     if (added.length === 1) {
-      parts.push(`${added[0].name} added`);
+      parts.push(`${added[0].name} ${added[0].dose || ""}${added[0].frequency ? " " + added[0].frequency : ""} added`.trim());
     } else if (added.length > 1) {
       parts.push(`${added.length} meds added`);
     }
     if (changed.length === 1) {
-      parts.push(`${changed[0].name} updated`);
+      parts.push(shortChange(changed[0]));
     } else if (changed.length > 1) {
       parts.push(`${changed.length} meds changed`);
     }
 
     const text = parts.length > 0 ? parts.join(", ") : "Updated";
 
-    const tooltipLines = [`Updated on ${fmtDate(latest)}:`];
+    const tooltipLines = [`Changes on ${fmtDate(latest)}:`];
     if (added.length > 0) {
       tooltipLines.push("Added:");
-      added.forEach((m) => tooltipLines.push(`  + ${m.name} ${m.dose || ""} ${m.frequency || ""}`));
+      added.forEach((m) => {
+        tooltipLines.push(`  + ${m.name} ${fmtRx(m)}`);
+      });
     }
     if (changed.length > 0) {
       tooltipLines.push("Changed:");
-      changed.forEach((m) => tooltipLines.push(`  ${m.name} ${m.dose || ""} ${m.frequency || ""}`));
+      changed.forEach((m) => {
+        tooltipLines.push(`  • ${m.name}`);
+        diffLines(m).forEach((line) => tooltipLines.push(`      ${line}`));
+      });
     }
 
-    return { text, date: latest, tooltip: tooltipLines.join("\n") };
+    const addedDetails = added.map((m) => ({
+      name: m.name,
+      diff: [fmtRx(m)],
+    }));
+    const changedDetails = changed.map((m) => ({
+      name: m.name,
+      diff: diffLines(m),
+    }));
+
+    return {
+      text,
+      date: latest,
+      tooltip: tooltipLines.join("\n"),
+      added: addedDetails,
+      changed: changedDetails,
+    };
   }, [activeMeds]);
 
   return (
@@ -393,18 +568,12 @@ const VisitMedications = memo(function VisitMedications({
         <div className="sct">
           <div className="sci ic-g">💊</div>Medications
           {medSummary && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--t3)",
-                fontWeight: 400,
-                marginLeft: 8,
-                cursor: "default",
-              }}
-              title={medSummary.tooltip}
-            >
-              {medSummary.text} — {fmtDateShort(medSummary.date)}
-            </span>
+            <ChangesPopover
+              date={medSummary.date}
+              label={`${medSummary.text} — ${fmtDateShort(medSummary.date)}`}
+              added={medSummary.added}
+              changed={medSummary.changed}
+            />
           )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -429,6 +598,7 @@ const VisitMedications = memo(function VisitMedications({
           <span className="mthl">Dose</span>
           <span className="mthl">Timing</span>
           <span className="mthl">For / Since</span>
+          <span className="mthl">Started On</span>
           <span className="mthl">Actions</span>
         </div>
 
@@ -471,9 +641,42 @@ const VisitMedications = memo(function VisitMedications({
               </div>
 
               {/* Medications in group */}
-              {meds.map((m, i) => (
-                <div key={m.id || `${group}-${i}`} className="mtr">
+              {meds.map((m, i) => {
+                const rowKey = m.id || `${group}-${i}`;
+                const hasHistory = Array.isArray(m.history) && m.history.length > 0;
+                const isOpen = !!expandedHist[rowKey];
+                return (
+                <div key={rowKey}>
+                <div className="mtr">
                   <div className="mmain">
+                    {hasHistory ? (
+                      <button
+                        type="button"
+                        aria-label={isOpen ? "Hide history" : "Show history"}
+                        onClick={() => toggleHist(rowKey)}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          color: "var(--t2)",
+                          fontSize: 12,
+                          padding: 0,
+                          marginRight: 2,
+                          transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+                          transition: "transform 0.15s ease",
+                        }}
+                        title={`${m.history.length} previous version${m.history.length === 1 ? "" : "s"}`}
+                      >
+                        ▶
+                      </button>
+                    ) : (
+                      <span style={{ width: 18, display: "inline-block" }} />
+                    )}
                     <div
                       className="mdot"
                       style={{ background: MED_COLORS[i % MED_COLORS.length] }}
@@ -515,6 +718,7 @@ const VisitMedications = memo(function VisitMedications({
                       </div>
                     )}
                   </div>
+                  <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
                   <div className="macts">
                     {!isExternal && (
                       <>
@@ -559,7 +763,10 @@ const VisitMedications = memo(function VisitMedications({
                       )}
                   </div>
                 </div>
-              ))}
+                  {isOpen && <MedHistoryPanel history={m.history} current={m} />}
+                </div>
+                );
+              })}
             </div>
           );
         })}
@@ -593,6 +800,7 @@ const VisitMedications = memo(function VisitMedications({
                     </div>
                   )}
                 </div>
+                <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
                 <div className="macts">
                   <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
                     Edit
@@ -637,6 +845,7 @@ const VisitMedications = memo(function VisitMedications({
                     </div>
                   )}
                 </div>
+                <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
                 <div className="macts">
                   <button className="ma ma-r">Restart?</button>
                 </div>

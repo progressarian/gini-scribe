@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from "react";
 import { fmtDate } from "./helpers";
 import { toast } from "../../stores/uiStore";
 import PdfViewerModal from "./PdfViewerModal";
+import { getDocStatus } from "../../utils/docStatus";
 
 const ICON_MAP = {
   lab_report: "🧪",
@@ -17,6 +18,21 @@ const BG_MAP = {
   radiology: "ri-r",
   discharge: "ri-o",
 };
+
+const parseExt = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+};
+
+const isMismatchReview = (doc) =>
+  parseExt(doc.extracted_data)?.extraction_status === "mismatch_review";
 
 const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport }) {
   const [viewingDoc, setViewingDoc] = useState(null);
@@ -38,44 +54,81 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
     setViewingDoc(doc);
   }, []);
 
-  const renderDoc = (doc, i) => (
-    <div
-      key={doc.id || i}
-      className="report-card"
-      style={{ cursor: "pointer" }}
-      onClick={() => openDoc(doc)}
-    >
+  const renderDoc = (doc, i) => {
+    const status = getDocStatus(doc);
+    const needsReview = status.kind === "mismatch";
+    const isPending = status.kind === "pending";
+    return (
       <div
-        className={`report-icon ${BG_MAP[doc.doc_type] || "ri-b"}`}
-        style={
-          doc.doc_type === "imaging" || doc.doc_type === "radiology"
-            ? { background: "#fff0f5" }
-            : undefined
-        }
+        key={doc.id || i}
+        className="report-card"
+        style={{
+          cursor: "pointer",
+          border: needsReview
+            ? "1px solid #fecaca"
+            : isPending
+              ? "1px solid #c4b5fd"
+              : undefined,
+          background: needsReview ? "#fef2f2" : isPending ? "#f5f3ff" : undefined,
+        }}
+        onClick={() => openDoc(doc)}
       >
-        {ICON_MAP[doc.doc_type] || "📄"}
-      </div>
-      <div style={{ flex: 1 }}>
-        <div className="report-nm">{doc.title || doc.file_name || doc.doc_type}</div>
-        <div className="report-dt">
-          {fmtDate(doc.doc_date || doc.created_at)}
-          {doc.source ? ` · ${doc.source}` : ""}
-          {doc.created_at &&
-          (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
-            ? ` · Uploaded ${fmtDate(doc.created_at)}`
-            : ""}
-          {doc.notes ? ` · ${doc.notes}` : ""}
+        <div
+          className={`report-icon ${BG_MAP[doc.doc_type] || "ri-b"}`}
+          style={
+            doc.doc_type === "imaging" || doc.doc_type === "radiology"
+              ? { background: "#fff0f5" }
+              : undefined
+          }
+        >
+          {ICON_MAP[doc.doc_type] || "📄"}
         </div>
+        <div style={{ flex: 1 }}>
+          <div className="report-nm">{doc.title || doc.file_name || doc.doc_type}</div>
+          <div className="report-dt">
+            {fmtDate(doc.doc_date || doc.created_at)}
+            {doc.source ? ` · ${doc.source}` : ""}
+            {doc.created_at &&
+            (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
+              ? ` · Uploaded ${fmtDate(doc.created_at)}`
+              : ""}
+            {doc.notes ? ` · ${doc.notes}` : ""}
+          </div>
+          {needsReview && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "#b91c1c",
+                fontWeight: 600,
+                marginTop: 3,
+              }}
+              title="Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
+            >
+              ⚠️ Awaiting review — extraction not applied
+            </div>
+          )}
+        </div>
+        {status.label ? (
+          <span
+            className="report-status"
+            style={{
+              background: status.bg,
+              color: status.color,
+              borderColor: status.border,
+            }}
+          >
+            {status.label}
+          </span>
+        ) : doc.doc_type === "prescription" ? (
+          <button className="bx bx-p">View PDF</button>
+        ) : (
+          <span className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}>
+            {doc.has_abnormal ? "Finding" : "Reviewed"}
+          </span>
+        )}
       </div>
-      {doc.doc_type === "prescription" ? (
-        <button className="bx bx-p">View PDF</button>
-      ) : (
-        <span className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}>
-          {doc.has_abnormal ? "Finding" : "Reviewed"}
-        </span>
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <>
