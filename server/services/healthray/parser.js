@@ -74,6 +74,91 @@ export function extractClinicalText(clinicalData) {
   return sections;
 }
 
+// ── Extract vitals from Healthray `answers[]` (structured vital_sign rows) ──
+// The medical_clinical_notes payload carries a deterministic `answers[]` array
+// with form_type:"vital_sign" entries — no AI needed. Walks arbitrarily nested
+// shapes (answers at the top, inside categories, topics, or selected entries)
+// and pulls every vital sign it finds. Returns null if nothing extracted.
+export function extractVitalsFromAnswers(clinicalData) {
+  const out = {};
+  const safeParse = (s) => {
+    try {
+      return typeof s === "string" ? JSON.parse(s) : s;
+    } catch {
+      return null;
+    }
+  };
+  const num = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const ingest = (a) => {
+    if (!a || a.form_type !== "vital_sign") return;
+    const col = (a.column_name || "").toLowerCase();
+    const label = (a.label || "").toLowerCase();
+    const alias = (a.alias || "").toLowerCase();
+    const raw = a.value;
+
+    if (col === "height") {
+      const p = safeParse(raw);
+      const h = num(p?.height ?? raw);
+      if (h) out.height = h;
+    } else if (col === "weight") {
+      const p = safeParse(raw);
+      const w = num(p?.weight ?? raw);
+      if (w) out.weight = w;
+    } else if (col === "body_mass_index") {
+      const b = num(raw);
+      if (b) out.bmi = b;
+    } else if (col === "bp_systolic" || col === "bp_1" || a.element_type === "BloodPressure") {
+      const p = safeParse(raw);
+      const sys = num(p?.systolic);
+      const dia = num(p?.diastolic);
+      const method = (p?.method || alias || "").toLowerCase();
+      if (method.includes("stand")) {
+        if (sys) out.bpStandingSys = sys;
+        if (dia) out.bpStandingDia = dia;
+      } else {
+        if (sys) out.bpSys = sys;
+        if (dia) out.bpDia = dia;
+      }
+    } else if (col === "heart_rate") {
+      const p = safeParse(raw);
+      const hr = num(p?.hr ?? raw);
+      if (hr) out.pulse = hr;
+    } else if (label.includes("waist") || alias.includes("waist")) {
+      const v = num(raw);
+      if (v) out.waist = v;
+    } else if (label.includes("body fat") || alias.includes("body fat")) {
+      const v = num(raw);
+      if (v) out.bodyFat = v;
+    } else if (label.includes("muscle") || alias.includes("muscle")) {
+      const v = num(raw);
+      if (v) out.muscleMass = v;
+    }
+  };
+
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (Array.isArray(node.answers)) {
+      for (const a of node.answers) ingest(a);
+    }
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      if (v && (Array.isArray(v) || typeof v === "object")) walk(v);
+    }
+  };
+
+  walk(clinicalData);
+  return Object.keys(out).length ? out : null;
+}
+
 // ── Repair truncated/malformed JSON from AI ─────────────────────────────────
 export function repairAndParseJSON(raw) {
   try {
@@ -145,11 +230,10 @@ export function repairAndParseJSON(raw) {
   return null;
 }
 
-// ── Use Claude to parse clinical text into structured data ──────────────────
-export async function parseClinicalWithAI(rawText) {
-  if (!ANTHROPIC_KEY || !rawText || rawText.trim().length < 10) return null;
-
-  const prompt = `Parse this clinical note into structured JSON. Extract ONLY data present in the text.
+// ── Shared clinical-extraction prompt ───────────────────────────────────────
+// Used by BOTH the HealthRay clinical-text parser AND the OPD prescription
+// image/PDF extractor so both flows produce the same unified schema.
+export const CLINICAL_EXTRACTION_PROMPT = `Parse this clinical note into structured JSON. Extract ONLY data present in the text.
 
 Return JSON with these keys:
 {
@@ -257,6 +341,12 @@ STRICT Rules:
   • If only a relative phrase is given (e.g. "review in 2 weeks"), put that in timing and leave date null — do NOT compute the date.
 - CRITICAL — all dates in these notes are in DD/MM/YYYY format (Indian standard). "06/04/2026" means April 6 2026 → output as 2026-04-06. NEVER interpret as MM/DD/YYYY.
 - Return ONLY valid JSON, no markdown`;
+
+// ── Use Claude to parse clinical text into structured data ──────────────────
+export async function parseClinicalWithAI(rawText) {
+  if (!ANTHROPIC_KEY || !rawText || rawText.trim().length < 10) return null;
+
+  const prompt = CLINICAL_EXTRACTION_PROMPT;
 
   try {
     const resp = await fetch("https://api.anthropic.com/v1/messages", {

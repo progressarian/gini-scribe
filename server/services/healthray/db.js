@@ -154,6 +154,16 @@ export async function ensureSyncColumns() {
       ADD COLUMN IF NOT EXISTS waist REAL;
     ALTER TABLE vitals
       ADD COLUMN IF NOT EXISTS body_fat REAL;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS muscle_mass REAL;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS pulse REAL;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS bp_standing_sys REAL;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS bp_standing_dia REAL;
+    ALTER TABLE vitals
+      ADD COLUMN IF NOT EXISTS source TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_healthray
       ON appointments(healthray_id) WHERE healthray_id IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_healthray
@@ -1232,25 +1242,34 @@ export async function syncVitals(patientId, apptId, apptDate, opdVitals) {
   if (!patientId || !opdVitals) return;
   const w = parseFloat(opdVitals.weight) || null;
   const bpSys = parseFloat(opdVitals.bpSys) || null;
-  if (!w && !bpSys) return; // nothing useful to write
+  const pulse = parseFloat(opdVitals.pulse) || null;
+  const muscle = parseFloat(opdVitals.muscleMass) || null;
+  const waist = parseFloat(opdVitals.waist) || null;
+  const bodyFat = parseFloat(opdVitals.bodyFat) || null;
+  if (!w && !bpSys && !pulse && !muscle && !waist && !bodyFat) return; // nothing useful to write
 
   await pool.query(`DELETE FROM vitals WHERE appointment_id = $1`, [apptId]);
   await pool
     .query(
       `INSERT INTO vitals
-       (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, weight, height, bmi, waist, body_fat)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, pulse, weight, height, bmi, waist, body_fat, muscle_mass, bp_standing_sys, bp_standing_dia, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         patientId,
         apptId,
         apptDate,
         bpSys,
         parseFloat(opdVitals.bpDia) || null,
+        pulse,
         w,
         parseFloat(opdVitals.height) || null,
         parseFloat(opdVitals.bmi) || null,
-        parseFloat(opdVitals.waist) || null,
-        parseFloat(opdVitals.bodyFat) || null,
+        waist,
+        bodyFat,
+        muscle,
+        parseFloat(opdVitals.bpStandingSys) || null,
+        parseFloat(opdVitals.bpStandingDia) || null,
+        opdVitals._source || "healthray",
       ],
     )
     .catch((e) =>

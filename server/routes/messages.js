@@ -21,11 +21,13 @@ try {
 
 const router = Router();
 
-// Inbox — latest message per patient from Supabase, unread first
+// Inbox — latest message per patient from Supabase, unread first.
+// Optional ?role=lab|reception filters to role-scoped inboxes.
 router.get("/messages/from-genie", async (req, res) => {
   try {
     if (!getMessagesFromGenie) return res.json({ data: [], total: 0 });
-    const messages = await getMessagesFromGenie(null);
+    const role = req.query.role || null;
+    const messages = await getMessagesFromGenie(null, role);
     const grouped = {};
     for (const m of messages) {
       if (!grouped[m.patient_id]) grouped[m.patient_id] = [];
@@ -119,14 +121,14 @@ router.get("/patients/:id/messages", async (req, res) => {
   }
 });
 
-// Doctor sends a reply — writes to Supabase patient_messages
+// Doctor / Lab / Reception sends a reply — writes to Supabase patient_messages
 router.post("/patients/:id/messages", validate(messageCreateSchema), async (req, res) => {
   try {
-    const { message, sender_name } = req.body;
+    const { message, sender_name, sender_role } = req.body;
     if (!sendReplyToGenie) return res.status(400).json({ error: "Genie sync not configured" });
     const patientId = req.params.id;
     const doctorName = sender_name || "Dr. Bhansali";
-    const reply = await sendReplyToGenie(patientId, message, doctorName);
+    const reply = await sendReplyToGenie(patientId, message, doctorName, sender_role || null);
     if (!reply) return res.status(500).json({ error: "Failed to send reply" });
     res.json(reply);
   } catch (e) {

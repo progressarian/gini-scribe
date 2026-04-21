@@ -997,7 +997,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
         </div>
 
         {/* Vitals */}
-        {(vitals.weight || vitals.height) && (
+        {(vitals.weight || vitals.height || vitals.bpSys || vitals.pulse || vitals.waist) && (
           <div
             style={{
               background: WH,
@@ -1036,6 +1036,15 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
               <VitalChip label="SpO2" value={vitals.spo2} />
               <VitalChip label="Waist" value={vitals.waist ? `${vitals.waist} cm` : null} />
               <VitalChip label="Body Fat" value={vitals.bodyFat ? `${vitals.bodyFat}%` : null} />
+              <VitalChip label="Pulse" value={vitals.pulse ? `${vitals.pulse} bpm` : null} />
+              <VitalChip
+                label="Muscle"
+                value={vitals.muscleMass ? `${vitals.muscleMass} kg` : null}
+              />
+              <VitalChip
+                label="BP (standing)"
+                value={vitals.bpStandingSys ? `${vitals.bpStandingSys}/${vitals.bpStandingDia}` : null}
+              />
             </div>
           </div>
         )}

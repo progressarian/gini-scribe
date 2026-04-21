@@ -7,7 +7,11 @@ import {
   fetchMedicalRecords,
   fetchPreviousAppointmentData,
 } from "../healthray/client.js";
-import { extractClinicalText, parseClinicalWithAI } from "../healthray/parser.js";
+import {
+  extractClinicalText,
+  parseClinicalWithAI,
+  extractVitalsFromAnswers,
+} from "../healthray/parser.js";
 import {
   calcAge,
   buildName,
@@ -199,7 +203,10 @@ async function fetchClinicalText(appt, healthrayId, doctorId) {
 
   const sections = extractClinicalText(effectiveData);
 
-  return Object.values(sections).join("\n\n---\n\n");
+  return {
+    text: Object.values(sections).join("\n\n---\n\n"),
+    raw: effectiveData,
+  };
 }
 
 // ── Sync documents for an appointment ───────────────────────────────────────
@@ -253,7 +260,35 @@ async function syncAppointment(appt, localDoctorName) {
 
   if (doctorId) {
     try {
-      const rawText = await fetchClinicalText(appt, healthrayId, doctorId);
+      const clinicalResult = await fetchClinicalText(appt, healthrayId, doctorId);
+      const rawText = clinicalResult?.text || null;
+      const clinicalRawData = clinicalResult?.raw || null;
+
+      // Deterministic vitals extraction from structured answers[] —
+      // independent of clinical text length / AI parse. Merges over AI-derived
+      // values where present.
+      if (clinicalRawData) {
+        const answersVitals = extractVitalsFromAnswers(clinicalRawData);
+        if (answersVitals) {
+          if (answersVitals.weight) opdVitals.weight = answersVitals.weight;
+          if (answersVitals.height) opdVitals.height = answersVitals.height;
+          if (answersVitals.bmi) opdVitals.bmi = answersVitals.bmi;
+          if (answersVitals.bpSys) opdVitals.bpSys = answersVitals.bpSys;
+          if (answersVitals.bpDia) opdVitals.bpDia = answersVitals.bpDia;
+          if (answersVitals.pulse) opdVitals.pulse = answersVitals.pulse;
+          if (answersVitals.waist) opdVitals.waist = answersVitals.waist;
+          if (answersVitals.bodyFat) opdVitals.bodyFat = answersVitals.bodyFat;
+          if (answersVitals.muscleMass) opdVitals.muscleMass = answersVitals.muscleMass;
+          if (answersVitals.bpStandingSys) opdVitals.bpStandingSys = answersVitals.bpStandingSys;
+          if (answersVitals.bpStandingDia) opdVitals.bpStandingDia = answersVitals.bpStandingDia;
+          // Mirror into biomarkers so the OPD row chips render them.
+          if (opdVitals.bpSys) biomarkers.bpSys = opdVitals.bpSys;
+          if (opdVitals.bpDia) biomarkers.bpDia = opdVitals.bpDia;
+          if (opdVitals.pulse) biomarkers.pulse = opdVitals.pulse;
+          if (opdVitals.waist) biomarkers.waist = opdVitals.waist;
+          if (opdVitals.bodyFat) biomarkers.bodyFat = opdVitals.bodyFat;
+        }
+      }
 
       if (rawText && rawText.trim().length > 20) {
         // Skip AI if text unchanged

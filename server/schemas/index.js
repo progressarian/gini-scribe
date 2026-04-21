@@ -209,6 +209,7 @@ export const appointmentUpdateSchema = z.object({
 export const messageCreateSchema = z.object({
   message: z.string({ required_error: "message is required" }).min(1),
   sender_name: optStr,
+  sender_role: optStr,
 });
 
 // ---- Clinical Reasoning ----

@@ -7,7 +7,15 @@ import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
 import { fetchMedicalRecords } from "../services/healthray/client.js";
-import { downloadAndStore } from "../services/healthray/db.js";
+import {
+  downloadAndStore,
+  syncDiagnoses,
+  syncSymptoms,
+  syncStoppedMedications,
+  syncLabResults,
+  syncBiomarkersFromLatestLabs,
+  syncVitals,
+} from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 
 const router = Router();
@@ -886,10 +894,17 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
       return res.status(400).json({ error: "Document is not a prescription" });
     if (!doc.file_url) return res.status(400).json({ error: "Document has no file URL" });
 
-    // Download + extract via Claude (handles PDF and image formats automatically)
+    // Download + extract via Claude — now uses the unified clinical-extraction
+    // prompt shared with HealthRay sync, so we get diagnoses, symptoms, labs,
+    // vitals, biomarkers, medications, previous_medications, advice, etc.
     const extracted = await extractPrescription(doc.file_url);
 
-    // Save extracted_data + sync medicines in a transaction
+    // Back-compat alias: older consumers (refreshOpdConsultations) read
+    // `stopped_medications`; unified schema calls it `previous_medications`.
+    if (!extracted.stopped_medications && Array.isArray(extracted.previous_medications)) {
+      extracted.stopped_medications = extracted.previous_medications;
+    }
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -899,19 +914,36 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
         docId,
       ]);
 
-      const rxDate =
-        extracted.visit_date ||
-        (doc.doc_date
-          ? new Date(doc.doc_date).toISOString().split("T")[0]
-          : new Date().toISOString().split("T")[0]);
+      const rxDate = doc.doc_date
+        ? new Date(doc.doc_date).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
 
       if (doc.patient_id && extracted.follow_up) {
         await syncFollowUpToAppointment(client, doc.patient_id, extracted.follow_up, rxDate);
       }
 
+      // Match an appointment by patient + date (±1 day) so appt-scoped syncs
+      // (vitals, symptoms, biomarkers) can attach. It's fine if none exists —
+      // diagnoses/labs/medications still sync at patient scope.
+      let apptId = null;
+      if (doc.patient_id) {
+        const { rows: apptRows } = await client.query(
+          `SELECT id FROM appointments
+           WHERE patient_id = $1
+             AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day')
+                                           AND ($2::date + INTERVAL '1 day')
+           ORDER BY appointment_date DESC LIMIT 1`,
+          [doc.patient_id, rxDate],
+        );
+        apptId = apptRows[0]?.id || null;
+      }
+
+      // Synthetic healthray-style scope ID so sync helpers can tag rows to this doc
+      const scopeId = `opd-doc-${docId}`;
+
+      // Medications — keep document-scoped upsert so deleting the doc can clean up
       if (doc.patient_id && extracted.medications?.length > 0) {
         await client.query(`DELETE FROM medications WHERE document_id = $1`, [docId]);
-
         for (const m of extracted.medications) {
           if (!m?.name) continue;
           await client
@@ -944,10 +976,53 @@ router.post("/documents/:id/extract-prescription", async (req, res) => {
       }
 
       await client.query("COMMIT");
+
+      // ── Post-commit: pool-based sync helpers mirror HealthRay flow ──
+      if (doc.patient_id) {
+        try {
+          await syncDiagnoses(doc.patient_id, scopeId, extracted.diagnoses || []);
+          await syncStoppedMedications(
+            doc.patient_id,
+            scopeId,
+            extracted.previous_medications || extracted.stopped_medications || [],
+            extracted.medications || [],
+          );
+          await syncLabResults(doc.patient_id, apptId, rxDate, extracted.labs || []);
+
+          // Vitals — pick the dated entry matching rxDate (unified schema is an array)
+          const vitalsArr = Array.isArray(extracted.vitals) ? extracted.vitals : [];
+          const todaysVitals =
+            vitalsArr.find((v) => v && v.date === rxDate) || vitalsArr[0] || null;
+          if (apptId && todaysVitals) {
+            await syncVitals(doc.patient_id, apptId, rxDate, {
+              bpSys: todaysVitals.bpSys,
+              bpDia: todaysVitals.bpDia,
+              weight: todaysVitals.weight,
+              height: todaysVitals.height,
+              bmi: todaysVitals.bmi,
+              waist: todaysVitals.waist,
+              bodyFat: todaysVitals.bodyFat,
+            });
+          }
+
+          if (apptId) {
+            await syncSymptoms(doc.patient_id, apptId, extracted.symptoms || []);
+            await syncBiomarkersFromLatestLabs(doc.patient_id, apptId);
+          }
+        } catch (syncErr) {
+          // Don't fail the request — extraction itself already committed
+          console.error("extract-prescription post-sync:", syncErr.message);
+        }
+      }
+
       res.json({
         success: true,
         documentId: docId,
         medicinesExtracted: extracted.medications?.length || 0,
+        diagnosesExtracted: extracted.diagnoses?.length || 0,
+        symptomsExtracted: extracted.symptoms?.length || 0,
+        labsExtracted: extracted.labs?.length || 0,
+        vitalsExtracted: Array.isArray(extracted.vitals) ? extracted.vitals.length : 0,
         medicines: extracted.medications || [],
       });
     } catch (e) {

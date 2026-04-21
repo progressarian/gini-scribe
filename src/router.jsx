@@ -32,6 +32,8 @@ const ConsultantPage = lazy(() => import("./pages/ConsultantPage"));
 const PlanPage = lazy(() => import("./pages/PlanPage"));
 const DocsPage = lazy(() => import("./pages/DocsPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
+const LabInboxPage = lazy(() => import("./pages/LabInboxPage"));
+const ReceptionInboxPage = lazy(() => import("./pages/ReceptionInboxPage"));
 const LabPortalPage = lazy(() => import("./pages/LabPortalPage"));
 const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 const OutcomesPage = lazy(() => import("./pages/OutcomesPage"));
@@ -112,6 +114,8 @@ const router = createBrowserRouter([
           // Tools
           { path: "/docs", element: lazyEl(DocsPage) },
           { path: "/messages", element: lazyEl(MessagesPage) },
+          { path: "/lab-inbox", element: lazyEl(LabInboxPage) },
+          { path: "/reception-inbox", element: lazyEl(ReceptionInboxPage) },
           { path: "/lab-portal", element: lazyEl(LabPortalPage) },
           // Analysis
           { path: "/history", element: lazyEl(HistoryPage) },

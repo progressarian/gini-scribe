@@ -66,6 +66,8 @@ const NAV_ITEMS = [
   { path: "/docs", label: "📎 Docs", show: (s) => s.hasPatient },
   { path: "/lab-portal", label: "🔬 Upload", show: (s) => s.isLabRole },
   { path: "/messages", label: "💬 Messages", show: () => true, badge: (s) => s.unreadCount > 0 },
+  { path: "/reception-inbox", label: "🏥 Reception", show: (s) => !s.isLabRole },
+  { path: "/lab-inbox", label: "🔬 Lab Chat", show: () => true },
   { path: "/history", label: "📜 Hx", show: (s) => !s.isLabRole && s.hasPatient },
   { path: "/outcomes", label: "📊", show: (s) => !s.isLabRole && !!s.dbPatientId },
   { path: "/ai", label: "🤖 AI", show: (s) => !s.isLabRole },

@@ -220,7 +220,7 @@ async function getAlertsFromGenie(giniPatientId = null) {
 /**
  * Get patient messages FROM Genie (patient → doctor)
  */
-async function getMessagesFromGenie(giniPatientId = null) {
+async function getMessagesFromGenie(giniPatientId = null, senderRole = null) {
   const db = getGenieDb();
   if (!db) return [];
 
@@ -229,10 +229,14 @@ async function getMessagesFromGenie(giniPatientId = null) {
     .select('*')
     .eq('direction', 'outbound')
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(200);
 
   if (giniPatientId) {
     query = query.eq('patient_id', String(giniPatientId));
+  }
+  if (senderRole) {
+    // Messages from the patient targeting a specific team inbox.
+    query = query.eq('sender_role', senderRole);
   }
 
   const { data, error } = await query;
@@ -243,19 +247,22 @@ async function getMessagesFromGenie(giniPatientId = null) {
 /**
  * Send doctor reply to patient via Supabase patient_messages
  */
-async function sendReplyToGenie(patientId, message, senderName) {
+async function sendReplyToGenie(patientId, message, senderName, senderRole) {
   const db = getGenieDb();
   if (!db) return null;
 
+  const payload = {
+    patient_id: String(patientId),
+    direction: 'inbound',
+    message,
+    sender_name: senderName || 'Dr. Bhansali',
+    is_read: false,
+  };
+  if (senderRole) payload.sender_role = senderRole;
+
   const { data, error } = await db
     .from('patient_messages')
-    .insert({
-      patient_id: String(patientId),
-      direction: 'inbound',
-      message,
-      sender_name: senderName || 'Dr. Bhansali',
-      is_read: false,
-    })
+    .insert(payload)
     .select()
     .single();
 

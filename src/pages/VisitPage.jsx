@@ -26,6 +26,7 @@ import VisitTopbar from "../components/visit/VisitTopbar";
 import VisitStrip from "../components/visit/VisitStrip";
 import VisitSidebar from "../components/visit/VisitSidebar";
 import VisitBiomarkers from "../components/visit/VisitBiomarkers";
+import VitalsTrendChart from "../components/visit/VitalsTrendChart";
 import VisitDiagnoses from "../components/visit/VisitDiagnoses";
 import VisitMedications from "../components/visit/VisitMedications";
 import VisitPlan from "../components/visit/VisitPlan";
@@ -789,6 +790,7 @@ export default function VisitPage() {
                 onAddLab={() => setModal({ type: "addLab" })}
                 onPasteBiomarkers={() => setModal({ type: "pasteText" })}
               />
+              <VitalsTrendChart vitals={vitals} />
               {/* <VisitCoordPrep prep={data.prep} /> */}
               <VisitSymptomsSection
                 symptoms={data.symptoms || []}
