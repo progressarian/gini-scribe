@@ -28,6 +28,7 @@ export default function MultiCaptureScreen() {
 
   const [mismatchReview, setMismatchReview] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [hasCamera, setHasCamera] = useState(false);
   // Holds { item, blobUrl }. Chromium blocks data: URIs for PDF in iframes,
   // so we convert the item's data URI to a blob URL before passing it to the
   // viewer modal.
@@ -41,6 +42,23 @@ export default function MultiCaptureScreen() {
 
   useEffect(() => {
     return () => multiReset();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.enumerateDevices) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+        setHasCamera(devices.some((d) => d.kind === "videoinput"));
+      } catch {
+        if (!cancelled) setHasCamera(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Revoke the preview blob URL when the modal closes or the component unmounts.
@@ -122,19 +140,21 @@ export default function MultiCaptureScreen() {
             </div>
             <div className="mcap__pick-btns">
               <button
-                onClick={() => setCameraOpen(true)}
+                onClick={() => (hasCamera ? setCameraOpen(true) : galleryRef.current?.click())}
                 className="mcap__pick-btn mcap__pick-btn--camera"
               >
                 <span className="mcap__pick-btn-icon">📷</span>
                 Take Photos
-                <span className="mcap__pick-btn-hint">Multiple captures</span>
+                <span className="mcap__pick-btn-hint">
+                  {hasCamera ? "Multiple captures" : "No camera — pick files"}
+                </span>
               </button>
               <button
                 onClick={() => galleryRef.current?.click()}
                 className="mcap__pick-btn mcap__pick-btn--file"
               >
                 <span className="mcap__pick-btn-icon">📁</span>
-                Upload Files
+                Upload from Gallery
                 <span className="mcap__pick-btn-hint">Images or PDFs</span>
               </button>
             </div>
@@ -189,16 +209,21 @@ export default function MultiCaptureScreen() {
                   }
                 />
               ))}
-              <button onClick={() => setCameraOpen(true)} className="mcap__card mcap__card--add">
+              <button
+                onClick={() => (hasCamera ? setCameraOpen(true) : addMoreRef.current?.click())}
+                className="mcap__card mcap__card--add"
+              >
                 <span className="mcap__thumb-add-icon">📷</span>
-                <span className="mcap__thumb-add-label">Take more photos</span>
+                <span className="mcap__thumb-add-label">
+                  {hasCamera ? "Take more photos" : "Pick photos"}
+                </span>
               </button>
               <button
                 onClick={() => addMoreRef.current?.click()}
                 className="mcap__card mcap__card--add"
               >
                 <span className="mcap__thumb-add-icon">+</span>
-                <span className="mcap__thumb-add-label">Add files</span>
+                <span className="mcap__thumb-add-label">Add from gallery</span>
               </button>
             </div>
 
@@ -558,6 +583,18 @@ function CameraCaptureSheet({ onDone, onClose }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The <video> element unmounts while previewing a capture, so the stream
+  // needs to be re-attached to the fresh element when we return to live view.
+  useEffect(() => {
+    if (preview) return;
+    const v = videoRef.current;
+    const s = streamRef.current;
+    if (v && s && v.srcObject !== s) {
+      v.srcObject = s;
+      v.play().catch(() => {});
+    }
+  }, [preview]);
 
   const capture = async () => {
     const video = videoRef.current;
