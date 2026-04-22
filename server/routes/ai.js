@@ -1,10 +1,80 @@
 import { Router } from "express";
+import sharp from "sharp";
 
 const router = Router();
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
+
+// Anthropic rejects base64 image payloads above 5 MB per image. Stay below that
+// with headroom for JSON/transport overhead.
+const MAX_IMAGE_BASE64_BYTES = 4.5 * 1024 * 1024;
+
+async function compressImageSource(source) {
+  if (!source || source.type !== "base64" || typeof source.data !== "string") return source;
+  if (!source.media_type?.startsWith("image/")) return source;
+
+  const currentBase64Bytes = Buffer.byteLength(source.data, "utf8");
+  if (currentBase64Bytes <= MAX_IMAGE_BASE64_BYTES) return source;
+
+  const inputBuffer = Buffer.from(source.data, "base64");
+
+  const attempts = [
+    { maxDim: 2400, quality: 80 },
+    { maxDim: 2000, quality: 75 },
+    { maxDim: 1600, quality: 70 },
+    { maxDim: 1280, quality: 65 },
+    { maxDim: 1024, quality: 60 },
+  ];
+
+  for (const { maxDim, quality } of attempts) {
+    try {
+      const outBuffer = await sharp(inputBuffer, { failOn: "none" })
+        .rotate()
+        .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality, mozjpeg: true })
+        .toBuffer();
+
+      const outBase64 = outBuffer.toString("base64");
+      if (Buffer.byteLength(outBase64, "utf8") <= MAX_IMAGE_BASE64_BYTES) {
+        return { type: "base64", media_type: "image/jpeg", data: outBase64 };
+      }
+    } catch (err) {
+      console.error("sharp compress failed:", err.message);
+      break;
+    }
+  }
+
+  // Final fallback: aggressive downscale
+  try {
+    const outBuffer = await sharp(inputBuffer, { failOn: "none" })
+      .rotate()
+      .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 50, mozjpeg: true })
+      .toBuffer();
+    return { type: "base64", media_type: "image/jpeg", data: outBuffer.toString("base64") };
+  } catch (err) {
+    console.error("sharp final compress failed:", err.message);
+    return source;
+  }
+}
+
+async function compressMessagesImages(messages) {
+  return Promise.all(
+    messages.map(async (m) => {
+      if (!m || !Array.isArray(m.content)) return m;
+      const newContent = await Promise.all(
+        m.content.map(async (c) => {
+          if (c?.type !== "image") return c;
+          const newSource = await compressImageSource(c.source);
+          return newSource === c.source ? c : { ...c, source: newSource };
+        }),
+      );
+      return { ...m, content: newContent };
+    }),
+  );
+}
 
 // ─── POST /api/ai/complete ───────────────────────────────────────────
 // Generic Claude proxy. Accepts the same shape as the Anthropic Messages API.
@@ -21,10 +91,12 @@ router.post("/ai/complete", async (req, res) => {
     model === "haiku" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-20250514";
 
   try {
+    const compressedMessages = await compressMessagesImages(messages);
+
     const body = {
       model: anthropicModel,
       max_tokens: maxTokens || 8000,
-      messages,
+      messages: compressedMessages,
     };
     if (system) body.system = system;
 
