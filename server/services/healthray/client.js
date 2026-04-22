@@ -1,7 +1,12 @@
 // ── HealthRay API Client — auth, session, fetch ─────────────────────────────
 
 import { createLogger } from "../logger.js";
+import { fetchWithTimeout } from "../cron/lowPriority.js";
 const { log } = createLogger("HealthRay Sync");
+
+// Upstream call timeout — a slow Healthray API must not stall a sync worker
+// (or a user request) indefinitely. 20s covers the slowest observed responses.
+const HEALTHRAY_TIMEOUT_MS = 20000;
 
 const HEALTHRAY_BASE = "https://node.healthray.com/api/v1";
 const HEALTHRAY_LOGIN_URL = "https://node.healthray.com/api/v2/users/sign_in";
@@ -23,19 +28,23 @@ async function healthrayLogin() {
 
   log("Auth", "Session expired, logging in...");
 
-  const res = await fetch(HEALTHRAY_LOGIN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      captchaToken: captcha,
-      user: {
-        mobile_no: mobile,
-        password: password,
-        platform: "Web",
-        user_type: "Doctor",
-      },
-    }),
-  });
+  const res = await fetchWithTimeout(
+    HEALTHRAY_LOGIN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        captchaToken: captcha,
+        user: {
+          mobile_no: mobile,
+          password: password,
+          platform: "Web",
+          user_type: "Doctor",
+        },
+      }),
+    },
+    HEALTHRAY_TIMEOUT_MS,
+  );
 
   const setCookie = res.headers.get("set-cookie") || "";
   const match = setCookie.match(/connect\.sid=([^;]+)/);
@@ -59,9 +68,11 @@ export async function healthrayFetch(path, isRetry = false) {
     await healthrayLogin();
   }
 
-  const res = await fetch(`${HEALTHRAY_BASE}${path}`, {
-    headers: { Cookie: `connect.sid=${sessionCookie}` },
-  });
+  const res = await fetchWithTimeout(
+    `${HEALTHRAY_BASE}${path}`,
+    { headers: { Cookie: `connect.sid=${sessionCookie}` } },
+    HEALTHRAY_TIMEOUT_MS,
+  );
 
   // HealthRay returns 200 + HTML when session expires (redirect to login page).
   // Detect this before trying to parse JSON, otherwise the parse throws and the
@@ -128,7 +139,7 @@ export async function healthrayRawFetch(url, isRetry = false) {
   const headers = { Cookie: `connect.sid=${sessionCookie}` };
   if (authToken) headers["x-auth-token"] = authToken;
 
-  const res = await fetch(url, { headers, redirect: "follow" });
+  const res = await fetchWithTimeout(url, { headers, redirect: "follow" }, HEALTHRAY_TIMEOUT_MS);
   const ct = res.headers.get("content-type") || "";
 
   if (!res.ok || ct.includes("text/html")) {
@@ -163,7 +174,7 @@ export async function downloadMedicalRecordFile(attachmentId, recordType, medica
   const headers = { Cookie: `connect.sid=${sessionCookie}` };
   if (authToken) headers["x-auth-token"] = authToken;
 
-  const res = await fetch(url, { headers, redirect: "follow" });
+  const res = await fetchWithTimeout(url, { headers, redirect: "follow" }, HEALTHRAY_TIMEOUT_MS);
 
   // Log response details for debugging
   const ct = res.headers.get("content-type") || "";
@@ -184,7 +195,11 @@ export async function downloadMedicalRecordFile(attachmentId, recordType, medica
     await healthrayLogin();
     const retryHeaders = { Cookie: `connect.sid=${sessionCookie}` };
     if (authToken) retryHeaders["x-auth-token"] = authToken;
-    const retry = await fetch(url, { headers: retryHeaders, redirect: "follow" });
+    const retry = await fetchWithTimeout(
+      url,
+      { headers: retryHeaders, redirect: "follow" },
+      HEALTHRAY_TIMEOUT_MS,
+    );
     if (!retry.ok) {
       const errBody = await retry.text().catch(() => "");
       log("Download", `Retry failed ${retry.status}: ${errBody.slice(0, 200)}`);

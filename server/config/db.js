@@ -23,12 +23,28 @@ const pool = new pg.Pool({
   keepAliveInitialDelayMillis: 10000,
 });
 
+// Dedicated low-priority pool for background cron/sync jobs.
+// Kept small so background sync can never starve user-facing requests on the main pool.
+const cronPool = new pg.Pool({
+  connectionString: finalDbUrl,
+  ssl: needsSsl ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 20000,
+  idleTimeoutMillis: 20000,
+  max: 4,
+  allowExitOnIdle: true,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+});
+
 // Log unexpected pool errors (prevents unhandled rejection crashes)
 pool.on("error", (err) => {
   console.error("Unexpected DB pool error:", err.message);
+});
+cronPool.on("error", (err) => {
+  console.error("Unexpected cron DB pool error:", err.message);
 });
 
 console.log("DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
 
 export default pool;
-export { dbUrl, needsSsl };
+export { dbUrl, needsSsl, cronPool };

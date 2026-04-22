@@ -14,16 +14,19 @@ import {
   backfillLabRanges,
   backfillLabPdfs,
 } from "./labSync.js";
+import { runDocumentRecovery } from "./documentRecovery.js";
 
 // ── Sync interval (every 5 minutes) ────────────────────────────────────────
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
+const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 
 let intervalId = null;
 let labIntervalId = null;
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
+let docRecoveryIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -42,17 +45,20 @@ export function startCronJobs() {
     }, SYNC_INTERVAL_MS);
   }
 
-  // ── Lab HealthRay sync (every 5 min) ──────────────────────────────────────
-  console.log("[Cron] Starting lab sync (every 5 min)...");
+  // ── Lab HealthRay sync (every 5 min, staggered) ───────────────────────────
+  // Offset by ~2.5 min so the lab sync and healthray sync never start at the
+  // same moment — the global advisory lock would still serialize them, but
+  // staggering spreads the load across the 5-min window so users see fewer
+  // back-to-back latency spikes.
+  const LAB_SYNC_OFFSET_MS = Math.floor(SYNC_INTERVAL_MS / 2); // 2.5 min offset
+  console.log("[Cron] Starting lab sync (every 5 min, staggered +2.5 min)...");
 
-  // Run once on startup after a short delay (let server finish booting)
   setTimeout(() => {
     runLabSync().catch((e) => console.error("[Cron] Lab initial sync failed:", e.message));
-  }, 10_000);
-
-  labIntervalId = setInterval(() => {
-    runLabSync().catch((e) => console.error("[Cron] Lab sync failed:", e.message));
-  }, SYNC_INTERVAL_MS);
+    labIntervalId = setInterval(() => {
+      runLabSync().catch((e) => console.error("[Cron] Lab sync failed:", e.message));
+    }, SYNC_INTERVAL_MS);
+  }, LAB_SYNC_OFFSET_MS);
 
   // Recovery job every 15 min
   recoveryIntervalId = setInterval(() => {
@@ -90,6 +96,23 @@ export function startCronJobs() {
       );
     }, STUCK_STATUS_INTERVAL_MS);
   }, STUCK_STATUS_DELAY_MS);
+
+  // ── Document recovery: clean orphans + re-kick stuck extractions ──
+  // Every 3 min. Handles the refresh-mid-upload case where /upload-file
+  // never completed (→ orphan) and the case where the server restarted
+  // between upload-file and its fire-and-forget extraction (→ stuck
+  // pending with a file). First run delayed by 90s to let startup settle.
+  console.log("[Cron] Starting document recovery (every 3 min)...");
+  setTimeout(() => {
+    runDocumentRecovery().catch((e) =>
+      console.error("[Cron] Document recovery failed:", e.message),
+    );
+    docRecoveryIntervalId = setInterval(() => {
+      runDocumentRecovery().catch((e) =>
+        console.error("[Cron] Document recovery failed:", e.message),
+      );
+    }, DOC_RECOVERY_INTERVAL_MS);
+  }, 90 * 1000);
 }
 
 export function stopCronJobs() {
@@ -117,6 +140,11 @@ export function stopCronJobs() {
     stuckStatusIntervalId = null;
     console.log("[Cron] Stuck status recovery stopped");
   }
+  if (docRecoveryIntervalId) {
+    clearInterval(docRecoveryIntervalId);
+    docRecoveryIntervalId = null;
+    console.log("[Cron] Document recovery stopped");
+  }
 }
 
 // Manual trigger exports
@@ -132,4 +160,5 @@ export {
   backfillLabPdfs,
   runDailyOpdBackfill,
   runStuckStatusRecovery,
+  runDocumentRecovery,
 };

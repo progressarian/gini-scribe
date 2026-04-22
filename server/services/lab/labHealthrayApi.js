@@ -2,9 +2,14 @@
 // Separate system from node.healthray.com — JWT auth with auto-refresh on 401
 
 import { createLogger } from "../logger.js";
+import { fetchWithTimeout } from "../cron/lowPriority.js";
 const { log } = createLogger("Lab Auth");
 
 const LAB_API_BASE = "https://labapi.healthray.com/api/v1";
+
+// Upstream call timeout — prevents a stalled lab API from holding a sync
+// worker (or a user request) indefinitely.
+const LAB_TIMEOUT_MS = 20000;
 
 // In-memory token cache — seeded from .env, refreshed automatically on 401
 let authToken = process.env.LAB_HEALTHRAY_AUTH_TOKEN || null;
@@ -39,21 +44,25 @@ export async function labLogin() {
 
   log("Login", `Logging in as ${mobile}...`);
 
-  const res = await fetch(`${LAB_API_BASE}/user/sign_in`, {
-    method: "POST",
-    headers: {
-      accept: "*/*",
-      "content-type": "application/json",
-      origin: "https://lab.healthray.com",
-      "x-auth-token": "null",
-      "x-device-token": DEVICE_TOKEN,
+  const res = await fetchWithTimeout(
+    `${LAB_API_BASE}/user/sign_in`,
+    {
+      method: "POST",
+      headers: {
+        accept: "*/*",
+        "content-type": "application/json",
+        origin: "https://lab.healthray.com",
+        "x-auth-token": "null",
+        "x-device-token": DEVICE_TOKEN,
+      },
+      body: JSON.stringify({
+        mobile_number: mobile,
+        country_code: countryCode,
+        password,
+      }),
     },
-    body: JSON.stringify({
-      mobile_number: mobile,
-      country_code: countryCode,
-      password,
-    }),
-  });
+    LAB_TIMEOUT_MS,
+  );
 
   const json = await res.json().catch(() => ({}));
 
@@ -85,7 +94,11 @@ async function labFetch(path, isRetry = false) {
     await labLogin();
   }
 
-  const res = await fetch(`${LAB_API_BASE}${path}`, { headers: LAB_HEADERS() });
+  const res = await fetchWithTimeout(
+    `${LAB_API_BASE}${path}`,
+    { headers: LAB_HEADERS() },
+    LAB_TIMEOUT_MS,
+  );
 
   // 401 = token expired → re-login once and retry
   if (res.status === 401 && !isRetry) {

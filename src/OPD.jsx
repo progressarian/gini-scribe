@@ -7,8 +7,12 @@ import { extractLab, extractImaging, extractRx } from "./services/extraction.js"
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
+import DocStatusPill from "./components/ui/DocStatusPill.jsx";
+import ConfirmModal from "./components/ui/ConfirmModal.jsx";
 import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
 import { qk } from "./queries/keys.js";
+import { useIsMobile } from "./hooks/useIsMobile.js";
+import "./OPD.css";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -1332,7 +1336,10 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
           }}
         >
           <SLbl>Key Biomarkers</SLbl>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+          <div
+            className="opd-biomarker-grid"
+            style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}
+          >
             {[
               ["HbA1c", bio.hba1c, "%", "hba1c"],
               ["FG", bio.fg, "mg/dL", "fg"],
@@ -1458,6 +1465,10 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
   const [activeType, setActiveType] = useState("blood");
   const [expandedReports, setExpandedReports] = useState({});
   const [loadingDocs, setLoadingDocs] = useState(false);
+  // null | { typeId, name, docId, extractedData } — shows ConfirmModal
+  // so we don't silently delete a doc + its synced lab values on a stray
+  // × click. User has to explicitly confirm.
+  const [reportToDelete, setReportToDelete] = useState(null);
   const fileRefs = useRef({});
 
   // Load previously uploaded docs from DB
@@ -1595,6 +1606,10 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
             title: `${typeId} - ${file.name}`,
             file_name: file.name,
             source: "opd_upload",
+            // Flip to pending up front so a page refresh during extraction
+            // still shows the "Extracting…" pill + Retry button instead of
+            // a blank row.
+            extracted_data: { extraction_status: "pending" },
           }),
         });
         const doc = await docResp.json();
@@ -1678,7 +1693,27 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
             showToast(`✓ Extracted ${testCount} test${testCount > 1 ? "s" : ""} from report`);
         }
       } else if (extractError) {
-        showToast(`Extraction failed: ${extractError}`, "err");
+        // Persist failed state to DB so the Retry pill survives a page reload
+        // and shows on every surface (Visit/OPD/Docs/Dashboard/Companion).
+        if (uploadedDocId) {
+          const failedPayload = {
+            extraction_status: "failed",
+            error_message: extractError,
+            retry_count: 3,
+            failed_at: new Date().toISOString(),
+          };
+          apiFetch(`/api/documents/${uploadedDocId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ extracted_data: failedPayload }),
+          }).catch(() => {});
+          setReports((prev) => ({
+            ...prev,
+            [typeId]: (prev[typeId] || []).map((r) =>
+              r.id === entryId ? { ...r, extractedData: failedPayload } : r,
+            ),
+          }));
+        }
+        showToast(`Extraction failed: ${extractError} — tap Retry`, "err");
       }
     } catch (err) {
       setReports((prev) => ({
@@ -1761,6 +1796,23 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
 
   return (
     <div>
+      <ConfirmModal
+        open={!!reportToDelete}
+        title="Delete this report?"
+        message={
+          reportToDelete
+            ? `"${reportToDelete.name}" will be removed. ${(reportToDelete.extractedData?.panels?.reduce((a, p) => a + (p.tests?.length || 0), 0) || 0) > 0 ? "Any lab values auto-filled from this report will also be cleared." : "This can't be undone."}`
+            : ""
+        }
+        confirmLabel="Delete report"
+        onCancel={() => setReportToDelete(null)}
+        onConfirm={() => {
+          const r = reportToDelete;
+          setReportToDelete(null);
+          if (!r) return;
+          removeReport(r.typeId, r.name, r.docId, r.extractedData);
+        }}
+      />
       {/* ── Report uploads ── */}
       <div
         style={{
@@ -1924,332 +1976,352 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                               }
                             })()
                           : r.extractedData;
-                      const needsReview =
-                        edParsed?.extraction_status === "mismatch_review";
+                      const needsReview = edParsed?.extraction_status === "mismatch_review";
                       return (
-                      <div key={r.id || i}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 9,
-                            background: needsReview
-                              ? "#fef2f2"
-                              : r.uploading || r.extracting
-                                ? BG
-                                : WH,
-                            border: `1px solid ${
-                              needsReview
-                                ? "#fecaca"
+                        <div key={r.id || i}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 9,
+                              background: needsReview
+                                ? "#fef2f2"
                                 : r.uploading || r.extracting
-                                  ? BD
-                                  : r.extractedData
-                                    ? SKB
-                                    : GNB
-                            }`,
-                            borderRadius: r.extractedData ? "7px 7px 0 0" : 7,
-                            padding: "8px 11px",
-                          }}
-                        >
-                          <span style={{ fontSize: 14 }}>
-                            {r.uploading
-                              ? "⏳"
-                              : r.extracting
-                                ? "🔬"
-                                : needsReview
-                                  ? "⚠️"
-                                  : r.extractedData
-                                    ? "✅"
-                                    : "📋"}
-                          </span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: needsReview ? "#b91c1c" : INK,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {r.name}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 9,
-                                color: needsReview ? "#b91c1c" : INK3,
-                                fontWeight: needsReview ? 600 : 400,
-                              }}
-                            >
+                                  ? BG
+                                  : WH,
+                              border: `1px solid ${
+                                needsReview
+                                  ? "#fecaca"
+                                  : r.uploading || r.extracting
+                                    ? BD
+                                    : r.extractedData
+                                      ? SKB
+                                      : GNB
+                              }`,
+                              borderRadius: r.extractedData ? "7px 7px 0 0" : 7,
+                              padding: "8px 11px",
+                            }}
+                          >
+                            <span style={{ fontSize: 14 }}>
                               {r.uploading
-                                ? "Uploading…"
+                                ? "⏳"
                                 : r.extracting
-                                  ? "AI extracting data…"
-                                  : r.extractError
-                                    ? `Extraction failed: ${r.extractError}`
-                                    : needsReview
-                                      ? `${r.date} · Needs review in Companion — extraction not applied`
-                                      : r.extractedData
-                                        ? (() => {
-                                            const d = r.extractedData;
-                                            if (d.panels) {
-                                              const tc = d.panels.reduce(
-                                                (a, p) => a + p.tests.length,
-                                                0,
-                                              );
-                                              return `${r.date} · AI extracted ${tc} test${tc !== 1 ? "s" : ""}`;
-                                            }
-                                            if (d.report_type) return `${r.date} · ${d.report_type}`;
-                                            return r.date;
-                                          })()
-                                        : r.date}
+                                  ? "🔬"
+                                  : needsReview
+                                    ? "⚠️"
+                                    : r.extractedData
+                                      ? "✅"
+                                      : "📋"}
+                            </span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: needsReview ? "#b91c1c" : INK,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {r.name}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 9,
+                                  color: needsReview ? "#b91c1c" : INK3,
+                                  fontWeight: needsReview ? 600 : 400,
+                                }}
+                              >
+                                {r.uploading
+                                  ? "Uploading…"
+                                  : r.extracting
+                                    ? "AI extracting data…"
+                                    : r.extractError
+                                      ? `Extraction failed: ${r.extractError}`
+                                      : needsReview
+                                        ? `${r.date} · Needs review in Companion — extraction not applied`
+                                        : r.extractedData
+                                          ? (() => {
+                                              const d = r.extractedData;
+                                              if (d.panels) {
+                                                const tc = d.panels.reduce(
+                                                  (a, p) => a + p.tests.length,
+                                                  0,
+                                                );
+                                                return `${r.date} · AI extracted ${tc} test${tc !== 1 ? "s" : ""}`;
+                                              }
+                                              if (d.report_type)
+                                                return `${r.date} · ${d.report_type}`;
+                                              return r.date;
+                                            })()
+                                          : r.date}
+                              </div>
                             </div>
+                            {needsReview && (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  padding: "3px 7px",
+                                  borderRadius: 10,
+                                  background: "#fee2e2",
+                                  color: "#b91c1c",
+                                  border: "1px solid #fecaca",
+                                  fontWeight: 700,
+                                  whiteSpace: "nowrap",
+                                }}
+                                title="Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
+                              >
+                                Needs Review
+                              </span>
+                            )}
+                            {r.extracting && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  color: SK,
+                                  fontWeight: 600,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Extracting…
+                              </span>
+                            )}
+                            {!r.uploading && !r.extracting && r.docId && r.extractedData && (
+                              <DocStatusPill
+                                doc={{ id: r.docId, extracted_data: r.extractedData }}
+                                patientId={appt.patient_id}
+                                size="sm"
+                              />
+                            )}
+                            {!r.uploading && !r.extracting && r.docId && (
+                              <button
+                                onClick={() =>
+                                  setViewingDoc({
+                                    id: r.docId,
+                                    title: r.name || "Lab Report",
+                                    file_name: r.name,
+                                    doc_type: "lab_report",
+                                    doc_date: r.date,
+                                    source: "opd_upload",
+                                    reviewed: true,
+                                  })
+                                }
+                                style={{
+                                  fontSize: 11,
+                                  color: T,
+                                  background: TL,
+                                  border: `1px solid ${TB}`,
+                                  cursor: "pointer",
+                                  padding: "3px 8px",
+                                  borderRadius: 5,
+                                  fontWeight: 600,
+                                  fontFamily: FB,
+                                }}
+                              >
+                                View
+                              </button>
+                            )}
+                            {!r.uploading && !r.extracting && (
+                              <button
+                                onClick={() =>
+                                  setReportToDelete({
+                                    typeId: activeType,
+                                    name: r.name,
+                                    docId: r.docId,
+                                    extractedData: r.extractedData,
+                                  })
+                                }
+                                style={{
+                                  fontSize: 12,
+                                  color: INK3,
+                                  background: "none",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  padding: "2px 6px",
+                                  borderRadius: 4,
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
                           </div>
-                          {needsReview && (
-                            <span
-                              style={{
-                                fontSize: 9,
-                                padding: "3px 7px",
-                                borderRadius: 10,
-                                background: "#fee2e2",
-                                color: "#b91c1c",
-                                border: "1px solid #fecaca",
-                                fontWeight: 700,
-                                whiteSpace: "nowrap",
-                              }}
-                              title="Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
-                            >
-                              Needs Review
-                            </span>
-                          )}
-                          {r.extracting && (
-                            <span
-                              style={{
-                                fontSize: 10,
-                                color: SK,
-                                fontWeight: 600,
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              Extracting…
-                            </span>
-                          )}
-                          {!r.uploading && !r.extracting && r.docId && (
-                            <button
-                              onClick={() =>
-                                setViewingDoc({
-                                  id: r.docId,
-                                  title: r.name || "Lab Report",
-                                  file_name: r.name,
-                                  doc_type: "lab_report",
-                                  doc_date: r.date,
-                                  source: "opd_upload",
-                                  reviewed: true,
-                                })
-                              }
-                              style={{
-                                fontSize: 11,
-                                color: T,
-                                background: TL,
-                                border: `1px solid ${TB}`,
-                                cursor: "pointer",
-                                padding: "3px 8px",
-                                borderRadius: 5,
-                                fontWeight: 600,
-                                fontFamily: FB,
-                              }}
-                            >
-                              View
-                            </button>
-                          )}
-                          {!r.uploading && !r.extracting && (
-                            <button
-                              onClick={() =>
-                                removeReport(activeType, r.name, r.docId, r.extractedData)
-                              }
-                              style={{
-                                fontSize: 12,
-                                color: INK3,
-                                background: "none",
-                                border: "none",
-                                cursor: "pointer",
-                                padding: "2px 6px",
-                                borderRadius: 4,
-                              }}
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                        {/* Extracted data preview */}
-                        {r.extractedData &&
-                          (() => {
-                            const d = r.extractedData;
-                            // Lab report: show key test results
-                            if (d.panels && d.panels.length > 0) {
-                              const tests = d.panels
-                                .flatMap((p) => p.tests)
-                                .filter((t) => t.result != null);
-                              if (!tests.length) return null;
-                              return (
-                                <div
-                                  style={{
-                                    background: SKL,
-                                    border: `1px solid ${SKB}`,
-                                    borderTop: "none",
-                                    borderRadius: "0 0 7px 7px",
-                                    padding: "8px 11px",
-                                  }}
-                                >
+                          {/* Extracted data preview */}
+                          {r.extractedData &&
+                            (() => {
+                              const d = r.extractedData;
+                              // Lab report: show key test results
+                              if (d.panels && d.panels.length > 0) {
+                                const tests = d.panels
+                                  .flatMap((p) => p.tests)
+                                  .filter((t) => t.result != null);
+                                if (!tests.length) return null;
+                                return (
                                   <div
                                     style={{
-                                      fontSize: 9,
-                                      fontWeight: 700,
-                                      color: SK,
-                                      textTransform: "uppercase",
-                                      letterSpacing: ".08em",
-                                      marginBottom: 5,
+                                      background: SKL,
+                                      border: `1px solid ${SKB}`,
+                                      borderTop: "none",
+                                      borderRadius: "0 0 7px 7px",
+                                      padding: "8px 11px",
                                     }}
                                   >
-                                    AI Extracted Results{d.lab_name ? ` — ${d.lab_name}` : ""}
-                                    {d.report_date ? ` · ${d.report_date}` : ""}
-                                  </div>
-                                  {(() => {
-                                    const rKey = r.id || r.name;
-                                    const isExpanded = expandedReports[rKey];
-                                    const shown = isExpanded ? tests : tests.slice(0, 25);
-                                    return (
-                                      <>
-                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                                          {shown.map((t, ti) => (
-                                            <span
-                                              key={ti}
-                                              style={{
-                                                fontSize: 10,
-                                                padding: "2px 7px",
-                                                borderRadius: 5,
-                                                fontWeight: 600,
-                                                fontFamily: FM,
-                                                background:
-                                                  t.flag === "H" ? REL : t.flag === "L" ? AML : GNL,
-                                                color:
-                                                  t.flag === "H" ? RE : t.flag === "L" ? AM : GN,
-                                                border: `1px solid ${t.flag === "H" ? REB : t.flag === "L" ? AMB : GNB}`,
-                                              }}
-                                            >
-                                              {t.test_name}: {t.result}
-                                              {t.unit ? ` ${t.unit}` : ""}
-                                              {t.flag === "H" ? " ↑" : t.flag === "L" ? " ↓" : ""}
-                                            </span>
-                                          ))}
-                                        </div>
-                                        {tests.length > 25 && (
-                                          <button
-                                            onClick={() =>
-                                              setExpandedReports((p) => ({
-                                                ...p,
-                                                [rKey]: !isExpanded,
-                                              }))
-                                            }
-                                            style={{
-                                              fontSize: 10,
-                                              fontWeight: 600,
-                                              color: SK,
-                                              background: "none",
-                                              border: "none",
-                                              cursor: "pointer",
-                                              padding: "4px 0 0",
-                                              fontFamily: FB,
-                                            }}
-                                          >
-                                            {isExpanded
-                                              ? "Show less ↑"
-                                              : `+${tests.length - 25} more — Show all ↓`}
-                                          </button>
-                                        )}
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-                              );
-                            }
-                            // Imaging report: show findings
-                            if (d.report_type || d.findings) {
-                              return (
-                                <div
-                                  style={{
-                                    background: SKL,
-                                    border: `1px solid ${SKB}`,
-                                    borderTop: "none",
-                                    borderRadius: "0 0 7px 7px",
-                                    padding: "8px 11px",
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      fontSize: 9,
-                                      fontWeight: 700,
-                                      color: SK,
-                                      textTransform: "uppercase",
-                                      letterSpacing: ".08em",
-                                      marginBottom: 5,
-                                    }}
-                                  >
-                                    AI Extracted — {d.report_type || "Imaging"}
-                                    {d.date ? ` · ${d.date}` : ""}
-                                  </div>
-                                  {d.findings && d.findings.length > 0 && (
                                     <div
                                       style={{
-                                        display: "flex",
-                                        flexWrap: "wrap",
-                                        gap: 4,
-                                        marginBottom: d.impression ? 4 : 0,
+                                        fontSize: 9,
+                                        fontWeight: 700,
+                                        color: SK,
+                                        textTransform: "uppercase",
+                                        letterSpacing: ".08em",
+                                        marginBottom: 5,
                                       }}
                                     >
-                                      {d.findings.slice(0, 8).map((f, fi) => (
-                                        <span
-                                          key={fi}
-                                          style={{
-                                            fontSize: 10,
-                                            padding: "2px 7px",
-                                            borderRadius: 5,
-                                            fontWeight: 500,
-                                            background:
-                                              f.interpretation === "Abnormal"
-                                                ? REL
-                                                : f.interpretation === "Borderline"
-                                                  ? AML
-                                                  : GNL,
-                                            color:
-                                              f.interpretation === "Abnormal"
-                                                ? RE
-                                                : f.interpretation === "Borderline"
-                                                  ? AM
-                                                  : GN,
-                                            border: `1px solid ${f.interpretation === "Abnormal" ? REB : f.interpretation === "Borderline" ? AMB : GNB}`,
-                                          }}
-                                        >
-                                          {f.parameter}: {f.value}
-                                          {f.unit ? ` ${f.unit}` : ""}
-                                        </span>
-                                      ))}
+                                      AI Extracted Results{d.lab_name ? ` — ${d.lab_name}` : ""}
+                                      {d.report_date ? ` · ${d.report_date}` : ""}
                                     </div>
-                                  )}
-                                  {d.impression && (
-                                    <div style={{ fontSize: 10, color: INK2, fontStyle: "italic" }}>
-                                      {d.impression.length > 120
-                                        ? d.impression.slice(0, 120) + "…"
-                                        : d.impression}
+                                    {(() => {
+                                      const rKey = r.id || r.name;
+                                      const isExpanded = expandedReports[rKey];
+                                      const shown = isExpanded ? tests : tests.slice(0, 25);
+                                      return (
+                                        <>
+                                          <div
+                                            style={{ display: "flex", flexWrap: "wrap", gap: 4 }}
+                                          >
+                                            {shown.map((t, ti) => (
+                                              <span
+                                                key={ti}
+                                                style={{
+                                                  fontSize: 10,
+                                                  padding: "2px 7px",
+                                                  borderRadius: 5,
+                                                  fontWeight: 600,
+                                                  fontFamily: FM,
+                                                  background:
+                                                    t.flag === "H"
+                                                      ? REL
+                                                      : t.flag === "L"
+                                                        ? AML
+                                                        : GNL,
+                                                  color:
+                                                    t.flag === "H" ? RE : t.flag === "L" ? AM : GN,
+                                                  border: `1px solid ${t.flag === "H" ? REB : t.flag === "L" ? AMB : GNB}`,
+                                                }}
+                                              >
+                                                {t.test_name}: {t.result}
+                                                {t.unit ? ` ${t.unit}` : ""}
+                                                {t.flag === "H" ? " ↑" : t.flag === "L" ? " ↓" : ""}
+                                              </span>
+                                            ))}
+                                          </div>
+                                          {tests.length > 25 && (
+                                            <button
+                                              onClick={() =>
+                                                setExpandedReports((p) => ({
+                                                  ...p,
+                                                  [rKey]: !isExpanded,
+                                                }))
+                                              }
+                                              style={{
+                                                fontSize: 10,
+                                                fontWeight: 600,
+                                                color: SK,
+                                                background: "none",
+                                                border: "none",
+                                                cursor: "pointer",
+                                                padding: "4px 0 0",
+                                                fontFamily: FB,
+                                              }}
+                                            >
+                                              {isExpanded
+                                                ? "Show less ↑"
+                                                : `+${tests.length - 25} more — Show all ↓`}
+                                            </button>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                );
+                              }
+                              // Imaging report: show findings
+                              if (d.report_type || d.findings) {
+                                return (
+                                  <div
+                                    style={{
+                                      background: SKL,
+                                      border: `1px solid ${SKB}`,
+                                      borderTop: "none",
+                                      borderRadius: "0 0 7px 7px",
+                                      padding: "8px 11px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontSize: 9,
+                                        fontWeight: 700,
+                                        color: SK,
+                                        textTransform: "uppercase",
+                                        letterSpacing: ".08em",
+                                        marginBottom: 5,
+                                      }}
+                                    >
+                                      AI Extracted — {d.report_type || "Imaging"}
+                                      {d.date ? ` · ${d.date}` : ""}
                                     </div>
-                                  )}
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                      </div>
+                                    {d.findings && d.findings.length > 0 && (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexWrap: "wrap",
+                                          gap: 4,
+                                          marginBottom: d.impression ? 4 : 0,
+                                        }}
+                                      >
+                                        {d.findings.slice(0, 8).map((f, fi) => (
+                                          <span
+                                            key={fi}
+                                            style={{
+                                              fontSize: 10,
+                                              padding: "2px 7px",
+                                              borderRadius: 5,
+                                              fontWeight: 500,
+                                              background:
+                                                f.interpretation === "Abnormal"
+                                                  ? REL
+                                                  : f.interpretation === "Borderline"
+                                                    ? AML
+                                                    : GNL,
+                                              color:
+                                                f.interpretation === "Abnormal"
+                                                  ? RE
+                                                  : f.interpretation === "Borderline"
+                                                    ? AM
+                                                    : GN,
+                                              border: `1px solid ${f.interpretation === "Abnormal" ? REB : f.interpretation === "Borderline" ? AMB : GNB}`,
+                                            }}
+                                          >
+                                            {f.parameter}: {f.value}
+                                            {f.unit ? ` ${f.unit}` : ""}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {d.impression && (
+                                      <div
+                                        style={{ fontSize: 10, color: INK2, fontStyle: "italic" }}
+                                      >
+                                        {d.impression.length > 120
+                                          ? d.impression.slice(0, 120) + "…"
+                                          : d.impression}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                        </div>
                       );
                     })}
                   </div>
@@ -2328,7 +2400,10 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
             </button>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+        <div
+          className="opd-biomarker-grid"
+          style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}
+        >
           {fields.map((f) => {
             const v = vals[f.k];
             return (
@@ -2655,6 +2730,9 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
   const [loadingRx, setLoadingRx] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const [addingRx, setAddingRx] = useState(false);
+  // null | { id, docId, fileName, doctorName, extractedData } — drives the
+  // delete confirmation modal so the × button never silently wipes a Rx.
+  const [rxToDelete, setRxToDelete] = useState(null);
   const [rxForm, setRxForm] = useState({
     doctorName: "",
     date: new Date().toISOString().split("T")[0],
@@ -2738,6 +2816,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
             doc_date: rxForm.date,
             source: "opd_upload",
             notes: rxForm.doctorName ? `Dr. ${rxForm.doctorName}` : null,
+            extracted_data: { extraction_status: "pending" },
           }),
         });
         const doc = await docResp.json();
@@ -2782,7 +2861,23 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
             `✓ Extracted ${medCount} medicine${medCount !== 1 ? "s" : ""} from prescription`,
           );
       } else if (extractError) {
-        if (showToast) showToast(`Extraction failed: ${extractError}`, "err");
+        // Persist failed state so the Retry pill survives page reload.
+        if (uploadedDocId) {
+          const failedPayload = {
+            extraction_status: "failed",
+            error_message: extractError,
+            retry_count: 3,
+            failed_at: new Date().toISOString(),
+          };
+          apiFetch(`/api/documents/${uploadedDocId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ extracted_data: failedPayload }),
+          }).catch(() => {});
+          setPrescriptions((prev) =>
+            prev.map((p) => (p.id === entryId ? { ...p, extractedData: failedPayload } : p)),
+          );
+        }
+        if (showToast) showToast(`Extraction failed: ${extractError} — tap Retry`, "err");
       }
     } catch (err) {
       setPrescriptions((prev) => prev.filter((p) => p.id !== entryId));
@@ -2809,6 +2904,23 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
 
   return (
     <div>
+      <ConfirmModal
+        open={!!rxToDelete}
+        title="Delete this prescription?"
+        message={
+          rxToDelete
+            ? `"${rxToDelete.fileName || "Prescription"}"${rxToDelete.doctorName ? ` from Dr. ${rxToDelete.doctorName}` : ""} will be removed. ${(rxToDelete.extractedData?.medications?.length || 0) > 0 ? `${rxToDelete.extractedData.medications.length} extracted medicine${rxToDelete.extractedData.medications.length !== 1 ? "s" : ""} will be excluded on next save.` : "This can't be undone."}`
+            : ""
+        }
+        confirmLabel="Delete prescription"
+        onCancel={() => setRxToDelete(null)}
+        onConfirm={() => {
+          const r = rxToDelete;
+          setRxToDelete(null);
+          if (!r) return;
+          removeRx(r.id, r.docId, r.extractedData);
+        }}
+      />
       <div
         style={{
           display: "flex",
@@ -3057,301 +3169,321 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                   : p.extractedData;
               const needsReview = edParsed?.extraction_status === "mismatch_review";
               return (
-              <div key={p.id}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    background: needsReview
-                      ? "#fef2f2"
-                      : p.uploading || p.extracting
-                        ? BG
-                        : WH,
-                    border: `1px solid ${
-                      needsReview
-                        ? "#fecaca"
-                        : p.uploading || p.extracting
-                          ? BD
-                          : p.extractedData
-                            ? SKB
-                            : GNB
-                    }`,
-                    borderRadius: p.extractedData ? "8px 8px 0 0" : 8,
-                    padding: "10px 12px",
-                  }}
-                >
-                  <span style={{ fontSize: 22, flexShrink: 0 }}>
-                    {p.uploading
-                      ? "⏳"
-                      : p.extracting
-                        ? "🔬"
-                        : needsReview
-                          ? "⚠️"
-                          : p.extractedData
-                            ? "✅"
-                            : "💊"}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: needsReview ? "#b91c1c" : INK,
-                        marginBottom: 2,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {p.fileName}
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 10,
-                        fontSize: 10,
-                        color: needsReview ? "#b91c1c" : INK3,
-                        fontWeight: needsReview ? 600 : 400,
-                      }}
-                    >
-                      {p.doctorName && <span>By {p.doctorName}</span>}
-                      <span>
-                        {p.uploading
-                          ? "Uploading…"
-                          : p.extracting
-                            ? "AI extracting medicines…"
-                            : p.extractError
-                              ? `Extraction failed`
-                              : needsReview
-                                ? `${fmtDate(p.date)} · Needs review in Companion — extraction not applied`
-                                : p.extractedData
-                                  ? `${fmtDate(p.date)} · ${(p.extractedData.medications || []).length} medicine${(p.extractedData.medications || []).length !== 1 ? "s" : ""} found`
-                                  : fmtDate(p.date)}
-                      </span>
-                    </div>
-                  </div>
-                  {needsReview && (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        padding: "3px 7px",
-                        borderRadius: 10,
-                        background: "#fee2e2",
-                        color: "#b91c1c",
-                        border: "1px solid #fecaca",
-                        fontWeight: 700,
-                        whiteSpace: "nowrap",
-                      }}
-                      title="Extraction not applied — review in the Companion app"
-                    >
-                      Needs Review
+                <div key={p.id}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      background: needsReview ? "#fef2f2" : p.uploading || p.extracting ? BG : WH,
+                      border: `1px solid ${
+                        needsReview
+                          ? "#fecaca"
+                          : p.uploading || p.extracting
+                            ? BD
+                            : p.extractedData
+                              ? SKB
+                              : GNB
+                      }`,
+                      borderRadius: p.extractedData ? "8px 8px 0 0" : 8,
+                      padding: "10px 12px",
+                    }}
+                  >
+                    <span style={{ fontSize: 22, flexShrink: 0 }}>
+                      {p.uploading
+                        ? "⏳"
+                        : p.extracting
+                          ? "🔬"
+                          : needsReview
+                            ? "⚠️"
+                            : p.extractedData
+                              ? "✅"
+                              : "💊"}
                     </span>
-                  )}
-                  {p.extracting && (
-                    <span
-                      style={{ fontSize: 10, color: SK, fontWeight: 600, whiteSpace: "nowrap" }}
-                    >
-                      Extracting…
-                    </span>
-                  )}
-                  {!p.uploading && !p.extracting && p.docId && (
-                    <button
-                      onClick={() =>
-                        setViewingDoc({
-                          id: p.docId,
-                          title: `Prescription — ${p.doctorName || "Unknown"}`,
-                          file_name: p.fileName,
-                          doc_type: "prescription",
-                          doc_date: p.date,
-                          source: "opd_upload",
-                          reviewed: true,
-                        })
-                      }
-                      style={{
-                        fontSize: 11,
-                        color: T,
-                        background: TL,
-                        border: `1px solid ${TB}`,
-                        cursor: "pointer",
-                        padding: "3px 8px",
-                        borderRadius: 5,
-                        fontWeight: 600,
-                        fontFamily: FB,
-                      }}
-                    >
-                      View
-                    </button>
-                  )}
-                  {!p.uploading && !p.extracting && (
-                    <button
-                      onClick={() => removeRx(p.id, p.docId, p.extractedData)}
-                      style={{
-                        fontSize: 12,
-                        color: INK3,
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-                {/* Extracted prescription data */}
-                {p.extractedData &&
-                  (() => {
-                    const rx = p.extractedData;
-                    const meds = rx.medications || [];
-                    const diags = rx.diagnoses || [];
-                    if (!meds.length && !diags.length) return null;
-                    return (
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
-                          background: SKL,
-                          border: `1px solid ${SKB}`,
-                          borderTop: "none",
-                          borderRadius: "0 0 8px 8px",
-                          padding: "10px 12px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: needsReview ? "#b91c1c" : INK,
+                          marginBottom: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                       >
+                        {p.fileName}
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          fontSize: 10,
+                          color: needsReview ? "#b91c1c" : INK3,
+                          fontWeight: needsReview ? 600 : 400,
+                        }}
+                      >
+                        {p.doctorName && <span>By {p.doctorName}</span>}
+                        <span>
+                          {p.uploading
+                            ? "Uploading…"
+                            : p.extracting
+                              ? "AI extracting medicines…"
+                              : p.extractError
+                                ? `Extraction failed`
+                                : needsReview
+                                  ? `${fmtDate(p.date)} · Needs review in Companion — extraction not applied`
+                                  : p.extractedData
+                                    ? `${fmtDate(p.date)} · ${(p.extractedData.medications || []).length} medicine${(p.extractedData.medications || []).length !== 1 ? "s" : ""} found`
+                                    : fmtDate(p.date)}
+                        </span>
+                      </div>
+                    </div>
+                    {needsReview && (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          padding: "3px 7px",
+                          borderRadius: 10,
+                          background: "#fee2e2",
+                          color: "#b91c1c",
+                          border: "1px solid #fecaca",
+                          fontWeight: 700,
+                          whiteSpace: "nowrap",
+                        }}
+                        title="Extraction not applied — review in the Companion app"
+                      >
+                        Needs Review
+                      </span>
+                    )}
+                    {p.extracting && (
+                      <span
+                        style={{ fontSize: 10, color: SK, fontWeight: 600, whiteSpace: "nowrap" }}
+                      >
+                        Extracting…
+                      </span>
+                    )}
+                    {!p.uploading && !p.extracting && p.docId && p.extractedData && (
+                      <DocStatusPill
+                        doc={{ id: p.docId, extracted_data: p.extractedData }}
+                        patientId={appt.patient_id}
+                        size="sm"
+                      />
+                    )}
+                    {!p.uploading && !p.extracting && p.docId && (
+                      <button
+                        onClick={() =>
+                          setViewingDoc({
+                            id: p.docId,
+                            title: `Prescription — ${p.doctorName || "Unknown"}`,
+                            file_name: p.fileName,
+                            doc_type: "prescription",
+                            doc_date: p.date,
+                            source: "opd_upload",
+                            reviewed: true,
+                          })
+                        }
+                        style={{
+                          fontSize: 11,
+                          color: T,
+                          background: TL,
+                          border: `1px solid ${TB}`,
+                          cursor: "pointer",
+                          padding: "3px 8px",
+                          borderRadius: 5,
+                          fontWeight: 600,
+                          fontFamily: FB,
+                        }}
+                      >
+                        View
+                      </button>
+                    )}
+                    {!p.uploading && !p.extracting && (
+                      <button
+                        onClick={() =>
+                          setRxToDelete({
+                            id: p.id,
+                            docId: p.docId,
+                            fileName: p.fileName,
+                            doctorName: p.doctorName,
+                            extractedData: p.extractedData,
+                          })
+                        }
+                        style={{
+                          fontSize: 12,
+                          color: INK3,
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  {/* Extracted prescription data */}
+                  {p.extractedData &&
+                    (() => {
+                      const rx = p.extractedData;
+                      const meds = rx.medications || [];
+                      const diags = rx.diagnoses || [];
+                      if (!meds.length && !diags.length) return null;
+                      return (
                         <div
                           style={{
-                            fontSize: 9,
-                            fontWeight: 700,
-                            color: SK,
-                            textTransform: "uppercase",
-                            letterSpacing: ".08em",
-                            marginBottom: 6,
+                            background: SKL,
+                            border: `1px solid ${SKB}`,
+                            borderTop: "none",
+                            borderRadius: "0 0 8px 8px",
+                            padding: "10px 12px",
                           }}
                         >
-                          AI Extracted{rx.doctor_name ? ` — ${rx.doctor_name}` : ""}
-                          {rx.visit_date ? ` · ${rx.visit_date}` : ""}
-                        </div>
-                        {diags.length > 0 && (
-                          <div
-                            style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}
-                          >
-                            {diags.map((d, di) => (
-                              <span
-                                key={di}
-                                style={{
-                                  fontSize: 10,
-                                  padding: "2px 7px",
-                                  borderRadius: 5,
-                                  fontWeight: 600,
-                                  background:
-                                    d.status === "Uncontrolled"
-                                      ? REL
-                                      : d.status === "New"
-                                        ? AML
-                                        : GNL,
-                                  color:
-                                    d.status === "Uncontrolled" ? RE : d.status === "New" ? AM : GN,
-                                  border: `1px solid ${d.status === "Uncontrolled" ? REB : d.status === "New" ? AMB : GNB}`,
-                                }}
-                              >
-                                {d.label || d.id}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {meds.length > 0 && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                            {meds.map((m, mi) => (
-                              <div
-                                key={mi}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  background: WH,
-                                  border: `1px solid ${BD}`,
-                                  borderRadius: 5,
-                                  padding: "5px 9px",
-                                }}
-                              >
-                                <span style={{ fontSize: 12 }}>💊</span>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <span style={{ fontSize: 11, fontWeight: 600, color: INK }}>
-                                    {m.name}
-                                  </span>
-                                  <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
-                                    {[m.dose, m.frequency, m.timing].filter(Boolean).join(" · ")}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {(rx.stopped_medications || []).length > 0 && (
                           <div
                             style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 3,
-                              marginTop: 4,
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: SK,
+                              textTransform: "uppercase",
+                              letterSpacing: ".08em",
+                              marginBottom: 6,
                             }}
                           >
+                            AI Extracted{rx.doctor_name ? ` — ${rx.doctor_name}` : ""}
+                            {rx.visit_date ? ` · ${rx.visit_date}` : ""}
+                          </div>
+                          {diags.length > 0 && (
+                            <div
+                              style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}
+                            >
+                              {diags.map((d, di) => (
+                                <span
+                                  key={di}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: "2px 7px",
+                                    borderRadius: 5,
+                                    fontWeight: 600,
+                                    background:
+                                      d.status === "Uncontrolled"
+                                        ? REL
+                                        : d.status === "New"
+                                          ? AML
+                                          : GNL,
+                                    color:
+                                      d.status === "Uncontrolled"
+                                        ? RE
+                                        : d.status === "New"
+                                          ? AM
+                                          : GN,
+                                    border: `1px solid ${d.status === "Uncontrolled" ? REB : d.status === "New" ? AMB : GNB}`,
+                                  }}
+                                >
+                                  {d.label || d.id}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {meds.length > 0 && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {meds.map((m, mi) => (
+                                <div
+                                  key={mi}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    background: WH,
+                                    border: `1px solid ${BD}`,
+                                    borderRadius: 5,
+                                    padding: "5px 9px",
+                                  }}
+                                >
+                                  <span style={{ fontSize: 12 }}>💊</span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: INK }}>
+                                      {m.name}
+                                    </span>
+                                    <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
+                                      {[m.dose, m.frequency, m.timing].filter(Boolean).join(" · ")}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {(rx.stopped_medications || []).length > 0 && (
                             <div
                               style={{
-                                fontSize: 9,
-                                fontWeight: 700,
-                                color: RE,
-                                textTransform: "uppercase",
-                                letterSpacing: ".06em",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 3,
+                                marginTop: 4,
                               }}
                             >
-                              Stopped / Omitted
-                            </div>
-                            {rx.stopped_medications.map((m, mi) => (
                               <div
-                                key={mi}
                                 style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  background: REL,
-                                  border: `1px solid ${REB}`,
-                                  borderRadius: 5,
-                                  padding: "5px 9px",
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  color: RE,
+                                  textTransform: "uppercase",
+                                  letterSpacing: ".06em",
                                 }}
                               >
-                                <span style={{ fontSize: 12 }}>🚫</span>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <span
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: 600,
-                                      color: RE,
-                                      textDecoration: "line-through",
-                                    }}
-                                  >
-                                    {m.name}
-                                  </span>
-                                  {m.reason && (
-                                    <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
-                                      — {m.reason}
-                                    </span>
-                                  )}
-                                </div>
+                                Stopped / Omitted
                               </div>
-                            ))}
-                          </div>
-                        )}
-                        {rx.advice && rx.advice.length > 0 && (
-                          <div
-                            style={{ fontSize: 10, color: INK2, marginTop: 5, fontStyle: "italic" }}
-                          >
-                            {rx.advice.join("; ")}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-              </div>
+                              {rx.stopped_medications.map((m, mi) => (
+                                <div
+                                  key={mi}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    background: REL,
+                                    border: `1px solid ${REB}`,
+                                    borderRadius: 5,
+                                    padding: "5px 9px",
+                                  }}
+                                >
+                                  <span style={{ fontSize: 12 }}>🚫</span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <span
+                                      style={{
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        color: RE,
+                                        textDecoration: "line-through",
+                                      }}
+                                    >
+                                      {m.name}
+                                    </span>
+                                    {m.reason && (
+                                      <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
+                                        — {m.reason}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {rx.advice && rx.advice.length > 0 && (
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: INK2,
+                                marginTop: 5,
+                                fontStyle: "italic",
+                              }}
+                            >
+                              {rx.advice.join("; ")}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                </div>
               );
             })}
           </div>
@@ -4151,6 +4283,7 @@ function PatientDetail({
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Header */}
       <div
+        className="opd-detail-header"
         style={{
           background: WH,
           borderBottom: `1px solid ${BD}`,
@@ -4165,10 +4298,12 @@ function PatientDetail({
             justifyContent: "space-between",
             gap: 12,
             marginBottom: 12,
+            flexWrap: "wrap",
           }}
         >
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div
+              className="opd-detail-name"
               style={{
                 fontFamily: FD,
                 fontSize: 23,
@@ -4246,7 +4381,10 @@ function PatientDetail({
                 );
               })()}
           </div>
-          <div style={{ display: "flex", gap: 7, flexShrink: 0, flexWrap: "wrap" }}>
+          <div
+            className="opd-detail-actions"
+            style={{ display: "flex", gap: 7, flexShrink: 0, flexWrap: "wrap" }}
+          >
             {appt.phone && (
               <a
                 href={`https://wa.me/91${appt.phone}`}
@@ -4355,10 +4493,13 @@ function PatientDetail({
           </div>
         </div>
         {/* Step bar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <div className="opd-step-bar" style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {STEPS.map((s, i) => (
             <React.Fragment key={s.k}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <div
+                className="opd-step"
+                style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
+              >
                 <div
                   style={{
                     width: 24,
@@ -6119,6 +6260,9 @@ export default function OPD() {
   const [searchQ, setSearchQ] = useState("");
   const [selAppt, setSelAppt] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const isMobile = useIsMobile();
+  const [mobileView, setMobileView] = useState("list"); // "list" | "detail"
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // URL-driven tab: ?tab=schedule|dashboard|new-appt|excel. "schedule" maps to
   // the internal "list" view so shareable links read naturally.
@@ -6355,6 +6499,7 @@ export default function OPD() {
   const selectAppt = (a) => {
     setSelAppt(a);
     setActiveTab("overview");
+    setMobileView("detail");
   };
 
   const filterBtn = (label, val, active, onClick, color) => (
@@ -6391,6 +6536,7 @@ export default function OPD() {
     >
       {/* Topbar */}
       <div
+        className="opd-topbar"
         style={{
           background: NV,
           height: 52,
@@ -6402,14 +6548,17 @@ export default function OPD() {
           zIndex: 60,
         }}
       >
-        <div style={{ fontFamily: FD, fontSize: 20, color: "#fff" }}>
+        <div className="opd-topbar-title" style={{ fontFamily: FD, fontSize: 20, color: "#fff" }}>
           Gini <em style={{ fontStyle: "italic", color: "#5dd6ca" }}>Scribe</em>
         </div>
         <div
+          className="opd-topbar-sub"
           style={{ width: 1, height: 18, background: "rgba(255,255,255,.15)", margin: "0 2px" }}
         />
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>OPD Manager</div>
-        <div style={{ display: "flex", gap: 2, marginLeft: 6 }}>
+        <div className="opd-topbar-sub" style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+          OPD Manager
+        </div>
+        <div className="opd-topbar-nav" style={{ display: "flex", gap: 2, marginLeft: 6 }}>
           {[
             ["list", "📋 Schedule"],
             ["dashboard", "📊 Live Dashboard"],
@@ -6436,8 +6585,12 @@ export default function OPD() {
             </button>
           ))}
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          className="opd-topbar-right"
+          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}
+        >
           <div
+            className="opd-clock"
             style={{
               background: "rgba(255,255,255,.1)",
               border: "1px solid rgba(255,255,255,.14)",
@@ -6452,6 +6605,7 @@ export default function OPD() {
           </div>
           {doctor && (
             <div
+              className="opd-doctor-pill"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -6473,11 +6627,12 @@ export default function OPD() {
                   fontSize: 10,
                   fontWeight: 700,
                   color: NV,
+                  flexShrink: 0,
                 }}
               >
                 {(doctor.short_name || doctor.name || "?").substring(0, 2).toUpperCase()}
               </div>
-              <div>
+              <div className="opd-doctor-meta">
                 <div style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,.85)" }}>
                   {doctor.short_name || doctor.name}
                 </div>
@@ -6491,8 +6646,9 @@ export default function OPD() {
       </div>
 
       {/* Sub-nav — only visible on Schedule tab */}
-      {view === "list" && (
+      {view === "list" && (!isMobile || mobileView === "list") && (
         <div
+          className="opd-subnav"
           style={{
             background: WH,
             borderBottom: `1px solid ${BD}`,
@@ -6500,128 +6656,211 @@ export default function OPD() {
             flexShrink: 0,
           }}
         >
-          {/* Status filters */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-              height: 38,
-              borderBottom: `1px solid ${BD}`,
-            }}
-          >
-            {[
-              ["all", "All"],
-              ["pending", "Pending"],
-              ["ready", "Ready"],
-              ["checkedin", "Checked In"],
-              ["in_visit", "In Visit"],
-              ["seen", "Seen"],
-            ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
-            <div style={{ width: 1, height: 18, background: BD, margin: "0 8px" }} />
-            <span style={{ fontFamily: FM, fontSize: 11, color: AM, fontWeight: 500 }}>
-              {stats.pending} pending
-            </span>
-            <span
-              style={{ fontFamily: FM, fontSize: 11, color: SK, fontWeight: 500, marginLeft: 8 }}
+          {/* Mobile filter toggle bar */}
+          <div className="opd-filter-toggle">
+            <button
+              type="button"
+              className={`opd-filter-toggle-btn${mobileFiltersOpen ? " active" : ""}`}
+              onClick={() => setMobileFiltersOpen((o) => !o)}
+              aria-expanded={mobileFiltersOpen}
             >
-              {stats.checkedin} waiting
-            </span>
-            <span
+              <span>🔍 Filters</span>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>{mobileFiltersOpen ? "▲" : "▼"}</span>
+            </button>
+            <div className="opd-filter-summary">
+              {[
+                filterStatus !== "all" ? filterStatus : null,
+                filterDoc !== "all" && filterDoc !== "__noshow__"
+                  ? filterDoc.replace(/^Dr\.\s*/i, "").split(" ")[0]
+                  : null,
+                filterDoc === "__noshow__" ? "No-Show" : null,
+                filterCat !== "all" ? filterCat : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "All patients"}
+            </div>
+            <button
+              type="button"
+              onClick={fetchAppts}
               style={{
-                fontFamily: FM,
+                padding: "5px 10px",
+                borderRadius: 6,
+                border: `1px solid ${BD}`,
+                background: "transparent",
+                cursor: "pointer",
                 fontSize: 11,
-                color: "#7c3aed",
-                fontWeight: 500,
-                marginLeft: 8,
+                color: INK3,
+                fontFamily: FB,
               }}
             >
-              {stats.in_visit} in visit
-            </span>
-            <span
-              style={{ fontFamily: FM, fontSize: 11, color: GN, fontWeight: 500, marginLeft: 8 }}
+              ↺
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("new-appt")}
+              style={{
+                padding: "5px 11px",
+                borderRadius: 6,
+                border: "none",
+                background: T,
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: FB,
+              }}
             >
-              {stats.seen} seen
-            </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
-              <button
-                onClick={fetchAppts}
-                style={{
-                  padding: "3px 10px",
-                  borderRadius: 5,
-                  fontSize: 10,
-                  fontWeight: 500,
-                  background: "transparent",
-                  border: `1px solid ${BD}`,
-                  cursor: "pointer",
-                  color: INK3,
-                  fontFamily: FB,
-                }}
-              >
-                ↺ Refresh
-              </button>
-              <button
-                onClick={() => setView("new-appt")}
-                style={{
-                  padding: "3px 10px",
-                  borderRadius: 5,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  background: T,
-                  color: "#fff",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: FB,
-                }}
-              >
-                + New
-              </button>
-            </div>
+              + New
+            </button>
           </div>
-          {/* Doctor + category filters */}
-          <div style={{ display: "flex", alignItems: "center", gap: 3, height: 34 }}>
-            <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>
-              Doctor:
-            </span>
-            {filterBtn("All", null, filterDoc === "all", () => setFilterDoc("all"))}
-            {apptDoctors.map((d) =>
-              filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
-                setFilterDoc(d === filterDoc ? "all" : d),
-              ),
-            )}
-            {filterBtn(
-              `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
-              "__noshow__",
-              filterDoc === "__noshow__",
-              () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
-              "#6b7280",
-            )}
-            <div style={{ width: 1, height: 18, background: BD, margin: "0 10px" }} />
-            <span style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}>
-              Category:
-            </span>
-            {filterBtn("All", null, filterCat === "all", () => setFilterCat("all"))}
-            {filterBtn(
-              "⚠ Uncontrolled",
-              "complex",
-              filterCat === "complex",
-              () => setFilterCat(filterCat === "complex" ? "all" : "complex"),
-              RE,
-            )}
-            {filterBtn(
-              "↑ Maintenance",
-              "maint",
-              filterCat === "maint",
-              () => setFilterCat(filterCat === "maint" ? "all" : "maint"),
-              AM,
-            )}
-            {filterBtn(
-              "✓ Continuous Care",
-              "ctrl",
-              filterCat === "ctrl",
-              () => setFilterCat(filterCat === "ctrl" ? "all" : "ctrl"),
-              GN,
-            )}
+          <div className={`opd-filter-body${isMobile && !mobileFiltersOpen ? " collapsed" : ""}`}>
+            {/* Status filters */}
+            <div
+              className="opd-filter-row"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                height: 38,
+                borderBottom: `1px solid ${BD}`,
+              }}
+            >
+              {[
+                ["all", "All"],
+                ["pending", "Pending"],
+                ["ready", "Ready"],
+                ["checkedin", "Checked In"],
+                ["in_visit", "In Visit"],
+                ["seen", "Seen"],
+              ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
+              <div
+                className="opd-filter-stats"
+                style={{ width: 1, height: 18, background: BD, margin: "0 8px" }}
+              />
+              <span
+                className="opd-filter-stats"
+                style={{ fontFamily: FM, fontSize: 11, color: AM, fontWeight: 500 }}
+              >
+                {stats.pending} pending
+              </span>
+              <span
+                className="opd-filter-stats"
+                style={{ fontFamily: FM, fontSize: 11, color: SK, fontWeight: 500, marginLeft: 8 }}
+              >
+                {stats.checkedin} waiting
+              </span>
+              <span
+                className="opd-filter-stats"
+                style={{
+                  fontFamily: FM,
+                  fontSize: 11,
+                  color: "#7c3aed",
+                  fontWeight: 500,
+                  marginLeft: 8,
+                }}
+              >
+                {stats.in_visit} in visit
+              </span>
+              <span
+                className="opd-filter-stats"
+                style={{ fontFamily: FM, fontSize: 11, color: GN, fontWeight: 500, marginLeft: 8 }}
+              >
+                {stats.seen} seen
+              </span>
+              <div
+                className="opd-filter-actions"
+                style={{ marginLeft: "auto", display: "flex", gap: 7 }}
+              >
+                <button
+                  onClick={fetchAppts}
+                  style={{
+                    padding: "3px 10px",
+                    borderRadius: 5,
+                    fontSize: 10,
+                    fontWeight: 500,
+                    background: "transparent",
+                    border: `1px solid ${BD}`,
+                    cursor: "pointer",
+                    color: INK3,
+                    fontFamily: FB,
+                  }}
+                >
+                  ↺ Refresh
+                </button>
+                <button
+                  onClick={() => setView("new-appt")}
+                  style={{
+                    padding: "3px 10px",
+                    borderRadius: 5,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    background: T,
+                    color: "#fff",
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: FB,
+                  }}
+                >
+                  + New
+                </button>
+              </div>
+            </div>
+            {/* Doctor + category filters */}
+            <div
+              className="opd-filter-row"
+              style={{ display: "flex", alignItems: "center", gap: 3, height: 34 }}
+            >
+              <span
+                className="opd-filter-label"
+                style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}
+              >
+                Doctor:
+              </span>
+              {filterBtn("All", null, filterDoc === "all", () => setFilterDoc("all"))}
+              {apptDoctors.map((d) =>
+                filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
+                  setFilterDoc(d === filterDoc ? "all" : d),
+                ),
+              )}
+              {filterBtn(
+                `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
+                "__noshow__",
+                filterDoc === "__noshow__",
+                () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
+                "#6b7280",
+              )}
+              <div
+                style={{ width: 1, height: 18, background: BD, margin: "0 10px", flexShrink: 0 }}
+              />
+              <span
+                className="opd-filter-label"
+                style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}
+              >
+                Category:
+              </span>
+              {filterBtn("All", null, filterCat === "all", () => setFilterCat("all"))}
+              {filterBtn(
+                "⚠ Uncontrolled",
+                "complex",
+                filterCat === "complex",
+                () => setFilterCat(filterCat === "complex" ? "all" : "complex"),
+                RE,
+              )}
+              {filterBtn(
+                "↑ Maintenance",
+                "maint",
+                filterCat === "maint",
+                () => setFilterCat(filterCat === "maint" ? "all" : "maint"),
+                AM,
+              )}
+              {filterBtn(
+                "✓ Continuous Care",
+                "ctrl",
+                filterCat === "ctrl",
+                () => setFilterCat(filterCat === "ctrl" ? "all" : "ctrl"),
+                GN,
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -6670,254 +6909,290 @@ export default function OPD() {
         ) : (
           <>
             {/* Left schedule */}
-            <div
-              style={{
-                width: 420,
-                flexShrink: 0,
-                borderRight: `1px solid ${BD}`,
-                display: "flex",
-                flexDirection: "column",
-                background: WH,
-                overflow: "hidden",
-              }}
-            >
+            {(!isMobile || mobileView === "list") && (
               <div
+                className="opd-schedule"
                 style={{
-                  padding: "13px 15px 11px",
-                  borderBottom: `1px solid ${BD}`,
+                  width: 420,
                   flexShrink: 0,
+                  borderRight: `1px solid ${BD}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  background: WH,
+                  overflow: "hidden",
                 }}
               >
-                <div style={{ fontFamily: FD, fontSize: 17, color: INK, marginBottom: 9 }}>
-                  {new Date(date + "T00:00").toLocaleDateString("en-IN", {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "long",
-                  })}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <button
-                    onClick={() => changeDate(-1)}
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 6,
-                      border: `1px solid ${BD}`,
-                      background: "transparent",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      color: INK3,
-                    }}
+                <div
+                  className="opd-schedule-head"
+                  style={{
+                    padding: "13px 15px 11px",
+                    borderBottom: `1px solid ${BD}`,
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    className="opd-schedule-title"
+                    style={{ fontFamily: FD, fontSize: 17, color: INK, marginBottom: 9 }}
                   >
-                    ‹
-                  </button>
-                  <input
-                    type="date"
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    style={{
-                      border: `1px solid ${BD}`,
-                      borderRadius: 7,
-                      padding: "4px 10px",
-                      fontFamily: FM,
-                      fontSize: 11,
-                      color: INK,
-                      background: BG,
-                      outline: "none",
-                      flex: 1,
-                    }}
-                  />
-                  <button
-                    onClick={() => changeDate(1)}
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 6,
-                      border: `1px solid ${BD}`,
-                      background: "transparent",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      color: INK3,
-                    }}
-                  >
-                    ›
-                  </button>
-                  <button
-                    onClick={() => setDate(new Date().toISOString().split("T")[0])}
-                    style={{
-                      padding: "4px 9px",
-                      fontSize: 10,
-                      fontWeight: 500,
-                      border: `1px solid ${BD}`,
-                      borderRadius: 6,
-                      background: "transparent",
-                      cursor: "pointer",
-                      color: INK3,
-                      fontFamily: FB,
-                    }}
-                  >
-                    Today
-                  </button>
-                </div>
-                <div style={{ position: "relative", marginTop: 8 }}>
-                  <span
-                    style={{
-                      position: "absolute",
-                      left: 9,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      fontSize: 12,
-                      color: INK3,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    🔍
-                  </span>
-                  <input
-                    value={searchQ}
-                    onChange={(e) => setSearchQ(e.target.value)}
-                    placeholder="Search by name, phone, file no..."
-                    style={{
-                      width: "100%",
-                      boxSizing: "border-box",
-                      paddingLeft: 28,
-                      paddingRight: searchQ ? 28 : 10,
-                      paddingTop: 5,
-                      paddingBottom: 5,
-                      border: `1px solid ${BD}`,
-                      borderRadius: 7,
-                      fontFamily: FB,
-                      fontSize: 11,
-                      color: INK,
-                      background: BG,
-                      outline: "none",
-                    }}
-                  />
-                  {searchQ && (
+                    {new Date(date + "T00:00").toLocaleDateString("en-IN", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                    })}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                     <button
-                      onClick={() => setSearchQ("")}
+                      onClick={() => changeDate(-1)}
                       style={{
-                        position: "absolute",
-                        right: 7,
-                        top: "50%",
-                        transform: "translateY(-50%)",
-                        background: "none",
-                        border: "none",
+                        width: 26,
+                        height: 26,
+                        borderRadius: 6,
+                        border: `1px solid ${BD}`,
+                        background: "transparent",
                         cursor: "pointer",
-                        fontSize: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 14,
                         color: INK3,
-                        padding: 0,
-                        lineHeight: 1,
                       }}
                     >
-                      ✕
+                      ‹
                     </button>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      style={{
+                        border: `1px solid ${BD}`,
+                        borderRadius: 7,
+                        padding: "4px 10px",
+                        fontFamily: FM,
+                        fontSize: 11,
+                        color: INK,
+                        background: BG,
+                        outline: "none",
+                        flex: 1,
+                      }}
+                    />
+                    <button
+                      onClick={() => changeDate(1)}
+                      style={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: 6,
+                        border: `1px solid ${BD}`,
+                        background: "transparent",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 14,
+                        color: INK3,
+                      }}
+                    >
+                      ›
+                    </button>
+                    <button
+                      onClick={() => setDate(new Date().toISOString().split("T")[0])}
+                      style={{
+                        padding: "4px 9px",
+                        fontSize: 10,
+                        fontWeight: 500,
+                        border: `1px solid ${BD}`,
+                        borderRadius: 6,
+                        background: "transparent",
+                        cursor: "pointer",
+                        color: INK3,
+                        fontFamily: FB,
+                      }}
+                    >
+                      Today
+                    </button>
+                  </div>
+                  <div
+                    className="opd-schedule-search"
+                    style={{ position: "relative", marginTop: 8 }}
+                  >
+                    <span
+                      style={{
+                        position: "absolute",
+                        left: 9,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        fontSize: 12,
+                        color: INK3,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      🔍
+                    </span>
+                    <input
+                      value={searchQ}
+                      onChange={(e) => setSearchQ(e.target.value)}
+                      placeholder="Search by name, phone, file no..."
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        paddingLeft: 28,
+                        paddingRight: searchQ ? 28 : 10,
+                        paddingTop: 5,
+                        paddingBottom: 5,
+                        border: `1px solid ${BD}`,
+                        borderRadius: 7,
+                        fontFamily: FB,
+                        fontSize: 11,
+                        color: INK,
+                        background: BG,
+                        outline: "none",
+                      }}
+                    />
+                    {searchQ && (
+                      <button
+                        onClick={() => setSearchQ("")}
+                        style={{
+                          position: "absolute",
+                          right: 7,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          color: INK3,
+                          padding: 0,
+                          lineHeight: 1,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto" }}>
+                  {loading && (
+                    <div style={{ padding: 20, textAlign: "center", color: INK3, fontSize: 12 }}>
+                      Loading…
+                    </div>
                   )}
+                  {!loading && filtered.length === 0 && (
+                    <div style={{ padding: 28, textAlign: "center", color: INK3 }}>
+                      <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.2 }}>📋</div>
+                      <div style={{ fontSize: 13, marginBottom: 12 }}>No appointments</div>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                        <button
+                          onClick={() => setView("new-appt")}
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: 7,
+                            background: T,
+                            color: "#fff",
+                            border: "none",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: FB,
+                          }}
+                        >
+                          + New
+                        </button>
+                        <button
+                          onClick={() => setView("excel")}
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: 7,
+                            background: WH,
+                            border: `1px solid ${BD}`,
+                            color: INK2,
+                            fontSize: 11,
+                            fontWeight: 500,
+                            cursor: "pointer",
+                            fontFamily: FB,
+                          }}
+                        >
+                          📊 Import
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {!loading &&
+                    Object.entries(grouped)
+                      .sort(([a], [b]) =>
+                        a === "Unassigned" ? -1 : b === "Unassigned" ? 1 : a.localeCompare(b),
+                      )
+                      .map(([doc, appts]) => (
+                        <DocSection
+                          key={doc}
+                          docName={doc}
+                          appts={appts}
+                          selAppt={selAppt}
+                          onSelect={selectAppt}
+                        />
+                      ))}
                 </div>
               </div>
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                {loading && (
-                  <div style={{ padding: 20, textAlign: "center", color: INK3, fontSize: 12 }}>
-                    Loading…
-                  </div>
-                )}
-                {!loading && filtered.length === 0 && (
-                  <div style={{ padding: 28, textAlign: "center", color: INK3 }}>
-                    <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.2 }}>📋</div>
-                    <div style={{ fontSize: 13, marginBottom: 12 }}>No appointments</div>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                      <button
-                        onClick={() => setView("new-appt")}
-                        style={{
-                          padding: "7px 14px",
-                          borderRadius: 7,
-                          background: T,
-                          color: "#fff",
-                          border: "none",
-                          fontSize: 11,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          fontFamily: FB,
-                        }}
-                      >
-                        + New
-                      </button>
-                      <button
-                        onClick={() => setView("excel")}
-                        style={{
-                          padding: "7px 14px",
-                          borderRadius: 7,
-                          background: WH,
-                          border: `1px solid ${BD}`,
-                          color: INK2,
-                          fontSize: 11,
-                          fontWeight: 500,
-                          cursor: "pointer",
-                          fontFamily: FB,
-                        }}
-                      >
-                        📊 Import
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {!loading &&
-                  Object.entries(grouped)
-                    .sort(([a], [b]) =>
-                      a === "Unassigned" ? -1 : b === "Unassigned" ? 1 : a.localeCompare(b),
-                    )
-                    .map(([doc, appts]) => (
-                      <DocSection
-                        key={doc}
-                        docName={doc}
-                        appts={appts}
-                        selAppt={selAppt}
-                        onSelect={selectAppt}
-                      />
-                    ))}
-              </div>
-            </div>
+            )}
 
             {/* Right detail */}
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-                background: BG,
-              }}
-            >
-              {!selAppt ? (
-                <EmptyState
-                  onNew={() => setView("new-appt")}
-                  onImport={() => setView("excel")}
-                  onDashboard={() => setView("dashboard")}
-                  stats={stats}
-                />
-              ) : (
-                <PatientDetail
-                  appt={selAppt}
-                  doctors={doctors}
-                  activeTab={activeTab}
-                  setActiveTab={setActiveTab}
-                  onPatchStatus={patchStatus}
-                  onPatchPrep={patchPrep}
-                  onPostBiomarkers={postBiomarkers}
-                  onPostCompliance={postCompliance}
-                  onPatchCategoryDoc={patchCategoryDoc}
-                  onPostVitals={postVitals}
-                  allAppts={appointments}
-                  showToast={showToast}
-                />
-              )}
-            </div>
+            {(!isMobile || mobileView === "detail") && (
+              <div
+                className="opd-detail"
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                  background: BG,
+                }}
+              >
+                {isMobile && (
+                  <div className="opd-mobile-back">
+                    <button
+                      onClick={() => setMobileView("list")}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${BD}`,
+                        borderRadius: 6,
+                        padding: "5px 10px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: INK2,
+                        cursor: "pointer",
+                        fontFamily: FB,
+                      }}
+                    >
+                      ← Back
+                    </button>
+                    <span style={{ fontSize: 12, color: INK3, fontFamily: FB }}>
+                      {selAppt ? selAppt.patient_name || "Patient" : "Select a patient"}
+                    </span>
+                  </div>
+                )}
+                {!selAppt ? (
+                  <EmptyState
+                    onNew={() => setView("new-appt")}
+                    onImport={() => setView("excel")}
+                    onDashboard={() => setView("dashboard")}
+                    stats={stats}
+                  />
+                ) : (
+                  <PatientDetail
+                    appt={selAppt}
+                    doctors={doctors}
+                    activeTab={activeTab}
+                    setActiveTab={setActiveTab}
+                    onPatchStatus={patchStatus}
+                    onPatchPrep={patchPrep}
+                    onPostBiomarkers={postBiomarkers}
+                    onPostCompliance={postCompliance}
+                    onPatchCategoryDoc={patchCategoryDoc}
+                    onPostVitals={postVitals}
+                    allAppts={appointments}
+                    showToast={showToast}
+                  />
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

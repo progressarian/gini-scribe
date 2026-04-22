@@ -160,3 +160,52 @@
   padding: 16px;
   margin-bottom: 12px;
 }
+
+/* ══════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .dashboard__stats,
+  .dashboard__workflow-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .dashboard__patient-row {
+    flex-wrap: wrap;
+  }
+  .dashboard__patient-card {
+    padding: 16px;
+  }
+  .dashboard__edit-btn {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard__stats,
+  .dashboard__workflow-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard__patient-card {
+    padding: 14px;
+  }
+  .dashboard__patient-name {
+    font-size: 17px;
+  }
+  .dashboard__patient-avatar {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+  .dashboard__patient-details {
+    font-size: 12px;
+  }
+  .dashboard__booking {
+    padding: 12px;
+  }
+  .dashboard__brief {
+    padding: 12px;
+  }
+  .dashboard__stat-value {
+    font-size: 20px;
+  }
+}

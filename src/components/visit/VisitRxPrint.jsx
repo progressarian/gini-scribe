@@ -52,6 +52,7 @@ const VisitRxPrint = memo(function VisitRxPrint({
   patient,
   doctor,
   summary,
+  symptoms = [],
   activeDx,
   activeMeds,
   stoppedMeds,
@@ -65,6 +66,11 @@ const VisitRxPrint = memo(function VisitRxPrint({
   doctorNote,
   vitals,
 }) {
+  // Active symptoms = anything not explicitly resolved
+  const activeSymptoms = (symptoms || []).filter((s) => {
+    const st = String(s.status || "").toLowerCase();
+    return s.is_active !== false && !st.includes("resolved");
+  });
   const today = new Date().toISOString().split("T")[0];
   const latestCon = consultations[0]?.con_data;
   const followUp = latestCon?.follow_up;
@@ -455,6 +461,26 @@ const VisitRxPrint = memo(function VisitRxPrint({
             </div>
           ))}
         </div>
+      )}
+
+      {/* ═══════ CHIEF COMPLAINTS & SYMPTOMS ═══════ */}
+      {activeSymptoms.length > 0 && (
+        <>
+          <div className="rx-sec-title">Chief Complaints &amp; Symptoms</div>
+          <div className="rx-dx">
+            {activeSymptoms.map((s, i) => {
+              const meta = [s.severity, s.since_date ? `Since ${s.since_date}` : null, s.related_to]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <span key={s.id || i} className="rx-dx-tag">
+                  ● {s.label || s.name}
+                  {meta ? ` — ${meta}` : ""}
+                </span>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* ═══════ DIAGNOSES ═══════ */}

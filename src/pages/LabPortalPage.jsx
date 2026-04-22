@@ -7,6 +7,7 @@ import usePatientStore from "../stores/patientStore.js";
 import useLabPortalStore from "../stores/labPortalStore.js";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 import { getDocStatus } from "../utils/docStatus.js";
+import DocStatusPill from "../components/ui/DocStatusPill.jsx";
 
 export default function LabPortalPage() {
   const { currentDoctor } = useAuthStore();
@@ -299,28 +300,7 @@ export default function LabPortalPage() {
                     >
                       {doc.title || doc.doc_type}
                     </span>
-                    {status.label && (
-                      <span
-                        style={{
-                          fontSize: 9,
-                          padding: "2px 6px",
-                          borderRadius: 8,
-                          background: status.bg,
-                          color: status.color,
-                          border: `1px solid ${status.border}`,
-                          fontWeight: 700,
-                        }}
-                        title={
-                          needsReview
-                            ? "Extraction not applied — review in Companion app"
-                            : isPending
-                              ? "Extraction is still running"
-                              : "Data extracted and applied"
-                        }
-                      >
-                        {status.label}
-                      </span>
-                    )}
+                    {status.label && <DocStatusPill doc={doc} patientId={dbPatientId} size="sm" />}
                     {doc.doc_date && (
                       <span className="lab-portal__prev-doc-date">
                         {(() => {

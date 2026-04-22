@@ -12,3 +12,4 @@ export { default as ChangeFollowUpModal } from "./ChangeFollowUpModal";
 export { default as TemplateModal } from "./TemplateModal";
 export { default as LabExtractionReviewModal } from "./LabExtractionReviewModal";
 export { default as PasteBiomarkersModal } from "./PasteBiomarkersModal";
+export { default as ClinicalExtractionReviewModal } from "./ClinicalExtractionReviewModal";

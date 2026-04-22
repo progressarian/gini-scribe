@@ -42,7 +42,12 @@ import {
   markAppointmentAsCheckedIn,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
+import { tryAcquireCronLock, yieldToApp } from "./lowPriority.js";
 const { log, error } = createLogger("HealthRay Sync");
+
+// Pause between items so user HTTP requests get event-loop time between
+// heavy sync steps (appointment enrichment, OPD backfill, stuck recovery).
+const YIELD_BETWEEN_ITEMS_MS = 300;
 
 // ── Build patient data from HealthRay appointment ───────────────────────────
 function buildPatientData(appt) {
@@ -446,6 +451,16 @@ async function runSync(date, prefetched = null) {
     log("Sync", `Skipping ${date} — previous run still in progress`);
     return { date, skippedRun: true };
   }
+
+  // Only the 5-min scheduled call takes the global cron lock. Range-sync calls
+  // (which pass `prefetched`) are orchestrated by syncDateRange and share that
+  // caller's lock — otherwise a long range backfill would starve itself.
+  let releaseLock = null;
+  if (!prefetched) {
+    releaseLock = await tryAcquireCronLock(`HealthRay Sync ${date}`);
+    if (!releaseLock) return { date, skippedRun: true };
+  }
+
   if (!prefetched) syncInFlight = true;
   const startTime = Date.now();
   log("Sync", `Starting for ${date}...`);
@@ -483,17 +498,23 @@ async function runSync(date, prefetched = null) {
       if (!appointments.length) continue;
       log("Sync", `${localName}: ${appointments.length} appointments`);
 
-      const results = await runBatch(appointments, 3, (appt) => syncAppointment(appt, localName));
-      for (const r of results) {
-        if (r.status === "rejected") {
+      // Sequential per-appointment processing with event-loop yields — keeps
+      // the DB pool and Node loop free so user-facing requests stay snappy
+      // while this background sync drains its work.
+      for (const appt of appointments) {
+        try {
+          const value = await syncAppointment(appt, localName);
+          if (value?.skipped) {
+            totalSkipped++;
+          } else {
+            totalCreated++;
+            if (value?.enriched) totalEnriched++;
+          }
+        } catch (e) {
           totalErrors++;
-          error("Sync", r.reason?.message);
-        } else if (r.value.skipped) {
-          totalSkipped++;
-        } else {
-          totalCreated++;
-          if (r.value.enriched) totalEnriched++;
+          error("Sync", e?.message);
         }
+        await yieldToApp(YIELD_BETWEEN_ITEMS_MS);
       }
     }
 
@@ -509,6 +530,7 @@ async function runSync(date, prefetched = null) {
     throw e;
   } finally {
     if (!prefetched) syncInFlight = false;
+    if (releaseLock) await releaseLock();
   }
 }
 
@@ -577,6 +599,10 @@ export async function runDailyOpdBackfill(dateStr) {
     log("Daily Backfill", "Skipping — previous run still in progress");
     return { skippedRun: true };
   }
+  // Wait behind the global cron lock so this heavy re-parse never runs while
+  // the 5-min sync or lab sync is already working the DB.
+  const releaseLock = await tryAcquireCronLock("Daily OPD Backfill");
+  if (!releaseLock) return { skippedRun: true };
   dailyBackfillInFlight = true;
   const date = dateStr || toISTDate(new Date().toISOString());
   log("Daily Backfill", `Starting OPD re-parse for ${date}...`);
@@ -662,6 +688,7 @@ export async function runDailyOpdBackfill(dateStr) {
     return { date, total: patients.length, done, fixed, errors };
   } finally {
     dailyBackfillInFlight = false;
+    await releaseLock();
   }
 }
 
@@ -677,6 +704,8 @@ export async function runStuckStatusRecovery(windowDays) {
     log("Stuck Recovery", "Skipping — previous run still in progress");
     return { skippedRun: true };
   }
+  const releaseLock = await tryAcquireCronLock("Stuck Status Recovery");
+  if (!releaseLock) return { skippedRun: true };
   stuckRecoveryInFlight = true;
   const days = Number.isFinite(+windowDays)
     ? Math.max(1, +windowDays)
@@ -719,6 +748,7 @@ export async function runStuckStatusRecovery(windowDays) {
     return { windowDays: days, total: rows.length, fixed, errors };
   } finally {
     stuckRecoveryInFlight = false;
+    await releaseLock();
   }
 }
 

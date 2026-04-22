@@ -3,6 +3,9 @@ import { fmtDate } from "./helpers";
 import { toast } from "../../stores/uiStore";
 import PdfViewerModal from "./PdfViewerModal";
 import { getDocStatus } from "../../utils/docStatus";
+import DocStatusPill from "../ui/DocStatusPill";
+import MismatchActions from "./MismatchActions";
+import usePatientStore from "../../stores/patientStore";
 
 const ICON_MAP = {
   lab_report: "🧪",
@@ -34,8 +37,9 @@ const parseExt = (raw) => {
 const isMismatchReview = (doc) =>
   parseExt(doc.extracted_data)?.extraction_status === "mismatch_review";
 
-const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport }) {
+const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUploadReport }) {
   const [viewingDoc, setViewingDoc] = useState(null);
+  const patient = usePatientStore((s) => s.patient);
 
   const prescriptions = documents.filter((d) => d.doc_type === "prescription");
   const labReports = documents.filter((d) => d.doc_type === "lab_report");
@@ -64,11 +68,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
         className="report-card"
         style={{
           cursor: "pointer",
-          border: needsReview
-            ? "1px solid #fecaca"
-            : isPending
-              ? "1px solid #c4b5fd"
-              : undefined,
+          border: needsReview ? "1px solid #fecaca" : isPending ? "1px solid #c4b5fd" : undefined,
           background: needsReview ? "#fef2f2" : isPending ? "#f5f3ff" : undefined,
         }}
         onClick={() => openDoc(doc)}
@@ -95,30 +95,28 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, onUploadReport 
             {doc.notes ? ` · ${doc.notes}` : ""}
           </div>
           {needsReview && (
-            <div
-              style={{
-                fontSize: 11,
-                color: "#b91c1c",
-                fontWeight: 600,
-                marginTop: 3,
-              }}
-              title="Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
-            >
-              ⚠️ Awaiting review — extraction not applied
-            </div>
+            <>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#b91c1c",
+                  fontWeight: 600,
+                  marginTop: 3,
+                }}
+                title="Extraction not applied — patient name on doc doesn't match."
+              >
+                ⚠️ Name mismatch — extraction not applied
+              </div>
+              <MismatchActions
+                doc={{ ...doc, patient_id: doc.patient_id || patientId }}
+                patient={patient}
+                compact
+              />
+            </>
           )}
         </div>
         {status.label ? (
-          <span
-            className="report-status"
-            style={{
-              background: status.bg,
-              color: status.color,
-              borderColor: status.border,
-            }}
-          >
-            {status.label}
-          </span>
+          <DocStatusPill doc={doc} patientId={patientId} size="sm" />
         ) : doc.doc_type === "prescription" ? (
           <button className="bx bx-p">View PDF</button>
         ) : (

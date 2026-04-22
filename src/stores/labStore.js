@@ -4,6 +4,7 @@ import { normalizeTestName } from "../config/labNormalization.js";
 import { extractLab, extractImaging, convertHeicToJpeg, isHeic } from "../services/extraction.js";
 import useAuthStore from "./authStore.js";
 import { toast } from "./uiStore.js";
+import { patientIdsMatch, patientNamesMatch } from "../utils/patientMatch.js";
 
 const useLabStore = create((set, get) => ({
   // ── state ──
@@ -74,11 +75,19 @@ const useLabStore = create((set, get) => ({
     }
     set({ labData: data });
     if (data?.patient_on_report?.name && patient?.name) {
-      const rn = data.patient_on_report.name.toLowerCase(),
-        pn = patient.name.toLowerCase();
-      if (rn && pn && !rn.includes(pn.split(" ")[0]) && !pn.includes(rn.split(" ")[0]))
-        set({ labMismatch: `Report: "${data.patient_on_report.name}" \u2260 "${patient.name}"` });
-      else set({ labMismatch: null });
+      // ID match short-circuits the name check — if the printed patient
+      // ID matches file_no, trust it even when the name differs.
+      const reportId = data.patient_on_report.patient_id || null;
+      if (patientIdsMatch(reportId, patient.file_no)) {
+        set({ labMismatch: null });
+      } else if (patientNamesMatch(data.patient_on_report.name, patient.name)) {
+        // Names match after stripping salutations (Mr/Mrs/Ms/Dr) — ok.
+        set({ labMismatch: null });
+      } else {
+        set({
+          labMismatch: `Report: "${data.patient_on_report.name}" \u2260 "${patient.name}"`,
+        });
+      }
     }
     // Save to DB
     if (data && dbPatientId) {

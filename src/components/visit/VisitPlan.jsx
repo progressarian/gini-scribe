@@ -332,9 +332,7 @@ const VisitPlan = memo(function VisitPlan({
 
     const addedDetails = addedTests.map((t) => ({ name: t, diff: ["ordered"] }));
     const changedDetails = [];
-    removedTests.forEach((t) =>
-      changedDetails.push({ name: t, diff: ["ordered → —"] }),
-    );
+    removedTests.forEach((t) => changedDetails.push({ name: t, diff: ["ordered → —"] }));
     if (fuChanged) {
       changedDetails.push({
         name: "Follow-up",
@@ -748,7 +746,7 @@ const VisitPlan = memo(function VisitPlan({
               </span>
             </div>
             <div className="scb">
-              <div className="chg-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <div className="chg-grid">
                 {/* SYMPTOMS & CONCERNS */}
                 <div>
                   <div className="chg-sec-lbl">Symptoms &amp; Concerns</div>

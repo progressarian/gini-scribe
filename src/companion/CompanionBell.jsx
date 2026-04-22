@@ -121,9 +121,10 @@ export default function CompanionBell() {
             </div>
           )}
           {data.map((row) => {
-            const ext = typeof row.extracted_data === "string"
-              ? safeParse(row.extracted_data)
-              : row.extracted_data;
+            const ext =
+              typeof row.extracted_data === "string"
+                ? safeParse(row.extracted_data)
+                : row.extracted_data;
             const reportName = ext?.mismatch?.reportName;
             const fields = ext?.mismatch?.mismatchedFields || [];
             return (

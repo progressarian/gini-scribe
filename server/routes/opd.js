@@ -533,6 +533,21 @@ router.get("/opd/appointments", async (req, res) => {
 // ── GET /api/opd/patient-docs/:patientId — OPD-uploaded documents ────────────
 router.get("/opd/patient-docs/:patientId", async (req, res) => {
   try {
+    // Clean up orphan pending docs (doc row exists but file never made it
+    // to storage because the user refreshed mid-upload). Same rule as
+    // /patients/:id — older than 45s so we don't kill live uploads.
+    pool
+      .query(
+        `DELETE FROM documents
+           WHERE patient_id = $1
+             AND extracted_data->>'extraction_status' = 'pending'
+             AND COALESCE(storage_path, '') = ''
+             AND COALESCE(file_url, '') = ''
+             AND created_at < NOW() - INTERVAL '45 seconds'`,
+        [req.params.patientId],
+      )
+      .catch(() => {});
+
     const { rows } = await pool.query(
       `SELECT id, doc_type, title, file_name, doc_date, source, notes, storage_path, extracted_data, created_at
          FROM documents

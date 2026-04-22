@@ -1,0 +1,341 @@
+/* ═══════════════════════════════════════════════════════════════
+   OPD page mobile responsiveness overrides.
+   Works alongside the inline styles in src/OPD.jsx — only targets
+   layout containers via added classNames.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Horizontally scrollable row (nav tabs, filter pills) */
+.opd-hscroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.opd-hscroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Always-on: topbar nav and filter row must scroll horizontally whenever
+   they overflow — at any viewport width. The mobile block below layers on
+   top of this (wrap to new row) but at tablet / in-between widths this
+   alone prevents buttons from being cut off or stretching the topbar. */
+.opd-topbar {
+  min-width: 0;
+}
+.opd-topbar-nav {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+  min-width: 0;
+  flex-shrink: 1;
+  padding-bottom: 3px;
+}
+.opd-topbar-nav::-webkit-scrollbar {
+  height: 5px;
+}
+.opd-topbar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.opd-topbar-nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+.opd-topbar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+.opd-topbar-nav button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.opd-topbar-right {
+  flex-shrink: 0;
+}
+
+/* Mobile filter toggle bar — hidden on desktop */
+.opd-filter-toggle {
+  display: none;
+}
+
+/* TABLET (≤1024px) — narrow the schedule sidebar */
+@media (max-width: 1024px) {
+  .opd-schedule {
+    width: 320px !important;
+  }
+}
+
+/* MOBILE (≤768px) */
+@media (max-width: 768px) {
+  /* Topbar — single line, nav scrolls horizontally */
+  .opd-topbar {
+    height: 48px !important;
+    padding: 0 10px !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+  }
+  .opd-topbar-title {
+    font-size: 16px !important;
+    flex-shrink: 0;
+  }
+  .opd-topbar-sub {
+    display: none !important;
+  }
+  .opd-topbar-nav {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    scrollbar-width: thin;
+    margin-left: 0 !important;
+  }
+  .opd-topbar-nav::-webkit-scrollbar {
+    height: 4px;
+  }
+  .opd-topbar-nav button {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 5px 10px !important;
+  }
+  .opd-topbar-right {
+    margin-left: 0 !important;
+    gap: 6px !important;
+    flex-shrink: 0;
+  }
+  .opd-clock {
+    display: none !important;
+  }
+  .opd-doctor-meta {
+    display: none !important;
+  }
+  .opd-doctor-pill {
+    padding: 3px 5px 3px 3px !important;
+  }
+
+  /* Sub-nav: collapse behind a toggle */
+  .opd-subnav {
+    padding: 0 !important;
+  }
+  .opd-filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    border-bottom: 1px solid #dde3ea;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+  .opd-filter-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border-radius: 6px;
+    border: 1px solid #dde3ea;
+    background: #f0f4f7;
+    color: #1a2332;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .opd-filter-toggle-btn.active {
+    background: #e6f6f4;
+    border-color: rgba(0, 158, 140, 0.3);
+    color: #009e8c;
+  }
+  .opd-filter-summary {
+    flex: 1;
+    font-size: 11px;
+    color: #6b7d90;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .opd-filter-body.collapsed {
+    display: none;
+  }
+  .opd-filter-row {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    height: auto !important;
+    min-height: 38px;
+    padding: 4px 10px;
+  }
+  .opd-filter-row::-webkit-scrollbar {
+    height: 4px;
+  }
+  .opd-filter-row::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 2px;
+  }
+  .opd-filter-row > * {
+    flex-shrink: 0;
+  }
+  .opd-filter-stats {
+    display: none !important;
+  }
+  .opd-filter-actions {
+    margin-left: auto;
+    gap: 5px !important;
+    flex-shrink: 0;
+  }
+
+  /* Body: full width single pane on mobile (list OR detail) */
+  .opd-schedule {
+    width: 100% !important;
+    border-right: none !important;
+  }
+  .opd-detail {
+    flex: 1;
+  }
+
+  /* Schedule list header: compact */
+  .opd-schedule-head {
+    padding: 7px 10px !important;
+  }
+  .opd-schedule-title {
+    font-size: 14px !important;
+    margin-bottom: 5px !important;
+  }
+  .opd-schedule-head > div:nth-child(2) {
+    gap: 5px !important;
+  }
+  .opd-schedule-head > div:nth-child(2) button {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 12px !important;
+  }
+  .opd-schedule-head > div:nth-child(2) button:last-child {
+    width: auto !important;
+    padding: 2px 7px !important;
+  }
+  .opd-schedule-head input[type="date"] {
+    padding: 3px 7px !important;
+    font-size: 10px !important;
+  }
+  .opd-schedule-search {
+    margin-top: 5px !important;
+  }
+  .opd-schedule-search input {
+    padding: 4px 8px 4px 26px !important;
+    font-size: 11px !important;
+  }
+
+  /* Mobile back button row */
+  .opd-mobile-back {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #fff;
+    border-bottom: 1px solid #dde3ea;
+  }
+
+  /* Detail header — minimal on mobile */
+  .opd-detail-header {
+    padding: 8px 10px !important;
+  }
+  .opd-detail-header > div:first-child {
+    margin-bottom: 6px !important;
+    gap: 6px !important;
+  }
+  .opd-detail-name {
+    font-size: 15px !important;
+    margin-bottom: 1px !important;
+    line-height: 1.15 !important;
+  }
+  /* Age · Sex · File no — tighter */
+  .opd-detail-header > div:first-child > div:first-child > div:nth-child(2) {
+    font-size: 10px !important;
+    margin-bottom: 3px !important;
+  }
+  /* Badge row — shrink all badges */
+  .opd-detail-header > div:first-child > div:first-child > div:nth-child(3) {
+    gap: 4px !important;
+    margin-bottom: 3px !important;
+  }
+  .opd-detail-header > div:first-child > div:first-child > div:nth-child(3) > * {
+    font-size: 8px !important;
+    padding: 1px 6px !important;
+  }
+  /* Last visit line */
+  .opd-detail-header > div:first-child > div:first-child > div:nth-child(4) {
+    font-size: 9px !important;
+  }
+  /* Action buttons */
+  .opd-detail-actions {
+    gap: 5px !important;
+    width: 100%;
+  }
+  .opd-detail-actions a,
+  .opd-detail-actions button {
+    padding: 5px 8px !important;
+    font-size: 10px !important;
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  /* Step bar: thin connector dots */
+  .opd-step-bar {
+    gap: 2px !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .opd-step-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .opd-step {
+    gap: 4px !important;
+  }
+  .opd-step > div:first-child {
+    width: 16px !important;
+    height: 16px !important;
+    font-size: 8px !important;
+    border-width: 1.5px !important;
+  }
+  .opd-step span {
+    font-size: 9px !important;
+  }
+  .opd-step-bar > div:not(.opd-step) {
+    min-width: 6px !important;
+    margin: 0 2px !important;
+  }
+
+  /* Biomarker/Lab Values grid: 2 per row */
+  .opd-biomarker-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+}
+
+/* SMALL MOBILE (≤480px) */
+@media (max-width: 480px) {
+  .opd-topbar-title {
+    font-size: 15px !important;
+  }
+  .opd-filter-label {
+    display: none !important;
+  }
+  .opd-detail-name {
+    font-size: 14px !important;
+  }
+  .opd-detail-header {
+    padding: 7px 9px !important;
+  }
+  /* Step bar: hide labels, keep only circles */
+  .opd-step span {
+    display: none;
+  }
+  .opd-step {
+    gap: 0 !important;
+  }
+  .opd-step > div:first-child {
+    width: 14px !important;
+    height: 14px !important;
+    font-size: 7px !important;
+  }
+}
+
+/* Back button is hidden on desktop, only shown on mobile via the .opd-mobile-back rule above */
+.opd-mobile-back {
+  display: none;
+}

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 import usePatientStore from "../stores/patientStore";
 import { getDocStatus } from "../utils/docStatus.js";
+import DocStatusPill from "../components/ui/DocStatusPill.jsx";
 import useVitalsStore from "../stores/vitalsStore";
 import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
@@ -593,11 +594,7 @@ export default function DashboardPage() {
                       padding: "3px 0",
                       fontSize: 10,
                       borderBottom: i < 3 ? "1px solid #f1f5f9" : "none",
-                      background: needsReview
-                        ? "#fef2f2"
-                        : isPending
-                          ? "#f5f3ff"
-                          : undefined,
+                      background: needsReview ? "#fef2f2" : isPending ? "#f5f3ff" : undefined,
                     }}
                   >
                     <span>
@@ -615,41 +612,12 @@ export default function DashboardPage() {
                       style={{
                         fontWeight: 700,
                         flex: 1,
-                        color: needsReview
-                          ? "#b91c1c"
-                          : isPending
-                            ? "#7c3aed"
-                            : undefined,
+                        color: needsReview ? "#b91c1c" : isPending ? "#7c3aed" : undefined,
                       }}
                     >
                       {d.title || d.doc_type}
                     </span>
-                    {status.label && (
-                      <span
-                        style={{
-                          fontSize: 8,
-                          padding: "1px 5px",
-                          borderRadius: 8,
-                          background: status.bg,
-                          color: status.color,
-                          border: `1px solid ${status.border}`,
-                          fontWeight: 700,
-                        }}
-                        title={
-                          needsReview
-                            ? "Needs review in Companion app"
-                            : isPending
-                              ? "Extraction in progress"
-                              : "Extracted"
-                        }
-                      >
-                        {needsReview
-                          ? "REVIEW"
-                          : isPending
-                            ? "EXTRACTING"
-                            : "DONE"}
-                      </span>
-                    )}
+                    {status.label && <DocStatusPill doc={d} patientId={dbPatientId} size="sm" />}
                     <span style={{ fontSize: 9, color: "#94a3b8" }}>
                       {d.doc_date
                         ? new Date(d.doc_date).toLocaleDateString("en-IN", {
@@ -668,9 +636,7 @@ export default function DashboardPage() {
 
       {/* Quick Stats */}
       {dbPatientId && (
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}
-        >
+        <div className="dashboard__stats" style={{ gap: 8, marginBottom: 12 }}>
           <div
             style={{ background: "#eff6ff", borderRadius: 10, padding: 12, textAlign: "center" }}
           >
@@ -1385,7 +1351,7 @@ export default function DashboardPage() {
       >
         GO TO
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+      <div className="dashboard__workflow-grid" style={{ gap: 8 }}>
         {[
           { path: "/quick", icon: "⚡", label: "Quick Dictation", color: "#dc2626", bg: "#fef2f2" },
           {

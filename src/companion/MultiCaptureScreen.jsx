@@ -27,6 +27,7 @@ export default function MultiCaptureScreen() {
   } = useCompanionStore();
 
   const [mismatchReview, setMismatchReview] = useState(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   // Holds { item, blobUrl }. Chromium blocks data: URIs for PDF in iframes,
   // so we convert the item's data URI to a blob URL before passing it to the
   // viewer modal.
@@ -73,7 +74,6 @@ export default function MultiCaptureScreen() {
     }
   }, [step, items.length]);
 
-  const cameraRef = useRef(null);
   const galleryRef = useRef(null);
   const addMoreRef = useRef(null);
 
@@ -122,7 +122,7 @@ export default function MultiCaptureScreen() {
             </div>
             <div className="mcap__pick-btns">
               <button
-                onClick={() => cameraRef.current?.click()}
+                onClick={() => setCameraOpen(true)}
                 className="mcap__pick-btn mcap__pick-btn--camera"
               >
                 <span className="mcap__pick-btn-icon">📷</span>
@@ -142,15 +142,6 @@ export default function MultiCaptureScreen() {
               ✨ On the next screen, confirm the type and details for each file, then save. Data
               extraction runs silently after save.
             </div>
-            <input
-              ref={cameraRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple
-              onChange={(e) => handleFilePick(e, cameraRef.current)}
-              style={{ display: "none" }}
-            />
             <input
               ref={galleryRef}
               type="file"
@@ -198,12 +189,16 @@ export default function MultiCaptureScreen() {
                   }
                 />
               ))}
+              <button onClick={() => setCameraOpen(true)} className="mcap__card mcap__card--add">
+                <span className="mcap__thumb-add-icon">📷</span>
+                <span className="mcap__thumb-add-label">Take more photos</span>
+              </button>
               <button
                 onClick={() => addMoreRef.current?.click()}
                 className="mcap__card mcap__card--add"
               >
                 <span className="mcap__thumb-add-icon">+</span>
-                <span className="mcap__thumb-add-label">Add more files</span>
+                <span className="mcap__thumb-add-label">Add files</span>
               </button>
             </div>
 
@@ -254,6 +249,16 @@ export default function MultiCaptureScreen() {
               />
             </div>
           </div>
+        )}
+
+        {cameraOpen && (
+          <CameraCaptureSheet
+            onClose={() => setCameraOpen(false)}
+            onDone={(files) => {
+              setCameraOpen(false);
+              if (files.length) multiHandleFilesSelect(files);
+            }}
+          />
         )}
 
         {viewingItem && (
@@ -493,6 +498,201 @@ function ItemCard({
       >
         🗑️ Remove Doc
       </button>
+    </div>
+  );
+}
+
+// In-app camera: keeps the live stream open across shots so the user can
+// capture → approve → next → capture again without re-launching the OS camera.
+// "Done" hands all captured JPEGs back to the parent as File objects.
+function CameraCaptureSheet({ onDone, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [shots, setShots] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [starting, setStarting] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera not supported on this device");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setStarting(false);
+      } catch (e) {
+        setError(e.message || "Unable to access camera");
+        setStarting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const s = streamRef.current;
+      if (s) s.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      shots.forEach((s) => URL.revokeObjectURL(s.url));
+      if (preview) URL.revokeObjectURL(preview.url);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const capture = async () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) return;
+    setPreview({ blob, url: URL.createObjectURL(blob) });
+  };
+
+  const approve = () => {
+    if (!preview) return;
+    setShots((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${prev.length}`, blob: preview.blob, url: preview.url },
+    ]);
+    setPreview(null);
+  };
+
+  const retake = () => {
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  };
+
+  const removeShot = (id) => {
+    setShots((prev) => {
+      const hit = prev.find((s) => s.id === id);
+      if (hit) URL.revokeObjectURL(hit.url);
+      return prev.filter((s) => s.id !== id);
+    });
+  };
+
+  const done = () => {
+    if (!shots.length) {
+      onClose();
+      return;
+    }
+    const ts = Date.now();
+    const files = shots.map(
+      (s, i) => new File([s.blob], `capture-${ts}-${i + 1}.jpg`, { type: "image/jpeg" }),
+    );
+    const s = streamRef.current;
+    if (s) s.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    onDone(files);
+  };
+
+  const cancel = () => {
+    if (
+      shots.length &&
+      !window.confirm(`Discard ${shots.length} captured photo${shots.length === 1 ? "" : "s"}?`)
+    ) {
+      return;
+    }
+    onClose();
+  };
+
+  return (
+    <div className="mcap__cam">
+      <div className="mcap__cam-header">
+        <button type="button" className="mcap__cam-close" onClick={cancel}>
+          ✕
+        </button>
+        <div className="mcap__cam-title">
+          {preview ? "Review photo" : `Camera${shots.length ? ` · ${shots.length} captured` : ""}`}
+        </div>
+        <button
+          type="button"
+          className="mcap__cam-done"
+          onClick={done}
+          disabled={!shots.length || !!preview}
+        >
+          Done{shots.length ? ` (${shots.length})` : ""}
+        </button>
+      </div>
+
+      <div className="mcap__cam-stage">
+        {error ? (
+          <div className="mcap__cam-error">⚠️ {error}</div>
+        ) : preview ? (
+          <img src={preview.url} alt="preview" className="mcap__cam-preview" />
+        ) : (
+          <video ref={videoRef} playsInline muted autoPlay className="mcap__cam-video" />
+        )}
+        {starting && !error && !preview && (
+          <div className="mcap__cam-loading">Starting camera…</div>
+        )}
+      </div>
+
+      {shots.length > 0 && !preview && (
+        <div className="mcap__cam-strip">
+          {shots.map((s) => (
+            <div key={s.id} className="mcap__cam-thumb">
+              <img src={s.url} alt="" />
+              <button
+                type="button"
+                className="mcap__cam-thumb-x"
+                onClick={() => removeShot(s.id)}
+                aria-label="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mcap__cam-ctrls">
+        {preview ? (
+          <>
+            <button type="button" className="mcap__cam-btn mcap__cam-btn--retake" onClick={retake}>
+              ↺ Retake
+            </button>
+            <button
+              type="button"
+              className="mcap__cam-btn mcap__cam-btn--approve"
+              onClick={approve}
+            >
+              ✓ Approve & Next
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="mcap__cam-shutter"
+            onClick={capture}
+            disabled={starting || !!error}
+            aria-label="Capture"
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   syncVitals,
 } from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
+import { extractWithRetry, detectMediaType } from "../services/extraction.js";
 
 const router = Router();
 
@@ -280,6 +281,17 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
       "UPDATE documents SET storage_path=$1, mime_type=$2, file_name=COALESCE(NULLIF($3,''),file_name) WHERE id=$4",
       [storagePath, mediaType, fileName || null, req.params.id],
     );
+
+    // Kick off server-side extraction in the background. skipIfNotPending
+    // means if the client (companion / OPD) finishes its own fast path
+    // first, we no-op instead of clobbering the result. This is what
+    // makes refresh-mid-upload recoverable: even if the tab closes, the
+    // server still has the file and will produce extraction_status =
+    // extracted | failed, never leaving the row stuck on "pending".
+    runServerExtraction(req.params.id, { skipIfNotPending: true }).catch((err) => {
+      console.error(`[upload-file] Background extraction for doc ${req.params.id} crashed:`, err);
+    });
+
     res.json({ success: true, storage_path: storagePath, file_name: fileName });
   } catch (e) {
     handleError(res, e, "Document");
@@ -875,6 +887,342 @@ router.patch("/documents/:id", async (req, res) => {
     client.release();
   }
 });
+
+// ── Core extraction runner, reused by:
+//   1. POST /documents/:id/retry-extract  (always runs, force=true)
+//   2. POST /documents/:id/upload-file    (fire-and-forget after upload)
+//   3. stale-pending cleanup cron         (kicks off extraction for docs
+//      stuck pending when the client never finished)
+//
+// Flow:
+//   1. Load doc; in skip-if-not-pending mode, bail if the client already
+//      wrote extracted_data (so we don't race with companion/OPD client
+//      extraction).
+//   2. Flip extracted_data.extraction_status to "pending" so polling UIs
+//      show "⏳ Extracting…" while this runs.
+//   3. Resolve file bytes from Supabase/HealthRay.
+//   4. Call extractWithRetry (3 attempts, 180s each, retries on 5xx/429,
+//      parse failures, and "thin JSON" partial extractions).
+//   5. On success: UPDATE extracted_data + cascade to labs/meds/vitals/
+//      biomarkers/diagnoses/follow-up (same cascade PATCH /:id runs).
+//   6. On failure: UPDATE extracted_data to { extraction_status:"failed",
+//      error_message, retry_count, failed_at } so every doc-rendering
+//      surface can show "❌ Failed — Retry".
+// Returns a result object; the HTTP handler decides what to send to the
+// client. Never throws to the caller.
+async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
+  docId = Number(docId);
+  if (!docId) return { success: false, error_message: "Invalid document ID" };
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, doc_type, file_url, storage_path, mime_type, file_name, doc_date, source, extracted_data
+       FROM documents WHERE id = $1`,
+      [docId],
+    );
+    if (!rows[0]) return { success: false, error_message: "Document not found" };
+    const doc = rows[0];
+
+    // Dedup: when fired from upload-file, the client may also extract. If
+    // the client already wrote a real extraction (or a mismatch/failed),
+    // don't clobber it. Only run when the row is still sitting at pending.
+    if (skipIfNotPending) {
+      let ext = doc.extracted_data;
+      if (typeof ext === "string") {
+        try {
+          ext = JSON.parse(ext);
+        } catch {
+          ext = null;
+        }
+      }
+      const status = ext?.extraction_status;
+      if (status && status !== "pending") {
+        return { success: true, skipped: true, reason: `status=${status}` };
+      }
+      // Thick extractions without extraction_status field — client already
+      // finished and stripped the flag. Skip to avoid duplicate work.
+      if (ext && !status && (ext.panels || ext.medications || ext.findings || ext.impression)) {
+        return { success: true, skipped: true, reason: "already-extracted" };
+      }
+    }
+
+    // Flip to pending so polling clients flip the pill to "Extracting…".
+    await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+      JSON.stringify({ extraction_status: "pending" }),
+      docId,
+    ]);
+
+    const resolved = await resolveDocumentUrl(docId);
+    if (resolved.error) {
+      const failPayload = {
+        extraction_status: "failed",
+        error_message: `File unavailable: ${resolved.error}`,
+        retry_count: 0,
+        failed_at: new Date().toISOString(),
+      };
+      await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+        JSON.stringify(failPayload),
+        docId,
+      ]);
+      return { success: false, ...failPayload };
+    }
+
+    let buffer, base64, mediaType;
+    if (resolved.buffer) {
+      buffer = resolved.buffer;
+      base64 = Buffer.from(buffer).toString("base64");
+      mediaType = detectMediaType(buffer) || resolved.mimeType || "application/pdf";
+    } else if (resolved.url) {
+      const fileResp = await fetch(resolved.url);
+      if (!fileResp.ok) {
+        const failPayload = {
+          extraction_status: "failed",
+          error_message: `File download failed (${fileResp.status})`,
+          retry_count: 0,
+          failed_at: new Date().toISOString(),
+        };
+        await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+          JSON.stringify(failPayload),
+          docId,
+        ]);
+        return { success: false, ...failPayload };
+      }
+      buffer = Buffer.from(await fileResp.arrayBuffer());
+      base64 = buffer.toString("base64");
+      mediaType = detectMediaType(buffer) || resolved.mimeType || "application/pdf";
+    } else {
+      const failPayload = {
+        extraction_status: "failed",
+        error_message: "No file attached to this document",
+        retry_count: 0,
+        failed_at: new Date().toISOString(),
+      };
+      await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+        JSON.stringify(failPayload),
+        docId,
+      ]);
+      return { success: false, ...failPayload };
+    }
+
+    let extracted, attempts;
+    try {
+      const result = await extractWithRetry({ base64, mediaType, docType: doc.doc_type });
+      extracted = result.data;
+      attempts = result.attempts;
+    } catch (e) {
+      const failPayload = {
+        extraction_status: "failed",
+        error_message: e.message || "Extraction failed",
+        retry_count: e.attempts || 3,
+        failed_at: new Date().toISOString(),
+      };
+      await pool.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+        JSON.stringify(failPayload),
+        docId,
+      ]);
+      console.error(`[extract] Doc ${docId} failed after retries: ${e.message}`);
+      return { success: false, ...failPayload };
+    }
+
+    // Guard: between flipping to pending and finishing extraction, the
+    // client may have already written a successful extraction (companion's
+    // in-memory path is usually faster). Re-check and bail if so.
+    if (skipIfNotPending) {
+      const { rows: freshRows } = await pool.query(
+        `SELECT extracted_data FROM documents WHERE id = $1`,
+        [docId],
+      );
+      let freshExt = freshRows[0]?.extracted_data;
+      if (typeof freshExt === "string") {
+        try {
+          freshExt = JSON.parse(freshExt);
+        } catch {
+          freshExt = null;
+        }
+      }
+      const freshStatus = freshExt?.extraction_status;
+      if (freshStatus && freshStatus !== "pending" && freshStatus !== "failed") {
+        return { success: true, skipped: true, reason: `client-wrote=${freshStatus}` };
+      }
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+        JSON.stringify(extracted),
+        docId,
+      ]);
+
+      if (extracted?.panels && doc.patient_id) {
+        await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);
+        const testDate =
+          extracted.report_date ||
+          extracted.collection_date ||
+          (doc.doc_date
+            ? new Date(doc.doc_date).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0]);
+        for (const panel of extracted.panels) {
+          for (const test of panel.tests || []) {
+            if (test.result == null && !test.result_text) continue;
+            const numResult =
+              typeof test.result === "number" ? test.result : parseFloat(test.result);
+            await client.query(
+              `INSERT INTO lab_results
+                 (patient_id, document_id, test_date, panel_name, test_name, canonical_name, result, result_text, unit, flag, ref_range, source)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'report_extract')`,
+              [
+                doc.patient_id,
+                doc.id,
+                testDate,
+                panel.panel_name || null,
+                test.test_name,
+                getCanonical(test.test_name) || test.test_name,
+                isNaN(numResult) ? null : numResult,
+                test.result_text || null,
+                test.unit || null,
+                test.flag || null,
+                test.ref_range || null,
+              ],
+            );
+          }
+        }
+        try {
+          const { syncVitalsFromExtraction } = await import("../services/healthray/db.js");
+          const reportDate =
+            extracted.report_date ||
+            extracted.collection_date ||
+            (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : null);
+          await syncVitalsFromExtraction(doc.patient_id, extracted, reportDate);
+        } catch (syncErr) {
+          console.error(
+            `[extract] Vitals sync failed for patient ${doc.patient_id}:`,
+            syncErr.message,
+          );
+        }
+        try {
+          const { rows: apptRows } = await client.query(
+            `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+            [doc.patient_id],
+          );
+          if (apptRows[0]) {
+            await syncBiomarkersFromLatestLabs(doc.patient_id, apptRows[0].id);
+          }
+        } catch (syncErr) {
+          console.error(
+            `[extract] Biomarker sync failed for patient ${doc.patient_id}:`,
+            syncErr.message,
+          );
+        }
+      }
+
+      if (doc.patient_id && extracted?.medications) {
+        await client.query(`DELETE FROM medications WHERE document_id = $1`, [doc.id]);
+        const rxDate =
+          extracted.visit_date ||
+          (doc.doc_date
+            ? new Date(doc.doc_date).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0]);
+        for (const m of extracted.medications || []) {
+          if (!m?.name) continue;
+          await client.query(
+            `INSERT INTO medications
+               (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
+             ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+             DO UPDATE SET document_id = EXCLUDED.document_id,
+               dose = COALESCE(EXCLUDED.dose, medications.dose),
+               frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+               timing = COALESCE(EXCLUDED.timing, medications.timing),
+               route = COALESCE(EXCLUDED.route, medications.route),
+               source = EXCLUDED.source,
+               started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+               updated_at = NOW()`,
+            [
+              doc.patient_id,
+              doc.id,
+              (m.name || "").slice(0, 200),
+              (m.dose || "").slice(0, 100),
+              (m.frequency || "").slice(0, 100),
+              (m.timing || "").slice(0, 100),
+              (m.route || "Oral").slice(0, 50),
+              rxDate,
+            ],
+          );
+        }
+        for (const m of extracted.stopped_medications || []) {
+          if (!m?.name) continue;
+          await client.query(
+            `INSERT INTO medications
+               (patient_id, document_id, name, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, false, false, 'report_extract', $4)
+             ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+             DO UPDATE SET document_id = EXCLUDED.document_id,
+               source = EXCLUDED.source,
+               updated_at = NOW()`,
+            [doc.patient_id, doc.id, (m.name || "").slice(0, 200), rxDate],
+          );
+        }
+        for (const d of extracted.diagnoses || []) {
+          if (!d?.id || !d?.label) continue;
+          await client.query(
+            `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (patient_id, diagnosis_id) DO UPDATE
+               SET label = EXCLUDED.label, status = EXCLUDED.status`,
+            [doc.patient_id, d.id, d.label, d.status || "Controlled"],
+          );
+        }
+        if (extracted.follow_up) {
+          const anchor =
+            extracted.visit_date ||
+            (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : null);
+          await syncFollowUpToAppointment(client, doc.patient_id, extracted.follow_up, anchor);
+        }
+        await refreshOpdConsultations(client, doc.patient_id);
+      }
+
+      await client.query("COMMIT");
+
+      if (doc.patient_id && extracted?.panels) {
+        pool
+          .query(
+            `UPDATE appointments SET ai_summary=NULL, ai_summary_generated_at=NULL
+             WHERE patient_id=$1
+               AND appointment_date=(SELECT MAX(appointment_date) FROM appointments WHERE patient_id=$1)`,
+            [doc.patient_id],
+          )
+          .catch(() => {});
+      }
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    return { success: true, attempts, extracted_data: extracted };
+  } catch (e) {
+    console.error(`[extract] Doc ${docId} unexpected error:`, e);
+    return { success: false, error_message: e.message || "Unknown error" };
+  }
+}
+
+// ── Retry extraction for a stuck / failed document ──────────────────────────
+// POST /api/documents/:id/retry-extract
+// Delegates to runServerExtraction with force=true (always runs, ignores
+// dedup). Callable from any doctor-facing page or the companion app.
+router.post("/documents/:id/retry-extract", async (req, res) => {
+  const docId = Number(req.params.id);
+  if (!docId) return res.status(400).json({ error: "Valid document ID required" });
+  const result = await runServerExtraction(docId, { skipIfNotPending: false });
+  if (result.error_message && !result.extraction_status && !result.success) {
+    return res.status(404).json({ error: result.error_message });
+  }
+  res.json(result);
+});
+
+export { runServerExtraction };
 
 // ── Extract medicines from a HealthRay prescription PDF/image using Claude vision
 // POST /api/documents/:id/extract-prescription

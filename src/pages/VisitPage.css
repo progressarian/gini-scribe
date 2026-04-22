@@ -1266,10 +1266,38 @@
 }
 
 /* ── CHANGES CARD ── */
+.visit-exam-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 480px) {
+  .visit-exam-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .visit-lab-row {
+    grid-template-columns: 2fr 1fr 1fr !important;
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+  }
+  .visit-lab-row > *:nth-child(4) {
+    display: none;
+  }
+  .visit-lab-head > *:nth-child(4) {
+    display: none;
+  }
+}
 .chg-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
+}
+@media (max-width: 1024px) {
+  .chg-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .chg-sec-lbl {
   font-size: 9px;
@@ -2654,22 +2682,36 @@ textarea.nf:focus {
   /* -- Topbar: compact -- */
   .topbar {
     height: auto;
-    min-height: 48px;
-    padding: 8px 10px;
+    min-height: 44px;
+    padding: 6px 8px;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
   }
   .logo {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     font-size: 11px;
   }
+  .ptinfo {
+    flex: 1;
+    min-width: 0;
+  }
   .ptname {
-    font-size: 13px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ptname span {
+    font-size: 10px !important;
   }
   .ptmeta {
-    font-size: 10px !important;
+    font-size: 9px !important;
     flex-wrap: wrap;
+    gap: 3px !important;
+  }
+  .ptmeta .allergy {
+    display: none;
   }
   .clock-block {
     display: none;
@@ -2684,18 +2726,26 @@ textarea.nf:focus {
     font-size: 9px;
     padding: 2px 8px;
   }
+  .visit-status-pill {
+    padding: 2px 8px !important;
+    font-size: 10px !important;
+    margin-left: 4px !important;
+  }
+  .visit-status-label {
+    display: none;
+  }
   .tbr {
     margin-left: auto;
-    gap: 4px;
+    gap: 3px;
   }
   .tbr .btn {
-    height: 28px;
-    padding: 0 8px;
+    height: 26px;
+    padding: 0 7px;
     font-size: 10px;
   }
   .tbr .btn-p {
-    height: 28px;
-    padding: 0 10px;
+    height: 26px;
+    padding: 0 8px;
     font-size: 10px;
   }
 

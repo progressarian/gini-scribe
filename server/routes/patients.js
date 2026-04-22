@@ -170,7 +170,30 @@ router.get("/patients/check-duplicate", async (req, res) => {
 });
 
 // Get single patient with all related data
+// Fast-path orphan cleanup: when a user refreshes mid-upload, the doc row
+// exists with extraction_status=pending but no file. We don't want the
+// doctor to see a ghost "Extracting…" row for up to 3 min (cron cycle).
+// Running a tiny DELETE here — scoped to this patient and older than 45s
+// so in-flight uploads aren't touched — makes the ghost disappear on
+// the next GET. Side-effect on a read is intentional and cheap.
+async function cleanOrphanDocsForPatient(patientId) {
+  try {
+    await pool.query(
+      `DELETE FROM documents
+       WHERE patient_id = $1
+         AND extracted_data->>'extraction_status' = 'pending'
+         AND COALESCE(storage_path, '') = ''
+         AND COALESCE(file_url, '') = ''
+         AND created_at < NOW() - INTERVAL '45 seconds'`,
+      [patientId],
+    );
+  } catch (e) {
+    console.warn(`[OrphanClean] Patient ${patientId} cleanup failed:`, e.message);
+  }
+}
+
 router.get("/patients/:id", async (req, res) => {
+  cleanOrphanDocsForPatient(req.params.id).catch(() => {});
   try {
     const { id } = req.params;
     const patient = await pool.query("SELECT * FROM patients WHERE id=$1", [id]);

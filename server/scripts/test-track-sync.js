@@ -27,9 +27,7 @@ const { default: pool } = await import("../config/db.js");
 
 const require = createRequire(import.meta.url);
 const { createClient } = require("@supabase/supabase-js");
-const { syncPatientLogsFromGenie, resolveGeniePatientId } = require(
-  "../genie-sync.cjs",
-);
+const { syncPatientLogsFromGenie, resolveGeniePatientId } = require("../genie-sync.cjs");
 
 const fileNoIdx = process.argv.indexOf("--file-no");
 const FILE_NO = fileNoIdx > -1 ? process.argv[fileNoIdx + 1] : "TEST_COMPANION_USER";
@@ -52,14 +50,11 @@ async function run() {
     return;
   }
 
-  const p = await pool.query(
-    "SELECT id, name, file_no, phone FROM patients WHERE file_no = $1",
-    [FILE_NO],
-  );
+  const p = await pool.query("SELECT id, name, file_no, phone FROM patients WHERE file_no = $1", [
+    FILE_NO,
+  ]);
   if (p.rows.length === 0) {
-    console.error(
-      `No local patient with file_no=${FILE_NO}. Run create-test-patient.js first.`,
-    );
+    console.error(`No local patient with file_no=${FILE_NO}. Run create-test-patient.js first.`);
     process.exitCode = 1;
     return;
   }
@@ -216,10 +211,9 @@ async function run() {
     "patient_meal_log",
   ];
   for (const t of tables) {
-    const r = await pool.query(
-      `SELECT COUNT(*)::int AS c FROM ${t} WHERE patient_id = $1`,
-      [scribePatient.id],
-    );
+    const r = await pool.query(`SELECT COUNT(*)::int AS c FROM ${t} WHERE patient_id = $1`, [
+      scribePatient.id,
+    ]);
     console.log(`  ${t.padEnd(22)} ${r.rows[0].c}`);
   }
 }

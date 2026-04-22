@@ -147,7 +147,8 @@ const MED_CLASSES = [
       "nifedipine",
       "cilnidipine",
     ],
-    implication: "Antihypertensive cover lost — BP likely to rise; check today's reading vs. prior.",
+    implication:
+      "Antihypertensive cover lost — BP likely to rise; check today's reading vs. prior.",
     action: "Restart or substitute today if BP trending up",
   },
   {
@@ -314,7 +315,13 @@ function classifyMed(name) {
   const n = (name || "").toLowerCase();
   for (const c of MED_CLASSES) {
     if (c.keywords.some((k) => n.includes(k))) {
-      return { className: c.className, label: c.label, weight: c.weight, implication: c.implication, action: c.action };
+      return {
+        className: c.className,
+        label: c.label,
+        weight: c.weight,
+        implication: c.implication,
+        action: c.action,
+      };
     }
   }
   return {

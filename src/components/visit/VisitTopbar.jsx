@@ -1,4 +1,4 @@
-import { memo, useState, useEffect } from "react";
+import { memo, useState, useEffect, useRef } from "react";
 import { fmtDate } from "./helpers";
 
 // In-clinic elapsed timer — updates every minute
@@ -79,6 +79,19 @@ const Clock = memo(function Clock() {
   );
 });
 
+const printMenuItemStyle = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  padding: "8px 12px",
+  background: "transparent",
+  border: "none",
+  borderRadius: 6,
+  fontSize: 13,
+  color: "var(--t1)",
+  cursor: "pointer",
+};
+
 const VisitTopbar = memo(function VisitTopbar({
   patient,
   doctor,
@@ -86,11 +99,33 @@ const VisitTopbar = memo(function VisitTopbar({
   latestVitals,
   onToggleAI,
   onEndVisit,
-  onPrint,
+  onPasteNotes,
+  onPrintRx,
+  onPrintMedCard,
+  onPrintBoth,
   visitStart,
   hasActiveVisit,
 }) {
   const today = new Date().toISOString().split("T")[0];
+  const [printOpen, setPrintOpen] = useState(false);
+  const printRef = useRef(null);
+
+  useEffect(() => {
+    if (!printOpen) return;
+    const onDocClick = (e) => {
+      if (printRef.current && !printRef.current.contains(e.target)) setPrintOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setPrintOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [printOpen]);
+
   return (
     <div className="topbar">
       <div className="logo">G</div>
@@ -115,6 +150,7 @@ const VisitTopbar = memo(function VisitTopbar({
       </div>
       {(hasActiveVisit || latestVitals) && (
         <div
+          className="visit-status-pill"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -137,9 +173,12 @@ const VisitTopbar = memo(function VisitTopbar({
               borderRadius: "50%",
               background: "#16a34a",
               display: "inline-block",
+              flexShrink: 0,
             }}
           />
-          Checked in{latestVitals ? " · Vitals done" : ""}
+          <span className="visit-status-label">
+            Checked in{latestVitals ? " · Vitals done" : ""}
+          </span>
         </div>
       )}
       <div className="sep" />
@@ -157,9 +196,71 @@ const VisitTopbar = memo(function VisitTopbar({
         >
           ✦ Gini AI
         </button>
-        <button className="btn" onClick={onPrint}>
-          🖨 Print Rx
-        </button>
+        {onPasteNotes && (
+          <button className="btn" onClick={onPasteNotes} title="Paste clinical notes to auto-fill">
+            📋 Paste
+          </button>
+        )}
+        <div ref={printRef} style={{ position: "relative" }}>
+          <button
+            className="btn"
+            onClick={() => setPrintOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={printOpen}
+          >
+            🖨 Print ▾
+          </button>
+          {printOpen && (
+            <div
+              role="menu"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                minWidth: 180,
+                background: "#fff",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(15, 23, 42, 0.12)",
+                padding: 4,
+                zIndex: 100,
+              }}
+            >
+              <button
+                className="print-menu-item"
+                onClick={() => {
+                  setPrintOpen(false);
+                  onPrintRx?.();
+                }}
+                style={printMenuItemStyle}
+              >
+                📄 Prescription
+              </button>
+              <button
+                className="print-menu-item"
+                onClick={() => {
+                  // Don't close before invoking — keeping the user-gesture intact
+                  // ensures window.open in printMedCard isn't popup-blocked.
+                  onPrintMedCard?.();
+                  setPrintOpen(false);
+                }}
+                style={printMenuItemStyle}
+              >
+                💊 Medicine Card
+              </button>
+              <button
+                className="print-menu-item"
+                onClick={() => {
+                  onPrintBoth?.();
+                  setPrintOpen(false);
+                }}
+                style={printMenuItemStyle}
+              >
+                🖨 Both
+              </button>
+            </div>
+          )}
+        </div>
         {onEndVisit && (
           <button className="btn-p" onClick={onEndVisit}>
             ✓ End Visit

@@ -18,7 +18,6 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   flags,
   onOpenAI,
   onAddLab,
-  onPasteBiomarkers,
 }) {
   const latestV = vitals?.[0];
   const prevV = vitals?.[1];
@@ -195,7 +194,8 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     if (updatedTests.length <= 2) {
       text = updatedTests.map(fmtChange).join(", ");
     } else {
-      text = updatedTests.slice(0, 2).map(fmtChange).join(", ") + ` +${updatedTests.length - 2} more`;
+      text =
+        updatedTests.slice(0, 2).map(fmtChange).join(", ") + ` +${updatedTests.length - 2} more`;
     }
 
     const added = updatedTests
@@ -229,13 +229,6 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <button
-            className="bx"
-            onClick={onPasteBiomarkers}
-            title="Paste clinical text from HealthRay to extract biomarkers"
-          >
-            📋 Paste
-          </button>
           <button className="bx bx-p" onClick={onAddLab}>
             + Add Value
           </button>

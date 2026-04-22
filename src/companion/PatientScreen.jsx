@@ -9,6 +9,7 @@ import CompanionBell from "./CompanionBell.jsx";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 import { useCompanionPatient } from "../queries/hooks/useCompanionPatient.js";
 import { qk } from "../queries/keys.js";
+import DocStatusPill from "../components/ui/DocStatusPill.jsx";
 
 const tabs = [
   ["records", "📎 Docs"],
@@ -142,7 +143,6 @@ const PHASE_BADGE = {
 const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc }) {
   const docs = patientData.documents || [];
   const pendingExtractions = useCompanionStore((s) => s.pendingExtractions);
-  const retryExtraction = useCompanionStore((s) => s.retryExtraction);
   const acceptMismatchedExtraction = useCompanionStore((s) => s.acceptMismatchedExtraction);
   const rejectMismatchedExtraction = useCompanionStore((s) => s.rejectMismatchedExtraction);
   const [mismatchReview, setMismatchReview] = useState(null);
@@ -245,7 +245,17 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
           !pending && !sentinelMismatch && ext?.extraction_status === "pending"
             ? { status: "extracting", phase: "extracting" }
             : null;
-        const state = pending || sentinelMismatch || sentinelPending;
+        // Pick up failed state persisted to the DB so the Retry button shows
+        // even after a page refresh on the companion tablet.
+        const sentinelFailed =
+          !pending && !sentinelMismatch && !sentinelPending && ext?.extraction_status === "failed"
+            ? {
+                status: "failed",
+                phase: "failed",
+                error: ext.error_message || "Extraction failed",
+              }
+            : null;
+        const state = pending || sentinelMismatch || sentinelPending || sentinelFailed;
         const phaseChip =
           state && state.status !== "failed"
             ? PHASE_BADGE[state.phase] || PHASE_BADGE.extracting
@@ -307,17 +317,24 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
                       </span>
                     )}
                     {state?.status === "failed" && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          retryExtraction(doc.id);
+                      // Same pill + Retry button users see on /visit?tab=labs,
+                      // /opd, /docs, /dashboard. Reads extracted_data from
+                      // the DB (persisted by companionStore on failure), so
+                      // it works even after a page refresh. Falls back to
+                      // the in-memory error string so freshly-failed tasks
+                      // show the message immediately.
+                      <DocStatusPill
+                        doc={{
+                          id: doc.id,
+                          extracted_data: {
+                            extraction_status: "failed",
+                            error_message: ext?.error_message || state.error || "Extraction failed",
+                            retry_count: ext?.retry_count || 3,
+                          },
                         }}
-                        className="patient__doc-badge patient__doc-badge--retry"
-                        title={state.error || "Retry extraction"}
-                      >
-                        ⚠️ Retry
-                      </button>
+                        patientId={patientData.id}
+                        size="sm"
+                      />
                     )}
                   </div>
                 )}
@@ -341,7 +358,7 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
                   </div>
                 )}
               </div>
-              {(doc.storage_path || doc.source === "healthray") && (
+              {doc.storage_path && (
                 <button onClick={() => onViewDoc(doc)} className="patient__doc-view-btn">
                   View
                 </button>

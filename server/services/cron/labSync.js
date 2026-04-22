@@ -25,8 +25,13 @@ import {
   downloadAndStoreLabPdf,
 } from "../lab/db.js";
 import { createLogger } from "../logger.js";
+import { tryAcquireCronLock, yieldToApp } from "./lowPriority.js";
 
 const { log } = createLogger("Lab Sync");
+
+// Pause between items so the Node event loop can service user HTTP requests
+// before the next sync item grabs CPU/DB again.
+const YIELD_BETWEEN_ITEMS_MS = 300;
 
 // ── Status tracking ──────────────────────────────────────────────────────────
 const status = {
@@ -162,6 +167,12 @@ export async function runLabSync(dateStr) {
     return;
   }
 
+  // Global cron advisory lock — ensures only one cron job (lab / healthray /
+  // backfill / recovery) touches the DB at a time. If another job is holding
+  // the lock, we skip this tick and let the next 5-min run pick up the work.
+  const releaseLock = await tryAcquireCronLock("Lab Sync");
+  if (!releaseLock) return;
+
   status.isRunning = true;
   status.lastRun = new Date().toISOString();
   const date = dateStr || todayIST();
@@ -181,13 +192,20 @@ export async function runLabSync(dateStr) {
       return status.lastResult;
     }
 
-    const batchResults = await runBatch(newCases, 5, processCase);
-
+    // Process sequentially, yielding to the event loop between cases so user
+    // requests stay responsive while the background sync drains.
     let written = 0;
     let errors = 0;
-    for (const r of batchResults) {
-      if (r.status === "fulfilled" && r.value?.written) written += r.value.written;
-      if (r.status === "rejected" || r.value?.error) errors++;
+    for (const c of newCases) {
+      try {
+        const r = await processCase(c);
+        if (r?.written) written += r.written;
+        if (r?.error) errors++;
+      } catch (e) {
+        errors++;
+        log("Case", `error: ${e.message}`);
+      }
+      await yieldToApp(YIELD_BETWEEN_ITEMS_MS);
     }
 
     status.lastResult = { date, cases: newCases.length, written, errors };
@@ -202,6 +220,7 @@ export async function runLabSync(dateStr) {
     throw e;
   } finally {
     status.isRunning = false;
+    await releaseLock();
   }
 }
 
@@ -267,85 +286,94 @@ export async function retryPendingLabCases() {
   const pending = await getPendingLabCases();
   if (!pending.length) return;
 
+  // Respect the global cron lock so recovery never runs alongside the main sync.
+  const releaseLock = await tryAcquireCronLock("Lab Recovery");
+  if (!releaseLock) return;
+
   log("Recovery", `${pending.length} pending cases to retry`);
 
-  for (const row of pending) {
-    try {
-      const caseDate = row.case_date
-        ? typeof row.case_date === "string"
-          ? row.case_date.slice(0, 10)
-          : row.case_date.toISOString().slice(0, 10)
-        : null;
-
-      // Bump retry counter first; if the cap is hit the row will be marked
-      // abandoned and skipped on subsequent ticks.
-      const bump = await bumpLabCaseRetry(row.case_no);
-      if (bump?.retry_abandoned) {
-        log("Recovery", `${row.patient_case_no}: retry cap reached, abandoning`);
-        continue;
-      }
-
-      // Re-attempt patient match — covers orphan rows from before file_no
-      // matching was prioritised (and rows where the OPD sync hadn't yet
-      // created the patient on the first pass).
-      let patientId = row.patient_id;
-      const patientObj = row.raw_list_json?.patient || null;
-      if (!patientId && patientObj) {
-        patientId =
-          (await matchLabPatient(patientObj.healthray_uid, row.patient_case_no, patientObj)) ||
-          (await ensureLabPatient(patientObj));
-      }
-
-      let detail;
+  try {
+    for (const row of pending) {
       try {
-        detail = await fetchLabCaseDetail(row.case_uid, row.lab_case_id, row.lab_user_id);
+        const caseDate = row.case_date
+          ? typeof row.case_date === "string"
+            ? row.case_date.slice(0, 10)
+            : row.case_date.toISOString().slice(0, 10)
+          : null;
+
+        // Bump retry counter first; if the cap is hit the row will be marked
+        // abandoned and skipped on subsequent ticks.
+        const bump = await bumpLabCaseRetry(row.case_no);
+        if (bump?.retry_abandoned) {
+          log("Recovery", `${row.patient_case_no}: retry cap reached, abandoning`);
+          continue;
+        }
+
+        // Re-attempt patient match — covers orphan rows from before file_no
+        // matching was prioritised (and rows where the OPD sync hadn't yet
+        // created the patient on the first pass).
+        let patientId = row.patient_id;
+        const patientObj = row.raw_list_json?.patient || null;
+        if (!patientId && patientObj) {
+          patientId =
+            (await matchLabPatient(patientObj.healthray_uid, row.patient_case_no, patientObj)) ||
+            (await ensureLabPatient(patientObj));
+        }
+
+        let detail;
+        try {
+          detail = await fetchLabCaseDetail(row.case_uid, row.lab_case_id, row.lab_user_id);
+        } catch (e) {
+          log("Recovery", `${row.patient_case_no}: still failing — ${e.message}`);
+          continue;
+        }
+
+        // Recompute source from richer detail payload
+        const detailSource = classifyCaseSource(detail);
+        const caseSource = detailSource === "unknown" ? row.case_source || "unknown" : detailSource;
+        if (caseSource && caseSource !== row.case_source) {
+          await setLabCaseSource(row.case_no, caseSource);
+        }
+
+        const results = parseLabCaseResults(detail);
+        const appointmentId =
+          row.appointment_id || (await linkLabAppointment(detail.healthray_order_id));
+        const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
+
+        const { expected, ready } = countInhouseProgress(detail);
+        const inhouseComplete = expected > 0 && ready >= expected;
+
+        if (caseSource === "outsource") {
+          await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
+          await abandonLabCase(row.case_no, "outsource-only");
+        } else if (patientId && (written > 0 || inhouseComplete)) {
+          await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
+        }
+
+        // Download PDF if not already stored
+        if (patientId && !row.pdf_storage_path) {
+          downloadAndStoreLabPdf(
+            patientId,
+            row.case_no,
+            row.case_uid,
+            row.lab_case_id,
+            row.lab_user_id,
+            row.pdf_file_name,
+            caseDate,
+          ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
+        }
+
+        log(
+          "Recovery",
+          `${row.patient_case_no} | src=${caseSource} | ${ready}/${expected} ready | ${written} written | retry=${bump?.retry_count}`,
+        );
       } catch (e) {
-        log("Recovery", `${row.patient_case_no}: still failing — ${e.message}`);
-        continue;
+        log("Recovery", `${row.patient_case_no} error: ${e.message}`);
       }
-
-      // Recompute source from richer detail payload
-      const detailSource = classifyCaseSource(detail);
-      const caseSource = detailSource === "unknown" ? row.case_source || "unknown" : detailSource;
-      if (caseSource && caseSource !== row.case_source) {
-        await setLabCaseSource(row.case_no, caseSource);
-      }
-
-      const results = parseLabCaseResults(detail);
-      const appointmentId =
-        row.appointment_id || (await linkLabAppointment(detail.healthray_order_id));
-      const written = await syncLabCaseResults(patientId, appointmentId, caseDate, results);
-
-      const { expected, ready } = countInhouseProgress(detail);
-      const inhouseComplete = expected > 0 && ready >= expected;
-
-      if (caseSource === "outsource") {
-        await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
-        await abandonLabCase(row.case_no, "outsource-only");
-      } else if (patientId && (written > 0 || inhouseComplete)) {
-        await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
-      }
-
-      // Download PDF if not already stored
-      if (patientId && !row.pdf_storage_path) {
-        downloadAndStoreLabPdf(
-          patientId,
-          row.case_no,
-          row.case_uid,
-          row.lab_case_id,
-          row.lab_user_id,
-          row.pdf_file_name,
-          caseDate,
-        ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
-      }
-
-      log(
-        "Recovery",
-        `${row.patient_case_no} | src=${caseSource} | ${ready}/${expected} ready | ${written} written | retry=${bump?.retry_count}`,
-      );
-    } catch (e) {
-      log("Recovery", `${row.patient_case_no} error: ${e.message}`);
+      await yieldToApp(YIELD_BETWEEN_ITEMS_MS);
     }
+  } finally {
+    await releaseLock();
   }
 }
 

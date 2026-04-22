@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import CustomCalendar from "../ui/CustomCalendar";
+import { useIsMobile } from "../../hooks/useIsMobile.js";
 
 const T = "#009e8c";
 const TL = "#e6f6f4";
@@ -53,8 +55,6 @@ if (typeof document !== "undefined" && !document.getElementById("live-dash-kf"))
   animation: ldShimmer 1.4s ease-in-out infinite;
   overflow: hidden;
 }
-.ld-cal-day { transition: background .1s; }
-.ld-cal-day:hover:not(:disabled) { background: #e6f6f4; }
 `;
   document.head.appendChild(s);
 }
@@ -202,161 +202,7 @@ function SectionTitle({ children, right }) {
 }
 
 function Shim({ w = "100%", h = 12, r = 6, style }) {
-  return (
-    <div
-      className="ld-shim"
-      style={{ width: w, height: h, borderRadius: r, ...style }}
-    />
-  );
-}
-
-function CustomCalendar({ value, maxDate, onSelect, onClose }) {
-  const initial = value ? new Date(value + "T00:00:00") : new Date();
-  const [view, setView] = useState(() => ({
-    y: initial.getFullYear(),
-    m: initial.getMonth(),
-  }));
-  const max = maxDate ? new Date(maxDate + "T00:00:00") : null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
-  const first = new Date(view.y, view.m, 1);
-  const startDow = first.getDay(); // 0 = Sun
-  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
-  const prevMonthDays = new Date(view.y, view.m, 0).getDate();
-  const cells = [];
-  for (let i = 0; i < startDow; i++) {
-    cells.push({ day: prevMonthDays - startDow + 1 + i, outside: true, date: null });
-  }
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateObj = new Date(view.y, view.m, d);
-    cells.push({ day: d, outside: false, date: dateObj });
-  }
-  while (cells.length % 7 !== 0 || cells.length < 42) {
-    const d = cells.length - startDow - daysInMonth + 1;
-    cells.push({ day: d, outside: true, date: null });
-    if (cells.length >= 42) break;
-  }
-  const step = (delta) => {
-    const next = new Date(view.y, view.m + delta, 1);
-    setView({ y: next.getFullYear(), m: next.getMonth() });
-  };
-  const selected = value ? new Date(value + "T00:00:00") : null;
-  const sameDay = (a, b) =>
-    a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: "calc(100% + 6px)",
-        right: 0,
-        zIndex: 50,
-        background: WH,
-        border: `1px solid ${BD}`,
-        borderRadius: 10,
-        boxShadow: "0 8px 24px rgba(0,0,0,.12)",
-        padding: 12,
-        width: 260,
-        fontFamily: FB,
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 8,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => step(-1)}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: INK2,
-            fontSize: 16,
-            padding: "2px 8px",
-          }}
-        >
-          ‹
-        </button>
-        <div style={{ fontSize: 12, fontWeight: 700, color: INK }}>
-          {monthNames[view.m]} {view.y}
-        </div>
-        <button
-          type="button"
-          onClick={() => step(1)}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: INK2,
-            fontSize: 16,
-            padding: "2px 8px",
-          }}
-        >
-          ›
-        </button>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
-        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-          <div
-            key={i}
-            style={{
-              fontSize: 9,
-              fontWeight: 700,
-              textAlign: "center",
-              color: INK3,
-              padding: "4px 0",
-              letterSpacing: ".06em",
-            }}
-          >
-            {d}
-          </div>
-        ))}
-        {cells.map((c, i) => {
-          const disabled = c.outside || (max && c.date && c.date > max);
-          const isSel = !c.outside && sameDay(c.date, selected);
-          const isToday = !c.outside && sameDay(c.date, today);
-          return (
-            <button
-              key={i}
-              type="button"
-              className="ld-cal-day"
-              disabled={disabled}
-              onClick={() => {
-                if (disabled || !c.date) return;
-                const y = c.date.getFullYear();
-                const mo = String(c.date.getMonth() + 1).padStart(2, "0");
-                const da = String(c.date.getDate()).padStart(2, "0");
-                onSelect(`${y}-${mo}-${da}`);
-                onClose();
-              }}
-              style={{
-                fontFamily: FM,
-                fontSize: 11,
-                padding: "7px 0",
-                border: isToday && !isSel ? `1px solid ${T}` : "1px solid transparent",
-                borderRadius: 6,
-                background: isSel ? T : "transparent",
-                color: isSel ? WH : c.outside ? "#c4cdd8" : disabled ? "#c4cdd8" : INK,
-                cursor: disabled ? "default" : "pointer",
-                fontWeight: isSel || isToday ? 700 : 500,
-              }}
-            >
-              {c.day}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
+  return <div className="ld-shim" style={{ width: w, height: h, borderRadius: r, ...style }} />;
 }
 
 // Biomarker directionality map (true = lower value is better).
@@ -411,6 +257,11 @@ export default function LiveDashboard({
   };
   const todayIso = toLocalIso(new Date());
   const isToday = !date || date === todayIso;
+  const isMobile = useIsMobile();
+  const isSmall = useIsMobile(480);
+  const grid5 = isSmall ? "1fr 1fr" : isMobile ? "1fr 1fr 1fr" : "repeat(5,1fr)";
+  const grid3 = isMobile ? "1fr" : "1fr 1fr 1fr";
+  const grid2 = isSmall ? "1fr" : "1fr 1fr";
   const [calOpen, setCalOpen] = useState(false);
   useEffect(() => {
     if (!calOpen) return;
@@ -593,7 +444,7 @@ export default function LiveDashboard({
       style={{
         flex: 1,
         overflowY: "auto",
-        padding: "16px 18px",
+        padding: isMobile ? "12px 10px" : "16px 18px",
         display: "flex",
         flexDirection: "column",
         gap: 12,
@@ -608,6 +459,8 @@ export default function LiveDashboard({
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          flexWrap: "wrap",
+          gap: 8,
         }}
       >
         <div>
@@ -802,7 +655,7 @@ export default function LiveDashboard({
 
       {isPending ? (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: grid5, gap: 10 }}>
             {Array.from({ length: 5 }).map((_, i) => (
               <Card key={i}>
                 <Shim w="60%" h={24} />
@@ -811,7 +664,7 @@ export default function LiveDashboard({
               </Card>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: grid3, gap: 10 }}>
             {Array.from({ length: 3 }).map((_, i) => (
               <Card key={i}>
                 <Shim w="50%" h={12} />
@@ -827,7 +680,7 @@ export default function LiveDashboard({
             <div style={{ height: 6 }} />
             <Shim w="90%" h={10} />
           </Card>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 10 }}>
             {Array.from({ length: 2 }).map((_, col) => (
               <Card key={col}>
                 <Shim w="45%" h={12} />
@@ -842,568 +695,671 @@ export default function LiveDashboard({
           </div>
         </>
       ) : (
-      <>
-      {/* ── 5-stat row ────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(5,1fr)",
-          gap: 10,
-          flexShrink: 0,
-        }}
-      >
-        <Stat val={m.total} label="Today's patients" />
-        <Stat val={m.withHba1c} subVal={m.total} label="HbA1c on file" valColor={coverageColor} />
-        <Stat
-          val={m.gettingWorse.length}
-          label="Getting worse ↑"
-          valColor={m.gettingWorse.length ? RE : INK3}
-          bg={m.gettingWorse.length ? REL : WH}
-          labelColor={m.gettingWorse.length ? RE : INK3}
-        />
-        <Stat
-          val={m.stableTrend}
-          label="Stable (±5%)"
-          valColor={m.stableTrend ? AM : INK3}
-          bg={m.stableTrend ? AML : WH}
-          labelColor={m.stableTrend ? AM : INK3}
-        />
-        <Stat
-          val={m.gettingBetter.length}
-          label="Getting better ↓"
-          valColor={m.gettingBetter.length ? GN : INK3}
-          bg={m.gettingBetter.length ? GNL : WH}
-          labelColor={m.gettingBetter.length ? GN : INK3}
-        />
-      </div>
-
-      {/* ── Middle row: rings + flow ──────────────────────────── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 10,
-          flexShrink: 0,
-        }}
-      >
-        <Card style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Ring pct={m.pctCoverage} color={coverageColor} centerLabel="data" />
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Biomarker Coverage</div>
-            <div style={{ fontSize: 11, color: INK3 }}>
-              {m.withHba1c} of {m.total} patients have HbA1c on file
-            </div>
-            {m.noData > 0 ? (
-              <div style={{ fontSize: 11, color: RE, marginTop: 6, fontWeight: 600 }}>
-                ⚠ {m.noData} missing — enter before visit
-              </div>
-            ) : m.total > 0 ? (
-              <div style={{ fontSize: 11, color: GN, marginTop: 6 }}>✓ All patients have data</div>
-            ) : null}
-          </div>
-        </Card>
-
-        <Card style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Ring pct={m.pctBetter} color={GN} centerLabel="better" />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>HbA1c Trend</div>
-            <div style={{ fontSize: 11, color: INK3, marginBottom: 6 }}>
-              {m.trendable} patients with prior value
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                <span style={{ color: GN, fontWeight: 600 }}>📈 Better</span>
-                <span style={{ fontFamily: FM, color: GN, fontWeight: 600 }}>
-                  {m.gettingBetter.length} · {m.pctBetter}%
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                <span style={{ color: AM, fontWeight: 600 }}>→ Stable</span>
-                <span style={{ fontFamily: FM, color: AM, fontWeight: 600 }}>
-                  {m.stableTrend} · {m.pctStable}%
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                <span style={{ color: RE, fontWeight: 600 }}>📉 Worse</span>
-                <span style={{ fontFamily: FM, color: RE, fontWeight: 600 }}>
-                  {m.gettingWorse.length} · {m.pctWorse}%
-                </span>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <SectionTitle>Today&apos;s visit flow</SectionTitle>
-          {flowRow("seen", "Seen", GN)}
-          {flowRow("in_visit", "With doctor", "#7c3aed")}
-          {flowRow("checkedin", "Checked in", SK)}
-          {flowRow("pending", "Pending", INK3)}
-          {m.total === 0 && <div style={{ fontSize: 11, color: INK3 }}>No appointments today</div>}
-        </Card>
-      </div>
-
-      {/* ── Getting worse / Getting better (HbA1c) ────────────── */}
-      {/* Shared trend summary bar */}
-      <Card>
-        <SectionTitle
-          right={
-            <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-              {m.trendable} of {m.total} with prior HbA1c
-            </span>
-          }
-        >
-          HbA1c trend — today
-        </SectionTitle>
-        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 14, flex: "0 0 auto" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: RE, lineHeight: 1 }}>
-                {m.pctWorse}%
-              </div>
-              <div style={{ fontSize: 9, color: INK3, marginTop: 3, textTransform: "uppercase", letterSpacing: ".06em" }}>
-                Worse · {m.gettingWorse.length}
-              </div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: AM, lineHeight: 1 }}>
-                {m.pctStable}%
-              </div>
-              <div style={{ fontSize: 9, color: INK3, marginTop: 3, textTransform: "uppercase", letterSpacing: ".06em" }}>
-                Stable · {m.stableTrend}
-              </div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: GN, lineHeight: 1 }}>
-                {m.pctBetter}%
-              </div>
-              <div style={{ fontSize: 9, color: INK3, marginTop: 3, textTransform: "uppercase", letterSpacing: ".06em" }}>
-                Better · {m.gettingBetter.length}
-              </div>
-            </div>
-          </div>
-          <div style={{ flex: 1, marginLeft: 4 }}>
-            <div
-              style={{
-                height: 10,
-                display: "flex",
-                borderRadius: 5,
-                overflow: "hidden",
-                background: BG,
-              }}
-            >
-              {m.pctWorse > 0 && (
-                <div style={{ width: `${m.pctWorse}%`, background: RE, transition: "width .6s" }} />
-              )}
-              {m.pctStable > 0 && (
-                <div style={{ width: `${m.pctStable}%`, background: AM, transition: "width .6s" }} />
-              )}
-              {m.pctBetter > 0 && (
-                <div style={{ width: `${m.pctBetter}%`, background: GN, transition: "width .6s" }} />
-              )}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 9, color: INK3 }}>
-              <span>Avg Δ worse: <span style={{ color: RE, fontFamily: FM, fontWeight: 600 }}>+{m.avgDeltaWorse.toFixed(2)}%</span></span>
-              <span>Avg Δ better: <span style={{ color: GN, fontFamily: FM, fontWeight: 600 }}>{m.avgDeltaBetter.toFixed(2)}%</span></span>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <Card>
-          <SectionTitle
-            right={
-              <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                {m.gettingWorse.length} patients · {m.pctWorse}%
-              </span>
-            }
-          >
-            📉 Getting worse — HbA1c
-          </SectionTitle>
+        <>
+          {/* ── 5-stat row ────────────────────────────────────────── */}
           <div
             style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 8,
-              marginBottom: 8,
-              paddingBottom: 8,
-              borderBottom: `1px solid ${BD}`,
+              display: "grid",
+              gridTemplateColumns: grid5,
+              gap: 10,
+              flexShrink: 0,
             }}
           >
-            <div style={{ fontFamily: FM, fontSize: 24, fontWeight: 500, color: RE, lineHeight: 1 }}>
-              {m.gettingWorse.length}
-            </div>
-            <div style={{ fontSize: 10, color: INK3 }}>
-              of {m.trendable} trended · avg{" "}
-              <span style={{ color: RE, fontFamily: FM, fontWeight: 600 }}>
-                +{m.avgDeltaWorse.toFixed(2)}%
-              </span>
-            </div>
+            <Stat val={m.total} label="Today's patients" />
+            <Stat
+              val={m.withHba1c}
+              subVal={m.total}
+              label="HbA1c on file"
+              valColor={coverageColor}
+            />
+            <Stat
+              val={m.gettingWorse.length}
+              label="Getting worse ↑"
+              valColor={m.gettingWorse.length ? RE : INK3}
+              bg={m.gettingWorse.length ? REL : WH}
+              labelColor={m.gettingWorse.length ? RE : INK3}
+            />
+            <Stat
+              val={m.stableTrend}
+              label="Stable (±5%)"
+              valColor={m.stableTrend ? AM : INK3}
+              bg={m.stableTrend ? AML : WH}
+              labelColor={m.stableTrend ? AM : INK3}
+            />
+            <Stat
+              val={m.gettingBetter.length}
+              label="Getting better ↓"
+              valColor={m.gettingBetter.length ? GN : INK3}
+              bg={m.gettingBetter.length ? GNL : WH}
+              labelColor={m.gettingBetter.length ? GN : INK3}
+            />
           </div>
-          <Bar pct={m.pctWorse} color={RE} />
-          <div style={{ height: 8 }} />
-          {m.gettingWorse.length === 0 ? (
-            <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
-              No HbA1c deterioration today
-            </div>
-          ) : (
-            (showAllWorse ? m.gettingWorse : m.gettingWorse.slice(0, LIMIT)).map((r) => {
-              const delta = (r.hba1c - r.prevHba1c).toFixed(1);
-              return (
-                <div
-                  key={r.id}
-                  className="ld-row"
-                  onClick={() => select(r)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "7px 10px",
-                    background: REL,
-                    border: `1px solid ${RE}22`,
-                    borderRadius: 7,
-                    marginBottom: 6,
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: FM, fontSize: 12, color: INK2 }}>
-                      {r.prevHba1c}% → <span style={{ color: RE, fontWeight: 600 }}>{r.hba1c}%</span>
-                    </div>
-                    <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}>
-                      +{delta} ↑
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-          {m.gettingWorse.length > LIMIT && (
-            <button
-              type="button"
-              onClick={() => setShowAllWorse((v) => !v)}
-              style={{
-                background: "none",
-                border: "none",
-                padding: "4px 0",
-                marginTop: 2,
-                fontSize: 10,
-                color: RE,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              {showAllWorse ? "Show less" : `+${m.gettingWorse.length - LIMIT} more`}
-            </button>
-          )}
-        </Card>
 
-        <Card>
-          <SectionTitle
-            right={
-              <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                {m.gettingBetter.length} patients · {m.pctBetter}%
-              </span>
-            }
-          >
-            📈 Getting better — HbA1c
-          </SectionTitle>
+          {/* ── Middle row: rings + flow ──────────────────────────── */}
           <div
             style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: 8,
-              marginBottom: 8,
-              paddingBottom: 8,
-              borderBottom: `1px solid ${BD}`,
+              display: "grid",
+              gridTemplateColumns: grid3,
+              gap: 10,
+              flexShrink: 0,
             }}
           >
-            <div style={{ fontFamily: FM, fontSize: 24, fontWeight: 500, color: GN, lineHeight: 1 }}>
-              {m.gettingBetter.length}
-            </div>
-            <div style={{ fontSize: 10, color: INK3 }}>
-              of {m.trendable} trended · avg{" "}
-              <span style={{ color: GN, fontFamily: FM, fontWeight: 600 }}>
-                {m.avgDeltaBetter.toFixed(2)}%
-              </span>
-            </div>
+            <Card style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <Ring pct={m.pctCoverage} color={coverageColor} centerLabel="data" />
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                  Biomarker Coverage
+                </div>
+                <div style={{ fontSize: 11, color: INK3 }}>
+                  {m.withHba1c} of {m.total} patients have HbA1c on file
+                </div>
+                {m.noData > 0 ? (
+                  <div style={{ fontSize: 11, color: RE, marginTop: 6, fontWeight: 600 }}>
+                    ⚠ {m.noData} missing — enter before visit
+                  </div>
+                ) : m.total > 0 ? (
+                  <div style={{ fontSize: 11, color: GN, marginTop: 6 }}>
+                    ✓ All patients have data
+                  </div>
+                ) : null}
+              </div>
+            </Card>
+
+            <Card style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <Ring pct={m.pctBetter} color={GN} centerLabel="better" />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>HbA1c Trend</div>
+                <div style={{ fontSize: 11, color: INK3, marginBottom: 6 }}>
+                  {m.trendable} patients with prior value
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: GN, fontWeight: 600 }}>📈 Better</span>
+                    <span style={{ fontFamily: FM, color: GN, fontWeight: 600 }}>
+                      {m.gettingBetter.length} · {m.pctBetter}%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: AM, fontWeight: 600 }}>→ Stable</span>
+                    <span style={{ fontFamily: FM, color: AM, fontWeight: 600 }}>
+                      {m.stableTrend} · {m.pctStable}%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: RE, fontWeight: 600 }}>📉 Worse</span>
+                    <span style={{ fontFamily: FM, color: RE, fontWeight: 600 }}>
+                      {m.gettingWorse.length} · {m.pctWorse}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <SectionTitle>Today&apos;s visit flow</SectionTitle>
+              {flowRow("seen", "Seen", GN)}
+              {flowRow("in_visit", "With doctor", "#7c3aed")}
+              {flowRow("checkedin", "Checked in", SK)}
+              {flowRow("pending", "Pending", INK3)}
+              {m.total === 0 && (
+                <div style={{ fontSize: 11, color: INK3 }}>No appointments today</div>
+              )}
+            </Card>
           </div>
-          <Bar pct={m.pctBetter} color={GN} />
-          <div style={{ height: 8 }} />
-          {m.gettingBetter.length === 0 ? (
-            <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
-              No HbA1c improvement today
-            </div>
-          ) : (
-            (showAllBetter ? m.gettingBetter : m.gettingBetter.slice(0, LIMIT)).map((r) => {
-              const delta = (r.hba1c - r.prevHba1c).toFixed(1);
-              return (
+
+          {/* ── Getting worse / Getting better (HbA1c) ────────────── */}
+          {/* Shared trend summary bar */}
+          <Card>
+            <SectionTitle
+              right={
+                <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                  {m.trendable} of {m.total} with prior HbA1c
+                </span>
+              }
+            >
+              HbA1c trend — today
+            </SectionTitle>
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 14, flex: "0 0 auto" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      fontFamily: FM,
+                      fontSize: 20,
+                      fontWeight: 500,
+                      color: RE,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {m.pctWorse}%
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: INK3,
+                      marginTop: 3,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    Worse · {m.gettingWorse.length}
+                  </div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      fontFamily: FM,
+                      fontSize: 20,
+                      fontWeight: 500,
+                      color: AM,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {m.pctStable}%
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: INK3,
+                      marginTop: 3,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    Stable · {m.stableTrend}
+                  </div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      fontFamily: FM,
+                      fontSize: 20,
+                      fontWeight: 500,
+                      color: GN,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {m.pctBetter}%
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: INK3,
+                      marginTop: 3,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    Better · {m.gettingBetter.length}
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: 1, marginLeft: 4 }}>
                 <div
-                  key={r.id}
-                  className="ld-row"
-                  onClick={() => select(r)}
+                  style={{
+                    height: 10,
+                    display: "flex",
+                    borderRadius: 5,
+                    overflow: "hidden",
+                    background: BG,
+                  }}
+                >
+                  {m.pctWorse > 0 && (
+                    <div
+                      style={{ width: `${m.pctWorse}%`, background: RE, transition: "width .6s" }}
+                    />
+                  )}
+                  {m.pctStable > 0 && (
+                    <div
+                      style={{ width: `${m.pctStable}%`, background: AM, transition: "width .6s" }}
+                    />
+                  )}
+                  {m.pctBetter > 0 && (
+                    <div
+                      style={{ width: `${m.pctBetter}%`, background: GN, transition: "width .6s" }}
+                    />
+                  )}
+                </div>
+                <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "7px 10px",
-                    background: GNL,
-                    border: `1px solid ${GN}22`,
-                    borderRadius: 7,
-                    marginBottom: 6,
+                    marginTop: 6,
+                    fontSize: 9,
+                    color: INK3,
                   }}
                 >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: FM, fontSize: 12, color: INK2 }}>
-                      {r.prevHba1c}% → <span style={{ color: GN, fontWeight: 600 }}>{r.hba1c}%</span>
-                    </div>
-                    <div style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}>
-                      {delta} ↓
-                    </div>
-                  </div>
+                  <span>
+                    Avg Δ worse:{" "}
+                    <span style={{ color: RE, fontFamily: FM, fontWeight: 600 }}>
+                      +{m.avgDeltaWorse.toFixed(2)}%
+                    </span>
+                  </span>
+                  <span>
+                    Avg Δ better:{" "}
+                    <span style={{ color: GN, fontFamily: FM, fontWeight: 600 }}>
+                      {m.avgDeltaBetter.toFixed(2)}%
+                    </span>
+                  </span>
                 </div>
-              );
-            })
-          )}
-          {m.gettingBetter.length > LIMIT && (
-            <button
-              type="button"
-              onClick={() => setShowAllBetter((v) => !v)}
-              style={{
-                background: "none",
-                border: "none",
-                padding: "4px 0",
-                marginTop: 2,
-                fontSize: 10,
-                color: GN,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              {showAllBetter ? "Show less" : `+${m.gettingBetter.length - LIMIT} more`}
-            </button>
-          )}
-        </Card>
-      </div>
-
-      {/* ── Needs attention + On track ────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <Card>
-          <SectionTitle
-            right={
-              <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                {m.needsAttention.length} patients
-              </span>
-            }
-          >
-            ⚠ Needs extra attention
-          </SectionTitle>
-          {m.needsAttention.length === 0 ? (
-            <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
-              ✓ All controlled patients today
+              </div>
             </div>
-          ) : (
-            (showAllAttention ? m.needsAttention : m.needsAttention.slice(0, LIMIT)).map((r) => {
-              const trend =
-                r.prevHba1c && r.hba1c > r.prevHba1c
-                  ? "↑"
-                  : r.prevHba1c && r.hba1c < r.prevHba1c
-                    ? "↓"
-                    : "";
-              const reasons = [];
-              if (r.hba1c > 9) reasons.push("HbA1c " + r.hba1c + "%");
-              if (r.prevHba1c && r.hba1c > r.prevHba1c)
-                reasons.push("Rising from " + r.prevHba1c + "%");
-              if (r.medPct != null && r.medPct < 60) reasons.push(r.medPct + "% compliance");
-              return (
-                <div
-                  key={r.id}
-                  className="ld-row"
-                  onClick={() => select(r)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "8px 10px",
-                    background: REL,
-                    border: `1px solid ${RE}22`,
-                    borderRadius: 7,
-                    marginBottom: 6,
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: RE }}>{reasons.join(" · ")}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: FM, fontSize: 13, color: RE, fontWeight: 600 }}>
-                      {r.hba1c}% <span style={{ color: trend === "↑" ? RE : GN }}>{trend}</span>
-                    </div>
-                    <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-          {m.needsAttention.length > LIMIT && (
-            <button
-              type="button"
-              onClick={() => setShowAllAttention((v) => !v)}
-              style={{
-                background: "none",
-                border: "none",
-                padding: "4px 0",
-                marginTop: 2,
-                fontSize: 10,
-                color: RE,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              {showAllAttention ? "Show less" : `+${m.needsAttention.length - LIMIT} more`}
-            </button>
-          )}
+          </Card>
 
-          {m.missingBio.length > 0 && (
-            <div style={{ borderTop: `1px solid ${BD}`, paddingTop: 8, marginTop: 4 }}>
+          <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 10 }}>
+            <Card>
+              <SectionTitle
+                right={
+                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                    {m.gettingWorse.length} patients · {m.pctWorse}%
+                  </span>
+                }
+              >
+                📉 Getting worse — HbA1c
+              </SectionTitle>
               <div
                 style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: AM,
-                  textTransform: "uppercase",
-                  letterSpacing: ".08em",
-                  marginBottom: 6,
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 8,
+                  marginBottom: 8,
+                  paddingBottom: 8,
+                  borderBottom: `1px solid ${BD}`,
                 }}
               >
-                ⚠ No biomarkers entered yet
-              </div>
-              {(showAllMissing ? m.missingBio : m.missingBio.slice(0, LIMIT)).map((r) => (
                 <div
-                  key={r.id}
-                  className="ld-row"
-                  onClick={() => select(r)}
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "7px 10px",
-                    background: AML,
-                    border: `1px solid ${AM}22`,
-                    borderRadius: 7,
-                    marginBottom: 6,
+                    fontFamily: FM,
+                    fontSize: 24,
+                    fontWeight: 500,
+                    color: RE,
+                    lineHeight: 1,
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: AM }}>Enter HbA1c before visit</div>
-                  </div>
-                  <div style={{ fontSize: 10, color: INK3, fontFamily: FM }}>{r.time}</div>
+                  {m.gettingWorse.length}
                 </div>
-              ))}
-              {m.missingBio.length > LIMIT && (
+                <div style={{ fontSize: 10, color: INK3 }}>
+                  of {m.trendable} trended · avg{" "}
+                  <span style={{ color: RE, fontFamily: FM, fontWeight: 600 }}>
+                    +{m.avgDeltaWorse.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+              <Bar pct={m.pctWorse} color={RE} />
+              <div style={{ height: 8 }} />
+              {m.gettingWorse.length === 0 ? (
+                <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
+                  No HbA1c deterioration today
+                </div>
+              ) : (
+                (showAllWorse ? m.gettingWorse : m.gettingWorse.slice(0, LIMIT)).map((r) => {
+                  const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+                  return (
+                    <div
+                      key={r.id}
+                      className="ld-row"
+                      onClick={() => select(r)}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "7px 10px",
+                        background: REL,
+                        border: `1px solid ${RE}22`,
+                        borderRadius: 7,
+                        marginBottom: 6,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                        <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontFamily: FM, fontSize: 12, color: INK2 }}>
+                          {r.prevHba1c}% →{" "}
+                          <span style={{ color: RE, fontWeight: 600 }}>{r.hba1c}%</span>
+                        </div>
+                        <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}>
+                          +{delta} ↑
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {m.gettingWorse.length > LIMIT && (
                 <button
                   type="button"
-                  onClick={() => setShowAllMissing((v) => !v)}
+                  onClick={() => setShowAllWorse((v) => !v)}
                   style={{
                     background: "none",
                     border: "none",
                     padding: "4px 0",
                     marginTop: 2,
                     fontSize: 10,
-                    color: AM,
+                    color: RE,
                     fontWeight: 600,
                     cursor: "pointer",
                   }}
                 >
-                  {showAllMissing ? "Show less" : `+${m.missingBio.length - LIMIT} more`}
+                  {showAllWorse ? "Show less" : `+${m.gettingWorse.length - LIMIT} more`}
                 </button>
               )}
-            </div>
-          )}
-        </Card>
+            </Card>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <Card style={{ flex: 1 }}>
-            <SectionTitle
-              right={
-                <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                  {m.onTrack.length} patients
-                </span>
-              }
-            >
-              ✅ On track today
-            </SectionTitle>
-            {m.onTrack.length === 0 ? (
-              <div style={{ fontSize: 12, color: INK3 }}>No patients at target today</div>
-            ) : (
-              (showAllOnTrack ? m.onTrack : m.onTrack.slice(0, LIMIT)).map((r) => {
-                const trend =
-                  r.prevHba1c && r.hba1c > r.prevHba1c
-                    ? "↑"
-                    : r.prevHba1c && r.hba1c < r.prevHba1c
-                      ? "↓"
-                      : "";
-                return (
+            <Card>
+              <SectionTitle
+                right={
+                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                    {m.gettingBetter.length} patients · {m.pctBetter}%
+                  </span>
+                }
+              >
+                📈 Getting better — HbA1c
+              </SectionTitle>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 8,
+                  marginBottom: 8,
+                  paddingBottom: 8,
+                  borderBottom: `1px solid ${BD}`,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: FM,
+                    fontSize: 24,
+                    fontWeight: 500,
+                    color: GN,
+                    lineHeight: 1,
+                  }}
+                >
+                  {m.gettingBetter.length}
+                </div>
+                <div style={{ fontSize: 10, color: INK3 }}>
+                  of {m.trendable} trended · avg{" "}
+                  <span style={{ color: GN, fontFamily: FM, fontWeight: 600 }}>
+                    {m.avgDeltaBetter.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+              <Bar pct={m.pctBetter} color={GN} />
+              <div style={{ height: 8 }} />
+              {m.gettingBetter.length === 0 ? (
+                <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
+                  No HbA1c improvement today
+                </div>
+              ) : (
+                (showAllBetter ? m.gettingBetter : m.gettingBetter.slice(0, LIMIT)).map((r) => {
+                  const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+                  return (
+                    <div
+                      key={r.id}
+                      className="ld-row"
+                      onClick={() => select(r)}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "7px 10px",
+                        background: GNL,
+                        border: `1px solid ${GN}22`,
+                        borderRadius: 7,
+                        marginBottom: 6,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                        <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontFamily: FM, fontSize: 12, color: INK2 }}>
+                          {r.prevHba1c}% →{" "}
+                          <span style={{ color: GN, fontWeight: 600 }}>{r.hba1c}%</span>
+                        </div>
+                        <div style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}>
+                          {delta} ↓
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {m.gettingBetter.length > LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllBetter((v) => !v)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: "4px 0",
+                    marginTop: 2,
+                    fontSize: 10,
+                    color: GN,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {showAllBetter ? "Show less" : `+${m.gettingBetter.length - LIMIT} more`}
+                </button>
+              )}
+            </Card>
+          </div>
+
+          {/* ── Needs attention + On track ────────────────────────── */}
+          <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 10 }}>
+            <Card>
+              <SectionTitle
+                right={
+                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                    {m.needsAttention.length} patients
+                  </span>
+                }
+              >
+                ⚠ Needs extra attention
+              </SectionTitle>
+              {m.needsAttention.length === 0 ? (
+                <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
+                  ✓ All controlled patients today
+                </div>
+              ) : (
+                (showAllAttention ? m.needsAttention : m.needsAttention.slice(0, LIMIT)).map(
+                  (r) => {
+                    const trend =
+                      r.prevHba1c && r.hba1c > r.prevHba1c
+                        ? "↑"
+                        : r.prevHba1c && r.hba1c < r.prevHba1c
+                          ? "↓"
+                          : "";
+                    const reasons = [];
+                    if (r.hba1c > 9) reasons.push("HbA1c " + r.hba1c + "%");
+                    if (r.prevHba1c && r.hba1c > r.prevHba1c)
+                      reasons.push("Rising from " + r.prevHba1c + "%");
+                    if (r.medPct != null && r.medPct < 60) reasons.push(r.medPct + "% compliance");
+                    return (
+                      <div
+                        key={r.id}
+                        className="ld-row"
+                        onClick={() => select(r)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "8px 10px",
+                          background: REL,
+                          border: `1px solid ${RE}22`,
+                          borderRadius: 7,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                          <div style={{ fontSize: 10, color: RE }}>{reasons.join(" · ")}</div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontFamily: FM, fontSize: 13, color: RE, fontWeight: 600 }}>
+                            {r.hba1c}%{" "}
+                            <span style={{ color: trend === "↑" ? RE : GN }}>{trend}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                        </div>
+                      </div>
+                    );
+                  },
+                )
+              )}
+              {m.needsAttention.length > LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAttention((v) => !v)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: "4px 0",
+                    marginTop: 2,
+                    fontSize: 10,
+                    color: RE,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {showAllAttention ? "Show less" : `+${m.needsAttention.length - LIMIT} more`}
+                </button>
+              )}
+
+              {m.missingBio.length > 0 && (
+                <div style={{ borderTop: `1px solid ${BD}`, paddingTop: 8, marginTop: 4 }}>
                   <div
-                    key={r.id}
-                    className="ld-row"
-                    onClick={() => select(r)}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "7px 10px",
-                      background: GNL,
-                      border: `1px solid ${GN}22`,
-                      borderRadius: 7,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: AM,
+                      textTransform: "uppercase",
+                      letterSpacing: ".08em",
                       marginBottom: 6,
                     }}
                   >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                      <div style={{ fontSize: 10, color: GN }}>
-                        {r.category === "ctrl" ? "Controlled" : "Improving"}
-                      </div>
-                    </div>
-                    <div style={{ fontFamily: FM, fontSize: 13, color: GN, fontWeight: 600 }}>
-                      {r.hba1c}% <span>{trend}</span>
-                    </div>
+                    ⚠ No biomarkers entered yet
                   </div>
-                );
-              })
-            )}
-            {m.onTrack.length > LIMIT && (
-              <button
-                type="button"
-                onClick={() => setShowAllOnTrack((v) => !v)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: "4px 0",
-                  marginTop: 2,
-                  fontSize: 10,
-                  color: GN,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                {showAllOnTrack ? "Show less" : `+${m.onTrack.length - LIMIT} more`}
-              </button>
-            )}
-          </Card>
+                  {(showAllMissing ? m.missingBio : m.missingBio.slice(0, LIMIT)).map((r) => (
+                    <div
+                      key={r.id}
+                      className="ld-row"
+                      onClick={() => select(r)}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "7px 10px",
+                        background: AML,
+                        border: `1px solid ${AM}22`,
+                        borderRadius: 7,
+                        marginBottom: 6,
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                        <div style={{ fontSize: 10, color: AM }}>Enter HbA1c before visit</div>
+                      </div>
+                      <div style={{ fontSize: 10, color: INK3, fontFamily: FM }}>{r.time}</div>
+                    </div>
+                  ))}
+                  {m.missingBio.length > LIMIT && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllMissing((v) => !v)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: "4px 0",
+                        marginTop: 2,
+                        fontSize: 10,
+                        color: AM,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {showAllMissing ? "Show less" : `+${m.missingBio.length - LIMIT} more`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </Card>
 
-        </div>
-      </div>
-      </>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <Card style={{ flex: 1 }}>
+                <SectionTitle
+                  right={
+                    <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                      {m.onTrack.length} patients
+                    </span>
+                  }
+                >
+                  ✅ On track today
+                </SectionTitle>
+                {m.onTrack.length === 0 ? (
+                  <div style={{ fontSize: 12, color: INK3 }}>No patients at target today</div>
+                ) : (
+                  (showAllOnTrack ? m.onTrack : m.onTrack.slice(0, LIMIT)).map((r) => {
+                    const trend =
+                      r.prevHba1c && r.hba1c > r.prevHba1c
+                        ? "↑"
+                        : r.prevHba1c && r.hba1c < r.prevHba1c
+                          ? "↓"
+                          : "";
+                    return (
+                      <div
+                        key={r.id}
+                        className="ld-row"
+                        onClick={() => select(r)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "7px 10px",
+                          background: GNL,
+                          border: `1px solid ${GN}22`,
+                          borderRadius: 7,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                          <div style={{ fontSize: 10, color: GN }}>
+                            {r.category === "ctrl" ? "Controlled" : "Improving"}
+                          </div>
+                        </div>
+                        <div style={{ fontFamily: FM, fontSize: 13, color: GN, fontWeight: 600 }}>
+                          {r.hba1c}% <span>{trend}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                {m.onTrack.length > LIMIT && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllOnTrack((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: "4px 0",
+                      marginTop: 2,
+                      fontSize: 10,
+                      color: GN,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {showAllOnTrack ? "Show less" : `+${m.onTrack.length - LIMIT} more`}
+                  </button>
+                )}
+              </Card>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

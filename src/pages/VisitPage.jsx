@@ -57,8 +57,10 @@ import {
   TemplateModal,
   LabExtractionReviewModal,
   PasteBiomarkersModal,
+  ClinicalExtractionReviewModal,
 } from "../components/visit/modals";
 import { useVisitMutations } from "../hooks/useVisitMutations";
+import { printMedCard } from "../components/visit/medCardPrint";
 
 // ── Tab definitions ──
 const SY_STATUS_OPTS = [
@@ -271,6 +273,7 @@ export default function VisitPage() {
   const [doctorNote, setDoctorNote] = useState("");
   const [modal, setModal] = useState(null); // { type, data? }
   const [labExtractSaving, setLabExtractSaving] = useState(false);
+  const [clinicalExtractSaving, setClinicalExtractSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const scrollRef = useRef(null);
   const noteTimerRef = useRef(null);
@@ -540,6 +543,21 @@ export default function VisitPage() {
   const openEndModal = useCallback(() => setShowEndModal(true), []);
   const closeEndModal = useCallback(() => setShowEndModal(false), []);
   const handlePrint = useCallback(() => window.print(), []);
+  const handlePrintMedCard = useCallback(() => {
+    const patient = data?.patient;
+    const activeMeds = derived?.uniqueActiveMeds || [];
+    if (!patient) return;
+    printMedCard(patient, activeMeds);
+  }, [data, derived]);
+  const handlePrintBoth = useCallback(() => {
+    // Open the med-card popup synchronously so the user-gesture isn't lost,
+    // use a longer delay since the Rx dialog also queues up.
+    const patient = data?.patient;
+    const activeMeds = derived?.uniqueActiveMeds || [];
+    if (patient) printMedCard(patient, activeMeds, 700);
+    window.print();
+  }, [data, derived]);
+  const handlePasteNotes = useCallback(() => setModal({ type: "pasteText" }), []);
 
   // ── Scroll spy: update jumpTarget based on scroll position ──
   useEffect(() => {
@@ -652,7 +670,10 @@ export default function VisitPage() {
         latestVitals={latestV}
         onToggleAI={toggleAI}
         onEndVisit={hasActiveVisit ? openEndModal : null}
-        onPrint={handlePrint}
+        onPasteNotes={handlePasteNotes}
+        onPrintRx={handlePrint}
+        onPrintMedCard={handlePrintMedCard}
+        onPrintBoth={handlePrintBoth}
         visitStart={visitStart}
         hasActiveVisit={hasActiveVisit}
       />
@@ -787,7 +808,6 @@ export default function VisitPage() {
                 flags={flags}
                 onOpenAI={() => setAiOpen(true)}
                 onAddLab={() => setModal({ type: "addLab" })}
-                onPasteBiomarkers={() => setModal({ type: "pasteText" })}
               />
               {/* <VitalsTrendChart vitals={vitals} /> */}
               {/* <VisitCoordPrep prep={data.prep} /> */}
@@ -845,6 +865,7 @@ export default function VisitPage() {
           <div className={`panel ${tab === "labs" ? "on" : ""}`}>
             <VisitLabsPanel
               documents={documents}
+              patientId={patient?.id}
               labResults={labResults}
               labLatest={data.labLatest}
               labOrders={data.labOrders}
@@ -864,7 +885,7 @@ export default function VisitPage() {
                 </div>
                 <div className="scb">
                   {data.examFindings ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div className="visit-exam-grid">
                       {data.examFindings.map((ef, i) => (
                         <div
                           key={i}
@@ -891,7 +912,7 @@ export default function VisitPage() {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div className="visit-exam-grid">
                       <div
                         style={{
                           border: "1px solid var(--border)",
@@ -1156,6 +1177,7 @@ export default function VisitPage() {
           <div className={`panel ${tab === "docs" ? "on" : ""}`}>
             <VisitDocsPanel
               documents={documents}
+              patientId={patient?.id}
               onUploadReport={() => setModal({ type: "uploadReport" })}
             />
           </div>
@@ -1173,6 +1195,7 @@ export default function VisitPage() {
         patient={patient}
         doctor={doctor}
         summary={summary}
+        symptoms={data.symptoms || []}
         activeDx={activeDx}
         activeMeds={uniqueActiveMeds}
         stoppedMeds={uniqueStoppedMeds}
@@ -1348,11 +1371,11 @@ export default function VisitPage() {
         <PasteBiomarkersModal
           patientId={dbPatientId}
           onClose={closeModal}
-          onExtracted={({ extracted, doc_date }) => {
+          onExtracted={({ extracted, doc_date, raw_text }) => {
             closeModal();
             setModal({
-              type: "labReview",
-              data: { extracted, doc_date, source: "report_extract" },
+              type: "clinicalReview",
+              data: { extracted, doc_date, raw_text },
             });
           }}
         />
@@ -1425,6 +1448,190 @@ export default function VisitPage() {
               parts.push(`${savedVitals} vitals reading${savedVitals !== 1 ? "s" : ""}`);
             toast(parts.length ? `${parts.join(" + ")} saved` : "Nothing saved", "success");
             // Delayed second refresh to catch async backend autoExtractLab results
+            setTimeout(() => refreshData(), 3000);
+          }}
+        />
+      )}
+      {modal?.type === "clinicalReview" && (
+        <ClinicalExtractionReviewModal
+          extracted={modal.data.extracted}
+          doc_date={modal.data.doc_date}
+          currentSymptoms={data.symptoms || []}
+          currentDiagnoses={activeDx}
+          currentMedications={uniqueActiveMeds}
+          saving={clinicalExtractSaving}
+          onClose={closeModal}
+          onSave={async (picked) => {
+            setClinicalExtractSaving(true);
+            const docDate = modal.data.doc_date;
+            const counts = { sx: 0, dx: 0, meds: 0, stop: 0, labs: 0, vit: 0, inv: 0 };
+
+            // Symptoms
+            for (const s of picked.symptoms) {
+              const r = await mutations.addSymptom({
+                name: s.name,
+                since: s.since_date || null,
+                severity: s.severity || "Mild",
+                related_to: s.related_to || "",
+              });
+              if (r.success) counts.sx++;
+            }
+
+            // Diagnoses
+            for (const d of picked.diagnoses) {
+              const notes = [d.details, d.since ? `Since ${d.since}` : null]
+                .filter(Boolean)
+                .join(" · ");
+              const r = await mutations.addDiagnosis({
+                name: d.name,
+                status: d.status === "Absent" ? "Resolved" : "Newly Diagnosed",
+                category: "primary",
+                notes,
+                key_value: "",
+              });
+              if (r.success) counts.dx++;
+            }
+
+            // Medications
+            for (const m of picked.medications) {
+              const r = await mutations.addMedication({
+                name: m.name,
+                dose: m.dose || "",
+                frequency: m.frequency || "OD",
+                timing: m.timing || "",
+                route: m.route || "Oral",
+                started_date: docDate || null,
+              });
+              if (r.success) counts.meds++;
+            }
+
+            // Stop previous meds
+            for (const sm of picked.stopMeds) {
+              const r = await mutations.stopMedication(sm.id, {
+                reason: sm.reason || "Previous visit",
+              });
+              if (r.success) counts.stop++;
+            }
+
+            // Labs
+            for (const lab of picked.labs) {
+              try {
+                await api.post(`/api/patients/${dbPatientId}/labs`, {
+                  test_name: normalizeTestName(lab.test_name),
+                  result: String(lab.result_text || lab.result),
+                  unit: lab.unit || "",
+                  flag: lab.flag || "N",
+                  ref_range: lab.ref_range || "",
+                  test_date: lab.test_date || docDate || null,
+                  source: "report_extract",
+                });
+                counts.labs++;
+              } catch (e) {
+                console.error("Failed to save lab:", e.message);
+              }
+            }
+
+            // Vitals
+            for (const v of picked.vitals) {
+              try {
+                await api.post(`/api/visit/${dbPatientId}/vitals`, {
+                  bp_sys: v.bpSys ?? null,
+                  bp_dia: v.bpDia ?? null,
+                  weight: v.weight ?? null,
+                  height: v.height ?? null,
+                  bmi: v.bmi ?? null,
+                  waist: v.waist ?? null,
+                  body_fat: v.bodyFat ?? null,
+                  recorded_at: v.date || docDate || null,
+                });
+                counts.vit++;
+              } catch (e) {
+                console.error("Failed to save vitals:", e.message);
+              }
+            }
+
+            // Investigations (single batched call)
+            if (picked.investigations.length > 0) {
+              const r = await mutations.addInvestigations(
+                picked.investigations.map((x) => ({
+                  name: x.name,
+                  urgency: x.urgency || "routine",
+                })),
+              );
+              if (r.success) counts.inv = r.added || picked.investigations.length;
+            }
+
+            if (counts.labs > 0) {
+              try {
+                await api.post(`/api/visit/${dbPatientId}/biomarkers/refresh`);
+              } catch (e) {
+                console.error("Biomarker refresh failed:", e.message);
+              }
+            }
+
+            // Build a "confirmed" payload reflecting only what the doctor
+            // accepted in the review modal, then save it as a Scribe-tagged
+            // prescription PDF in the patient's documents. Anything the doctor
+            // unchecked is excluded from the printable record.
+            const totalPicked =
+              counts.sx +
+              counts.dx +
+              counts.meds +
+              counts.stop +
+              counts.labs +
+              counts.vit +
+              counts.inv;
+            if (totalPicked > 0) {
+              const srcExtracted = modal.data.extracted || {};
+              const confirmedParsed = {
+                symptoms: picked.symptoms,
+                diagnoses: picked.diagnoses,
+                medications: picked.medications,
+                previous_medications: picked.stopMeds.map((sm) => ({
+                  name: sm.name,
+                  status: "stopped",
+                  reason: sm.reason,
+                })),
+                labs: picked.labs.map((l) => ({
+                  test: l.test_name,
+                  value: l.result_text || l.result,
+                  unit: l.unit,
+                  date: l.test_date,
+                })),
+                vitals: picked.vitals,
+                investigations_to_order: picked.investigations,
+                lifestyle: srcExtracted.lifestyle || {},
+                follow_up: srcExtracted.follow_up || {},
+                advice: srcExtracted.advice || "",
+              };
+              api
+                .post(`/api/visit/${dbPatientId}/scribe-prescription`, {
+                  patient,
+                  doctor,
+                  parsed: confirmedParsed,
+                  raw_text: modal.data.raw_text || "",
+                  doc_date: docDate || null,
+                })
+                .catch((e) => console.error("Scribe prescription PDF save failed:", e.message));
+            }
+
+            await refreshData();
+            qc.invalidateQueries({ queryKey: qk.opd.all });
+            setClinicalExtractSaving(false);
+            closeModal();
+
+            const parts = [];
+            if (counts.sx) parts.push(`${counts.sx} symptom${counts.sx !== 1 ? "s" : ""}`);
+            if (counts.dx) parts.push(`${counts.dx} diagnos${counts.dx !== 1 ? "es" : "is"}`);
+            if (counts.meds) parts.push(`${counts.meds} med${counts.meds !== 1 ? "s" : ""}`);
+            if (counts.stop) parts.push(`${counts.stop} stopped`);
+            if (counts.labs) parts.push(`${counts.labs} lab${counts.labs !== 1 ? "s" : ""}`);
+            if (counts.vit) parts.push(`${counts.vit} vitals`);
+            if (counts.inv) parts.push(`${counts.inv} test${counts.inv !== 1 ? "s" : ""}`);
+            // PDF generation disabled — parsed payload + raw text are still
+            // saved server-side. Re-add "Rx PDF" line when prescription output returns.
+            // if (totalPicked > 0) parts.push("Rx PDF");
+            toast(parts.length ? `Saved: ${parts.join(", ")}` : "Nothing saved", "success");
             setTimeout(() => refreshData(), 3000);
           }}
         />

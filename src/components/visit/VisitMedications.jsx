@@ -326,8 +326,7 @@ function summarizeHistoryEntry(h) {
 function MedHistoryPanel({ history, current }) {
   if (!history?.length) return null;
   const sorted = [...history].sort((a, b) => (a.at < b.at ? 1 : -1));
-  const fmtRx = (s) =>
-    [s?.dose, s?.frequency, s?.timing].filter(Boolean).join(" · ") || "—";
+  const fmtRx = (s) => [s?.dose, s?.frequency, s?.timing].filter(Boolean).join(" · ") || "—";
 
   // Build version list newest→oldest: current state, then each "from" snapshot
   const versions = [
@@ -482,8 +481,7 @@ const VisitMedications = memo(function VisitMedications({
       if (!priorByKey[k] || (d && d > priorByKey[k]._d)) priorByKey[k] = { ...m, _d: d };
     }
 
-    const fmtRx = (m) =>
-      [m.dose, m.frequency, m.timing].filter(Boolean).join(" · ") || "—";
+    const fmtRx = (m) => [m.dose, m.frequency, m.timing].filter(Boolean).join(" · ") || "—";
 
     // Build a diff field list for a changed med vs its prior version.
     // Only include fields that actually changed — no extracted details.
@@ -517,7 +515,9 @@ const VisitMedications = memo(function VisitMedications({
 
     const parts = [];
     if (added.length === 1) {
-      parts.push(`${added[0].name} ${added[0].dose || ""}${added[0].frequency ? " " + added[0].frequency : ""} added`.trim());
+      parts.push(
+        `${added[0].name} ${added[0].dose || ""}${added[0].frequency ? " " + added[0].frequency : ""} added`.trim(),
+      );
     } else if (added.length > 1) {
       parts.push(`${added.length} meds added`);
     }
@@ -646,125 +646,130 @@ const VisitMedications = memo(function VisitMedications({
                 const hasHistory = Array.isArray(m.history) && m.history.length > 0;
                 const isOpen = !!expandedHist[rowKey];
                 return (
-                <div key={rowKey}>
-                <div className="mtr">
-                  <div className="mmain">
-                    {hasHistory ? (
-                      <button
-                        type="button"
-                        aria-label={isOpen ? "Hide history" : "Show history"}
-                        onClick={() => toggleHist(rowKey)}
-                        style={{
-                          width: 18,
-                          height: 18,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          border: "none",
-                          background: "transparent",
-                          cursor: "pointer",
-                          color: "var(--t2)",
-                          fontSize: 12,
-                          padding: 0,
-                          marginRight: 2,
-                          transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
-                          transition: "transform 0.15s ease",
-                        }}
-                        title={`${m.history.length} previous version${m.history.length === 1 ? "" : "s"}`}
-                      >
-                        ▶
-                      </button>
-                    ) : (
-                      <span style={{ width: 18, display: "inline-block" }} />
-                    )}
-                    <div
-                      className="mdot"
-                      style={{ background: MED_COLORS[i % MED_COLORS.length] }}
-                    />
-                    <div>
-                      <div className="mbrand">{m.name}</div>
-                      <div className="mgen">
-                        {m.composition || ""}
-                        {m.route ? ` · ${m.route}` : ""}
-                        {m.clinical_note && (
-                          <span style={{ color: "var(--primary)", display: "block", marginTop: 2 }}>
-                            {m.clinical_note}
-                          </span>
+                  <div key={rowKey}>
+                    <div className="mtr">
+                      <div className="mmain">
+                        {hasHistory ? (
+                          <button
+                            type="button"
+                            aria-label={isOpen ? "Hide history" : "Show history"}
+                            onClick={() => toggleHist(rowKey)}
+                            style={{
+                              width: 18,
+                              height: 18,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              color: "var(--t2)",
+                              fontSize: 12,
+                              padding: 0,
+                              marginRight: 2,
+                              transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+                              transition: "transform 0.15s ease",
+                            }}
+                            title={`${m.history.length} previous version${m.history.length === 1 ? "" : "s"}`}
+                          >
+                            ▶
+                          </button>
+                        ) : (
+                          <span style={{ width: 18, display: "inline-block" }} />
                         )}
+                        <div
+                          className="mdot"
+                          style={{ background: MED_COLORS[i % MED_COLORS.length] }}
+                        />
+                        <div>
+                          <div className="mbrand">{m.name}</div>
+                          <div className="mgen">
+                            {m.composition || ""}
+                            {m.route ? ` · ${m.route}` : ""}
+                            {m.clinical_note && (
+                              <span
+                                style={{ color: "var(--primary)", display: "block", marginTop: 2 }}
+                              >
+                                {m.clinical_note}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mtd">{m.dose || "—"}</div>
+                      <div className="mtd">
+                        {m.frequency || "OD"}
+                        {m.timing && (
+                          <>
+                            <br />
+                            <span style={{ fontSize: 10, color: "var(--t3)" }}>{m.timing}</span>
+                          </>
+                        )}
+                      </div>
+                      <div>
+                        {m.for_diagnosis?.length > 0 && (
+                          <span className="mfor">{m.for_diagnosis[0]}</span>
+                        )}
+                        {m.prescribed_date && (
+                          <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 3 }}>
+                            Since {fmtDate(m.prescribed_date)}
+                            {m.prescriber ? ` · ${m.prescriber}` : ""}
+                            {m.external_doctor && (
+                              <span style={{ color: "var(--red)" }}>
+                                {" "}
+                                · Dr. {m.external_doctor}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
+                      <div className="macts">
+                        {!isExternal && (
+                          <>
+                            <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                              Edit
+                            </button>
+                            <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                              Stop
+                            </button>
+                            <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
+                              Delete
+                            </button>
+                          </>
+                        )}
+                        {isExternal && (
+                          <button
+                            className="ma"
+                            style={{
+                              color: "var(--t3)",
+                              borderColor: "var(--border)",
+                              background: "var(--bg)",
+                            }}
+                            title="External medication - cannot modify"
+                          >
+                            View Only
+                          </button>
+                        )}
+                        {(m.route === "SC" ||
+                          m.route === "Subcutaneous" ||
+                          (m.name || "").toLowerCase().includes("inj")) &&
+                          !isExternal && (
+                            <button
+                              className="ma"
+                              style={{
+                                color: "var(--amber)",
+                                borderColor: "var(--amb-bd)",
+                                background: "var(--amb-lt)",
+                              }}
+                            >
+                              Pause
+                            </button>
+                          )}
                       </div>
                     </div>
+                    {isOpen && <MedHistoryPanel history={m.history} current={m} />}
                   </div>
-                  <div className="mtd">{m.dose || "—"}</div>
-                  <div className="mtd">
-                    {m.frequency || "OD"}
-                    {m.timing && (
-                      <>
-                        <br />
-                        <span style={{ fontSize: 10, color: "var(--t3)" }}>{m.timing}</span>
-                      </>
-                    )}
-                  </div>
-                  <div>
-                    {m.for_diagnosis?.length > 0 && (
-                      <span className="mfor">{m.for_diagnosis[0]}</span>
-                    )}
-                    {m.prescribed_date && (
-                      <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 3 }}>
-                        Since {fmtDate(m.prescribed_date)}
-                        {m.prescriber ? ` · ${m.prescriber}` : ""}
-                        {m.external_doctor && (
-                          <span style={{ color: "var(--red)" }}> · Dr. {m.external_doctor}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
-                  <div className="macts">
-                    {!isExternal && (
-                      <>
-                        <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
-                          Edit
-                        </button>
-                        <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
-                          Stop
-                        </button>
-                        <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
-                          Delete
-                        </button>
-                      </>
-                    )}
-                    {isExternal && (
-                      <button
-                        className="ma"
-                        style={{
-                          color: "var(--t3)",
-                          borderColor: "var(--border)",
-                          background: "var(--bg)",
-                        }}
-                        title="External medication - cannot modify"
-                      >
-                        View Only
-                      </button>
-                    )}
-                    {(m.route === "SC" ||
-                      m.route === "Subcutaneous" ||
-                      (m.name || "").toLowerCase().includes("inj")) &&
-                      !isExternal && (
-                        <button
-                          className="ma"
-                          style={{
-                            color: "var(--amber)",
-                            borderColor: "var(--amb-bd)",
-                            background: "var(--amb-lt)",
-                          }}
-                        >
-                          Pause
-                        </button>
-                      )}
-                  </div>
-                </div>
-                  {isOpen && <MedHistoryPanel history={m.history} current={m} />}
-                </div>
                 );
               })}
             </div>

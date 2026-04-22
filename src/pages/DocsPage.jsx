@@ -6,6 +6,8 @@ import { ts } from "../config/constants.js";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 import { getDocStatus } from "../utils/docStatus.js";
 import { usePatientFullData } from "../queries/hooks/usePatientFullData.js";
+import DocStatusPill from "../components/ui/DocStatusPill.jsx";
+import MismatchActions from "../components/visit/MismatchActions.jsx";
 
 export default function DocsPage() {
   const patient = usePatientStore((s) => s.patient);
@@ -23,10 +25,7 @@ export default function DocsPage() {
     <>
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
       <div>
-        <div
-          className="docs__title"
-          style={{ display: "flex", alignItems: "center", gap: 10 }}
-        >
+        <div className="docs__title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span>📎 Patient Documents</span>
           {isFetching && (
             <span
@@ -342,27 +341,8 @@ export default function DocsPage() {
                               <span className="docs__doc-filename">{doc.file_name}</span>
                             )}
                             {status.label && (
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  marginLeft: 8,
-                                  padding: "2px 8px",
-                                  background: status.bg,
-                                  color: status.color,
-                                  border: `1px solid ${status.border}`,
-                                  borderRadius: 10,
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                }}
-                                title={
-                                  needsReview
-                                    ? "Extraction not applied — patient name on doc doesn't match. Review in the Companion app."
-                                    : isPending
-                                      ? "Extraction is still running — data will appear here once complete."
-                                      : "Data has been extracted and applied."
-                                }
-                              >
-                                {status.label}
+                              <span style={{ marginLeft: 8, display: "inline-flex" }}>
+                                <DocStatusPill doc={doc} patientId={dbPatientId} size="sm" />
                               </span>
                             )}
                           </div>
@@ -448,6 +428,33 @@ export default function DocsPage() {
                           </div>
                         )}
                         {doc.notes && !ed && <div className="docs__doc-notes">{doc.notes}</div>}
+                        {needsReview && (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              padding: "8px 10px",
+                              background: "#fff",
+                              border: "1px solid #fecaca",
+                              borderRadius: 6,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: "#b91c1c",
+                                fontWeight: 600,
+                                marginBottom: 6,
+                              }}
+                            >
+                              ⚠️ Patient name on document doesn't match — extraction not applied
+                              yet.
+                            </div>
+                            <MismatchActions
+                              doc={{ ...doc, patient_id: doc.patient_id || dbPatientId }}
+                              patient={patient}
+                            />
+                          </div>
+                        )}
                         <div className="docs__doc-actions">
                           {(doc.storage_path || doc.source === "healthray") && (
                             <button onClick={() => setViewingDoc(doc)} className="docs__btn--view">

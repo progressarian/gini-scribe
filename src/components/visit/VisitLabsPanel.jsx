@@ -4,6 +4,9 @@ import PdfViewerModal from "./PdfViewerModal";
 import { LAB_PANELS as PANELS } from "../../config/labOrder";
 import { getFallbackRange } from "../../config/labRanges";
 import { getDocStatus } from "../../utils/docStatus";
+import DocStatusPill from "../ui/DocStatusPill";
+import MismatchActions from "./MismatchActions";
+import usePatientStore from "../../stores/patientStore";
 
 // Panel grouping config lives in src/config/labOrder.js — single source of
 // truth shared with Outcomes, Sidebar, Assess and the dashboard. See
@@ -211,6 +214,7 @@ function ResultRow({ r }) {
   const displayRange = r.ref_range || fallbackRange || "";
   return (
     <div
+      className="visit-lab-row"
       style={{
         display: "grid",
         gridTemplateColumns: "2fr 1fr 1fr 1fr",
@@ -294,6 +298,7 @@ function PanelBlock({ name, results, type }) {
         {date && <span style={{ fontSize: 11, color: "var(--t3)" }}>{fmtDate(date)}</span>}
       </div>
       <div
+        className="visit-lab-row visit-lab-head"
         style={{
           display: "grid",
           gridTemplateColumns: "2fr 1fr 1fr 1fr",
@@ -347,6 +352,7 @@ function findLabOrderForDate(labOrders, dateStr) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 const VisitLabsPanel = memo(function VisitLabsPanel({
   documents,
+  patientId,
   labResults,
   labLatest,
   labOrders,
@@ -354,6 +360,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
 }) {
   const [viewingDoc, setViewingDoc] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null); // null = "Latest"
+  const patient = usePatientStore((s) => s.patient);
 
   // On the Labs tab we want every uploaded document to be visible except
   // prescriptions (those belong to the Rx / visit history, not the lab view).
@@ -452,19 +459,13 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         : isPending
                           ? "1px solid #c4b5fd"
                           : undefined,
-                      background: needsReview
-                        ? "#fef2f2"
-                        : isPending
-                          ? "#f5f3ff"
-                          : undefined,
+                      background: needsReview ? "#fef2f2" : isPending ? "#f5f3ff" : undefined,
                     }}
                     onClick={() => openDoc(doc)}
                   >
                     <div className="report-icon ri-b">{needsReview ? "⚠️" : "🧪"}</div>
                     <div style={{ flex: 1 }}>
-                      <div className="report-nm">
-                        {doc.title || doc.file_name || "Lab Report"}
-                      </div>
+                      <div className="report-nm">{doc.title || doc.file_name || "Lab Report"}</div>
                       <div className="report-dt">
                         {fmtDate(doc.doc_date)}
                         {doc.source ? ` · ${doc.source}` : ""}
@@ -475,30 +476,28 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         {doc.notes ? ` · ${doc.notes}` : ""}
                       </div>
                       {needsReview && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#b91c1c",
-                            fontWeight: 600,
-                            marginTop: 3,
-                          }}
-                          title="Extraction not applied — review in the Companion app"
-                        >
-                          ⚠️ Awaiting review — extraction not applied
-                        </div>
+                        <>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#b91c1c",
+                              fontWeight: 600,
+                              marginTop: 3,
+                            }}
+                            title="Extraction not applied — patient name on doc doesn't match."
+                          >
+                            ⚠️ Name mismatch — extraction not applied
+                          </div>
+                          <MismatchActions
+                            doc={{ ...doc, patient_id: doc.patient_id || patientId }}
+                            patient={patient}
+                            compact
+                          />
+                        </>
                       )}
                     </div>
                     {status.label ? (
-                      <span
-                        className="report-status"
-                        style={{
-                          background: status.bg,
-                          color: status.color,
-                          borderColor: status.border,
-                        }}
-                      >
-                        {status.label}
-                      </span>
+                      <DocStatusPill doc={doc} patientId={patientId} size="sm" />
                     ) : (
                       <span
                         className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
@@ -544,20 +543,12 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         : isPending
                           ? "1px solid #c4b5fd"
                           : undefined,
-                      background: needsReview
-                        ? "#fef2f2"
-                        : isPending
-                          ? "#f5f3ff"
-                          : undefined,
+                      background: needsReview ? "#fef2f2" : isPending ? "#f5f3ff" : undefined,
                     }}
                     onClick={() => openDoc(doc)}
                   >
                     <div className="report-icon ri-r" style={{ background: "#fff0f5" }}>
-                      {needsReview
-                        ? "⚠️"
-                        : doc.title?.toLowerCase().includes("echo")
-                          ? "🫀"
-                          : "🫁"}
+                      {needsReview ? "⚠️" : doc.title?.toLowerCase().includes("echo") ? "🫀" : "🫁"}
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="report-nm">
@@ -569,30 +560,28 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         {doc.notes ? ` · ${doc.notes}` : ""}
                       </div>
                       {needsReview && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#b91c1c",
-                            fontWeight: 600,
-                            marginTop: 3,
-                          }}
-                          title="Extraction not applied — review in the Companion app"
-                        >
-                          ⚠️ Awaiting review — extraction not applied
-                        </div>
+                        <>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#b91c1c",
+                              fontWeight: 600,
+                              marginTop: 3,
+                            }}
+                            title="Extraction not applied — patient name on doc doesn't match."
+                          >
+                            ⚠️ Name mismatch — extraction not applied
+                          </div>
+                          <MismatchActions
+                            doc={{ ...doc, patient_id: doc.patient_id || patientId }}
+                            patient={patient}
+                            compact
+                          />
+                        </>
                       )}
                     </div>
                     {status.label ? (
-                      <span
-                        className="report-status"
-                        style={{
-                          background: status.bg,
-                          color: status.color,
-                          borderColor: status.border,
-                        }}
-                      >
-                        {status.label}
-                      </span>
+                      <DocStatusPill doc={doc} patientId={patientId} size="sm" />
                     ) : (
                       <span className="report-status rs-ab">Review</span>
                     )}

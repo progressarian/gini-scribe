@@ -147,7 +147,7 @@ function VitalsSparkline({ data, lines, unit }) {
           const tipX = Math.min(Math.max(cx - TW / 2, 0), W - TW);
           // anchor above topmost point in this column
           const topY = Math.min(
-            ...seriesPoints.map(({ pts }) => (pts[hoverIdx] ? pts[hoverIdx].y : H))
+            ...seriesPoints.map(({ pts }) => (pts[hoverIdx] ? pts[hoverIdx].y : H)),
           );
           const tipY = topY - TH - 14;
 
@@ -163,7 +163,14 @@ function VitalsSparkline({ data, lines, unit }) {
                 strokeDasharray="3,3"
                 opacity="0.5"
               />
-              <rect x={tipX + 1} y={tipY + 1} width={TW} height={TH} rx="7" fill="rgba(0,0,0,0.15)" />
+              <rect
+                x={tipX + 1}
+                y={tipY + 1}
+                width={TW}
+                height={TH}
+                rx="7"
+                fill="rgba(0,0,0,0.15)"
+              />
               <rect x={tipX} y={tipY} width={TW} height={TH} rx="7" fill="#1e293b" />
               {rows.map((r, idx) => (
                 <text

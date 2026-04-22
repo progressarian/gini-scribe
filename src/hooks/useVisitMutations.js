@@ -139,6 +139,20 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData],
   );
 
+  const addInvestigations = useCallback(
+    async (items) => {
+      try {
+        const { data } = await api.patch(`/api/visit/${patientId}/investigations`, { items });
+        await refreshData();
+        return { success: true, added: data?.added ?? 0 };
+      } catch {
+        toast("Failed to save investigations", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   const addReferral = useCallback(
     async (data) => {
       try {
@@ -224,6 +238,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     editMedication,
     stopMedication,
     deleteMedication,
+    addInvestigations,
     addReferral,
     uploadDocument,
     updateFollowUp,

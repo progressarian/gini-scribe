@@ -18,6 +18,7 @@ export function parseExtractedData(raw) {
 // Returns one of:
 //   { kind: "pending",   label: "⏳ Extracting…",   color, bg, border }
 //   { kind: "mismatch",  label: "⚠️ Needs Review", color, bg, border }
+//   { kind: "failed",    label: "❌ Failed",        color, bg, border, error, retryCount }
 //   { kind: "extracted", label: "✅ Extracted",     color, bg, border }
 //   { kind: "none",      label: null, ... }        (no extraction data yet)
 export function getDocStatus(doc) {
@@ -31,6 +32,18 @@ export function getDocStatus(doc) {
       color: "#b91c1c",
       bg: "#fee2e2",
       border: "#fecaca",
+    };
+  }
+  if (status === "failed") {
+    return {
+      kind: "failed",
+      label: "❌ Failed",
+      color: "#b91c1c",
+      bg: "#fee2e2",
+      border: "#fecaca",
+      error: ext.error_message || "Extraction failed",
+      retryCount: ext.retry_count || 0,
+      failedAt: ext.failed_at || null,
     };
   }
   if (status === "pending") {

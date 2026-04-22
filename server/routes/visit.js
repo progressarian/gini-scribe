@@ -6,6 +6,7 @@ import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
+import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
 import {
   syncBiomarkersFromLatestLabs,
   syncVitalsFromExtraction,
@@ -1045,6 +1046,167 @@ router.post("/visit/:patientId/document", async (req, res) => {
     res.json(doc);
   } catch (e) {
     handleError(res, e, "Upload document");
+  }
+});
+
+// ── PATCH /visit/:patientId/investigations — Append investigations_to_order on latest consultation ──
+// Accepts { items: [{name, urgency}] }. Merges into con_data.investigations_to_order of the
+// latest consultation, deduping by lowercase-trimmed name so repeated pastes don't stack duplicates.
+router.patch("/visit/:patientId/investigations", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const clean = items
+      .map((it) => ({
+        name: t(it?.name, 200),
+        urgency: t(it?.urgency, 50) || "routine",
+      }))
+      .filter((it) => it.name);
+    if (!clean.length) return res.status(400).json({ error: "items array is required" });
+
+    const existingRow = await pool.query(
+      `SELECT id, con_data FROM consultations
+       WHERE patient_id = $1
+       ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
+      [pid],
+    );
+    if (!existingRow.rows[0]) return res.status(404).json({ error: "No consultation found" });
+
+    const existing = Array.isArray(existingRow.rows[0].con_data?.investigations_to_order)
+      ? existingRow.rows[0].con_data.investigations_to_order
+      : [];
+    const seen = new Set(
+      existing.map((e) =>
+        String(e?.name || "")
+          .toLowerCase()
+          .trim(),
+      ),
+    );
+    const merged = [...existing];
+    for (const it of clean) {
+      const key = it.name.toLowerCase().trim();
+      if (!seen.has(key)) {
+        merged.push(it);
+        seen.add(key);
+      }
+    }
+
+    await pool.query(
+      `UPDATE consultations
+       SET con_data = jsonb_set(COALESCE(con_data, '{}'::jsonb), '{investigations_to_order}', $1::jsonb),
+           updated_at = NOW()
+       WHERE id = $2`,
+      [JSON.stringify(merged), existingRow.rows[0].id],
+    );
+    res.json({
+      success: true,
+      investigations_to_order: merged,
+      added: merged.length - existing.length,
+    });
+  } catch (e) {
+    handleError(res, e, "Patch investigations");
+  }
+});
+
+// ── POST /visit/:patientId/scribe-prescription ───────────────────────────────
+// Generates a sectioned PDF from the AI-extracted clinical payload and saves it
+// as a "prescription" document tagged source='scribe'. Called from the paste-
+// notes review modal AFTER the doctor confirms which items to apply, so the PDF
+// reflects what was actually accepted (not the raw AI guess).
+router.post("/visit/:patientId/scribe-prescription", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { patient, doctor, parsed, raw_text, doc_date } = req.body || {};
+    if (!parsed || typeof parsed !== "object") {
+      return res.status(400).json({ error: "parsed payload is required" });
+    }
+
+    // PDF generation disabled for now — only raw text + parsed analysis are saved.
+    // Re-enable when the prescription PDF output is needed again.
+    // const pdfBuffer = await buildPrescriptionPdf({
+    //   patient: patient || {},
+    //   doctor: doctor || {},
+    //   parsed,
+    //   doc_date,
+    // });
+
+    // Resolve the latest consultation so the doc can hang off it (mirrors the
+    // existing prescription→consultation linkage at documents.js:593).
+    const latestCon = await pool.query(
+      `SELECT id FROM consultations WHERE patient_id = $1
+       ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
+      [pid],
+    );
+    const consultationId = latestCon.rows[0]?.id || null;
+
+    const dateLabel = (() => {
+      const d = doc_date ? new Date(doc_date) : new Date();
+      return Number.isNaN(d.getTime())
+        ? new Date().toISOString().slice(0, 10)
+        : d.toISOString().slice(0, 10);
+    })();
+    const title = `Prescription — Scribe — ${dateLabel}`;
+    const fileName = `scribe-prescription-${Date.now()}.pdf`;
+
+    // Insert the documents row first so we have an id for the storage path.
+    const ins = await pool.query(
+      `INSERT INTO documents
+         (patient_id, consultation_id, doc_type, title, file_name, doc_date,
+          source, notes, extracted_text, extracted_data)
+       VALUES ($1,$2,'prescription',$3,$4,COALESCE($5::date, CURRENT_DATE),
+               'scribe','Created by Scribe',$6,$7::jsonb)
+       RETURNING *`,
+      [
+        pid,
+        consultationId,
+        t(title, 200),
+        t(fileName, 200),
+        n(doc_date),
+        raw_text ? String(raw_text).slice(0, 50000) : null,
+        JSON.stringify(parsed),
+      ],
+    );
+    const docRow = ins.rows[0];
+
+    // PDF upload disabled for now — document row is saved with raw_text +
+    // parsed payload only; no binary file is produced. Re-enable alongside
+    // buildPrescriptionPdf() above when prescription output is needed.
+    // if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+    //   const storagePath = `patients/${pid}/prescription/${Date.now()}_${fileName}`;
+    //   try {
+    //     const uploadResp = await fetch(
+    //       `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+    //       {
+    //         method: "POST",
+    //         headers: {
+    //           Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    //           "Content-Type": "application/pdf",
+    //           "x-upsert": "true",
+    //         },
+    //         body: pdfBuffer,
+    //       },
+    //     );
+    //     if (uploadResp.ok) {
+    //       await pool.query(
+    //         "UPDATE documents SET storage_path=$1, mime_type='application/pdf' WHERE id=$2",
+    //         [storagePath, docRow.id],
+    //       );
+    //       docRow.storage_path = storagePath;
+    //       docRow.mime_type = "application/pdf";
+    //     } else {
+    //       const errText = await uploadResp.text().catch(() => "");
+    //       console.warn("Scribe PDF upload failed:", uploadResp.status, errText.slice(0, 200));
+    //     }
+    //   } catch (uploadErr) {
+    //     console.warn("Scribe PDF upload error:", uploadErr.message);
+    //   }
+    // }
+
+    res.json(docRow);
+  } catch (e) {
+    handleError(res, e, "Save scribe prescription");
   }
 });
 

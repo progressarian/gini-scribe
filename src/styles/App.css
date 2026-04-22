@@ -21,12 +21,16 @@
   margin-bottom: 8px;
   padding-bottom: 8px;
   border-bottom: 2px solid #1e293b;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .header__brand {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .header__logo {
@@ -80,6 +84,17 @@
 .header__actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  max-width: 100%;
+  scrollbar-width: none;
+}
+.header__actions::-webkit-scrollbar {
+  display: none;
+}
+.header__actions > * {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .header__find-btn {
@@ -224,6 +239,8 @@
   background: linear-gradient(135deg, #eff6ff, #f0fdf4);
   border-radius: 8px;
   border: 1px solid #bfdbfe;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .patient-bar__avatar {
@@ -243,6 +260,12 @@
 .patient-bar__info {
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.patient-bar__info::-webkit-scrollbar {
+  display: none;
 }
 
 .patient-bar__name {
@@ -798,18 +821,29 @@
 }
 
 /* ============ TABS ============ */
+/* Horizontal scroll — 19 tabs never fit on narrow screens. Natural width per
+   tab + overflow-x:auto keeps each label readable and lets the user swipe
+   to reach off-screen tabs instead of wrapping onto a second row (which
+   stole vertical space and hid the content below). */
 .tabs {
   display: flex;
   gap: 0;
   margin-bottom: 10px;
   border-radius: 8px;
-  overflow: hidden;
   border: 1px solid #e2e8f0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-btn {
-  flex: 1;
-  padding: 8px 4px;
+  flex: 0 0 auto;
+  padding: 8px 10px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
@@ -820,6 +854,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
 }
 
 .tab-btn--active {
@@ -975,4 +1010,59 @@
 .visit-banner__btn--end {
   background: rgba(255, 255, 255, 0.15);
   padding: 4px 8px;
+}
+
+/* ============ RESPONSIVE — narrow screens ============ */
+/* Keep header / patient-bar / tabs on a single row each. When content
+   overflows horizontally, the row scrolls instead of wrapping onto multiple
+   lines — wrapping was stealing vertical height and pushing the page
+   content below the fold. */
+@media (max-width: 900px) {
+  .app {
+    padding: 6px 8px;
+  }
+  .header {
+    gap: 6px;
+  }
+  .header__title {
+    font-size: 14px;
+  }
+  .header__doctor {
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+  }
+  .header__spacer {
+    display: none;
+  }
+  .header__find-btn,
+  .header__save-btn,
+  .header__new-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .header__logout-btn {
+    padding: 6px 8px;
+  }
+  .tab-btn {
+    padding: 7px 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .header__doctor {
+    display: none;
+  }
+  .patient-bar__phone {
+    display: none;
+  }
+  .header__find-btn,
+  .header__save-btn,
+  .header__new-btn,
+  .header__logout-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
 }

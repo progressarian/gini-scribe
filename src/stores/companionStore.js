@@ -12,6 +12,7 @@ import { toast } from "./uiStore.js";
 import { docCategories } from "../companion/constants";
 import queryClient from "../queries/client.js";
 import { qk } from "../queries/keys.js";
+import { patientIdsMatch, patientNamesMatch } from "../utils/patientMatch.js";
 
 const LAB_CATEGORIES = ["blood_test", "thyroid", "lipid", "kidney", "hba1c", "urine"];
 const IMAGING_CATEGORIES = ["xray", "usg", "mri", "dexa", "ecg", "ncs", "eye"];
@@ -304,30 +305,27 @@ const useCompanionStore = create((set, get) => ({
     const selectedPatient = patientOverride || get().selectedPatient;
     if (!selectedPatient) return null;
 
-    // Primary check is NAME. If the printed patient name matches the
-    // selected patient, the doc is considered safe to attach even if the
-    // ID/UHID on the report differs (scanning artifacts, manual edits,
-    // multiple IDs per patient). Only flag for review when the name does
-    // not match. The ID is still captured and shown in the review modal
-    // for context.
     const reportName = (extracted?.patient_name || extracted?.name || "").trim();
     const selectedName = (selectedPatient.name || "").trim();
     const reportId = String(extracted?.patient_id || extracted?.patient_uhid || "").trim();
     const selectedId = String(selectedPatient.file_no || "").trim();
 
+    // Rule 1: if the patient IDs match, trust that the report belongs to
+    // this patient — even if the printed NAME differs (married-name
+    // change, OCR artefacts, name translated/transliterated). ID is the
+    // strong signal; skip the name check and skip the confirmation UI.
+    if (patientIdsMatch(reportId, selectedId)) return null;
+
     if (!reportName || !selectedName || reportName.length < 3) return null;
 
-    const rp = reportName.toLowerCase().split(/\s+/);
-    const sp = selectedName.toLowerCase().split(/\s+/);
-    const nameMatches = rp.some(
-      (a) => a.length > 2 && sp.some((b) => b.includes(a) || a.includes(b)),
-    );
-    if (nameMatches) return null;
+    // Rule 2: strip salutation prefixes (Mr/Mrs/Ms/Dr/Shri/Smt...) before
+    // comparing so "Mr. Harish Kumar" vs "Harish Kumar" doesn't trigger a
+    // false mismatch. See utils/patientMatch.js.
+    if (patientNamesMatch(reportName, selectedName)) return null;
 
     const mismatchedFields = ["name"];
-    if (reportId && selectedId) {
-      const norm = (x) => x.replace(/[^a-z0-9]/gi, "").toLowerCase();
-      if (norm(reportId) !== norm(selectedId)) mismatchedFields.push("id");
+    if (reportId && selectedId && !patientIdsMatch(reportId, selectedId)) {
+      mismatchedFields.push("id");
     }
 
     return {
@@ -537,10 +535,7 @@ const useCompanionStore = create((set, get) => ({
           pendingMeta: meta,
           error: null,
         });
-        toast(
-          `⚠️ Mismatch on ${fileName || "document"} — review on the document card`,
-          "warn",
-        );
+        toast(`⚠️ Mismatch on ${fileName || "document"} — review on the document card`, "warn");
         queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
         queryClient.invalidateQueries({ queryKey: ["companion", "mismatchReviews"] });
         return;
@@ -585,28 +580,65 @@ const useCompanionStore = create((set, get) => ({
       queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
     } catch (e) {
       console.error(`BG extraction failed for doc ${docId}:`, e);
+      const errorMessage = e.message || "Extraction failed";
+      // Persist failed state to DB so the status survives a page refresh
+      // and every doctor page (Visit/OPD/Docs/Dashboard) sees it — not just
+      // this companion session. Retry count reflects the client-side
+      // in-service retries (extractLab/Imaging/Rx already tried 3×).
+      try {
+        await api.patch(`/api/documents/${docId}`, {
+          extracted_data: {
+            extraction_status: "failed",
+            error_message: errorMessage,
+            retry_count: 3,
+            failed_at: new Date().toISOString(),
+          },
+        });
+      } catch (patchErr) {
+        console.warn(`Persist failed state for doc ${docId}:`, patchErr);
+      }
       get()._setPending(docId, {
         status: "failed",
         phase: "failed",
-        error: e.message || "Extraction failed",
+        error: errorMessage,
       });
-      toast(`Extraction failed for ${fileName || "document"} — retry from patient screen`, "error");
+      queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
+      queryClient.invalidateQueries({ queryKey: qk.patient.full(patientId) });
+      toast(`Extraction failed for ${fileName || "document"} — tap Retry on the doc card`, "error");
     }
   },
 
-  retryExtraction: (docId) => {
+  retryExtraction: async (docId) => {
     const entry = get().pendingExtractions[docId];
-    if (!entry?.task) {
-      toast("Cannot retry — original file is no longer in memory", "error");
-      return;
-    }
+    // Fall back to the currently-selected companion patient if the doc has
+    // no in-memory entry (e.g., user hit refresh before clicking Retry).
+    const patientId = entry?.patientId || get().selectedPatient?.id || null;
+    // Optimistic UI flip so the card immediately shows "Extracting…"
     get()._setPending(docId, {
       status: "extracting",
-      phase: entry.task.needsClassify ? "classifying" : "extracting",
+      phase: "extracting",
       error: null,
     });
-    set((s) => ({ _bgQueue: [...s._bgQueue, entry.task] }));
-    get()._drainBg();
+    try {
+      await api.post(`/api/documents/${docId}/retry-extract`);
+      get()._clearPending(docId);
+      if (patientId) {
+        queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
+        queryClient.invalidateQueries({ queryKey: qk.patient.full(patientId) });
+      } else {
+        // No patient id known — invalidate the whole companion family so
+        // whatever screen is open picks up the new state.
+        queryClient.invalidateQueries({ queryKey: qk.companion.all });
+      }
+    } catch (e) {
+      console.error(`Retry failed for doc ${docId}:`, e);
+      get()._setPending(docId, {
+        status: "failed",
+        phase: "failed",
+        error: e.response?.data?.error || e.message || "Retry failed",
+      });
+      toast("Retry failed — please try again", "error");
+    }
   },
 
   // Accept a mismatched document: run the sync phase that was skipped in
@@ -869,7 +901,10 @@ const useCompanionStore = create((set, get) => ({
       if (error) return { data: null, error };
       if (!data) return { data: null, error: "No prescription data extracted" };
       const pat = extractPatientFromRaw(data);
-      return { data: { ...data, patient_name: pat.patient_name, patient_id: pat.patient_id }, error: null };
+      return {
+        data: { ...data, patient_name: pat.patient_name, patient_id: pat.patient_id },
+        error: null,
+      };
     }
 
     if (IMAGING_CATEGORIES.includes(category)) {
@@ -877,7 +912,10 @@ const useCompanionStore = create((set, get) => ({
       if (error) return { data: null, error };
       const d = data || {};
       const pat = extractPatientFromRaw(d);
-      return { data: { ...d, patient_name: pat.patient_name, patient_id: pat.patient_id }, error: null };
+      return {
+        data: { ...d, patient_name: pat.patient_name, patient_id: pat.patient_id },
+        error: null,
+      };
     }
 
     // Generic "other" — lightweight inline prompt
