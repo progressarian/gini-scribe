@@ -2,6 +2,8 @@ import { create } from "zustand";
 import api, { callClaude } from "../services/api.js";
 import { RX_EXTRACT_PROMPT, REPORT_EXTRACT_PROMPT } from "../config/prompts.js";
 import { emptyHistory } from "../config/history.js";
+import { compressBase64Image } from "../services/imageCompress.js";
+import { compressBase64Pdf } from "../services/pdfCompress.js";
 
 const useHistoryStore = create((set, get) => ({
   // ── state ──
@@ -154,15 +156,18 @@ const useHistoryStore = create((set, get) => ({
       ),
     }));
     try {
+      let { base64, mediaType } = report;
+      ({ base64, mediaType } = await compressBase64Image(base64, mediaType));
+      ({ base64, mediaType } = await compressBase64Pdf(base64, mediaType));
       const block =
-        report.mediaType === "application/pdf"
+        mediaType === "application/pdf"
           ? {
               type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: report.base64 },
+              source: { type: "base64", media_type: "application/pdf", data: base64 },
             }
           : {
               type: "image",
-              source: { type: "base64", media_type: report.mediaType, data: report.base64 },
+              source: { type: "base64", media_type: mediaType, data: base64 },
             };
       const resp = await api.post("/api/ai/complete", {
         messages: [

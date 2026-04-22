@@ -1,6 +1,16 @@
 import api from "./api.js";
 import { LAB_PROMPT, IMAGING_PROMPT, RX_EXTRACT_PROMPT } from "../config/prompts.js";
 import { compressBase64Image } from "./imageCompress.js";
+import { compressBase64Pdf } from "./pdfCompress.js";
+
+// Shrink whatever we're about to send to Claude — images get re-encoded
+// as smaller JPEGs, PDFs get rasterised + rebuilt from JPEGs. Each helper
+// is a no-op for the other media type, so calling both is safe.
+async function compressForClaude(base64, mediaType) {
+  ({ base64, mediaType } = await compressBase64Image(base64, mediaType));
+  ({ base64, mediaType } = await compressBase64Pdf(base64, mediaType));
+  return { base64, mediaType };
+}
 
 // Convert HEIC/HEIF to JPEG via server (sharp)
 export async function convertHeicToJpeg(file) {
@@ -156,7 +166,7 @@ function buildBlock(base64, mediaType) {
 }
 
 export async function extractLab(base64, mediaType) {
-  ({ base64, mediaType } = await compressBase64Image(base64, mediaType));
+  ({ base64, mediaType } = await compressForClaude(base64, mediaType));
   const { timeoutMs, maxTokens } = budgetFor(base64, mediaType);
   return runWithRetry(
     "Lab extraction",
@@ -175,7 +185,7 @@ export async function extractLab(base64, mediaType) {
 }
 
 export async function extractImaging(base64, mediaType) {
-  ({ base64, mediaType } = await compressBase64Image(base64, mediaType));
+  ({ base64, mediaType } = await compressForClaude(base64, mediaType));
   const { timeoutMs, maxTokens } = budgetFor(base64, mediaType);
   return runWithRetry(
     "Imaging extraction",
@@ -194,7 +204,7 @@ export async function extractImaging(base64, mediaType) {
 }
 
 export async function extractRx(base64, mediaType) {
-  ({ base64, mediaType } = await compressBase64Image(base64, mediaType));
+  ({ base64, mediaType } = await compressForClaude(base64, mediaType));
   const { timeoutMs } = budgetFor(base64, mediaType);
   // Rx prompt stays at 3000 output tokens — prescriptions are short.
   // Large scans still get the longer timeout.
