@@ -186,6 +186,24 @@ export async function findAppointmentWithNotes(fileNo, _phone, excludeHealthrayI
   );
 }
 
+// ── Return JSONB array lengths for prescription fields on an appointment ──
+// Used by the sync flow to detect whether an appointment already carries a
+// prior good enrichment, so a flaky re-parse (AI returns null / empty) cannot
+// silently overwrite it with blank arrays.
+export async function getAppointmentEnrichmentCounts(appointmentId) {
+  if (!appointmentId) return null;
+  const { rows } = await pool.query(
+    `SELECT
+       jsonb_array_length(COALESCE(healthray_diagnoses, '[]'::jsonb))             AS dx,
+       jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb))           AS meds,
+       jsonb_array_length(COALESCE(healthray_previous_medications, '[]'::jsonb))  AS prev_meds
+       FROM appointments
+      WHERE id = $1`,
+    [appointmentId],
+  );
+  return rows[0] || null;
+}
+
 // ── Find existing appointment by healthray_id, or by file_no + date (sheet import) ──
 export async function findAppointment(healthrayId, fileNo, apptDate) {
   // First try exact healthray_id match
@@ -1155,6 +1173,26 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
 // This handles meds that were prescribed before but dropped from the current note.
 export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
   if (!patientId || !healthrayId) return;
+
+  // Skip when nothing got tagged with this healthrayId — that means the current
+  // prescription was empty. Running the "stale" sweep in that state matches
+  // every active HealthRay med for the patient and wipes prior visits' data.
+  const { rows: tagged } = await pool.query(
+    `SELECT 1 FROM medications
+      WHERE patient_id = $1
+        AND source = 'healthray'
+        AND notes LIKE 'healthray:' || $2 || '%'
+      LIMIT 1`,
+    [patientId, String(healthrayId)],
+  );
+  if (tagged.length === 0) {
+    log(
+      "stopStaleHealthrayMeds",
+      `${patientId}/${healthrayId}: skip — current prescription empty, preserving prior meds`,
+    );
+    return;
+  }
+
   // Two-statement approach so the UPDATE sees the effects of the DELETE:
   //
   // Problem A: a pre-existing inactive row with the same canonical as a stale

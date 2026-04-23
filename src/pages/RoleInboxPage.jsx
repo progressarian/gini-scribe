@@ -60,10 +60,9 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
     setStartingChat(true);
     setNewChatError(null);
     try {
-      const { data: conv } = await api.post(
-        `/api/patients/${patient.id}/conversations/ensure`,
-        { kind: role },
-      );
+      const { data: conv } = await api.post(`/api/patients/${patient.id}/conversations/ensure`, {
+        kind: role,
+      });
       if (!conv?.id) throw new Error("Failed to create conversation");
       await queryClient.invalidateQueries({ queryKey: qk.messages.conversations(role) });
       setShowNewChat(false);
@@ -303,13 +302,9 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                   >
                     <div>
                       <div style={{ fontWeight: 500, fontSize: 14 }}>{p.name || "Unnamed"}</div>
-                      <div style={{ fontSize: 12, color: "#64748b" }}>
-                        {p.phone || "No phone"}
-                      </div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>{p.phone || "No phone"}</div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 500 }}>
-                      Chat →
-                    </div>
+                    <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 500 }}>Chat →</div>
                   </div>
                 ))
               )}
@@ -452,9 +447,7 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
 
           <div className="messages__patient-header">
             <div className="messages__patient-avatar">
-              {(activeConv.patient?.name || activeConv.patient_id || "P")
-                .charAt(0)
-                .toUpperCase()}
+              {(activeConv.patient?.name || activeConv.patient_id || "P").charAt(0).toUpperCase()}
             </div>
             <div>
               <div className="messages__patient-name">

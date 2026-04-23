@@ -439,7 +439,8 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       if (syncPatientToGenie) {
         syncPatientToGenie(row)
           .then((r) => {
-            if (r?.synced) console.log(`📲 Genie sync (update) patient ${row.id}: ${r.mhgPatientId}`);
+            if (r?.synced)
+              console.log(`📲 Genie sync (update) patient ${row.id}: ${r.mhgPatientId}`);
           })
           .catch(() => {});
       }
@@ -469,7 +470,8 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       if (syncPatientToGenie) {
         syncPatientToGenie(row)
           .then((r) => {
-            if (r?.synced) console.log(`📲 Genie sync (create) patient ${row.id}: ${r.mhgPatientId}`);
+            if (r?.synced)
+              console.log(`📲 Genie sync (create) patient ${row.id}: ${r.mhgPatientId}`);
           })
           .catch(() => {});
       }

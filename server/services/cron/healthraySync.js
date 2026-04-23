@@ -26,6 +26,7 @@ import {
   ensureSyncColumns,
   findAppointment,
   findAppointmentWithNotes,
+  getAppointmentEnrichmentCounts,
   upsertPatient,
   syncDoctors,
   upsertAppointment,
@@ -305,6 +306,36 @@ async function syncAppointment(appt, localDoctorName) {
         // Parse with AI
         const parsed = await parseClinicalWithAI(rawText);
         clinical.clinicalRaw = rawText;
+
+        // Guard against a flaky re-parse silently wiping prior good data.
+        // parseClinicalWithAI returns null on any hard failure (API error,
+        // missing JSON in response, repair failure). We also treat a non-null
+        // parse that yields zero diagnoses + zero medications + zero
+        // previous-medications for a substantive clinical text as a parse
+        // failure — it's indistinguishable from the real failure mode and
+        // overwriting existing JSONB with blanks is always the wrong move
+        // (see P_179683: rich 2316-char prescription got wiped on re-sync).
+        const parseHasContent =
+          parsed &&
+          ((parsed.diagnoses?.length || 0) > 0 ||
+            (parsed.medications?.length || 0) > 0 ||
+            (parsed.previous_medications?.length || 0) > 0);
+
+        if (!parseHasContent && existing?.id) {
+          const prior = await getAppointmentEnrichmentCounts(existing.id);
+          const hadPrior =
+            prior && (prior.dx > 0 || prior.meds > 0 || prior.prev_meds > 0);
+          if (hadPrior) {
+            error(
+              "Enrich",
+              `${healthrayId}: parse ${parsed === null ? "returned null" : "produced no dx/meds/prev"} for ${rawText.length}-char clinical — appt ${existing.id} has prior enrichment (dx=${prior.dx} meds=${prior.meds} prev=${prior.prev_meds}); preserving existing JSONB and skipping medication sync`,
+            );
+            if (existing.patient_id)
+              await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+            return { skipped: true, id: existing.id, parseFailed: true };
+          }
+        }
+
         if (parsed) {
           clinical.parsedClinical = parsed;
           clinical.healthrayDiagnoses = parsed.diagnoses || [];
@@ -412,7 +443,9 @@ async function syncAppointment(appt, localDoctorName) {
     clinical.healthrayStoppedMedications,
     clinical.healthrayMedications,
   );
-  await stopStaleHealthrayMeds(patientId, healthrayId, apptDate);
+  if (clinical.healthrayMedications.length > 0) {
+    await stopStaleHealthrayMeds(patientId, healthrayId, apptDate);
+  }
   await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
   await syncSymptoms(patientId, localApptId, clinical.parsedClinical?.symptoms);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
