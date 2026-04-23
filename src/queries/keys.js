@@ -29,4 +29,18 @@ export const qk = {
     all: ["patient"],
     full: (id) => ["patient", "full", String(id)],
   },
+  messages: {
+    all: ["messages"],
+    thread: (patientId, role = null, doctor = null) => [
+      "messages",
+      "thread",
+      String(patientId),
+      role || null,
+      doctor || null,
+    ],
+    // Conversation-centric keys (2026-04-23 rebuild)
+    conversations: (kind) => ["conversations", String(kind || "doctor")],
+    conversation: (conversationId) => ["conversation", String(conversationId)],
+    conversationMessages: (conversationId) => ["conversation", String(conversationId), "messages"],
+  },
 };

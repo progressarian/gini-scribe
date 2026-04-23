@@ -1,300 +1,336 @@
-import { useEffect, useState } from "react";
-import usePatientStore from "../stores/patientStore.js";
-import useMessagingStore from "../stores/messagingStore.js";
-import useAlertStore from "../stores/alertStore.js";
-import Shimmer from "../components/Shimmer.jsx";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import api from "../services/api.js";
+import useAuthStore from "../stores/authStore.js";
+import { genieSupabase, hasGenieRealtime } from "../lib/genieSupabase.js";
+import { useConversations } from "../queries/hooks/useConversations";
+import { useThreadMessages, flattenThread } from "../queries/hooks/useThreadMessages";
+import { useSendReply } from "../queries/hooks/useSendReply";
+import { qk } from "../queries/keys";
 import "./MessagesPage.css";
 
+// Doctor inbox. Lists only conversations where the current logged-in doctor
+// is the participant. Each row is a distinct (patient, this-doctor) thread
+// with a stable conversation_id. Clicking opens the thread; sending a reply
+// writes into that same conversation so the patient receives it under the
+// matching Doctor tab on their end.
 export default function MessagesPage() {
-  const [showAlertForm, setShowAlertForm] = useState(false);
-  const [alertTitle, setAlertTitle] = useState("");
-  const [alertMessage, setAlertMessage] = useState("");
-  const [alertType, setAlertType] = useState("doctor_note");
-  const { sendAlert, sendingAlert } = useAlertStore();
-  const { patient, dbPatientId } = usePatientStore();
-  const {
-    inbox,
-    inboxLoading,
-    activeThread,
-    setActiveThread,
-    threadMessages,
-    threadLoading,
-    setThreadMessages,
-    replyText,
-    setReplyText,
-    sendingReply,
-    fetchInbox,
-    fetchThread,
-    sendReply,
-    markRead,
-  } = useMessagingStore();
+  const currentDoctor = useAuthStore((s) => s.currentDoctor);
+  const senderName = currentDoctor?.name || currentDoctor?.short_name || "Doctor";
+  const queryClient = useQueryClient();
 
+  const convQuery = useConversations("doctor");
+  const conversations = convQuery.data || [];
+
+  const [activeId, setActiveId] = useState(null);
+  const activeConv = useMemo(
+    () => conversations.find((c) => c.id === activeId) || null,
+    [conversations, activeId],
+  );
+  const activeIdRef = useRef(null);
+  activeIdRef.current = activeId;
+
+  const [search, setSearch] = useState("");
+  const [replyText, setReplyText] = useState("");
+  const [sendError, setSendError] = useState(null);
+
+  const threadQuery = useThreadMessages(activeId, { enabled: !!activeId });
+  const threadMessages = flattenThread(threadQuery.data?.pages);
+  const threadLoading = threadQuery.isLoading;
+  const fetchingOlder = threadQuery.isFetchingNextPage;
+  const hasMoreOlder = threadQuery.hasNextPage;
+
+  const sendReplyMutation = useSendReply({ conversationId: activeId, senderName });
+  const sendingReply = sendReplyMutation.isPending;
+
+  const scrollContainerRef = useRef(null);
+  const prevScrollHeightRef = useRef(0);
+  const lastTailIdRef = useRef(null);
+
+  // Mark thread read when opened and whenever the latest message arrives.
+  // The server flips is_read on all outbound rows in one round-trip and
+  // resets conversations.team_unread_count.
   useEffect(() => {
-    fetchInbox();
-  }, [fetchInbox]);
+    if (!activeId) return;
+    api.post(`/api/conversations/${activeId}/read`).catch(() => {
+      // Non-fatal: unread state will still self-heal on next inbox refresh.
+    });
+    queryClient.invalidateQueries({ queryKey: qk.messages.conversations("doctor") });
+  }, [activeId, threadMessages.length, queryClient]);
+
+  // Realtime: any INSERT on patient_messages or UPDATE on conversations
+  // triggers a targeted refetch. We subscribe once at the page level (not
+  // per-thread) so the inbox list also updates when a new message arrives
+  // while a different thread is open.
+  useEffect(() => {
+    const refetchInbox = () => {
+      queryClient.invalidateQueries({ queryKey: qk.messages.conversations("doctor") });
+    };
+    const refetchActive = () => {
+      const id = activeIdRef.current;
+      if (id) queryClient.invalidateQueries({ queryKey: qk.messages.conversationMessages(id) });
+    };
+
+    if (hasGenieRealtime && genieSupabase) {
+      const channel = genieSupabase
+        .channel("scribe-doctor-inbox")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "patient_messages" },
+          (payload) => {
+            const row = payload.new;
+            if (row?.conversation_id && row.conversation_id === activeIdRef.current) {
+              refetchActive();
+            }
+            refetchInbox();
+          },
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "conversations" },
+          refetchInbox,
+        )
+        .subscribe();
+      return () => {
+        genieSupabase.removeChannel(channel);
+      };
+    }
+
+    // Polling fallback.
+    const id = setInterval(() => {
+      refetchInbox();
+      refetchActive();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [queryClient]);
+
+  // Auto-scroll to bottom on new tail message or first paint.
+  useEffect(() => {
+    if (!activeId) {
+      lastTailIdRef.current = null;
+      return;
+    }
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const tail = threadMessages[threadMessages.length - 1];
+    const tailId = tail?.id ?? null;
+    const prev = lastTailIdRef.current;
+    const firstPaint = prev === null && threadMessages.length > 0;
+    const newTail = tailId !== null && prev !== null && tailId !== prev;
+    if (firstPaint || newTail) el.scrollTop = el.scrollHeight;
+    lastTailIdRef.current = tailId;
+  }, [threadMessages, activeId]);
+
+  // Preserve scroll position when prepending older messages.
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (prevScrollHeightRef.current > 0 && el.scrollHeight > prevScrollHeightRef.current) {
+      el.scrollTop = el.scrollHeight - prevScrollHeightRef.current;
+      prevScrollHeightRef.current = 0;
+    }
+  }, [threadMessages.length]);
+
+  const onThreadScroll = (e) => {
+    const el = e.currentTarget;
+    if (el.scrollTop < 60 && hasMoreOlder && !fetchingOlder) {
+      prevScrollHeightRef.current = el.scrollHeight;
+      threadQuery.fetchNextPage();
+    }
+  };
+
+  const sendReply = async () => {
+    const text = replyText.trim();
+    if (!text || !activeId) return;
+    setReplyText("");
+    setSendError(null);
+    try {
+      await sendReplyMutation.mutateAsync(text);
+    } catch (e) {
+      setReplyText(text);
+      setSendError(e?.response?.data?.error || e?.message || "Failed to send");
+    }
+  };
+
+  // Filter inbox by patient name / conversation preview.
+  const q = search.trim().toLowerCase();
+  const filtered = !q
+    ? conversations
+    : conversations.filter((c) =>
+        [c.doctor_name, c.last_message_preview, c.patient_id]
+          .filter(Boolean)
+          .some((s) => String(s).toLowerCase().includes(q)),
+      );
+
+  const totalUnread = conversations.reduce((n, c) => n + (c.team_unread_count || 0), 0);
 
   return (
     <div>
-      <div className="messages__title">{"\ud83d\udcac"} Patient Messages</div>
+      <div className="messages__title">💬 My Patient Messages</div>
 
-      {/* Send Alert to current patient */}
-      {dbPatientId && patient?.name && (
-        <div
-          style={{
-            margin: "0 0 12px",
-            padding: "10px 14px",
-            background: "#fffbeb",
-            border: "1.5px solid #fde68a",
-            borderRadius: 10,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: showAlertForm ? 8 : 0,
-            }}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e" }}>
-              {"\ud83d\udce2"} Send Alert to {patient.name}
-            </div>
-            <button
-              onClick={() => setShowAlertForm((v) => !v)}
-              style={{
-                padding: "4px 12px",
-                borderRadius: 6,
-                border: "none",
-                cursor: "pointer",
-                background: showAlertForm ? "#92400e" : "#d97706",
-                color: "white",
-                fontWeight: 600,
-                fontSize: 12,
-              }}
-            >
-              {showAlertForm ? "Cancel" : "New Alert"}
-            </button>
-          </div>
-          {showAlertForm && (
-            <div>
-              <select
-                value={alertType}
-                onChange={(e) => setAlertType(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  marginBottom: 6,
-                  borderRadius: 6,
-                  border: "1px solid #fde68a",
-                  fontSize: 13,
-                }}
-              >
-                <option value="doctor_note">Doctor Note</option>
-                <option value="reminder">Reminder</option>
-                <option value="lab_ready">Lab Results Ready</option>
-                <option value="prescription_ready">Prescription Ready</option>
-                <option value="follow_up">Follow-up Reminder</option>
-              </select>
-              <input
-                value={alertTitle}
-                onChange={(e) => setAlertTitle(e.target.value)}
-                placeholder="Alert title..."
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  marginBottom: 6,
-                  borderRadius: 6,
-                  border: "1px solid #fde68a",
-                  fontSize: 13,
-                  boxSizing: "border-box",
-                }}
-              />
-              <textarea
-                value={alertMessage}
-                onChange={(e) => setAlertMessage(e.target.value)}
-                placeholder="Alert message..."
-                rows={2}
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  marginBottom: 8,
-                  borderRadius: 6,
-                  border: "1px solid #fde68a",
-                  fontSize: 13,
-                  resize: "vertical",
-                  boxSizing: "border-box",
-                }}
-              />
-              <button
-                disabled={!alertTitle.trim() || !alertMessage.trim() || sendingAlert}
-                onClick={async () => {
-                  const result = await sendAlert(dbPatientId, alertTitle, alertMessage, alertType);
-                  if (result?.success) {
-                    setAlertTitle("");
-                    setAlertMessage("");
-                    setShowAlertForm(false);
-                  }
-                }}
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: 6,
-                  border: "none",
-                  cursor: "pointer",
-                  background: alertTitle.trim() && alertMessage.trim() ? "#d97706" : "#e5e7eb",
-                  color: alertTitle.trim() && alertMessage.trim() ? "white" : "#9ca3af",
-                  fontWeight: 600,
-                  fontSize: 13,
-                }}
-              >
-                {sendingAlert ? "Sending..." : "Send Alert \ud83d\udce2"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {!activeThread ? (
+      {!activeConv ? (
         <div>
           <div className="messages__inbox-bar">
             <div className="messages__inbox-info">
-              {inbox.length === 0
+              {conversations.length === 0
                 ? "No messages yet"
-                : `${inbox.filter((m) => !m.is_read && m.direction === "outbound").length} unread · ${inbox.length} total`}
+                : `${totalUnread} unread · ${conversations.length} conversations`}
             </div>
-            <button onClick={fetchInbox} className="messages__refresh-btn">
-              ↻ Refresh
+            <button
+              onClick={() =>
+                queryClient.invalidateQueries({ queryKey: qk.messages.conversations("doctor") })
+              }
+              disabled={convQuery.isFetching}
+              className="messages__refresh-btn"
+            >
+              <span
+                className={`messages__refresh-icon ${convQuery.isFetching ? "messages__refresh-icon--spinning" : ""}`}
+              >
+                ↻
+              </span>{" "}
+              {convQuery.isFetching ? "Refreshing…" : "Refresh"}
             </button>
           </div>
 
-          {inboxLoading ? (
-            <div style={{ padding: 10 }}>
-              <Shimmer type="cards" count={4} />
+          <div className="messages__search-bar">
+            <span className="messages__search-icon">🔍</span>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search conversations…"
+              className="messages__search-input"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="messages__search-clear">
+                ✕
+              </button>
+            )}
+          </div>
+
+          {convQuery.isLoading ? (
+            <div className="messages__loading-center">
+              <div className="messages__spinner" />
+              <div className="messages__loading-text">Loading conversations…</div>
             </div>
-          ) : inbox.length === 0 ? (
+          ) : conversations.length === 0 ? (
             <div className="messages__empty">
               <div className="messages__empty-icon">📭</div>
-              <div className="messages__empty-text">No patient messages yet</div>
+              <div className="messages__empty-text">No patient conversations yet</div>
               <div className="messages__empty-hint">
-                Messages sent from the MyHealth Genie app will appear here
+                When a patient messages you, the thread will appear here.
               </div>
             </div>
-          ) : null}
-
-          {!inboxLoading &&
-            Object.entries(
-              inbox.reduce((acc, m) => {
-                const key = m.patient_id;
-                if (!acc[key])
-                  acc[key] = {
-                    patient_name: m.patient_name,
-                    file_no: m.file_no,
-                    patient_id: m.patient_id,
-                    messages: [],
-                  };
-                acc[key].messages.push(m);
-                return acc;
-              }, {}),
-            ).map(([pid, group]) => {
-              const unread = group.messages.filter(
-                (m) => !m.is_read && m.direction === "outbound",
-              ).length;
-              const last = group.messages[group.messages.length - 1];
+          ) : filtered.length === 0 ? (
+            <div className="messages__empty">
+              <div className="messages__empty-icon">🔍</div>
+              <div className="messages__empty-text">No matches for "{search}"</div>
+            </div>
+          ) : (
+            filtered.map((c) => {
+              const unread = c.team_unread_count || 0;
+              const previewPrefix = c.last_sender === "patient" ? "" : "You: ";
               return (
                 <div
-                  key={pid}
-                  onClick={() => {
-                    setActiveThread(group);
-                    fetchThread(pid);
-                    group.messages.filter((m) => !m.is_read).forEach((m) => markRead(m.id));
-                  }}
+                  key={c.id}
+                  onClick={() => setActiveId(c.id)}
                   className="messages__thread-card"
                   style={{
                     border: `1px solid ${unread > 0 ? "#fde68a" : "#f1f5f9"}`,
                     borderLeft: `4px solid ${unread > 0 ? "#f59e0b" : "#e2e8f0"}`,
+                    cursor: "pointer",
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,.08)")
-                  }
-                  onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
                 >
                   <div className="messages__thread-header">
                     <div className="messages__thread-info">
                       <div className="messages__thread-avatar">
-                        {(group.patient_name || "?").charAt(0).toUpperCase()}
+                        {(c.doctor_name || "P").charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <div className="messages__thread-name">{group.patient_name}</div>
-                        {group.file_no && (
-                          <div className="messages__thread-file">File: {group.file_no}</div>
-                        )}
+                        <div className="messages__thread-name">
+                          Patient {c.patient_id?.slice(0, 8) || ""}
+                        </div>
+                        <div className="messages__thread-file">Chat #{c.id.slice(0, 8)}</div>
                       </div>
                     </div>
                     <div className="messages__thread-meta">
                       {unread > 0 && <div className="messages__thread-badge">{unread} new</div>}
-                      <div className="messages__thread-date">
-                        {new Date(last.created_at).toLocaleDateString("en-IN", {
-                          day: "2-digit",
-                          month: "short",
-                        })}
-                      </div>
+                      {c.last_message_at && (
+                        <div className="messages__thread-date">
+                          {new Date(c.last_message_at).toLocaleDateString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="messages__thread-preview">
-                    {last.direction === "inbound" ? "You: " : ""}
-                    {last.message}
-                  </div>
+                  {c.last_message_preview && (
+                    <div className="messages__thread-preview">
+                      {previewPrefix}
+                      {c.last_message_preview}
+                    </div>
+                  )}
                 </div>
               );
-            })}
+            })
+          )}
         </div>
       ) : (
-        <div>
-          <button
-            onClick={() => {
-              setActiveThread(null);
-              setThreadMessages([]);
-              setReplyText("");
-              fetchInbox();
-            }}
-            className="messages__back-btn"
-          >
+        <div className="messages__chat-view">
+          <button onClick={() => setActiveId(null)} className="messages__back-btn">
             ← Back to Inbox
           </button>
 
           <div className="messages__patient-header">
             <div className="messages__patient-avatar">
-              {(activeThread.patient_name || "?").charAt(0).toUpperCase()}
+              {(activeConv.doctor_name || "P").charAt(0).toUpperCase()}
             </div>
             <div>
-              <div className="messages__patient-name">{activeThread.patient_name}</div>
-              {activeThread.file_no && (
-                <div className="messages__patient-file">File: {activeThread.file_no}</div>
-              )}
+              <div className="messages__patient-name">
+                Patient {activeConv.patient_id?.slice(0, 8)}
+              </div>
+              <div className="messages__patient-file">
+                Chat #{activeConv.id.slice(0, 8)} · You as {activeConv.doctor_name || senderName}
+              </div>
             </div>
           </div>
 
-          <div className="messages__thread-scroll">
-            {threadLoading ? (
-              <div style={{ padding: 16 }}>
-                <Shimmer type="lines" count={6} />
+          <div
+            className="messages__thread-scroll"
+            ref={scrollContainerRef}
+            onScroll={onThreadScroll}
+          >
+            {fetchingOlder && (
+              <div className="messages__older-loader">
+                <div className="messages__spinner messages__spinner--sm" />
+                <span>Loading older messages…</span>
+              </div>
+            )}
+            {!fetchingOlder && !hasMoreOlder && threadMessages.length > 0 && (
+              <div className="messages__older-end">— Start of conversation —</div>
+            )}
+            {threadLoading && threadMessages.length === 0 ? (
+              <div className="messages__loading-center">
+                <div className="messages__spinner" />
+                <div className="messages__loading-text">Loading conversation…</div>
               </div>
             ) : threadMessages.length === 0 ? (
-              <div className="messages__thread-empty">No messages in this thread</div>
-            ) : null}
-            {!threadLoading &&
+              <div className="messages__thread-empty">No messages in this thread yet</div>
+            ) : (
               threadMessages.map((m, i) => {
-                const isDoctor = m.direction === "inbound";
+                const isTeam = m.direction === "inbound";
                 return (
                   <div
-                    key={i}
-                    className={`messages__msg-row ${isDoctor ? "messages__msg-row--doctor" : "messages__msg-row--patient"}`}
+                    key={m.id || `idx-${i}`}
+                    className={`messages__msg-row ${isTeam ? "messages__msg-row--doctor" : "messages__msg-row--patient"}`}
                   >
                     <div
-                      className={`messages__msg-bubble ${isDoctor ? "messages__msg-bubble--doctor" : "messages__msg-bubble--patient"}`}
+                      className={`messages__msg-bubble ${isTeam ? "messages__msg-bubble--doctor" : "messages__msg-bubble--patient"}`}
                     >
                       <div className="messages__msg-text">{m.message}</div>
                       <div className="messages__msg-meta">
-                        {m.sender_name || (isDoctor ? "Dr. Bhansali" : "Patient")} ·{" "}
+                        {m.sender_name || (isTeam ? senderName : "Patient")} ·{" "}
                         {new Date(m.created_at).toLocaleTimeString("en-IN", {
                           hour: "2-digit",
                           minute: "2-digit",
@@ -303,7 +339,8 @@ export default function MessagesPage() {
                     </div>
                   </div>
                 );
-              })}
+              })
+            )}
           </div>
 
           <div className="messages__reply-box">
@@ -316,7 +353,7 @@ export default function MessagesPage() {
                   sendReply();
                 }
               }}
-              placeholder="Type a reply... (Enter to send)"
+              placeholder={`Reply as ${senderName}… (Enter to send)`}
               className="messages__reply-textarea"
             />
             <div className="messages__reply-actions">
@@ -328,105 +365,45 @@ export default function MessagesPage() {
                 disabled={!replyText.trim() || sendingReply}
                 className={`messages__send-btn ${replyText.trim() ? "messages__send-btn--active" : "messages__send-btn--disabled"}`}
               >
-                {sendingReply ? "Sending..." : "Send Reply \u2709\ufe0f"}
+                {sendingReply ? "Sending…" : "Send Reply ✉️"}
               </button>
-              <button
-                onClick={() => setShowAlertForm((v) => !v)}
-                className="messages__send-btn messages__send-btn--active"
-                style={{ background: showAlertForm ? "#92400e" : "#d97706" }}
-              >
-                {showAlertForm ? "Cancel Alert" : "\ud83d\udce2 Send Alert"}
-              </button>
-            </div>
-
-            {showAlertForm && (
-              <div
-                style={{
-                  marginTop: 10,
-                  padding: 12,
-                  background: "#fffbeb",
-                  border: "1.5px solid #fde68a",
-                  borderRadius: 8,
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8 }}>
-                  Send Alert to Patient's App
+              {sendError && (
+                <div
+                  style={{
+                    flex: 1,
+                    fontSize: 12,
+                    color: "#b91c1c",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    borderRadius: 6,
+                    padding: "4px 10px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span>⚠ {sendError}</span>
+                  <button
+                    onClick={() => {
+                      setSendError(null);
+                      sendReply();
+                    }}
+                    style={{
+                      background: "#dc2626",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      padding: "2px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Retry
+                  </button>
                 </div>
-                <select
-                  value={alertType}
-                  onChange={(e) => setAlertType(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    marginBottom: 6,
-                    borderRadius: 6,
-                    border: "1px solid #fde68a",
-                    fontSize: 13,
-                  }}
-                >
-                  <option value="doctor_note">Doctor Note</option>
-                  <option value="reminder">Reminder</option>
-                  <option value="lab_ready">Lab Results Ready</option>
-                  <option value="prescription_ready">Prescription Ready</option>
-                  <option value="follow_up">Follow-up Reminder</option>
-                </select>
-                <input
-                  value={alertTitle}
-                  onChange={(e) => setAlertTitle(e.target.value)}
-                  placeholder="Alert title..."
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    marginBottom: 6,
-                    borderRadius: 6,
-                    border: "1px solid #fde68a",
-                    fontSize: 13,
-                    boxSizing: "border-box",
-                  }}
-                />
-                <textarea
-                  value={alertMessage}
-                  onChange={(e) => setAlertMessage(e.target.value)}
-                  placeholder="Alert message..."
-                  rows={2}
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    marginBottom: 8,
-                    borderRadius: 6,
-                    border: "1px solid #fde68a",
-                    fontSize: 13,
-                    resize: "vertical",
-                    boxSizing: "border-box",
-                  }}
-                />
-                <button
-                  disabled={!alertTitle.trim() || !alertMessage.trim() || sendingAlert}
-                  onClick={async () => {
-                    const pid = activeThread?.patient_id || dbPatientId;
-                    if (!pid) return;
-                    const result = await sendAlert(pid, alertTitle, alertMessage, alertType);
-                    if (result?.success) {
-                      setAlertTitle("");
-                      setAlertMessage("");
-                      setShowAlertForm(false);
-                    }
-                  }}
-                  style={{
-                    padding: "6px 16px",
-                    borderRadius: 6,
-                    border: "none",
-                    cursor: "pointer",
-                    background: alertTitle.trim() && alertMessage.trim() ? "#d97706" : "#e5e7eb",
-                    color: alertTitle.trim() && alertMessage.trim() ? "white" : "#9ca3af",
-                    fontWeight: 600,
-                    fontSize: 13,
-                  }}
-                >
-                  {sendingAlert ? "Sending..." : "Send Alert \ud83d\udce2"}
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}

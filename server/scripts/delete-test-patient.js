@@ -3,6 +3,8 @@
  * ALL related rows (documents, labs, meds, vitals, consultations, etc).
  *
  * Unlike wipe-patient-data.js, this also removes the patients row itself.
+ * After the local delete we also drop the mirrored row from MyHealth Genie
+ * so the mobile app no longer resolves the phone to a `gini_patient`.
  *
  * NOTE: files uploaded to Supabase storage from documents.storage_path are
  * NOT deleted here — they become orphaned. Test data volume is low so this
@@ -21,6 +23,15 @@ const dotenv = await import("dotenv");
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const { default: pool } = await import("../config/db.js");
+
+const { createRequire } = await import("module");
+const require = createRequire(import.meta.url);
+let deletePatientFromGenie = null;
+try {
+  deletePatientFromGenie = require("../genie-sync.cjs").deletePatientFromGenie;
+} catch (e) {
+  console.warn("[delete-test-patient] genie-sync.cjs not loaded:", e.message);
+}
 
 const APPLY = process.argv.includes("--apply");
 const fileNoFlagIdx = process.argv.indexOf("--file-no");
@@ -47,6 +58,21 @@ const CHILD_TABLES = [
   "consultations",
   "appointments",
 ];
+
+async function dropFromGenie(giniPatientId) {
+  if (!deletePatientFromGenie) {
+    console.log("(Skipped MyHealth Genie cleanup — GENIE_SUPABASE_URL/KEY not set?)");
+    return;
+  }
+  const r = await deletePatientFromGenie(giniPatientId);
+  if (r?.deleted) {
+    console.log(`MyHealth Genie row removed (gini_patient_id=${giniPatientId})`);
+  } else if (r?.count === 0) {
+    console.log(`No MyHealth Genie row was present for gini_patient_id=${giniPatientId}`);
+  } else {
+    console.warn(`MyHealth Genie cleanup failed: ${r?.reason || "unknown"}`);
+  }
+}
 
 async function run() {
   const client = await pool.connect();
@@ -85,6 +111,8 @@ async function run() {
     console.log(`  ${"patients".padEnd(24)} 1`);
     console.log(`  ${"TOTAL".padEnd(24)} ${total + 1}`);
     console.log();
+    console.log("Also removes mirrored row in MyHealth Genie (patients.gini_patient_id).");
+    console.log();
 
     if (!APPLY) {
       console.log("Dry-run — no changes committed. Re-run with --apply to delete.");
@@ -112,6 +140,11 @@ async function run() {
 
     await client.query("COMMIT");
     console.log(`\nDone — ${deleted} rows removed (patient + children).`);
+
+    // Mirror the delete to MyHealth Genie only after the Scribe-side commit
+    // succeeds. Failures there are surfaced but do not fail the script.
+    console.log();
+    await dropFromGenie(patient.id);
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Error:", e.message);

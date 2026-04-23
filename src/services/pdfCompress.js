@@ -118,9 +118,7 @@ function buildPdfFromJpegs(pages) {
   }
 
   const kids = pageIds.map((id) => `${id} 0 R`).join(" ");
-  const actualPagesId = pushObj(
-    `<< /Type /Pages /Kids [${kids}] /Count ${pageIds.length} >>`,
-  );
+  const actualPagesId = pushObj(`<< /Type /Pages /Kids [${kids}] /Count ${pageIds.length} >>`);
   // Invariant: the predicted pagesObjId must match what we actually got,
   // otherwise /Parent refs are dangling.
   if (actualPagesId !== pagesObjId) {
@@ -147,8 +145,7 @@ function buildPdfFromJpegs(pages) {
   let xref = `xref\n0 ${n + 1}\n0000000000 65535 f \n`;
   for (const off of offsets) xref += off.toString().padStart(10, "0") + " 00000 n \n";
   xref +=
-    `trailer\n<< /Size ${n + 1} /Root ${catalogId} 0 R >>\n` +
-    `startxref\n${xrefOffset}\n%%EOF\n`;
+    `trailer\n<< /Size ${n + 1} /Root ${catalogId} 0 R >>\n` + `startxref\n${xrefOffset}\n%%EOF\n`;
   const xrefBytes = enc.encode(xref);
 
   const out = new Uint8Array(size + xrefBytes.length);

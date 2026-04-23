@@ -34,11 +34,25 @@ const PUBLIC_PATHS = [
   "/api/sync/healthray/today",
 ];
 
-const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/", "/api/admin/"];
+const PUBLIC_PREFIXES = [
+  "/api/sync/debug/",
+  "/api/sync/backfill/",
+  "/api/admin/",
+  // Patient app (no scribe JWT): care-team bootstrap + conversation ensure.
+  // Requests are scoped to the patient_id in the URL path.
+];
+
+// Patterns that always bypass auth (tested with a regex match on req.path).
+// Separate from PUBLIC_PREFIXES so we can match nested segments.
+const PUBLIC_PATTERNS = [
+  /^\/api\/patients\/[^/]+\/care-team$/,
+  /^\/api\/patients\/[^/]+\/conversations\/ensure$/,
+];
 
 export const requireAuth = (req, res, next) => {
   if (!req.path.startsWith("/api/") || PUBLIC_PATHS.includes(req.path)) return next();
   if (PUBLIC_PREFIXES.some((p) => req.path.startsWith(p))) return next();
+  if (PUBLIC_PATTERNS.some((r) => r.test(req.path))) return next();
   if (!req.doctor) return res.status(401).json({ error: "Authentication required" });
   next();
 };

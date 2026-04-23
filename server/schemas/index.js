@@ -212,6 +212,17 @@ export const messageCreateSchema = z.object({
   sender_role: optStr,
 });
 
+// Conversation-centric (2026-04-23)
+export const conversationMessageSchema = z.object({
+  message: z.string({ required_error: "message is required" }).min(1).max(4000),
+});
+
+export const ensureConversationSchema = z.object({
+  kind: z.enum(["doctor", "lab", "reception"]),
+  doctor_id: optStr,
+  doctor_name: optStr,
+});
+
 // ---- Clinical Reasoning ----
 export const reasoningCreateSchema = z.object({
   patient_id: optInt,

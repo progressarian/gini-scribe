@@ -1,33 +1,291 @@
 import { Router } from "express";
 import { createRequire } from "module";
+import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
-import { messageCreateSchema } from "../schemas/index.js";
+import {
+  messageCreateSchema,
+  conversationMessageSchema,
+  ensureConversationSchema,
+} from "../schemas/index.js";
 
 const require = createRequire(import.meta.url);
-let getMessagesFromGenie = null;
-let sendReplyToGenie = null;
-let getThreadFromGenie = null;
-let markMessageReadInGenie = null;
+let genie = null;
 try {
-  const genie = require("../genie-sync.cjs");
-  getMessagesFromGenie = genie.getMessagesFromGenie;
-  sendReplyToGenie = genie.sendReplyToGenie;
-  getThreadFromGenie = genie.getThreadFromGenie;
-  markMessageReadInGenie = genie.markMessageReadInGenie;
+  genie = require("../genie-sync.cjs");
 } catch {
   console.log("genie-sync.cjs not loaded — message sync disabled");
 }
 
 const router = Router();
 
-// Inbox — latest message per patient from Supabase, unread first.
-// Optional ?role=lab|reception filters to role-scoped inboxes.
+// ─── helpers ───────────────────────────────────────────────────────────────
+
+// Load a conversation and run the standard viewer-authorization check:
+//   - doctor conversations: the caller must be the participant doctor
+//   - lab / reception: any authenticated scribe user may view (team inboxes)
+// Returns { conv, error } — error is { status, message } when denied/missing.
+async function loadAuthorizedConversation(req, conversationId) {
+  if (!genie?.getConversationById) {
+    return { error: { status: 503, message: "Messaging not configured" } };
+  }
+  const conv = await genie.getConversationById(conversationId);
+  if (!conv) return { error: { status: 404, message: "Conversation not found" } };
+
+  if (conv.kind === "doctor") {
+    const callerId = req.doctor?.doctor_id != null ? String(req.doctor.doctor_id) : null;
+    if (!callerId || callerId !== String(conv.doctor_id)) {
+      return { error: { status: 403, message: "Not a participant of this conversation" } };
+    }
+  }
+  // Lab/reception: any scribe doctor can view.
+  return { conv };
+}
+
+// Look up the scribe-side patient.id for a given Supabase (Genie) patient UUID.
+// The linkage lives on the Supabase patients table via `gini_patient_id`
+// (which stores the scribe INT id). Reverse-maps UUID → scribe INT id.
+async function resolveScribePatientIdFromGenieUuid(genieUuid) {
+  if (!genie?.getGenieDb) return null;
+  const db = typeof genie.getGenieDb === "function" ? genie.getGenieDb() : null;
+  if (!db) return null;
+  try {
+    const { data, error } = await db
+      .from("patients")
+      .select("gini_patient_id")
+      .eq("id", String(genieUuid))
+      .maybeSingle();
+    if (error || !data) return null;
+    const id = parseInt(data.gini_patient_id, 10);
+    return Number.isFinite(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// NEW conversation-centric routes
+// ═════════════════════════════════════════════════════════════════════════
+
+/**
+ * List conversations visible to the current caller.
+ * ?kind=doctor — conversations where the caller's doctor_id is the participant
+ * ?kind=lab | reception — shared team inboxes
+ */
+router.get("/conversations", async (req, res) => {
+  try {
+    if (!genie?.listConversationsForDoctor) {
+      return res.json({ data: [] });
+    }
+    const kind = String(req.query.kind || "").toLowerCase();
+    if (!["doctor", "lab", "reception"].includes(kind)) {
+      return res.status(400).json({ error: "kind must be doctor|lab|reception" });
+    }
+
+    let rows = [];
+    if (kind === "doctor") {
+      const doctorId = req.doctor?.doctor_id;
+      if (!doctorId) return res.status(401).json({ error: "Auth required" });
+      rows = await genie.listConversationsForDoctor(String(doctorId));
+    } else {
+      rows = await genie.listConversationsForTeam(kind);
+    }
+    res.json({ data: rows });
+  } catch (e) {
+    handleError(res, e, "Conversations list");
+  }
+});
+
+/**
+ * Paginated messages in a single conversation.
+ */
+router.get("/conversations/:id/messages", async (req, res) => {
+  try {
+    const { conv, error } = await loadAuthorizedConversation(req, req.params.id);
+    if (error) return res.status(error.status).json({ error: error.message });
+
+    const limitRaw = req.query.limit ? parseInt(req.query.limit, 10) : null;
+    const limit = limitRaw && limitRaw > 0 ? Math.min(limitRaw, 200) : 30;
+    const before = req.query.before || null;
+    const result = await genie.getConversationMessages(conv.id, { limit, before });
+    res.json(result);
+  } catch (e) {
+    handleError(res, e, "Conversation messages");
+  }
+});
+
+/**
+ * Send a reply into a conversation. Server derives senderName from the
+ * authenticated doctor and senderRole from the conversation kind.
+ */
+router.post(
+  "/conversations/:id/messages",
+  validate(conversationMessageSchema),
+  async (req, res) => {
+    try {
+      const { conv, error } = await loadAuthorizedConversation(req, req.params.id);
+      if (error) return res.status(error.status).json({ error: error.message });
+
+      const senderName =
+        req.doctor?.doctor_name ||
+        req.doctor?.short_name ||
+        (conv.kind === "lab"
+          ? "Gini Lab"
+          : conv.kind === "reception"
+            ? "Gini Reception"
+            : "Doctor");
+
+      const row = await genie.sendMessageToConversation({
+        conversationId: conv.id,
+        message: req.body.message,
+        senderName,
+        senderRole: conv.kind,
+        direction: "inbound",
+      });
+      if (!row) return res.status(500).json({ error: "Failed to send message" });
+      res.json(row);
+    } catch (e) {
+      handleError(res, e, "Send conversation message");
+    }
+  },
+);
+
+/**
+ * Mark the team side of a conversation as read (all outbound patient→team
+ * messages flip to is_read=true, team_unread_count resets).
+ */
+router.post("/conversations/:id/read", async (req, res) => {
+  try {
+    const { conv, error } = await loadAuthorizedConversation(req, req.params.id);
+    if (error) return res.status(error.status).json({ error: error.message });
+    const ok = await genie.markConversationRead({ conversationId: conv.id, side: "team" });
+    res.json({ success: ok });
+  } catch (e) {
+    handleError(res, e, "Mark conversation read");
+  }
+});
+
+/**
+ * Search patients in the Genie/Supabase patients table so the scribe UI can
+ * start a new chat with a specific patient. Returns id, name, phone.
+ */
+router.get("/genie-patients/search", async (req, res) => {
+  try {
+    if (!genie?.searchGeniePatients) return res.json({ data: [] });
+    const q = (req.query.q || "").toString();
+    const limitRaw = req.query.limit ? parseInt(req.query.limit, 10) : 20;
+    const limit = Math.min(Math.max(limitRaw || 20, 1), 50);
+    const rows = await genie.searchGeniePatients(q, { limit });
+    res.json({ data: rows });
+  } catch (e) {
+    handleError(res, e, "Patient search");
+  }
+});
+
+/**
+ * Ensure (find-or-create) a conversation for a patient. Idempotent.
+ */
+router.post(
+  "/patients/:id/conversations/ensure",
+  validate(ensureConversationSchema),
+  async (req, res) => {
+    try {
+      if (!genie?.ensureConversation) {
+        return res.status(503).json({ error: "Messaging not configured" });
+      }
+      const { kind, doctor_id, doctor_name } = req.body;
+      if (kind === "doctor" && !doctor_id) {
+        return res.status(400).json({ error: "doctor_id required for kind=doctor" });
+      }
+      const conv = await genie.ensureConversation({
+        patientId: req.params.id,
+        kind,
+        doctorId: kind === "doctor" ? String(doctor_id) : null,
+        doctorName: doctor_name || null,
+      });
+      if (!conv) return res.status(500).json({ error: "Failed to ensure conversation" });
+      res.json(conv);
+    } catch (e) {
+      handleError(res, e, "Ensure conversation");
+    }
+  },
+);
+
+/**
+ * Patient-app entry point: returns the care-team conversation list for a
+ * patient. Always includes lab + reception. Adds one doctor conversation
+ * per distinct doctor the patient has had a recorded consultation with
+ * (scribe Postgres `consultations` table is the source of truth). The
+ * server upserts all conversations before returning, so the patient app
+ * always receives stable conversation_ids to bind its tabs to.
+ *
+ * Route is PUBLIC by design — the patient app has no scribe JWT. The
+ * patient_id already scopes the response; there's no cross-patient leak.
+ */
+router.get("/patients/:id/care-team", async (req, res) => {
+  try {
+    if (!genie?.ensureConversation) {
+      return res.json({ data: [] });
+    }
+    const patientId = req.params.id;
+
+    // Always ensure the shared team conversations exist.
+    const [lab, reception] = await Promise.all([
+      genie.ensureConversation({ patientId, kind: "lab" }),
+      genie.ensureConversation({ patientId, kind: "reception" }),
+    ]);
+
+    // Doctor conversations: only the doctors the patient has actually seen.
+    // Cross into scribe's Postgres to find distinct mo_doctor_ids.
+    let doctorRows = [];
+    try {
+      const scribePid = await resolveScribePatientIdFromGenieUuid(patientId);
+      if (scribePid != null) {
+        const q = await pool.query(
+          `SELECT DISTINCT d.id, d.name, d.short_name
+             FROM consultations c
+             JOIN doctors d ON d.id = c.mo_doctor_id
+            WHERE c.patient_id = $1
+              AND c.mo_doctor_id IS NOT NULL
+            ORDER BY d.name`,
+          [scribePid],
+        );
+        doctorRows = q.rows || [];
+      }
+    } catch (e) {
+      console.warn("[care-team] scribe consult lookup failed:", e.message);
+    }
+
+    const doctorConvs = [];
+    for (const d of doctorRows) {
+      const conv = await genie.ensureConversation({
+        patientId,
+        kind: "doctor",
+        doctorId: String(d.id),
+        doctorName: d.name,
+      });
+      if (conv) doctorConvs.push(conv);
+    }
+
+    // Preserve a consistent order: doctors first (alpha), then reception, then lab.
+    const data = [...doctorConvs, reception, lab].filter(Boolean);
+    res.json({ data });
+  } catch (e) {
+    handleError(res, e, "Care team");
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// LEGACY routes — kept during rollout so old clients still work
+// ═════════════════════════════════════════════════════════════════════════
+
+// Legacy inbox — latest message per patient. Used by the old MessagesPage.jsx
+// before the care-team refactor lands.
 router.get("/messages/from-genie", async (req, res) => {
   try {
-    if (!getMessagesFromGenie) return res.json({ data: [], total: 0 });
+    if (!genie?.getMessagesFromGenie) return res.json({ data: [], total: 0 });
     const role = req.query.role || null;
-    const messages = await getMessagesFromGenie(null, role);
+    const messages = await genie.getMessagesFromGenie(null, role);
     const grouped = {};
     for (const m of messages) {
       if (!grouped[m.patient_id]) grouped[m.patient_id] = [];
@@ -55,11 +313,11 @@ router.get("/messages/from-genie", async (req, res) => {
   }
 });
 
-// Backward-compatible inbox endpoint
 router.get("/messages/inbox", async (req, res) => {
   try {
-    if (!getMessagesFromGenie) return res.json({ data: [], total: 0, page: 1, totalPages: 1 });
-    const messages = await getMessagesFromGenie(null);
+    if (!genie?.getMessagesFromGenie)
+      return res.json({ data: [], total: 0, page: 1, totalPages: 1 });
+    const messages = await genie.getMessagesFromGenie(null);
     const grouped = {};
     for (const m of messages) {
       if (!grouped[m.patient_id]) grouped[m.patient_id] = [];
@@ -87,11 +345,10 @@ router.get("/messages/inbox", async (req, res) => {
   }
 });
 
-// Unread count from Supabase
 router.get("/messages/unread-count", async (req, res) => {
   try {
-    if (!getMessagesFromGenie) return res.json({ count: 0 });
-    const messages = await getMessagesFromGenie(null);
+    if (!genie?.getMessagesFromGenie) return res.json({ count: 0 });
+    const messages = await genie.getMessagesFromGenie(null);
     const count = messages.filter((m) => !m.is_read).length;
     res.json({ count });
   } catch (e) {
@@ -99,36 +356,47 @@ router.get("/messages/unread-count", async (req, res) => {
   }
 });
 
-// Mark message as read in Supabase
 router.put("/messages/:id/read", async (req, res) => {
   try {
-    if (!markMessageReadInGenie) return res.json({ success: false });
-    const success = await markMessageReadInGenie(req.params.id);
+    if (!genie?.markMessageReadInGenie) return res.json({ success: false });
+    const success = await genie.markMessageReadInGenie(req.params.id);
     res.json({ success });
   } catch (e) {
     handleError(res, e, "Mark read");
   }
 });
 
-// Full conversation thread for a patient (both directions from Supabase)
+// Legacy per-patient thread — returns the full merged conversation stream.
+// Still used by a handful of older callers. Internally maps to conversations.
 router.get("/patients/:id/messages", async (req, res) => {
   try {
-    if (!getThreadFromGenie) return res.json([]);
-    const data = await getThreadFromGenie(req.params.id);
-    res.json(data);
+    if (!genie?.getThreadFromGenie) {
+      if (req.query.limit) return res.json({ data: [], nextCursor: null, hasMore: false });
+      return res.json([]);
+    }
+    const limitRaw = req.query.limit ? parseInt(req.query.limit, 10) : null;
+    const limit = limitRaw && limitRaw > 0 ? Math.min(limitRaw, 200) : null;
+    const before = req.query.before || null;
+    const roleParam = (req.query.role || "").toString().toLowerCase();
+    const role = ["doctor", "lab", "reception"].includes(roleParam) ? roleParam : null;
+    const doctor = req.query.doctor ? String(req.query.doctor) : null;
+    const result = await genie.getThreadFromGenie(req.params.id, { limit, before, role, doctor });
+    res.json(result);
   } catch (e) {
     handleError(res, e, "Messages thread");
   }
 });
 
-// Doctor / Lab / Reception sends a reply — writes to Supabase patient_messages
+// Legacy send — retained for old clients. New clients should POST to
+// /api/conversations/:id/messages.
 router.post("/patients/:id/messages", validate(messageCreateSchema), async (req, res) => {
   try {
     const { message, sender_name, sender_role } = req.body;
-    if (!sendReplyToGenie) return res.status(400).json({ error: "Genie sync not configured" });
+    if (!genie?.sendReplyToGenie)
+      return res.status(400).json({ error: "Genie sync not configured" });
     const patientId = req.params.id;
-    const doctorName = sender_name || "Dr. Bhansali";
-    const reply = await sendReplyToGenie(patientId, message, doctorName, sender_role || null);
+    const doctorName = sender_name || req.doctor?.doctor_name || "Doctor";
+    const reply = await genie.sendReplyToGenie(patientId, message, doctorName, sender_role || null);
     if (!reply) return res.status(500).json({ error: "Failed to send reply" });
     res.json(reply);
   } catch (e) {

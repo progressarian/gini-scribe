@@ -9,8 +9,11 @@ import { patientCreateSchema } from "../schemas/index.js";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 let syncPatientLogsFromGenie;
+let syncPatientToGenie;
 try {
-  syncPatientLogsFromGenie = require("../genie-sync.cjs").syncPatientLogsFromGenie;
+  const genieSync = require("../genie-sync.cjs");
+  syncPatientLogsFromGenie = genieSync.syncPatientLogsFromGenie;
+  syncPatientToGenie = genieSync.syncPatientToGenie;
 } catch {}
 
 const router = Router();
@@ -431,6 +434,15 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+      // Mirror patient profile to MyHealth Genie so the mobile app recognises
+      // them as a gini_patient on their first phone-OTP login. Fire-and-forget.
+      if (syncPatientToGenie) {
+        syncPatientToGenie(row)
+          .then((r) => {
+            if (r?.synced) console.log(`📲 Genie sync (update) patient ${row.id}: ${r.mhgPatientId}`);
+          })
+          .catch(() => {});
+      }
       res.json({ ...row, _isNew: false });
     } else {
       const result = await pool.query(
@@ -454,6 +466,13 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+      if (syncPatientToGenie) {
+        syncPatientToGenie(row)
+          .then((r) => {
+            if (r?.synced) console.log(`📲 Genie sync (create) patient ${row.id}: ${r.mhgPatientId}`);
+          })
+          .catch(() => {});
+      }
       res.json({ ...row, _isNew: true });
     }
   } catch (e) {
@@ -493,6 +512,13 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
     if (!result.rows[0]) return res.status(404).json({ error: "Patient not found" });
     const row = result.rows[0];
     if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+    if (syncPatientToGenie) {
+      syncPatientToGenie(row)
+        .then((r) => {
+          if (r?.synced) console.log(`📲 Genie sync (PUT) patient ${row.id}: ${r.mhgPatientId}`);
+        })
+        .catch(() => {});
+    }
     res.json(row);
   } catch (e) {
     handleError(res, e, "Patient update");
