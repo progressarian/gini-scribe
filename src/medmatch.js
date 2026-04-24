@@ -1,5 +1,6 @@
 // Medicine Fuzzy Matcher — matches AI-extracted names to Gini pharmacy brands
 import PHARMACY_DB from "./medicine_db.json";
+import { stripFormPrefix } from "./lib/medName";
 
 // Build search index once on load
 const MEDS_INDEX = PHARMACY_DB.filter((m) =>
@@ -28,10 +29,14 @@ const MEDS_INDEX = PHARMACY_DB.filter((m) =>
 }));
 
 function normalize(s) {
-  return (s || "")
+  // Strip leading dosage-form prefix via the shared canonical helper, then
+  // sanitise for fuzzy matching (uppercase, drop punctuation, collapse
+  // spaces). Keeping the prefix list in one place (src/lib/medName.js) means
+  // client, server, and DB all agree on what "TAB"/"INJ"/etc. are.
+  const base = stripFormPrefix(s || "").name;
+  return base
     .toUpperCase()
     .replace(/[^A-Z0-9\s.]/g, " ")
-    .replace(/\bTAB\b|\bCAP\b|\bINJ\b|\bSYP\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

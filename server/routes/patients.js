@@ -374,14 +374,9 @@ router.get("/patients/:id", async (req, res) => {
         : null,
     });
 
-    // Auto-sync patient logs from Genie in background
-    if (syncPatientLogsFromGenie) {
-      syncPatientLogsFromGenie(id, pool)
-        .then((r) => {
-          if (r?.counts) console.log(`📲 Auto-sync patient ${id}:`, r.counts);
-        })
-        .catch(() => {});
-    }
+    // Note: the per-patient sync from Genie is handled by GET /api/visit/:id
+    // (with a 30s throttle). Running it here too made the server log spam
+    // `📲 Auto-sync patient` on every sidebar/care-team fetch.
   } catch (e) {
     handleError(res, e, "Patient detail");
   }

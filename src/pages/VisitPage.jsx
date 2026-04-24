@@ -383,7 +383,7 @@ export default function VisitPage() {
       } catch {
         // silent — polling is non-critical
       }
-    }, 60_000);
+    }, 120_000);
 
     return () => clearInterval(interval);
   }, [dbPatientId, refreshData, data?.labResults?.length]);
@@ -413,8 +413,9 @@ export default function VisitPage() {
           m.prescribed_date &&
           (!grouped[key].prescribed_date || m.prescribed_date > grouped[key].prescribed_date)
         ) {
-          const id = grouped[key].id;
-          Object.assign(grouped[key], m, { id });
+          // Take the newer row whole — including its id. Pinning the older
+          // row's id made the delete button target a stale record.
+          grouped[key] = { ...m };
         }
       });
       return Object.values(grouped);
@@ -466,8 +467,9 @@ export default function VisitPage() {
           date: v.recorded_at,
           weight: v.weight || g.weight_kg || null,
           bmi: v.bmi || g.bmi || null,
-          waist: g.waist || null,
-          body_fat: g.body_fat || null,
+          waist: v.waist || g.waist || null,
+          body_fat: v.body_fat || g.body_fat || null,
+          muscle_mass: v.muscle_mass || g.muscle_mass || null,
           bp_sys: v.bp_sys || g.bp_systolic || null,
           bp_dia: v.bp_dia || g.bp_diastolic || null,
         };
@@ -476,13 +478,14 @@ export default function VisitPage() {
     const clinicDates = new Set(vitals.map((v) => String(v.recorded_at).slice(0, 10)));
     genieVitals.forEach((g) => {
       const d = String(g.recorded_date).slice(0, 10);
-      if (!clinicDates.has(d) && (g.waist || g.body_fat || g.weight_kg)) {
+      if (!clinicDates.has(d) && (g.waist || g.body_fat || g.muscle_mass || g.weight_kg)) {
         anthropoRows.push({
           date: g.recorded_date,
           weight: g.weight_kg || null,
           bmi: g.bmi || null,
           waist: g.waist || null,
           body_fat: g.body_fat || null,
+          muscle_mass: g.muscle_mass || null,
           bp_sys: g.bp_systolic || null,
           bp_dia: g.bp_diastolic || null,
         });
@@ -599,9 +602,12 @@ export default function VisitPage() {
   // ── Tab badge counts (memoized) ──
   const tabBadges = useMemo(() => {
     if (!data) return {};
+    const visibleDocs = data.documents.filter(
+      (d) => d.storage_path || d.file_url || d.source === "healthray",
+    );
     return {
-      labs: data.documents.filter((d) => d.doc_type === "lab_report").length || null,
-      docs: data.documents.length || null,
+      labs: visibleDocs.filter((d) => d.doc_type === "lab_report").length || null,
+      docs: visibleDocs.length || null,
       messages: null, // populated when messaging is wired up
     };
   }, [data]);
@@ -1465,16 +1471,22 @@ export default function VisitPage() {
             setClinicalExtractSaving(true);
             const docDate = modal.data.doc_date;
             const counts = { sx: 0, dx: 0, meds: 0, stop: 0, labs: 0, vit: 0, inv: 0 };
+            const silent = { silent: true, skipRefresh: true };
+            const failed = [];
 
             // Symptoms
             for (const s of picked.symptoms) {
-              const r = await mutations.addSymptom({
-                name: s.name,
-                since: s.since_date || null,
-                severity: s.severity || "Mild",
-                related_to: s.related_to || "",
-              });
+              const r = await mutations.addSymptom(
+                {
+                  name: s.name,
+                  since: s.since_date || null,
+                  severity: s.severity || "Mild",
+                  related_to: s.related_to || "",
+                },
+                silent,
+              );
               if (r.success) counts.sx++;
+              else failed.push(`symptom "${s.name}"`);
             }
 
             // Diagnoses
@@ -1482,35 +1494,46 @@ export default function VisitPage() {
               const notes = [d.details, d.since ? `Since ${d.since}` : null]
                 .filter(Boolean)
                 .join(" · ");
-              const r = await mutations.addDiagnosis({
-                name: d.name,
-                status: d.status === "Absent" ? "Resolved" : "Newly Diagnosed",
-                category: "primary",
-                notes,
-                key_value: "",
-              });
+              const r = await mutations.addDiagnosis(
+                {
+                  name: d.name,
+                  status: d.status === "Absent" ? "Resolved" : "Newly Diagnosed",
+                  category: "primary",
+                  notes,
+                  key_value: "",
+                },
+                silent,
+              );
               if (r.success) counts.dx++;
+              else failed.push(`diagnosis "${d.name}"`);
             }
 
             // Medications
             for (const m of picked.medications) {
-              const r = await mutations.addMedication({
-                name: m.name,
-                dose: m.dose || "",
-                frequency: m.frequency || "OD",
-                timing: m.timing || "",
-                route: m.route || "Oral",
-                started_date: docDate || null,
-              });
+              const r = await mutations.addMedication(
+                {
+                  name: m.name,
+                  dose: m.dose || "",
+                  frequency: m.frequency || "OD",
+                  timing: m.timing || "",
+                  route: m.route || "Oral",
+                  started_date: docDate || null,
+                },
+                silent,
+              );
               if (r.success) counts.meds++;
+              else failed.push(`medication "${m.name}"`);
             }
 
             // Stop previous meds
             for (const sm of picked.stopMeds) {
-              const r = await mutations.stopMedication(sm.id, {
-                reason: sm.reason || "Previous visit",
-              });
+              const r = await mutations.stopMedication(
+                sm.id,
+                { reason: sm.reason || "Previous visit" },
+                silent,
+              );
               if (r.success) counts.stop++;
+              else failed.push(`stop "${sm.name}"`);
             }
 
             // Labs
@@ -1528,6 +1551,7 @@ export default function VisitPage() {
                 counts.labs++;
               } catch (e) {
                 console.error("Failed to save lab:", e.message);
+                failed.push(`lab "${lab.test_name}"`);
               }
             }
 
@@ -1547,6 +1571,7 @@ export default function VisitPage() {
                 counts.vit++;
               } catch (e) {
                 console.error("Failed to save vitals:", e.message);
+                failed.push("vitals");
               }
             }
 
@@ -1557,8 +1582,10 @@ export default function VisitPage() {
                   name: x.name,
                   urgency: x.urgency || "routine",
                 })),
+                silent,
               );
               if (r.success) counts.inv = r.added || picked.investigations.length;
+              else failed.push("investigations");
             }
 
             if (counts.labs > 0) {
@@ -1631,7 +1658,12 @@ export default function VisitPage() {
             // PDF generation disabled — parsed payload + raw text are still
             // saved server-side. Re-add "Rx PDF" line when prescription output returns.
             // if (totalPicked > 0) parts.push("Rx PDF");
-            toast(parts.length ? `Saved: ${parts.join(", ")}` : "Nothing saved", "success");
+            if (failed.length > 0) {
+              const savedMsg = parts.length ? `Saved ${parts.join(", ")}. ` : "";
+              toast(`${savedMsg}Failed: ${failed.join(", ")}`, "error");
+            } else {
+              toast(parts.length ? `Saved: ${parts.join(", ")}` : "Nothing saved", "success");
+            }
             setTimeout(() => refreshData(), 3000);
           }}
         />

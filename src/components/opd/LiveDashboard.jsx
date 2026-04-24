@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import CustomCalendar from "../ui/CustomCalendar";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 
@@ -237,8 +237,335 @@ function Card({ children, style }) {
   );
 }
 
+function MultiSelectFilter({
+  label: titleLabel,
+  allLabel,
+  unitSingular,
+  unitPlural,
+  options,
+  selected,
+  onChange,
+  displayName,
+  searchable = true,
+  icon,
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const total = options.length;
+  const isAll = selected.size === 0 || selected.size === total;
+
+  const triggerLabel =
+    isAll || selected.size === 0
+      ? allLabel
+      : selected.size === 1
+        ? displayName
+          ? displayName([...selected][0])
+          : [...selected][0]
+        : `${selected.size} ${unitPlural || unitSingular + "s"}`;
+
+  const toggleOne = (name) => {
+    const cur = selected.size === 0 ? new Set(options) : new Set(selected);
+    if (cur.has(name)) cur.delete(name);
+    else cur.add(name);
+    if (cur.size === 0 || cur.size === total) onChange(new Set());
+    else onChange(cur);
+  };
+
+  const selectAll = () => onChange(new Set());
+  const toggleAll = () => {
+    if (isAll && total > 0) onChange(new Set([options[0]]));
+    else onChange(new Set());
+  };
+
+  const filtered = query.trim()
+    ? options.filter((d) => d.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  const isChecked = (name) => (selected.size === 0 ? true : selected.has(name));
+
+  const CheckBox = ({ checked }) => (
+    <span
+      aria-hidden
+      style={{
+        width: 14,
+        height: 14,
+        borderRadius: 4,
+        border: `1.5px solid ${checked ? T : BD}`,
+        background: checked ? T : WH,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        transition: "all .12s",
+      }}
+    >
+      {checked && (
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+          <path
+            d="M1.5 5.2 4 7.7 8.8 2.8"
+            stroke="#fff"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </span>
+  );
+
+  const defaultIcon = (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M2.5 3.5h11M4.5 8h7M6.5 12.5h3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", fontFamily: FB }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={titleLabel}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          background: isAll ? WH : TL,
+          border: `1px solid ${isAll ? BD : TB}`,
+          color: isAll ? INK2 : T,
+          borderRadius: 6,
+          padding: "5px 10px",
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: "pointer",
+          fontFamily: FB,
+          maxWidth: 220,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {icon || defaultIcon}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{triggerLabel}</span>
+        {!isAll && (
+          <span
+            style={{
+              background: T,
+              color: WH,
+              fontSize: 10,
+              fontWeight: 700,
+              borderRadius: 10,
+              padding: "1px 6px",
+              fontFamily: FM,
+              lineHeight: 1.3,
+            }}
+          >
+            {selected.size}
+          </span>
+        )}
+        <span
+          style={{
+            fontSize: 9,
+            color: isAll ? INK3 : T,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform .15s",
+            marginLeft: 1,
+          }}
+        >
+          ▾
+        </span>
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            width: 260,
+            background: WH,
+            border: `1px solid ${BD}`,
+            borderRadius: 8,
+            boxShadow: SH,
+            zIndex: 50,
+            overflow: "hidden",
+            fontFamily: FB,
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 12px 8px",
+              borderBottom: `1px solid ${BD}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 700, color: INK, letterSpacing: 0.2 }}>
+              {titleLabel}
+            </span>
+            {!isAll && (
+              <button
+                type="button"
+                onClick={selectAll}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: T,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: 0,
+                  fontFamily: FB,
+                }}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+
+          {searchable && options.length > 6 && (
+            <div style={{ padding: "8px 10px", borderBottom: `1px solid ${BD}` }}>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${unitPlural || unitSingular + "s"}…`}
+                style={{
+                  width: "100%",
+                  padding: "5px 8px",
+                  fontSize: 11,
+                  fontFamily: FB,
+                  color: INK,
+                  border: `1px solid ${BD}`,
+                  borderRadius: 5,
+                  outline: "none",
+                  background: BG,
+                  boxSizing: "border-box",
+                }}
+                onFocus={(e) => (e.target.style.borderColor = T)}
+                onBlur={(e) => (e.target.style.borderColor = BD)}
+              />
+            </div>
+          )}
+
+          <div style={{ maxHeight: 240, overflowY: "auto", padding: "4px 0" }}>
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={toggleAll}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleAll();
+                }
+              }}
+              className="ld-row"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                padding: "7px 12px",
+                cursor: "pointer",
+                fontSize: 11,
+                color: INK,
+                fontWeight: 600,
+                borderBottom: `1px dashed ${BD}`,
+                marginBottom: 2,
+                userSelect: "none",
+              }}
+            >
+              <CheckBox checked={isAll} />
+              <span style={{ flex: 1 }}>{allLabel}</span>
+              <span style={{ fontSize: 10, color: INK3, fontFamily: FM }}>{total}</span>
+            </div>
+
+            {filtered.length === 0 ? (
+              <div
+                style={{
+                  padding: "10px 12px",
+                  fontSize: 11,
+                  color: INK3,
+                  textAlign: "center",
+                }}
+              >
+                No {unitPlural || unitSingular + "s"} match
+              </div>
+            ) : (
+              filtered.map((name) => {
+                const checked = isChecked(name);
+                return (
+                  <div
+                    key={name}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleOne(name)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleOne(name);
+                      }
+                    }}
+                    className="ld-row"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 9,
+                      padding: "7px 12px",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      color: INK2,
+                      userSelect: "none",
+                    }}
+                  >
+                    <CheckBox checked={checked} />
+                    <span
+                      style={{
+                        flex: 1,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {displayName ? displayName(name) : name}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LiveDashboard({
   appointments = [],
+  doctors = [],
   updatedAt,
   isFetching,
   isPending = false,
@@ -271,8 +598,78 @@ export default function LiveDashboard({
   }, [calOpen]);
   useTick(1000);
 
+  const [selectedDoctors, setSelectedDoctors] = useState(() => new Set());
+  const [selectedSpecs, setSelectedSpecs] = useState(() => new Set());
+
+  const doctorSpecMap = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(doctors) ? doctors : []).forEach((d) => {
+      if (d && d.name) {
+        const sp = (d.speciality || d.specialization || d.specialty || "").trim();
+        if (sp) map.set(d.name, sp);
+      }
+    });
+    return map;
+  }, [doctors]);
+
+  const doctorList = useMemo(() => {
+    const set = new Set();
+    (Array.isArray(appointments) ? appointments : []).forEach((a) => {
+      if (a && a.doctor_name) set.add(a.doctor_name);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [appointments]);
+
+  const specList = useMemo(() => {
+    const set = new Set();
+    doctorList.forEach((name) => {
+      const sp = doctorSpecMap.get(name);
+      if (sp) set.add(sp);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [doctorList, doctorSpecMap]);
+
+  useEffect(() => {
+    if (selectedDoctors.size === 0) return;
+    const available = new Set(doctorList);
+    let changed = false;
+    const next = new Set();
+    selectedDoctors.forEach((name) => {
+      if (available.has(name)) next.add(name);
+      else changed = true;
+    });
+    if (changed) setSelectedDoctors(next);
+  }, [doctorList, selectedDoctors]);
+
+  useEffect(() => {
+    if (selectedSpecs.size === 0) return;
+    const available = new Set(specList);
+    let changed = false;
+    const next = new Set();
+    selectedSpecs.forEach((sp) => {
+      if (available.has(sp)) next.add(sp);
+      else changed = true;
+    });
+    if (changed) setSelectedSpecs(next);
+  }, [specList, selectedSpecs]);
+
+  const filteredAppointments = useMemo(() => {
+    const base = Array.isArray(appointments) ? appointments : [];
+    const hasDoc = selectedDoctors && selectedDoctors.size > 0;
+    const hasSpec = selectedSpecs && selectedSpecs.size > 0;
+    if (!hasDoc && !hasSpec) return base;
+    return base.filter((a) => {
+      if (hasDoc && !selectedDoctors.has(a.doctor_name)) return false;
+      if (hasSpec) {
+        const sp = doctorSpecMap.get(a.doctor_name);
+        if (!sp || !selectedSpecs.has(sp)) return false;
+      }
+      return true;
+    });
+  }, [appointments, selectedDoctors, selectedSpecs, doctorSpecMap]);
+
   const m = useMemo(() => {
-    const appts = Array.isArray(appointments) ? appointments : [];
+    const appts = Array.isArray(filteredAppointments) ? filteredAppointments : [];
     const get = (a) => {
       const bio = a.biomarkers || {};
       const compl = a.compliance || {};
@@ -387,7 +784,7 @@ export default function LiveDashboard({
       avgDeltaWorse,
       buckets,
     };
-  }, [appointments]);
+  }, [filteredAppointments]);
 
   const coverageColor = m.pctCoverage >= 80 ? GN : m.pctCoverage >= 60 ? AM : RE;
   const controlColor = m.pctControlled >= 60 ? GN : m.pctControlled >= 30 ? AM : RE;
@@ -603,6 +1000,50 @@ export default function LiveDashboard({
                 />
               )}
             </div>
+          )}
+          {specList.length > 0 && (
+            <MultiSelectFilter
+              label="Filter by specialization"
+              allLabel="All specializations"
+              unitSingular="specialization"
+              unitPlural="specializations"
+              options={specList}
+              selected={selectedSpecs}
+              onChange={setSelectedSpecs}
+              icon={
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path
+                    d="M8 1.8v3.1M8 11.1v3.1M1.8 8h3.1M11.1 8h3.1M4.5 4.5 6.6 6.6M9.4 9.4l2.1 2.1M11.5 4.5 9.4 6.6M6.6 9.4 4.5 11.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              }
+            />
+          )}
+          {doctorList.length > 0 && (
+            <MultiSelectFilter
+              label="Filter by doctor"
+              allLabel="All doctors"
+              unitSingular="doctor"
+              unitPlural="doctors"
+              options={doctorList}
+              selected={selectedDoctors}
+              onChange={setSelectedDoctors}
+              displayName={firstName}
+              icon={
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <circle cx="8" cy="5.2" r="2.6" stroke="currentColor" strokeWidth="1.4" />
+                  <path
+                    d="M2.8 13.6c.9-2.5 3-3.6 5.2-3.6s4.3 1.1 5.2 3.6"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              }
+            />
           )}
           <button
             onClick={onRefresh}

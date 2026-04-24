@@ -41,12 +41,16 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUp
   const [viewingDoc, setViewingDoc] = useState(null);
   const patient = usePatientStore((s) => s.patient);
 
-  const prescriptions = documents.filter((d) => d.doc_type === "prescription");
-  const labReports = documents.filter((d) => d.doc_type === "lab_report");
-  const radiologyReports = documents.filter(
+  const visibleDocuments = documents.filter(
+    (d) => d.storage_path || d.file_url || d.source === "healthray",
+  );
+
+  const prescriptions = visibleDocuments.filter((d) => d.doc_type === "prescription");
+  const labReports = visibleDocuments.filter((d) => d.doc_type === "lab_report");
+  const radiologyReports = visibleDocuments.filter(
     (d) => d.doc_type === "imaging" || d.doc_type === "radiology",
   );
-  const otherDocs = documents.filter(
+  const otherDocs = visibleDocuments.filter(
     (d) => !["prescription", "lab_report", "imaging", "radiology"].includes(d.doc_type),
   );
 
@@ -176,7 +180,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUp
               </>
             )}
 
-            {documents.length === 0 && (
+            {visibleDocuments.length === 0 && (
               <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
                 No documents uploaded
               </div>

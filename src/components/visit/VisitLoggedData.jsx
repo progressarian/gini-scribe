@@ -112,19 +112,24 @@ function SummaryCards({ vitals, activity, meds, meals, symptoms }) {
 
 function VitalsTable({ vitals, limit }) {
   const rows = limit ? vitals.slice(0, limit) : vitals;
+  // Grid template for 9 columns — keeps the header and body aligned even
+  // though ld-vital-cols (a 7-col helper) isn't wide enough anymore.
+  const cols = "0.8fr 0.9fr 0.7fr 0.7fr 0.7fr 0.7fr 0.5fr 0.6fr 0.8fr";
   return (
     <div className="ld-table-wrap">
-      <div className="ld-tbl-head ld-vital-cols">
+      <div className="ld-tbl-head" style={{ gridTemplateColumns: cols }}>
         <span>Date</span>
         <span>BP</span>
         <span>Sugar (RBS)</span>
         <span>Weight</span>
+        <span>Body Fat</span>
+        <span>Muscle</span>
         <span>Pulse</span>
         <span>SpO2</span>
         <span>Type</span>
       </div>
       {rows.map((v, i) => (
-        <div key={v.id || i} className="ld-tbl-row ld-vital-cols">
+        <div key={v.id || i} className="ld-tbl-row" style={{ gridTemplateColumns: cols }}>
           <span>{fmtDate(v.recorded_date)}</span>
           <span
             style={{
@@ -138,6 +143,8 @@ function VitalsTable({ vitals, limit }) {
             {v.rbs || "—"}
           </span>
           <span>{v.weight_kg ? `${v.weight_kg} kg` : "—"}</span>
+          <span>{v.body_fat != null ? `${v.body_fat}%` : "—"}</span>
+          <span>{v.muscle_mass != null ? `${v.muscle_mass} kg` : "—"}</span>
           <span>{v.pulse || "—"}</span>
           <span>{v.spo2 ? `${v.spo2}%` : "—"}</span>
           <span style={{ color: "var(--t3)" }}>{v.meal_type || ""}</span>
@@ -318,6 +325,111 @@ function MealsTable({ meals, limit }) {
   );
 }
 
+// Medicines the patient has added in the Genie app — shown even when no
+// dose has been logged yet. This is how a "Test Med (Track Sync)" surfaces
+// on the web side.
+function PatientMedicationsTable({ medications, limit }) {
+  const rows = limit ? medications.slice(0, limit) : medications;
+  return (
+    <div className="ld-table-wrap">
+      <div
+        className="ld-tbl-head"
+        style={{ gridTemplateColumns: "1.5fr 0.9fr 1fr 1.3fr 0.7fr 0.8fr" }}
+      >
+        <span>Name</span>
+        <span>Dose</span>
+        <span>Frequency</span>
+        <span>Instructions</span>
+        <span>Status</span>
+        <span>Source</span>
+      </div>
+      {rows.map((m, i) => (
+        <div
+          key={m.id || i}
+          className="ld-tbl-row"
+          style={{ gridTemplateColumns: "1.5fr 0.9fr 1fr 1.3fr 0.7fr 0.8fr" }}
+        >
+          <span style={{ fontWeight: 600 }}>{m.name || "—"}</span>
+          <span style={{ color: "var(--t2)" }}>{m.dose || "—"}</span>
+          <span style={{ color: "var(--t2)" }}>{m.frequency || m.timing || "—"}</span>
+          <span style={{ color: "var(--t3)", fontSize: 12 }}>{m.instructions || "—"}</span>
+          <span
+            style={{
+              color: m.is_active ? "var(--green)" : "var(--t3)",
+              fontWeight: 600,
+            }}
+          >
+            {m.is_active ? "Active" : "Stopped"}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--t3)", textTransform: "capitalize" }}>
+            {m.source || "genie"}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Conditions the patient (or scribe) has recorded on the Genie side.
+// Mirrors the status chips the patient sees on the Track → Conditions screen.
+const CONDITION_STATUS_COLORS = {
+  controlled: { bg: "#DCFCE7", fg: "#15803D", label: "Controlled" },
+  improving: { bg: "#DBEAFE", fg: "#1D4ED8", label: "Improving" },
+  monitoring: { bg: "#FEF3C7", fg: "#92400E", label: "Monitoring" },
+  uncontrolled: { bg: "#FEE2E2", fg: "#B91C1C", label: "Needs Attention" },
+  worsening: { bg: "#FEE2E2", fg: "#B91C1C", label: "Worsening" },
+  diagnosed: { bg: "#F3F4F6", fg: "#374151", label: "Diagnosed" },
+  active: { bg: "#FEF3C7", fg: "#92400E", label: "Active" },
+};
+
+function PatientConditionsTable({ conditions }) {
+  return (
+    <div className="ld-condition-grid" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {conditions.map((c, i) => {
+        const key = String(c.status || "diagnosed").toLowerCase();
+        const chip = CONDITION_STATUS_COLORS[key] || CONDITION_STATUS_COLORS.diagnosed;
+        return (
+          <div
+            key={c.id || i}
+            style={{
+              background: "#fff",
+              border: "1px solid var(--line)",
+              borderRadius: 10,
+              padding: "10px 12px",
+              minWidth: 200,
+              flex: "1 1 220px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{c.name || "Condition"}</span>
+              <span
+                style={{
+                  background: chip.bg,
+                  color: chip.fg,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                }}
+              >
+                {chip.label}
+              </span>
+            </div>
+            {c.diagnosed_date && (
+              <div style={{ fontSize: 11, color: "var(--t3)" }}>
+                Diagnosed {fmtDate(c.diagnosed_date)}
+              </div>
+            )}
+            {c.notes && (
+              <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 4 }}>{c.notes}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── View All Data Modal ── */
 
 const ALL_TABS = [
@@ -398,12 +510,17 @@ function ViewAllModal({ loggedData, onClose }) {
 const VisitLoggedData = memo(function VisitLoggedData({ loggedData }) {
   const [showAll, setShowAll] = useState(false);
 
+  const patientMedications = loggedData.patientMedications || [];
+  const patientConditions = loggedData.patientConditions || [];
+
   const hasAny = !!(
     loggedData.vitals?.length ||
     loggedData.activity?.length ||
     loggedData.symptoms?.length ||
     loggedData.meds?.length ||
-    loggedData.meals?.length
+    loggedData.meals?.length ||
+    patientMedications.length ||
+    patientConditions.length
   );
 
   // Nutrition summary
@@ -480,7 +597,7 @@ const VisitLoggedData = memo(function VisitLoggedData({ loggedData }) {
       <div className="sc">
         <div className="sch">
           <div className="sct">
-            <div className="sci ic-b">📊</div>Patient App Data — Last 30 Days
+            <div className="sci ic-b">📊</div>Patient App Data
           </div>
           <button className="bx bx-p" onClick={() => hasAny && setShowAll(true)} disabled={!hasAny}>
             View All Data
@@ -513,6 +630,22 @@ const VisitLoggedData = memo(function VisitLoggedData({ loggedData }) {
                       <span className={`ni ${a.type === "warn" ? "amb" : "inf"}`}>{a.msg}</span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* ── Conditions reported in app ── */}
+              {patientConditions.length > 0 && (
+                <div className="ld-section">
+                  <div className="subsec">Conditions reported in Genie app</div>
+                  <PatientConditionsTable conditions={patientConditions} />
+                </div>
+              )}
+
+              {/* ── Medicines the patient is taking (from Genie app) ── */}
+              {patientMedications.length > 0 && (
+                <div className="ld-section">
+                  <div className="subsec">Medicines the patient is taking (from Genie app)</div>
+                  <PatientMedicationsTable medications={patientMedications} />
                 </div>
               )}
 

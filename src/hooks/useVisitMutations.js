@@ -21,14 +21,14 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   );
 
   const addDiagnosis = useCallback(
-    async (data) => {
+    async (data, opts = {}) => {
       try {
         await api.post(`/api/visit/${patientId}/diagnosis`, data);
-        toast("Diagnosis added", "success");
-        await refreshData();
+        if (!opts.silent) toast("Diagnosis added", "success");
+        if (!opts.skipRefresh) await refreshData();
         return { success: true };
       } catch {
-        toast("Failed to add diagnosis", "error");
+        if (!opts.silent) toast("Failed to add diagnosis", "error");
         return { success: false };
       }
     },
@@ -51,14 +51,14 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   );
 
   const addMedication = useCallback(
-    async (data) => {
+    async (data, opts = {}) => {
       try {
         await api.post(`/api/visit/${patientId}/medication`, { ...data, ...extra });
-        toast("Medication added", "success");
-        await refreshData();
+        if (!opts.silent) toast("Medication added", "success");
+        if (!opts.skipRefresh) await refreshData();
         return { success: true };
       } catch {
-        toast("Failed to add medication", "error");
+        if (!opts.silent) toast("Failed to add medication", "error");
         return { success: false };
       }
     },
@@ -81,14 +81,14 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   );
 
   const stopMedication = useCallback(
-    async (id, data) => {
+    async (id, data, opts = {}) => {
       try {
         await api.patch(`/api/visit/${patientId}/medication/${id}/stop`, data);
-        toast("Medication stopped", "success");
-        await refreshData();
+        if (!opts.silent) toast("Medication stopped", "success");
+        if (!opts.skipRefresh) await refreshData();
         return { success: true };
       } catch {
-        toast("Failed to stop medication", "error");
+        if (!opts.silent) toast("Failed to stop medication", "error");
         return { success: false };
       }
     },
@@ -111,14 +111,14 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   );
 
   const addSymptom = useCallback(
-    async (data) => {
+    async (data, opts = {}) => {
       try {
         await api.post(`/api/visit/${patientId}/symptom`, { ...data, ...extra });
-        toast("Symptom added", "success");
-        await refreshData();
+        if (!opts.silent) toast("Symptom added", "success");
+        if (!opts.skipRefresh) await refreshData();
         return { success: true };
       } catch {
-        toast("Failed to add symptom", "error");
+        if (!opts.silent) toast("Failed to add symptom", "error");
         return { success: false };
       }
     },
@@ -140,13 +140,13 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   );
 
   const addInvestigations = useCallback(
-    async (items) => {
+    async (items, opts = {}) => {
       try {
         const { data } = await api.patch(`/api/visit/${patientId}/investigations`, { items });
-        await refreshData();
+        if (!opts.skipRefresh) await refreshData();
         return { success: true, added: data?.added ?? 0 };
       } catch {
-        toast("Failed to save investigations", "error");
+        if (!opts.silent) toast("Failed to save investigations", "error");
         return { success: false };
       }
     },

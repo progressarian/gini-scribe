@@ -5,23 +5,32 @@ import pool from "../config/db.js";
 const require = createRequire(import.meta.url);
 
 // Import CJS module
-const { syncPatientLogsFromGenie } = require("../genie-sync.cjs");
+const {
+  syncPatientLogsFromGenie,
+  syncPatientLogsFromGenieThrottled,
+  syncDiagnosesToGenie,
+} = require("../genie-sync.cjs");
 
 const router = express.Router();
 
 /**
  * POST /patients/:id/sync-health-logs
- * Trigger on-demand sync from Genie → Local DB
+ * Trigger on-demand sync — pulls Genie→scribe logs + pushes scribe diagnoses
+ * back to Genie so the "Sync Now" button is a true bidirectional kick.
  */
 router.post("/patients/:id/sync-health-logs", async (req, res) => {
   try {
     const patientId = req.params.id;
 
-    const result = await syncPatientLogsFromGenie(patientId, pool);
+    const [pullResult, pushResult] = await Promise.all([
+      syncPatientLogsFromGenie(patientId, pool),
+      syncDiagnosesToGenie(patientId, pool),
+    ]);
 
     return res.json({
       success: true,
-      ...result,
+      ...pullResult,
+      diagnosesPush: pushResult,
     });
   } catch (error) {
     console.error("Sync Health Logs Error:", error);
@@ -44,6 +53,13 @@ router.get("/patients/:id/health-logs", async (req, res) => {
   try {
     const patientId = req.params.id;
     const { type, since } = req.query;
+
+    // Pull latest Genie → scribe before reading the local mirror, so patient
+    // app logs show up without the doctor having to open the visit page or
+    // click "Sync Now". Throttled (30s) so a rapid UI refresh burst collapses.
+    await syncPatientLogsFromGenieThrottled(patientId, pool).catch((e) =>
+      console.warn("[health-logs] Pre-read sync skipped:", e.message),
+    );
 
     const filters = [];
     const values = [patientId];

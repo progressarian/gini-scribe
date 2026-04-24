@@ -5,6 +5,8 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
+import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
+import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
 const { log, error } = createLogger("HealthRay Sync");
 
 // ── Download HealthRay file and store in Supabase ───────────────────────────
@@ -791,7 +793,8 @@ const DIAGNOSIS_ID_RENAMES = {
   hyposomatotropis: "hyposomatotropism",
 };
 
-export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
+export async function syncDiagnoses(patientId, healthrayId, diagnoses, options = {}) {
+  const { sweepStale = false } = options;
   if (!patientId || !diagnoses || diagnoses.length === 0) return;
 
   // Deactivate stale duplicate rows for known renamed IDs before upserting
@@ -809,6 +812,7 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
       );
   }
 
+  const keptIds = [];
   for (const dx of diagnoses) {
     if (!dx.name) continue;
     if (isAbsentFinding(dx)) continue;
@@ -817,6 +821,7 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
     if (!cleanName) continue;
     const diagId = normalizeDiagnosisId(dx.id || cleanName);
     if (!diagId) continue; // null = non-medical descriptor, skip
+    keptIds.push(diagId);
 
     await pool
       .query(
@@ -841,6 +846,31 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses) {
           "syncDiagnoses",
           `UPSERT failed for patient=${patientId} diagnosis_id="${diagId}" label="${cleanName}": ${e.message}`,
         ),
+      );
+  }
+
+  // Opt-in stale sweep — used by the prescription re-extraction path so the
+  // latest prescription becomes the sole source of truth for the patient's
+  // diagnoses. HealthRay cron path leaves sweepStale=false (additive-only).
+  // Only touches auto-synced rows (notes prefixed 'healthray:'); manually
+  // added or consultation-scoped diagnoses (different notes prefix) are
+  // preserved.
+  if (sweepStale && keptIds.length > 0) {
+    await pool
+      .query(
+        `UPDATE diagnoses
+            SET is_active = false,
+                notes = COALESCE(notes, '') ||
+                        ' — superseded by healthray:' || $2::text,
+                updated_at = NOW()
+          WHERE patient_id = $1
+            AND is_active = true
+            AND notes LIKE 'healthray:%'
+            AND diagnosis_id <> ALL($3::text[])`,
+        [patientId, String(healthrayId), keptIds],
+      )
+      .catch((e) =>
+        error("syncDiagnoses", `stale-sweep UPDATE failed for patient=${patientId}: ${e.message}`),
       );
   }
 }
@@ -913,7 +943,13 @@ export async function syncStoppedMedications(
 
     const reason = `healthray:${healthrayId}${med.reason ? " — " + med.reason : med.status || ""}`;
 
-    // Try to mark existing active med as stopped (by name + dose)
+    // Always compare on the canonical key, never on the raw name. Once the
+    // one-time normalize-medication-names.js migration has run, every row has
+    // pharmacy_match set and the brand name stripped, so this match is exact.
+    const cleanMedName = stripFormPrefix(med.name).name || med.name;
+    const matchKey = normalizeMedName(med.name);
+
+    // Try to mark existing active med as stopped (by canonical name + dose)
     const updateRes = await pool
       .query(
         `UPDATE medications
@@ -922,10 +958,10 @@ export async function syncStoppedMedications(
              stop_reason = $2,
              updated_at = NOW()
          WHERE patient_id = $1
-           AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)
+           AND UPPER(COALESCE(pharmacy_match, name)) = $3
            AND (($4::text IS NULL AND dose IS NULL) OR dose = $4)
            AND is_active = true`,
-        [patientId, reason, med.name, med.dose || null],
+        [patientId, reason, matchKey, med.dose || null],
       )
       .catch((e) => {
         error(
@@ -948,8 +984,8 @@ export async function syncStoppedMedications(
            DO NOTHING`,
           [
             patientId,
-            med.name,
-            normalizeMedName(med.name),
+            cleanMedName,
+            matchKey,
             med.dose || null,
             med.frequency || null,
             reason,
@@ -966,34 +1002,44 @@ export async function syncStoppedMedications(
   }
 }
 
-// Strip common dosage-form prefixes so "Tab Wegovy", "INJ Wegovy", "WEGOVY"
-// all resolve to the same canonical key ("WEGOVY") for the ON CONFLICT check.
-function normalizeMedName(name) {
-  return name
-    .replace(
-      /^(tab\.?\s+|tablet\s+|inj\.?\s+|injection\s+|cap\.?\s+|capsule\s+|syp\.?\s+|syrup\s+|drops?\s+|oint\.?\s+|ointment\s+|gel\s+|cream\s+|spray\s+|sachet\s+|pwd\.?\s+|powder\s+)/i,
-      "",
-    )
-    .replace(/\s*\([\d\s+.\/mg%KkUuIL]+\)\s*$/i, "") // strip trailing dose in parens e.g. "(5+25+1000 mg)", "(60K units)"
-    .trim()
-    .toUpperCase();
-}
+// Canonical key delegated to the shared medication normaliser.
+// See server/services/medication/normalize.js for the full contract.
+const normalizeMedName = canonicalMedKey;
 
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
 
+  // Historical started_date lookup — if the patient was already on this drug
+  // in an earlier prescription, backdate started_date to the first known
+  // occurrence instead of stamping it with the current apptDate.
+  const canonicalKeys = meds
+    .filter((m) => m?.name)
+    .map((m) => {
+      const { name } = stripFormPrefix(m.name);
+      return canonicalMedKey(name || m.name).slice(0, 200);
+    })
+    .filter(Boolean);
+  const earliestByKey = await findEarliestStartDates(pool, patientId, canonicalKeys, null);
+
   for (const med of meds) {
     if (!med.name) continue;
-    const pharmacyMatch = normalizeMedName(med.name);
+    // Strip dosage-form prefix so the stored `name` is the clean brand — the
+    // prefix becomes the route (Oral/SC/Topical/...) and never survives in
+    // `name`, which is what the stop-medicine matcher reads.
+    const { name: cleanName, form: detectedForm } = stripFormPrefix(med.name);
+    const storedName = cleanName || med.name;
+    const pharmacyMatch = normalizeMedName(storedName);
+    const storedRoute = med.route || routeForForm(detectedForm) || "Oral";
+    const startedDate = resolveStartedDate(earliestByKey, pharmacyMatch, apptDate);
     const params = [
       patientId,
-      med.name,
+      storedName,
       pharmacyMatch,
       med.dose || null,
       med.frequency || null,
       med.timing || null,
-      med.route || "Oral",
-      apptDate,
+      storedRoute,
+      startedDate,
       `healthray:${healthrayId}`,
     ];
 
@@ -1014,7 +1060,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       med.frequency || null, // $4
       med.timing || null, // $5
       med.route || "Oral", // $6
-      apptDate, // $7
+      startedDate, // $7 — earliest known start, falls back to apptDate
       `healthray:${healthrayId}`, // $8
     ];
     await pool
@@ -1026,7 +1072,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
              frequency = COALESCE($4, frequency),
              timing = COALESCE($5, timing),
              route = COALESCE($6, route),
-             started_date = COALESCE($7, started_date),
+             started_date = LEAST(started_date, $7),
              notes = $8,
              consultation_id = NULL,
              document_id = NULL,
@@ -1061,7 +1107,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
            timing = COALESCE(EXCLUDED.timing, medications.timing),
            route = COALESCE(EXCLUDED.route, medications.route),
-           started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+           started_date = LEAST(medications.started_date, EXCLUDED.started_date),
            notes = EXCLUDED.notes,
            pharmacy_match = EXCLUDED.pharmacy_match,
            source = 'healthray',

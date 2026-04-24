@@ -232,6 +232,8 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_weight: parseFloat(v.weight) || null,
         p_height: parseFloat(v.height) || null,
         p_temp: parseFloat(v.temp) || null,
+        p_rbs: parseFloat(v.rbs) || null,
+        p_meal_type: v.meal_type || null,
         p_source: 'doctor',
       }, { step: 'vitals' });
     }
@@ -281,6 +283,415 @@ async function syncPatientToGenie(patient) {
     return { synced: true, mhgPatientId: result?.data || null };
   } catch (err) {
     console.error('[Genie Sync Patient] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err) };
+  }
+}
+
+/**
+ * Push all active scribe diagnoses for a patient to Genie's `conditions` table.
+ *
+ * syncVisitToGenie only pushes diagnoses that are attached to the `visit`
+ * payload it's given — i.e. on consultation save. Diagnoses added/edited via
+ * the standalone AddDiagnosis / UpdateDiagnosis mutations never flowed to
+ * Genie, which is why the patient app's Conditions section would stay empty
+ * until the doctor saved a full consultation. This helper closes that gap:
+ * it reads the canonical diagnoses list from Postgres and replays the same
+ * `gini_sync_condition` RPC that syncVisitToGenie uses, so Genie converges.
+ *
+ * Safe to call fire-and-forget; every RPC has its own try/catch so one failed
+ * condition can't abort the rest.
+ */
+async function syncDiagnosesToGenie(scribePatientId, localDb) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId) return { synced: false, reason: 'Missing patient id' };
+
+  const giniPatientId = String(scribePatientId);
+  const errors = [];
+  let pushed = 0;
+
+  try {
+    const { rows } = await localDb.query(
+      `SELECT DISTINCT ON (diagnosis_id)
+         diagnosis_id, label, status, since_year, notes, is_active, updated_at
+       FROM diagnoses
+       WHERE patient_id = $1 AND is_active IS NOT FALSE
+       ORDER BY diagnosis_id, updated_at DESC`,
+      [scribePatientId],
+    );
+
+    for (const dx of rows) {
+      const dxName = dx.label || dx.diagnosis_id;
+      if (!dxName) continue;
+      // Genie's gini_sync_condition RPC accepts a full date; expand the
+      // scribe-side since_year to a Jan-1 date so the year doesn't get lost.
+      let diagDate = null;
+      if (dx.since_year) {
+        const yr = String(dx.since_year);
+        diagDate = /^\d{4}$/.test(yr) ? `${yr}-01-01` : yr;
+      }
+      try {
+        const result = await withRetry(
+          () =>
+            db.rpc('gini_sync_condition', {
+              p_gini_patient_id: giniPatientId,
+              p_source_id: `gini-dx-${String(dxName).toLowerCase().replace(/\s+/g, '-')}`,
+              p_name: dxName,
+              p_status: dx.status || 'active',
+              p_diagnosed_date: diagDate,
+              p_notes: dx.notes || null,
+            }),
+          { label: `gini_sync_condition(${dxName})` },
+        );
+        if (result?.error) {
+          errors.push({ name: dxName, error: result.error.message || String(result.error) });
+        } else {
+          pushed += 1;
+        }
+      } catch (err) {
+        errors.push({ name: dxName, error: err.message || String(err) });
+      }
+    }
+
+    return { synced: true, pushed, total: rows.length, errors };
+  } catch (err) {
+    console.error('[Genie Sync Diagnoses] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err), errors };
+  }
+}
+
+/**
+ * Mirror of `syncDiagnosesToGenie` for the `medications` table. `syncVisitToGenie`
+ * only pushes meds attached to a full consultation payload, so standalone
+ * add/edit/stop on the /visit page never reached Genie. Reads the canonical
+ * medications list from Postgres and replays `gini_sync_medication` per row.
+ * Includes inactive rows so a stop flips `is_active=false` on the Genie side.
+ */
+async function syncMedicationsToGenie(scribePatientId, localDb) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId) return { synced: false, reason: 'Missing patient id' };
+
+  const giniPatientId = String(scribePatientId);
+  const errors = [];
+  let pushed = 0;
+
+  try {
+    const { rows } = await localDb.query(
+      `SELECT id, name, dose, frequency, timing, clinical_note, notes, is_active
+         FROM medications
+        WHERE patient_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 500`,
+      [scribePatientId],
+    );
+
+    for (const med of rows) {
+      if (!med.name) continue;
+      try {
+        const result = await withRetry(
+          () =>
+            db.rpc('gini_sync_medication', {
+              p_gini_patient_id: giniPatientId,
+              p_source_id: `gini-med-${med.id}`,
+              p_name: med.name,
+              p_dose: med.dose || null,
+              p_frequency: med.frequency || null,
+              p_timing: med.timing || null,
+              p_duration: null,
+              p_instructions: med.clinical_note || med.notes || null,
+              p_is_active: med.is_active !== false,
+            }),
+          { label: `gini_sync_medication(${med.name})` },
+        );
+        if (result?.error) {
+          errors.push({ name: med.name, error: result.error.message || String(result.error) });
+        } else {
+          pushed += 1;
+        }
+      } catch (err) {
+        errors.push({ name: med.name, error: err.message || String(err) });
+      }
+    }
+
+    return { synced: true, pushed, total: rows.length, errors };
+  } catch (err) {
+    console.error('[Genie Sync Medications] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err), errors };
+  }
+}
+
+/**
+ * Delete a patient-added medication from Genie. `genieMedId` is the UUID
+ * stored in `patient_medications_genie.genie_id` — i.e. the Supabase
+ * `medications.id` that the patient created in the Genie app. Removes the
+ * row both on Genie (so it disappears from the app) and from the scribe
+ * mirror table. Idempotent: missing rows are treated as success.
+ */
+async function deleteGenieMedication(scribePatientId, genieMedId, localDb) {
+  if (!genieMedId) return { deleted: false, reason: 'Missing genie medication id' };
+  const db = getGenieDb();
+
+  let mirrorDeleted = 0;
+  if (localDb && scribePatientId) {
+    try {
+      const r = await localDb.query(
+        `DELETE FROM patient_medications_genie
+          WHERE patient_id = $1 AND (genie_id = $2 OR id::text = $2)
+          RETURNING id`,
+        [scribePatientId, String(genieMedId)],
+      );
+      mirrorDeleted = r.rows.length;
+    } catch (err) {
+      console.warn('[Genie Delete Med] Mirror delete failed:', err.message || err);
+    }
+  }
+
+  if (!db) {
+    return { deleted: mirrorDeleted > 0, mirrorDeleted, reason: 'No Genie credentials' };
+  }
+
+  try {
+    const { data, error } = await db
+      .from('medications')
+      .delete()
+      .eq('id', genieMedId)
+      .select('id');
+    if (error) {
+      console.error('[Genie Delete Med] Error:', error.message);
+      return { deleted: mirrorDeleted > 0, mirrorDeleted, reason: error.message };
+    }
+    return { deleted: true, mirrorDeleted, genieDeleted: data?.length || 0 };
+  } catch (err) {
+    console.error('[Genie Delete Med] Exception:', err.message || err);
+    return { deleted: mirrorDeleted > 0, mirrorDeleted, reason: err.message || String(err) };
+  }
+}
+
+/**
+ * Mirror of `syncDiagnosesToGenie` for the `lab_results` table. Standalone lab
+ * adds (POST /visit/:patientId/lab) bypass `syncVisitToGenie`. Skips rows with
+ * non-numeric results since `gini_sync_lab.p_value` is NUMERIC NOT NULL.
+ */
+async function syncLabsToGenie(scribePatientId, localDb) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId) return { synced: false, reason: 'Missing patient id' };
+
+  const giniPatientId = String(scribePatientId);
+  const errors = [];
+  let pushed = 0;
+
+  try {
+    const { rows } = await localDb.query(
+      `SELECT id, test_name, result, unit, test_date
+         FROM lab_results
+        WHERE patient_id = $1 AND result IS NOT NULL
+        ORDER BY test_date DESC NULLS LAST, id DESC
+        LIMIT 500`,
+      [scribePatientId],
+    );
+
+    for (const lab of rows) {
+      if (!lab.test_name) continue;
+      const value = parseFloat(lab.result);
+      if (!Number.isFinite(value)) continue;
+      try {
+        const result = await withRetry(
+          () =>
+            db.rpc('gini_sync_lab', {
+              p_gini_patient_id: giniPatientId,
+              p_source_id: `gini-lab-${lab.id}`,
+              p_test_name: lab.test_name,
+              p_value: value,
+              p_unit: lab.unit || null,
+              p_reference_range: null,
+              p_status: 'normal',
+              p_test_date: lab.test_date || new Date().toISOString().split('T')[0],
+            }),
+          { label: `gini_sync_lab(${lab.test_name})` },
+        );
+        if (result?.error) {
+          errors.push({ name: lab.test_name, error: result.error.message || String(result.error) });
+        } else {
+          pushed += 1;
+        }
+      } catch (err) {
+        errors.push({ name: lab.test_name, error: err.message || String(err) });
+      }
+    }
+
+    return { synced: true, pushed, total: rows.length, errors };
+  } catch (err) {
+    console.error('[Genie Sync Labs] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err), errors };
+  }
+}
+
+/**
+ * Mirror of `syncDiagnosesToGenie` for follow-up / scheduled appointments.
+ * `syncVisitToGenie` only pushes the follow-up date embedded in a freshly-saved
+ * consultation, so edits via `PATCH /visit/:patientId/followup` or
+ * `PATCH /appointments/:id` never reached Genie and the patient app kept
+ * showing the stale appointment date.
+ *
+ * Reads the most recent/upcoming appointment from scribe and pushes it via
+ * `gini_sync_appointment` (upserts by `source_id`).
+ */
+async function syncAppointmentToGenie(scribePatientId, localDb) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId) return { synced: false, reason: 'Missing patient id' };
+
+  const giniPatientId = String(scribePatientId);
+  const errors = [];
+  let pushed = 0;
+
+  try {
+    // Prefer the next scheduled appointment; fall back to most recent.
+    const { rows } = await localDb.query(
+      `SELECT id, appointment_date, doctor_name, status, notes
+         FROM appointments
+        WHERE patient_id = $1
+        ORDER BY
+          CASE WHEN appointment_date >= CURRENT_DATE THEN 0 ELSE 1 END,
+          appointment_date ASC,
+          id DESC
+        LIMIT 1`,
+      [scribePatientId],
+    );
+    if (!rows[0]) return { synced: true, pushed: 0, total: 0, errors };
+
+    const appt = rows[0];
+    try {
+      const result = await withRetry(
+        () =>
+          db.rpc('gini_sync_appointment', {
+            p_gini_patient_id: giniPatientId,
+            p_source_id: `gini-appt-${appt.id}`,
+            p_appointment_date: appt.appointment_date,
+            p_doctor_name: appt.doctor_name || null,
+            p_notes: appt.notes || null,
+            p_status: appt.status || 'scheduled',
+          }),
+        { label: `gini_sync_appointment(${appt.id})` },
+      );
+      if (result?.error) {
+        errors.push({ id: appt.id, error: result.error.message || String(result.error) });
+      } else {
+        pushed += 1;
+      }
+    } catch (err) {
+      errors.push({ id: appt.id, error: err.message || String(err) });
+    }
+    return { synced: true, pushed, total: rows.length, errors };
+  } catch (err) {
+    console.error('[Genie Sync Appointment] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err), errors };
+  }
+}
+
+/**
+ * Mirror of `syncDiagnosesToGenie` for the patient's primary care team.
+ * `syncVisitToGenie` only pushes care team at full consultation save. If the
+ * doctor is reassigned on an appointment outside a visit (e.g., via
+ * `PATCH /appointments/:id` with a new `doctor_name`), Genie keeps showing the
+ * old doctor. This helper reads the current assignment from the latest
+ * appointment and replays `gini_sync_care_team` so the `patients.doctor_name`
+ * column on Genie converges (see gini_sync_care_team SQL definition).
+ */
+async function syncCareTeamToGenie(scribePatientId, localDb) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId) return { synced: false, reason: 'Missing patient id' };
+
+  const giniPatientId = String(scribePatientId);
+  const errors = [];
+  let pushed = 0;
+
+  try {
+    const { rows } = await localDb.query(
+      `SELECT doctor_name
+         FROM appointments
+        WHERE patient_id = $1 AND doctor_name IS NOT NULL
+        ORDER BY appointment_date DESC NULLS LAST, id DESC
+        LIMIT 1`,
+      [scribePatientId],
+    );
+    const doctorName = rows[0]?.doctor_name;
+    if (!doctorName) return { synced: true, pushed: 0, total: 0, errors };
+
+    try {
+      const result = await withRetry(
+        () =>
+          db.rpc('gini_sync_care_team', {
+            p_gini_patient_id: giniPatientId,
+            p_source_id: 'gini-doc-primary',
+            p_role: 'doctor',
+            p_name: doctorName,
+            p_phone: null,
+            p_speciality: null,
+            p_organization: 'Gini Advanced Care Hospital',
+            p_is_primary: true,
+          }),
+        { label: `gini_sync_care_team(${doctorName})` },
+      );
+      if (result?.error) {
+        errors.push({ name: doctorName, error: result.error.message || String(result.error) });
+      } else {
+        pushed += 1;
+      }
+    } catch (err) {
+      errors.push({ name: doctorName, error: err.message || String(err) });
+    }
+    return { synced: true, pushed, total: 1, errors };
+  } catch (err) {
+    console.error('[Genie Sync CareTeam] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err), errors };
+  }
+}
+
+/**
+ * Push a single scribe `vitals` row to Genie so BP/weight/pulse the doctor
+ * types on the /visit page shows up on the patient's phone.
+ *
+ * syncVisitToGenie only fires on consultation save; standalone vitals edits
+ * (POST/PATCH /visit/:patientId/vitals) bypassed that path entirely, which
+ * is why the app never saw doctor-entered readings. Idempotent on
+ * `gini-vitals-{scribeVitalsId}` so re-saves update the same Genie row.
+ */
+async function syncVitalsRowToGenie(scribePatientId, vitalsRow) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId || !vitalsRow || vitalsRow.id == null) {
+    return { synced: false, reason: 'Missing patient id or vitals row' };
+  }
+  try {
+    const result = await withRetry(
+      () =>
+        db.rpc('gini_sync_vitals', {
+          p_gini_patient_id: String(scribePatientId),
+          p_source_id: `gini-vitals-${vitalsRow.id}`,
+          p_recorded_at: vitalsRow.recorded_at || new Date().toISOString(),
+          p_bp_sys: vitalsRow.bp_sys != null ? parseFloat(vitalsRow.bp_sys) : null,
+          p_bp_dia: vitalsRow.bp_dia != null ? parseFloat(vitalsRow.bp_dia) : null,
+          p_pulse: vitalsRow.pulse != null ? parseFloat(vitalsRow.pulse) : null,
+          p_spo2: vitalsRow.spo2 != null ? parseFloat(vitalsRow.spo2) : null,
+          p_weight: vitalsRow.weight != null ? parseFloat(vitalsRow.weight) : null,
+          p_height: vitalsRow.height != null ? parseFloat(vitalsRow.height) : null,
+          p_temp: vitalsRow.temp != null ? parseFloat(vitalsRow.temp) : null,
+          p_rbs: vitalsRow.rbs != null ? parseFloat(vitalsRow.rbs) : null,
+          p_meal_type: vitalsRow.meal_type || null,
+          p_source: 'doctor',
+        }),
+      { label: `gini_sync_vitals(${vitalsRow.id})` },
+    );
+    if (result?.error) {
+      return { synced: false, reason: result.error.message || String(result.error) };
+    }
+    return { synced: true };
+  } catch (err) {
+    console.error('[Genie Sync Vitals Row] Exception:', err.message || err);
     return { synced: false, reason: err.message || String(err) };
   }
 }
@@ -556,7 +967,15 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
   if (!db) return { synced: false, reason: "No Genie credentials" };
 
   const fetchErrors = [];
-  const upsertFailures = { vitals: 0, activities: 0, symptoms: 0, medications: 0, meals: 0 };
+  const upsertFailures = {
+    vitals: 0,
+    activities: 0,
+    symptoms: 0,
+    medications: 0,
+    meals: 0,
+    medications_master: 0,
+    conditions: 0,
+  };
 
   try {
 
@@ -585,7 +1004,7 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
       }
     };
 
-    const [vitals, activities, symptoms, meds, meals] = await Promise.all([
+    const [vitals, activities, symptoms, meds, meals, medsMaster, conditions] = await Promise.all([
       safeFetch('vitals', () =>
         db.from("vitals")
           .select("*")
@@ -620,6 +1039,23 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           .select("*")
           .eq("patient_id", genieUUID)
           .order("log_date", { ascending: false })
+          .limit(500),
+      ),
+      // Master medications list the patient (or scribe) has attached to the
+      // Genie profile. We mirror these so the scribe visit page can show
+      // "patient-added" medicines even before a dose has been logged.
+      safeFetch('medications', () =>
+        db.from("medications")
+          .select("*")
+          .eq("patient_id", genieUUID)
+          .order("created_at", { ascending: false })
+          .limit(500),
+      ),
+      safeFetch('conditions', () =>
+        db.from("conditions")
+          .select("*")
+          .eq("patient_id", genieUUID)
+          .order("created_at", { ascending: false })
           .limit(500),
       ),
     ]);
@@ -686,6 +1122,67 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
         scribePatientId, a.id, a.activity_type, a.value, a.value2,
         a.context, a.duration_minutes, a.mood_score,
         a.log_date, a.log_time, a.created_at,
+      ]);
+    }
+
+
+    // -------------------------
+    // Body Scan BACKFILL  (activity_logs → patient_vitals_log)
+    // -------------------------
+    // Defence-in-depth: any time the Genie app's Body section records
+    // weight / body_fat / muscle_mass / bmi / waist, the intended write
+    // goes into the vitals table. Old app bundles (pre-insert-fix) and
+    // older code paths instead wrote only to activity_logs with the
+    // metrics encoded as JSON in `context`. Here we synthesize a
+    // patient_vitals_log row from those entries so the doctor sees the
+    // reading regardless of which write path ran. Idempotent via a
+    // 'body-' prefix on genie_id so re-runs don't duplicate.
+    // Pre-compute the timestamps of real vitals rows that already carry at
+    // least one body metric — we use these to skip the backfill when the
+    // app successfully double-wrote the scan (new bundle path). Tolerance
+    // is 60s to absorb clock skew and the two-write latency.
+    const bodyVitalsTimestamps = vitals
+      .filter((v) => v.weight_kg != null || v.body_fat != null || v.muscle_mass != null)
+      .map((v) => new Date(v.created_at).getTime())
+      .filter((t) => !isNaN(t));
+
+    for (const a of activities) {
+      if (a.activity_type !== 'Body' || !a.context) continue;
+      let ctx;
+      try { ctx = typeof a.context === 'string' ? JSON.parse(a.context) : a.context; }
+      catch { continue; }
+      if (!ctx || typeof ctx !== 'object') continue;
+      const wt = ctx.weight_kg != null ? Number(ctx.weight_kg) : null;
+      const bf = ctx.body_fat != null ? Number(ctx.body_fat) : null;
+      const mm = ctx.muscle_mass != null ? Number(ctx.muscle_mass) : null;
+      const bmi = ctx.bmi != null ? Number(ctx.bmi) : null;
+      const waist = ctx.waist != null ? Number(ctx.waist) : null;
+      if (wt == null && bf == null && mm == null && bmi == null && waist == null) continue;
+      // Skip if the same scan was already written to Genie vitals directly
+      // (new app bundles do the double-write; the direct row is richer).
+      const aTs = new Date(a.created_at).getTime();
+      if (!isNaN(aTs) && bodyVitalsTimestamps.some((t) => Math.abs(t - aTs) <= 60_000)) continue;
+      await safeUpsert('vitals', `
+        INSERT INTO patient_vitals_log (
+          patient_id, genie_id, recorded_date, reading_time,
+          weight_kg, body_fat, muscle_mass, bmi, waist, created_at
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+        )
+        ON CONFLICT (genie_id) DO UPDATE SET
+          weight_kg = EXCLUDED.weight_kg,
+          body_fat = EXCLUDED.body_fat,
+          muscle_mass = EXCLUDED.muscle_mass,
+          bmi = EXCLUDED.bmi,
+          waist = EXCLUDED.waist
+      `, [
+        scribePatientId,
+        `body-${a.id}`,
+        a.log_date,
+        a.log_time || null,
+        wt, bf, mm, bmi, waist,
+        a.created_at,
       ]);
     }
 
@@ -771,12 +1268,92 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
       ]);
     }
 
+
+    // -------------------------
+    // Medications MASTER UPSERT (Genie `medications` → scribe mirror)
+    // -------------------------
+
+    for (const mm of medsMaster) {
+      // Genie medications schema: id, patient_id, name, dose, timing, is_active,
+      //   type, brand, scheduled_time, for_conditions, start_date, notes,
+      //   created_at, source, source_id. Our mirror maps `timing` → frequency
+      //   and `notes` → instructions so the UI doesn't need Genie-specific columns.
+      const forConds = Array.isArray(mm.for_conditions)
+        ? mm.for_conditions
+        : (mm.for_conditions ? [String(mm.for_conditions)] : null);
+      await safeUpsert('medications_master', `
+        INSERT INTO patient_medications_genie (
+          patient_id, genie_id, name, dose, frequency,
+          timing, instructions, is_active, for_conditions,
+          source, synced_at, created_at
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11
+        )
+        ON CONFLICT (genie_id) DO UPDATE SET
+          name = EXCLUDED.name,
+          dose = EXCLUDED.dose,
+          frequency = EXCLUDED.frequency,
+          timing = EXCLUDED.timing,
+          instructions = EXCLUDED.instructions,
+          is_active = EXCLUDED.is_active,
+          for_conditions = EXCLUDED.for_conditions,
+          source = EXCLUDED.source,
+          synced_at = NOW()
+      `, [
+        scribePatientId, mm.id, mm.name, mm.dose,
+        mm.timing || mm.scheduled_time || null,
+        mm.timing || null,
+        mm.notes || null,
+        mm.is_active === undefined ? true : !!mm.is_active,
+        forConds,
+        mm.source || 'genie',
+        mm.created_at,
+      ]);
+    }
+
+
+    // -------------------------
+    // Conditions UPSERT (Genie `conditions` → scribe mirror)
+    // -------------------------
+
+    for (const c of conditions) {
+      // Genie `conditions` stores the diagnosis year as a 4-digit string in
+      // `diagnosed_year`. Promote it to Jan 1 of that year for DATE storage
+      // so the scribe UI can format it consistently with other date fields.
+      let diagDate = null;
+      if (c.diagnosed_year) {
+        const yr = String(c.diagnosed_year);
+        diagDate = /^\d{4}$/.test(yr) ? `${yr}-01-01` : yr;
+      }
+      await safeUpsert('conditions', `
+        INSERT INTO patient_conditions_genie (
+          patient_id, genie_id, name, status,
+          diagnosed_date, notes, synced_at, created_at
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,NOW(),$7
+        )
+        ON CONFLICT (genie_id) DO UPDATE SET
+          name = EXCLUDED.name,
+          status = EXCLUDED.status,
+          diagnosed_date = EXCLUDED.diagnosed_date,
+          notes = EXCLUDED.notes,
+          synced_at = NOW()
+      `, [
+        scribePatientId, c.id, c.name, c.status,
+        diagDate, c.notes || null, c.created_at,
+      ]);
+    }
+
     const counts = {
       vitals: vitals.length - upsertFailures.vitals,
       activities: activities.length - upsertFailures.activities,
       symptoms: symptoms.length - upsertFailures.symptoms,
       medications: meds.length - upsertFailures.medications,
       meals: meals.length - upsertFailures.meals,
+      medications_master: medsMaster.length - upsertFailures.medications_master,
+      conditions: conditions.length - upsertFailures.conditions,
     };
     const totalFailures = Object.values(upsertFailures).reduce((a, b) => a + b, 0);
 
@@ -1069,11 +1646,55 @@ async function markConversationRead({ conversationId, side } = {}) {
   return true;
 }
 
+// ─── Per-patient sync throttle ────────────────────────────────────────────
+// The visit GET handler used to call syncPatientLogsFromGenie unconditionally,
+// which — combined with React Query's refetch-on-focus and a 60s lab poll —
+// produced one Genie round-trip every few seconds while a doctor's tab was
+// open. This wrapper collapses those bursts: concurrent requests share the
+// same in-flight promise, and we skip entirely if the previous sync for this
+// patient completed less than MIN_SYNC_INTERVAL_MS ago. Explicit "Sync Now"
+// (POST /api/patients/:id/sync-health-logs) keeps calling the raw function
+// so users can always force a fresh pull.
+const _lastSyncAt = new Map();    // scribePatientId → epoch ms of last success
+const _inFlight = new Map();      // scribePatientId → Promise of current sync
+const MIN_SYNC_INTERVAL_MS = 30_000;
+
+async function syncPatientLogsFromGenieThrottled(scribePatientId, localDb) {
+  // Normalize to string so Number(16619) and "16619" share the same throttle
+  // entry (visit.js passes Number, health-logs.js passes the raw string param).
+  const key = String(scribePatientId);
+  if (_inFlight.has(key)) return _inFlight.get(key);
+  const now = Date.now();
+  const last = _lastSyncAt.get(key) || 0;
+  if (now - last < MIN_SYNC_INTERVAL_MS) {
+    return { synced: true, skipped: 'throttled', ageMs: now - last };
+  }
+  const p = (async () => {
+    try {
+      const r = await syncPatientLogsFromGenie(scribePatientId, localDb);
+      _lastSyncAt.set(key, Date.now());
+      return r;
+    } finally {
+      _inFlight.delete(key);
+    }
+  })();
+  _inFlight.set(key, p);
+  return p;
+}
+
 module.exports = {
   syncPatientToGenie, deletePatientFromGenie,
   syncVisitToGenie, sendAlertToGenie, getAlertsFromGenie,
   getMessagesFromGenie, sendReplyToGenie, getThreadFromGenie, markMessageReadInGenie, resolveGeniePatientId,
   syncPatientLogsFromGenie,
+  syncPatientLogsFromGenieThrottled,
+  syncDiagnosesToGenie,
+  syncMedicationsToGenie,
+  deleteGenieMedication,
+  syncLabsToGenie,
+  syncAppointmentToGenie,
+  syncCareTeamToGenie,
+  syncVitalsRowToGenie,
   // Conversation-model exports
   ensureConversation,
   listConversationsForDoctor,

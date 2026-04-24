@@ -1,12 +1,30 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 
 const DeleteMedicationModal = memo(function DeleteMedicationModal({
   medication,
   onClose,
   onSubmit,
 }) {
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      await onSubmit(medication.id);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="mo open"
+      onClick={(e) => {
+        if (loading) return;
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="mbox">
         <div className="mttl">🗑️ Delete Medication</div>
         <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>
@@ -30,15 +48,37 @@ const DeleteMedicationModal = memo(function DeleteMedicationModal({
           If you want to keep a record but stop the medication, use "Stop" instead.
         </div>
         <div className="macts">
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={onClose} disabled={loading}>
             Cancel
           </button>
           <button
             className="btn-p"
-            style={{ background: "var(--red)" }}
-            onClick={() => onSubmit(medication.id)}
+            style={{
+              background: "var(--red)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              opacity: loading ? 0.75 : 1,
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+            disabled={loading}
+            onClick={handleSubmit}
           >
-            Delete Permanently
+            {loading && (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 12,
+                  height: 12,
+                  border: "2px solid rgba(255,255,255,0.4)",
+                  borderTopColor: "#fff",
+                  borderRadius: "50%",
+                  display: "inline-block",
+                  animation: "spin 0.7s linear infinite",
+                }}
+              />
+            )}
+            {loading ? "Deleting…" : "Delete Permanently"}
           </button>
         </div>
       </div>

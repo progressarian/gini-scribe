@@ -14,9 +14,26 @@ const REASONS = [
 const StopMedicationModal = memo(function StopMedicationModal({ medication, onClose, onSubmit }) {
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!reason || loading) return;
+    setLoading(true);
+    try {
+      await onSubmit({ reason, notes });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="mo open"
+      onClick={(e) => {
+        if (loading) return;
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="mbox">
         <div className="mttl">🛑 Stop Medication</div>
         <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>
@@ -24,7 +41,12 @@ const StopMedicationModal = memo(function StopMedicationModal({ medication, onCl
         </div>
         <div className="mf">
           <label className="ml">Reason for stopping *</label>
-          <select className="ms" value={reason} onChange={(e) => setReason(e.target.value)}>
+          <select
+            className="ms"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            disabled={loading}
+          >
             <option value="">Select reason...</option>
             {REASONS.map((r) => (
               <option key={r} value={r}>
@@ -40,19 +62,41 @@ const StopMedicationModal = memo(function StopMedicationModal({ medication, onCl
             placeholder="Additional notes..."
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
+            disabled={loading}
           />
         </div>
         <div className="macts">
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={onClose} disabled={loading}>
             Cancel
           </button>
           <button
             className="btn-p"
-            style={{ background: "var(--red)" }}
-            disabled={!reason}
-            onClick={() => onSubmit({ reason, notes })}
+            style={{
+              background: "var(--red)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              opacity: loading ? 0.75 : 1,
+              cursor: loading || !reason ? "not-allowed" : "pointer",
+            }}
+            disabled={!reason || loading}
+            onClick={handleSubmit}
           >
-            Stop Medication
+            {loading && (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 12,
+                  height: 12,
+                  border: "2px solid rgba(255,255,255,0.4)",
+                  borderTopColor: "#fff",
+                  borderRadius: "50%",
+                  display: "inline-block",
+                  animation: "spin 0.7s linear infinite",
+                }}
+              />
+            )}
+            {loading ? "Stopping…" : "Stop Medication"}
           </button>
         </div>
       </div>

@@ -13,5 +13,11 @@ export function useVisit(patientId, appointmentId) {
     queryKey: qk.visit.byPatient(patientId, appointmentId),
     queryFn: () => fetchVisit(patientId, appointmentId),
     enabled: !!patientId,
+    // Each /visit GET runs a Genie sync server-side. The global React Query
+    // defaults (staleTime:0, refetchOnWindowFocus:true) turned a normal
+    // doctor session into a storm of sync calls. Override both for just
+    // this query — other screens keep the global behaviour.
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 }

@@ -1,8 +1,12 @@
 import { Router } from "express";
+import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import { appointmentCreateSchema, appointmentUpdateSchema } from "../schemas/index.js";
+
+const require = createRequire(import.meta.url);
+const { syncAppointmentToGenie, syncCareTeamToGenie } = require("../genie-sync.cjs");
 
 const router = Router();
 
@@ -130,6 +134,16 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
         is_walkin || false,
       ],
     );
+    if (rows[0]?.patient_id) {
+      syncAppointmentToGenie(rows[0].patient_id, pool).catch((e) =>
+        console.warn("[Appt] Appointment push skipped:", e.message),
+      );
+      if (rows[0].doctor_name) {
+        syncCareTeamToGenie(rows[0].patient_id, pool).catch((e) =>
+          console.warn("[Appt] Care team push skipped:", e.message),
+        );
+      }
+    }
     res.json(rows[0]);
   } catch (e) {
     handleError(res, e, "Appointment create");
@@ -166,6 +180,16 @@ router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, r
       [req.params.id, doctor_name, appointment_date, time_slot, visit_type, status, notes],
     );
     if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    if (rows[0].patient_id) {
+      syncAppointmentToGenie(rows[0].patient_id, pool).catch((e) =>
+        console.warn("[Appt] Appointment push skipped:", e.message),
+      );
+      if (doctor_name) {
+        syncCareTeamToGenie(rows[0].patient_id, pool).catch((e) =>
+          console.warn("[Appt] Care team push skipped:", e.message),
+        );
+      }
+    }
     res.json(rows[0]);
   } catch (e) {
     handleError(res, e, "Appointment update");

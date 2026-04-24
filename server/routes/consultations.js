@@ -7,6 +7,11 @@ import { getCanonical } from "../utils/labCanonical.js";
 import { encryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { consultationCreateSchema, historyCreateSchema } from "../schemas/index.js";
+import {
+  stripFormPrefix,
+  canonicalMedKey,
+  routeForForm,
+} from "../services/medication/normalize.js";
 
 const require = createRequire(import.meta.url);
 let syncVisitToGenie = null;
@@ -220,13 +225,17 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       const prevMap = new Map();
       for (const m of moData?.previous_medications || []) {
         if (!m?.name) continue;
-        const key = (m._matched || m.name || "").toUpperCase();
-        if (key) prevMap.set(key, m);
+        const { name: cleanName } = stripFormPrefix(m.name);
+        const storedName = cleanName || m.name;
+        const key = (m._matched || canonicalMedKey(storedName) || storedName).toUpperCase();
+        if (key) prevMap.set(key, { ...m, _clean_name: storedName });
       }
       const prevMedsRows = Array.from(prevMap.values());
       if (prevMedsRows.length) {
-        const names = prevMedsRows.map((m) => t(m.name, 200));
-        const matched = prevMedsRows.map((m) => t(m._matched, 200));
+        const names = prevMedsRows.map((m) => t(m._clean_name || m.name, 200));
+        const matched = prevMedsRows.map(
+          (m) => t(m._matched, 200) || canonicalMedKey(m._clean_name || m.name),
+        );
         const compositions = prevMedsRows.map((m) => t(m.composition, 200));
         const doses = prevMedsRows.map((m) => t(m.dose, 100));
         const freqs = prevMedsRows.map((m) => t(m.frequency, 100));
@@ -281,8 +290,10 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       const confMap = new Map();
       for (const m of conData?.medications_confirmed || []) {
         if (!m?.name) continue;
-        const key = (m._matched || m.name || "").toUpperCase();
-        if (key) confMap.set(key, m);
+        const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+        const storedName = cleanName || m.name;
+        const key = (m._matched || canonicalMedKey(storedName) || storedName).toUpperCase();
+        if (key) confMap.set(key, { ...m, _clean_name: storedName, _detected_form: detectedForm });
       }
       const confRows = Array.from(confMap.values());
       if (confRows.length) {
@@ -304,13 +315,13 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
           [
             patientId,
             consultationId,
-            confRows.map((m) => t(m.name, 200)),
-            confRows.map((m) => t(m._matched, 200)),
+            confRows.map((m) => t(m._clean_name || m.name, 200)),
+            confRows.map((m) => t(m._matched, 200) || canonicalMedKey(m._clean_name || m.name)),
             confRows.map((m) => t(m.composition, 200)),
             confRows.map((m) => t(m.dose, 100)),
             confRows.map((m) => t(m.frequency, 100)),
             confRows.map((m) => t(m.timing, 100)),
-            confRows.map((m) => t(m.route, 50) || "Oral"),
+            confRows.map((m) => t(m.route, 50) || routeForForm(m._detected_form) || "Oral"),
             confRows.map((m) => m.isNew === true),
           ],
         );
@@ -555,22 +566,26 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     for (const m of medications || []) {
       if (m?.name) {
         const isActive = m.is_active !== false;
+        const { name: cleanName } = stripFormPrefix(m.name);
+        const storedName = cleanName || m.name;
         await client.query(
-          `INSERT INTO medications (patient_id, consultation_id, name, composition, dose, frequency, timing, is_active, started_date)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_active, started_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+             pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
              composition = COALESCE(EXCLUDED.composition, medications.composition),
              dose = COALESCE(EXCLUDED.dose, medications.dose),
              frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
              timing = COALESCE(EXCLUDED.timing, medications.timing),
              is_active = EXCLUDED.is_active,
-             started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+             started_date = LEAST(medications.started_date, EXCLUDED.started_date),
              updated_at = NOW()`,
           [
             patientId,
             cid,
-            m.name,
+            storedName,
+            canonicalMedKey(storedName),
             n(m.composition),
             n(m.dose),
             n(m.frequency),

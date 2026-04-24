@@ -18,9 +18,24 @@ import {
   detectMedGroup,
   detectDrugClass,
 } from "../utils/medicationSort.js";
+import {
+  stripFormPrefix,
+  canonicalMedKey,
+  routeForForm,
+} from "../services/medication/normalize.js";
 
 const require = createRequire(import.meta.url);
-const { syncPatientLogsFromGenie } = require("../genie-sync.cjs");
+const {
+  syncPatientLogsFromGenie,
+  syncPatientLogsFromGenieThrottled,
+  syncDiagnosesToGenie,
+  syncMedicationsToGenie,
+  deleteGenieMedication,
+  syncLabsToGenie,
+  syncAppointmentToGenie,
+  syncCareTeamToGenie,
+  syncVitalsRowToGenie,
+} = require("../genie-sync.cjs");
 
 const router = Router();
 
@@ -64,17 +79,59 @@ pool
   .query(`ALTER TABLE medications ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb`)
   .catch(() => {});
 
+// Genie master medications mirror — populated by syncPatientLogsFromGenie so the
+// scribe visit page can show medicines the patient has added in the Genie app
+// even before any dose has been logged (see genie-sync.cjs).
+pool
+  .query(
+    `CREATE TABLE IF NOT EXISTS patient_medications_genie (
+  id SERIAL PRIMARY KEY,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  genie_id TEXT UNIQUE,
+  name TEXT,
+  dose TEXT,
+  frequency TEXT,
+  timing TEXT,
+  instructions TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  for_conditions TEXT[],
+  source TEXT DEFAULT 'genie',
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ
+)`,
+  )
+  .catch(() => {});
+
+// Genie conditions mirror — conditions the patient or scribe has added on the
+// Genie side so doctors can see them without waiting for the next consultation.
+pool
+  .query(
+    `CREATE TABLE IF NOT EXISTS patient_conditions_genie (
+  id SERIAL PRIMARY KEY,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  genie_id TEXT UNIQUE,
+  name TEXT,
+  status TEXT,
+  diagnosed_date DATE,
+  notes TEXT,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ
+)`,
+  )
+  .catch(() => {});
+
 // GET /api/visit/:patientId — comprehensive visit-page data
 router.get("/visit/:patientId", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
 
-  // Pull the patient's fresh Track logs from Genie before we SELECT. Awaiting
-  // keeps the doctor from seeing stale data on page load; if Genie is down or
-  // credentials are missing, the function returns a soft { synced:false }
-  // result and we carry on.
+  // Pull the patient's fresh Track logs from Genie before we SELECT. The
+  // throttled variant coalesces concurrent requests and skips entirely if
+  // a sync ran for this patient in the last 30s — so rapid refetches
+  // (React Query focus, lab-count poll, client retries) don't fan out into
+  // multiple Genie round-trips.
   try {
-    await syncPatientLogsFromGenie(pid, pool);
+    await syncPatientLogsFromGenieThrottled(pid, pool);
   } catch (e) {
     console.warn("[Visit] Genie log sync skipped:", e.message);
   }
@@ -102,6 +159,8 @@ router.get("/visit/:patientId", async (req, res) => {
       healthrayDxApptR,
       healthraySyncR,
       labSyncR,
+      patientMedsGenieR,
+      patientCondsGenieR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -221,43 +280,50 @@ router.get("/visit/:patientId", async (req, res) => {
       // 9. Goals
       pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [pid]),
 
-      // 10. Genie vitals log (last 60 days)
+      // 10. Genie vitals log — newest 500 rows, no interval filter so older
+      //     history still surfaces when the doctor asks for it.
       pool.query(
         `SELECT * FROM patient_vitals_log
-         WHERE patient_id=$1 AND recorded_date >= NOW() - INTERVAL '60 days'
-         ORDER BY recorded_date DESC`,
+         WHERE patient_id=$1
+         ORDER BY recorded_date DESC
+         LIMIT 500`,
         [pid],
       ),
 
-      // 11. Genie activity log (last 30 days)
+      // 11. Genie activity log
       pool.query(
         `SELECT * FROM patient_activity_log
-         WHERE patient_id=$1 AND log_date >= NOW() - INTERVAL '30 days'
-         ORDER BY log_date DESC`,
+         WHERE patient_id=$1
+         ORDER BY log_date DESC
+         LIMIT 500`,
         [pid],
       ),
 
-      // 12. Genie symptom log (last 60 days)
+      // 12. Genie symptom log
       pool.query(
         `SELECT * FROM patient_symptom_log
-         WHERE patient_id=$1 AND log_date >= NOW() - INTERVAL '60 days'
-         ORDER BY log_date DESC`,
+         WHERE patient_id=$1
+         ORDER BY log_date DESC
+         LIMIT 500`,
         [pid],
       ),
 
-      // 13. Genie med log (last 30 days)
+      // 13. Genie med log — removed 30-day filter so Test Med and other older
+      //     intake events stay visible after sync.
       pool.query(
         `SELECT * FROM patient_med_log
-         WHERE patient_id=$1 AND log_date >= NOW() - INTERVAL '30 days'
-         ORDER BY log_date DESC`,
+         WHERE patient_id=$1
+         ORDER BY log_date DESC
+         LIMIT 500`,
         [pid],
       ),
 
-      // 14. Genie meal log (last 30 days)
+      // 14. Genie meal log
       pool.query(
         `SELECT * FROM patient_meal_log
-         WHERE patient_id=$1 AND log_date >= NOW() - INTERVAL '30 days'
-         ORDER BY log_date DESC`,
+         WHERE patient_id=$1
+         ORDER BY log_date DESC
+         LIMIT 500`,
         [pid],
       ),
 
@@ -313,6 +379,25 @@ router.get("/visit/:patientId", async (req, res) => {
         `SELECT case_no, patient_case_no, case_date, synced_at
          FROM lab_cases WHERE patient_id=$1 AND results_synced = TRUE
          ORDER BY case_date DESC LIMIT 5`,
+        [pid],
+      ),
+
+      // 22. Genie master medications mirror — medicines the patient has added
+      //     in the Genie app (populated by syncPatientLogsFromGenie).
+      pool.query(
+        `SELECT * FROM patient_medications_genie
+         WHERE patient_id=$1
+         ORDER BY is_active DESC, synced_at DESC
+         LIMIT 200`,
+        [pid],
+      ),
+
+      // 23. Genie conditions mirror — what the patient is seeing on their app.
+      pool.query(
+        `SELECT * FROM patient_conditions_genie
+         WHERE patient_id=$1
+         ORDER BY synced_at DESC
+         LIMIT 100`,
         [pid],
       ),
     ]);
@@ -426,7 +511,45 @@ router.get("/visit/:patientId", async (req, res) => {
 
     // Apply clinical sorting to diagnoses and medications
     const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
-    const sortedActiveMeds = sortMedications(activeMedsR.rows);
+    // Merge patient-added Genie meds (e.g. "Test Med (Track Sync)" added from
+    // the app) into the active medications list so the scribe web count
+    // matches what the patient sees in the app. Dedupe by normalised name
+    // against the doctor-prescribed rows; a doctor entry always wins on
+    // collision since it carries fuller metadata (prescriber, consultation
+    // link, started_date, etc.).
+    const doctorNamesSet = new Set(
+      (activeMedsR.rows || []).map((m) =>
+        String(m.pharmacy_match || m.name || "")
+          .trim()
+          .toUpperCase(),
+      ),
+    );
+    const patientOnlyMeds = (patientMedsGenieR.rows || [])
+      .filter((m) => m.is_active !== false)
+      .filter(
+        (m) =>
+          !doctorNamesSet.has(
+            String(m.name || "")
+              .trim()
+              .toUpperCase(),
+          ),
+      )
+      .map((m) => ({
+        id: `genie:${m.genie_id || m.id}`,
+        name: m.name,
+        dose: m.dose,
+        frequency: m.frequency,
+        timing: m.timing,
+        instructions: m.instructions,
+        is_active: m.is_active !== false,
+        started_date: m.created_at || m.synced_at,
+        prescribed_date: m.created_at || m.synced_at,
+        prescriber: null,
+        source: m.source || "patient_app",
+        for_conditions: m.for_conditions || null,
+      }));
+    const combinedActive = [...activeMedsR.rows, ...patientOnlyMeds];
+    const sortedActiveMeds = sortMedications(combinedActive);
 
     res.json({
       patient,
@@ -471,6 +594,8 @@ router.get("/visit/:patientId", async (req, res) => {
         symptoms: symptomLogR.rows,
         meds: medLogR.rows,
         meals: mealLogR.rows,
+        patientMedications: patientMedsGenieR.rows,
+        patientConditions: patientCondsGenieR.rows,
       },
       summary: {
         totalVisits,
@@ -560,6 +685,7 @@ router.post("/visit/:patientId/lab", async (req, res) => {
         appointment_id || null,
       ],
     );
+    syncLabsToGenie(pid, pool).catch((e) => console.warn("[Visit] Labs push skipped:", e.message));
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Add lab value");
@@ -612,6 +738,11 @@ router.post("/visit/:patientId/diagnosis", async (req, res) => {
         t(notes, 1000),
       ],
     );
+    // Fire-and-forget push to Genie so the patient app's Conditions section
+    // updates without waiting for the next consultation save.
+    syncDiagnosesToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Diagnosis push skipped:", e.message),
+    );
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Add diagnosis");
@@ -631,6 +762,9 @@ router.patch("/visit/:patientId/diagnosis/:id", async (req, res) => {
       [t(status, 100), t(notes, 1000), did, pid],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Diagnosis not found" });
+    syncDiagnosesToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Diagnosis push skipped:", e.message),
+    );
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Update diagnosis");
@@ -665,15 +799,24 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         ? [for_diagnosis]
         : null;
 
+    // Strip any dosage-form prefix the doctor may have typed ("TAB Concor",
+    // "INJ Wegovy") so the stored brand name is canonical. The prefix becomes
+    // the route fallback — an explicit route in the payload still wins.
+    const { name: cleanName, form: detectedForm } = stripFormPrefix(name);
+    const storedName = cleanName || name;
+    const storedRoute = t(route, 50) || routeForForm(detectedForm) || "Oral";
+    const pharmacyMatch = canonicalMedKey(storedName);
+
     // Auto-detect group and class if not provided
-    const detectedGroup = med_group || detectMedGroup({ name, composition });
-    const detectedClass = drug_class || detectDrugClass({ name, composition });
+    const detectedGroup = med_group || detectMedGroup({ name: storedName, composition });
+    const detectedClass = drug_class || detectDrugClass({ name: storedName, composition });
 
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,COALESCE($9::date, CURRENT_DATE),$10,'visit',$11,$12,$13,$14,$15)
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16)
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
+         pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
          composition = COALESCE(EXCLUDED.composition, medications.composition),
          dose = COALESCE(EXCLUDED.dose, medications.dose),
          frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
@@ -690,12 +833,13 @@ router.post("/visit/:patientId/medication", async (req, res) => {
        RETURNING *`,
       [
         pid,
-        t(name, 200),
+        t(storedName, 200),
+        t(pharmacyMatch, 200),
         t(composition, 200),
         t(dose, 100),
         t(frequency, 100),
         t(timing, 200),
-        t(route, 50) || "Oral",
+        storedRoute,
         forDx,
         n(started_date),
         appointment_id || null,
@@ -705,6 +849,9 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         t(clinical_note, 500),
         t(notes, 1000),
       ],
+    );
+    syncMedicationsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Medications push skipped:", e.message),
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -759,6 +906,9 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       [nextDose, nextFreq, nextTiming, t(reason, 500), historyEntry, mid, pid],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
+    syncMedicationsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Medications push skipped:", e.message),
+    );
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Edit medication");
@@ -799,6 +949,9 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
     );
     if (!r.rows[0])
       return res.status(404).json({ error: "Medication not found or already stopped" });
+    syncMedicationsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Medications push skipped:", e.message),
+    );
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Stop medication");
@@ -808,15 +961,54 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
 // ── DELETE /visit/:patientId/medication/:id — Delete medication permanently ──
 router.delete("/visit/:patientId/medication/:id", async (req, res) => {
   const pid = Number(req.params.patientId);
-  const mid = Number(req.params.id);
-  if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
+  const rawId = String(req.params.id || "");
+  if (!pid) return res.status(400).json({ error: "Invalid IDs" });
+
+  // Genie-sourced meds use `genie:<uuid>` ids (the Supabase medications.id).
+  // They aren't in the local `medications` table, so number coercion fails —
+  // delete from the mirror + Genie Supabase instead.
+  if (rawId.startsWith("genie:")) {
+    const genieMedId = rawId.slice("genie:".length);
+    if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
+    try {
+      const result = await deleteGenieMedication(pid, genieMedId, pool);
+      if (!result.deleted) {
+        return res.status(500).json({ error: result.reason || "Delete failed" });
+      }
+      return res.json({ success: true, deleted: 1, source: "genie" });
+    } catch (e) {
+      return handleError(res, e, "Delete Genie medication");
+    }
+  }
+
+  const mid = Number(rawId);
+  if (!mid) return res.status(400).json({ error: "Invalid IDs" });
   try {
-    const r = await pool.query(
-      "DELETE FROM medications WHERE id = $1 AND patient_id = $2 RETURNING id",
+    const med = await pool.query(
+      "SELECT pharmacy_match, name FROM medications WHERE id = $1 AND patient_id = $2",
       [mid, pid],
     );
-    if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
-    res.json({ success: true });
+    if (!med.rows[0]) return res.status(404).json({ error: "Medication not found" });
+    const matchKey = med.rows[0].pharmacy_match || med.rows[0].name;
+
+    // Delete the target row plus every same-canonical-name twin (active or
+    // inactive). Without this, a previously hidden inactive twin resurfaces
+    // in "Stopped Medications" on the next refetch (see stoppedMeds NOT
+    // EXISTS filter) and duplicate active rows from earlier consultations
+    // leave a stale card on the UI.
+    const r = await pool.query(
+      `DELETE FROM medications
+       WHERE patient_id = $1
+         AND (id = $2 OR UPPER(COALESCE(pharmacy_match, name)) = UPPER($3))
+       RETURNING id`,
+      [pid, mid, matchKey],
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Medication not found" });
+
+    syncMedicationsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Medications push skipped:", e.message),
+    );
+    res.json({ success: true, deleted: r.rows.length });
   } catch (e) {
     handleError(res, e, "Delete medication");
   }
@@ -1229,6 +1421,9 @@ router.patch("/visit/:patientId/followup", async (req, res) => {
       [JSON.stringify(followUp), pid],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "No consultation found" });
+    syncAppointmentToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Appointment push skipped:", e.message),
+    );
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Update follow-up");
@@ -1359,11 +1554,16 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
              WHERE patient_id = $1
                AND visit_date < (SELECT MAX(visit_date) FROM consultations WHERE patient_id = $1)
            ))
-           -- Case 2: Document/uploaded prescription medicines from past dates only
-           -- Excludes HealthRay medicines (source = 'healthray') — those stay active
-           -- until the doctor explicitly stops them or HealthRay sync marks them stopped
+           -- Case 2: Document/uploaded prescription medicines from past dates only.
+           -- Excludes HealthRay medicines (source = 'healthray') and re-extracted
+           -- prescription medicines (source = 'report_extract') — those stay
+           -- active until the doctor explicitly stops them OR the prescription
+           -- re-extraction's own stale-sweep deactivates them (see
+           -- runPrescriptionExtraction in routes/documents.js). Without this
+           -- exclusion, the newest prescription's meds get nuked here because
+           -- their started_date (= doc_date) is naturally in the past.
            OR (consultation_id IS NULL
-               AND COALESCE(source, '') != 'healthray'
+               AND COALESCE(source, '') NOT IN ('healthray', 'report_extract')
                AND (COALESCE(started_date, created_at::DATE) < CURRENT_DATE))
          )
        RETURNING id`,
@@ -1394,6 +1594,8 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
       body_fat,
       muscle_mass,
       waist,
+      rbs,
+      meal_type,
       recorded_at,
     } = req.body;
     const recordedAt = n(recorded_at) || null;
@@ -1413,8 +1615,9 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
       return res.json({ ok: true, id: existing.rows[0].id, deduplicated: true });
     }
     const { rows } = await pool.query(
-      `INSERT INTO vitals (patient_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist)
-       VALUES ($1, COALESCE($2::timestamptz, NOW()), $3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      `INSERT INTO vitals (patient_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist, rbs, meal_type)
+       VALUES ($1, COALESCE($2::timestamptz, NOW()), $3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, rbs, meal_type`,
       [
         pid,
         recordedAt,
@@ -1429,7 +1632,14 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
         num(body_fat),
         num(muscle_mass),
         num(waist),
+        num(rbs),
+        t(meal_type, 50),
       ],
+    );
+    // Fire-and-forget push so the patient sees doctor-entered BP/weight on
+    // the Genie app without waiting for the next full consultation save.
+    syncVitalsRowToGenie(pid, rows[0]).catch((e) =>
+      console.warn("[Visit] Vitals push skipped:", e.message),
     );
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
@@ -1455,15 +1665,23 @@ router.patch("/visit/:patientId/vitals/:id", async (req, res) => {
       "body_fat",
       "muscle_mass",
       "waist",
+      "rbs",
+      "meal_type",
     ];
     const keys = allowed.filter((f) => req.body[f] !== undefined);
     if (!keys.length) return res.json({ ok: true });
     const sets = keys.map((f, i) => `${f} = $${i + 1}`).join(", ");
-    const vals = keys.map((f) => num(req.body[f]));
-    await pool.query(
-      `UPDATE vitals SET ${sets} WHERE id = $${vals.length + 1} AND patient_id = $${vals.length + 2}`,
+    const vals = keys.map((f) => (f === "meal_type" ? t(req.body[f], 50) : num(req.body[f])));
+    const upd = await pool.query(
+      `UPDATE vitals SET ${sets} WHERE id = $${vals.length + 1} AND patient_id = $${vals.length + 2}
+       RETURNING id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, rbs, meal_type`,
       [...vals, vid, pid],
     );
+    if (upd.rows[0]) {
+      syncVitalsRowToGenie(pid, upd.rows[0]).catch((e) =>
+        console.warn("[Visit] Vitals push skipped:", e.message),
+      );
+    }
     res.json({ ok: true });
   } catch (e) {
     handleError(res, e, "Update vitals");

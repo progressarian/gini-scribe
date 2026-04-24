@@ -3,8 +3,11 @@
  * ALL related rows (documents, labs, meds, vitals, consultations, etc).
  *
  * Unlike wipe-patient-data.js, this also removes the patients row itself.
- * After the local delete we also drop the mirrored row from MyHealth Genie
- * so the mobile app no longer resolves the phone to a `gini_patient`.
+ * After the local delete we also wipe the mirrored patient in MyHealth
+ * Genie — including child rows (medications, labs, conditions, goals,
+ * appointments, vitals, timeline, care_team, conversations, messages,
+ * alerts) — before dropping the patients row on the Genie side so no
+ * orphaned test data is left behind on either database.
  *
  * NOTE: files uploaded to Supabase storage from documents.storage_path are
  * NOT deleted here — they become orphaned. Test data volume is low so this
@@ -27,8 +30,13 @@ const { default: pool } = await import("../config/db.js");
 const { createRequire } = await import("module");
 const require = createRequire(import.meta.url);
 let deletePatientFromGenie = null;
+let resolveGeniePatientId = null;
+let getGenieDb = null;
 try {
-  deletePatientFromGenie = require("../genie-sync.cjs").deletePatientFromGenie;
+  const mod = require("../genie-sync.cjs");
+  deletePatientFromGenie = mod.deletePatientFromGenie;
+  resolveGeniePatientId = mod.resolveGeniePatientId;
+  getGenieDb = mod.getGenieDb;
 } catch (e) {
   console.warn("[delete-test-patient] genie-sync.cjs not loaded:", e.message);
 }
@@ -55,20 +63,73 @@ const CHILD_TABLES = [
   "patient_symptom_log",
   "patient_med_log",
   "patient_meal_log",
+  "patient_medications_genie",
+  "patient_conditions_genie",
   "consultations",
   "appointments",
 ];
 
+// MyHealth Genie (Supabase) child tables keyed on `patient_id` (genie UUID).
+// Order doesn't strictly matter because they're independent, but we drop
+// conversations last so patient_messages rows are cleared first.
+const GENIE_CHILD_TABLES = [
+  "medications",
+  "lab_results",
+  "conditions",
+  "goals",
+  "appointments",
+  "vitals",
+  "timeline_events",
+  "care_team",
+  "alert_channel",
+  "patient_messages",
+  "conversations",
+];
+
+async function dropGenieChildren(giniPatientId) {
+  if (!getGenieDb || !resolveGeniePatientId) {
+    console.log("(Skipped Genie child cleanup — helpers not loaded)");
+    return;
+  }
+  const db = getGenieDb();
+  if (!db) {
+    console.log("(Skipped Genie child cleanup — GENIE_SUPABASE_URL/KEY not set)");
+    return;
+  }
+  const genieUUID = await resolveGeniePatientId(giniPatientId);
+  if (!genieUUID) {
+    console.log(`(No Genie patient for gini_patient_id=${giniPatientId}; nothing to clean)`);
+    return;
+  }
+
+  let total = 0;
+  for (const t of GENIE_CHILD_TABLES) {
+    try {
+      const { data, error } = await db.from(t).delete().eq("patient_id", genieUUID).select("id");
+      if (error) {
+        console.warn(`  ${t.padEnd(24)} — skip (${error.message})`);
+        continue;
+      }
+      const n = data?.length || 0;
+      console.log(`  genie.${t.padEnd(18)} deleted ${n}`);
+      total += n;
+    } catch (e) {
+      console.warn(`  ${t.padEnd(24)} — skip (${e.message})`);
+    }
+  }
+  console.log(`  genie children total    ${total}`);
+}
+
 async function dropFromGenie(giniPatientId) {
   if (!deletePatientFromGenie) {
-    console.log("(Skipped MyHealth Genie cleanup — GENIE_SUPABASE_URL/KEY not set?)");
+    console.log("(Skipped MyHealth Genie patient row — helper not loaded)");
     return;
   }
   const r = await deletePatientFromGenie(giniPatientId);
   if (r?.deleted) {
-    console.log(`MyHealth Genie row removed (gini_patient_id=${giniPatientId})`);
+    console.log(`MyHealth Genie patient row removed (gini_patient_id=${giniPatientId})`);
   } else if (r?.count === 0) {
-    console.log(`No MyHealth Genie row was present for gini_patient_id=${giniPatientId}`);
+    console.log(`No MyHealth Genie patient row was present for gini_patient_id=${giniPatientId}`);
   } else {
     console.warn(`MyHealth Genie cleanup failed: ${r?.reason || "unknown"}`);
   }
@@ -95,7 +156,7 @@ async function run() {
     console.log(`Patient: id=${patient.id}  file_no=${patient.file_no}  name=${patient.name}`);
     console.log();
 
-    console.log("Rows to delete:");
+    console.log("Rows to delete (Scribe):");
     let total = 0;
     for (const t of CHILD_TABLES) {
       const r = await client
@@ -111,7 +172,9 @@ async function run() {
     console.log(`  ${"patients".padEnd(24)} 1`);
     console.log(`  ${"TOTAL".padEnd(24)} ${total + 1}`);
     console.log();
-    console.log("Also removes mirrored row in MyHealth Genie (patients.gini_patient_id).");
+    console.log("Also removes, on the MyHealth Genie (Supabase) side:");
+    console.log(`  child rows in: ${GENIE_CHILD_TABLES.join(", ")}`);
+    console.log(`  the mirrored patients row (gini_patient_id = ${patient.id})`);
     console.log();
 
     if (!APPLY) {
@@ -139,10 +202,12 @@ async function run() {
     deleted += pDel.rowCount;
 
     await client.query("COMMIT");
-    console.log(`\nDone — ${deleted} rows removed (patient + children).`);
+    console.log(`\nDone — ${deleted} rows removed from Scribe (patient + children).`);
 
     // Mirror the delete to MyHealth Genie only after the Scribe-side commit
     // succeeds. Failures there are surfaced but do not fail the script.
+    console.log("\nCleaning MyHealth Genie child rows…");
+    await dropGenieChildren(patient.id);
     console.log();
     await dropFromGenie(patient.id);
   } catch (e) {

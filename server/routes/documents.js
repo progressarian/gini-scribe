@@ -16,8 +16,20 @@ import {
   syncBiomarkersFromLatestLabs,
   syncVitals,
 } from "../services/healthray/db.js";
-import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
+import {
+  extractPrescription,
+  extractFromFile,
+} from "../services/healthray/prescriptionExtractor.js";
 import { extractWithRetry, detectMediaType } from "../services/extraction.js";
+import {
+  stripFormPrefix,
+  canonicalMedKey,
+  routeForForm,
+} from "../services/medication/normalize.js";
+import {
+  findEarliestStartDates,
+  resolveStartedDate,
+} from "../services/medication/historicalStart.js";
 
 const router = Router();
 
@@ -790,29 +802,34 @@ router.patch("/documents/:id", async (req, res) => {
 
       for (const m of extracted_data.medications || []) {
         if (!m?.name) continue;
+        const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+        const storedName = cleanName || m.name;
+        const storedRoute = m.route || routeForForm(detectedForm) || "Oral";
         await client.query(
           `INSERT INTO medications
-             (patient_id, document_id, consultation_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)
+             (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, 'report_extract', $10)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET document_id = EXCLUDED.document_id,
              consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
+             pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
              dose = COALESCE(EXCLUDED.dose, medications.dose),
              frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
              timing = COALESCE(EXCLUDED.timing, medications.timing),
              route = COALESCE(EXCLUDED.route, medications.route),
              source = EXCLUDED.source,
-             started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+             started_date = LEAST(medications.started_date, EXCLUDED.started_date),
              updated_at = NOW()`,
           [
             doc.patient_id,
             doc.id,
             doc.consultation_id || null,
-            (m.name || "").slice(0, 200),
+            storedName.slice(0, 200),
+            canonicalMedKey(storedName).slice(0, 200),
             (m.dose || "").slice(0, 100),
             (m.frequency || "").slice(0, 100),
             (m.timing || "").slice(0, 100),
-            (m.route || "Oral").slice(0, 50),
+            storedRoute.slice(0, 50),
             rxDate,
           ],
         );
@@ -821,20 +838,24 @@ router.patch("/documents/:id", async (req, res) => {
       // Sync stopped medications as inactive
       for (const m of extracted_data.stopped_medications || []) {
         if (!m?.name) continue;
+        const { name: cleanName } = stripFormPrefix(m.name);
+        const storedName = cleanName || m.name;
         await client.query(
           `INSERT INTO medications
-             (patient_id, document_id, consultation_id, name, is_new, is_active, source, started_date)
-           VALUES ($1, $2, $3, $4, false, false, 'report_extract', $5)
+             (patient_id, document_id, consultation_id, name, pharmacy_match, is_new, is_active, source, started_date)
+           VALUES ($1, $2, $3, $4, $5, false, false, 'report_extract', $6)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
            DO UPDATE SET document_id = EXCLUDED.document_id,
              consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
+             pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
              source = EXCLUDED.source,
              updated_at = NOW()`,
           [
             doc.patient_id,
             doc.id,
             doc.consultation_id || null,
-            (m.name || "").slice(0, 200),
+            storedName.slice(0, 200),
+            canonicalMedKey(storedName).slice(0, 200),
             rxDate,
           ],
         );
@@ -1125,42 +1146,56 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
             : new Date().toISOString().split("T")[0]);
         for (const m of extracted.medications || []) {
           if (!m?.name) continue;
+          const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+          const storedName = cleanName || m.name;
+          const storedRoute = m.route || routeForForm(detectedForm) || "Oral";
           await client.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
+               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET document_id = EXCLUDED.document_id,
+               pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
                dose = COALESCE(EXCLUDED.dose, medications.dose),
                frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
                timing = COALESCE(EXCLUDED.timing, medications.timing),
                route = COALESCE(EXCLUDED.route, medications.route),
                source = EXCLUDED.source,
-               started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+               started_date = LEAST(medications.started_date, EXCLUDED.started_date),
                updated_at = NOW()`,
             [
               doc.patient_id,
               doc.id,
-              (m.name || "").slice(0, 200),
+              storedName.slice(0, 200),
+              canonicalMedKey(storedName).slice(0, 200),
               (m.dose || "").slice(0, 100),
               (m.frequency || "").slice(0, 100),
               (m.timing || "").slice(0, 100),
-              (m.route || "Oral").slice(0, 50),
+              storedRoute.slice(0, 50),
               rxDate,
             ],
           );
         }
         for (const m of extracted.stopped_medications || []) {
           if (!m?.name) continue;
+          const { name: cleanName } = stripFormPrefix(m.name);
+          const storedName = cleanName || m.name;
           await client.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, is_new, is_active, source, started_date)
-             VALUES ($1, $2, $3, false, false, 'report_extract', $4)
+               (patient_id, document_id, name, pharmacy_match, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, $4, false, false, 'report_extract', $5)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
              DO UPDATE SET document_id = EXCLUDED.document_id,
+               pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
                source = EXCLUDED.source,
                updated_at = NOW()`,
-            [doc.patient_id, doc.id, (m.name || "").slice(0, 200), rxDate],
+            [
+              doc.patient_id,
+              doc.id,
+              storedName.slice(0, 200),
+              canonicalMedKey(storedName).slice(0, 200),
+              rxDate,
+            ],
           );
         }
         for (const d of extracted.diagnoses || []) {
@@ -1225,160 +1260,431 @@ router.post("/documents/:id/retry-extract", async (req, res) => {
 export { runServerExtraction };
 
 // ── Extract medicines from a HealthRay prescription PDF/image using Claude vision
-// POST /api/documents/:id/extract-prescription
-router.post("/documents/:id/extract-prescription", async (req, res) => {
-  const docId = Number(req.params.id);
-  if (!docId) return res.status(400).json({ error: "Valid document ID required" });
+// Shared core used by the HTTP route and one-off scripts. Uses the unified
+// CLINICAL_EXTRACTION_PROMPT (same as HealthRay sync) and runs the full
+// syncDiagnoses / syncStoppedMedications / syncLabResults / syncVitals /
+// syncSymptoms / syncBiomarkersFromLatestLabs chain.
+async function runPrescriptionExtraction(docId) {
+  docId = Number(docId);
+  if (!docId) return { error: "Valid document ID required", status: 400 };
 
+  const { rows } = await pool.query(
+    `SELECT id, patient_id, doc_type, file_url, doc_date FROM documents WHERE id = $1`,
+    [docId],
+  );
+  if (!rows[0]) return { error: "Document not found", status: 404 };
+  const doc = rows[0];
+
+  if (doc.doc_type !== "prescription")
+    return { error: "Document is not a prescription", status: 400 };
+
+  // Resolve through the same path uploads/retries use — handles HealthRay auth,
+  // storage_path fallback, and re-signing expired URLs. A plain fetch on
+  // file_url fails with 403 for HealthRay-sourced docs.
+  const resolved = await resolveDocumentUrl(docId);
+  if (resolved.error) return { error: `File unavailable: ${resolved.error}`, status: 400 };
+
+  let buffer;
+  if (resolved.buffer) {
+    buffer = resolved.buffer;
+  } else if (resolved.url) {
+    const fileResp = await fetch(resolved.url);
+    if (!fileResp.ok) return { error: `File download failed (${fileResp.status})`, status: 400 };
+    buffer = Buffer.from(await fileResp.arrayBuffer());
+  } else {
+    return { error: "No file attached to this document", status: 400 };
+  }
+  const base64 = Buffer.from(buffer).toString("base64");
+  const extracted = await extractFromFile(base64, buffer);
+
+  // Back-compat alias: older consumers (refreshOpdConsultations) read
+  // `stopped_medications`; unified schema calls it `previous_medications`.
+  if (!extracted.stopped_medications && Array.isArray(extracted.previous_medications)) {
+    extracted.stopped_medications = extracted.previous_medications;
+  }
+
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
-      `SELECT id, patient_id, doc_type, file_url, doc_date FROM documents WHERE id = $1`,
-      [docId],
-    );
-    if (!rows[0]) return res.status(404).json({ error: "Document not found" });
-    const doc = rows[0];
+    await client.query("BEGIN");
 
-    if (doc.doc_type !== "prescription")
-      return res.status(400).json({ error: "Document is not a prescription" });
-    if (!doc.file_url) return res.status(400).json({ error: "Document has no file URL" });
+    await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+      JSON.stringify(extracted),
+      docId,
+    ]);
 
-    // Download + extract via Claude — now uses the unified clinical-extraction
-    // prompt shared with HealthRay sync, so we get diagnoses, symptoms, labs,
-    // vitals, biomarkers, medications, previous_medications, advice, etc.
-    const extracted = await extractPrescription(doc.file_url);
+    // Prescription date (clinical): what's printed on the Rx. Used everywhere
+    // that needs the real clinical date — started_date, follow-up sync, labs.
+    const rxDate = doc.doc_date
+      ? new Date(doc.doc_date).toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0];
 
-    // Back-compat alias: older consumers (refreshOpdConsultations) read
-    // `stopped_medications`; unified schema calls it `previous_medications`.
-    if (!extracted.stopped_medications && Array.isArray(extracted.previous_medications)) {
-      extracted.stopped_medications = extracted.previous_medications;
+    // Latest consultation for this patient — extracted meds get linked to it
+    // so they survive the /medications/reconcile sweep (both branches skip
+    // rows whose consultation_id points to the most recent consultation) AND
+    // the visit page shows the correct `prescribed_date` (=
+    // consultations.visit_date, which matches the Rx date for HealthRay
+    // prescriptions). If the patient has no consultations yet, we skip the
+    // link — the reconcile deploy fix + stale-sweep already cover that path.
+    let latestConsId = null;
+    if (doc.patient_id) {
+      const { rows: consRows } = await client.query(
+        `SELECT id FROM consultations
+          WHERE patient_id = $1
+          ORDER BY visit_date DESC NULLS LAST, id DESC
+          LIMIT 1`,
+        [doc.patient_id],
+      );
+      latestConsId = consRows[0]?.id || null;
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
+    if (doc.patient_id && extracted.follow_up) {
+      await syncFollowUpToAppointment(client, doc.patient_id, extracted.follow_up, rxDate);
+    }
 
-      await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
-        JSON.stringify(extracted),
-        docId,
-      ]);
-
-      const rxDate = doc.doc_date
-        ? new Date(doc.doc_date).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0];
-
-      if (doc.patient_id && extracted.follow_up) {
-        await syncFollowUpToAppointment(client, doc.patient_id, extracted.follow_up, rxDate);
-      }
-
-      // Match an appointment by patient + date (±1 day) so appt-scoped syncs
-      // (vitals, symptoms, biomarkers) can attach. It's fine if none exists —
-      // diagnoses/labs/medications still sync at patient scope.
-      let apptId = null;
-      if (doc.patient_id) {
-        const { rows: apptRows } = await client.query(
-          `SELECT id FROM appointments
+    // Match an appointment by patient + date (±1 day) so appt-scoped syncs
+    // (vitals, symptoms, biomarkers) can attach. It's fine if none exists —
+    // diagnoses/labs/medications still sync at patient scope.
+    let apptId = null;
+    if (doc.patient_id) {
+      const { rows: apptRows } = await client.query(
+        `SELECT id FROM appointments
            WHERE patient_id = $1
              AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day')
                                            AND ($2::date + INTERVAL '1 day')
            ORDER BY appointment_date DESC LIMIT 1`,
-          [doc.patient_id, rxDate],
-        );
-        apptId = apptRows[0]?.id || null;
-      }
+        [doc.patient_id, rxDate],
+      );
+      apptId = apptRows[0]?.id || null;
+    }
 
-      // Synthetic healthray-style scope ID so sync helpers can tag rows to this doc
-      const scopeId = `opd-doc-${docId}`;
+    // Synthetic healthray-style scope ID so sync helpers can tag rows to this doc
+    const scopeId = `opd-doc-${docId}`;
 
-      // Medications — keep document-scoped upsert so deleting the doc can clean up
-      if (doc.patient_id && extracted.medications?.length > 0) {
-        await client.query(`DELETE FROM medications WHERE document_id = $1`, [docId]);
-        for (const m of extracted.medications) {
+    // Medications — keep document-scoped upsert so deleting the doc can clean up.
+    //
+    // Three pitfalls we guard against, because the user reported missing meds:
+    //   1. Same canonical key twice in the current list (same brand at two
+    //      strengths, or Claude returning a morning+evening split as two
+    //      rows): the unique index
+    //      (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active
+    //      lets only ONE active row survive. Second INSERT's DO UPDATE
+    //      overwrites the first's dose/frequency → a medicine is lost.
+    //      Merge those in JS before insert, combining doses/frequencies.
+    //   2. Silent `.catch(() => {})` hid all errors. Log every failure.
+    //   3. `previous_medications` (stopped/dose-changed) was only reaching
+    //      the DB via post-commit syncStoppedMedications, which writes rows
+    //      WITHOUT document_id. Doc-scoped medication listings on the visit
+    //      page then missed them. Now we also insert previous_medications
+    //      as inactive rows scoped to this document.
+    const prescriptionMeds = Array.isArray(extracted.medications) ? extracted.medications : [];
+    const prevMeds = Array.isArray(extracted.previous_medications)
+      ? extracted.previous_medications
+      : Array.isArray(extracted.stopped_medications)
+        ? extracted.stopped_medications
+        : [];
+
+    if (doc.patient_id && (prescriptionMeds.length > 0 || prevMeds.length > 0)) {
+      await client.query(`DELETE FROM medications WHERE document_id = $1`, [docId]);
+
+      const join = (a, b) => {
+        if (!a) return b || "";
+        if (!b || a === b) return a;
+        return a.includes(b) ? a : `${a} / ${b}`;
+      };
+      const buildMerged = (list) => {
+        const map = new Map();
+        for (const m of list) {
           if (!m?.name) continue;
-          await client
-            .query(
-              `INSERT INTO medications
-                 (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
+          const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+          const storedName = (cleanName || m.name).slice(0, 200);
+          const canonical = canonicalMedKey(storedName).slice(0, 200);
+          const key = canonical || storedName.toUpperCase();
+          const route = (m.route || routeForForm(detectedForm) || "Oral").slice(0, 50);
+          const existing = map.get(key);
+          if (!existing) {
+            map.set(key, {
+              storedName,
+              canonical,
+              dose: m.dose || "",
+              frequency: m.frequency || "",
+              timing: m.timing || "",
+              route,
+              status: m.status || null,
+              reason: m.reason || null,
+            });
+          } else {
+            existing.dose = join(existing.dose, m.dose || "");
+            existing.frequency = join(existing.frequency, m.frequency || "");
+            existing.timing = join(existing.timing, m.timing || "");
+            if (!existing.route || existing.route === "Oral") existing.route = route;
+            existing.status = existing.status || m.status || null;
+            existing.reason = existing.reason || m.reason || null;
+          }
+        }
+        return map;
+      };
+
+      const currentByKey = buildMerged(prescriptionMeds);
+      const prevByKey = buildMerged(prevMeds);
+      // A drug appearing in both current and previous = dose/frequency change,
+      // not a stop. Keep it only in the active list.
+      for (const k of currentByKey.keys()) prevByKey.delete(k);
+
+      // Historical started_date lookup — see services/medication/historicalStart.js
+      const earliestByKey = await findEarliestStartDates(
+        client,
+        doc.patient_id,
+        [...currentByKey.keys(), ...prevByKey.keys()],
+        docId,
+      );
+      const resolveStarted = (canonical) => resolveStartedDate(earliestByKey, canonical, rxDate);
+
+      let okCur = 0,
+        failCur = 0;
+      for (const [, m] of currentByKey) {
+        try {
+          await client.query(
+            `INSERT INTO medications
+                 (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
+               VALUES ($1, $2, $10, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)
                ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
                DO UPDATE SET document_id = EXCLUDED.document_id,
-                 dose = COALESCE(EXCLUDED.dose, medications.dose),
-                 frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
-                 timing = COALESCE(EXCLUDED.timing, medications.timing),
-                 route = COALESCE(EXCLUDED.route, medications.route),
+                 consultation_id = EXCLUDED.consultation_id,
+                 pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
+                 dose = COALESCE(NULLIF(EXCLUDED.dose, ''), medications.dose),
+                 frequency = COALESCE(NULLIF(EXCLUDED.frequency, ''), medications.frequency),
+                 timing = COALESCE(NULLIF(EXCLUDED.timing, ''), medications.timing),
+                 route = COALESCE(NULLIF(EXCLUDED.route, ''), medications.route),
+                 name = EXCLUDED.name,
                  source = EXCLUDED.source,
-                 started_date = COALESCE(EXCLUDED.started_date, medications.started_date),
+                 started_date = LEAST(medications.started_date, EXCLUDED.started_date),
                  updated_at = NOW()`,
-              [
-                doc.patient_id,
-                docId,
-                (m.name || "").slice(0, 200),
-                (m.dose || "").slice(0, 100),
-                (m.frequency || "").slice(0, 100),
-                (m.timing || "").slice(0, 100),
-                (m.route || "Oral").slice(0, 50),
-                rxDate,
-              ],
-            )
-            .catch(() => {});
-        }
-      }
-
-      await client.query("COMMIT");
-
-      // ── Post-commit: pool-based sync helpers mirror HealthRay flow ──
-      if (doc.patient_id) {
-        try {
-          await syncDiagnoses(doc.patient_id, scopeId, extracted.diagnoses || []);
-          await syncStoppedMedications(
-            doc.patient_id,
-            scopeId,
-            extracted.previous_medications || extracted.stopped_medications || [],
-            extracted.medications || [],
+            [
+              doc.patient_id,
+              docId,
+              m.storedName,
+              m.canonical,
+              m.dose.slice(0, 100),
+              m.frequency.slice(0, 100),
+              m.timing.slice(0, 100),
+              m.route,
+              resolveStarted(m.canonical),
+              latestConsId,
+            ],
           );
-          await syncLabResults(doc.patient_id, apptId, rxDate, extracted.labs || []);
-
-          // Vitals — pick the dated entry matching rxDate (unified schema is an array)
-          const vitalsArr = Array.isArray(extracted.vitals) ? extracted.vitals : [];
-          const todaysVitals =
-            vitalsArr.find((v) => v && v.date === rxDate) || vitalsArr[0] || null;
-          if (apptId && todaysVitals) {
-            await syncVitals(doc.patient_id, apptId, rxDate, {
-              bpSys: todaysVitals.bpSys,
-              bpDia: todaysVitals.bpDia,
-              weight: todaysVitals.weight,
-              height: todaysVitals.height,
-              bmi: todaysVitals.bmi,
-              waist: todaysVitals.waist,
-              bodyFat: todaysVitals.bodyFat,
-            });
-          }
-
-          if (apptId) {
-            await syncSymptoms(doc.patient_id, apptId, extracted.symptoms || []);
-            await syncBiomarkersFromLatestLabs(doc.patient_id, apptId);
-          }
-        } catch (syncErr) {
-          // Don't fail the request — extraction itself already committed
-          console.error("extract-prescription post-sync:", syncErr.message);
+          okCur += 1;
+        } catch (e) {
+          failCur += 1;
+          console.error(
+            `[extract-prescription] active med insert failed doc=${docId} patient=${doc.patient_id} name="${m.storedName}" canonical="${m.canonical}": ${e.message}`,
+          );
         }
       }
 
-      res.json({
-        success: true,
-        documentId: docId,
-        medicinesExtracted: extracted.medications?.length || 0,
-        diagnosesExtracted: extracted.diagnoses?.length || 0,
-        symptomsExtracted: extracted.symptoms?.length || 0,
-        labsExtracted: extracted.labs?.length || 0,
-        vitalsExtracted: Array.isArray(extracted.vitals) ? extracted.vitals.length : 0,
-        medicines: extracted.medications || [],
-      });
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
+      let okPrev = 0,
+        failPrev = 0;
+      for (const [, m] of prevByKey) {
+        const stopReason = `report_extract:${docId}${
+          m.reason ? " — " + m.reason : m.status ? " — " + m.status : ""
+        }`;
+        try {
+          // Deactivate any currently-active row with the same canonical (in
+          // case a prior extraction had marked it active), then insert the
+          // inactive doc-scoped row. DO NOTHING on conflict with the
+          // inactive partial unique index so we never crash — the UPDATE
+          // branch above already handled the live side.
+          await client.query(
+            `UPDATE medications
+                  SET is_active = false,
+                      stopped_date = CURRENT_DATE,
+                      stop_reason = $3,
+                      updated_at = NOW()
+                WHERE patient_id = $1
+                  AND UPPER(COALESCE(pharmacy_match, name)) = $2
+                  AND is_active = true`,
+            [doc.patient_id, m.canonical || m.storedName.toUpperCase(), stopReason],
+          );
+          await client.query(
+            `INSERT INTO medications
+                 (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, route,
+                  is_new, is_active, source, started_date, stopped_date, stop_reason)
+               VALUES ($1, $2, $11, $3, $4, $5, $6, $7, $8,
+                       false, false, 'report_extract', $9, CURRENT_DATE, $10)
+               ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
+               DO UPDATE SET document_id = EXCLUDED.document_id,
+                 consultation_id = EXCLUDED.consultation_id,
+                 dose = COALESCE(NULLIF(EXCLUDED.dose, ''), medications.dose),
+                 frequency = COALESCE(NULLIF(EXCLUDED.frequency, ''), medications.frequency),
+                 timing = COALESCE(NULLIF(EXCLUDED.timing, ''), medications.timing),
+                 route = COALESCE(NULLIF(EXCLUDED.route, ''), medications.route),
+                 name = EXCLUDED.name,
+                 source = EXCLUDED.source,
+                 stop_reason = EXCLUDED.stop_reason,
+                 stopped_date = EXCLUDED.stopped_date,
+                 updated_at = NOW()`,
+            [
+              doc.patient_id,
+              docId,
+              m.storedName,
+              m.canonical,
+              m.dose.slice(0, 100),
+              m.frequency.slice(0, 100),
+              m.timing.slice(0, 100),
+              m.route,
+              resolveStarted(m.canonical),
+              stopReason,
+              latestConsId,
+            ],
+          );
+          okPrev += 1;
+        } catch (e) {
+          failPrev += 1;
+          console.error(
+            `[extract-prescription] stopped med insert failed doc=${docId} patient=${doc.patient_id} name="${m.storedName}" canonical="${m.canonical}": ${e.message}`,
+          );
+        }
+      }
+
+      // ── Stale-med sweep ───────────────────────────────────────────────
+      // Deactivate any active meds for this patient that the new
+      // prescription doesn't mention (neither current nor previous).
+      // Only touches auto-synced rows (source in report_extract/healthray);
+      // manually-added rows (source NULL / 'manual' / 'scribe' / 'consultation'
+      // / 'opd_upload') are preserved.
+      //
+      // Safety: skip the sweep entirely when the extraction produced zero
+      // medications AND zero previous_medications — mirrors
+      // stopStaleHealthrayMeds which refuses to sweep against an empty
+      // prescription (prevents a failed Claude call from wiping the regimen).
+      let staleSwept = 0;
+      if (currentByKey.size > 0 || prevByKey.size > 0) {
+        const keepKeys = [...currentByKey.keys(), ...prevByKey.keys()];
+        const stopReason = `report_extract:${docId} — not in latest prescription`;
+
+        // Phase 1: DELETE inactive-row collisions that would block the UPDATE
+        // (same canonical already sits inactive). Same pattern as
+        // stopStaleHealthrayMeds:1209-1246.
+        await client
+          .query(
+            `DELETE FROM medications
+                WHERE patient_id = $1
+                  AND is_active = false
+                  AND UPPER(COALESCE(pharmacy_match, name)) IN (
+                    SELECT UPPER(COALESCE(pharmacy_match, name))
+                      FROM medications
+                     WHERE patient_id = $1
+                       AND is_active = true
+                       AND source IN ('report_extract', 'healthray')
+                       AND UPPER(COALESCE(pharmacy_match, name)) <> ALL($2::text[])
+                       AND (document_id IS NULL OR document_id <> $3)
+                  )`,
+            [doc.patient_id, keepKeys, docId],
+          )
+          .catch((e) =>
+            console.error(
+              `[extract-prescription] stale-sweep DELETE failed doc=${docId} patient=${doc.patient_id}: ${e.message}`,
+            ),
+          );
+
+        // Phase 2: deactivate the stale active rows.
+        const sweepRes = await client
+          .query(
+            `UPDATE medications
+                  SET is_active = false,
+                      stopped_date = $4::date,
+                      stop_reason = $5,
+                      updated_at = NOW()
+                WHERE patient_id = $1
+                  AND is_active = true
+                  AND source IN ('report_extract', 'healthray')
+                  AND UPPER(COALESCE(pharmacy_match, name)) <> ALL($2::text[])
+                  AND (document_id IS NULL OR document_id <> $3)`,
+            [doc.patient_id, keepKeys, docId, rxDate, stopReason],
+          )
+          .catch((e) => {
+            console.error(
+              `[extract-prescription] stale-sweep UPDATE failed doc=${docId} patient=${doc.patient_id}: ${e.message}`,
+            );
+            return { rowCount: 0 };
+          });
+        staleSwept = sweepRes?.rowCount || 0;
+      }
+
+      console.log(
+        `[extract-prescription] doc=${docId} meds: ` +
+          `current extracted=${prescriptionMeds.length} merged=${currentByKey.size} inserted=${okCur} failed=${failCur} | ` +
+          `previous extracted=${prevMeds.length} merged=${prevByKey.size} inserted=${okPrev} failed=${failPrev} | ` +
+          `stale swept=${staleSwept}`,
+      );
     }
+
+    await client.query("COMMIT");
+
+    // ── Post-commit: pool-based sync helpers mirror HealthRay flow ──
+    if (doc.patient_id) {
+      try {
+        await syncDiagnoses(doc.patient_id, scopeId, extracted.diagnoses || [], {
+          sweepStale: true,
+        });
+        await syncStoppedMedications(
+          doc.patient_id,
+          scopeId,
+          extracted.previous_medications || extracted.stopped_medications || [],
+          extracted.medications || [],
+        );
+        await syncLabResults(doc.patient_id, apptId, rxDate, extracted.labs || []);
+
+        // Vitals — pick the dated entry matching rxDate (unified schema is an array)
+        const vitalsArr = Array.isArray(extracted.vitals) ? extracted.vitals : [];
+        const todaysVitals = vitalsArr.find((v) => v && v.date === rxDate) || vitalsArr[0] || null;
+        if (apptId && todaysVitals) {
+          await syncVitals(doc.patient_id, apptId, rxDate, {
+            bpSys: todaysVitals.bpSys,
+            bpDia: todaysVitals.bpDia,
+            weight: todaysVitals.weight,
+            height: todaysVitals.height,
+            bmi: todaysVitals.bmi,
+            waist: todaysVitals.waist,
+            bodyFat: todaysVitals.bodyFat,
+          });
+        }
+
+        if (apptId) {
+          await syncSymptoms(doc.patient_id, apptId, extracted.symptoms || []);
+          await syncBiomarkersFromLatestLabs(doc.patient_id, apptId);
+        }
+      } catch (syncErr) {
+        // Don't fail the request — extraction itself already committed
+        console.error("extract-prescription post-sync:", syncErr.message);
+      }
+    }
+
+    return {
+      success: true,
+      documentId: docId,
+      medicinesExtracted: extracted.medications?.length || 0,
+      diagnosesExtracted: extracted.diagnoses?.length || 0,
+      symptomsExtracted: extracted.symptoms?.length || 0,
+      labsExtracted: extracted.labs?.length || 0,
+      vitalsExtracted: Array.isArray(extracted.vitals) ? extracted.vitals.length : 0,
+      medicines: extracted.medications || [],
+    };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export { runPrescriptionExtraction };
+
+// POST /api/documents/:id/extract-prescription
+router.post("/documents/:id/extract-prescription", async (req, res) => {
+  try {
+    const result = await runPrescriptionExtraction(req.params.id);
+    if (result?.error) return res.status(result.status || 500).json({ error: result.error });
+    res.json(result);
   } catch (e) {
     handleError(res, e, "Extract prescription PDF");
   }

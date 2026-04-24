@@ -2,6 +2,7 @@ import { memo, useState, useMemo } from "react";
 import { MED_COLORS, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 import { MED_GROUPS, findDrug } from "../../config/drugDatabase";
 import ChangesPopover from "./ChangesPopover";
+import { displayMedName, displayFormBadge } from "../../lib/medName";
 
 // Auto-detect med group from name when med_group is not set
 function autoDetectGroup(name) {
@@ -214,6 +215,19 @@ function dedup(meds) {
     ) {
       const entries = grouped[key]._entries;
       Object.assign(grouped[key], m, { _entries: entries });
+    }
+  });
+  // After collapsing, pin prescribed_date and started_date to the earliest
+  // Started On seen across all entries — that's when the patient actually
+  // started this drug, not the latest renewal.
+  Object.values(grouped).forEach((g) => {
+    const earliestStarted = g._entries
+      .map((e) => e.started_date)
+      .filter(Boolean)
+      .reduce((a, b) => (!a || b < a ? b : a), null);
+    if (earliestStarted) {
+      g.started_date = earliestStarted;
+      g.prescribed_date = earliestStarted;
     }
   });
   return Object.values(grouped);
@@ -682,7 +696,47 @@ const VisitMedications = memo(function VisitMedications({
                           style={{ background: MED_COLORS[i % MED_COLORS.length] }}
                         />
                         <div>
-                          <div className="mbrand">{m.name}</div>
+                          <div className="mbrand">
+                            {displayFormBadge(m) && (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  background: "var(--bg2, #eef2f7)",
+                                  color: "var(--t2)",
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  padding: "1px 5px",
+                                  marginRight: 6,
+                                  borderRadius: 3,
+                                  verticalAlign: "middle",
+                                }}
+                                title={m.form || m.route || ""}
+                              >
+                                {displayFormBadge(m)}
+                              </span>
+                            )}
+                            {displayMedName(m)}
+                            {(m.source === "patient_app" ||
+                              m.source === "manual" ||
+                              String(m.id).startsWith("genie:")) && (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  background: "#EEF2FF",
+                                  color: "#4338CA",
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  padding: "1px 5px",
+                                  marginLeft: 6,
+                                  borderRadius: 3,
+                                  verticalAlign: "middle",
+                                }}
+                                title="Added by the patient in the Genie app"
+                              >
+                                PATIENT-ADDED
+                              </span>
+                            )}
+                          </div>
                           <div className="mgen">
                             {m.composition || ""}
                             {m.route ? ` · ${m.route}` : ""}
@@ -723,21 +777,37 @@ const VisitMedications = memo(function VisitMedications({
                           </div>
                         )}
                       </div>
-                      <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
+                      <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
                       <div className="macts">
-                        {!isExternal && (
-                          <>
-                            <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
-                              Edit
-                            </button>
-                            <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
-                              Stop
-                            </button>
-                            <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
-                              Delete
-                            </button>
-                          </>
-                        )}
+                        {!isExternal &&
+                          !(
+                            m.source === "patient_app" ||
+                            m.source === "manual" ||
+                            String(m.id).startsWith("genie:")
+                          ) && (
+                            <>
+                              <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                                Edit
+                              </button>
+                              <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                                Stop
+                              </button>
+                              <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        {!isExternal &&
+                          (m.source === "patient_app" ||
+                            m.source === "manual" ||
+                            String(m.id).startsWith("genie:")) && (
+                            <span
+                              style={{ fontSize: 10, color: "var(--t3)" }}
+                              title="Patient-added meds can only be changed from the Genie app"
+                            >
+                              app-managed
+                            </span>
+                          )}
                         {isExternal && (
                           <button
                             className="ma"
@@ -791,7 +861,7 @@ const VisitMedications = memo(function VisitMedications({
                 <div className="mmain">
                   <div className="mdot" style={{ background: "var(--t4)" }} />
                   <div>
-                    <div className="mbrand">{m.name}</div>
+                    <div className="mbrand">{displayMedName(m)}</div>
                     <div className="mgen">{m.composition || ""}</div>
                   </div>
                 </div>
@@ -805,7 +875,7 @@ const VisitMedications = memo(function VisitMedications({
                     </div>
                   )}
                 </div>
-                <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
+                <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
                 <div className="macts">
                   <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
                     Edit
@@ -831,7 +901,7 @@ const VisitMedications = memo(function VisitMedications({
                 <div className="mmain">
                   <div className="mdot" style={{ background: "var(--t4)" }} />
                   <div>
-                    <div className="mbrand">{m.name}</div>
+                    <div className="mbrand">{displayMedName(m)}</div>
                     <div className="mgen">{m.composition || ""}</div>
                   </div>
                 </div>
@@ -850,7 +920,7 @@ const VisitMedications = memo(function VisitMedications({
                     </div>
                   )}
                 </div>
-                <div className="mtd">{m.created_at ? fmtDate(m.created_at) : "—"}</div>
+                <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
                 <div className="macts">
                   <button className="ma ma-r">Restart?</button>
                 </div>

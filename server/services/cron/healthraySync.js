@@ -223,6 +223,140 @@ async function syncAppointmentDocs(healthrayId, patientId, apptDate) {
   } catch {}
 }
 
+// ── Re-extract the patient's most recent prescription by fetching it fresh
+// from HealthRay (same flow as the manual
+// scripts/reextract-last-prescription-by-date.js): walk the patient's local
+// appointments newest-first, ask HealthRay for medical_records on each
+// healthray_id, pick the newest Prescription/Rx record, upsert it into our
+// documents table via syncDocuments, then runPrescriptionExtraction.
+//
+// Uses the unified CLINICAL_EXTRACTION_PROMPT (HealthRay parity) so
+// medications, diagnoses, labs, vitals, symptoms, and biomarkers are all
+// refreshed with the latest extraction logic.
+//
+// Guarded against redundant work: skip if the resolved prescription document
+// was already re-extracted with this path within the last 24 hours.
+const MAX_APPTS_WALK_REEXTRACT = 10;
+
+function _isPrescriptionRecord(rec) {
+  const rt = (rec?.record_type || "").toLowerCase();
+  return rt.includes("prescription") || rt.includes("rx");
+}
+
+function _compareRecordsNewestFirst(a, b) {
+  const ta = a.app_date_time ? Date.parse(a.app_date_time) : 0;
+  const tb = b.app_date_time ? Date.parse(b.app_date_time) : 0;
+  if (tb !== ta) return tb - ta;
+  return (Number(b.id) || 0) - (Number(a.id) || 0);
+}
+
+async function reextractLastPrescription(patientId, ctx) {
+  if (!patientId) return;
+  try {
+    const { default: pool } = await import("../../config/db.js");
+
+    // Walk local appointments (newest first) and ask HealthRay for records.
+    const { rows: appts } = await pool.query(
+      `SELECT id AS local_appt_id, healthray_id, appointment_date
+         FROM appointments
+        WHERE patient_id = $1
+          AND healthray_id IS NOT NULL
+        ORDER BY appointment_date DESC NULLS LAST, id DESC
+        LIMIT $2`,
+      [patientId, MAX_APPTS_WALK_REEXTRACT],
+    );
+
+    let chosen = null;
+    for (const appt of appts) {
+      let records;
+      try {
+        records = await fetchMedicalRecords(appt.healthray_id);
+      } catch (e) {
+        error("ReExtract", `${ctx}: fetchMedicalRecords ${appt.healthray_id} — ${e.message}`);
+        continue;
+      }
+      const rx = (records || []).filter(_isPrescriptionRecord);
+      if (rx.length === 0) continue;
+      rx.sort(_compareRecordsNewestFirst);
+      chosen = {
+        record: rx[0],
+        healthrayApptId: appt.healthray_id,
+        apptDate:
+          appt.appointment_date instanceof Date
+            ? appt.appointment_date.toISOString().slice(0, 10)
+            : String(appt.appointment_date).slice(0, 10),
+      };
+      break;
+    }
+
+    if (!chosen) {
+      log("ReExtract", `${ctx}: patient=${patientId} no HealthRay prescription found`);
+      return;
+    }
+
+    // Upsert the prescription doc into our documents table.
+    await syncDocuments(patientId, [chosen.record], chosen.apptDate, chosen.healthrayApptId);
+
+    // Locate the synced document row.
+    const { rows: docRows } = await pool.query(
+      `SELECT id, extracted_data FROM documents
+        WHERE patient_id = $1 AND file_name = $2 AND source = 'healthray'
+        LIMIT 1`,
+      [patientId, chosen.record.file_name],
+    );
+    const doc = docRows[0];
+    if (!doc) {
+      error(
+        "ReExtract",
+        `${ctx}: patient=${patientId} synced doc row not found for file=${chosen.record.file_name}`,
+      );
+      return;
+    }
+
+    // 24h guard — avoid re-calling Claude on every cron resync.
+    let ext = doc.extracted_data;
+    if (typeof ext === "string") {
+      try {
+        ext = JSON.parse(ext);
+      } catch {
+        ext = null;
+      }
+    }
+    const lastTs = ext?._reextractedAt ? Date.parse(ext._reextractedAt) : 0;
+    if (lastTs && Date.now() - lastTs < 24 * 60 * 60 * 1000) {
+      log(
+        "ReExtract",
+        `${ctx}: patient=${patientId} doc=${doc.id} skipped — re-extracted within 24h`,
+      );
+      return;
+    }
+
+    const { runPrescriptionExtraction } = await import("../../routes/documents.js");
+    const result = await runPrescriptionExtraction(doc.id);
+    if (result?.success) {
+      await pool.query(
+        `UPDATE documents
+            SET extracted_data = extracted_data || jsonb_build_object('_reextractedAt', $1::text)
+          WHERE id = $2`,
+        [new Date().toISOString(), doc.id],
+      );
+      log(
+        "ReExtract",
+        `${ctx}: patient=${patientId} doc=${doc.id} ok — meds=${result.medicinesExtracted} ` +
+          `dx=${result.diagnosesExtracted} labs=${result.labsExtracted} ` +
+          `sx=${result.symptomsExtracted} vitals=${result.vitalsExtracted}`,
+      );
+    } else {
+      error(
+        "ReExtract",
+        `${ctx}: patient=${patientId} doc=${doc.id} fail — ${result?.error || "unknown"}`,
+      );
+    }
+  } catch (e) {
+    error("ReExtract", `${ctx}: patient=${patientId} crash — ${e.message}`);
+  }
+}
+
 // ── Sync a single appointment ───────────────────────────────────────────────
 async function syncAppointment(appt, localDoctorName) {
   const healthrayId = String(appt.id);
@@ -230,6 +364,7 @@ async function syncAppointment(appt, localDoctorName) {
   const apptDate = toISTDate(appt.app_date_time);
   const fileNo = appt.patient_case_id || null;
   const existing = await findAppointment(healthrayId, fileNo, apptDate);
+  const isNewAppointment = !existing;
   const status = mapStatus(appt.status);
   const isCompleted = status === "completed";
 
@@ -323,8 +458,7 @@ async function syncAppointment(appt, localDoctorName) {
 
         if (!parseHasContent && existing?.id) {
           const prior = await getAppointmentEnrichmentCounts(existing.id);
-          const hadPrior =
-            prior && (prior.dx > 0 || prior.meds > 0 || prior.prev_meds > 0);
+          const hadPrior = prior && (prior.dx > 0 || prior.meds > 0 || prior.prev_meds > 0);
           if (hadPrior) {
             error(
               "Enrich",
@@ -457,6 +591,14 @@ async function syncAppointment(appt, localDoctorName) {
   } else if (!isCompleted && status !== "cancelled" && status !== "no_show") {
     // Appointment exists in HealthRay but no prescription yet → patient checked in
     await markAppointmentAsCheckedIn(localApptId);
+  }
+
+  // ── On first entry of a new appointment, re-extract the patient's last
+  // prescription via the unified clinical prompt so medications, diagnoses,
+  // labs, vitals and biomarkers reflect the current extractor (not whatever
+  // prompt was in use when the doc was first uploaded). 24h self-guarded.
+  if (isNewAppointment) {
+    await reextractLastPrescription(patientId, `appt=${localApptId} healthray=${healthrayId}`);
   }
 
   return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };

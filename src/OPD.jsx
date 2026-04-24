@@ -6891,6 +6891,7 @@ export default function OPD() {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", background: BG }}>
             <LiveDashboard
               appointments={appointments}
+              doctors={doctors}
               updatedAt={apptsQuery.dataUpdatedAt}
               isFetching={apptsQuery.isFetching}
               isPending={apptsQuery.isPending}

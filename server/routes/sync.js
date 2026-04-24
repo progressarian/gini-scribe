@@ -31,6 +31,7 @@ import {
 } from "../services/healthray/db.js";
 import { extractPrescription } from "../services/healthray/prescriptionExtractor.js";
 import { normalizeTestName } from "../utils/labNormalization.js";
+import { stripFormPrefix, canonicalMedKey } from "../services/medication/normalize.js";
 
 const router = Router();
 
@@ -493,10 +494,13 @@ router.post("/sync/debug/rename-med", async (req, res) => {
   const { id, name, pharmacy_match } = req.body || {};
   if (!id || !name) return res.status(400).json({ error: "id and name required" });
   try {
+    const { name: cleanName } = stripFormPrefix(name);
+    const storedName = cleanName || name;
+    const storedPharm = pharmacy_match || canonicalMedKey(storedName);
     const { rows } = await pool.query(
       `UPDATE medications SET name = $1, pharmacy_match = COALESCE($2, pharmacy_match), updated_at = NOW()
        WHERE id = $3 RETURNING id, name, pharmacy_match`,
-      [name, pharmacy_match || null, id],
+      [storedName, storedPharm || null, id],
     );
     res.json({ success: true, updated: rows[0] });
   } catch (e) {

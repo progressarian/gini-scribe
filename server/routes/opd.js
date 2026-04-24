@@ -1,9 +1,22 @@
 import { Router } from "express";
+import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
 import { markAppointmentAsSeen } from "../services/healthray/db.js";
+import {
+  stripFormPrefix,
+  canonicalMedKey,
+  routeForForm,
+} from "../services/medication/normalize.js";
+
+const require = createRequire(import.meta.url);
+const {
+  syncVitalsRowToGenie,
+  syncAppointmentToGenie,
+  syncCareTeamToGenie,
+} = require("../genie-sync.cjs");
 
 const router = Router();
 
@@ -884,6 +897,16 @@ router.patch("/appointments/:id", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    if (appt.patient_id) {
+      syncAppointmentToGenie(appt.patient_id, pool).catch((e) =>
+        console.warn("[OPD] Appointment push skipped:", e.message),
+      );
+      if (doctor_name) {
+        syncCareTeamToGenie(appt.patient_id, pool).catch((e) =>
+          console.warn("[OPD] Care team push skipped:", e.message),
+        );
+      }
+    }
     res.json(appt);
   } catch (e) {
     await client.query("ROLLBACK");
@@ -1018,24 +1041,33 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         [appt.patient_id, appt.id],
       );
 
-      // Active medicines — dedupe on the ON CONFLICT key (UPPER(name)).
+      // Active medicines — dedupe on the canonical (prefix-stripped) key.
       {
         const active = new Map();
         for (const m of medications || []) {
           if (!m?.name) continue;
-          const key = (m.name || "").toUpperCase();
-          if (key) active.set(key, m);
+          const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+          const storedName = cleanName || m.name;
+          const key = canonicalMedKey(storedName);
+          if (key)
+            active.set(key, {
+              ...m,
+              _clean_name: storedName,
+              _canonical: key,
+              _detected_form: detectedForm,
+            });
         }
         const rows = Array.from(active.values());
         if (rows.length) {
           await client.query(
             `INSERT INTO medications
-               (patient_id, appointment_id, name, composition, dose, frequency, timing, route, is_new, is_active, source)
-             SELECT $1, $2, name, composition, dose, freq, timing, route, false, true, 'opd'
-               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
-                    AS t(name, composition, dose, freq, timing, route)
+               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active, source)
+             SELECT $1, $2, name, pharm, composition, dose, freq, timing, route, false, true, 'opd'
+               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
+                    AS t(name, pharm, composition, dose, freq, timing, route)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
+               pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
                composition = COALESCE(EXCLUDED.composition, medications.composition),
                dose = COALESCE(EXCLUDED.dose, medications.dose),
                frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
@@ -1046,12 +1078,13 @@ router.post("/appointments/:id/compliance", async (req, res) => {
             [
               appt.patient_id,
               appt.id,
-              rows.map((m) => (m.name || "").slice(0, 200)),
+              rows.map((m) => m._clean_name.slice(0, 200)),
+              rows.map((m) => m._canonical.slice(0, 200)),
               rows.map((m) => (m.composition || "").slice(0, 200)),
               rows.map((m) => (m.dose || "").slice(0, 100)),
               rows.map((m) => (m.frequency || "").slice(0, 100)),
               rows.map((m) => (m.timing || "").slice(0, 100)),
-              rows.map((m) => (m.route || "Oral").slice(0, 50)),
+              rows.map((m) => (m.route || routeForForm(m._detected_form) || "Oral").slice(0, 50)),
             ],
           );
         }
@@ -1062,25 +1095,29 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         const stopped = new Map();
         for (const m of stopped_medications || []) {
           if (!m?.name) continue;
-          const key = (m.name || "").toUpperCase();
-          if (key) stopped.set(key, m);
+          const { name: cleanName } = stripFormPrefix(m.name);
+          const storedName = cleanName || m.name;
+          const key = canonicalMedKey(storedName);
+          if (key) stopped.set(key, { ...m, _clean_name: storedName, _canonical: key });
         }
         const rows = Array.from(stopped.values());
         if (rows.length) {
           await client.query(
             `INSERT INTO medications
-               (patient_id, appointment_id, name, dose, is_new, is_active, source)
-             SELECT $1, $2, name, dose, false, false, 'opd'
-               FROM UNNEST($3::text[], $4::text[]) AS t(name, dose)
+               (patient_id, appointment_id, name, pharmacy_match, dose, is_new, is_active, source)
+             SELECT $1, $2, name, pharm, dose, false, false, 'opd'
+               FROM UNNEST($3::text[], $4::text[], $5::text[]) AS t(name, pharm, dose)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
              DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
+               pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
                dose = COALESCE(EXCLUDED.dose, medications.dose),
                source = EXCLUDED.source,
                updated_at = NOW()`,
             [
               appt.patient_id,
               appt.id,
-              rows.map((m) => (m.name || "").slice(0, 200)),
+              rows.map((m) => m._clean_name.slice(0, 200)),
+              rows.map((m) => m._canonical.slice(0, 200)),
               rows.map((m) => (m.reason || "").slice(0, 100)),
             ],
           );
@@ -1147,14 +1184,16 @@ router.post("/appointments/:id/vitals", async (req, res) => {
     const v = req.body;
 
     // ── Sync to vitals table if patient exists ──
+    let newVitalsRow = null;
     if (appt.patient_id && (num(v.bpSys) || num(v.weight))) {
       // Remove previous OPD vitals for this appointment (handles re-save)
       await client.query(`DELETE FROM vitals WHERE appointment_id = $1`, [appt.id]);
 
-      await client.query(
+      const ins = await client.query(
         `INSERT INTO vitals
-           (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, pulse, spo2, weight, height, bmi, waist, body_fat, muscle_mass, rbs, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+           (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, pulse, spo2, weight, height, bmi, waist, body_fat, muscle_mass, rbs, meal_type, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         RETURNING id, recorded_at, bp_sys, bp_dia, pulse, spo2, weight, height, rbs, meal_type`,
         [
           appt.patient_id,
           appt.id,
@@ -1170,12 +1209,21 @@ router.post("/appointments/:id/vitals", async (req, res) => {
           num(v.bodyFat),
           num(v.muscleMass),
           num(v.spotSugar),
+          v.mealType || null,
           "OPD vitals",
         ],
       );
+      newVitalsRow = ins.rows[0];
     }
 
     await client.query("COMMIT");
+    // Fire-and-forget push to Genie so the patient app reflects OPD-recorded
+    // vitals without waiting for the next full consultation save.
+    if (newVitalsRow && appt.patient_id) {
+      syncVitalsRowToGenie(appt.patient_id, newVitalsRow).catch((e) =>
+        console.warn("[OPD] Vitals push skipped:", e.message),
+      );
+    }
     res.json(rows[0]);
   } catch (e) {
     await client.query("ROLLBACK");
