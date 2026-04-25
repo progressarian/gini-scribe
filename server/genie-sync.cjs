@@ -610,7 +610,6 @@ async function syncDocumentsToGenie(scribePatientId, localDb) {
     for (const doc of rows) {
       const signed = doc.storage_path ? await signStorageUrl(doc.storage_path) : null;
       const fileUrl = signed || doc.file_url || null;
-      if (!fileUrl) continue; // nothing for the patient to open
       try {
         const result = await withRetry(
           () =>

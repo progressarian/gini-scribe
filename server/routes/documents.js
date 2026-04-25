@@ -238,7 +238,7 @@ router.get("/documents/:id", async (req, res) => {
 // from the OS (especially after renaming) often contain em-dashes, smart
 // quotes, or other unicode that Supabase rejects with InvalidKey. Sanitize
 // for the key while preserving the extension.
-function sanitizeForStorageKey(name) {
+export function sanitizeForStorageKey(name) {
   if (!name) return `file_${Date.now()}`;
   const lastDot = name.lastIndexOf(".");
   const base = lastDot > 0 ? name.slice(0, lastDot) : name;

@@ -4,6 +4,7 @@ import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
+import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
@@ -1208,7 +1209,8 @@ router.post("/visit/:patientId/document", async (req, res) => {
           : fileName.match(/\.jpe?g$/i)
             ? "image/jpeg"
             : "application/octet-stream";
-      const storagePath = `patients/${pid}/${doc_type}/${Date.now()}_${fileName}`;
+      const safeName = sanitizeForStorageKey(fileName);
+      const storagePath = `patients/${pid}/${doc_type}/${Date.now()}_${safeName}`;
       const fileBuffer = Buffer.from(base64, "base64");
       const uploadResp = await fetch(
         `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
@@ -1223,12 +1225,18 @@ router.post("/visit/:patientId/document", async (req, res) => {
         },
       );
       if (uploadResp.ok) {
-        await pool.query("UPDATE documents SET storage_path=$1, mime_type=$2 WHERE id=$3", [
-          storagePath,
-          mediaType,
-          doc.id,
-        ]);
+        await pool.query(
+          "UPDATE documents SET storage_path=$1, mime_type=$2, file_name=COALESCE(NULLIF($3,''),file_name) WHERE id=$4",
+          [storagePath, mediaType, fileName || null, doc.id],
+        );
         doc.storage_path = storagePath;
+        doc.mime_type = mediaType;
+        doc.file_name = fileName || doc.file_name;
+      } else {
+        const errBody = await uploadResp.text().catch(() => "");
+        console.error(
+          `[visit/document] Supabase upload failed for doc ${doc.id} (${fileName}): ${uploadResp.status} ${errBody}`,
+        );
       }
     }
     // Fire-and-forget: auto-extract lab results from uploaded lab reports
