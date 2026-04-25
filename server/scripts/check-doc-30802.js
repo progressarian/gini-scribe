@@ -22,7 +22,10 @@ const r = await pool.query(
 );
 console.log("scribe documents row:", r.rows[0]);
 
-if (!r.rows[0]) { await pool.end(); process.exit(1); }
+if (!r.rows[0]) {
+  await pool.end();
+  process.exit(1);
+}
 const patientId = r.rows[0].patient_id;
 
 const genieId = await resolveGeniePatientId(patientId);

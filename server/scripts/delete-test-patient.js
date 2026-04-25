@@ -196,11 +196,7 @@ async function dropFromGenie(genieRow) {
     console.log(`No MyHealth Genie patient row to delete`);
     return;
   }
-  const { data, error } = await db
-    .from("patients")
-    .delete()
-    .eq("id", genieRow.id)
-    .select("id");
+  const { data, error } = await db.from("patients").delete().eq("id", genieRow.id).select("id");
   if (error) {
     console.warn(`MyHealth Genie cleanup failed: ${error.message}`);
     return;

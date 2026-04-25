@@ -57,6 +57,11 @@ app.use((req, res, next) => {
     (p === "/api/consultations" && req.method === "POST") ||
     (p.includes("/visit/") && p.endsWith("/document")) ||
     p.includes("/upload-file") ||
+    // Chat attachment uploads (team & patient sides) — base64-encoded
+    // PDFs/images, capped at 10 MB raw → ~13 MB base64. Default 1 MB
+    // limit otherwise rejects the request before our route can run.
+    p.endsWith("/attachments") ||
+    p.endsWith("/chat-attachment") ||
     p.includes("/audio") ||
     p === "/api/convert-heic" ||
     p.startsWith("/api/ai/");

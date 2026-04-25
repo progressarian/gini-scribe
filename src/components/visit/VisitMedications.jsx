@@ -431,26 +431,44 @@ const VisitMedications = memo(function VisitMedications({
   onEditMed,
   onStopMed,
   onDeleteMed,
+  onRestartMed,
 }) {
   const [showStopped, setShowStopped] = useState(false);
   const [showPrev, setShowPrev] = useState(false);
   const [expandedHist, setExpandedHist] = useState({});
+  const [restartingId, setRestartingId] = useState(null);
+
+  const handleRestart = async (m) => {
+    if (!onRestartMed || restartingId != null) return;
+    setRestartingId(m.id);
+    try {
+      await onRestartMed(m);
+    } finally {
+      setRestartingId(null);
+    }
+  };
   const toggleHist = (key) => setExpandedHist((s) => ({ ...s, [key]: !s[key] }));
 
   const uniqueActive = useMemo(() => dedup(activeMeds), [activeMeds]);
   const uniqueStopped = useMemo(() => dedup(stoppedMeds), [stoppedMeds]);
 
   // Split: last visit meds (active) vs previous visit meds (display as stopped)
+  // Normalise to YYYY-MM-DD before comparing — SQL-sourced dates arrive as
+  // ISO timestamps ("2026-04-25T00:00:00.000Z") while patient-added rows
+  // carry their full created_at timestamp. Comparing the raw strings makes
+  // every doctor med fail the equality check on a day a patient-added med
+  // is also active, dropping all doctor meds into "Prev Visit".
+  const dayKey = (d) => (d ? String(d).slice(0, 10) : null);
   const { lastVisitMeds, prevVisitMeds } = useMemo(() => {
-    const dates = uniqueActive.map((m) => m.prescribed_date).filter(Boolean);
+    const dates = uniqueActive.map((m) => dayKey(m.prescribed_date)).filter(Boolean);
     const latestDate = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
     if (!latestDate) return { lastVisitMeds: uniqueActive, prevVisitMeds: [] };
     return {
       lastVisitMeds: uniqueActive.filter(
-        (m) => !m.prescribed_date || m.prescribed_date === latestDate,
+        (m) => !m.prescribed_date || dayKey(m.prescribed_date) === latestDate,
       ),
       prevVisitMeds: uniqueActive.filter(
-        (m) => m.prescribed_date && m.prescribed_date !== latestDate,
+        (m) => m.prescribed_date && dayKey(m.prescribed_date) !== latestDate,
       ),
     };
   }, [uniqueActive]);
@@ -922,7 +940,13 @@ const VisitMedications = memo(function VisitMedications({
                 </div>
                 <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
                 <div className="macts">
-                  <button className="ma ma-r">Restart?</button>
+                  <button
+                    className="ma ma-r"
+                    onClick={() => handleRestart(m)}
+                    disabled={restartingId === m.id}
+                  >
+                    {restartingId === m.id ? "Restarting…" : "Restart?"}
+                  </button>
                 </div>
               </div>
             ))}

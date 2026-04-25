@@ -33,6 +33,7 @@ const {
   syncMedicationsToGenie,
   deleteGenieMedication,
   syncLabsToGenie,
+  syncDocumentsToGenie,
   syncAppointmentToGenie,
   syncCareTeamToGenie,
   syncVitalsRowToGenie,
@@ -535,20 +536,39 @@ router.get("/visit/:patientId", async (req, res) => {
               .toUpperCase(),
           ),
       )
-      .map((m) => ({
-        id: `genie:${m.genie_id || m.id}`,
-        name: m.name,
-        dose: m.dose,
-        frequency: m.frequency,
-        timing: m.timing,
-        instructions: m.instructions,
-        is_active: m.is_active !== false,
-        started_date: m.created_at || m.synced_at,
-        prescribed_date: m.created_at || m.synced_at,
-        prescriber: null,
-        source: m.source || "patient_app",
-        for_conditions: m.for_conditions || null,
-      }));
+      .map((m) => {
+        // Normalise to YYYY-MM-DD so the frontend's string-equality split of
+        // lastVisit vs prevVisit (in VisitMedications.jsx) compares apples
+        // to apples. The SQL side returns prescribed_date as a DATE; if we
+        // hand back a TIMESTAMPTZ for patient-added rows, every doctor-
+        // prescribed med written on the same day fails the latestDate match
+        // and gets shoved into the collapsed "Prev Visit" bucket — leaving
+        // only the patient-added row visible in the active table.
+        // NOTE: pg returns TIMESTAMPTZ columns as JS Date objects. Plain
+        // String(date) calls .toString() ("Sat Apr 25 2026 ...") — we need
+        // .toISOString() to get the YYYY-MM-DD prefix.
+        const ts = m.created_at || m.synced_at || null;
+        const toIso = (v) => {
+          if (!v) return null;
+          if (v instanceof Date) return v.toISOString();
+          return String(v);
+        };
+        const dayOnly = ts ? toIso(ts).slice(0, 10) : null;
+        return {
+          id: `genie:${m.genie_id || m.id}`,
+          name: m.name,
+          dose: m.dose,
+          frequency: m.frequency,
+          timing: m.timing,
+          instructions: m.instructions,
+          is_active: m.is_active !== false,
+          started_date: dayOnly,
+          prescribed_date: dayOnly,
+          prescriber: null,
+          source: m.source || "patient_app",
+          for_conditions: m.for_conditions || null,
+        };
+      });
     const combinedActive = [...activeMedsR.rows, ...patientOnlyMeds];
     const sortedActiveMeds = sortMedications(combinedActive);
 
@@ -956,6 +976,70 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Stop medication");
+  }
+});
+
+// ── PATCH /visit/:patientId/medication/:id/restart — Restart a stopped med ──
+// Flips is_active back to true and clears stopped_date / stop_reason. If an
+// active row with the same normalised name already exists, returns 409 so
+// the doctor can decide whether to merge — otherwise the partial unique
+// index on (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active
+// would reject the UPDATE.
+router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  const mid = Number(req.params.id);
+  if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
+  try {
+    const med = await pool.query(
+      "SELECT pharmacy_match, name, is_active FROM medications WHERE id = $1 AND patient_id = $2",
+      [mid, pid],
+    );
+    if (!med.rows[0]) return res.status(404).json({ error: "Medication not found" });
+    if (med.rows[0].is_active) return res.json({ ok: true, alreadyActive: true });
+
+    const matchKey = med.rows[0].pharmacy_match || med.rows[0].name;
+    const dup = await pool.query(
+      `SELECT id, name FROM medications
+        WHERE patient_id = $1 AND id != $2 AND is_active = true
+          AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)
+        LIMIT 1`,
+      [pid, mid, matchKey],
+    );
+    if (dup.rows[0]) {
+      return res.status(409).json({
+        error: "An active medication with this name already exists",
+        existingId: dup.rows[0].id,
+        existingName: dup.rows[0].name,
+      });
+    }
+
+    // Restart is clinically a re-prescription — reset started_date to today
+    // AND clear consultation_id so the visit query's prescribed_date
+    // (COALESCE(c.visit_date, m.started_date)) falls back to the fresh
+    // started_date instead of the original consultation's old visit_date.
+    // Without this, the row keeps lining up with the old visit and the
+    // frontend grouping puts it under "Prev Visit".
+    const r = await pool.query(
+      `UPDATE medications
+          SET is_active = true,
+              stopped_date = NULL,
+              stop_reason = NULL,
+              started_date = CURRENT_DATE,
+              consultation_id = NULL,
+              updated_at = NOW()
+        WHERE id = $1 AND patient_id = $2 AND is_active = false
+        RETURNING *`,
+      [mid, pid],
+    );
+    if (!r.rows[0])
+      return res.status(404).json({ error: "Medication not found or already active" });
+
+    syncMedicationsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Medications push skipped:", e.message),
+    );
+    res.json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Restart medication");
   }
 });
 
@@ -1369,6 +1453,15 @@ router.post("/visit/:patientId/scribe-prescription", async (req, res) => {
       ],
     );
     const docRow = ins.rows[0];
+
+    // Push to Genie so the patient app's Story screen renders this saved
+    // prescription immediately. syncDocumentsToGenie will fold extracted_text
+    // (the raw pasted note) into the JSONB payload it sends to Supabase, so
+    // when the user taps the prescription card in the app they see the
+    // original note alongside the extracted meds/diagnoses.
+    syncDocumentsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Documents push skipped:", e.message),
+    );
 
     // PDF upload disabled for now — document row is saved with raw_text +
     // parsed payload only; no binary file is produced. Re-enable alongside

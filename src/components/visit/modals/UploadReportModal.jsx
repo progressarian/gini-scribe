@@ -141,11 +141,7 @@ const UploadReportModal = memo(function UploadReportModal({ onClose, onSubmit })
           <button className="btn" onClick={onClose} disabled={uploading}>
             Cancel
           </button>
-          <button
-            className="btn-p"
-            disabled={!form.doc_type || uploading}
-            onClick={handleSubmit}
-          >
+          <button className="btn-p" disabled={!form.doc_type || uploading} onClick={handleSubmit}>
             {uploading ? (
               <>
                 <span

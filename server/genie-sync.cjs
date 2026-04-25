@@ -598,7 +598,7 @@ async function syncDocumentsToGenie(scribePatientId, localDb) {
   try {
     const { rows } = await localDb.query(
       `SELECT id, doc_type, title, file_name, file_url, storage_path, mime_type,
-              extracted_data, doc_date
+              extracted_data, extracted_text, doc_date
          FROM documents
         WHERE patient_id = $1
           AND doc_type IN ('prescription','lab_report','imaging','discharge')
@@ -610,6 +610,17 @@ async function syncDocumentsToGenie(scribePatientId, localDb) {
     for (const doc of rows) {
       const signed = doc.storage_path ? await signStorageUrl(doc.storage_path) : null;
       const fileUrl = signed || doc.file_url || null;
+      // Fold the raw clinical note into the JSONB payload as `raw_text`.
+      // The Genie RPC has no dedicated parameter for it, but `extracted_data`
+      // is already JSONB so the patient app can read `extracted_data.raw_text`
+      // when the user taps the prescription card in the Story screen.
+      let extractedPayload = doc.extracted_data || null;
+      if (doc.extracted_text) {
+        const base = extractedPayload && typeof extractedPayload === 'object'
+          ? extractedPayload
+          : {};
+        extractedPayload = { ...base, raw_text: String(doc.extracted_text) };
+      }
       try {
         const result = await withRetry(
           () =>
@@ -621,7 +632,7 @@ async function syncDocumentsToGenie(scribePatientId, localDb) {
               p_document_date: doc.doc_date || null,
               p_file_url: fileUrl,
               p_content_type: doc.mime_type || null,
-              p_extracted_data: doc.extracted_data || null,
+              p_extracted_data: extractedPayload,
             }),
           { label: `gini_sync_document(${doc.id})` },
         );
@@ -1703,9 +1714,15 @@ async function sendMessageToConversation({
   senderName,
   direction = 'inbound',
   senderRole = null,
+  attachmentPath = null,
+  attachmentMime = null,
+  attachmentName = null,
 } = {}) {
   const db = getGenieDb();
-  if (!db || !conversationId || !message) return null;
+  if (!db || !conversationId) return null;
+  // Either text body or attachment must be present.
+  const hasText = typeof message === 'string' && message.trim().length > 0;
+  if (!hasText && !attachmentPath) return null;
 
   const conv = await getConversationById(conversationId);
   if (!conv) return null;
@@ -1714,10 +1731,13 @@ async function sendMessageToConversation({
     patient_id: conv.patient_id,
     conversation_id: conversationId,
     direction,
-    message,
+    message: hasText ? message : null,
     sender_name: senderName || (direction === 'inbound' ? 'Team' : 'Patient'),
     sender_role: senderRole || conv.kind,
     is_read: false,
+    attachment_path: attachmentPath || null,
+    attachment_mime: attachmentMime || null,
+    attachment_name: attachmentName || null,
   };
 
   const { data, error } = await db
@@ -1736,6 +1756,105 @@ async function sendMessageToConversation({
  * (scribe read the patient's messages). `side='patient'` clears inbound
  * unreads (patient read the team's messages).
  */
+// Upload a chat attachment (image/PDF) into the shared `patient-files`
+// bucket and return its storage key. Caller is responsible for then
+// inserting the patient_messages row that references the key.
+async function uploadChatAttachment({
+  patientId,
+  conversationId,
+  base64,
+  mediaType,
+  fileName,
+} = {}) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  const bucket = 'patient-files';
+  if (!url || !key) return { error: 'Storage not configured' };
+  if (!patientId || !conversationId || !base64 || !fileName) {
+    return { error: 'Missing required fields' };
+  }
+
+  const buffer = Buffer.from(base64, 'base64');
+  // 10 MB cap. Mirrors UploadReportModal.jsx and the documents.js path.
+  const MAX_BYTES = 10 * 1024 * 1024;
+  if (buffer.length > MAX_BYTES) {
+    return { error: 'File exceeds 10 MB limit' };
+  }
+
+  // Lazy-import the same sanitizer used by documents.js to keep paths ASCII-safe.
+  const safeName = sanitizeFilename(fileName);
+  const ts = Date.now();
+  const path = `patients/${patientId}/chat/${conversationId}/${ts}_${safeName}`;
+
+  const resp = await fetch(`${url}/storage/v1/object/${bucket}/${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      apikey: key,
+      'Content-Type': mediaType || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
+    body: buffer,
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    console.error('[chat upload]', resp.status, body);
+    return { error: `Upload failed (${resp.status}): ${body.slice(0, 200)}` };
+  }
+  try {
+    const ack = await resp.json();
+    if (ack?.Key && !ack.Key.endsWith(path)) {
+      console.warn('[chat upload] path mismatch — generated', path, 'stored', ack.Key);
+    }
+  } catch {
+    /* non-JSON body is fine */
+  }
+  // Defensive HEAD verify — a recent regression had the upload reporting
+  // 200 while the binary wasn't actually persisted. Catch that here
+  // instead of letting downstream sign-URL calls 404 silently.
+  try {
+    const head = await fetch(`${url}/storage/v1/object/${bucket}/${path}`, {
+      method: 'HEAD',
+      headers: { Authorization: `Bearer ${key}`, apikey: key },
+    });
+    if (!head.ok) {
+      console.error('[chat upload verify]', head.status, 'path missing after upload', path);
+      return { error: `Upload reported success but file not found (${head.status})` };
+    }
+  } catch (e) {
+    console.warn('[chat upload verify]', e.message);
+    /* non-fatal — verify failure shouldn't block the upload entirely */
+  }
+  return { path, mime: mediaType, name: fileName };
+}
+
+// Local copy of the sanitizer in routes/documents.js — duplicated to avoid
+// a CJS↔ESM circular import (documents.js is ESM and imports this module).
+function sanitizeFilename(name) {
+  if (!name) return `file_${Date.now()}`;
+  const lastDot = name.lastIndexOf('.');
+  const base = lastDot > 0 ? name.slice(0, lastDot) : name;
+  const ext = lastDot > 0 ? name.slice(lastDot + 1).toLowerCase() : '';
+  const cleanBase = base
+    .normalize('NFKD')
+    .replace(/[–—]/g, '-')
+    .replace(/[‘’“”]/g, '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/[^\w.\-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .replace(/^[_.-]+|[_.-]+$/g, '')
+    .slice(0, 120);
+  const cleanExt = ext.replace(/[^a-z0-9]/g, '').slice(0, 8);
+  const safeBase = cleanBase || `file_${Date.now()}`;
+  return cleanExt ? `${safeBase}.${cleanExt}` : safeBase;
+}
+
+// Short-lived signed URL for a chat attachment. 5-min default.
+async function signChatAttachmentUrl(storagePath, expiresIn = 300) {
+  return signStorageUrl(storagePath, expiresIn);
+}
+
 async function markConversationRead({ conversationId, side } = {}) {
   const db = getGenieDb();
   if (!db || !conversationId || !['team', 'patient'].includes(side)) return false;
@@ -1822,5 +1941,7 @@ module.exports = {
   getConversationMessages,
   sendMessageToConversation,
   markConversationRead,
+  uploadChatAttachment,
+  signChatAttachmentUrl,
   getGenieDb,
 };

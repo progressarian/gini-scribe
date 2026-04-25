@@ -6,7 +6,249 @@ import { useConversations } from "../queries/hooks/useConversations";
 import { useThreadMessages, flattenThread } from "../queries/hooks/useThreadMessages";
 import { useSendReply } from "../queries/hooks/useSendReply";
 import { qk } from "../queries/keys";
+import PdfViewerModal from "../components/visit/PdfViewerModal";
 import "./MessagesPage.css";
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error("Read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Renders an attachment inline. Sent (team→patient) bubbles use a
+// translucent-white inner card so the file pill reads against the doctor
+// bubble's tinted background; received (patient→team) bubbles use a
+// slate inner card on white. Clicking opens the inline PdfViewerModal
+// via onOpen — never a new tab.
+function AttachmentBubble({ message, conversationId, onOpen, variant = "received" }) {
+  const [url, setUrl] = useState(null);
+  const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
+  const isImage = (message.attachment_mime || "").startsWith("image/");
+  const isPending = !message.id || String(message.id).startsWith("tmp-");
+  const isSent = variant === "sent";
+
+  useEffect(() => {
+    if (isPending) return;
+    let cancelled = false;
+    setError(null);
+    setUrl(null);
+    api
+      .get(`/api/conversations/${conversationId}/messages/${message.id}/attachment-url`)
+      .then((r) => {
+        if (!cancelled) setUrl(r.data?.url || null);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e?.response?.data?.error || "Could not load attachment");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, message.id, isPending, attempt]);
+
+  // Theme tokens — match the patient app's polish but in CSS.
+  const cardBg = isSent ? "rgba(255,255,255,0.18)" : "#F1F5F9";
+  const cardBorder = isSent ? "rgba(255,255,255,0.28)" : "#E2E8F0";
+  const titleColor = isSent ? "#FFFFFF" : "#0F172A";
+  const subColor = isSent ? "rgba(255,255,255,0.78)" : "#64748B";
+  const badgeBg = isSent ? "rgba(255,255,255,0.22)" : "#FFFFFF";
+  const badgeColor = isSent ? "#FFFFFF" : "#DC2626";
+  const ext = (message.attachment_name?.split(".").pop() || "FILE")
+    .toUpperCase()
+    .slice(0, 4);
+  const sizeLabel = formatBytes(message.attachment_size);
+
+  const cardBase = {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    background: cardBg,
+    border: `1px solid ${cardBorder}`,
+    borderRadius: 10,
+    minWidth: 220,
+    maxWidth: 300,
+    color: titleColor,
+    font: "inherit",
+    cursor: "pointer",
+    marginBottom: 4,
+  };
+
+  if (isPending) {
+    return (
+      <div style={{ ...cardBase, cursor: "default" }}>
+        <div className="messages__spinner messages__spinner--sm" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: titleColor,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {message.attachment_name || "Sending…"}
+          </div>
+          <div style={{ fontSize: 11, color: subColor, marginTop: 2 }}>Sending…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAttempt((n) => n + 1)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 10px",
+          background: isSent ? "rgba(254,226,226,0.20)" : "#FEF2F2",
+          border: `1px solid ${isSent ? "rgba(254,202,202,0.50)" : "#FECACA"}`,
+          borderRadius: 10,
+          color: isSent ? "#FECACA" : "#B91C1C",
+          font: "inherit",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          marginBottom: 4,
+        }}
+      >
+        ⚠ Couldn't load — click to retry
+      </button>
+    );
+  }
+
+  if (!url) {
+    return (
+      <div style={{ ...cardBase, cursor: "default" }}>
+        <div className="messages__spinner messages__spinner--sm" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: titleColor,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {message.attachment_name || (isImage ? "Loading image…" : "Loading file…")}
+          </div>
+          <div style={{ fontSize: 11, color: subColor, marginTop: 2 }}>
+            Preparing preview…
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const open = () =>
+    onOpen?.({
+      url,
+      mimeType: message.attachment_mime || (isImage ? "image/jpeg" : "application/pdf"),
+      fileName: message.attachment_name || "attachment",
+    });
+
+  if (isImage) {
+    return (
+      <button
+        type="button"
+        onClick={open}
+        style={{
+          background: "transparent",
+          border: `1px solid ${cardBorder}`,
+          padding: 0,
+          cursor: "zoom-in",
+          display: "block",
+          borderRadius: 12,
+          overflow: "hidden",
+          marginBottom: 4,
+        }}
+      >
+        <img
+          src={url}
+          alt={message.attachment_name || "attachment"}
+          className="messages__msg-image"
+          style={{
+            maxWidth: 280,
+            maxHeight: 280,
+            borderRadius: 12,
+            display: "block",
+            background: "#E5E7EB",
+          }}
+        />
+      </button>
+    );
+  }
+  return (
+    <button type="button" onClick={open} style={cardBase}>
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          background: badgeBg,
+          border: isSent ? "none" : "1px solid #E2E8F0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 800,
+            color: badgeColor,
+            letterSpacing: 0.5,
+          }}
+        >
+          {ext}
+        </span>
+      </div>
+      <div style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: titleColor,
+            lineHeight: "17px",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            wordBreak: "break-word",
+          }}
+        >
+          {message.attachment_name || "Open file"}
+        </div>
+        <div style={{ fontSize: 11, color: subColor, marginTop: 2 }}>
+          {[sizeLabel, "Click to open"].filter(Boolean).join(" · ")}
+        </div>
+      </div>
+    </button>
+  );
+}
 
 // Shared team inbox (Lab / Reception). Unlike the doctor inbox, all scribe
 // users see the same conversations here — these are team-shared queues.
@@ -26,6 +268,15 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
   const [search, setSearch] = useState("");
   const [replyText, setReplyText] = useState("");
   const [sendError, setSendError] = useState(null);
+  // Multi-file attachment queue. Picking adds to it; remove via the
+  // per-chip ✕ button. Each entry sends as its own message on Send.
+  const [pendingFiles, setPendingFiles] = useState([]); // [{id, file, fileName, mime, size}]
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const fileInputRef = useRef(null);
+  // Lifted lightbox state — clicking any attachment in the thread opens here
+  // instead of a new tab. PdfViewerModal handles both images and PDFs.
+  const [viewerSrc, setViewerSrc] = useState(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
   const [patientQuery, setPatientQuery] = useState("");
@@ -170,17 +421,155 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
     }
   };
 
+  // Upload one file with progress reporting. Reads as base64 then POSTs
+  // via XHR (fetch can't expose upload-progress events) to the existing
+  // /api/conversations/:id/attachments endpoint. Resolves to the
+  // attachment metadata on success.
+  const uploadOneAttachment = async (pf, onProgress) => {
+    const base64 = await fileToBase64(pf.file);
+    const body = JSON.stringify({
+      base64,
+      mediaType: pf.mime,
+      fileName: pf.fileName,
+    });
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/conversations/${activeId}/attachments`, true);
+      // Reuse the auth header axios uses elsewhere — read from localStorage
+      // to match the api.js interceptor's behavior.
+      const token = localStorage.getItem("gini_auth_token");
+      if (token) xhr.setRequestHeader("x-auth-token", token);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.upload.onprogress = (evt) => {
+        if (onProgress && evt.lengthComputable && evt.total > 0) {
+          onProgress(Math.min(99, Math.round((evt.loaded / evt.total) * 100)));
+        }
+      };
+      xhr.onload = () => {
+        let parsed = null;
+        try {
+          parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          /* keep raw */
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(parsed?.error || `Upload failed (${xhr.status})`));
+          return;
+        }
+        if (onProgress) onProgress(100);
+        resolve({
+          attachment_path: parsed.attachment_path,
+          attachment_mime: parsed.attachment_mime,
+          attachment_name: parsed.attachment_name,
+        });
+      };
+      xhr.onerror = () => reject(new Error("Network error during upload"));
+      xhr.ontimeout = () => reject(new Error("Upload timed out"));
+      xhr.send(body);
+    });
+  };
+
   const sendReply = async () => {
     const text = replyText.trim();
-    if (!text || !activeId) return;
-    setReplyText("");
+    if ((!text && pendingFiles.length === 0) || !activeId) return;
+    if (uploadingFile) return;
     setSendError(null);
-    try {
-      await sendReplyMutation.mutateAsync(text);
-    } catch (e) {
-      setReplyText(text);
-      setSendError(e?.response?.data?.error || e?.message || "Failed to send");
+
+    // Snapshot + clear so the user can keep typing the next message.
+    const queue = pendingFiles.slice();
+    setPendingFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    // Each file becomes its own message. The trailing text (if any)
+    // becomes a separate text-only message after all files have sent —
+    // matches WhatsApp/Telegram batch behavior.
+    let successCount = 0;
+    if (queue.length > 0) {
+      setUploadingFile(true);
+      for (let i = 0; i < queue.length; i++) {
+        const pf = queue[i];
+        setUploadProgress({ current: i + 1, total: queue.length, percent: 0 });
+        try {
+          const attachment = await uploadOneAttachment(pf, (pct) =>
+            setUploadProgress({ current: i + 1, total: queue.length, percent: pct }),
+          );
+          await sendReplyMutation.mutateAsync({
+            message: undefined,
+            ...attachment,
+          });
+          successCount += 1;
+        } catch (e) {
+          console.warn("[chat upload]", pf.fileName, e?.message);
+          setSendError(`${pf.fileName}: ${e?.message || "Upload failed"}`);
+          // Continue to the next file in the queue.
+        }
+      }
+      setUploadingFile(false);
+      setUploadProgress({ current: 0, total: 0, percent: 0 });
     }
+
+    if (text) {
+      setReplyText("");
+      try {
+        await sendReplyMutation.mutateAsync({ message: text });
+      } catch (e) {
+        setReplyText(text);
+        setSendError(e?.response?.data?.error || e?.message || "Failed to send");
+      }
+    } else if (queue.length > 0 && successCount === 0) {
+      // All uploads failed and there's no text — restore queue so the
+      // user can retry without re-picking files.
+      setPendingFiles(queue);
+    }
+  };
+
+  const onPickFile = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const ALLOWED = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/heic",
+      "image/heif",
+      "image/webp",
+      "application/pdf",
+    ];
+    const additions = [];
+    let rejectedType = 0;
+    let rejectedSize = 0;
+    for (const file of files) {
+      if (!ALLOWED.includes(file.type)) {
+        rejectedType += 1;
+        continue;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        rejectedSize += 1;
+        continue;
+      }
+      additions.push({
+        id: `pf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        file,
+        fileName: file.name,
+        mime: file.type,
+        size: file.size,
+      });
+    }
+    e.target.value = "";
+    if (rejectedType + rejectedSize > 0) {
+      const parts = [];
+      if (rejectedType) parts.push(`${rejectedType} unsupported`);
+      if (rejectedSize) parts.push(`${rejectedSize} > 10 MB`);
+      setSendError(`Skipped ${parts.join(", ")}`);
+    } else {
+      setSendError(null);
+    }
+    if (additions.length === 0) return;
+    setPendingFiles((prev) => [...prev, ...additions]);
+  };
+
+  const removePendingFile = (id) => {
+    setPendingFiles((prev) => prev.filter((p) => p.id !== id));
   };
 
   const q = search.trim().toLowerCase();
@@ -491,7 +880,17 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                     <div
                       className={`messages__msg-bubble ${isTeam ? "messages__msg-bubble--doctor" : "messages__msg-bubble--patient"}`}
                     >
-                      <div className="messages__msg-text">{m.message}</div>
+                      {m.attachment_path && (
+                        <div style={{ marginBottom: m.message ? 6 : 0 }}>
+                          <AttachmentBubble
+                            message={m}
+                            conversationId={activeId}
+                            onOpen={setViewerSrc}
+                            variant={isTeam ? "sent" : "received"}
+                          />
+                        </div>
+                      )}
+                      {m.message && <div className="messages__msg-text">{m.message}</div>}
                       <div className="messages__msg-meta">
                         {m.sender_name || (isTeam ? senderLabel : "Patient")} ·{" "}
                         {new Date(m.created_at).toLocaleTimeString("en-IN", {
@@ -507,6 +906,150 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
           </div>
 
           <div className="messages__reply-box">
+            {pendingFiles.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  marginBottom: 8,
+                }}
+              >
+                {uploadingFile && uploadProgress.total > 1 && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#1A5FAA",
+                      padding: "0 2px",
+                    }}
+                  >
+                    Uploading {uploadProgress.current} of {uploadProgress.total}…
+                  </div>
+                )}
+                {pendingFiles.map((pf, idx) => {
+                  const isActive = uploadingFile && uploadProgress.current === idx + 1;
+                  const ext = (pf.fileName.split(".").pop() || "FILE")
+                    .toUpperCase()
+                    .slice(0, 4);
+                  return (
+                    <div
+                      key={pf.id}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        padding: "10px 12px",
+                        background: isActive ? "#EFF6FF" : "#F1F5F9",
+                        border: `1px solid ${isActive ? "#BFDBFE" : "#E2E8F0"}`,
+                        borderRadius: 10,
+                        opacity: uploadingFile && !isActive ? 0.6 : 1,
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        {isActive ? (
+                          <div className="messages__spinner messages__spinner--sm" />
+                        ) : (
+                          <div
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 6,
+                              background: "#FFFFFF",
+                              border: "1px solid #E2E8F0",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 800,
+                                color: "#DC2626",
+                                letterSpacing: 0.5,
+                              }}
+                            >
+                              {ext}
+                            </span>
+                          </div>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "#0F172A",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {pf.fileName}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                            {isActive
+                              ? `Uploading… ${uploadProgress.percent}%`
+                              : pf.size
+                                ? `${(pf.size / 1024).toFixed(0)} KB${uploadingFile ? " · waiting" : " · ready"}`
+                                : uploadingFile
+                                  ? "Waiting"
+                                  : "Ready"}
+                          </div>
+                        </div>
+                        {!uploadingFile && (
+                          <button
+                            type="button"
+                            onClick={() => removePendingFile(pf.id)}
+                            aria-label="Remove file"
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#94A3B8",
+                              cursor: "pointer",
+                              fontSize: 16,
+                              fontWeight: 700,
+                              padding: "4px 6px",
+                            }}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      {isActive && (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            height: 4,
+                            borderRadius: 2,
+                            background: "#DBEAFE",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${Math.max(2, uploadProgress.percent)}%`,
+                              height: "100%",
+                              background: "#1A5FAA",
+                              transition: "width 0.15s ease",
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf"
+              multiple
+              onChange={onPickFile}
+              style={{ display: "none" }}
+            />
             <textarea
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
@@ -516,19 +1059,46 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                   sendReply();
                 }
               }}
-              placeholder={`Reply as ${senderLabel}… (Enter to send)`}
+              placeholder={`Reply as ${senderLabel}… (Enter to send, Shift+Enter for newline)`}
               className="messages__reply-textarea"
+              disabled={uploadingFile}
             />
             <div className="messages__reply-actions">
-              <button onClick={() => setReplyText("")} className="messages__clear-btn">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="messages__clear-btn"
+                disabled={uploadingFile}
+                title="Attach images or PDFs (multi-select, max 10 MB each)"
+              >
+                📎 Attach
+              </button>
+              <button
+                onClick={() => {
+                  setReplyText("");
+                  setPendingFiles([]);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="messages__clear-btn"
+                disabled={uploadingFile}
+              >
                 Clear
               </button>
               <button
                 onClick={sendReply}
-                disabled={!replyText.trim() || sendingReply}
-                className={`messages__send-btn ${replyText.trim() ? "messages__send-btn--active" : "messages__send-btn--disabled"}`}
+                disabled={
+                  (!replyText.trim() && pendingFiles.length === 0) ||
+                  sendingReply ||
+                  uploadingFile
+                }
+                className={`messages__send-btn ${replyText.trim() || pendingFiles.length > 0 ? "messages__send-btn--active" : "messages__send-btn--disabled"}`}
               >
-                {sendingReply ? "Sending…" : "Send Reply ✉️"}
+                {uploadingFile
+                  ? `Uploading… ${uploadProgress.percent}%`
+                  : sendingReply
+                    ? "Sending…"
+                    : pendingFiles.length > 1
+                      ? `Send ${pendingFiles.length} files ✉️`
+                      : "Send Reply ✉️"}
               </button>
               {sendError && (
                 <div
@@ -570,6 +1140,7 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
           </div>
         </div>
       )}
+      {viewerSrc && <PdfViewerModal src={viewerSrc} onClose={() => setViewerSrc(null)} />}
     </div>
   );
 }

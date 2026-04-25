@@ -6,6 +6,7 @@ import { validate } from "../middleware/validate.js";
 import {
   messageCreateSchema,
   conversationMessageSchema,
+  conversationAttachmentSchema,
   ensureConversationSchema,
 } from "../schemas/index.js";
 
@@ -135,12 +136,22 @@ router.post(
             ? "Gini Reception"
             : "Doctor");
 
+      // Attachments are scoped to lab/reception by product decision.
+      // Doctor chat stays text-only — reject attachment payloads here
+      // even though the schema accepts them generically.
+      if (req.body.attachment_path && conv.kind === "doctor") {
+        return res.status(400).json({ error: "Attachments are not allowed in doctor chat" });
+      }
+
       const row = await genie.sendMessageToConversation({
         conversationId: conv.id,
         message: req.body.message,
         senderName,
         senderRole: conv.kind,
         direction: "inbound",
+        attachmentPath: req.body.attachment_path || null,
+        attachmentMime: req.body.attachment_mime || null,
+        attachmentName: req.body.attachment_name || null,
       });
       if (!row) return res.status(500).json({ error: "Failed to send message" });
       res.json(row);
@@ -149,6 +160,80 @@ router.post(
     }
   },
 );
+
+/**
+ * Upload a chat attachment (image or PDF). Returns the storage path that
+ * should then be passed to POST /conversations/:id/messages.
+ * Scoped to lab/reception conversations only.
+ */
+router.post(
+  "/conversations/:id/attachments",
+  validate(conversationAttachmentSchema),
+  async (req, res) => {
+    try {
+      const { conv, error } = await loadAuthorizedConversation(req, req.params.id);
+      if (error) return res.status(error.status).json({ error: error.message });
+      if (!["lab", "reception"].includes(conv.kind)) {
+        return res
+          .status(400)
+          .json({ error: "Attachments are only supported in lab/reception chats" });
+      }
+      if (!genie?.uploadChatAttachment) {
+        return res.status(503).json({ error: "Storage not configured" });
+      }
+
+      const result = await genie.uploadChatAttachment({
+        patientId: conv.patient_id,
+        conversationId: conv.id,
+        base64: req.body.base64,
+        mediaType: req.body.mediaType,
+        fileName: req.body.fileName,
+      });
+      if (result?.error) return res.status(400).json({ error: result.error });
+
+      res.json({
+        attachment_path: result.path,
+        attachment_mime: result.mime,
+        attachment_name: result.name,
+      });
+    } catch (e) {
+      handleError(res, e, "Upload chat attachment");
+    }
+  },
+);
+
+/**
+ * Issue a short-lived signed URL for a chat attachment so the scribe UI
+ * can render images / open PDFs without exposing the bucket publicly.
+ */
+router.get("/conversations/:id/messages/:messageId/attachment-url", async (req, res) => {
+  try {
+    const { conv, error } = await loadAuthorizedConversation(req, req.params.id);
+    if (error) return res.status(error.status).json({ error: error.message });
+    if (!genie?.getGenieDb || !genie?.signChatAttachmentUrl) {
+      return res.status(503).json({ error: "Storage not configured" });
+    }
+    const db = genie.getGenieDb();
+    const { data, error: rowErr } = await db
+      .from("patient_messages")
+      .select("attachment_path, conversation_id")
+      .eq("id", req.params.messageId)
+      .maybeSingle();
+    if (rowErr || !data) return res.status(404).json({ error: "Message not found" });
+    if (data.conversation_id !== conv.id) {
+      return res.status(403).json({ error: "Message does not belong to this conversation" });
+    }
+    if (!data.attachment_path) {
+      return res.status(404).json({ error: "Message has no attachment" });
+    }
+
+    const url = await genie.signChatAttachmentUrl(data.attachment_path, 300);
+    if (!url) return res.status(500).json({ error: "Failed to sign URL" });
+    res.json({ url, expires_in: 300 });
+  } catch (e) {
+    handleError(res, e, "Chat attachment URL");
+  }
+});
 
 /**
  * Mark the team side of a conversation as read (all outbound patient→team
@@ -272,6 +357,87 @@ router.get("/patients/:id/care-team", async (req, res) => {
     res.json({ data });
   } catch (e) {
     handleError(res, e, "Care team");
+  }
+});
+
+/**
+ * Patient-app chat attachment upload. Public by design (mirrors
+ * /care-team) — the patient app has no scribe JWT. Authorization comes
+ * from the conversation lookup: the route only accepts uploads when the
+ * conversation actually belongs to the :patientId in the URL, and the
+ * conversation kind must be lab or reception (doctor chat is text-only
+ * by product decision).
+ *
+ * Body matches the team-side `/conversations/:id/attachments` endpoint:
+ * { base64, mediaType, fileName }. The actual upload reuses the same
+ * `genie.uploadChatAttachment` function the team route uses, so both
+ * directions write to the same `patient-files` bucket via the service
+ * key — no patient-side storage RLS, no native upload module dependency,
+ * and no anon-key edge cases.
+ */
+router.post(
+  "/patients/:patientId/conversations/:conversationId/chat-attachment",
+  validate(conversationAttachmentSchema),
+  async (req, res) => {
+    try {
+      if (!genie?.getConversationById || !genie?.uploadChatAttachment) {
+        return res.status(503).json({ error: "Storage not configured" });
+      }
+      const { patientId, conversationId } = req.params;
+      const conv = await genie.getConversationById(conversationId);
+      if (!conv) return res.status(404).json({ error: "Conversation not found" });
+      if (conv.patient_id !== patientId) {
+        return res.status(403).json({ error: "Conversation does not belong to this patient" });
+      }
+      if (!["lab", "reception"].includes(conv.kind)) {
+        return res
+          .status(400)
+          .json({ error: "Attachments are only supported in lab/reception chats" });
+      }
+
+      const result = await genie.uploadChatAttachment({
+        patientId,
+        conversationId,
+        base64: req.body.base64,
+        mediaType: req.body.mediaType,
+        fileName: req.body.fileName,
+      });
+      if (result?.error) return res.status(400).json({ error: result.error });
+
+      res.json({
+        attachment_path: result.path,
+        attachment_mime: result.mime,
+        attachment_name: result.name,
+      });
+    } catch (e) {
+      handleError(res, e, "Patient chat attachment upload");
+    }
+  },
+);
+
+/**
+ * Public sign-URL helper for the patient app. Validates that the
+ * requested storage path lives under the patient's own folder so a
+ * patient can only sign their own attachments (the bucket is private,
+ * so without this they couldn't fetch anything anyway, but we add the
+ * scoping check for defense-in-depth).
+ */
+router.post("/patients/:patientId/chat-attachments/sign-url", async (req, res) => {
+  try {
+    if (!genie?.signChatAttachmentUrl) {
+      return res.status(503).json({ error: "Storage not configured" });
+    }
+    const { patientId } = req.params;
+    const path = String(req.body?.path || "");
+    const expected = new RegExp(`^patients/${patientId}/chat/[0-9a-f-]+/.+`);
+    if (!expected.test(path)) {
+      return res.status(400).json({ error: "Path does not match this patient's chat folder" });
+    }
+    const url = await genie.signChatAttachmentUrl(path, 300);
+    if (!url) return res.status(404).json({ error: "Object not found" });
+    res.json({ url, expires_in: 300 });
+  } catch (e) {
+    handleError(res, e, "Patient chat attachment sign-url");
   }
 });
 

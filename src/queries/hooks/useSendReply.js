@@ -19,18 +19,21 @@ export function useSendReply({ conversationId, senderName = "Doctor" } = {}) {
       return true;
     },
     retryDelay: (attempt) => Math.min(500 * Math.pow(3, attempt), 5000),
-    mutationFn: async (message) => {
-      const { data } = await api.post(`/api/conversations/${conversationId}/messages`, {
-        message,
-      });
+    mutationFn: async (input) => {
+      const payload = typeof input === "string" ? { message: input } : { ...input };
+      const { data } = await api.post(`/api/conversations/${conversationId}/messages`, payload);
       return data;
     },
-    onMutate: async (message) => {
+    onMutate: async (input) => {
+      const payload = typeof input === "string" ? { message: input } : { ...input };
       const tmpId = `tmp-${Date.now()}`;
       const optimistic = {
         id: tmpId,
         conversation_id: conversationId,
-        message,
+        message: payload.message || null,
+        attachment_path: payload.attachment_path || null,
+        attachment_mime: payload.attachment_mime || null,
+        attachment_name: payload.attachment_name || null,
         direction: "inbound",
         sender_name: senderName,
         created_at: new Date().toISOString(),

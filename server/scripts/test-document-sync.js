@@ -40,10 +40,9 @@ async function run() {
     return;
   }
 
-  const p = await pool.query(
-    "SELECT id, name, file_no, phone FROM patients WHERE file_no = $1",
-    [FILE_NO],
-  );
+  const p = await pool.query("SELECT id, name, file_no, phone FROM patients WHERE file_no = $1", [
+    FILE_NO,
+  ]);
   if (p.rows.length === 0) {
     console.error(`No local patient with file_no=${FILE_NO}. Run create-test-patient.js first.`);
     process.exitCode = 1;
@@ -95,19 +94,13 @@ async function run() {
   const rx = (await seedDoc("prescription", "Test Prescription Sync")).rows[0];
   const lab = (await seedDoc("lab_report", "Test Lab Report Sync")).rows[0];
   const scan = (await seedDoc("imaging", "Test Scan Sync")).rows[0];
-  console.log(
-    `Seeded docs: rx=${rx.id} lab=${lab.id} scan=${scan.id}`,
-  );
+  console.log(`Seeded docs: rx=${rx.id} lab=${lab.id} scan=${scan.id}`);
 
   console.log("\n--- syncDocumentsToGenie ---");
   const res = await syncDocumentsToGenie(scribePatient.id, pool);
   console.log(JSON.stringify(res, null, 2));
 
-  const expectedSids = [
-    `gini-doc-${rx.id}`,
-    `gini-doc-${lab.id}`,
-    `gini-doc-${scan.id}`,
-  ];
+  const expectedSids = [`gini-doc-${rx.id}`, `gini-doc-${lab.id}`, `gini-doc-${scan.id}`];
 
   const { data: remoteDocs, error: rdErr } = await genie
     .from("patient_documents")
@@ -133,9 +126,7 @@ async function run() {
   console.log(`Scan         (gini-doc-${scan.id}) landed on Genie: ${scanHit ? "YES" : "NO"}`);
 
   // Cleanup the scribe rows so reruns don't accumulate.
-  await pool.query(`DELETE FROM documents WHERE id = ANY($1::int[])`, [
-    [rx.id, lab.id, scan.id],
-  ]);
+  await pool.query(`DELETE FROM documents WHERE id = ANY($1::int[])`, [[rx.id, lab.id, scan.id]]);
   await genie
     .from("patient_documents")
     .delete()

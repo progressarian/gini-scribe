@@ -26,7 +26,9 @@ const r = await pool.query(
 );
 console.log(`scribe documents for patient ${PATIENT_ID}:`);
 for (const d of r.rows) {
-  console.log(`  id=${d.id} type=${d.doc_type} storage=${d.has_storage} url=${d.has_url} src=${d.source} title=${(d.title||'').slice(0,40)}`);
+  console.log(
+    `  id=${d.id} type=${d.doc_type} storage=${d.has_storage} url=${d.has_url} src=${d.source} title=${(d.title || "").slice(0, 40)}`,
+  );
 }
 
 const genieId = await resolveGeniePatientId(PATIENT_ID);
@@ -45,6 +47,9 @@ const { data: docs } = await genie
   .eq("patient_id", genieId)
   .order("created_at", { ascending: false });
 console.log(`\nGenie patient_documents rows: ${docs?.length || 0}`);
-for (const d of docs || []) console.log(`  sid=${d.source_id} type=${d.doc_type} url=${d.file_url ? d.file_url.slice(0,60)+'...' : 'NULL'} title=${(d.title||'').slice(0,40)}`);
+for (const d of docs || [])
+  console.log(
+    `  sid=${d.source_id} type=${d.doc_type} url=${d.file_url ? d.file_url.slice(0, 60) + "..." : "NULL"} title=${(d.title || "").slice(0, 40)}`,
+  );
 
 await pool.end();

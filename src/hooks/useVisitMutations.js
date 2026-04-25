@@ -95,6 +95,26 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData],
   );
 
+  const restartMedication = useCallback(
+    async (id, opts = {}) => {
+      try {
+        await api.patch(`/api/visit/${patientId}/medication/${id}/restart`);
+        if (!opts.silent) toast("Medication restarted", "success");
+        if (!opts.skipRefresh) await refreshData();
+        return { success: true };
+      } catch (err) {
+        const status = err?.response?.status;
+        const msg =
+          status === 409
+            ? "An active prescription with this name already exists"
+            : "Failed to restart medication";
+        if (!opts.silent) toast(msg, "error");
+        return { success: false, status };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   const deleteMedication = useCallback(
     async (id) => {
       try {
@@ -237,6 +257,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     addMedication,
     editMedication,
     stopMedication,
+    restartMedication,
     deleteMedication,
     addInvestigations,
     addReferral,

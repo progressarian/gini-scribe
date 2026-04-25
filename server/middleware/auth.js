@@ -47,6 +47,10 @@ const PUBLIC_PREFIXES = [
 const PUBLIC_PATTERNS = [
   /^\/api\/patients\/[^/]+\/care-team$/,
   /^\/api\/patients\/[^/]+\/conversations\/ensure$/,
+  // Patient-app chat attachment upload + sign-url. Scoped by patient_id
+  // in the URL path, validated against conversation ownership server-side.
+  /^\/api\/patients\/[^/]+\/conversations\/[^/]+\/chat-attachment$/,
+  /^\/api\/patients\/[^/]+\/chat-attachments\/sign-url$/,
 ];
 
 export const requireAuth = (req, res, next) => {

@@ -3,7 +3,11 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 
 const require = createRequire(import.meta.url);
-const { syncDocumentsToGenie } = require("../genie-sync.cjs");
+const {
+  syncDocumentsToGenie,
+  syncLabsToGenie,
+  syncMedicationsToGenie,
+} = require("../genie-sync.cjs");
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
@@ -900,6 +904,19 @@ router.patch("/documents/:id", async (req, res) => {
       syncDocumentsToGenie(doc.patient_id, pool).catch((e) =>
         console.warn("[PATCH /documents] Genie doc push skipped:", e.message),
       );
+      // Newly extracted lab values + meds rows from this document need to
+      // reach Genie's lab_results / medications tables so the Journey page
+      // and Medicines tab populate without waiting for a visit save.
+      if (extracted_data?.panels) {
+        syncLabsToGenie(doc.patient_id, pool).catch((e) =>
+          console.warn("[PATCH /documents] Genie labs push skipped:", e.message),
+        );
+      }
+      if (extracted_data?.medications || extracted_data?.medicines) {
+        syncMedicationsToGenie(doc.patient_id, pool).catch((e) =>
+          console.warn("[PATCH /documents] Genie meds push skipped:", e.message),
+        );
+      }
     }
 
     // Bust summary cache so the panel reflects the newly extracted report immediately
@@ -1232,6 +1249,22 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
       }
 
       await client.query("COMMIT");
+
+      if (doc.patient_id) {
+        syncDocumentsToGenie(doc.patient_id, pool).catch((e) =>
+          console.warn("[extract] Genie doc push skipped:", e.message),
+        );
+        if (extracted?.panels) {
+          syncLabsToGenie(doc.patient_id, pool).catch((e) =>
+            console.warn("[extract] Genie labs push skipped:", e.message),
+          );
+        }
+        if (extracted?.medications) {
+          syncMedicationsToGenie(doc.patient_id, pool).catch((e) =>
+            console.warn("[extract] Genie meds push skipped:", e.message),
+          );
+        }
+      }
 
       if (doc.patient_id && extracted?.panels) {
         pool

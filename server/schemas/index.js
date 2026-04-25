@@ -213,8 +213,44 @@ export const messageCreateSchema = z.object({
 });
 
 // Conversation-centric (2026-04-23)
-export const conversationMessageSchema = z.object({
-  message: z.string({ required_error: "message is required" }).min(1).max(4000),
+// As of 2026-04-25, lab/reception messages may carry an attachment in place
+// of (or alongside) text. message and attachment_path are individually
+// optional, but at least one must be present.
+export const CHAT_ATTACHMENT_MIMES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "image/heif",
+  "image/webp",
+  "application/pdf",
+];
+
+export const conversationMessageSchema = z
+  .object({
+    message: z.string().max(4000).optional().nullable(),
+    attachment_path: optStr,
+    attachment_mime: z.enum(CHAT_ATTACHMENT_MIMES).optional().nullable(),
+    attachment_name: optStr,
+  })
+  .refine(
+    (v) =>
+      (typeof v.message === "string" && v.message.trim().length > 0) ||
+      (typeof v.attachment_path === "string" && v.attachment_path.length > 0),
+    { message: "message or attachment_path is required" },
+  )
+  .refine(
+    (v) =>
+      !v.attachment_path || (typeof v.attachment_mime === "string" && v.attachment_mime.length > 0),
+    { message: "attachment_mime is required when attachment_path is set" },
+  );
+
+export const conversationAttachmentSchema = z.object({
+  base64: z.string({ required_error: "base64 data is required" }).min(1),
+  mediaType: z.enum(CHAT_ATTACHMENT_MIMES, {
+    required_error: "mediaType is required",
+  }),
+  fileName: z.string({ required_error: "fileName is required" }).min(1),
 });
 
 export const ensureConversationSchema = z.object({

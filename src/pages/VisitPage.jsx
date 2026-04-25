@@ -841,6 +841,7 @@ export default function VisitPage() {
                 onEditMed={(m) => setModal({ type: "editMed", data: m })}
                 onStopMed={(m) => setModal({ type: "stopMed", data: m })}
                 onDeleteMed={(m) => setModal({ type: "deleteMed", data: m })}
+                onRestartMed={(m) => mutations.restartMedication(m.id)}
               />
               <VisitPlan
                 consultations={consultations}
