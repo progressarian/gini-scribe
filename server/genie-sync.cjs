@@ -134,7 +134,8 @@ async function syncVisitToGenie(visit, patient, doctor) {
       }, { step: 'care_team', extra: { name: ct.name } });
     }
 
-    // 3. Sync medications
+    // 3. Sync medications — flow the rich Scribe fields the v9 patient app
+    //    consumes (icon picker, brand pill, "due in Xh" chip, trend timeline).
     const meds = visit.medications || visit.medicines || visit.prescription || [];
     for (let i = 0; i < meds.length; i++) {
       const med = meds[i];
@@ -147,11 +148,18 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_timing: med.timing || med.schedule || null,
         p_duration: med.duration || null,
         p_instructions: med.instructions || med.notes || null,
-        p_is_active: true,
+        p_is_active: med.is_active !== false,
+        p_type: med.drug_class || med.med_group || med.route || null,
+        p_brand: med.pharmacy_match || med.brand || null,
+        p_scheduled_time: med.scheduled_time || null,
+        p_start_date: med.started_date || med.start_date || visit.visit_date || null,
+        p_expiry_date: med.expiry_date || null,
+        p_for_conditions: med.for_diagnosis || med.for_conditions || null,
       }, { step: 'medication', extra: { name: med.name } });
     }
 
-    // 4. Sync lab results
+    // 4. Sync lab results — include lab_name (panel/provider) so the v9
+    //    trend modal can show "Latest · 24 Apr 2026 / Lal Path Labs".
     const labs = visit.lab_results || visit.labs || visit.investigations || [];
     for (let i = 0; i < labs.length; i++) {
       const lab = labs[i];
@@ -164,6 +172,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_reference_range: lab.reference_range || lab.normal_range || lab.ref_range || lab.ref || null,
         p_status: lab.status || lab.flag || (lab.is_abnormal ? 'abnormal' : 'normal'),
         p_test_date: lab.test_date || visit.visit_date || new Date().toISOString().split('T')[0],
+        p_lab_name: lab.lab_name || lab.panel_name || lab.lab || null,
       }, { step: 'lab', extra: { name: lab.test_name } });
     }
 
@@ -197,7 +206,9 @@ async function syncVisitToGenie(visit, patient, doctor) {
       }, { step: 'goal', extra: { name: g.biomarker || g.marker } });
     }
 
-    // 7. Sync appointment (next follow-up)
+    // 7. Sync appointment (next follow-up). Pass time + purpose so the v9
+    //    pre-visit hero can render "Friday, 1 May · 11:30 AM" and the Care
+    //    tab can label the visit with its purpose.
     if (visit.follow_up_date || visit.next_appointment) {
       await callRpc('gini_sync_appointment', {
         p_gini_patient_id: giniPatientId,
@@ -206,6 +217,8 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_doctor_name: doctor?.name || doctor?.con_name || visit.doctor_name || visit.con_name || null,
         p_notes: visit.follow_up_instructions || null,
         p_status: 'scheduled',
+        p_appointment_time: visit.follow_up_time || visit.next_appointment_time || visit.time_slot || null,
+        p_purpose: visit.follow_up_purpose || visit.visit_type || visit.purpose || null,
       }, { step: 'appointment' });
     }
 
@@ -378,7 +391,9 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
 
   try {
     const { rows } = await localDb.query(
-      `SELECT id, name, dose, frequency, timing, clinical_note, notes, is_active
+      `SELECT id, name, dose, frequency, timing, clinical_note, notes, is_active,
+              drug_class, med_group, route, pharmacy_match, started_date,
+              for_diagnosis
          FROM medications
         WHERE patient_id = $1
         ORDER BY updated_at DESC
@@ -401,6 +416,12 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
               p_duration: null,
               p_instructions: med.clinical_note || med.notes || null,
               p_is_active: med.is_active !== false,
+              p_type: med.drug_class || med.med_group || med.route || null,
+              p_brand: med.pharmacy_match || null,
+              p_scheduled_time: null,
+              p_start_date: med.started_date || null,
+              p_expiry_date: null,
+              p_for_conditions: med.for_diagnosis || null,
             }),
           { label: `gini_sync_medication(${med.name})` },
         );
@@ -484,7 +505,7 @@ async function syncLabsToGenie(scribePatientId, localDb) {
 
   try {
     const { rows } = await localDb.query(
-      `SELECT id, test_name, result, unit, test_date
+      `SELECT id, test_name, result, unit, test_date, ref_range, flag, panel_name
          FROM lab_results
         WHERE patient_id = $1 AND result IS NOT NULL
         ORDER BY test_date DESC NULLS LAST, id DESC
@@ -505,9 +526,10 @@ async function syncLabsToGenie(scribePatientId, localDb) {
               p_test_name: lab.test_name,
               p_value: value,
               p_unit: lab.unit || null,
-              p_reference_range: null,
-              p_status: 'normal',
+              p_reference_range: lab.ref_range || null,
+              p_status: lab.flag || 'normal',
               p_test_date: lab.test_date || new Date().toISOString().split('T')[0],
+              p_lab_name: lab.panel_name || null,
             }),
           { label: `gini_sync_lab(${lab.test_name})` },
         );
@@ -524,6 +546,99 @@ async function syncLabsToGenie(scribePatientId, localDb) {
     return { synced: true, pushed, total: rows.length, errors };
   } catch (err) {
     console.error('[Genie Sync Labs] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err), errors };
+  }
+}
+
+/**
+ * Sign a Supabase storage object so the URL works for the patient app without
+ * needing scribe-side auth. Returns null on failure (caller should fall back
+ * to the row's existing file_url).
+ */
+async function signStorageUrl(storagePath, expiresIn = 60 * 60 * 24 * 30) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  const bucket = 'patient-files';
+  if (!url || !key || !storagePath) return null;
+  try {
+    const resp = await fetch(
+      `${url}/storage/v1/object/sign/${bucket}/${storagePath}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresIn }),
+      },
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const signed = data.signedURL || data.signedUrl || null;
+    if (!signed) return null;
+    return signed.startsWith('http') ? signed : `${url}/storage/v1${signed}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Push uploaded documents (prescription PDFs, lab report PDFs, imaging/scan
+ * files) from scribe's `documents` table into Genie's `patient_documents` so
+ * the V9 Care → Records tab can list them. Mirrors `syncLabsToGenie`'s
+ * upsert-by-source_id pattern; the matching RPC lives in
+ * `myhealthgenie/supabase/migrations/2026-04-25_gini_sync_document.sql`.
+ */
+async function syncDocumentsToGenie(scribePatientId, localDb) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!scribePatientId) return { synced: false, reason: 'Missing patient id' };
+
+  const giniPatientId = String(scribePatientId);
+  const errors = [];
+  let pushed = 0;
+
+  try {
+    const { rows } = await localDb.query(
+      `SELECT id, doc_type, title, file_name, file_url, storage_path, mime_type,
+              extracted_data, doc_date
+         FROM documents
+        WHERE patient_id = $1
+          AND doc_type IN ('prescription','lab_report','imaging','discharge')
+        ORDER BY doc_date DESC NULLS LAST, id DESC
+        LIMIT 200`,
+      [scribePatientId],
+    );
+
+    for (const doc of rows) {
+      const signed = doc.storage_path ? await signStorageUrl(doc.storage_path) : null;
+      const fileUrl = signed || doc.file_url || null;
+      if (!fileUrl) continue; // nothing for the patient to open
+      try {
+        const result = await withRetry(
+          () =>
+            db.rpc('gini_sync_document', {
+              p_gini_patient_id: giniPatientId,
+              p_source_id: `gini-doc-${doc.id}`,
+              p_doc_type: doc.doc_type,
+              p_title: doc.title || doc.file_name || doc.doc_type,
+              p_document_date: doc.doc_date || null,
+              p_file_url: fileUrl,
+              p_content_type: doc.mime_type || null,
+              p_extracted_data: doc.extracted_data || null,
+            }),
+          { label: `gini_sync_document(${doc.id})` },
+        );
+        if (result?.error) {
+          errors.push({ id: doc.id, error: result.error.message || String(result.error) });
+        } else {
+          pushed += 1;
+        }
+      } catch (err) {
+        errors.push({ id: doc.id, error: err.message || String(err) });
+      }
+    }
+
+    return { synced: true, pushed, total: rows.length, errors };
+  } catch (err) {
+    console.error('[Genie Sync Documents] Exception:', err.message || err);
     return { synced: false, reason: err.message || String(err), errors };
   }
 }
@@ -550,7 +665,7 @@ async function syncAppointmentToGenie(scribePatientId, localDb) {
   try {
     // Prefer the next scheduled appointment; fall back to most recent.
     const { rows } = await localDb.query(
-      `SELECT id, appointment_date, doctor_name, status, notes
+      `SELECT id, appointment_date, time_slot, doctor_name, status, notes, visit_type
          FROM appointments
         WHERE patient_id = $1
         ORDER BY
@@ -573,6 +688,8 @@ async function syncAppointmentToGenie(scribePatientId, localDb) {
             p_doctor_name: appt.doctor_name || null,
             p_notes: appt.notes || null,
             p_status: appt.status || 'scheduled',
+            p_appointment_time: appt.time_slot || null,
+            p_purpose: appt.visit_type || null,
           }),
         { label: `gini_sync_appointment(${appt.id})` },
       );
@@ -1692,6 +1809,7 @@ module.exports = {
   syncMedicationsToGenie,
   deleteGenieMedication,
   syncLabsToGenie,
+  syncDocumentsToGenie,
   syncAppointmentToGenie,
   syncCareTeamToGenie,
   syncVitalsRowToGenie,

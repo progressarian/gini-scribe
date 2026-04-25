@@ -9,6 +9,9 @@ const {
   syncPatientLogsFromGenie,
   syncPatientLogsFromGenieThrottled,
   syncDiagnosesToGenie,
+  syncMedicationsToGenie,
+  syncLabsToGenie,
+  syncDocumentsToGenie,
 } = require("../genie-sync.cjs");
 
 const router = express.Router();
@@ -22,15 +25,21 @@ router.post("/patients/:id/sync-health-logs", async (req, res) => {
   try {
     const patientId = req.params.id;
 
-    const [pullResult, pushResult] = await Promise.all([
+    const [pullResult, pushResult, medsPush, labsPush, docsPush] = await Promise.all([
       syncPatientLogsFromGenie(patientId, pool),
       syncDiagnosesToGenie(patientId, pool),
+      syncMedicationsToGenie(patientId, pool),
+      syncLabsToGenie(patientId, pool),
+      syncDocumentsToGenie(patientId, pool),
     ]);
 
     return res.json({
       success: true,
       ...pullResult,
       diagnosesPush: pushResult,
+      medicationsPush: medsPush,
+      labsPush,
+      documentsPush: docsPush,
     });
   } catch (error) {
     console.error("Sync Health Logs Error:", error);

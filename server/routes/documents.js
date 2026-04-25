@@ -1,5 +1,9 @@
 import { Router } from "express";
+import { createRequire } from "module";
 import pool from "../config/db.js";
+
+const require = createRequire(import.meta.url);
+const { syncDocumentsToGenie } = require("../genie-sync.cjs");
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
@@ -303,6 +307,10 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
     runServerExtraction(req.params.id, { skipIfNotPending: true }).catch((err) => {
       console.error(`[upload-file] Background extraction for doc ${req.params.id} crashed:`, err);
     });
+
+    syncDocumentsToGenie(patientId, pool).catch((e) =>
+      console.warn("[upload-file] Genie doc push skipped:", e.message),
+    );
 
     res.json({ success: true, storage_path: storagePath, file_name: fileName });
   } catch (e) {
@@ -887,6 +895,12 @@ router.patch("/documents/:id", async (req, res) => {
     }
 
     await client.query("COMMIT");
+
+    if (doc.patient_id) {
+      syncDocumentsToGenie(doc.patient_id, pool).catch((e) =>
+        console.warn("[PATCH /documents] Genie doc push skipped:", e.message),
+      );
+    }
 
     // Bust summary cache so the panel reflects the newly extracted report immediately
     if (doc.patient_id && extracted_data?.panels) {

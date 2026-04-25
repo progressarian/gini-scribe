@@ -15,8 +15,19 @@ const UploadReportModal = memo(function UploadReportModal({ onClose, onSubmit })
   const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (uploading) return;
+    setUploading(true);
+    try {
+      await onSubmit({ ...form, base64: file, fileName });
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleFile = (f) => {
     if (!f) return;
@@ -127,15 +138,34 @@ const UploadReportModal = memo(function UploadReportModal({ onClose, onSubmit })
           )}
         </div>
         <div className="macts">
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={onClose} disabled={uploading}>
             Cancel
           </button>
           <button
             className="btn-p"
-            disabled={!form.doc_type}
-            onClick={() => onSubmit({ ...form, base64: file, fileName })}
+            disabled={!form.doc_type || uploading}
+            onClick={handleSubmit}
           >
-            Upload Report
+            {uploading ? (
+              <>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 12,
+                    height: 12,
+                    border: "2px solid currentColor",
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    animation: "spin 0.7s linear infinite",
+                    marginRight: 6,
+                    verticalAlign: "-2px",
+                  }}
+                />
+                Uploading...
+              </>
+            ) : (
+              "Upload Report"
+            )}
           </button>
         </div>
       </div>

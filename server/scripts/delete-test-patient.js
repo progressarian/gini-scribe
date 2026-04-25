@@ -29,13 +29,9 @@ const { default: pool } = await import("../config/db.js");
 
 const { createRequire } = await import("module");
 const require = createRequire(import.meta.url);
-let deletePatientFromGenie = null;
-let resolveGeniePatientId = null;
 let getGenieDb = null;
 try {
   const mod = require("../genie-sync.cjs");
-  deletePatientFromGenie = mod.deletePatientFromGenie;
-  resolveGeniePatientId = mod.resolveGeniePatientId;
   getGenieDb = mod.getGenieDb;
 } catch (e) {
   console.warn("[delete-test-patient] genie-sync.cjs not loaded:", e.message);
@@ -44,6 +40,10 @@ try {
 const APPLY = process.argv.includes("--apply");
 const fileNoFlagIdx = process.argv.indexOf("--file-no");
 const FILE_NO = fileNoFlagIdx > -1 ? process.argv[fileNoFlagIdx + 1] : "TEST_COMPANION_USER";
+// Same phone create-test-patient.js seeds with — used as a fallback when the
+// Scribe row is already gone and the Genie schema doesn't expose file_no.
+const phoneFlagIdx = process.argv.indexOf("--phone");
+const FALLBACK_PHONE = phoneFlagIdx > -1 ? process.argv[phoneFlagIdx + 1] : "+919999999001";
 
 // Delete children first. Any table not present in this DB is skipped.
 const CHILD_TABLES = [
@@ -84,10 +84,45 @@ const GENIE_CHILD_TABLES = [
   "alert_channel",
   "patient_messages",
   "conversations",
+  "activity_logs",
+  "meal_logs",
+  "symptom_logs",
+  "vitals_logs",
+  "chat_messages",
+  "documents",
+  "reminders",
+  "notifications",
 ];
 
-async function dropGenieChildren(giniPatientId) {
-  if (!getGenieDb || !resolveGeniePatientId) {
+// Find the Genie patient row directly — by gini_patient_id when we still
+// have the Scribe id, otherwise by file_no (uhid) and finally by phone.
+// Needed because the script may be re-run after the Scribe row has already
+// been deleted, leaving the Genie row orphaned.
+async function findGenieRow({ giniPatientId, fileNo, phone }) {
+  if (!getGenieDb) return null;
+  const db = getGenieDb();
+  if (!db) return null;
+  const lookups = [];
+  if (giniPatientId != null) lookups.push(["gini_patient_id", String(giniPatientId)]);
+  if (fileNo) lookups.push(["file_no", fileNo]);
+  if (phone) lookups.push(["phone", phone]);
+  for (const [col, val] of lookups) {
+    const { data, error } = await db
+      .from("patients")
+      .select("id, gini_patient_id, phone")
+      .eq(col, val)
+      .maybeSingle();
+    if (error) {
+      console.warn(`  genie lookup by ${col} failed: ${error.message}`);
+      continue;
+    }
+    if (data) return data;
+  }
+  return null;
+}
+
+async function dropGenieChildren(genieRow) {
+  if (!getGenieDb) {
     console.log("(Skipped Genie child cleanup — helpers not loaded)");
     return;
   }
@@ -96,10 +131,37 @@ async function dropGenieChildren(giniPatientId) {
     console.log("(Skipped Genie child cleanup — GENIE_SUPABASE_URL/KEY not set)");
     return;
   }
-  const genieUUID = await resolveGeniePatientId(giniPatientId);
+  const genieUUID = genieRow?.id;
   if (!genieUUID) {
-    console.log(`(No Genie patient for gini_patient_id=${giniPatientId}; nothing to clean)`);
+    console.log(`(No Genie patient row found; nothing to clean)`);
     return;
+  }
+
+  // medication_logs is keyed on medication_id, not patient_id, so we have to
+  // resolve the medications for this patient first and clear their logs before
+  // we can drop the medications row (FK: medication_logs_medication_id_fkey).
+  try {
+    const { data: meds, error: medErr } = await db
+      .from("medications")
+      .select("id")
+      .eq("patient_id", genieUUID);
+    if (medErr) {
+      console.warn(`  medication_logs prep — skip (${medErr.message})`);
+    } else if (meds?.length) {
+      const ids = meds.map((m) => m.id);
+      const { data: logs, error: logErr } = await db
+        .from("medication_logs")
+        .delete()
+        .in("medication_id", ids)
+        .select("id");
+      if (logErr) {
+        console.warn(`  medication_logs        — skip (${logErr.message})`);
+      } else {
+        console.log(`  genie.medication_logs   deleted ${logs?.length || 0}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`  medication_logs        — skip (${e.message})`);
   }
 
   let total = 0;
@@ -120,30 +182,62 @@ async function dropGenieChildren(giniPatientId) {
   console.log(`  genie children total    ${total}`);
 }
 
-async function dropFromGenie(giniPatientId) {
-  if (!deletePatientFromGenie) {
+async function dropFromGenie(genieRow) {
+  if (!getGenieDb) {
     console.log("(Skipped MyHealth Genie patient row — helper not loaded)");
     return;
   }
-  const r = await deletePatientFromGenie(giniPatientId);
-  if (r?.deleted) {
-    console.log(`MyHealth Genie patient row removed (gini_patient_id=${giniPatientId})`);
-  } else if (r?.count === 0) {
-    console.log(`No MyHealth Genie patient row was present for gini_patient_id=${giniPatientId}`);
-  } else {
-    console.warn(`MyHealth Genie cleanup failed: ${r?.reason || "unknown"}`);
+  const db = getGenieDb();
+  if (!db) {
+    console.log("(Skipped MyHealth Genie patient row — GENIE_SUPABASE_URL/KEY not set)");
+    return;
   }
+  if (!genieRow?.id) {
+    console.log(`No MyHealth Genie patient row to delete`);
+    return;
+  }
+  const { data, error } = await db
+    .from("patients")
+    .delete()
+    .eq("id", genieRow.id)
+    .select("id");
+  if (error) {
+    console.warn(`MyHealth Genie cleanup failed: ${error.message}`);
+    return;
+  }
+  console.log(
+    `MyHealth Genie patient row removed (id=${genieRow.id}, gini_patient_id=${genieRow.gini_patient_id ?? "—"}, phone=${genieRow.phone ?? "—"})`,
+  );
+  void data;
 }
 
 async function run() {
   const client = await pool.connect();
   try {
-    const pRes = await client.query("SELECT id, name, file_no FROM patients WHERE file_no = $1", [
-      FILE_NO,
-    ]);
+    const pRes = await client.query(
+      "SELECT id, name, file_no, phone FROM patients WHERE file_no = $1",
+      [FILE_NO],
+    );
     if (pRes.rows.length === 0) {
-      console.error(`No patient found with file_no=${FILE_NO}`);
-      process.exitCode = 1;
+      console.warn(
+        `No Scribe patient with file_no=${FILE_NO}; checking MyHealth Genie for an orphan row…`,
+      );
+      const orphan = await findGenieRow({ fileNo: FILE_NO, phone: FALLBACK_PHONE });
+      if (!orphan) {
+        console.log(`No MyHealth Genie patient row found either. Nothing to do.`);
+        return;
+      }
+      console.log(
+        `Found Genie orphan: id=${orphan.id}  phone=${orphan.phone ?? "—"}  gini_patient_id=${orphan.gini_patient_id ?? "—"}`,
+      );
+      if (!APPLY) {
+        console.log("Dry-run — re-run with --apply to remove the Genie orphan.");
+        return;
+      }
+      console.log("\nCleaning MyHealth Genie child rows…");
+      await dropGenieChildren(orphan);
+      console.log();
+      await dropFromGenie(orphan);
       return;
     }
     if (pRes.rows.length > 1) {
@@ -206,10 +300,15 @@ async function run() {
 
     // Mirror the delete to MyHealth Genie only after the Scribe-side commit
     // succeeds. Failures there are surfaced but do not fail the script.
+    const genieRow = await findGenieRow({
+      giniPatientId: patient.id,
+      fileNo: patient.file_no,
+      phone: patient.phone,
+    });
     console.log("\nCleaning MyHealth Genie child rows…");
-    await dropGenieChildren(patient.id);
+    await dropGenieChildren(genieRow);
     console.log();
-    await dropFromGenie(patient.id);
+    await dropFromGenie(genieRow);
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Error:", e.message);
