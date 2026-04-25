@@ -423,12 +423,15 @@ export default function VisitPage() {
     const uniqueActiveMeds = dedupMeds(data.activeMeds);
     const uniqueStoppedMeds = dedupMeds(data.stoppedMeds);
 
-    // Filter to latest prescription date only (for sidebar — same logic as VisitMedications)
-    const _dates = uniqueActiveMeds.map((m) => m.prescribed_date).filter(Boolean);
+    // Filter to latest prescription date only (for sidebar — same logic as VisitMedications).
+    // Strict match: meds without a prescribed_date are treated as previous/legacy and
+    // excluded so the sidebar only reflects what was actually prescribed in the latest visit.
+    const _activeOnly = uniqueActiveMeds.filter((m) => m.is_active !== false);
+    const _dates = _activeOnly.map((m) => m.prescribed_date).filter(Boolean);
     const _latestDate = _dates.length ? _dates.reduce((a, b) => (a > b ? a : b)) : null;
     const latestVisitMeds = _latestDate
-      ? uniqueActiveMeds.filter((m) => !m.prescribed_date || m.prescribed_date === _latestDate)
-      : uniqueActiveMeds;
+      ? _activeOnly.filter((m) => m.prescribed_date === _latestDate)
+      : _activeOnly;
 
     // HbA1c trend for the summary strip
     const hba1cH = getLabHist(labHistory, "HbA1c");
