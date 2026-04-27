@@ -61,7 +61,8 @@ export async function extractFromFile(base64, buffer) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 16000,
+      max_tokens: 24000,
+      temperature: 0,
       system: CLINICAL_EXTRACTION_PROMPT,
       messages: [
         {

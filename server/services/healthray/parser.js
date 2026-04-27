@@ -278,6 +278,8 @@ STRICT Rules:
   • "YOUR NEXT FOLLOW UP IS SCHEDULED ON <date>" / a plain date-only header followed only by FBG-X / PP-X target numbers (no clinical context) / sections explicitly labelled "TARGET" or "GOAL" = TARGET GOALS — do NOT extract as labs.
   • An "OBSERVATION" or "OBSERVATION-:" section header followed by "-TESTNAME-:VALUE" lines is an observations block — extract those values as real lab results. The "-:" suffix on the label is just formatting, NOT an absent marker.
   • A line like "FBG-115" under a future follow-up booking heading = target; but "FBG:105" under "FOLLOW UP TODAY ON 03/02/2026" alongside "C/O LOOSE MOTION" = real result from 03/02/2026.
+- MEDICATION BRAND-SUFFIX FIDELITY — ABSOLUTE. Preserve every brand suffix EXACTLY as written in the source: XR, SR, MR, CR, ER, OD, LA, XL, MEX, MEZ, MD, M, DSR, DM, DS, AM, CT, CH, PLUS, CD, F, FORTE, TRIO, AT, H, etc. These suffixes denote specific formulations or composition variants and are clinically distinct (e.g. Diamicron XR MEX = gliclazide + metformin combo; Diamicron XR = gliclazide alone — they are DIFFERENT drugs). Do NOT "correct", normalise, drop, or substitute one suffix for another (e.g. NEVER change MEX→MR, MEZ→MR, DM→D, FORTE→F). If unsure how to spell a suffix, copy it verbatim from the source — character-for-character.
+- MEDICATION DOSE UNIT FIDELITY — ABSOLUTE. Preserve dose units EXACTLY as written. Case-sensitive interpretation: a single uppercase "G" or "GM" or "g" or "gm" means GRAMS, while "MG"/"mg" means MILLIGRAMS — these differ by 1000× and a unit error is a serious clinical error. If the source says "60+1G", emit "60 mg + 1 g" (or "60+1 g" if the leading number's unit is implied by context) — NEVER coerce both to "mg". Likewise: "60K" or "60 K" (kilo / thousand) for vitamin D etc. → emit "60,000 units" or "60K IU" but NEVER "60 mg". "MCG"/"mcg"/"µg" = micrograms, distinct from mg. If a multi-component dose has different units per component (common for combo drugs like metformin + gliclazide where metformin is in grams and gliclazide is in milligrams), preserve each component's unit. When the source unit is ambiguous, copy it character-for-character rather than guessing.
 - MEDICATION NAME FORMAT — STRICT. The "name" field is the BRAND NAME ONLY (or composition name for generics) — NEVER include a dosage-form prefix like "TAB", "TABLET", "INJ", "INJECTION", "CAP", "CAPSULE", "SYP", "SYRUP", "OINT", "OINTMENT", "CREAM", "GEL", "SPRAY", "DROPS", "SACHET", "POWDER", "LOTION", "INHALER", "SUSP", "PWD", or trailing punctuation. Move that information into the "form" field. Examples:
   • Source text "TAB SITACIP DM 10+100+500MG OD" → name: "Sitacip DM", form: "Tablet", dose: "10+100+500 mg", frequency: "OD", route: "Oral"
   • Source text "INJ. RYZODEG 8 UNIT S/C OD BEFORE BREAKFAST" → name: "Ryzodeg", form: "Injection", dose: "8 units", frequency: "OD", timing: "before breakfast", route: "SC"
@@ -366,7 +368,8 @@ export async function parseClinicalWithAI(rawText) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 16000,
+        max_tokens: 24000,
+        temperature: 0,
         messages: [{ role: "user", content: rawText }],
         system: prompt,
       }),

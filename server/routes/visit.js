@@ -183,7 +183,9 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 4. Active medications — all active meds; frontend picks the latest prescription date
       pool.query(
-        `SELECT m.*, c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
+        `SELECT m.*, c.con_name AS prescriber,
+                COALESCE(c.visit_date, m.started_date) AS prescribed_date,
+                COALESCE(m.last_prescribed_date, c.visit_date, m.started_date) AS last_prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
          WHERE m.patient_id=$1 AND m.is_active = true
          ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
@@ -564,6 +566,7 @@ router.get("/visit/:patientId", async (req, res) => {
           is_active: m.is_active !== false,
           started_date: dayOnly,
           prescribed_date: dayOnly,
+          last_prescribed_date: dayOnly,
           prescriber: null,
           source: m.source || "patient_app",
           for_conditions: m.for_conditions || null,

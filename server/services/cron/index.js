@@ -6,6 +6,7 @@ import {
   getRangeSyncStatus,
   runDailyOpdBackfill,
   runStuckStatusRecovery,
+  runMissingMedsRecovery,
 } from "./healthraySync.js";
 import {
   runLabSync,
@@ -27,6 +28,7 @@ let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
 let docRecoveryIntervalId = null;
+let missingMedsIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -97,6 +99,23 @@ export function startCronJobs() {
     }, STUCK_STATUS_INTERVAL_MS);
   }, STUCK_STATUS_DELAY_MS);
 
+  // ── Missing medications recovery ───────────────────────────────────────
+  // Detects patients with an upcoming appointment whose latest HealthRay
+  // prescription has zero active healthray-tagged rows in `medications` and
+  // re-runs the chronological sync. First run 10 min after startup, then hourly.
+  const MISSING_MEDS_DELAY_MS = 10 * 60 * 1000;
+  const MISSING_MEDS_INTERVAL_MS = 60 * 60 * 1000;
+  setTimeout(() => {
+    runMissingMedsRecovery().catch((e) =>
+      console.error("[Cron] Missing meds recovery failed:", e.message),
+    );
+    missingMedsIntervalId = setInterval(() => {
+      runMissingMedsRecovery().catch((e) =>
+        console.error("[Cron] Missing meds recovery failed:", e.message),
+      );
+    }, MISSING_MEDS_INTERVAL_MS);
+  }, MISSING_MEDS_DELAY_MS);
+
   // ── Document recovery: clean orphans + re-kick stuck extractions ──
   // Every 3 min. Handles the refresh-mid-upload case where /upload-file
   // never completed (→ orphan) and the case where the server restarted
@@ -145,6 +164,11 @@ export function stopCronJobs() {
     docRecoveryIntervalId = null;
     console.log("[Cron] Document recovery stopped");
   }
+  if (missingMedsIntervalId) {
+    clearInterval(missingMedsIntervalId);
+    missingMedsIntervalId = null;
+    console.log("[Cron] Missing meds recovery stopped");
+  }
 }
 
 // Manual trigger exports
@@ -160,5 +184,6 @@ export {
   backfillLabPdfs,
   runDailyOpdBackfill,
   runStuckStatusRecovery,
+  runMissingMedsRecovery,
   runDocumentRecovery,
 };

@@ -217,9 +217,10 @@ function dedup(meds) {
       Object.assign(grouped[key], m, { _entries: entries });
     }
   });
-  // After collapsing, pin prescribed_date and started_date to the earliest
-  // Started On seen across all entries — that's when the patient actually
-  // started this drug, not the latest renewal.
+  // After collapsing, pin started_date / prescribed_date to the earliest start
+  // across entries (used for "Since DD MMM YYYY" display) and pin
+  // last_prescribed_date to the most recent renewal (used by the lastVisit /
+  // prevVisit splitter — see below).
   Object.values(grouped).forEach((g) => {
     const earliestStarted = g._entries
       .map((e) => e.started_date)
@@ -229,6 +230,11 @@ function dedup(meds) {
       g.started_date = earliestStarted;
       g.prescribed_date = earliestStarted;
     }
+    const latestPrescribed = g._entries
+      .map((e) => e.last_prescribed_date)
+      .filter(Boolean)
+      .reduce((a, b) => (!a || b > a ? b : a), null);
+    if (latestPrescribed) g.last_prescribed_date = latestPrescribed;
   });
   return Object.values(grouped);
 }
@@ -452,23 +458,23 @@ const VisitMedications = memo(function VisitMedications({
   const uniqueActive = useMemo(() => dedup(activeMeds), [activeMeds]);
   const uniqueStopped = useMemo(() => dedup(stoppedMeds), [stoppedMeds]);
 
-  // Split: last visit meds (active) vs previous visit meds (display as stopped)
-  // Normalise to YYYY-MM-DD before comparing — SQL-sourced dates arrive as
-  // ISO timestamps ("2026-04-25T00:00:00.000Z") while patient-added rows
-  // carry their full created_at timestamp. Comparing the raw strings makes
-  // every doctor med fail the equality check on a day a patient-added med
-  // is also active, dropping all doctor meds into "Prev Visit".
+  // Split: last visit meds (active) vs previous visit meds.
+  // Source of truth is `last_prescribed_date` — set on the medications row
+  // every time HealthRay re-prescribes it (see syncMedications). Comparing
+  // started_date / prescribed_date is wrong because those are pinned to the
+  // earliest start, so a long-running drug re-prescribed today still carries
+  // its original 2025 start date and would be mis-bucketed as "previous".
   const dayKey = (d) => (d ? String(d).slice(0, 10) : null);
   const { lastVisitMeds, prevVisitMeds } = useMemo(() => {
-    const dates = uniqueActive.map((m) => dayKey(m.prescribed_date)).filter(Boolean);
+    const dates = uniqueActive.map((m) => dayKey(m.last_prescribed_date)).filter(Boolean);
     const latestDate = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
     if (!latestDate) return { lastVisitMeds: uniqueActive, prevVisitMeds: [] };
     return {
       lastVisitMeds: uniqueActive.filter(
-        (m) => !m.prescribed_date || dayKey(m.prescribed_date) === latestDate,
+        (m) => !m.last_prescribed_date || dayKey(m.last_prescribed_date) === latestDate,
       ),
       prevVisitMeds: uniqueActive.filter(
-        (m) => m.prescribed_date && dayKey(m.prescribed_date) !== latestDate,
+        (m) => m.last_prescribed_date && dayKey(m.last_prescribed_date) !== latestDate,
       ),
     };
   }, [uniqueActive]);

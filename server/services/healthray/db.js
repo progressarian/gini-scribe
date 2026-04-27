@@ -1041,6 +1041,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       storedRoute,
       startedDate,
       `healthray:${healthrayId}`,
+      apptDate || null,
     ];
 
     // Step 1: reactivate any existing inactive row with the same name first.
@@ -1062,6 +1063,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       med.route || "Oral", // $6
       startedDate, // $7 — earliest known start, falls back to apptDate
       `healthray:${healthrayId}`, // $8
+      apptDate || null, // $9 — date this prescription was issued
     ];
     await pool
       .query(
@@ -1073,7 +1075,10 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
              timing = COALESCE($5, timing),
              route = COALESCE($6, route),
              started_date = LEAST(started_date, $7),
+             last_prescribed_date = GREATEST(COALESCE(last_prescribed_date, $9::date), $9::date),
              notes = $8,
+             stopped_date = NULL,
+             stop_reason = NULL,
              consultation_id = NULL,
              document_id = NULL,
              updated_at = NOW()
@@ -1099,8 +1104,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     await pool
       .query(
         `INSERT INTO medications
-         (patient_id, name, pharmacy_match, dose, frequency, timing, route, is_active, started_date, notes, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, 'healthray')
+         (patient_id, name, pharmacy_match, dose, frequency, timing, route, is_active, started_date, notes, last_prescribed_date, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, 'healthray')
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
@@ -1108,6 +1113,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            timing = COALESCE(EXCLUDED.timing, medications.timing),
            route = COALESCE(EXCLUDED.route, medications.route),
            started_date = LEAST(medications.started_date, EXCLUDED.started_date),
+           last_prescribed_date = GREATEST(COALESCE(medications.last_prescribed_date, EXCLUDED.last_prescribed_date), EXCLUDED.last_prescribed_date),
            notes = EXCLUDED.notes,
            pharmacy_match = EXCLUDED.pharmacy_match,
            source = 'healthray',

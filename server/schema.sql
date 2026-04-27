@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS medications (
   is_new          BOOLEAN DEFAULT FALSE,
   is_active       BOOLEAN DEFAULT TRUE,-- Still taking
   started_date    DATE,
+  last_prescribed_date DATE,
   stopped_date    DATE,
   stop_reason     TEXT,                -- 'Side effect','Replaced','Goal met'
   notes           TEXT,

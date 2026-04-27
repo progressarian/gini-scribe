@@ -67,9 +67,7 @@ function AttachmentBubble({ message, conversationId, onOpen, variant = "received
   const subColor = isSent ? "rgba(255,255,255,0.78)" : "#64748B";
   const badgeBg = isSent ? "rgba(255,255,255,0.22)" : "#FFFFFF";
   const badgeColor = isSent ? "#FFFFFF" : "#DC2626";
-  const ext = (message.attachment_name?.split(".").pop() || "FILE")
-    .toUpperCase()
-    .slice(0, 4);
+  const ext = (message.attachment_name?.split(".").pop() || "FILE").toUpperCase().slice(0, 4);
   const sizeLabel = formatBytes(message.attachment_size);
 
   const cardBase = {
@@ -154,9 +152,7 @@ function AttachmentBubble({ message, conversationId, onOpen, variant = "received
           >
             {message.attachment_name || (isImage ? "Loading image…" : "Loading file…")}
           </div>
-          <div style={{ fontSize: 11, color: subColor, marginTop: 2 }}>
-            Preparing preview…
-          </div>
+          <div style={{ fontSize: 11, color: subColor, marginTop: 2 }}>Preparing preview…</div>
         </div>
       </div>
     );
@@ -929,9 +925,7 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                 )}
                 {pendingFiles.map((pf, idx) => {
                   const isActive = uploadingFile && uploadProgress.current === idx + 1;
-                  const ext = (pf.fileName.split(".").pop() || "FILE")
-                    .toUpperCase()
-                    .slice(0, 4);
+                  const ext = (pf.fileName.split(".").pop() || "FILE").toUpperCase().slice(0, 4);
                   return (
                     <div
                       key={pf.id}
@@ -1086,9 +1080,7 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
               <button
                 onClick={sendReply}
                 disabled={
-                  (!replyText.trim() && pendingFiles.length === 0) ||
-                  sendingReply ||
-                  uploadingFile
+                  (!replyText.trim() && pendingFiles.length === 0) || sendingReply || uploadingFile
                 }
                 className={`messages__send-btn ${replyText.trim() || pendingFiles.length > 0 ? "messages__send-btn--active" : "messages__send-btn--disabled"}`}
               >

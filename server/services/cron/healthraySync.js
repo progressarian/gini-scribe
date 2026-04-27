@@ -927,6 +927,99 @@ export async function runStuckStatusRecovery(windowDays) {
   }
 }
 
+// ── Missing-medications recovery ──────────────────────────────────────────
+// Detects patients with an upcoming appointment whose latest HealthRay
+// prescription has medications in the appointments JSONB but zero active rows
+// in the medications table tagged to that healthray_id. Replays the same
+// chronological resync the manual fix script uses.
+let missingMedsRecoveryInFlight = false;
+export async function runMissingMedsRecovery() {
+  if (missingMedsRecoveryInFlight) {
+    log("Missing Meds Recovery", "Skipping — previous run still in progress");
+    return { skippedRun: true };
+  }
+  const releaseLock = await tryAcquireCronLock("Missing Meds Recovery");
+  if (!releaseLock) return { skippedRun: true };
+  missingMedsRecoveryInFlight = true;
+
+  try {
+    // For each patient with a future appointment, find the LATEST appointment
+    // whose healthray_medications JSONB is non-empty, and check whether any
+    // active medications row is tagged to that healthray_id. If not, the
+    // patient needs a chronological resync of all their healthray prescriptions.
+    const { rows: affected } = await pool.query(`
+      WITH future_pts AS (
+        SELECT DISTINCT patient_id FROM appointments WHERE appointment_date >= CURRENT_DATE
+      ),
+      latest_rx AS (
+        SELECT DISTINCT ON (a.patient_id)
+               a.patient_id, a.healthray_id
+        FROM appointments a
+        WHERE a.healthray_id IS NOT NULL
+          AND jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) > 0
+          AND a.patient_id IN (SELECT patient_id FROM future_pts)
+        ORDER BY a.patient_id, a.appointment_date DESC, a.id DESC
+      ),
+      tagged AS (
+        SELECT m.patient_id, SUBSTRING(m.notes FROM 'healthray:([0-9]+)') AS hr_id
+        FROM medications m
+        WHERE m.source = 'healthray'
+          AND m.is_active = true
+          AND m.notes LIKE 'healthray:%'
+      )
+      SELECT DISTINCT l.patient_id
+      FROM latest_rx l
+      WHERE NOT EXISTS (
+        SELECT 1 FROM tagged t
+        WHERE t.patient_id = l.patient_id AND t.hr_id = l.healthray_id::text
+      );
+    `);
+
+    if (!affected.length) {
+      log("Missing Meds Recovery", "No patients with missing meds");
+      return { total: 0, fixed: 0, errors: 0 };
+    }
+
+    log("Missing Meds Recovery", `Found ${affected.length} patients to resync`);
+
+    let fixed = 0;
+    let errors = 0;
+    for (const { patient_id } of affected) {
+      try {
+        const { rows: appts } = await pool.query(
+          `SELECT healthray_id, appointment_date, healthray_medications
+           FROM appointments
+           WHERE patient_id = $1
+             AND healthray_id IS NOT NULL
+             AND jsonb_array_length(COALESCE(healthray_medications,'[]'::jsonb)) > 0
+           ORDER BY appointment_date ASC, id ASC`,
+          [patient_id],
+        );
+        for (const a of appts) {
+          await syncMedications(
+            patient_id,
+            a.healthray_id,
+            a.appointment_date,
+            a.healthray_medications,
+          );
+          await stopStaleHealthrayMeds(patient_id, a.healthray_id, a.appointment_date);
+        }
+        fixed++;
+      } catch (e) {
+        errors++;
+        error("Missing Meds Recovery", `patient_id=${patient_id}: ${e.message}`);
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    log("Missing Meds Recovery", `Done — ${fixed} fixed, ${errors} errors`);
+    return { total: affected.length, fixed, errors };
+  } finally {
+    missingMedsRecoveryInFlight = false;
+    await releaseLock();
+  }
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export function syncWalkingAppointmentsByDate(date) {
