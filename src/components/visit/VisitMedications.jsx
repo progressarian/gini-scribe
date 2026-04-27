@@ -5,7 +5,7 @@ import ChangesPopover from "./ChangesPopover";
 import { displayMedName, displayFormBadge } from "../../lib/medName";
 
 // Auto-detect med group from name when med_group is not set
-function autoDetectGroup(name) {
+export function autoDetectGroup(name) {
   const n = (name || "").toLowerCase();
   // Strip parenthetical composition: "Ryzodeg (Insulin degludec/aspart)" → "ryzodeg"
   const baseName = n.replace(/\s*\(.*\)/, "").trim();
@@ -309,7 +309,7 @@ function diabetesClassOrder(name) {
 }
 
 // Group medications by med_group (auto-detect from name if not set)
-function groupMedsByCategory(meds) {
+export function groupMedsByCategory(meds) {
   const groups = {};
   meds.forEach((m) => {
     const group = m.med_group || autoDetectGroup(m.name);
@@ -324,7 +324,7 @@ function groupMedsByCategory(meds) {
 }
 
 // Get group label
-function getGroupLabel(group) {
+export function getGroupLabel(group) {
   const found = MED_GROUPS.find((g) => g.id === group);
   return found ? found.label : group.charAt(0).toUpperCase() + group.slice(1);
 }

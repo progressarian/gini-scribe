@@ -1,5 +1,16 @@
 import { memo, useState, useCallback } from "react";
 import { MED_COLORS, DX_STATUS_STYLE, DX_STATUS_DEFAULT, findLab, fmtLabVal } from "./helpers";
+import { autoDetectGroup, getGroupLabel } from "./VisitMedications";
+
+const SIDEBAR_GROUP_ORDER = [
+  "diabetes",
+  "kidney",
+  "bp",
+  "lipids",
+  "thyroid",
+  "supplement",
+  "external",
+];
 
 // Order matches the canonical lab order in src/config/labOrder.js
 // (Diabetes → Kidney → Lipids → Thyroid → CBC). Units and flag thresholds
@@ -485,24 +496,61 @@ const VisitSidebar = memo(function VisitSidebar({
         {activeMeds.length > 0 && (
           <div className="sbsec">
             <div className="sbsec-title">Active Meds ({activeMeds.length})</div>
-            {activeMeds.map((m, i) => (
-              <div key={i} className="smed">
-                <div
-                  className="smed-dot"
-                  style={{ background: MED_COLORS[i % MED_COLORS.length] }}
-                />
-                <div>
-                  <div className="smed-nm">{m.name}</div>
-                  <div className="smed-dose">
-                    {m.dose} · {m.frequency || "OD"}
-                    {m.timing ? ` · ${m.timing}` : ""}
+            {(() => {
+              const groups = {};
+              activeMeds.forEach((m) => {
+                const g = m.med_group || autoDetectGroup(m.name);
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(m);
+              });
+              const orderedKeys = [
+                ...SIDEBAR_GROUP_ORDER.filter((k) => groups[k]?.length),
+                ...Object.keys(groups).filter((k) => !SIDEBAR_GROUP_ORDER.includes(k)),
+              ];
+              let colorIdx = 0;
+              return orderedKeys.map((gKey) => {
+                const isExternal = gKey === "external";
+                return (
+                  <div key={gKey}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "6px 0 4px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: isExternal ? "rgb(220, 38, 38)" : "var(--t2)",
+                      }}
+                    >
+                      <span>{getGroupLabel(gKey)}</span>
+                      <span style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500 }}>
+                        ({groups[gKey].length})
+                      </span>
+                    </div>
+                    {groups[gKey].map((m) => {
+                      const dot = MED_COLORS[colorIdx % MED_COLORS.length];
+                      colorIdx += 1;
+                      return (
+                        <div key={m.id || `${gKey}-${m.name}-${colorIdx}`} className="smed">
+                          <div className="smed-dot" style={{ background: dot }} />
+                          <div>
+                            <div className="smed-nm">{m.name}</div>
+                            <div className="smed-dose">
+                              {m.dose} · {m.frequency || "OD"}
+                              {m.timing ? ` · ${m.timing}` : ""}
+                            </div>
+                            {m.for_diagnosis?.length > 0 && (
+                              <div className="smed-for">{m.for_diagnosis.join(", ")}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {m.for_diagnosis?.length > 0 && (
-                    <div className="smed-for">{m.for_diagnosis.join(", ")}</div>
-                  )}
-                </div>
-              </div>
-            ))}
+                );
+              });
+            })()}
           </div>
         )}
 

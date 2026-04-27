@@ -423,14 +423,18 @@ export default function VisitPage() {
     const uniqueActiveMeds = dedupMeds(data.activeMeds);
     const uniqueStoppedMeds = dedupMeds(data.stoppedMeds);
 
-    // Filter to latest prescription date only (for sidebar — same logic as VisitMedications).
-    // Strict match: meds without a prescribed_date are treated as previous/legacy and
-    // excluded so the sidebar only reflects what was actually prescribed in the latest visit.
+    // Filter to latest prescription date only (for sidebar — mirrors the
+    // lastVisitMeds split inside VisitMedications). Source of truth is
+    // `last_prescribed_date` (re-set on every re-prescription); meds without
+    // it are kept (legacy/active rows) so they don't disappear.
     const _activeOnly = uniqueActiveMeds.filter((m) => m.is_active !== false);
-    const _dates = _activeOnly.map((m) => m.prescribed_date).filter(Boolean);
+    const _dayKey = (d) => (d ? String(d).slice(0, 10) : null);
+    const _dates = _activeOnly.map((m) => _dayKey(m.last_prescribed_date)).filter(Boolean);
     const _latestDate = _dates.length ? _dates.reduce((a, b) => (a > b ? a : b)) : null;
     const latestVisitMeds = _latestDate
-      ? _activeOnly.filter((m) => m.prescribed_date === _latestDate)
+      ? _activeOnly.filter(
+          (m) => !m.last_prescribed_date || _dayKey(m.last_prescribed_date) === _latestDate,
+        )
       : _activeOnly;
 
     // HbA1c trend for the summary strip
