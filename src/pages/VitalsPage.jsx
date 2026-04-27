@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { fmtLabVal } from "../components/visit/helpers";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore.js";
 import useVitalsStore from "../stores/vitalsStore.js";
 import useLabStore from "../stores/labStore.js";
@@ -11,6 +12,7 @@ import "./VitalsPage.css";
 
 export default function VitalsPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const labRef = useRef(null);
   const { dgKey, whisperKey } = useAuthStore();
   const { vitals, updateVital, voiceFillVitals } = useVitalsStore();
@@ -286,7 +288,7 @@ export default function VitalsPage() {
         ))}
       </div>
 
-      <button onClick={() => navigate("/mo")} className="vitals__next-btn">
+      <button onClick={navClick("/mo")} className="vitals__next-btn">
         Next: MO Recording →
       </button>
     </div>

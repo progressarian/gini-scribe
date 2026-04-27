@@ -1,5 +1,6 @@
 import "./MOPage.css";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useClinicalStore from "../stores/clinicalStore";
@@ -11,6 +12,7 @@ import { DC, sa } from "../config/constants.js";
 
 export default function MOPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const dgKey = useAuthStore((s) => s.dgKey);
   const whisperKey = useAuthStore((s) => s.whisperKey);
   const moName = useAuthStore((s) => s.moName);
@@ -468,7 +470,7 @@ export default function MOPage() {
               <span style={{ fontSize: 10, opacity: 0.7 }}>by {moName}</span>
             </span>
             <button
-              onClick={() => navigate("/consultant")}
+              onClick={navClick("/consultant")}
               style={{
                 background: "rgba(255,255,255,0.2)",
                 border: "none",

@@ -1,6 +1,7 @@
 import "./LabPortalPage.css";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import { toast } from "../stores/uiStore.js";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
@@ -21,6 +22,7 @@ export default function LabPortalPage() {
     removeLabPortalFile,
   } = useLabPortalStore();
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const [viewingDoc, setViewingDoc] = useState(null);
 
   const pfd = getPfd();
@@ -38,7 +40,7 @@ export default function LabPortalPage() {
           <div className="lab-portal__find-icon">🔍</div>
           <div className="lab-portal__find-title">Step 1: Find Patient</div>
           <div className="lab-portal__find-hint">Search by name, phone, or file number</div>
-          <button onClick={() => navigate("/find")} className="lab-portal__find-btn">
+          <button onClick={navClick("/find")} className="lab-portal__find-btn">
             🔍 Find Patient
           </button>
         </div>

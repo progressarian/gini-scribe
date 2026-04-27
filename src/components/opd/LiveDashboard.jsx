@@ -575,6 +575,7 @@ export default function LiveDashboard({
   onSelectAppt,
   date,
   onDateChange,
+  onGenerateReport,
 }) {
   const toLocalIso = (d) => {
     const y = d.getFullYear();
@@ -1000,6 +1001,25 @@ export default function LiveDashboard({
                 />
               )}
             </div>
+          )}
+          {onGenerateReport && (
+            <button
+              type="button"
+              onClick={onGenerateReport}
+              style={{
+                background: T,
+                border: `1px solid ${T}`,
+                color: WH,
+                borderRadius: 6,
+                padding: "5px 11px",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: FB,
+              }}
+            >
+              📝 Generate Report
+            </button>
           )}
           {specList.length > 0 && (
             <MultiSelectFilter

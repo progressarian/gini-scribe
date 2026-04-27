@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useVisitStore from "../stores/visitStore";
@@ -77,6 +78,7 @@ const NAV_ITEMS = [
 
 export default function AppLayout() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const location = useLocation();
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
   const handleLogout = useAuthStore((s) => s.handleLogout);
@@ -186,7 +188,7 @@ export default function AppLayout() {
         )}
         <div className="header__actions">
           <button
-            onClick={() => navigate("/find")}
+            onClick={navClick("/find")}
             className={`header__find-btn ${location.pathname === "/find" ? "header__find-btn--active" : "header__find-btn--inactive"}`}
           >
             🔍 Find
@@ -204,10 +206,14 @@ export default function AppLayout() {
           )}
           {patient.name && (
             <button
-              onClick={async () => {
+              onClick={async (e) => {
                 await saveConsultation();
                 newPatient();
-                navigate("/patient");
+                if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1)) {
+                  window.open("/patient", "_blank", "noopener,noreferrer");
+                } else {
+                  navigate("/patient");
+                }
               }}
               className="header__new-btn"
             >

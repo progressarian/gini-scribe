@@ -1,5 +1,6 @@
 import "./ConsultantPage.css";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useClinicalStore from "../stores/clinicalStore";
@@ -17,6 +18,7 @@ import { sa, ts } from "../config/constants.js";
 
 export default function ConsultantPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const dgKey = useAuthStore((s) => s.dgKey);
   const whisperKey = useAuthStore((s) => s.whisperKey);
   const conName = useAuthStore((s) => s.conName);
@@ -889,7 +891,7 @@ export default function ConsultantPage() {
             >
               <span>Medications</span>
               <button
-                onClick={() => navigate("/plan")}
+                onClick={navClick("/plan")}
                 style={{
                   background: "rgba(255,255,255,0.2)",
                   border: "none",

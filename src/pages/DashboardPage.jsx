@@ -1,6 +1,7 @@
 import "./DashboardPage.css";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import { z } from "zod";
 import usePatientStore from "../stores/patientStore";
 import { getDocStatus } from "../utils/docStatus.js";
@@ -43,6 +44,7 @@ const bookingSchema = z.object({
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const patient = usePatientStore((s) => s.patient);
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
   const pfd = usePatientStore((s) => s.getPfd());
@@ -105,7 +107,7 @@ export default function DashboardPage() {
             </div>
             {patient.phone && <div className="dashboard__patient-phone">📱 {patient.phone}</div>}
           </div>
-          <button onClick={() => navigate("/patient")} className="dashboard__edit-btn">
+          <button onClick={navClick("/patient")} className="dashboard__edit-btn">
             ✏️ Edit
           </button>
         </div>
@@ -1370,7 +1372,7 @@ export default function DashboardPage() {
         ].map((n) => (
           <button
             key={n.path}
-            onClick={() => navigate(n.path)}
+            onClick={navClick(n.path)}
             style={{
               background: n.bg,
               border: `1px solid ${n.color}22`,
@@ -1430,7 +1432,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <button
-              onClick={() => navigate("/messages")}
+              onClick={navClick("/messages")}
               style={{
                 fontSize: 11,
                 color: "#2563eb",

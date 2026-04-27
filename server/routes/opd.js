@@ -543,6 +543,89 @@ router.get("/opd/appointments", async (req, res) => {
   }
 });
 
+// ── GET /api/opd/appointments-range — flat appointment rows in [start,end] ───
+//
+// Used by the OPD dashboard's range/period report. Returns one row per
+// appointment within the inclusive [start_date, end_date] window so the
+// client can group by patient and compute first/last biomarker trends.
+router.get("/opd/appointments-range", async (req, res) => {
+  try {
+    const start = req.query.start_date || req.query.start;
+    const end = req.query.end_date || req.query.end || start;
+    if (!start) {
+      return res.status(400).json({ error: "start_date required" });
+    }
+    const doctorFilter = (req.query.doctor || "").trim();
+    const specialtyFilter = (req.query.specialty || req.query.speciality || "").trim();
+    const params = [start, end];
+    let qualWhere = "WHERE a.appointment_date BETWEEN $1 AND $2";
+    if (doctorFilter) {
+      params.push(doctorFilter);
+      qualWhere += ` AND a.doctor_name = $${params.length}`;
+    }
+    if (specialtyFilter) {
+      params.push(specialtyFilter);
+      qualWhere += ` AND d.specialty = $${params.length}`;
+    }
+    // Two-step: identify patients with at least one visit in the period
+    // (qualifying CTE), then return *all* their visits so the client can show
+    // full biomarker history — not just visits inside the window.
+    const { rows } = await pool.query(
+      `WITH qualifying AS (
+         SELECT DISTINCT
+           COALESCE(p.id, a.patient_id) AS pid,
+           COALESCE(a.file_no, p.file_no) AS fno
+           FROM appointments a
+           LEFT JOIN patients p
+             ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
+             OR (a.file_no IS NULL AND p.id = a.patient_id)
+           LEFT JOIN doctors d
+             ON d.name = a.doctor_name
+          ${qualWhere}
+       )
+       SELECT a.id,
+              a.appointment_date,
+              a.time_slot,
+              a.status,
+              a.visit_type,
+              a.doctor_name,
+              d.specialty,
+              a.category,
+              a.biomarkers,
+              a.compliance,
+              a.healthray_diagnoses,
+              COALESCE(p.id, a.patient_id) AS patient_id,
+              COALESCE(a.patient_name, p.name) AS patient_name,
+              COALESCE(a.file_no, p.file_no) AS file_no,
+              COALESCE(a.phone, p.phone) AS phone,
+              COALESCE(a.age, EXTRACT(YEAR FROM AGE(p.dob))::INTEGER, p.age) AS age,
+              COALESCE(a.sex, p.sex) AS sex,
+              (a.appointment_date BETWEEN $1 AND $2) AS in_period
+         FROM appointments a
+         LEFT JOIN patients p
+           ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
+           OR (a.file_no IS NULL AND p.id = a.patient_id)
+         LEFT JOIN doctors d
+           ON d.name = a.doctor_name
+        WHERE EXISTS (
+                SELECT 1 FROM qualifying q
+                 WHERE (q.pid IS NOT NULL
+                          AND q.pid = COALESCE(p.id, a.patient_id))
+                    OR (q.fno IS NOT NULL
+                          AND q.fno = COALESCE(a.file_no, p.file_no))
+              )
+        ORDER BY COALESCE(p.id, a.patient_id) NULLS LAST,
+                 a.appointment_date ASC,
+                 a.time_slot ASC NULLS LAST,
+                 a.created_at ASC`,
+      params,
+    );
+    res.json(rows);
+  } catch (e) {
+    handleError(res, e, "OPD appointments range");
+  }
+});
+
 // ── GET /api/opd/patient-docs/:patientId — OPD-uploaded documents ────────────
 router.get("/opd/patient-docs/:patientId", async (req, res) => {
   try {

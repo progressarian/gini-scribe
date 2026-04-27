@@ -1,6 +1,7 @@
 import "./VisitPage.css";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import { useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
 import { useVisit } from "../queries/hooks/useVisit";
@@ -40,6 +41,7 @@ import VisitLoggedData from "../components/visit/VisitLoggedData";
 import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
+import DoctorSummarySection from "../components/visit/DoctorSummarySection";
 import VisitCoordPrep from "../components/visit/VisitCoordPrep";
 import SyncStatusBanner from "../components/visit/SyncStatusBanner";
 import {
@@ -217,6 +219,7 @@ const JUMP_SECTIONS = [
   { id: "medications", label: "💊 Medications" },
   { id: "plan", label: "📝 Plan" },
   { id: "summary", label: "📄 Summary" },
+  { id: "summary-doctor", label: "📝 Doctor Summary" },
 ];
 
 // Transform raw exam_data from DB into display-ready array
@@ -236,17 +239,28 @@ function buildExamFindings(rawExam) {
 
 export default function VisitPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const qc = useQueryClient();
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
+  const restorePatient = usePatientStore((s) => s.restorePatient);
   const doctor = useAuthStore((s) => s.currentDoctor);
   const endVisitAction = useVisitStore((s) => s.endVisit);
   const conData = useClinicalStore((s) => s.conData);
   const setConData = useClinicalStore((s) => s.setConData);
 
   // ── OPD appointment sync ──
+  // Falls back to URL `?appt=` so a Ctrl/Cmd-click "Open Scribe" opening a
+  // new tab can carry the appointment context (sessionStorage is per-tab).
   const [opdApptId] = useState(() => {
     const id = sessionStorage.getItem("gini_opd_appt_id");
-    return id ? Number(id) : null;
+    if (id) return Number(id);
+    const params = new URLSearchParams(window.location.search);
+    const urlAppt = params.get("appt");
+    if (urlAppt) {
+      sessionStorage.setItem("gini_opd_appt_id", String(urlAppt));
+      return Number(urlAppt);
+    }
+    return null;
   });
   const [visitStart, setVisitStart] = useState(
     () => sessionStorage.getItem("gini_visit_start") || null,
@@ -303,11 +317,37 @@ export default function VisitPage() {
     [saveDoctorNote],
   );
 
-  // ── Redirect if no patient — restore is handled by the patient store ──
+  // ── Hydrate patient context from URL ?patient=&appt= for new-tab opens ──
+  // SessionStorage is per-tab, so a Ctrl/Cmd-click new tab won't have the
+  // active patient. We read it from the URL, persist it, then restore.
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlPatient = params.get("patient");
     const savedId = sessionStorage.getItem("gini_active_patient");
-    if (!dbPatientId && !savedId) navigate("/");
-  }, [dbPatientId, navigate]);
+    if (urlPatient && !savedId) {
+      sessionStorage.setItem("gini_active_patient", String(urlPatient));
+    }
+    const effectiveId = urlPatient || savedId;
+    if (!dbPatientId && effectiveId) {
+      restorePatient();
+      return;
+    }
+    if (!dbPatientId && !effectiveId) navigate("/");
+  }, [dbPatientId, navigate, restorePatient]);
+
+  // Strip the patient/appt query params from the URL once hydrated so the
+  // address bar stays clean and bookmarks don't pin a stale appointment.
+  useEffect(() => {
+    if (!dbPatientId) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("patient") || params.has("appt")) {
+      params.delete("patient");
+      params.delete("appt");
+      const next = params.toString();
+      const url = window.location.pathname + (next ? `?${next}` : "");
+      window.history.replaceState({}, "", url);
+    }
+  }, [dbPatientId]);
 
   // ── React Query owns the visit fetch ──
   // - Auto-refetches on mount (staleTime: 0) and on window focus.
@@ -635,7 +675,7 @@ export default function VisitPage() {
       <div className="visit-page">
         <div className="vp-loading">
           No visit data found.{" "}
-          <button className="btn" onClick={() => navigate("/")}>
+          <button className="btn" onClick={navClick("/")}>
             Go Home
           </button>
         </div>
@@ -847,6 +887,7 @@ export default function VisitPage() {
                 onDeleteMed={(m) => setModal({ type: "deleteMed", data: m })}
                 onRestartMed={(m) => mutations.restartMedication(m.id)}
               />
+              <DoctorSummarySection patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitPlan
                 consultations={consultations}
                 apptPlan={appt_plan}
@@ -893,7 +934,7 @@ export default function VisitPage() {
                   <div className="sct">
                     <div className="sci ic-g">🩺</div>Physical Exam · Visit #{summary.totalVisits}
                   </div>
-                  <button className="bx bx-p" onClick={() => navigate("/exam")}>
+                  <button className="bx bx-p" onClick={navClick("/exam")}>
                     + Record Exam
                   </button>
                 </div>

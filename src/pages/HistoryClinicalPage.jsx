@@ -1,5 +1,6 @@
 import "./HistoryClinicalPage.css";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useExamStore from "../stores/examStore.js";
 import useLabStore from "../stores/labStore.js";
 import {
@@ -11,6 +12,7 @@ import {
 
 export default function HistoryClinicalPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const {
     hxConditions,
     hxCondData,
@@ -493,10 +495,10 @@ export default function HistoryClinicalPage() {
       )}
 
       <div className="hx-clinical__nav">
-        <button onClick={() => navigate("/intake")} className="hx-clinical__back-btn">
+        <button onClick={navClick("/intake")} className="hx-clinical__back-btn">
           ← Intake
         </button>
-        <button onClick={() => navigate("/exam")} className="hx-clinical__next-btn">
+        <button onClick={navClick("/exam")} className="hx-clinical__next-btn">
           Exam →
         </button>
       </div>

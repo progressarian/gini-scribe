@@ -9,6 +9,7 @@ export const qk = {
   opd: {
     all: ["opd"],
     appointments: (date) => ["opd", "appointments", date],
+    appointmentsRange: (start, end) => ["opd", "appointments-range", start, end],
   },
   visit: {
     all: ["visit"],

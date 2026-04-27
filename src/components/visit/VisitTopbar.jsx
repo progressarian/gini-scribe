@@ -134,7 +134,7 @@ const VisitTopbar = memo(function VisitTopbar({
         <div className="ptname">
           {patient.name}
           <span style={{ fontSize: 12, fontWeight: 400, color: "var(--t3)" }}>
-            {patient.age}
+            {patient.age}/ 
             {patient.sex?.[0]} · ID #{patient.file_no || `P-${patient.id}`}
             {patient.blood_group ? ` · ${patient.blood_group}` : ""}
           </span>

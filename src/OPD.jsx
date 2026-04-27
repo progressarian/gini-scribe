@@ -7,6 +7,7 @@ import { extractLab, extractImaging, extractRx } from "./services/extraction.js"
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
+import OpdRangeReport from "./components/opd/OpdRangeReport.jsx";
 import DocStatusPill from "./components/ui/DocStatusPill.jsx";
 import ConfirmModal from "./components/ui/ConfirmModal.jsx";
 import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
@@ -4428,16 +4429,25 @@ function PatientDetail({
                 </button>
               )}
             {appt.status === "checkedin" && (
-              <button
-                onClick={async () => {
-                  if (appt.patient_id) {
-                    await onPatchStatus(appt.id, "in_visit");
-                    sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
-                    sessionStorage.setItem("gini_visit_start", new Date().toISOString());
-                    setDbPatientId(appt.patient_id);
-                    sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
-                    navigate("/visit");
+              <a
+                href={
+                  appt.patient_id
+                    ? `/visit?patient=${encodeURIComponent(appt.patient_id)}&appt=${encodeURIComponent(appt.id)}`
+                    : "#"
+                }
+                onClick={async (e) => {
+                  if (!appt.patient_id) {
+                    e.preventDefault();
+                    return;
                   }
+                  const newTab = e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1;
+                  if (!newTab) e.preventDefault();
+                  await onPatchStatus(appt.id, "in_visit");
+                  sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                  sessionStorage.setItem("gini_visit_start", new Date().toISOString());
+                  setDbPatientId(appt.patient_id);
+                  sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                  if (!newTab) navigate("/visit");
                 }}
                 style={{
                   padding: "7px 13px",
@@ -4449,32 +4459,44 @@ function PatientDetail({
                   border: "none",
                   cursor: "pointer",
                   fontFamily: FB,
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
                 }}
               >
                 🩺 Start Visit
-              </button>
+              </a>
             )}
-            <button
-              onClick={() => {
-                if (appt.patient_id) {
-                  setPatient({
-                    name: appt.patient_name || "",
-                    phone: appt.phone || "",
-                    age: appt.age || "",
-                    sex: appt.sex || "Male",
-                    fileNo: appt.file_no || "",
-                    dob: "",
-                    abhaId: "",
-                    healthId: "",
-                    aadhaar: "",
-                    govtId: "",
-                    govtIdType: "",
-                    address: "",
-                  });
-                  setDbPatientId(appt.patient_id);
-                  sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
-                  navigate("/visit");
+            <a
+              href={
+                appt.patient_id
+                  ? `/visit?patient=${encodeURIComponent(appt.patient_id)}&appt=${encodeURIComponent(appt.id)}`
+                  : "#"
+              }
+              onClick={(e) => {
+                if (!appt.patient_id) {
+                  e.preventDefault();
+                  return;
                 }
+                setPatient({
+                  name: appt.patient_name || "",
+                  phone: appt.phone || "",
+                  age: appt.age || "",
+                  sex: appt.sex || "Male",
+                  fileNo: appt.file_no || "",
+                  dob: "",
+                  abhaId: "",
+                  healthId: "",
+                  aadhaar: "",
+                  govtId: "",
+                  govtIdType: "",
+                  address: "",
+                });
+                setDbPatientId(appt.patient_id);
+                sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                e.preventDefault();
+                navigate("/visit");
               }}
               style={{
                 padding: "7px 13px",
@@ -4486,10 +4508,13 @@ function PatientDetail({
                 color: INK2,
                 cursor: "pointer",
                 fontFamily: FB,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
               }}
             >
               🩺 Open Scribe
-            </button>
+            </a>
           </div>
         </div>
         {/* Step bar */}
@@ -4620,7 +4645,7 @@ function PatientDetail({
           <CheckInTab
             appt={appt}
             onCheckIn={() => onPatchStatus(appt.id, "checkedin")}
-            onMarkSeen={async () => {
+            onMarkSeen={async (e) => {
               if (appt.patient_id) {
                 await onPatchStatus(appt.id, "in_visit");
                 sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
@@ -4640,7 +4665,12 @@ function PatientDetail({
                 });
                 setDbPatientId(appt.patient_id);
                 sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
-                navigate("/visit");
+                if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1)) {
+                  const url = `/visit?patient=${encodeURIComponent(appt.patient_id)}&appt=${encodeURIComponent(appt.id)}`;
+                  window.open(url, "_blank", "noopener,noreferrer");
+                } else {
+                  navigate("/visit");
+                }
               }
             }}
           />
@@ -6263,6 +6293,7 @@ export default function OPD() {
   const isMobile = useIsMobile();
   const [mobileView, setMobileView] = useState("list"); // "list" | "detail"
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [showRangeReport, setShowRangeReport] = useState(false);
 
   // URL-driven tab: ?tab=schedule|dashboard|new-appt|excel. "schedule" maps to
   // the internal "list" view so shareable links read naturally.
@@ -6888,7 +6919,15 @@ export default function OPD() {
             }}
           />
         ) : view === "dashboard" ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", background: BG }}>
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              background: BG,
+              overflow: "auto",
+            }}
+          >
             <LiveDashboard
               appointments={appointments}
               doctors={doctors}
@@ -6900,12 +6939,43 @@ export default function OPD() {
               onRefresh={() => apptsQuery.refetch()}
               date={date}
               onDateChange={setDate}
+              onGenerateReport={() => setShowRangeReport(true)}
               onSelectAppt={(a) => {
                 setSelAppt(a);
                 setActiveTab("overview");
                 setView("list");
               }}
             />
+            {showRangeReport && (
+              <div
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,.45)",
+                  zIndex: 1000,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "center",
+                  padding: 20,
+                  overflow: "auto",
+                }}
+                onClick={() => setShowRangeReport(false)}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: "white",
+                    borderRadius: 10,
+                    width: "100%",
+                    maxWidth: 1100,
+                    maxHeight: "100%",
+                    overflow: "auto",
+                  }}
+                >
+                  <OpdRangeReport onClose={() => setShowRangeReport(false)} />
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <>

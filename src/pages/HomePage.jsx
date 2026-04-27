@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useVisitStore from "../stores/visitStore.js";
@@ -11,6 +12,7 @@ import "./HomePage.css";
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const { currentDoctor } = useAuthStore();
   const { loadPatientDB, newPatient } = usePatientStore();
   const {
@@ -321,7 +323,7 @@ export default function HomePage() {
               <span className="home__panel-title">{"\ud83d\udcac"} PATIENT MESSAGES</span>
               {unreadCount > 0 && <span className="home__msg-badge">{unreadCount}</span>}
             </div>
-            <button onClick={() => navigate("/messages")} className="home__msg-view-all-btn">
+            <button onClick={navClick("/messages")} className="home__msg-view-all-btn">
               View All →
             </button>
           </div>

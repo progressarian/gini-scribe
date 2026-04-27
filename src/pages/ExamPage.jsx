@@ -1,10 +1,12 @@
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useExamStore from "../stores/examStore.js";
 import { EXAM_SECTIONS } from "../config/exam.js";
 import "./ExamPage.css";
 
 export default function ExamPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const {
     examSpecialty,
     setExamSpecialty,
@@ -111,10 +113,10 @@ export default function ExamPage() {
       </div>
 
       <div className="exam__nav">
-        <button onClick={() => navigate("/history-clinical")} className="exam__back-btn">
+        <button onClick={navClick("/history-clinical")} className="exam__back-btn">
           ← History
         </button>
-        <button onClick={() => navigate("/assess")} className="exam__next-btn">
+        <button onClick={navClick("/assess")} className="exam__next-btn">
           Assess →
         </button>
       </div>

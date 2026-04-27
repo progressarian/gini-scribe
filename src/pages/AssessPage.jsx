@@ -1,5 +1,6 @@
 import "./AssessPage.css";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useClinicalStore from "../stores/clinicalStore";
@@ -18,6 +19,7 @@ import { toggleChip } from "../utils/helpers.js";
 
 export default function AssessPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const dgKey = useAuthStore((s) => s.dgKey);
   const whisperKey = useAuthStore((s) => s.whisperKey);
   const patientFullData = usePatientStore((s) => s.patientFullData);
@@ -378,7 +380,7 @@ export default function AssessPage() {
       )}
 
       <div className="assess__nav">
-        <button onClick={() => navigate("/exam")} className="assess__nav-btn assess__nav-btn--back">
+        <button onClick={navClick("/exam")} className="assess__nav-btn assess__nav-btn--back">
           ← Exam
         </button>
         <button
@@ -392,10 +394,7 @@ export default function AssessPage() {
         >
           {shadowLoading ? "🔄 Analyzing..." : "🤖 Shadow AI"}
         </button>
-        <button
-          onClick={() => navigate("/consultant")}
-          className="assess__nav-btn assess__nav-btn--next"
-        >
+        <button onClick={navClick("/consultant")} className="assess__nav-btn assess__nav-btn--next">
           Consultant →
         </button>
       </div>

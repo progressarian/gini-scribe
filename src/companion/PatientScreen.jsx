@@ -1,6 +1,7 @@
 import "./PatientScreen.css";
 import { memo, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { docCategories, fDate } from "./constants";
 import useCompanionStore from "../stores/companionStore";
@@ -21,6 +22,7 @@ const tabs = [
 export default function PatientScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const { patientTab, setPatientTab, selectedPatient } = useCompanionStore();
   const setStorePatient = useCompanionStore((s) => s.setSelectedPatient);
 
@@ -62,7 +64,7 @@ export default function PatientScreen() {
           className="patient__header-row"
           style={{ display: "flex", alignItems: "center", gap: 8 }}
         >
-          <button onClick={() => navigate("/companion")} className="patient__back">
+          <button onClick={navClick("/companion")} className="patient__back">
             ←
           </button>
           {patient && (
@@ -80,14 +82,14 @@ export default function PatientScreen() {
         </div>
         <div className="patient__header-actions">
           <button
-            onClick={() => navigate(`/companion/multi-capture/${id}`)}
+            onClick={navClick(`/companion/multi-capture/${id}`)}
             className="patient__action-btn patient__action-btn--multi"
           >
             <span className="patient__action-icon">📤</span>
             <span className="patient__action-label">Multi Upload</span>
           </button>
           <button
-            onClick={() => navigate(`/companion/capture/${id}`)}
+            onClick={navClick(`/companion/capture/${id}`)}
             className="patient__action-btn patient__action-btn--capture"
           >
             <span className="patient__action-icon">📸</span>

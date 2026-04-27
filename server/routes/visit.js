@@ -1592,6 +1592,91 @@ router.patch("/visit/:patientId/symptom/:id", async (req, res) => {
   }
 });
 
+// ── doctor_summaries: per-version doctor narrative for a patient ─────────────
+// Each row = one immutable version. Editing creates a new row pointing at
+// the prior one via prev_version_id. Latest row per patient is the current.
+pool
+  .query(
+    `CREATE TABLE IF NOT EXISTS doctor_summaries (
+       id SERIAL PRIMARY KEY,
+       patient_id INTEGER NOT NULL,
+       appointment_id INTEGER,
+       version INTEGER NOT NULL,
+       content TEXT NOT NULL,
+       change_note TEXT,
+       prev_version_id INTEGER,
+       author_name TEXT,
+       author_id TEXT,
+       created_at TIMESTAMPTZ DEFAULT NOW()
+     )`,
+  )
+  .catch(() => {});
+pool
+  .query(
+    `CREATE INDEX IF NOT EXISTS idx_doctor_summaries_patient
+       ON doctor_summaries (patient_id, version DESC)`,
+  )
+  .catch(() => {});
+
+// GET /visit/:patientId/doctor-summary — return all versions (latest first)
+router.get("/visit/:patientId/doctor-summary", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, appointment_id, version, content, change_note,
+              prev_version_id, author_name, author_id, created_at
+         FROM doctor_summaries
+        WHERE patient_id = $1
+        ORDER BY version DESC, id DESC`,
+      [pid],
+    );
+    res.json({ versions: rows, current: rows[0] || null });
+  } catch (e) {
+    handleError(res, e, "Load doctor summary");
+  }
+});
+
+// POST /visit/:patientId/doctor-summary — append a new version
+router.post("/visit/:patientId/doctor-summary", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  const { content, change_note, appointment_id, author_name, author_id } = req.body || {};
+  if (typeof content !== "string" || !content.trim()) {
+    return res.status(400).json({ error: "content is required" });
+  }
+  try {
+    const prev = await pool.query(
+      `SELECT id, version FROM doctor_summaries
+        WHERE patient_id = $1 ORDER BY version DESC LIMIT 1`,
+      [pid],
+    );
+    const nextVersion = (prev.rows[0]?.version || 0) + 1;
+    const prevId = prev.rows[0]?.id || null;
+    const ins = await pool.query(
+      `INSERT INTO doctor_summaries
+         (patient_id, appointment_id, version, content, change_note,
+          prev_version_id, author_name, author_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, patient_id, appointment_id, version, content, change_note,
+                 prev_version_id, author_name, author_id, created_at`,
+      [
+        pid,
+        appointment_id || null,
+        nextVersion,
+        content,
+        change_note || null,
+        prevId,
+        author_name || null,
+        author_id || null,
+      ],
+    );
+    res.json({ success: true, version: ins.rows[0] });
+  } catch (e) {
+    handleError(res, e, "Save doctor summary");
+  }
+});
+
 // PATCH /visit/:patientId/doctor-note — save doctor's note
 router.patch("/visit/:patientId/doctor-note", async (req, res) => {
   const pid = Number(req.params.patientId);

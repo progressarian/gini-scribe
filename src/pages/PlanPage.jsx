@@ -239,7 +239,7 @@ export default function PlanPage() {
         style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}
       >
         <button
-          onClick={() => navigate(visitActive ? "/intake" : "/docs")}
+          onClick={navClick(visitActive ? "/intake" : "/docs")}
           style={{
             background: "#f1f5f9",
             border: "1px solid #e2e8f0",
@@ -253,7 +253,7 @@ export default function PlanPage() {
           + Reports
         </button>
         <button
-          onClick={() => navigate("/mo")}
+          onClick={navClick("/mo")}
           style={{
             background: "#f1f5f9",
             border: "1px solid #e2e8f0",
@@ -267,7 +267,7 @@ export default function PlanPage() {
           ✏️ MO
         </button>
         <button
-          onClick={() => navigate("/consultant")}
+          onClick={navClick("/consultant")}
           style={{
             background: "#f1f5f9",
             border: "1px solid #e2e8f0",
