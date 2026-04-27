@@ -60,8 +60,31 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     const hba1cH = getLabHist(labHistory, "HbA1c");
     const hba1cFirst = hba1cH.length > 0 ? hba1cH[0] : null;
     const hba1c = getLabValFromLatest(labLatest, "HbA1c");
-    const fbs = getLabValFromLatest(labLatest, "FBS");
-    const fbsH = getLabHist(labHistory, "FBS");
+    const fbsLab = getLabValFromLatest(labLatest, "FBS");
+    const fbsLabH = getLabHist(labHistory, "FBS");
+    // Patient-app fasting sugars (vitals.rbs with meal_type='Fasting') belong in
+    // the FBS trend alongside doctor-entered labs. Merge both streams and sort
+    // strictly by full timestamp so multi-reading days (lab + app log on the
+    // same date) render left→right in actual chronological order.
+    const tsOf = (r) => {
+      const d = r.date || r.test_date || r.recorded_at || r.recorded_date;
+      const t = d ? new Date(d).getTime() : 0;
+      return Number.isFinite(t) ? t : 0;
+    };
+    const fastingVitals = (vitals || [])
+      .filter((v) => v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting")
+      .map((v) => ({
+        result: parseFloat(v.rbs),
+        // Prefer full timestamp (created_at via recorded_at) so multiple app
+        // logs on the same day stay distinguishable; fall back to date-only.
+        date: v.recorded_at || v.recorded_date,
+        unit: "mg/dL",
+        source: v.source || "patient_app",
+      }))
+      .filter((r) => Number.isFinite(r.result) && r.date);
+    const fbsH = [...fbsLabH, ...fastingVitals].sort((a, b) => tsOf(a) - tsOf(b));
+    // Latest reading: most-recent across the merged history; fall back to lab.
+    const fbs = fbsH.length > 0 ? fbsH[fbsH.length - 1] : fbsLab;
     const ldl = getLabValFromLatest(labLatest, "LDL");
     const ldlH = getLabHist(labHistory, "LDL");
     const tsh = getLabValFromLatest(labLatest, "TSH");

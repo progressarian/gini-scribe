@@ -94,6 +94,27 @@ const VisitStrip = memo(function VisitStrip({
         </div>
       )}
 
+      {latestVitals?.rbs && (() => {
+        const rbs = Number(latestVitals.rbs);
+        const isFasting = (latestVitals.meal_type || "").toLowerCase() === "fasting";
+        const high = isFasting ? rbs > 126 : rbs > 180;
+        return (
+          <div className="ss-item">
+            <div>
+              <div className="ss-label">
+                Sugar{latestVitals.meal_type ? ` — ${latestVitals.meal_type}` : ""}
+              </div>
+              <div className="ss-val">
+                {latestVitals.rbs} mg/dL
+                <span className={`ss-badge ${high ? "ss-a" : "ss-g"}`}>
+                  {high ? "↑ Review" : "Normal"}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="ss-sep" />
 
       {activeMeds.length > 0 && (

@@ -30,6 +30,7 @@ const VITALS_FIELDS = [
   { key: "bp_sys", label: "BP", unit: "mmHg" },
   { key: "bp_dia", label: "BP Dia", unit: "mmHg" },
   { key: "pulse", label: "HR", unit: "bpm" },
+  { key: "rbs", label: "Sugar", unit: "mg/dL" },
   { key: "weight", label: "Weight", unit: "kg" },
   { key: "height", label: "Height", unit: "cm" },
   { key: "bmi", label: "BMI", unit: "", readOnly: true },
@@ -70,6 +71,7 @@ const VisitSidebar = memo(function VisitSidebar({
       bp_sys: v?.bp_sys ?? "",
       bp_dia: v?.bp_dia ?? "",
       pulse: v?.pulse ?? "",
+      rbs: v?.rbs ?? "",
       weight: v?.weight ?? "",
       height: v?.height ?? "",
       bmi: v?.bmi ?? "",
@@ -263,6 +265,8 @@ const VisitSidebar = memo(function VisitSidebar({
                     return null; // Skip, already shown in BP
                   } else if (key === "bmi" && v?.bmi) {
                     displayVal = Number(v.bmi).toFixed(1);
+                  } else if (key === "rbs" && v?.rbs) {
+                    displayVal = v.meal_type ? `${v.rbs} (${v.meal_type})` : v.rbs;
                   }
 
                   if (displayVal === "-") return null; // Skip empty vitals
