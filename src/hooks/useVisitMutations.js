@@ -230,8 +230,17 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
             d.getDate() === now.getDate()
           );
         };
+        // App-logged rows have synthetic ids like "app:123" and live in
+        // patient_vitals_log, not the doctor-side vitals table — never PATCH
+        // them. Fall through to POST so the doctor's edit creates a fresh
+        // clinic vitals row instead of 400ing.
+        const isAppRow =
+          typeof latestVitals?.id === "string" && latestVitals.id.startsWith("app:");
         const useExisting =
-          latestVitals?.id && latestVitals?.recorded_at && isToday(latestVitals.recorded_at);
+          !isAppRow &&
+          latestVitals?.id &&
+          latestVitals?.recorded_at &&
+          isToday(latestVitals.recorded_at);
         if (useExisting) {
           await api.patch(`/api/visit/${patientId}/vitals/${latestVitals.id}`, vitalsData);
         } else {

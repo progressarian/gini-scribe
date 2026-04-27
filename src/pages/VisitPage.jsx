@@ -436,8 +436,43 @@ export default function VisitPage() {
     if (!data) return null;
     console.log("data", data);
     const { vitals, diagnoses, labResults, labHistory } = data;
-    const latestV = vitals?.[0] || null;
-    const prevV = vitals?.[1] || null;
+    // The vitals array now includes both clinic rows (full panel) and Genie
+    // app self-logs (sparse — usually only one of BP / weight / rbs filled).
+    // If we naively take vitals[0], a BP-only app row hides the weight from
+    // the older clinic row. Instead, coalesce field-wise: for each field,
+    // pick the most recent non-null across all rows (already sorted desc by
+    // recorded_at on the server). prevV is the second most recent per field.
+    const VITAL_FIELDS = [
+      'bp_sys', 'bp_dia', 'pulse', 'temp', 'spo2', 'weight', 'height', 'bmi',
+      'rbs', 'waist', 'body_fat', 'muscle_mass', 'meal_type', 'reading_time',
+    ];
+    const latestClinic = (vitals || []).find((v) => v.source !== 'patient_app') || null;
+    const buildCoalesced = (rows, depth) => {
+      if (!rows || rows.length === 0) return null;
+      // Always anchor id / recorded_at / consultation_id to the latest clinic
+      // row when one exists, so editVitals targets a clinic record. Fall back
+      // to the first row otherwise.
+      const anchor = latestClinic || rows[0];
+      const out = {
+        id: anchor.id,
+        recorded_at: anchor.recorded_at,
+        consultation_id: anchor.consultation_id,
+        source: anchor.source,
+      };
+      for (const f of VITAL_FIELDS) {
+        let hits = 0;
+        for (const r of rows) {
+          if (r[f] != null && r[f] !== '') {
+            if (hits === depth) { out[f] = r[f]; break; }
+            hits += 1;
+          }
+        }
+        if (out[f] == null) out[f] = null;
+      }
+      return out;
+    };
+    const latestV = buildCoalesced(vitals, 0);
+    const prevV = buildCoalesced(vitals, 1);
     const activeDx = diagnoses.filter((d) => d.is_active !== false);
     const flags = computeFlags(data);
 

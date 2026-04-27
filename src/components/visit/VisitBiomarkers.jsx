@@ -19,8 +19,41 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   onOpenAI,
   onAddLab,
 }) {
-  const latestV = vitals?.[0];
-  const prevV = vitals?.[1];
+  // The merged vitals array contains clinic rows (full panel) plus Genie app
+  // self-logs that are sparse (BP-only, weight-only, rbs-only, etc.). Taking
+  // vitals[0] would hide every other field whenever the most recent row is a
+  // single-field app log. Coalesce field-wise instead: per field, pick the
+  // most-recent non-null across all rows; prevV picks the second most-recent.
+  const { latestV, prevV } = useMemo(() => {
+    const rows = vitals || [];
+    if (rows.length === 0) return { latestV: undefined, prevV: undefined };
+    const FIELDS = [
+      "bp_sys", "bp_dia", "pulse", "temp", "spo2", "weight", "height", "bmi",
+      "rbs", "waist", "body_fat", "muscle_mass", "meal_type", "reading_time",
+    ];
+    const latestClinic = rows.find((v) => v && v.source !== "patient_app");
+    const build = (depth) => {
+      const anchor = latestClinic || rows[0];
+      const out = {
+        id: anchor?.id,
+        recorded_at: anchor?.recorded_at,
+        consultation_id: anchor?.consultation_id,
+        source: anchor?.source,
+      };
+      for (const f of FIELDS) {
+        let hits = 0;
+        out[f] = null;
+        for (const r of rows) {
+          if (r && r[f] != null && r[f] !== "") {
+            if (hits === depth) { out[f] = r[f]; break; }
+            hits += 1;
+          }
+        }
+      }
+      return out;
+    };
+    return { latestV: build(0), prevV: build(1) };
+  }, [vitals]);
 
   // Memoize lab lookups
   const markers = useMemo(() => {

@@ -82,7 +82,7 @@ router.get("/patients/:id/health-logs", async (req, res) => {
         SELECT * FROM patient_vitals_log
         WHERE patient_id = $1
         ${since ? "AND recorded_date >= $2" : ""}
-        ORDER BY recorded_date DESC
+        ORDER BY recorded_date DESC, created_at DESC NULLS LAST, id DESC
         LIMIT 500
       `,
 

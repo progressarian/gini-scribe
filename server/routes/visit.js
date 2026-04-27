@@ -289,7 +289,7 @@ router.get("/visit/:patientId", async (req, res) => {
       pool.query(
         `SELECT * FROM patient_vitals_log
          WHERE patient_id=$1
-         ORDER BY recorded_date DESC
+         ORDER BY recorded_date DESC, created_at DESC NULLS LAST, id DESC
          LIMIT 500`,
         [pid],
       ),
@@ -575,9 +575,51 @@ router.get("/visit/:patientId", async (req, res) => {
     const combinedActive = [...activeMedsR.rows, ...patientOnlyMeds];
     const sortedActiveMeds = sortMedications(combinedActive);
 
+    // Merge app-logged vitals (patient_vitals_log) into the doctor-side
+    // `vitals` array so the visit response surfaces both streams in one
+    // chronological list. Column names are normalised to the doctor-side
+    // shape (bp_sys/bp_dia/weight) and the original Genie row is tagged
+    // with source='patient_app' so the UI can still tell them apart.
+    const appVitals = (vitalsLogR.rows || []).map((r) => {
+      const recordedAt =
+        r.created_at ||
+        (r.recorded_date ? new Date(r.recorded_date).toISOString() : null);
+      return {
+        id: `app:${r.id}`,
+        patient_id: r.patient_id,
+        consultation_id: null,
+        recorded_at: recordedAt,
+        bp_sys: r.bp_systolic != null ? String(r.bp_systolic) : null,
+        bp_dia: r.bp_diastolic != null ? String(r.bp_diastolic) : null,
+        pulse: r.pulse != null ? String(r.pulse) : null,
+        temp: null,
+        spo2: r.spo2 != null ? String(r.spo2) : null,
+        weight: r.weight_kg != null ? String(r.weight_kg) : null,
+        height: null,
+        bmi: r.bmi != null ? String(r.bmi) : null,
+        rbs: r.rbs != null ? String(r.rbs) : null,
+        waist: r.waist != null ? String(r.waist) : null,
+        body_fat: r.body_fat != null ? String(r.body_fat) : null,
+        muscle_mass: r.muscle_mass != null ? String(r.muscle_mass) : null,
+        notes: null,
+        appointment_id: null,
+        bp_standing_sys: null,
+        bp_standing_dia: null,
+        source: "patient_app",
+        meal_type: r.meal_type || null,
+        reading_time: r.reading_time || null,
+        recorded_date: r.recorded_date || null,
+      };
+    });
+    const mergedVitals = [...vitalsR.rows, ...appVitals].sort((a, b) => {
+      const ta = a.recorded_at ? new Date(a.recorded_at).getTime() : 0;
+      const tb = b.recorded_at ? new Date(b.recorded_at).getTime() : 0;
+      return tb - ta;
+    });
+
     res.json({
       patient,
-      vitals: vitalsR.rows,
+      vitals: mergedVitals,
       diagnoses: sortedDiagnoses,
       healthrayDiagnoses: healthrayDxAppt?.healthray_diagnoses || null,
       activeMeds: sortedActiveMeds,

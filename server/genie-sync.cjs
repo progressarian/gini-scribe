@@ -1892,7 +1892,7 @@ async function markConversationRead({ conversationId, side } = {}) {
 // so users can always force a fresh pull.
 const _lastSyncAt = new Map();    // scribePatientId → epoch ms of last success
 const _inFlight = new Map();      // scribePatientId → Promise of current sync
-const MIN_SYNC_INTERVAL_MS = 30_000;
+const MIN_SYNC_INTERVAL_MS = 5_000;
 
 async function syncPatientLogsFromGenieThrottled(scribePatientId, localDb) {
   // Normalize to string so Number(16619) and "16619" share the same throttle

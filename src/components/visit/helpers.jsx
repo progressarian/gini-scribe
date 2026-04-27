@@ -411,13 +411,17 @@ function BiomarkerSparkline({ data, color, unit, target }) {
 
   const W = 260,
     H = 52;
-  // Deduplicate by date — keep only the latest value per date
-  const seenDates = new Set();
+  // Deduplicate — for lab rows (date-only timestamps) keep the latest value
+  // per day; for vitals (full ISO timestamps) keep every intra-day reading
+  // so app-logged points don't get swallowed by a same-day clinic entry.
+  const seen = new Set();
   const dedupedData = [];
   for (let i = data.length - 1; i >= 0; i--) {
-    const dateKey = (data[i].date || data[i].test_date || "").slice(0, 10);
-    if (!seenDates.has(dateKey)) {
-      seenDates.add(dateKey);
+    const raw = String(data[i].date || data[i].test_date || "");
+    const hasTime = raw.includes("T") || /\d{2}:\d{2}/.test(raw);
+    const key = hasTime ? raw : raw.slice(0, 10);
+    if (!seen.has(key)) {
+      seen.add(key);
       dedupedData.unshift(data[i]);
     }
   }
@@ -478,6 +482,16 @@ function BiomarkerSparkline({ data, color, unit, target }) {
         const cx = getX(i);
         const cy = getY(v);
         const isHovered = hoverIdx === i;
+        // Per-point value label, always visible. Position above the circle by
+        // default; flip below when the point sits near the top so the label
+        // stays inside the SVG. Anchor at start/end on the edges so labels
+        // don't get clipped horizontally.
+        const labelAbove = cy > 12;
+        const labelY = labelAbove ? cy - 6 : cy + 12;
+        const anchor = i === 0 ? "start" : i === values.length - 1 ? "end" : "middle";
+        const labelX = i === 0 ? cx + 1 : i === values.length - 1 ? cx - 1 : cx;
+        // Format: drop trailing .0 for whole numbers
+        const labelText = Number.isInteger(v) ? String(v) : v.toFixed(1);
         return (
           <g key={i} onMouseEnter={() => setHoverIdx(i)} style={{ cursor: "crosshair" }}>
             {/* outer glow ring on hover */}
@@ -490,6 +504,20 @@ function BiomarkerSparkline({ data, color, unit, target }) {
               stroke={color}
               strokeWidth={isHovered ? 2.5 : 1.8}
             />
+            {!isHovered && (
+              <text
+                x={labelX}
+                y={labelY}
+                fill={color}
+                fontSize="8.5"
+                fontWeight="700"
+                textAnchor={anchor}
+                fontFamily="DM Sans,sans-serif"
+                style={{ paintOrder: "stroke", stroke: "white", strokeWidth: 2.5 }}
+              >
+                {labelText}
+              </text>
+            )}
             {/* larger hit area */}
             <circle cx={cx} cy={cy} r="14" fill="transparent" />
           </g>
