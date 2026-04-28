@@ -1,13 +1,19 @@
 import { memo, useState } from "react";
 
-const AddLabModal = memo(function AddLabModal({ onClose, onSubmit }) {
-  const [form, setForm] = useState({ test_name: "", result: "", unit: "", test_date: "" });
+const AddLabModal = memo(function AddLabModal({ onClose, onSubmit, existingLab = null }) {
+  const isEdit = !!existingLab?.id;
+  const [form, setForm] = useState({
+    test_name: existingLab?.test_name || "",
+    result: existingLab?.result != null ? String(existingLab.result) : "",
+    unit: existingLab?.unit || "",
+    test_date: existingLab?.test_date ? String(existingLab.test_date).slice(0, 10) : "",
+  });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
     <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mbox">
-        <div className="mttl">🧪 Add Lab Value</div>
+        <div className="mttl">{isEdit ? "🧪 Edit Lab Value" : "🧪 Add Lab Value"}</div>
         <div className="g2">
           <div className="mf">
             <label className="ml">Test name *</label>
@@ -57,9 +63,9 @@ const AddLabModal = memo(function AddLabModal({ onClose, onSubmit }) {
           <button
             className="btn-p"
             disabled={!form.test_name || !form.result}
-            onClick={() => onSubmit(form)}
+            onClick={() => onSubmit(form, existingLab)}
           >
-            Add Value
+            {isEdit ? "Save" : "Add Value"}
           </button>
         </div>
       </div>

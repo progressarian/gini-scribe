@@ -803,63 +803,29 @@ const VisitMedications = memo(function VisitMedications({
                       </div>
                       <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
                       <div className="macts">
-                        {!isExternal &&
-                          !(
-                            m.source === "patient_app" ||
-                            m.source === "manual" ||
-                            String(m.id).startsWith("genie:")
-                          ) && (
-                            <>
-                              <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
-                                Edit
-                              </button>
-                              <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
-                                Stop
-                              </button>
-                              <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
-                                Delete
-                              </button>
-                            </>
-                          )}
-                        {!isExternal &&
-                          (m.source === "patient_app" ||
-                            m.source === "manual" ||
-                            String(m.id).startsWith("genie:")) && (
-                            <span
-                              style={{ fontSize: 10, color: "var(--t3)" }}
-                              title="Patient-added meds can only be changed from the Genie app"
-                            >
-                              app-managed
-                            </span>
-                          )}
-                        {isExternal && (
+                        <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                          Edit
+                        </button>
+                        <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                          Stop
+                        </button>
+                        <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
+                          Delete
+                        </button>
+                        {(m.route === "SC" ||
+                          m.route === "Subcutaneous" ||
+                          (m.name || "").toLowerCase().includes("inj")) && (
                           <button
                             className="ma"
                             style={{
-                              color: "var(--t3)",
-                              borderColor: "var(--border)",
-                              background: "var(--bg)",
+                              color: "var(--amber)",
+                              borderColor: "var(--amb-bd)",
+                              background: "var(--amb-lt)",
                             }}
-                            title="External medication - cannot modify"
                           >
-                            View Only
+                            Pause
                           </button>
                         )}
-                        {(m.route === "SC" ||
-                          m.route === "Subcutaneous" ||
-                          (m.name || "").toLowerCase().includes("inj")) &&
-                          !isExternal && (
-                            <button
-                              className="ma"
-                              style={{
-                                color: "var(--amber)",
-                                borderColor: "var(--amb-bd)",
-                                background: "var(--amb-lt)",
-                              }}
-                            >
-                              Pause
-                            </button>
-                          )}
                       </div>
                     </div>
                     {isOpen && <MedHistoryPanel history={m.history} current={m} />}

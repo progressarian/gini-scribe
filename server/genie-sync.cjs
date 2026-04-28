@@ -75,6 +75,64 @@ async function withRetry(fn, { label = 'op', attempts = 3, baseMs = 400 } = {}) 
   return { data: null, error: lastErr };
 }
 
+// Derive a clock time (HH:MM, 24h) from the AI-extracted free-text `timing`
+// (e.g. "before breakfast", "at bedtime", "8 AM", "after dinner") so the
+// patient app can render an exact "8 AM" chip, sort meds within their
+// time-of-day bucket, and drive the "due in Xh" countdown + reminder default.
+// Returns null if the timing text is missing or unrecognised — the app then
+// falls back to its bucket-from-timing-text logic and a generic chip.
+function deriveScheduledTime(timing, frequency) {
+  if (!timing) return null;
+  const t = String(timing).toLowerCase().trim();
+
+  // 1. Explicit clock time inside the timing text: "8am", "8 AM", "08:00", "20:30".
+  const ampm = t.match(/(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)/);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = ampm[2] ? parseInt(ampm[2], 10) : 0;
+    const isPm = /^p/.test(ampm[3]);
+    if (h === 12) h = isPm ? 12 : 0;
+    else if (isPm) h += 12;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  const hhmm = t.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (hhmm) return `${String(parseInt(hhmm[1], 10)).padStart(2, '0')}:${hhmm[2]}`;
+
+  // 2. Meal/period anchors. "before" shifts ~30min earlier than the meal,
+  //    "after" ~30min later. These are conservative defaults that match
+  //    typical Indian meal patterns; the patient can edit reminder times.
+  const before = /\bbefore\b/.test(t);
+  const after  = /\bafter\b/.test(t);
+  const adjust = (h, m) => {
+    if (before) m -= 30;
+    else if (after) m += 30;
+    if (m < 0) { h -= 1; m += 60; }
+    if (m >= 60) { h += 1; m -= 60; }
+    h = (h + 24) % 24;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+  if (/breakfast/.test(t))                       return adjust(8, 0);
+  if (/lunch/.test(t))                           return adjust(13, 0);
+  if (/dinner|supper/.test(t))                   return adjust(20, 0);
+  if (/bedtime|at bed|before bed|h\.?s\.?\b/.test(t)) return '22:00';
+  if (/morning|am\b/.test(t))                    return '08:00';
+  if (/noon|afternoon/.test(t))                  return '13:00';
+  if (/evening/.test(t))                         return '18:00';
+  if (/night/.test(t))                           return '21:00';
+  if (/empty\s*stomach|fasting/.test(t))         return '07:00';
+
+  // 3. Frequency-only fallback — used when timing is empty but frequency is
+  //    e.g. "OD" / "Once daily". Picks a sensible morning default for OD;
+  //    leaves multi-dose schedules null (the app shows them under "Anytime"
+  //    rather than a misleading single time).
+  if (!t && frequency) {
+    const f = String(frequency).toLowerCase();
+    if (/\bod\b|once\s*daily|once a day/.test(f)) return '08:00';
+    if (/\bhs\b|at night|bedtime/.test(f))         return '22:00';
+  }
+  return null;
+}
+
 /**
  * Sync a full visit from GiniScribe to MyHealth Genie
  * Call this after every prescription save in Scribe
@@ -151,7 +209,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_is_active: med.is_active !== false,
         p_type: med.drug_class || med.med_group || med.route || null,
         p_brand: med.pharmacy_match || med.brand || null,
-        p_scheduled_time: med.scheduled_time || null,
+        p_scheduled_time: med.scheduled_time || deriveScheduledTime(med.timing || med.schedule, med.frequency),
         p_start_date: med.started_date || med.start_date || visit.visit_date || null,
         p_expiry_date: med.expiry_date || null,
         p_for_conditions: med.for_diagnosis || med.for_conditions || null,
@@ -418,7 +476,7 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
               p_is_active: med.is_active !== false,
               p_type: med.drug_class || med.med_group || med.route || null,
               p_brand: med.pharmacy_match || null,
-              p_scheduled_time: null,
+              p_scheduled_time: deriveScheduledTime(med.timing, med.frequency),
               p_start_date: med.started_date || null,
               p_expiry_date: null,
               p_for_conditions: med.for_diagnosis || null,
@@ -486,6 +544,70 @@ async function deleteGenieMedication(scribePatientId, genieMedId, localDb) {
   } catch (err) {
     console.error('[Genie Delete Med] Exception:', err.message || err);
     return { deleted: mirrorDeleted > 0, mirrorDeleted, reason: err.message || String(err) };
+  }
+}
+
+/**
+ * Update a patient-added medication in Genie. `genieMedId` is the UUID
+ * stored in `patient_medications_genie.genie_id`. Updates the scribe mirror
+ * row first, then pushes the same fields to the Genie Supabase `medications`
+ * row so the change reflects in the patient app. `fields` is a partial of
+ * { dose, frequency, timing, instructions, is_active }.
+ */
+async function updateGenieMedication(scribePatientId, genieMedId, fields, localDb) {
+  if (!genieMedId) return { updated: false, reason: 'Missing genie medication id' };
+  const allowed = ['dose', 'frequency', 'timing', 'instructions', 'is_active'];
+  const payload = {};
+  for (const k of allowed) {
+    if (fields && fields[k] !== undefined) payload[k] = fields[k];
+  }
+  if (Object.keys(payload).length === 0) {
+    return { updated: false, reason: 'No updatable fields' };
+  }
+
+  let mirrorUpdated = 0;
+  if (localDb && scribePatientId) {
+    try {
+      const sets = [];
+      const vals = [];
+      let i = 1;
+      for (const [k, v] of Object.entries(payload)) {
+        sets.push(`${k} = $${i++}`);
+        vals.push(v);
+      }
+      vals.push(scribePatientId, String(genieMedId));
+      const r = await localDb.query(
+        `UPDATE patient_medications_genie
+            SET ${sets.join(', ')}, synced_at = NOW()
+          WHERE patient_id = $${i++} AND (genie_id = $${i} OR id::text = $${i})
+          RETURNING id`,
+        vals,
+      );
+      mirrorUpdated = r.rows.length;
+    } catch (err) {
+      console.warn('[Genie Update Med] Mirror update failed:', err.message || err);
+    }
+  }
+
+  const db = getGenieDb();
+  if (!db) {
+    return { updated: mirrorUpdated > 0, mirrorUpdated, reason: 'No Genie credentials' };
+  }
+
+  try {
+    const { data, error } = await db
+      .from('medications')
+      .update(payload)
+      .eq('id', genieMedId)
+      .select('id');
+    if (error) {
+      console.error('[Genie Update Med] Error:', error.message);
+      return { updated: mirrorUpdated > 0, mirrorUpdated, reason: error.message };
+    }
+    return { updated: true, mirrorUpdated, genieUpdated: data?.length || 0 };
+  } catch (err) {
+    console.error('[Genie Update Med] Exception:', err.message || err);
+    return { updated: mirrorUpdated > 0, mirrorUpdated, reason: err.message || String(err) };
   }
 }
 
@@ -819,6 +941,37 @@ async function syncVitalsRowToGenie(scribePatientId, vitalsRow) {
     return { synced: true };
   } catch (err) {
     console.error('[Genie Sync Vitals Row] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err) };
+  }
+}
+
+/**
+ * Update a Genie `vitals` row directly by its UUID. Used when the doctor
+ * edits a patient-app-logged reading from /visit — the canonical row lives
+ * in Genie and patient_vitals_log mirrors it via genie_id, so we update
+ * the source of truth on Genie too. Distinct from syncVitalsRowToGenie,
+ * which is keyed by scribe vitals.id via the gini_sync_vitals RPC.
+ */
+async function updateGenieVitalsByGenieId(genieVitalsId, fields) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!genieVitalsId) return { synced: false, reason: 'Missing genie_id' };
+  const payload = {};
+  for (const [k, v] of Object.entries(fields || {})) {
+    if (v !== undefined && v !== null && v !== '') payload[k] = v;
+  }
+  if (Object.keys(payload).length === 0) return { synced: false, reason: 'No fields to update' };
+  try {
+    const result = await withRetry(
+      () => db.from('vitals').update(payload).eq('id', genieVitalsId),
+      { label: `genie_vitals_update(${genieVitalsId})` },
+    );
+    if (result?.error) {
+      return { synced: false, reason: result.error.message || String(result.error) };
+    }
+    return { synced: true };
+  } catch (err) {
+    console.error('[Genie Sync Vitals Update] Exception:', err.message || err);
     return { synced: false, reason: err.message || String(err) };
   }
 }
@@ -1218,7 +1371,18 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
         )
         ON CONFLICT (genie_id) DO UPDATE SET
           recorded_date = EXCLUDED.recorded_date,
-          reading_time = EXCLUDED.reading_time
+          reading_time  = EXCLUDED.reading_time,
+          bp_systolic   = EXCLUDED.bp_systolic,
+          bp_diastolic  = EXCLUDED.bp_diastolic,
+          rbs           = EXCLUDED.rbs,
+          meal_type     = EXCLUDED.meal_type,
+          weight_kg     = EXCLUDED.weight_kg,
+          pulse         = EXCLUDED.pulse,
+          spo2          = EXCLUDED.spo2,
+          body_fat      = EXCLUDED.body_fat,
+          muscle_mass   = EXCLUDED.muscle_mass,
+          bmi           = EXCLUDED.bmi,
+          waist         = EXCLUDED.waist
       `, [
         scribePatientId, v.id, v.recorded_date, v.reading_time,
         v.bp_systolic, v.bp_diastolic, v.rbs, v.meal_type,
@@ -1244,7 +1408,14 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
         )
         ON CONFLICT (genie_id) DO UPDATE SET
-          activity_type = EXCLUDED.activity_type
+          activity_type    = EXCLUDED.activity_type,
+          value            = EXCLUDED.value,
+          value2           = EXCLUDED.value2,
+          context          = EXCLUDED.context,
+          duration_minutes = EXCLUDED.duration_minutes,
+          mood_score       = EXCLUDED.mood_score,
+          log_date         = EXCLUDED.log_date,
+          log_time         = EXCLUDED.log_time
       `, [
         scribePatientId, a.id, a.activity_type, a.value, a.value2,
         a.context, a.duration_minutes, a.mood_score,
@@ -1330,7 +1501,14 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
         )
         ON CONFLICT (genie_id) DO UPDATE SET
-          severity = EXCLUDED.severity
+          symptom          = EXCLUDED.symptom,
+          severity         = EXCLUDED.severity,
+          body_area        = EXCLUDED.body_area,
+          context          = EXCLUDED.context,
+          notes            = EXCLUDED.notes,
+          follow_up_needed = EXCLUDED.follow_up_needed,
+          log_date         = EXCLUDED.log_date,
+          log_time         = EXCLUDED.log_time
       `, [
         scribePatientId, s.id, s.symptom, s.severity, s.body_area,
         s.context, s.notes, s.follow_up_needed,
@@ -1359,7 +1537,11 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           $1,$2,$3,$4,$5,$6,$7,$8,$9
         )
         ON CONFLICT (genie_id) DO UPDATE SET
-          status = EXCLUDED.status
+          medication_name = EXCLUDED.medication_name,
+          medication_dose = EXCLUDED.medication_dose,
+          log_date        = EXCLUDED.log_date,
+          dose_time       = EXCLUDED.dose_time,
+          status          = EXCLUDED.status
       `, [
         scribePatientId, m.id,
         m.medications?.name || null,
@@ -1387,7 +1569,13 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
         )
         ON CONFLICT (genie_id) DO UPDATE SET
-          calories = EXCLUDED.calories
+          meal_type   = EXCLUDED.meal_type,
+          description = EXCLUDED.description,
+          calories    = EXCLUDED.calories,
+          protein_g   = EXCLUDED.protein_g,
+          carbs_g     = EXCLUDED.carbs_g,
+          fat_g       = EXCLUDED.fat_g,
+          log_date    = EXCLUDED.log_date
       `, [
         scribePatientId, m.id, m.meal_type, m.description,
         m.calories, m.protein_g, m.carbs_g, m.fat_g,
@@ -1926,11 +2114,13 @@ module.exports = {
   syncDiagnosesToGenie,
   syncMedicationsToGenie,
   deleteGenieMedication,
+  updateGenieMedication,
   syncLabsToGenie,
   syncDocumentsToGenie,
   syncAppointmentToGenie,
   syncCareTeamToGenie,
   syncVitalsRowToGenie,
+  updateGenieVitalsByGenieId,
   // Conversation-model exports
   ensureConversation,
   listConversationsForDoctor,

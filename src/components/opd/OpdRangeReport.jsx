@@ -307,13 +307,11 @@ export default function OpdRangeReport({ initialStart, initialEnd, onClose }) {
     stable: true,
     single: false,
   });
-  const toggleSection = (k) =>
-    setOpenSections((prev) => ({ ...prev, [k]: !prev[k] }));
+  const toggleSection = (k) => setOpenSections((prev) => ({ ...prev, [k]: !prev[k] }));
 
   // Per-patient collapse state — closed by default; opening reveals visit table.
   const [openPatients, setOpenPatients] = useState({});
-  const togglePatient = (id) =>
-    setOpenPatients((prev) => ({ ...prev, [id]: !prev[id] }));
+  const togglePatient = (id) => setOpenPatients((prev) => ({ ...prev, [id]: !prev[id] }));
 
   // Build a flat row-per-visit dataset for export — each row carries patient
   // details + every biomarker captured at that visit.
@@ -1134,21 +1132,11 @@ function ShimmerList() {
             boxShadow: SH,
           }}
         >
-          <div
-            className="opd-shimmer"
-            style={{ height: 14, width: "40%", marginBottom: 8 }}
-          />
-          <div
-            className="opd-shimmer"
-            style={{ height: 10, width: "70%", marginBottom: 14 }}
-          />
+          <div className="opd-shimmer" style={{ height: 14, width: "40%", marginBottom: 8 }} />
+          <div className="opd-shimmer" style={{ height: 10, width: "70%", marginBottom: 14 }} />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {[0, 1, 2, 3, 4].map((j) => (
-              <div
-                key={j}
-                className="opd-shimmer"
-                style={{ height: 22, width: 90 }}
-              />
+              <div key={j} className="opd-shimmer" style={{ height: 22, width: 90 }} />
             ))}
           </div>
         </div>
@@ -1166,7 +1154,13 @@ function PatientCard({ p, isOpen, onToggle, visibleBio, sectionColor, sectionBg,
       const s = p.series[bm.key];
       if (!s) continue;
       const arrow =
-        s.status === "better" ? "▼" : s.status === "worse" ? "▲" : s.status === "stable" ? "→" : "•";
+        s.status === "better"
+          ? "▼"
+          : s.status === "worse"
+            ? "▲"
+            : s.status === "stable"
+              ? "→"
+              : "•";
       const color =
         s.status === "better" ? GN : s.status === "worse" ? RE : s.status === "stable" ? INK3 : AM;
       const bg =
@@ -1212,8 +1206,7 @@ function PatientCard({ p, isOpen, onToggle, visibleBio, sectionColor, sectionBg,
             const inP = p.visits.filter((v) => v.in_period).length;
             return inP && inP !== p.visitCount ? ` · ${inP} in period` : "";
           })()}{" "}
-          · {fmtDate(p.firstVisit?.appointment_date)} →{" "}
-          {fmtDate(p.lastVisit?.appointment_date)}
+          · {fmtDate(p.firstVisit?.appointment_date)} → {fmtDate(p.lastVisit?.appointment_date)}
         </div>
         <span style={{ fontSize: 13, color: sectionColor, fontWeight: 700, marginLeft: 4 }}>
           {isOpen ? "▾" : "▸"}

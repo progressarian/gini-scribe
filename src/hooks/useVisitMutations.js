@@ -20,6 +20,21 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData, extra],
   );
 
+  const editLab = useCallback(
+    async (labId, data) => {
+      try {
+        await api.patch(`/api/visit/${patientId}/lab/${labId}`, data);
+        toast("Lab value updated", "success");
+        await refreshData();
+        return { success: true };
+      } catch {
+        toast("Failed to update lab value", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   const addDiagnosis = useCallback(
     async (data, opts = {}) => {
       try {
@@ -231,17 +246,18 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
           );
         };
         // App-logged rows have synthetic ids like "app:123" and live in
-        // patient_vitals_log, not the doctor-side vitals table — never PATCH
-        // them. Fall through to POST so the doctor's edit creates a fresh
-        // clinic vitals row instead of 400ing.
-        const isAppRow =
-          typeof latestVitals?.id === "string" && latestVitals.id.startsWith("app:");
-        const useExisting =
-          !isAppRow &&
+        // patient_vitals_log. Edit them in place via the dedicated
+        // app-vitals route so the latest reading on /visit can be corrected
+        // irrespective of which side originally logged it.
+        const isAppRow = typeof latestVitals?.id === "string" && latestVitals.id.startsWith("app:");
+        if (isAppRow) {
+          const logId = latestVitals.id.slice("app:".length);
+          await api.patch(`/api/visit/${patientId}/app-vitals/${logId}`, vitalsData);
+        } else if (
           latestVitals?.id &&
           latestVitals?.recorded_at &&
-          isToday(latestVitals.recorded_at);
-        if (useExisting) {
+          isToday(latestVitals.recorded_at)
+        ) {
           await api.patch(`/api/visit/${patientId}/vitals/${latestVitals.id}`, vitalsData);
         } else {
           await api.post(`/api/visit/${patientId}/vitals`, vitalsData);
@@ -259,6 +275,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
 
   return {
     addLab,
+    editLab,
     addDiagnosis,
     updateDiagnosis,
     addSymptom,

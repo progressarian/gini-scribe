@@ -18,6 +18,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   flags,
   onOpenAI,
   onAddLab,
+  onEditLab,
 }) {
   // The merged vitals array contains clinic rows (full panel) plus Genie app
   // self-logs that are sparse (BP-only, weight-only, rbs-only, etc.). Taking
@@ -28,12 +29,26 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     const rows = vitals || [];
     if (rows.length === 0) return { latestV: undefined, prevV: undefined };
     const FIELDS = [
-      "bp_sys", "bp_dia", "pulse", "temp", "spo2", "weight", "height", "bmi",
-      "rbs", "waist", "body_fat", "muscle_mass", "meal_type", "reading_time",
+      "bp_sys",
+      "bp_dia",
+      "pulse",
+      "temp",
+      "spo2",
+      "weight",
+      "height",
+      "bmi",
+      "rbs",
+      "waist",
+      "body_fat",
+      "muscle_mass",
+      "meal_type",
+      "reading_time",
     ];
-    const latestClinic = rows.find((v) => v && v.source !== "patient_app");
     const build = (depth) => {
-      const anchor = latestClinic || rows[0];
+      // Anchor to the truly latest row (clinic or app); the editor downstream
+      // routes patient_app rows through PATCH /app-vitals so editing the
+      // latest reading works regardless of source.
+      const anchor = rows[0];
       const out = {
         id: anchor?.id,
         recorded_at: anchor?.recorded_at,
@@ -45,7 +60,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
         out[f] = null;
         for (const r of rows) {
           if (r && r[f] != null && r[f] !== "") {
-            if (hits === depth) { out[f] = r[f]; break; }
+            if (hits === depth) {
+              out[f] = r[f];
+              break;
+            }
             hits += 1;
           }
         }
@@ -72,7 +90,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       return Number.isFinite(t) ? t : 0;
     };
     const fastingVitals = (vitals || [])
-      .filter((v) => v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting")
+      .filter(
+        (v) =>
+          v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting",
+      )
       .map((v) => ({
         result: parseFloat(v.rbs),
         // Prefer full timestamp (created_at via recorded_at) so multiple app
@@ -285,6 +306,25 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          {onEditLab && (labResults || []).length > 0 && (
+            <button
+              className="bx"
+              title="Edit the most recent lab result"
+              onClick={() => {
+                const latest = [...(labResults || [])]
+                  .filter((r) => r && r.id)
+                  .sort((a, b) => {
+                    const ta = a.test_date ? new Date(a.test_date).getTime() : 0;
+                    const tb = b.test_date ? new Date(b.test_date).getTime() : 0;
+                    if (tb !== ta) return tb - ta;
+                    return (b.id || 0) - (a.id || 0);
+                  })[0];
+                if (latest) onEditLab(latest);
+              }}
+            >
+              ✎ Edit Latest
+            </button>
+          )}
           <button className="bx bx-p" onClick={onAddLab}>
             + Add Value
           </button>

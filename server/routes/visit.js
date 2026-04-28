@@ -32,11 +32,13 @@ const {
   syncDiagnosesToGenie,
   syncMedicationsToGenie,
   deleteGenieMedication,
+  updateGenieMedication,
   syncLabsToGenie,
   syncDocumentsToGenie,
   syncAppointmentToGenie,
   syncCareTeamToGenie,
   syncVitalsRowToGenie,
+  updateGenieVitalsByGenieId,
 } = require("../genie-sync.cjs");
 
 const router = Router();
@@ -582,8 +584,7 @@ router.get("/visit/:patientId", async (req, res) => {
     // with source='patient_app' so the UI can still tell them apart.
     const appVitals = (vitalsLogR.rows || []).map((r) => {
       const recordedAt =
-        r.created_at ||
-        (r.recorded_date ? new Date(r.recorded_date).toISOString() : null);
+        r.created_at || (r.recorded_date ? new Date(r.recorded_date).toISOString() : null);
       return {
         id: `app:${r.id}`,
         patient_id: r.patient_id,
@@ -758,6 +759,51 @@ router.post("/visit/:patientId/lab", async (req, res) => {
   }
 });
 
+// ── PATCH /visit/:patientId/lab/:id — Edit an existing lab value ──
+// Used when the doctor corrects the latest lab reading (any source). After
+// the local update we re-push labs so the Genie app sees the new value.
+router.patch("/visit/:patientId/lab/:id", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  const lid = Number(req.params.id);
+  if (!pid || !lid) return res.status(400).json({ error: "Invalid IDs" });
+  try {
+    const { test_name, result, unit, test_date } = req.body;
+    const sets = [];
+    const vals = [];
+    if (test_name !== undefined) {
+      vals.push(t(test_name, 200));
+      sets.push(`test_name = $${vals.length}`);
+      vals.push(getCanonical(test_name));
+      sets.push(`canonical_name = $${vals.length}`);
+    }
+    if (result !== undefined) {
+      vals.push(num(result));
+      sets.push(`result = $${vals.length}`);
+    }
+    if (unit !== undefined) {
+      vals.push(t(unit, 50));
+      sets.push(`unit = $${vals.length}`);
+    }
+    if (test_date !== undefined) {
+      vals.push(n(test_date));
+      sets.push(`test_date = $${vals.length}::date`);
+    }
+    if (!sets.length) return res.json({ ok: true });
+    vals.push(lid, pid);
+    const r = await pool.query(
+      `UPDATE lab_results SET ${sets.join(", ")}
+       WHERE id = $${vals.length - 1} AND patient_id = $${vals.length}
+       RETURNING *`,
+      vals,
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: "lab_results row not found" });
+    syncLabsToGenie(pid, pool).catch((e) => console.warn("[Visit] Labs push skipped:", e.message));
+    res.json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Update lab value");
+  }
+});
+
 // ── POST /visit/:patientId/diagnosis — Add / upsert diagnosis ──
 router.post("/visit/:patientId/diagnosis", async (req, res) => {
   const pid = Number(req.params.patientId);
@@ -928,8 +974,32 @@ router.post("/visit/:patientId/medication", async (req, res) => {
 // ── PATCH /visit/:patientId/medication/:id — Edit medication ──
 router.patch("/visit/:patientId/medication/:id", async (req, res) => {
   const pid = Number(req.params.patientId);
-  const mid = Number(req.params.id);
-  if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
+  const rawId = String(req.params.id || "");
+  if (!pid) return res.status(400).json({ error: "Invalid IDs" });
+
+  // Genie-sourced (patient-added) meds — update mirror + Genie Supabase so
+  // the change reflects in the app.
+  if (rawId.startsWith("genie:")) {
+    const genieMedId = rawId.slice("genie:".length);
+    if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
+    try {
+      const { dose, frequency, timing } = req.body;
+      const fields = {};
+      if (dose !== undefined) fields.dose = t(dose, 100);
+      if (frequency !== undefined) fields.frequency = t(frequency, 100);
+      if (timing !== undefined) fields.timing = t(timing, 200);
+      const result = await updateGenieMedication(pid, genieMedId, fields, pool);
+      if (!result.updated) {
+        return res.status(500).json({ error: result.reason || "Update failed" });
+      }
+      return res.json({ success: true, source: "genie" });
+    } catch (e) {
+      return handleError(res, e, "Edit Genie medication");
+    }
+  }
+
+  const mid = Number(rawId);
+  if (!mid) return res.status(400).json({ error: "Invalid IDs" });
   try {
     const { dose, frequency, timing, reason } = req.body;
 
@@ -984,8 +1054,32 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
 // ── PATCH /visit/:patientId/medication/:id/stop — Stop medication ──
 router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
   const pid = Number(req.params.patientId);
-  const mid = Number(req.params.id);
-  if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
+  const rawId = String(req.params.id || "");
+  if (!pid) return res.status(400).json({ error: "Invalid IDs" });
+
+  // Genie-sourced meds — flag as inactive in Genie + mirror so the app stops
+  // showing the med as active.
+  if (rawId.startsWith("genie:")) {
+    const genieMedId = rawId.slice("genie:".length);
+    if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
+    try {
+      const result = await updateGenieMedication(
+        pid,
+        genieMedId,
+        { is_active: false },
+        pool,
+      );
+      if (!result.updated) {
+        return res.status(500).json({ error: result.reason || "Stop failed" });
+      }
+      return res.json({ success: true, source: "genie" });
+    } catch (e) {
+      return handleError(res, e, "Stop Genie medication");
+    }
+  }
+
+  const mid = Number(rawId);
+  if (!mid) return res.status(400).json({ error: "Invalid IDs" });
   try {
     const { reason, notes } = req.body;
     if (!reason) return res.status(400).json({ error: "reason is required" });
@@ -1916,6 +2010,65 @@ router.patch("/visit/:patientId/vitals/:id", async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     handleError(res, e, "Update vitals");
+  }
+});
+
+// ── PATCH /visit/:patientId/app-vitals/:logId — edit a patient-app row ──
+// Doctor edits a vital that was originally logged from the Genie app. The
+// canonical row lives in patient_vitals_log (mirror of Genie `vitals`); we
+// update it locally and push the same value change back to Genie via
+// genie_id so the patient's app shows the corrected reading.
+router.patch("/visit/:patientId/app-vitals/:logId", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  const logId = Number(req.params.logId);
+  if (!pid || !logId) return res.status(400).json({ error: "Invalid IDs" });
+  // Map UI field names → patient_vitals_log column names. Inverse of the
+  // mapping used when merging app rows into the visit response.
+  const FIELD_MAP = {
+    bp_sys: "bp_systolic",
+    bp_dia: "bp_diastolic",
+    pulse: "pulse",
+    spo2: "spo2",
+    weight: "weight_kg",
+    bmi: "bmi",
+    body_fat: "body_fat",
+    muscle_mass: "muscle_mass",
+    waist: "waist",
+    rbs: "rbs",
+    meal_type: "meal_type",
+  };
+  try {
+    const sets = [];
+    const vals = [];
+    const genieFields = {};
+    for (const [uiKey, col] of Object.entries(FIELD_MAP)) {
+      if (req.body[uiKey] === undefined) continue;
+      const raw = req.body[uiKey];
+      const v = col === "meal_type" ? t(raw, 50) : num(raw);
+      vals.push(v);
+      sets.push(`${col} = $${vals.length}`);
+      genieFields[col] = v;
+    }
+    if (!sets.length) return res.json({ ok: true });
+    vals.push(logId, pid);
+    const upd = await pool.query(
+      `UPDATE patient_vitals_log SET ${sets.join(", ")}
+       WHERE id = $${vals.length - 1} AND patient_id = $${vals.length}
+       RETURNING id, genie_id`,
+      vals,
+    );
+    if (!upd.rows[0]) {
+      return res.status(404).json({ error: "patient_vitals_log row not found" });
+    }
+    const genieId = upd.rows[0].genie_id;
+    if (genieId) {
+      updateGenieVitalsByGenieId(genieId, genieFields).catch((e) =>
+        console.warn("[Visit] App-vitals push skipped:", e.message),
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    handleError(res, e, "Update app vitals");
   }
 });
 

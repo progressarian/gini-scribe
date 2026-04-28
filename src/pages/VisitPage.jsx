@@ -443,16 +443,28 @@ export default function VisitPage() {
     // pick the most recent non-null across all rows (already sorted desc by
     // recorded_at on the server). prevV is the second most recent per field.
     const VITAL_FIELDS = [
-      'bp_sys', 'bp_dia', 'pulse', 'temp', 'spo2', 'weight', 'height', 'bmi',
-      'rbs', 'waist', 'body_fat', 'muscle_mass', 'meal_type', 'reading_time',
+      "bp_sys",
+      "bp_dia",
+      "pulse",
+      "temp",
+      "spo2",
+      "weight",
+      "height",
+      "bmi",
+      "rbs",
+      "waist",
+      "body_fat",
+      "muscle_mass",
+      "meal_type",
+      "reading_time",
     ];
-    const latestClinic = (vitals || []).find((v) => v.source !== 'patient_app') || null;
     const buildCoalesced = (rows, depth) => {
       if (!rows || rows.length === 0) return null;
-      // Always anchor id / recorded_at / consultation_id to the latest clinic
-      // row when one exists, so editVitals targets a clinic record. Fall back
-      // to the first row otherwise.
-      const anchor = latestClinic || rows[0];
+      // Anchor identity to the truly latest row (rows are sorted DESC by
+      // recorded_at on the server). If that row is patient-app sourced,
+      // updateVitals routes the edit to the app-vitals PATCH endpoint so the
+      // doctor edits the latest value in place regardless of who logged it.
+      const anchor = rows[0];
       const out = {
         id: anchor.id,
         recorded_at: anchor.recorded_at,
@@ -462,8 +474,11 @@ export default function VisitPage() {
       for (const f of VITAL_FIELDS) {
         let hits = 0;
         for (const r of rows) {
-          if (r[f] != null && r[f] !== '') {
-            if (hits === depth) { out[f] = r[f]; break; }
+          if (r[f] != null && r[f] !== "") {
+            if (hits === depth) {
+              out[f] = r[f];
+              break;
+            }
             hits += 1;
           }
         }
@@ -896,6 +911,7 @@ export default function VisitPage() {
                 flags={flags}
                 onOpenAI={() => setAiOpen(true)}
                 onAddLab={() => setModal({ type: "addLab" })}
+                onEditLab={(lab) => setModal({ type: "addLab", data: lab })}
               />
               {/* <VitalsTrendChart vitals={vitals} /> */}
               {/* <VisitCoordPrep prep={data.prep} /> */}
@@ -1333,8 +1349,11 @@ export default function VisitPage() {
       {modal?.type === "addLab" && (
         <AddLabModal
           onClose={closeModal}
-          onSubmit={async (d) => {
-            const r = await mutations.addLab(d);
+          existingLab={modal.data || null}
+          onSubmit={async (d, existing) => {
+            const r = existing?.id
+              ? await mutations.editLab(existing.id, d)
+              : await mutations.addLab(d);
             if (r.success) closeModal();
           }}
         />
