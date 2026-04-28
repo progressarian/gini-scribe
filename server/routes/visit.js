@@ -8,6 +8,9 @@ import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
+import { generatePrescriptionPdf } from "../services/prescriptionHtmlPdf.js";
+import { generateVisitSummary } from "../services/visitSummaryAI.js";
+import { generatePatientSummary } from "../services/patientSummaryAI.js";
 import {
   syncBiomarkersFromLatestLabs,
   syncVitalsFromExtraction,
@@ -39,6 +42,7 @@ const {
   syncCareTeamToGenie,
   syncVitalsRowToGenie,
   updateGenieVitalsByGenieId,
+  updateGenieLabByGenieId,
 } = require("../genie-sync.cjs");
 
 const router = Router();
@@ -481,9 +485,9 @@ router.get("/visit/:patientId", async (req, res) => {
     }
 
     // Care phase based on visit count
-    let carePhase = "Phase 1 — Initial Assessment";
-    if (totalVisits >= 10) carePhase = "Phase 3 — Continuous Care";
-    else if (totalVisits >= 4) carePhase = "Phase 2 — Active Management";
+    let carePhase = "Phase 1 · Control";
+    if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
+    else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
 
     // Load doctor note + compliance from active OPD appointment if present
     let apptDoctorNote = null;
@@ -727,33 +731,63 @@ router.post("/visit/:patientId/lab", async (req, res) => {
     const numResult = num(result);
     const finalDate = n(test_date) || new Date().toISOString().split("T")[0];
 
-    // Skip if exact same data already exists (same test + value + date)
-    if (numResult !== null) {
-      const dup = await pool.query(
-        `SELECT * FROM lab_results
-         WHERE patient_id = $1 AND canonical_name = $2
-           AND result::numeric = $3::numeric AND test_date::date = $4::date
-         LIMIT 1`,
-        [pid, canonical, numResult, finalDate],
-      );
-      if (dup.rows[0]) return res.json(dup.rows[0]);
-    }
-
-    const r = await pool.query(
-      `INSERT INTO lab_results (patient_id, test_name, canonical_name, result, unit, test_date, source, appointment_id)
-       VALUES ($1,$2,$3,$4,$5,$6::date,'manual',$7) RETURNING *`,
-      [
-        pid,
-        t(test_name, 200),
-        canonical,
-        numResult,
-        t(unit, 50),
-        finalDate,
-        appointment_id || null,
-      ],
+    // Same-day same-test = update existing row instead of inserting a new
+    // one. Keeps a single row per (patient, canonical, date) so the lab
+    // trend has one point per day per biomarker. Prefer rows that already
+    // have a genie_id (patient-origin) so we update through the pull key.
+    const existing = await pool.query(
+      `SELECT id, genie_id, ref_range, flag FROM lab_results
+       WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+       ORDER BY (genie_id IS NOT NULL) DESC, created_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [pid, canonical, finalDate],
     );
-    syncLabsToGenie(pid, pool).catch((e) => console.warn("[Visit] Labs push skipped:", e.message));
-    res.json(r.rows[0]);
+
+    let r;
+    if (existing.rows[0]) {
+      r = await pool.query(
+        `UPDATE lab_results
+            SET test_name      = $1,
+                result         = $2,
+                unit           = $3,
+                appointment_id = COALESCE($4, appointment_id)
+          WHERE id = $5
+          RETURNING *`,
+        [t(test_name, 200), numResult, t(unit, 50), appointment_id || null, existing.rows[0].id],
+      );
+    } else {
+      r = await pool.query(
+        `INSERT INTO lab_results (patient_id, test_name, canonical_name, result, unit, test_date, source, appointment_id)
+         VALUES ($1,$2,$3,$4,$5,$6::date,'manual',$7) RETURNING *`,
+        [
+          pid,
+          t(test_name, 200),
+          canonical,
+          numResult,
+          t(unit, 50),
+          finalDate,
+          appointment_id || null,
+        ],
+      );
+    }
+    const row = r.rows[0];
+    if (row.genie_id) {
+      // Patient-origin row: update Genie row directly so the app sees it.
+      const flag = row.flag === "HIGH" ? "high" : row.flag === "LOW" ? "low" : "normal";
+      updateGenieLabByGenieId(row.genie_id, {
+        test_name: row.test_name,
+        value: row.result,
+        unit: row.unit,
+        reference_range: row.ref_range,
+        status: flag,
+        test_date: row.test_date,
+      }).catch((e) => console.warn("[Visit] Genie lab update skipped:", e.message));
+    } else {
+      syncLabsToGenie(pid, pool).catch((e) =>
+        console.warn("[Visit] Labs push skipped:", e.message),
+      );
+    }
+    res.json(row);
   } catch (e) {
     handleError(res, e, "Add lab value");
   }
@@ -797,8 +831,27 @@ router.patch("/visit/:patientId/lab/:id", async (req, res) => {
       vals,
     );
     if (!r.rows[0]) return res.status(404).json({ error: "lab_results row not found" });
-    syncLabsToGenie(pid, pool).catch((e) => console.warn("[Visit] Labs push skipped:", e.message));
-    res.json(r.rows[0]);
+    // If this lab originated from the patient app (genie_id is set), update
+    // the Genie row directly by id so the patient app sees the edit instead
+    // of getting a duplicate insert. The gini_sync_lab RPC is keyed by
+    // source_id which is NULL on patient-app rows, so it would INSERT.
+    const updated = r.rows[0];
+    if (updated.genie_id) {
+      const flag = updated.flag === "HIGH" ? "high" : updated.flag === "LOW" ? "low" : "normal";
+      updateGenieLabByGenieId(updated.genie_id, {
+        test_name: updated.test_name,
+        value: updated.result,
+        unit: updated.unit,
+        reference_range: updated.ref_range,
+        status: flag,
+        test_date: updated.test_date,
+      }).catch((e) => console.warn("[Visit] Genie lab update skipped:", e.message));
+    } else {
+      syncLabsToGenie(pid, pool).catch((e) =>
+        console.warn("[Visit] Labs push skipped:", e.message),
+      );
+    }
+    res.json(updated);
   } catch (e) {
     handleError(res, e, "Update lab value");
   }
@@ -1063,12 +1116,7 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
     const genieMedId = rawId.slice("genie:".length);
     if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
     try {
-      const result = await updateGenieMedication(
-        pid,
-        genieMedId,
-        { is_active: false },
-        pool,
-      );
+      const result = await updateGenieMedication(pid, genieMedId, { is_active: false }, pool);
       if (!result.updated) {
         return res.status(500).json({ error: result.reason || "Stop failed" });
       }
@@ -1773,6 +1821,45 @@ router.get("/visit/:patientId/doctor-summary", async (req, res) => {
   }
 });
 
+// POST /visit/:patientId/doctor-summary/generate — AI-generate a summary and
+// store it as a new version. Body is the same visit data shape used by the
+// prescription PDF endpoint. Returns { version, generated: true }.
+router.post("/visit/:patientId/doctor-summary/generate", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const text = await generateVisitSummary(req.body || {});
+    const prev = await pool.query(
+      `SELECT id, version FROM doctor_summaries
+        WHERE patient_id=$1 ORDER BY version DESC LIMIT 1`,
+      [pid],
+    );
+    const nextVersion = (prev.rows[0]?.version || 0) + 1;
+    const prevId = prev.rows[0]?.id || null;
+    const ins = await pool.query(
+      `INSERT INTO doctor_summaries
+         (patient_id, appointment_id, version, content, change_note,
+          prev_version_id, author_name, author_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, patient_id, appointment_id, version, content, change_note,
+                 prev_version_id, author_name, author_id, created_at`,
+      [
+        pid,
+        req.body?.appointment_id || null,
+        nextVersion,
+        text,
+        prev.rows[0] ? "AI regenerated" : "AI generated",
+        prevId,
+        "AI",
+        null,
+      ],
+    );
+    res.json({ success: true, generated: true, version: ins.rows[0] });
+  } catch (e) {
+    handleError(res, e, "Generate visit summary");
+  }
+});
+
 // POST /visit/:patientId/doctor-summary — append a new version
 router.post("/visit/:patientId/doctor-summary", async (req, res) => {
   const pid = Number(req.params.patientId);
@@ -1810,6 +1897,132 @@ router.post("/visit/:patientId/doctor-summary", async (req, res) => {
     res.json({ success: true, version: ins.rows[0] });
   } catch (e) {
     handleError(res, e, "Save doctor summary");
+  }
+});
+
+// ── patient_summaries: per-version PATIENT-FACING visit narrative ────────────
+// Plain-language summary (written for the patient to read). This is the text
+// that prints on the prescription PDF "Visit summary" block. Internal doctor
+// notes live in doctor_summaries — keep these tables separate.
+pool
+  .query(
+    `CREATE TABLE IF NOT EXISTS patient_summaries (
+       id SERIAL PRIMARY KEY,
+       patient_id INTEGER NOT NULL,
+       appointment_id INTEGER,
+       version INTEGER NOT NULL,
+       content TEXT NOT NULL,
+       change_note TEXT,
+       prev_version_id INTEGER,
+       author_name TEXT,
+       author_id TEXT,
+       source TEXT,
+       created_at TIMESTAMPTZ DEFAULT NOW()
+     )`,
+  )
+  .catch(() => {});
+pool
+  .query(
+    `CREATE INDEX IF NOT EXISTS idx_patient_summaries_patient
+       ON patient_summaries (patient_id, version DESC)`,
+  )
+  .catch(() => {});
+
+// GET /visit/:patientId/patient-summary — return all versions (latest first)
+router.get("/visit/:patientId/patient-summary", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, appointment_id, version, content, change_note,
+              prev_version_id, author_name, author_id, source, created_at
+         FROM patient_summaries
+        WHERE patient_id = $1
+        ORDER BY version DESC, id DESC`,
+      [pid],
+    );
+    res.json({ versions: rows, current: rows[0] || null });
+  } catch (e) {
+    handleError(res, e, "Load patient summary");
+  }
+});
+
+// POST /visit/:patientId/patient-summary/generate — AI-generate a patient-facing
+// summary and store it as a new version. Body is the same visit data shape used
+// by the prescription PDF endpoint.
+router.post("/visit/:patientId/patient-summary/generate", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const text = await generatePatientSummary(req.body || {});
+    const prev = await pool.query(
+      `SELECT id, version FROM patient_summaries
+        WHERE patient_id=$1 ORDER BY version DESC LIMIT 1`,
+      [pid],
+    );
+    const nextVersion = (prev.rows[0]?.version || 0) + 1;
+    const prevId = prev.rows[0]?.id || null;
+    const ins = await pool.query(
+      `INSERT INTO patient_summaries
+         (patient_id, appointment_id, version, content, change_note,
+          prev_version_id, author_name, author_id, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ai')
+       RETURNING id, patient_id, appointment_id, version, content, change_note,
+                 prev_version_id, author_name, author_id, source, created_at`,
+      [
+        pid,
+        req.body?.appointment_id || null,
+        nextVersion,
+        text,
+        prev.rows[0] ? "AI regenerated" : "AI generated",
+        prevId,
+        "AI",
+        null,
+      ],
+    );
+    res.json({ success: true, generated: true, version: ins.rows[0] });
+  } catch (e) {
+    handleError(res, e, "Generate patient summary");
+  }
+});
+
+// POST /visit/:patientId/patient-summary — append a new (manually edited) version
+router.post("/visit/:patientId/patient-summary", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  const { content, change_note, appointment_id, author_name, author_id } = req.body || {};
+  if (typeof content !== "string" || !content.trim()) {
+    return res.status(400).json({ error: "content is required" });
+  }
+  try {
+    const prev = await pool.query(
+      `SELECT id, version FROM patient_summaries
+        WHERE patient_id = $1 ORDER BY version DESC LIMIT 1`,
+      [pid],
+    );
+    const nextVersion = (prev.rows[0]?.version || 0) + 1;
+    const prevId = prev.rows[0]?.id || null;
+    const ins = await pool.query(
+      `INSERT INTO patient_summaries
+         (patient_id, appointment_id, version, content, change_note,
+          prev_version_id, author_name, author_id, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+       RETURNING id, patient_id, appointment_id, version, content, change_note,
+                 prev_version_id, author_name, author_id, source, created_at`,
+      [
+        pid,
+        appointment_id || null,
+        nextVersion,
+        content,
+        change_note || null,
+        prevId,
+        author_name || null,
+        author_id || null,
+      ],
+    );
+    res.json({ success: true, version: ins.rows[0] });
+  } catch (e) {
+    handleError(res, e, "Save patient summary");
   }
 });
 
@@ -2069,6 +2282,103 @@ router.patch("/visit/:patientId/app-vitals/:logId", async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     handleError(res, e, "Update app vitals");
+  }
+});
+
+// ── POST /visit/:patientId/goal — Create / upsert a goal ──
+router.post("/visit/:patientId/goal", async (req, res) => {
+  try {
+    const pid = Number(req.params.patientId);
+    if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+    const { marker, current_value, target_value, timeline, priority, notes } = req.body || {};
+    if (!marker?.trim()) return res.status(400).json({ error: "marker is required" });
+    const ins = await pool.query(
+      `INSERT INTO goals (patient_id, marker, current_value, target_value, timeline, priority, notes, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active')
+       RETURNING *`,
+      [
+        pid,
+        marker.trim(),
+        current_value || null,
+        target_value || null,
+        timeline || null,
+        priority || null,
+        notes || null,
+      ],
+    );
+    res.json(ins.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Create goal");
+  }
+});
+
+// ── PATCH /visit/:patientId/goal/:id — Edit a goal ──
+router.patch("/visit/:patientId/goal/:id", async (req, res) => {
+  try {
+    const pid = Number(req.params.patientId);
+    const id = Number(req.params.id);
+    if (!pid || !id) return res.status(400).json({ error: "Invalid IDs" });
+    const fields = [
+      "marker",
+      "current_value",
+      "target_value",
+      "timeline",
+      "priority",
+      "status",
+      "notes",
+    ];
+    const sets = [];
+    const vals = [];
+    let i = 1;
+    for (const f of fields) {
+      if (req.body[f] !== undefined) {
+        sets.push(`${f}=$${i++}`);
+        vals.push(req.body[f]);
+      }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: "No fields to update" });
+    sets.push(`updated_at=NOW()`);
+    vals.push(pid, id);
+    const upd = await pool.query(
+      `UPDATE goals SET ${sets.join(", ")} WHERE patient_id=$${i++} AND id=$${i} RETURNING *`,
+      vals,
+    );
+    if (!upd.rowCount) return res.status(404).json({ error: "Goal not found" });
+    res.json(upd.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Update goal");
+  }
+});
+
+// ── DELETE /visit/:patientId/goal/:id ──
+router.delete("/visit/:patientId/goal/:id", async (req, res) => {
+  try {
+    const pid = Number(req.params.patientId);
+    const id = Number(req.params.id);
+    if (!pid || !id) return res.status(400).json({ error: "Invalid IDs" });
+    const del = await pool.query("DELETE FROM goals WHERE patient_id=$1 AND id=$2", [pid, id]);
+    if (!del.rowCount) return res.status(404).json({ error: "Goal not found" });
+    res.json({ ok: true });
+  } catch (e) {
+    handleError(res, e, "Delete goal");
+  }
+});
+
+// ── POST /visit/:patientId/prescription.pdf — render Rx PDF from client data ──
+// Frontend already loads all needed visit data (patient, doctor, dx, meds, labs,
+// goals, consultations) via GET /visit/:patientId. To avoid duplicating that
+// loader, the client posts the data shape it already has and we render the
+// HTML template through Puppeteer.
+router.post("/visit/:patientId/prescription.pdf", async (req, res) => {
+  try {
+    const pdf = await generatePrescriptionPdf(req.body || {});
+    const filename = `Rx-${req.params.patientId}-${new Date().toISOString().split("T")[0]}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Content-Length", pdf.length);
+    res.end(pdf);
+  } catch (e) {
+    handleError(res, e, "Generate prescription PDF");
   }
 });
 

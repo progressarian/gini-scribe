@@ -80,10 +80,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     const hba1c = getLabValFromLatest(labLatest, "HbA1c");
     const fbsLab = getLabValFromLatest(labLatest, "FBS");
     const fbsLabH = getLabHist(labHistory, "FBS");
-    // Patient-app fasting sugars (vitals.rbs with meal_type='Fasting') belong in
-    // the FBS trend alongside doctor-entered labs. Merge both streams and sort
-    // strictly by full timestamp so multi-reading days (lab + app log on the
-    // same date) render left→right in actual chronological order.
+    // FBS trend merges two streams so this card behaves like HbA1c — one
+    // unified trend that includes every fasting reading regardless of
+    // origin: doctor-entered lab_results + patient finger-stick readings
+    // from patient_vitals_log (vitals.rbs with meal_type='Fasting').
     const tsOf = (r) => {
       const d = r.date || r.test_date || r.recorded_at || r.recorded_date;
       const t = d ? new Date(d).getTime() : 0;
@@ -96,15 +96,12 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       )
       .map((v) => ({
         result: parseFloat(v.rbs),
-        // Prefer full timestamp (created_at via recorded_at) so multiple app
-        // logs on the same day stay distinguishable; fall back to date-only.
         date: v.recorded_at || v.recorded_date,
         unit: "mg/dL",
         source: v.source || "patient_app",
       }))
       .filter((r) => Number.isFinite(r.result) && r.date);
     const fbsH = [...fbsLabH, ...fastingVitals].sort((a, b) => tsOf(a) - tsOf(b));
-    // Latest reading: most-recent across the merged history; fall back to lab.
     const fbs = fbsH.length > 0 ? fbsH[fbsH.length - 1] : fbsLab;
     const ldl = getLabValFromLatest(labLatest, "LDL");
     const ldlH = getLabHist(labHistory, "LDL");
@@ -115,6 +112,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     const cr = getLabValFromLatest(labLatest, "Creatinine");
     const crH = getLabHist(labHistory, "Creatinine");
     const egfr = getLabValFromLatest(labLatest, "eGFR");
+    const egfrH = getLabHist(labHistory, "eGFR");
     const hb = getLabValFromLatest(labLatest, "Haemoglobin");
     const hbH = getLabHist(labHistory, "Haemoglobin");
     const insulin = getLabValFromLatest(labLatest, "Insulin");
@@ -179,6 +177,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       cr,
       crH,
       egfr,
+      egfrH,
       hb,
       hbH,
       homaIr,
@@ -213,6 +212,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     cr,
     crH,
     egfr,
+    egfrH,
     hb,
     hbH,
     homaIr,
@@ -441,25 +441,51 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
           Renal Function (RFT + UACR)
         </div>
         <div className="bmg">
+          {/* eGFR card — primary kidney biomarker, matches the patient app
+              which logs and displays eGFR. Pulled from labLatest/labHistory
+              so doctor-entered + patient-self-logged + Healthray-imported
+              all roll into one trend (single lab_results stream). */}
           <BiomarkerCard
-            label="Creatinine / eGFR"
-            value={cr?.result}
-            unit="mg/dL"
-            target={1.2}
+            label="eGFR (Kidney)"
+            value={egfr?.result}
+            unit="mL/min"
+            target={90}
+            lowerBetter={false}
             trend={
-              crH.length > 1
-                ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
-                : egfr
-                  ? `✓ eGFR ${egfr.result}`
+              egfrH.length > 1
+                ? `${egfr?.result > egfrH[egfrH.length - 2]?.result ? "▲" : "▼"} ${Math.abs(egfr?.result - egfrH[egfrH.length - 2]?.result).toFixed(0)} from ${fmtDate(egfrH[egfrH.length - 2]?.date)}`
+                : egfr?.result >= 90
+                  ? "✓ Normal"
+                  : egfr?.result >= 60
+                    ? "→ Mildly reduced"
+                    : "↑ Review"
+            }
+            trendDir={egfr?.result >= 90 ? "good" : egfr?.result >= 60 ? "warn" : "bad"}
+            goal="≥90"
+            goalLabel="Normal"
+            history={egfrH}
+          />
+          {/* Creatinine card — kept alongside eGFR for clinicians who track
+              both. Hidden if no Creatinine data exists. */}
+          {cr?.result != null && (
+            <BiomarkerCard
+              label="Creatinine"
+              value={cr?.result}
+              unit="mg/dL"
+              target={1.2}
+              trend={
+                crH.length > 1
+                  ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
                   : cr?.result <= 1.2
                     ? "✓ Normal"
                     : "↑ Review"
-            }
-            trendDir={cr?.result <= 1.2 ? "good" : "bad"}
-            goal="<1.2"
-            goalLabel="Normal"
-            history={crH}
-          />
+              }
+              trendDir={cr?.result <= 1.2 ? "good" : "bad"}
+              goal="<1.2"
+              goalLabel="Normal"
+              history={crH}
+            />
+          )}
           {uacr?.result != null && (
             <BiomarkerCard
               label="UACR"

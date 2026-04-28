@@ -1,0 +1,32 @@
+.pvb-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary, #2563eb);
+  border-radius: var(--r);
+  box-shadow: var(--sh);
+  padding: 12px 14px;
+  margin-bottom: 13px;
+}
+
+.pvb-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--primary, #2563eb);
+  margin-bottom: 6px;
+}
+
+.pvb-narrative {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.pvb-shimmer-line {
+  height: 12px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}

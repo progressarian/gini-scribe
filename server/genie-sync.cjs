@@ -626,10 +626,17 @@ async function syncLabsToGenie(scribePatientId, localDb) {
   let pushed = 0;
 
   try {
+    // Skip patient-origin rows (genie_id IS NOT NULL): those already exist
+    // in Genie. Pushing them via gini_sync_lab would create duplicates
+    // because the RPC's EXISTS check is keyed on source_id, which is NULL
+    // for patient-app rows. Edits to these rows go through
+    // updateGenieLabByGenieId in routes/visit.js.
     const { rows } = await localDb.query(
       `SELECT id, test_name, result, unit, test_date, ref_range, flag, panel_name
          FROM lab_results
-        WHERE patient_id = $1 AND result IS NOT NULL
+        WHERE patient_id = $1
+          AND result IS NOT NULL
+          AND genie_id IS NULL
         ORDER BY test_date DESC NULLS LAST, id DESC
         LIMIT 500`,
       [scribePatientId],
@@ -977,6 +984,44 @@ async function updateGenieVitalsByGenieId(genieVitalsId, fields) {
 }
 
 /**
+ * Update a Genie `lab_results` row directly by its UUID. Used when the
+ * doctor edits a lab value on scribe whose canonical row lives on Genie
+ * (i.e. originated from the patient app, scribe.lab_results.genie_id is
+ * set). The gini_sync_lab RPC is keyed by source_id and would INSERT a
+ * fresh Genie row instead of updating in this case, so we bypass it and
+ * write straight to the table.
+ *
+ * Field mapping (scribe → Genie lab_results column):
+ *   result    → value
+ *   ref_range → reference_range
+ *   flag      → status   ('HIGH'→'high', 'LOW'→'low', null→'normal')
+ * Other fields (test_name, test_date, unit, lab_name) are passed through.
+ */
+async function updateGenieLabByGenieId(genieLabId, fields) {
+  const db = getGenieDb();
+  if (!db) return { synced: false, reason: 'No Genie credentials' };
+  if (!genieLabId) return { synced: false, reason: 'Missing genie_id' };
+  const payload = {};
+  for (const [k, v] of Object.entries(fields || {})) {
+    if (v !== undefined && v !== null && v !== '') payload[k] = v;
+  }
+  if (Object.keys(payload).length === 0) return { synced: false, reason: 'No fields to update' };
+  try {
+    const result = await withRetry(
+      () => db.from('lab_results').update(payload).eq('id', genieLabId),
+      { label: `genie_lab_update(${genieLabId})` },
+    );
+    if (result?.error) {
+      return { synced: false, reason: result.error.message || String(result.error) };
+    }
+    return { synced: true };
+  } catch (err) {
+    console.error('[Genie Sync Lab Update] Exception:', err.message || err);
+    return { synced: false, reason: err.message || String(err) };
+  }
+}
+
+/**
  * Delete a patient row from MyHealth Genie by gini_patient_id.
  * Used by the test-patient cleanup script. Best-effort: if a FK cascade is
  * missing on the Genie side, we log and continue — test data leftovers are
@@ -1246,6 +1291,11 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
   const db = getGenieDb();
   if (!db) return { synced: false, reason: "No Genie credentials" };
 
+  // Dynamic import — labCanonical.js is ESM, this file is CJS. Used to
+  // populate scribe lab_results.canonical_name on patient-pull rows so the
+  // POST /lab existing-row check (keyed on canonical_name) can match.
+  const { getCanonical } = await import("./utils/labCanonical.js");
+
   const fetchErrors = [];
   const upsertFailures = {
     vitals: 0,
@@ -1255,6 +1305,7 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
     meals: 0,
     medications_master: 0,
     conditions: 0,
+    labs: 0,
   };
 
   try {
@@ -1284,7 +1335,7 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
       }
     };
 
-    const [vitals, activities, symptoms, meds, meals, medsMaster, conditions] = await Promise.all([
+    const [vitals, activities, symptoms, meds, meals, medsMaster, conditions, labs] = await Promise.all([
       safeFetch('vitals', () =>
         db.from("vitals")
           .select("*")
@@ -1338,6 +1389,18 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           .order("created_at", { ascending: false })
           .limit(500),
       ),
+      // Patient-app self-logged labs (HbA1c, LDL, TSH, Haemoglobin, eGFR
+      // entered via LogModal). Filter on source='patient' so we don't
+      // re-pull rows that scribe itself just pushed via gini_sync_lab
+      // (those carry source='scribe').
+      safeFetch('lab_results', () =>
+        db.from("lab_results")
+          .select("*")
+          .eq("patient_id", genieUUID)
+          .eq("source", "patient")
+          .order("test_date", { ascending: false })
+          .limit(500),
+      ),
     ]);
 
     // Helper: run a single upsert with retry and per-row isolation so one bad
@@ -1388,6 +1451,60 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
         v.bp_systolic, v.bp_diastolic, v.rbs, v.meal_type,
         v.weight_kg, v.pulse, v.spo2, v.body_fat,
         v.muscle_mass, v.bmi, v.waist, v.created_at,
+      ]);
+    }
+
+
+    // -------------------------
+    // Lab Results UPSERT  (patient-app self-logged labs)
+    // -------------------------
+    // Mirror Genie `lab_results` rows (source='patient') into the scribe
+    // `lab_results` table so the doctor's visit page sees the patient's
+    // self-entered HbA1c / LDL / TSH / Haemoglobin / eGFR alongside the
+    // doctor-entered or Healthray-imported values. Idempotent via
+    // genie_id (added in 2026-04-28_lab_results_genie_id.sql). Genie's
+    // numeric `value` maps to scribe's `result`; status ('normal'|'high'|
+    // 'low') maps to scribe's flag convention ('HIGH'|'LOW'|null).
+
+    for (const lab of labs) {
+      const value = lab.value != null ? parseFloat(lab.value) : null;
+      if (!Number.isFinite(value)) continue;
+      if (!lab.test_name) continue;
+      const flag =
+        lab.status === 'high' ? 'HIGH' :
+        lab.status === 'low' ? 'LOW' : null;
+      const canonical = getCanonical(lab.test_name) || lab.test_name;
+      await safeUpsert('labs', `
+        INSERT INTO lab_results (
+          patient_id, genie_id, test_date, test_name, canonical_name,
+          result, unit, ref_range, flag, panel_name,
+          source, created_at
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+        )
+        ON CONFLICT (genie_id) DO UPDATE SET
+          test_date      = EXCLUDED.test_date,
+          test_name      = EXCLUDED.test_name,
+          canonical_name = EXCLUDED.canonical_name,
+          result         = EXCLUDED.result,
+          unit           = EXCLUDED.unit,
+          ref_range      = EXCLUDED.ref_range,
+          flag           = EXCLUDED.flag,
+          panel_name     = EXCLUDED.panel_name
+      `, [
+        scribePatientId,
+        lab.id,
+        lab.test_date || null,
+        lab.test_name,
+        canonical,
+        value,
+        lab.unit || null,
+        lab.reference_range || null,
+        flag,
+        lab.lab_name || null,
+        'patient_app',
+        lab.created_at || new Date().toISOString(),
       ]);
     }
 
@@ -2115,6 +2232,7 @@ module.exports = {
   syncMedicationsToGenie,
   deleteGenieMedication,
   updateGenieMedication,
+  updateGenieLabByGenieId,
   syncLabsToGenie,
   syncDocumentsToGenie,
   syncAppointmentToGenie,

@@ -23,8 +23,17 @@ pool
 const SYSTEM_PROMPT = `You are a clinical assistant briefing a doctor before they see a patient.
 Be concise, specific, and clinical. Use exact numbers from the data provided.
 Never be vague. Never use generic language.
-Format output as JSON with three arrays: red_alerts, amber_alerts, green_notes.
-Each item is a single sentence. Maximum 3 items per zone.
+Format output as JSON with four fields: narrative, red_alerts, amber_alerts, green_notes.
+
+The "narrative" field is a single prose paragraph (4–7 sentences, ~100–140 words) that gives the doctor an at-a-glance briefing they could read in 20 seconds and walk into the room. It MUST:
+- Open with: "<First name> is a <age>-year-old <man|woman> with <comma-separated active conditions>, on <N> active medications."
+- State visit number and months on programme (use the values provided).
+- Highlight what is performing well using exact numbers (e.g. "HbA1c is controlled at 5.9% and LDL is at target (22.3 mg/dL)").
+- Pivot with "However," / "But" / "Three things need your attention before you start:" and concisely flag what needs action today, citing exact numbers and class consequences.
+- Use plain clinical prose — no bullet points, no markdown, no emojis inside the narrative.
+- Do not hallucinate numbers; only use values present in the data below.
+
+red_alerts, amber_alerts, green_notes are arrays of single-sentence items (max 3 each).
 
 Use BOTH the rule-engine alerts AND the lab panel below as source material.
 When a lab has a prior value, compare: note direction (↑/↓), magnitude, and whether it crossed into/out of target range.
@@ -98,19 +107,100 @@ function formatLabs(labHistory) {
   return lines.join("\n");
 }
 
-async function generateAiBrief(patient, diagnoses, alerts, labHistory) {
+function fmtMedList(meds, label) {
+  if (!meds || meds.length === 0) return `${label}: (none)`;
+  const lines = meds.map((m) => {
+    const bits = [m.name];
+    if (m.dose) bits.push(m.dose);
+    if (m.frequency) bits.push(m.frequency);
+    if (m.timing) bits.push(`(${m.timing})`);
+    if (m.started_date) bits.push(`started ${String(m.started_date).slice(0, 10)}`);
+    if (m.stopped_date) bits.push(`stopped ${String(m.stopped_date).slice(0, 10)}`);
+    if (m.stop_reason) bits.push(`reason: ${m.stop_reason}`);
+    return `  - ${bits.join(" · ")}`;
+  });
+  return `${label}:\n${lines.join("\n")}`;
+}
+
+function fmtVitals(vitals) {
+  if (!vitals || vitals.length === 0) return "Vitals: (none recorded)";
+  const lines = vitals.slice(0, 5).map((v) => {
+    const parts = [];
+    if (v.bp_sys || v.bp_dia) parts.push(`BP ${v.bp_sys || "?"}/${v.bp_dia || "?"}`);
+    if (v.pulse) parts.push(`HR ${v.pulse}`);
+    if (v.spo2) parts.push(`SpO2 ${v.spo2}%`);
+    if (v.temp) parts.push(`Temp ${v.temp}`);
+    if (v.weight) parts.push(`Wt ${v.weight}kg`);
+    if (v.bmi) parts.push(`BMI ${v.bmi}`);
+    if (v.waist) parts.push(`Waist ${v.waist}`);
+    const date = v.recorded_at ? String(v.recorded_at).slice(0, 10) : "";
+    return `  - ${date} · ${parts.join(", ")}`;
+  });
+  return `Vitals (most recent first, up to 5):\n${lines.join("\n")}`;
+}
+
+function fmtPrep(prep) {
+  if (!prep) return "Compliance & symptoms (since last visit): (not recorded)";
+  const out = [];
+  out.push(`  Reported compliance: ${prep.medPct != null ? prep.medPct + "%" : "not recorded"}`);
+  if (prep.missed) {
+    const missed = Array.isArray(prep.missed) ? prep.missed.join(", ") : String(prep.missed);
+    if (missed) out.push(`  Missed doses: ${missed}`);
+  }
+  if (prep.symptoms && prep.symptoms.length) {
+    const syms = prep.symptoms
+      .map((s) => (typeof s === "string" ? s : s?.label || s?.name || s?.text))
+      .filter(Boolean)
+      .join(", ");
+    if (syms) out.push(`  Symptoms reported: ${syms}`);
+  }
+  return `Compliance & symptoms (since last visit):\n${out.join("\n")}`;
+}
+
+function fmtDiagnoses(diagnoses) {
+  if (!diagnoses || diagnoses.length === 0) return "Diagnoses: (none recorded)";
+  const lines = diagnoses.slice(0, 15).map((d) => {
+    const bits = [d.label || d.name || "Unknown"];
+    if (d.since) bits.push(`since ${d.since}`);
+    if (d.severity) bits.push(d.severity);
+    if (d.is_active === false) bits.push("(inactive)");
+    return `  - ${bits.join(" · ")}`;
+  });
+  return `Diagnoses (full list):\n${lines.join("\n")}`;
+}
+
+async function generateAiBrief(patient, diagnoses, alerts, labHistory, ctx = {}) {
   if (!ANTHROPIC_KEY) return null;
   const total = alerts.red.length + alerts.amber.length + alerts.green.length;
   if (total === 0) return null;
 
-  const dx =
-    diagnoses
-      .map((d) => d.label)
-      .filter(Boolean)
-      .join(", ") || "Not recorded";
+  const firstName = (patient?.name || "").trim().split(/\s+/)[0] || "Patient";
+  const sexWord =
+    patient?.sex && /^m/i.test(patient.sex)
+      ? "man"
+      : patient?.sex && /^f/i.test(patient.sex)
+        ? "woman"
+        : "patient";
   const userContent = [
     `Patient: ${patient?.name || "Unknown"}, ${patient?.age ?? "?"}y${patient?.sex ? ", " + patient.sex : ""}`,
-    `Diagnoses: ${dx}`,
+    `First name (use in narrative opener): ${firstName}`,
+    `Sex word (use in narrative opener): ${sexWord}`,
+    `Phone: ${patient?.phone || "—"}`,
+    `Patient ID / file: ${patient?.file_no || patient?.id || "—"}`,
+    `Visit number: ${ctx.totalVisits ?? "?"}`,
+    `Months on programme: ${ctx.monthsWithGini ?? "?"}`,
+    `Care phase: ${ctx.carePhase ?? "?"}`,
+    `Active medications count: ${ctx.activeMedsCount ?? "?"}`,
+    ``,
+    fmtDiagnoses(diagnoses),
+    ``,
+    fmtMedList(ctx.activeMeds || [], "Active medications"),
+    ``,
+    fmtMedList(ctx.stoppedMeds || [], "Recently stopped (last 60 days)"),
+    ``,
+    fmtVitals(ctx.vitals || []),
+    ``,
+    fmtPrep(ctx.prep),
     ``,
     `Rule engine alerts:`,
     formatAlerts(alerts),
@@ -118,7 +208,7 @@ async function generateAiBrief(patient, diagnoses, alerts, labHistory) {
     `Lab panel (latest vs. previous, newest tests first):`,
     formatLabs(labHistory),
     ``,
-    `Generate a clinical briefing. Return only valid JSON. When labs have changed meaningfully vs. previous, surface that in the appropriate zone with exact numbers and delta.`,
+    `Generate the clinical briefing as described in the system prompt. Return only valid JSON with fields narrative, red_alerts, amber_alerts, green_notes. When labs or vitals have changed meaningfully vs. previous, surface that in the narrative and the appropriate zone with exact numbers and delta. Cross-reference active medications against diagnoses to flag protocol gaps (e.g. nephropathy without ACE/ARB, CAD without statin/aspirin) and stopped high-weight drugs against their corresponding biomarker trends.`,
   ].join("\n");
 
   try {
@@ -131,7 +221,7 @@ async function generateAiBrief(patient, diagnoses, alerts, labHistory) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 600,
+        max_tokens: 1100,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
       }),
@@ -146,6 +236,7 @@ async function generateAiBrief(patient, diagnoses, alerts, labHistory) {
       .trim();
     const parsed = JSON.parse(text);
     return {
+      narrative: typeof parsed.narrative === "string" ? parsed.narrative.trim() : null,
       red: (parsed.red_alerts || []).slice(0, 3),
       amber: (parsed.amber_alerts || []).slice(0, 3),
       green: (parsed.green_notes || []).slice(0, 3),
@@ -291,15 +382,50 @@ router.get("/patients/:id/summary", async (req, res) => {
       prep,
     });
 
-    // ── 6. Generate AI brief (async, non-blocking for cache write) ──
-    const ai = await generateAiBrief(patient, sortedDiagnoses, rules, labHistory);
+    // ── 6. Compute visit context for narrative (cheap, single query) ──
+    const consR = await pool.query(
+      `SELECT visit_date FROM consultations WHERE patient_id=$1 ORDER BY visit_date ASC`,
+      [pid],
+    );
+    const totalVisits = consR.rows.length;
+    const firstVisitDate = consR.rows[0]?.visit_date || null;
+    let monthsWithGini = 0;
+    if (firstVisitDate) {
+      monthsWithGini = Math.max(
+        0,
+        Math.floor((Date.now() - new Date(firstVisitDate).getTime()) / (1000 * 60 * 60 * 24 * 30)),
+      );
+    }
+    let carePhase = "Phase 1 · Control";
+    if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
+    else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
+
+    // ── 7. Generate AI brief (async, non-blocking for cache write) ──
+    const ai = await generateAiBrief(patient, sortedDiagnoses, rules, labHistory, {
+      totalVisits,
+      monthsWithGini,
+      carePhase,
+      activeMedsCount: activeMedsR.rows.length,
+      activeMeds: activeMedsR.rows,
+      stoppedMeds: stoppedMedsR.rows,
+      vitals: vitalsR.rows,
+      prep,
+    });
 
     const generatedAt = new Date().toISOString();
     const latestReport = latestReportR.rows[0] || null;
     // dataAsOf = the date of the most recent piece of data used by the rules
     const dataAsOf =
       latestReport?.doc_date || latestReport?.created_at || labsR.rows[0]?.test_date || generatedAt;
-    const payload = { rules, ai, generatedAt, dataAsOf, cached: false, latestReport };
+    const payload = {
+      rules,
+      ai,
+      generatedAt,
+      dataAsOf,
+      cached: false,
+      latestReport,
+      visitContext: { totalVisits, monthsWithGini, carePhase },
+    };
 
     // ── 7. Store in cache ──
     if (resolvedApptId) {

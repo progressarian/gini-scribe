@@ -776,7 +776,10 @@ export async function runDailyOpdBackfill(dateStr) {
   }
   // Wait behind the global cron lock so this heavy re-parse never runs while
   // the 5-min sync or lab sync is already working the DB.
-  const releaseLock = await tryAcquireCronLock("Daily OPD Backfill", CRON_LOCK_KEYS.DAILY_OPD_BACKFILL);
+  const releaseLock = await tryAcquireCronLock(
+    "Daily OPD Backfill",
+    CRON_LOCK_KEYS.DAILY_OPD_BACKFILL,
+  );
   if (!releaseLock) return { skippedRun: true };
   dailyBackfillInFlight = true;
   const date = dateStr || toISTDate(new Date().toISOString());
@@ -879,7 +882,10 @@ export async function runStuckStatusRecovery(windowDays) {
     log("Stuck Recovery", "Skipping — previous run still in progress");
     return { skippedRun: true };
   }
-  const releaseLock = await tryAcquireCronLock("Stuck Status Recovery", CRON_LOCK_KEYS.STUCK_STATUS_RECOVERY);
+  const releaseLock = await tryAcquireCronLock(
+    "Stuck Status Recovery",
+    CRON_LOCK_KEYS.STUCK_STATUS_RECOVERY,
+  );
   if (!releaseLock) return { skippedRun: true };
   stuckRecoveryInFlight = true;
   const days = Number.isFinite(+windowDays)
@@ -938,7 +944,10 @@ export async function runMissingMedsRecovery() {
     log("Missing Meds Recovery", "Skipping — previous run still in progress");
     return { skippedRun: true };
   }
-  const releaseLock = await tryAcquireCronLock("Missing Meds Recovery", CRON_LOCK_KEYS.MISSING_MEDS_RECOVERY);
+  const releaseLock = await tryAcquireCronLock(
+    "Missing Meds Recovery",
+    CRON_LOCK_KEYS.MISSING_MEDS_RECOVERY,
+  );
   if (!releaseLock) return { skippedRun: true };
   missingMedsRecoveryInFlight = true;
 

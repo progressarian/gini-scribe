@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gini — Summary & Prescription Examples</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f0f4f7;--white:#fff;--ink:#1a2332;--ink2:#3d4f63;--ink3:#6b7d90;
+  --bd:#dde3ea;--bd2:#c4cdd8;
+  --tl:#009e8c;--tll:#e6f6f4;--tlb:rgba(0,158,140,.22);
+  --nv:#0e2240;
+  --re:#d94f4f;--rel:#fdf0f0;--reb:rgba(217,79,79,.18);
+  --am:#d97a0a;--aml:#fef6e6;--amb:rgba(217,122,10,.18);
+  --gn:#15803d;--gnl:#edfcf0;--gnb:rgba(21,128,61,.18);
+  --sk:#2563eb;--skl:#eff6ff;
+  --sh:0 1px 3px rgba(0,0,0,.08);
+  --r:10px;--fb:'Outfit',sans-serif;--fd:'Instrument Serif',serif;--fm:'DM Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--fb);color:var(--ink);background:var(--bg);font-size:13px}
+
+/* nav */
+.nav{background:var(--nv);padding:0 24px;height:52px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
+.nav-logo{font-family:var(--fd);font-size:20px;color:#fff}.nav-logo em{font-style:italic;color:#5dd6ca}
+.nav-sep{width:1px;height:18px;background:rgba(255,255,255,.15)}
+.nav-label{font-size:11px;color:rgba(255,255,255,.5)}
+.tab-bar{background:var(--white);border-bottom:2px solid var(--bd);display:flex;gap:0;padding:0 24px;position:sticky;top:52px;z-index:99}
+.tab{padding:13px 18px;font-size:12px;font-weight:600;color:var(--ink3);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .15s}
+.tab:hover{color:var(--ink)}.tab.active{color:var(--tl);border-bottom-color:var(--tl)}
+.section{display:none;max-width:900px;margin:24px auto;padding:0 24px 60px}
+.section.show{display:block}
+.section-header{margin-bottom:20px}
+.section-title{font-family:var(--fd);font-size:24px;color:var(--nv);margin-bottom:5px}
+.section-sub{font-size:12px;color:var(--ink3);line-height:1.6}
+.example-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--ink3);margin-bottom:8px;margin-top:20px;display:flex;align-items:center;gap:8px}
+.example-label:after{content:'';flex:1;height:1px;background:var(--bd)}
+
+
+
+/* ─── PRINTED PRESCRIPTION ─── */
+.rx-page{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--shm);margin-bottom:16px;overflow:hidden}
+.rx-header{background:var(--nv);padding:16px 22px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.rx-hosp-name{font-family:var(--fd);font-size:22px;color:#fff;font-style:italic}
+.rx-hosp-tag{font-size:10px;color:rgba(255,255,255,.5);margin-top:2px}
+.rx-doc{text-align:right}
+.rx-doc-name{font-size:13px;font-weight:700;color:#fff}
+.rx-doc-cred{font-size:10px;color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}
+.rx-patient-bar{background:var(--bg);padding:10px 22px;display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.rx-pt-name{font-size:14px;font-weight:700;color:var(--nv)}
+.rx-pt-meta{font-size:11px;color:var(--ink3)}
+.rx-pt-pills{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap}
+.rx-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+.rx-body{padding:18px 22px}
+
+/* Summary block */
+.rx-summary-block{background:var(--tll);border:1px solid var(--tlb);border-radius:7px;padding:12px 14px;margin-bottom:16px;font-size:12px;line-height:1.8;color:var(--ink)}
+.rx-summary-block .sum-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin-bottom:7px}
+
+/* Diagnoses */
+.rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd)}
+.rx-dx{display:flex;gap:10px;align-items:flex-start;margin-bottom:7px}
+.rx-dx-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:18px;padding-top:1px}
+.rx-dx-body{flex:1}
+.rx-dx-name{font-size:13px;font-weight:600;color:var(--ink)}
+.rx-dx-detail{font-size:11px;color:var(--ink3);margin-top:1px}
+.rx-dx-badge{font-size:9px;font-weight:700;padding:1px 7px;border-radius:4px;margin-left:7px}
+
+/* Goals */
+.rx-goals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px}
+.rx-goal{background:var(--bg);border-radius:6px;padding:8px 10px;border-left:3px solid var(--tl)}
+.rx-goal-label{font-size:10px;font-weight:700;color:var(--tl);margin-bottom:3px}
+.rx-goal-val{font-family:var(--fm);font-size:12px;font-weight:500}
+.rx-goal-current{font-size:10px;color:var(--ink3);margin-top:2px}
+
+/* Biomarker trend */
+.rx-bio-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:4px}
+.rx-bio{background:var(--bg);border-radius:6px;padding:8px 10px}
+.rx-bio-name{font-size:10px;color:var(--ink3);margin-bottom:4px}
+.rx-bio-val{font-family:var(--fm);font-size:14px;font-weight:500}
+.rx-bio-trend{font-size:10px;margin-top:2px}
+.rx-bio-sparkline{display:flex;gap:2px;align-items:flex-end;height:20px;margin-top:4px}
+.sp-bar{width:8px;border-radius:1px 1px 0 0;min-height:2px}
+
+/* Medicines */
+.rx-med{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg)}
+.rx-med:last-child{border:none}
+.rx-med-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:20px;padding-top:2px}
+.rx-med-body{flex:1}
+.rx-med-name{font-size:13px;font-weight:700;color:var(--ink)}
+.rx-med-brand{font-size:11px;color:var(--ink3)}
+.rx-med-right{text-align:right;flex-shrink:0}
+.rx-med-dose{font-family:var(--fm);font-size:12px;font-weight:500}
+.rx-med-timing{font-size:11px;color:var(--ink3)}
+.rx-ext-badge{font-size:9px;background:var(--skl);color:var(--sk);font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
+
+/* Referrals + Tests */
+.rx-ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.rx-ref{background:var(--skl);border-radius:6px;padding:9px 11px;border-left:3px solid var(--sk)}
+.rx-ref-title{font-size:10px;font-weight:700;color:var(--sk);margin-bottom:4px}
+.rx-ref-body{font-size:12px;color:var(--ink);line-height:1.5}
+.rx-test{background:var(--aml);border-radius:6px;padding:9px 11px;border-left:3px solid var(--am)}
+.rx-test-title{font-size:10px;font-weight:700;color:var(--am);margin-bottom:4px}
+.rx-test-item{font-size:12px;color:var(--ink);padding:2px 0;display:flex;gap:6px}
+
+/* footer */
+.rx-footer{background:var(--bg);border-top:1px solid var(--bd);padding:10px 22px;display:flex;justify-content:space-between;align-items:center}
+.rx-sig{font-size:11px;color:var(--ink3)}
+.rx-next{font-size:11px;font-weight:700;color:var(--nv)}
+
+/* utilities */
+.red{color:var(--re)}.amb{color:var(--am)}.grn{color:var(--gn)}.blu{color:var(--sk)}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+.badge-red{background:var(--rel);color:var(--re)}.badge-amb{background:var(--aml);color:var(--am)}.badge-grn{background:var(--gnl);color:var(--gn)}
+</style>
+</head>
+<body>
+
+
+<!-- ════════════════════════════════════════════
+     TAB 3 — PRINTED PRESCRIPTION
+════════════════════════════════════════════ -->
+<div class="section show" id="sec-rx">
+
+<div class="rx-page">
+  <!-- Header -->
+  <div class="rx-header">
+    <div>
+      <div class="rx-hosp-name">Gini Advanced Care Hospital</div>
+      <div class="rx-hosp-tag">NABH Accredited · SCO 14-15, Sector 68, SAS Nagar, Mohali 160068 · +91 81463 20100</div>
+    </div>
+    <div class="rx-doc">
+      <div class="rx-doc-name">Dr. Anil Bhansali</div>
+      <div class="rx-doc-cred">Director & Chief Endocrinologist<br>Former Head, PGIMER Chandigarh<br>MD · DM · FAMS · 700+ publications</div>
+    </div>
+  </div>
+
+  <!-- Patient bar -->
+  <div class="rx-patient-bar">
+    <div>
+      <div class="rx-pt-name">Kulwinder Kaur Randhawa</div>
+      <div class="rx-pt-meta">44 yrs · Female · P_11822 · 27 April 2026 · Visit 4</div>
+    </div>
+    <div class="rx-pt-pills">
+      <span class="rx-pill" style="background:var(--aml);color:var(--am)">Phase 2 · Stabilize</span>
+      <span class="rx-pill" style="background:var(--tll);color:var(--tl)">8 months on programme</span>
+    </div>
+  </div>
+
+  <div class="rx-body">
+
+    <!-- Visit summary -->
+    <div class="rx-summary-block">
+      <div class="sum-title">Visit summary</div>
+      HbA1c has improved from 9.8% at first visit to 7.4% today over 8 months — diabetes control progressing well. Continuing Phase 2 (Stabilize). Blood pressure is not controlled at 148/94 on ARB + CCB double therapy — adding Indapamide as triple therapy this visit. Target BP below 130/80. Weight up 1.4 kg — advised diet and daily walking. Referred for fundus exam and foot Doppler. Kidney screening tests ordered.
+    </div>
+
+    <!-- Diagnoses -->
+    <div class="rx-section-title">Diagnoses</div>
+    <div class="rx-dx">
+      <div class="rx-dx-num">1.</div>
+      <div class="rx-dx-body">
+        <div class="rx-dx-name">Type 2 Diabetes Mellitus (Since 2018 · Age of onset: 36 yrs)<span class="rx-dx-badge" style="background:var(--aml);color:var(--am)">Improving</span></div>
+        <div class="rx-dx-detail">HbA1c 7.4% (↓ from 9.8% · target ≤ 7%) · FBS 134 mg/dL (↓ from 162)</div>
+      </div>
+    </div>
+    <div class="rx-dx">
+      <div class="rx-dx-num">2.</div>
+      <div class="rx-dx-body">
+        <div class="rx-dx-name">Hypertension<span class="rx-dx-badge" style="background:var(--rel);color:var(--re)">Uncontrolled</span></div>
+        <div class="rx-dx-detail">BP 148/94 mmHg · On ARB + CCB · Adding 3rd agent this visit · Target < 130/80</div>
+      </div>
+    </div>
+    <div class="rx-dx">
+      <div class="rx-dx-num">3.</div>
+      <div class="rx-dx-body">
+        <div class="rx-dx-name">Dyslipidaemia<span class="rx-dx-badge" style="background:var(--gnl);color:var(--gn)">Controlled</span></div>
+        <div class="rx-dx-detail">LDL 88 mg/dL (target < 100) · On Rosuvastatin</div>
+      </div>
+    </div>
+    <div class="rx-dx">
+      <div class="rx-dx-num">4.</div>
+      <div class="rx-dx-body">
+        <div class="rx-dx-name">Dual Adiposity (Obesity)<span class="rx-dx-badge" style="background:var(--aml);color:var(--am)">Active</span></div>
+        <div class="rx-dx-detail">BMI 28.2 · Weight 72.4 kg · ↑ 1.4 kg since last visit · Target: below 70 kg</div>
+      </div>
+    </div>
+
+    <!-- Goals -->
+    <div class="rx-section-title">Goals for next visit</div>
+    <div class="rx-goals">
+      <div class="rx-goal">
+        <div class="rx-goal-label">HbA1c — at target</div>
+        <div class="rx-goal-val" style="color:var(--am)">≤ 7.0%</div>
+        <div class="rx-goal-current">Today: 7.4% · ↓ from 9.8%</div>
+      </div>
+      <div class="rx-goal">
+        <div class="rx-goal-label">Blood pressure — control</div>
+        <div class="rx-goal-val" style="color:var(--re)">< 130/80</div>
+        <div class="rx-goal-current">Today: 148/94 — triple therapy started</div>
+      </div>
+      <div class="rx-goal">
+        <div class="rx-goal-label">Weight — reduction</div>
+        <div class="rx-goal-val" style="color:var(--am)">Below 70 kg</div>
+        <div class="rx-goal-current">Today: 72.4 kg · ↑ 1.4 kg · lose ~2.5 kg</div>
+      </div>
+    </div>
+
+    <!-- Biomarker trends -->
+    <div class="rx-section-title">Biomarker trends — last 4 visits</div>
+    <div class="rx-bio-grid">
+      <div class="rx-bio">
+        <div class="rx-bio-name">HbA1c (%)</div>
+        <div class="rx-bio-val" style="color:var(--am)">7.4</div>
+        <div class="rx-bio-trend grn">↓ from 9.8 at first visit</div>
+        <div class="rx-bio-sparkline">
+          <div class="sp-bar" style="height:95%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:78%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:62%;background:var(--am)"></div>
+          <div class="sp-bar" style="height:50%;background:var(--am)"></div>
+        </div>
+      </div>
+      <div class="rx-bio">
+        <div class="rx-bio-name">FBS (mg/dL)</div>
+        <div class="rx-bio-val" style="color:var(--gn)">134</div>
+        <div class="rx-bio-trend grn">↓ from 246 at first visit</div>
+        <div class="rx-bio-sparkline">
+          <div class="sp-bar" style="height:100%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:80%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:60%;background:var(--am)"></div>
+          <div class="sp-bar" style="height:40%;background:var(--gn)"></div>
+        </div>
+      </div>
+      <div class="rx-bio">
+        <div class="rx-bio-name">BP (mmHg)</div>
+        <div class="rx-bio-val" style="color:var(--re)">148/94</div>
+        <div class="rx-bio-trend red">→ not improving</div>
+        <div class="rx-bio-sparkline">
+          <div class="sp-bar" style="height:90%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:85%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:90%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:88%;background:var(--re)"></div>
+        </div>
+      </div>
+      <div class="rx-bio">
+        <div class="rx-bio-name">LDL (mg/dL)</div>
+        <div class="rx-bio-val" style="color:var(--gn)">88</div>
+        <div class="rx-bio-trend grn">↓ at target</div>
+        <div class="rx-bio-sparkline">
+          <div class="sp-bar" style="height:100%;background:var(--re)"></div>
+          <div class="sp-bar" style="height:70%;background:var(--am)"></div>
+          <div class="sp-bar" style="height:55%;background:var(--am)"></div>
+          <div class="sp-bar" style="height:40%;background:var(--gn)"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Medicines -->
+    <div class="rx-section-title">Medicines — prescribed by Dr. Bhansali</div>
+    <div class="rx-med"><div class="rx-med-num">1.</div><div class="rx-med-body"><div class="rx-med-name">Metformin 500mg <span style="font-weight:400;font-size:11px;color:var(--ink3)">(Glycomet)</span></div><div class="rx-med-brand">Diabetes · for T2DM</div></div><div class="rx-med-right"><div class="rx-med-dose">BD</div><div class="rx-med-timing">After breakfast & dinner</div></div></div>
+    <div class="rx-med"><div class="rx-med-num">2.</div><div class="rx-med-body"><div class="rx-med-name">Empagliflozin 10mg <span style="font-weight:400;font-size:11px;color:var(--ink3)">(Jardiance)</span></div><div class="rx-med-brand">Diabetes (SGLT2) · for T2DM</div></div><div class="rx-med-right"><div class="rx-med-dose">OD</div><div class="rx-med-timing">With breakfast</div></div></div>
+    <div class="rx-med"><div class="rx-med-num">3.</div><div class="rx-med-body"><div class="rx-med-name">Telmisartan 40mg <span style="font-weight:400;font-size:11px;color:var(--ink3)">(Telma)</span></div><div class="rx-med-brand">Kidney / BP (ARB)</div></div><div class="rx-med-right"><div class="rx-med-dose">OD</div><div class="rx-med-timing">After breakfast</div></div></div>
+    <div class="rx-med"><div class="rx-med-num">4.</div><div class="rx-med-body"><div class="rx-med-name">Amlodipine 5mg <span style="font-weight:400;font-size:11px;color:var(--ink3)">(Amlokind)</span></div><div class="rx-med-brand">BP (CCB)</div></div><div class="rx-med-right"><div class="rx-med-dose">OD</div><div class="rx-med-timing">After dinner</div></div></div>
+    <div class="rx-med" style="background:var(--gnl);padding:8px 10px;border-radius:6px;margin-bottom:2px"><div class="rx-med-num">5.</div><div class="rx-med-body"><div class="rx-med-name">Indapamide 1.5mg <span style="font-weight:400;font-size:11px;color:var(--gn)">🆕 New this visit</span></div><div class="rx-med-brand">BP (Thiazide-like diuretic) · Triple therapy for BP</div></div><div class="rx-med-right"><div class="rx-med-dose">OD</div><div class="rx-med-timing">After breakfast</div></div></div>
+    <div class="rx-med"><div class="rx-med-num">6.</div><div class="rx-med-body"><div class="rx-med-name">Rosuvastatin 10mg <span style="font-weight:400;font-size:11px;color:var(--ink3)">(Crestor)</span></div><div class="rx-med-brand">Lipids</div></div><div class="rx-med-right"><div class="rx-med-dose">OD</div><div class="rx-med-timing">At bedtime</div></div></div>
+
+    <div class="rx-section-title" style="margin-top:14px">External medicines — prescribed by other doctors</div>
+    <div class="rx-med" style="background:var(--skl);padding:8px 10px;border-radius:6px"><div class="rx-med-num">—</div><div class="rx-med-body"><div class="rx-med-name">Levothyroxine 50mcg <span class="rx-ext-badge">External</span></div><div class="rx-med-brand">Prescribed by Dr. Priya Sharma (Endocrinology) · Do not modify</div></div><div class="rx-med-right"><div class="rx-med-dose">OD</div><div class="rx-med-timing">Empty stomach · 30 min before breakfast</div></div></div>
+
+    <!-- Referrals + Tests -->
+    <div class="rx-section-title">Referrals &amp; tests for next visit</div>
+    <div class="rx-ref-grid">
+      <div class="rx-ref">
+        <div class="rx-ref-title">👁 Eye — Fundus examination</div>
+        <div class="rx-ref-body">Referred to Dr. Sanghi (Ophthalmology)<br>Annual diabetic retinopathy screen — no prior fundus on record.</div>
+      </div>
+      <div class="rx-ref">
+        <div class="rx-ref-title">🦶 Vascular — Foot Doppler</div>
+        <div class="rx-ref-body">Referred to Dr. Harjoban Singh (Orthopaedics)<br>Peripheral vascular screen — claudication symptom noted.</div>
+      </div>
+    </div>
+    <div class="rx-test" style="margin-top:8px">
+      <div class="rx-test-title">🔬 Bring these reports to next visit (3 months)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px">
+        <div class="rx-test-item"><span>·</span><span>HbA1c</span></div>
+        <div class="rx-test-item"><span>·</span><span>Fasting glucose</span></div>
+        <div class="rx-test-item"><span>·</span><span>UACR (kidney)</span></div>
+        <div class="rx-test-item"><span>·</span><span>eGFR / Creatinine</span></div>
+        <div class="rx-test-item"><span>·</span><span>Lipid profile</span></div>
+        <div class="rx-test-item"><span>·</span><span>LFT (liver)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="rx-footer">
+    <div class="rx-sig">
+      <div style="font-weight:700">Dr. Anil Bhansali</div>
+      <div style="font-size:10px;color:var(--ink3)">Reg. No. MC/12345 · Date: 27 Apr 2026</div>
+    </div>
+    <div class="rx-next">📅 Next visit: 27 July 2026 · Come with all reports above</div>
+  </div>
+</div><!-- /rx-page -->
+</div><!-- /sec-rx -->
+
+<script>
+function show(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('show'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('sec-rx').classList.add('show');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

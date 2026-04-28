@@ -25,6 +25,7 @@ import healthLogRoutes from "./routes/health-logs.js";
 import visitRoutes from "./routes/visit.js";
 import syncRoutes from "./routes/sync.js";
 import summaryRoutes from "./routes/summary.js";
+import postVisitSummaryRoutes from "./routes/postVisitSummary.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
@@ -107,6 +108,7 @@ app.use("/api", alertRoutes);
 app.use("/api", healthLogRoutes);
 app.use("/api", visitRoutes);
 app.use("/api", summaryRoutes);
+app.use("/api", postVisitSummaryRoutes);
 app.use("/api", dashboardRoutes);
 
 // Serve frontend

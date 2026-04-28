@@ -3,6 +3,7 @@ import { fmtDate, fmtDateLong, fmtDateShort, getLabVal, MED_COLORS } from "./hel
 import ChangesPopover from "./ChangesPopover";
 import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard";
 import { LAB_ORDER_CHIPS } from "../../config/chips";
+import VisitGoals from "./VisitGoals";
 
 function buildRxHTML(
   patient,
@@ -185,6 +186,8 @@ const VisitPlan = memo(function VisitPlan({
   symptoms,
   conData,
   setConData,
+  onPrintRx,
+  printingRx,
 }) {
   const latestCon = consultations[0]?.con_data;
   const tests = latestCon?.investigations_to_order?.length
@@ -213,19 +216,11 @@ const VisitPlan = memo(function VisitPlan({
     if (!conData.follow_up) return { ...conData, follow_up: { tests_to_bring: [] } };
     return conData;
   }, [conData]);
+  // Backend PDF flow lives in VisitPage; keep a local fallback that no-ops
+  // if the parent didn't wire onPrintRx.
   const handlePrintRx = useCallback(() => {
-    const html = buildRxHTML(
-      patient,
-      doctor,
-      activeDx,
-      activeMeds,
-      consultations,
-      latestVitals,
-      doctorNote,
-      summary,
-    );
-    openPrintWindow(html);
-  }, [patient, doctor, activeDx, activeMeds, consultations, latestVitals, doctorNote, summary]);
+    if (onPrintRx) onPrintRx();
+  }, [onPrintRx]);
 
   const handlePrintMedCard = useCallback(() => {
     const grouped = {};
@@ -886,6 +881,9 @@ const VisitPlan = memo(function VisitPlan({
         );
       })()}
 
+      {/* GOALS for next visit */}
+      <VisitGoals patientId={patient?.id} goals={goals || []} />
+
       {/* SUMMARY */}
       <div className="sc" id="summary">
         <div className="sch">
@@ -904,8 +902,13 @@ const VisitPlan = memo(function VisitPlan({
             </span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn" onClick={handlePrintRx}>
-              🖨 Print Rx
+            <button
+              className="btn"
+              onClick={handlePrintRx}
+              disabled={printingRx}
+              style={printingRx ? { opacity: 0.6, cursor: "wait" } : undefined}
+            >
+              {printingRx ? "⏳ Generating…" : "🖨 Print Rx"}
             </button>
             <button className="btn" onClick={onMedCardTab}>
               💊 Print Med Card
@@ -962,8 +965,13 @@ const VisitPlan = memo(function VisitPlan({
                   ✓ Complete &amp; Save Visit
                 </button>
               )}
-              <button className="btn" onClick={handlePrintRx}>
-                Print Full Prescription
+              <button
+                className="btn"
+                onClick={handlePrintRx}
+                disabled={printingRx}
+                style={printingRx ? { opacity: 0.6, cursor: "wait" } : undefined}
+              >
+                {printingRx ? "⏳ Generating…" : "Print Full Prescription"}
               </button>
             </div>
           </div>

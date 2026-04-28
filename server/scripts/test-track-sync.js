@@ -180,6 +180,20 @@ async function run() {
         status: "taken",
       },
     ],
+    [
+      "lab_results",
+      {
+        patient_id: genieId,
+        test_name: "HbA1c",
+        value: 6.7,
+        unit: "%",
+        reference_range: "<5.7",
+        status: "high",
+        lab_name: "Self-logged",
+        test_date: today,
+        source: "patient", // pull filter is .eq("source","patient")
+      },
+    ],
   ];
 
   for (const [table, row] of seeds) {
@@ -215,6 +229,30 @@ async function run() {
       scribePatient.id,
     ]);
     console.log(`  ${t.padEnd(22)} ${r.rows[0].c}`);
+  }
+
+  // Verify the patient-app lab landed in scribe lab_results via the new
+  // genie_id pull path (added 2026-04-28). source='patient_app' is the
+  // tag genie-sync.cjs writes for these rows.
+  const labCheck = await pool.query(
+    `SELECT id, genie_id, test_name, result, source
+       FROM lab_results
+      WHERE patient_id = $1 AND source = 'patient_app'
+      ORDER BY created_at DESC LIMIT 5`,
+    [scribePatient.id],
+  );
+  console.log(`\nlab_results (source='patient_app') for this patient: ${labCheck.rows.length}`);
+  labCheck.rows.forEach((r) =>
+    console.log(`  test=${r.test_name} result=${r.result} genie_id=${r.genie_id}`),
+  );
+  if (labCheck.rows.length === 0) {
+    console.error("FAIL: no lab_results landed in scribe — check upsertFailures.labs above");
+    process.exitCode = 1;
+  }
+
+  if (result.upsertFailures && Object.values(result.upsertFailures).some((v) => v > 0)) {
+    console.error("\nUpsert failures detected:", result.upsertFailures);
+    process.exitCode = 1;
   }
 }
 

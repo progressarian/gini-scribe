@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { makeNavClick } from "../lib/navClick";
 import { useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
+import { usePatientSummary } from "../queries/hooks/usePatientSummary.js";
 import { useVisit } from "../queries/hooks/useVisit";
 import { qk } from "../queries/keys";
 import usePatientStore from "../stores/patientStore";
@@ -32,7 +33,6 @@ import ChangesPopover from "../components/visit/ChangesPopover";
 import VisitDiagnoses from "../components/visit/VisitDiagnoses";
 import VisitMedications from "../components/visit/VisitMedications";
 import VisitPlan from "../components/visit/VisitPlan";
-import VisitRxPrint from "../components/visit/VisitRxPrint";
 import VisitLabsPanel from "../components/visit/VisitLabsPanel";
 import VisitHistoryPanel from "../components/visit/VisitHistoryPanel";
 import VisitDocsPanel from "../components/visit/VisitDocsPanel";
@@ -41,7 +41,11 @@ import VisitLoggedData from "../components/visit/VisitLoggedData";
 import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
+import PreVisitBrief from "../components/visit/PreVisitBrief";
+import PostVisitSummary from "../components/visit/PostVisitSummary";
 import DoctorSummarySection from "../components/visit/DoctorSummarySection";
+import PatientSummarySection from "../components/visit/PatientSummarySection";
+import RxPdfModal from "../components/visit/RxPdfModal";
 import VisitCoordPrep from "../components/visit/VisitCoordPrep";
 import SyncStatusBanner from "../components/visit/SyncStatusBanner";
 import {
@@ -244,6 +248,7 @@ export default function VisitPage() {
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
   const restorePatient = usePatientStore((s) => s.restorePatient);
   const doctor = useAuthStore((s) => s.currentDoctor);
+  const patientSummaryQ = usePatientSummary(dbPatientId);
   const endVisitAction = useVisitStore((s) => s.endVisit);
   const conData = useClinicalStore((s) => s.conData);
   const setConData = useClinicalStore((s) => s.setConData);
@@ -642,7 +647,154 @@ export default function VisitPage() {
   const toggleAI = useCallback(() => setAiOpen((o) => !o), []);
   const openEndModal = useCallback(() => setShowEndModal(true), []);
   const closeEndModal = useCallback(() => setShowEndModal(false), []);
-  const handlePrint = useCallback(() => window.print(), []);
+  // Visit payload — used by both AI summary generation and PDF print.
+  // Filters out tracking-only / stopped meds.
+  const visitPayload = useMemo(() => {
+    if (!data?.patient) return null;
+    const activeOnly = (derived?.uniqueActiveMeds || []).filter((m) => {
+      if (m.is_active === false) return false;
+      if (typeof m.id === "string" && m.id.startsWith("genie:")) return false;
+      if (m.source === "manual" && !m.consultation_id) return false;
+      return true;
+    });
+    return {
+      patient: data.patient,
+      doctor,
+      summary: data.summary,
+      activeDx: derived?.activeDx || [],
+      activeMeds: activeOnly,
+      latestVitals: derived?.latestV || null,
+      prevVitals: derived?.prevV || null,
+      labResults: data.labResults || [],
+      labHistory: data.labHistory || {},
+      consultations: data.consultations || [],
+      goals: data.goals || [],
+    };
+  }, [data, derived, doctor]);
+
+  const [printingRx, setPrintingRx] = useState(false);
+  const [rxModal, setRxModal] = useState({
+    open: false,
+    loading: false,
+    status: "",
+    blobUrl: null,
+    error: null,
+  });
+  const rxBlobRef = useRef(null);
+
+  const closeRxModal = useCallback(() => {
+    setRxModal({ open: false, loading: false, status: "", blobUrl: null, error: null });
+    if (rxBlobRef.current) {
+      try {
+        URL.revokeObjectURL(rxBlobRef.current);
+      } catch {
+        // ignore
+      }
+      rxBlobRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rxBlobRef.current) {
+        try {
+          URL.revokeObjectURL(rxBlobRef.current);
+        } catch {
+          // ignore
+        }
+        rxBlobRef.current = null;
+      }
+    };
+  }, []);
+
+  // Pick the patient-facing summary text the prescription should print.
+  // Scoping rules:
+  //   1. If we have a current appointment id and a saved version matches it,
+  //      use that version (the visit's own summary).
+  //   2. If we have a current appointment id but no version matches, return
+  //      "" — the caller will auto-generate one for this visit. We never
+  //      reuse an OLDER visit's summary on a new visit (would be stale).
+  //   3. If there's no current appointment id at all (opened outside an OPD
+  //      flow), fall back to the latest saved version OR any version with a
+  //      null appointment_id, so manually-saved summaries still print.
+  const pickVisitSummaryText = useCallback(() => {
+    const versions = patientSummaryQ.data?.versions || [];
+    if (versions.length === 0) return "";
+    if (opdApptId) {
+      const forAppt = versions.find((v) => Number(v.appointment_id) === Number(opdApptId));
+      return forAppt?.content || "";
+    }
+    const noAppt = versions.find((v) => v.appointment_id == null);
+    return noAppt?.content || versions[0]?.content || "";
+  }, [patientSummaryQ.data, opdApptId]);
+
+  // On print: if this visit already has a saved summary, reuse it. Otherwise
+  // generate one once (tied to this appointment_id) and save it — subsequent
+  // prints will reuse it without hitting the AI again. The doctor can still
+  // regenerate / edit manually from the Patient Summary card.
+  const resolveVisitSummaryText = useCallback(async () => {
+    const existing = pickVisitSummaryText();
+    if (existing) return existing;
+    if (!visitPayload || !dbPatientId) return "";
+
+    setRxModal((m) => ({ ...m, status: "Generating patient summary…" }));
+    try {
+      const { data: gen } = await api.post(`/api/visit/${dbPatientId}/patient-summary/generate`, {
+        ...visitPayload,
+        appointment_id: opdApptId || null,
+      });
+      await patientSummaryQ.refetch();
+      return gen?.version?.content || "";
+    } catch (err) {
+      console.warn("[Visit] Patient summary generation failed:", err.message);
+      return "";
+    }
+  }, [pickVisitSummaryText, visitPayload, dbPatientId, opdApptId, patientSummaryQ]);
+
+  const handlePrint = useCallback(async () => {
+    if (!visitPayload) return;
+    if (printingRx) return;
+    setPrintingRx(true);
+    setRxModal({
+      open: true,
+      loading: true,
+      status: "Preparing prescription…",
+      blobUrl: null,
+      error: null,
+    });
+    try {
+      const visitSummaryText = await resolveVisitSummaryText();
+      setRxModal((m) => ({ ...m, status: "Generating PDF…" }));
+      const payload = { ...visitPayload, visitSummaryText };
+      const res = await api.post(
+        `/api/visit/${dbPatientId || data.patient.id}/prescription.pdf`,
+        payload,
+        { responseType: "blob" },
+      );
+      const url = URL.createObjectURL(res.data);
+      rxBlobRef.current = url;
+      setRxModal({
+        open: true,
+        loading: false,
+        status: "",
+        blobUrl: url,
+        error: null,
+      });
+    } catch (err) {
+      console.error("[Visit] Print Rx failed:", err);
+      const msg = err?.response?.data?.error || err.message || "Unknown error";
+      setRxModal({
+        open: true,
+        loading: false,
+        status: "",
+        blobUrl: null,
+        error: msg,
+      });
+      toast(`Could not generate prescription: ${msg}`, "error");
+    } finally {
+      setPrintingRx(false);
+    }
+  }, [visitPayload, dbPatientId, data, resolveVisitSummaryText, printingRx]);
   const handlePrintMedCard = useCallback(() => {
     const patient = data?.patient;
     const activeMeds = derived?.uniqueActiveMeds || [];
@@ -650,13 +802,11 @@ export default function VisitPage() {
     printMedCard(patient, activeMeds);
   }, [data, derived]);
   const handlePrintBoth = useCallback(() => {
-    // Open the med-card popup synchronously so the user-gesture isn't lost,
-    // use a longer delay since the Rx dialog also queues up.
     const patient = data?.patient;
     const activeMeds = derived?.uniqueActiveMeds || [];
     if (patient) printMedCard(patient, activeMeds, 700);
-    window.print();
-  }, [data, derived]);
+    handlePrint();
+  }, [data, derived, handlePrint]);
   const handlePasteNotes = useCallback(() => setModal({ type: "pasteText" }), []);
 
   // ── Scroll spy: update jumpTarget based on scroll position ──
@@ -902,6 +1052,13 @@ export default function VisitPage() {
             </div>
             <div className="scrl" ref={scrollRef}>
               <SyncStatusBanner syncStatus={data.syncStatus} />
+              <PostVisitSummary
+                patientId={dbPatientId}
+                appointmentId={opdApptId}
+                patient={patient}
+                doctor={doctor}
+              />
+              <PreVisitBrief patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitSummaryPanel patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitBiomarkers
                 labResults={labResults}
@@ -938,6 +1095,11 @@ export default function VisitPage() {
                 onDeleteMed={(m) => setModal({ type: "deleteMed", data: m })}
                 onRestartMed={(m) => mutations.restartMedication(m.id)}
               />
+              <PatientSummarySection
+                patientId={dbPatientId}
+                appointmentId={opdApptId}
+                visitPayload={visitPayload}
+              />
               <DoctorSummarySection patientId={dbPatientId} appointmentId={opdApptId} />
               <VisitPlan
                 consultations={consultations}
@@ -962,6 +1124,8 @@ export default function VisitPage() {
                 onMedCardTab={() => setTab("medcard")}
                 conData={conData}
                 setConData={setConData}
+                onPrintRx={handlePrint}
+                printingRx={printingRx}
               />
               <div style={{ height: 28 }} />
             </div>
@@ -1296,32 +1460,23 @@ export default function VisitPage() {
         </div>
       </div>
 
-      {/* ── Print Prescription (hidden on screen, shown on print) ── */}
-      <VisitRxPrint
-        patient={patient}
-        doctor={doctor}
-        summary={summary}
-        symptoms={data.symptoms || []}
-        activeDx={activeDx}
-        activeMeds={uniqueActiveMeds}
-        stoppedMeds={uniqueStoppedMeds}
-        latestVitals={latestV}
-        prevVitals={prevV}
-        labResults={labResults}
-        labHistory={labHistory}
-        consultations={consultations}
-        goals={goals}
-        flags={flags}
-        doctorNote={doctorNote}
-        vitals={vitals}
-      />
-
       {/* ── AI Panel ── */}
       <VisitAIPanel
         open={aiOpen}
         onClose={() => setAiOpen(false)}
         patientContext={aiContext}
         initialMessage={aiInitialMsg}
+      />
+
+      {/* ── Prescription PDF Modal ── */}
+      <RxPdfModal
+        open={rxModal.open}
+        loading={rxModal.loading}
+        status={rxModal.status}
+        blobUrl={rxModal.blobUrl}
+        error={rxModal.error}
+        onClose={closeRxModal}
+        onRetry={handlePrint}
       />
 
       {/* ── End Visit Modal ── */}

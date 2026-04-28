@@ -138,7 +138,13 @@ export default function DoctorSummarySection({ patientId, appointmentId }) {
   const q = useDoctorSummary(patientId);
   const saveM = useSaveDoctorSummary(patientId);
 
-  const versions = q.data?.versions || [];
+  const allVersions = q.data?.versions || [];
+  // When this section is rendered for a specific appointment, scope the
+  // history (and the "current" version that prints on the Rx) to that
+  // appointment so each visit has its own pinned summary.
+  const versions = appointmentId
+    ? allVersions.filter((v) => Number(v.appointment_id) === Number(appointmentId))
+    : allVersions;
   const current = versions[0] || null;
 
   const [editing, setEditing] = useState(false);
@@ -201,16 +207,47 @@ export default function DoctorSummarySection({ patientId, appointmentId }) {
           marginBottom: 10,
           flexWrap: "wrap",
           gap: 8,
+          rowGap: 6,
         }}
       >
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>📝 Doctor's Summary</div>
-          <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+        <div style={{ minWidth: 0, lineHeight: 1.25 }}>
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: 14,
+              color: "#0f172a",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
+              lineHeight: 1.25,
+            }}
+          >
+            <span>📝 Doctor's Summary</span>
+            <span
+              title="Internal — visible only to the hospital team. Does not print on the prescription."
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: ".06em",
+                textTransform: "uppercase",
+                color: "#92400e",
+                background: "#fef3c7",
+                padding: "1px 6px",
+                borderRadius: 4,
+                lineHeight: 1.4,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Internal · Hospital only
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, lineHeight: 1.3 }}>
             {current
               ? `v${current.version} · ${fmtDateTime(current.created_at)}${
                   current.author_name ? ` · ${current.author_name}` : ""
                 }`
-              : "No summary yet"}
+              : "No summary for this visit yet — click Create to add one"}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -373,8 +410,20 @@ export default function DoctorSummarySection({ patientId, appointmentId }) {
           {current.content}
         </div>
       ) : (
-        <div style={{ fontSize: 13, color: "#94a3b8", fontStyle: "italic", padding: 8 }}>
-          No summary has been created yet. Click "Create Summary" to add one.
+        <div
+          style={{
+            fontSize: 13,
+            color: "#94a3b8",
+            fontStyle: "italic",
+            padding: "8px 10px",
+            background: "#fafbfc",
+            border: "1px dashed #e2e8f0",
+            borderRadius: 6,
+            lineHeight: 1.4,
+          }}
+        >
+          No internal summary has been written yet. Click "Create Summary" to add one — this is
+          visible only to the hospital team.
         </div>
       )}
 

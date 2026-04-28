@@ -740,9 +740,7 @@ const VisitMedications = memo(function VisitMedications({
                               </span>
                             )}
                             {displayMedName(m)}
-                            {(m.source === "patient_app" ||
-                              m.source === "manual" ||
-                              String(m.id).startsWith("genie:")) && (
+                            {(m.source === "patient_app" || m.source === "manual") && (
                               <span
                                 style={{
                                   display: "inline-block",
