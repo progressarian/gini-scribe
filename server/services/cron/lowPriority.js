@@ -1,27 +1,39 @@
 import { cronPool } from "../../config/db.js";
 
-// Shared Postgres advisory-lock key space for all background cron jobs.
-// Using a single key means only one cron job holds the lock at a time,
-// so healthray / lab / backfill / recovery can never pile onto the DB together.
-const CRON_LOCK_KEY = 918273645;
+// Per-family Postgres advisory-lock keys. Each background job family has its
+// own key so jobs of *different* families never block each other — only a job
+// of the same family (e.g. a still-running HealthRay sync) blocks the next
+// run of that same family. This prevents the OPD appointment tick from being
+// starved by Lab Sync / Backfill / Recovery jobs.
+export const CRON_LOCK_KEYS = {
+  HEALTHRAY_SYNC: 918273645,
+  LAB_SYNC: 918273646,
+  LAB_RECOVERY: 918273647,
+  DAILY_OPD_BACKFILL: 918273648,
+  STUCK_STATUS_RECOVERY: 918273649,
+  MISSING_MEDS_RECOVERY: 918273650,
+};
 
 /**
- * Try to acquire the global cron advisory lock. Returns a release() fn on success,
- * or null if another cron job already holds it (in which case the caller should skip this run).
+ * Try to acquire a per-family cron advisory lock. Returns a release() fn on success,
+ * or null if another run of the *same family* already holds it (caller should skip).
  * The lock is session-scoped to the checked-out client, so the client must be released after unlock.
  */
-export async function tryAcquireCronLock(label = "cron") {
+export async function tryAcquireCronLock(label = "cron", key) {
+  if (!Number.isFinite(key)) {
+    throw new Error(`tryAcquireCronLock(${label}): numeric key is required`);
+  }
   const client = await cronPool.connect();
   try {
-    const { rows } = await client.query("SELECT pg_try_advisory_lock($1) AS got", [CRON_LOCK_KEY]);
+    const { rows } = await client.query("SELECT pg_try_advisory_lock($1) AS got", [key]);
     if (!rows[0]?.got) {
       client.release();
-      console.log(`[Cron] ${label} skipped — another sync job holds the lock`);
+      console.log(`[Cron] ${label} skipped — previous ${label} run still holds its lock`);
       return null;
     }
     return async () => {
       try {
-        await client.query("SELECT pg_advisory_unlock($1)", [CRON_LOCK_KEY]);
+        await client.query("SELECT pg_advisory_unlock($1)", [key]);
       } catch (e) {
         console.error(`[Cron] ${label} unlock failed:`, e.message);
       } finally {

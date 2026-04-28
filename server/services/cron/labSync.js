@@ -25,7 +25,7 @@ import {
   downloadAndStoreLabPdf,
 } from "../lab/db.js";
 import { createLogger } from "../logger.js";
-import { tryAcquireCronLock, yieldToApp } from "./lowPriority.js";
+import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 
 const { log } = createLogger("Lab Sync");
 
@@ -170,7 +170,7 @@ export async function runLabSync(dateStr) {
   // Global cron advisory lock — ensures only one cron job (lab / healthray /
   // backfill / recovery) touches the DB at a time. If another job is holding
   // the lock, we skip this tick and let the next 5-min run pick up the work.
-  const releaseLock = await tryAcquireCronLock("Lab Sync");
+  const releaseLock = await tryAcquireCronLock("Lab Sync", CRON_LOCK_KEYS.LAB_SYNC);
   if (!releaseLock) return;
 
   status.isRunning = true;
@@ -287,7 +287,7 @@ export async function retryPendingLabCases() {
   if (!pending.length) return;
 
   // Respect the global cron lock so recovery never runs alongside the main sync.
-  const releaseLock = await tryAcquireCronLock("Lab Recovery");
+  const releaseLock = await tryAcquireCronLock("Lab Recovery", CRON_LOCK_KEYS.LAB_RECOVERY);
   if (!releaseLock) return;
 
   log("Recovery", `${pending.length} pending cases to retry`);

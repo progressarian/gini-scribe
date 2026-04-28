@@ -43,7 +43,7 @@ import {
   markAppointmentAsCheckedIn,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
-import { tryAcquireCronLock, yieldToApp } from "./lowPriority.js";
+import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 const { log, error } = createLogger("HealthRay Sync");
 
 // Pause between items so user HTTP requests get event-loop time between
@@ -632,7 +632,7 @@ async function runSync(date, prefetched = null) {
   // caller's lock — otherwise a long range backfill would starve itself.
   let releaseLock = null;
   if (!prefetched) {
-    releaseLock = await tryAcquireCronLock(`HealthRay Sync ${date}`);
+    releaseLock = await tryAcquireCronLock(`HealthRay Sync ${date}`, CRON_LOCK_KEYS.HEALTHRAY_SYNC);
     if (!releaseLock) return { date, skippedRun: true };
   }
 
@@ -776,7 +776,7 @@ export async function runDailyOpdBackfill(dateStr) {
   }
   // Wait behind the global cron lock so this heavy re-parse never runs while
   // the 5-min sync or lab sync is already working the DB.
-  const releaseLock = await tryAcquireCronLock("Daily OPD Backfill");
+  const releaseLock = await tryAcquireCronLock("Daily OPD Backfill", CRON_LOCK_KEYS.DAILY_OPD_BACKFILL);
   if (!releaseLock) return { skippedRun: true };
   dailyBackfillInFlight = true;
   const date = dateStr || toISTDate(new Date().toISOString());
@@ -879,7 +879,7 @@ export async function runStuckStatusRecovery(windowDays) {
     log("Stuck Recovery", "Skipping — previous run still in progress");
     return { skippedRun: true };
   }
-  const releaseLock = await tryAcquireCronLock("Stuck Status Recovery");
+  const releaseLock = await tryAcquireCronLock("Stuck Status Recovery", CRON_LOCK_KEYS.STUCK_STATUS_RECOVERY);
   if (!releaseLock) return { skippedRun: true };
   stuckRecoveryInFlight = true;
   const days = Number.isFinite(+windowDays)
@@ -938,7 +938,7 @@ export async function runMissingMedsRecovery() {
     log("Missing Meds Recovery", "Skipping — previous run still in progress");
     return { skippedRun: true };
   }
-  const releaseLock = await tryAcquireCronLock("Missing Meds Recovery");
+  const releaseLock = await tryAcquireCronLock("Missing Meds Recovery", CRON_LOCK_KEYS.MISSING_MEDS_RECOVERY);
   if (!releaseLock) return { skippedRun: true };
   missingMedsRecoveryInFlight = true;
 
