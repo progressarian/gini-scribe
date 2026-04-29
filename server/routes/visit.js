@@ -1404,13 +1404,18 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
       });
     }
 
-    // Restart is clinically a re-prescription — reset started_date to today
-    // AND clear consultation_id so the visit query's prescribed_date
-    // (COALESCE(c.visit_date, m.started_date)) falls back to the fresh
-    // started_date instead of the original consultation's old visit_date.
-    // Without this, the row keeps lining up with the old visit and the
-    // frontend grouping puts it under "Prev Visit".
-    //
+    // Restart is clinically a re-prescription — align the restarted med with
+    // the patient's most recent active prescription date so it groups under
+    // the same visit as the rest of the active regimen. Falls back to today
+    // when there is no other active med to align with.
+    const latestActive = await client.query(
+      `SELECT MAX(COALESCE(c.visit_date, m.started_date))::date AS d
+         FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
+        WHERE m.patient_id = $1 AND m.is_active = true AND m.id != $2`,
+      [pid, mid],
+    );
+    const alignDate = latestActive.rows[0]?.d || null;
+
     // If asStandalone is set on a child row, also clear the parent link so
     // the restarted med is no longer rendered as a support medicine.
     const promote = asStandalone === true && med.rows[0].parent_medication_id != null;
@@ -1419,15 +1424,15 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
           SET is_active = true,
               stopped_date = NULL,
               stop_reason = NULL,
-              started_date = CURRENT_DATE,
-              last_prescribed_date = CURRENT_DATE,
+              started_date = COALESCE($4::date, CURRENT_DATE),
+              last_prescribed_date = COALESCE($4::date, CURRENT_DATE),
               consultation_id = NULL,
               parent_medication_id = CASE WHEN $3::boolean THEN NULL ELSE parent_medication_id END,
               support_condition = CASE WHEN $3::boolean THEN NULL ELSE support_condition END,
               updated_at = NOW()
         WHERE id = $1 AND patient_id = $2 AND is_active = false
         RETURNING *`,
-      [mid, pid, promote],
+      [mid, pid, promote, alignDate],
     );
     if (!r.rows[0]) {
       await client.query("ROLLBACK");
@@ -1464,12 +1469,12 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
               SET is_active = true,
                   stopped_date = NULL,
                   stop_reason = NULL,
-                  started_date = CURRENT_DATE,
-                  last_prescribed_date = CURRENT_DATE,
+                  started_date = COALESCE($3::date, CURRENT_DATE),
+                  last_prescribed_date = COALESCE($3::date, CURRENT_DATE),
                   consultation_id = NULL,
                   updated_at = NOW()
             WHERE id = $1 AND patient_id = $2 AND is_active = false`,
-          [ch.id, pid],
+          [ch.id, pid, alignDate],
         );
         cascadeRestarted.push(ch.id);
       }
