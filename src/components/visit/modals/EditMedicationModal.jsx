@@ -19,15 +19,24 @@ const EditMedicationModal = memo(function EditMedicationModal({
   onClose,
   onSubmit,
 }) {
-  const [dose, setDose] = useState(medication.dose || "");
-  const [frequency, setFrequency] = useState(medication.frequency || "OD");
-  const [timings, setTimings] = useState(() => {
-    const existing = (medication.timing || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return TIMINGS.filter((t) => existing.some((e) => e.toLowerCase() === t.toLowerCase()));
-  });
+  const initialDose = medication.dose || "";
+  const initialFrequency = medication.frequency || "OD";
+  const initialTimingRaw = medication.timing || "";
+  const initialTimingTokens = initialTimingRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Preserve any legacy/freeform tokens (e.g. "Before meals") that aren't in
+  // the canonical TIMINGS list so editing other fields doesn't silently drop
+  // them.
+  const extraTimings = initialTimingTokens.filter(
+    (e) => !TIMINGS.some((t) => t.toLowerCase() === e.toLowerCase()),
+  );
+  const [dose, setDose] = useState(initialDose);
+  const [frequency, setFrequency] = useState(initialFrequency);
+  const [timings, setTimings] = useState(() =>
+    TIMINGS.filter((t) => initialTimingTokens.some((e) => e.toLowerCase() === t.toLowerCase())),
+  );
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -49,12 +58,11 @@ const EditMedicationModal = memo(function EditMedicationModal({
     if (loading) return;
     setLoading(true);
     try {
-      const payload = {
-        dose,
-        frequency,
-        timing: timings.join(", "),
-        reason,
-      };
+      const nextTiming = [...timings, ...extraTimings].join(", ");
+      const payload = { reason };
+      if (dose !== initialDose) payload.dose = dose;
+      if (frequency !== initialFrequency) payload.frequency = frequency;
+      if (nextTiming !== initialTimingRaw) payload.timing = nextTiming;
       const initialParent = medication.parent_medication_id
         ? String(medication.parent_medication_id)
         : "";
