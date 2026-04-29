@@ -497,12 +497,15 @@ const VisitSidebar = memo(function VisitSidebar({
         )}
 
         {/* Active Meds */}
-        {activeMeds.length > 0 && (
+        {(() => {
+          const parentMeds = activeMeds.filter((m) => !m.parent_medication_id);
+          if (parentMeds.length === 0) return null;
+          return (
           <div className="sbsec">
-            <div className="sbsec-title">Active Meds ({activeMeds.length})</div>
+            <div className="sbsec-title">Active Meds ({parentMeds.length})</div>
             {(() => {
               const groups = {};
-              activeMeds.forEach((m) => {
+              parentMeds.forEach((m) => {
                 const g = m.med_group || autoDetectGroup(m.name);
                 if (!groups[g]) groups[g] = [];
                 groups[g].push(m);
@@ -556,7 +559,8 @@ const VisitSidebar = memo(function VisitSidebar({
               });
             })()}
           </div>
-        )}
+          );
+        })()}
 
         {/* Flags */}
         {flags.length > 0 && (
