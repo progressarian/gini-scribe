@@ -23,6 +23,17 @@ const ChangeFollowUpModal = memo(function ChangeFollowUpModal({ currentDate, onC
   const [date, setDate] = useState(currentDate || "");
   const [notes, setNotes] = useState("");
   const [selectedPreset, setSelectedPreset] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (saving || !date) return;
+    setSaving(true);
+    try {
+      await onSubmit({ date, notes });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handlePresetClick = (preset) => {
     const newDate = addDays(preset.days);
@@ -36,7 +47,8 @@ const ChangeFollowUpModal = memo(function ChangeFollowUpModal({ currentDate, onC
   };
 
   return (
-    <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="mo open" onClick={(e) => e.target === e.currentTarget && !saving && onClose()}>
+      <style>{`@keyframes cfu-spin { to { transform: rotate(360deg); } }`}</style>
       <div className="mbox">
         <div className="mttl">📅 Schedule Follow-up</div>
         <div style={{ marginBottom: 16 }}>
@@ -87,11 +99,28 @@ const ChangeFollowUpModal = memo(function ChangeFollowUpModal({ currentDate, onC
           />
         </div>
         <div className="macts">
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button className="btn-p" disabled={!date} onClick={() => onSubmit({ date, notes })}>
-            Save Date
+          <button className="btn-p" disabled={!date || saving} onClick={handleSave}>
+            {saving ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    border: "2px solid rgba(255,255,255,0.4)",
+                    borderTopColor: "#ffffff",
+                    borderRadius: "50%",
+                    display: "inline-block",
+                    animation: "cfu-spin 0.7s linear infinite",
+                  }}
+                />
+                Saving...
+              </span>
+            ) : (
+              "Save Date"
+            )}
           </button>
         </div>
       </div>

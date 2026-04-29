@@ -610,7 +610,12 @@ function buildPrescriptionHtml(data = {}) {
 
   // ── Own medicines
   const ownChildrenByParent = buildChildrenMap(ownMeds);
-  const ownParents = ownMeds.filter((m) => !m.parent_medication_id);
+  const ownIds = new Set(ownMeds.map((m) => m.id).filter((x) => x != null));
+  // Top-level: rows without a parent + children whose parent is not in this
+  // group (orphans must still print, not vanish).
+  const ownParents = ownMeds.filter(
+    (m) => !m.parent_medication_id || !ownIds.has(m.parent_medication_id),
+  );
   const ownMedsHtml = ownParents
     .map((m, i) => {
       const primary = m.composition || m.name;
@@ -647,7 +652,10 @@ function buildPrescriptionHtml(data = {}) {
 
   // ── External medicines
   const extChildrenByParent = buildChildrenMap(externalMeds);
-  const extParents = externalMeds.filter((m) => !m.parent_medication_id);
+  const extIds = new Set(externalMeds.map((m) => m.id).filter((x) => x != null));
+  const extParents = externalMeds.filter(
+    (m) => !m.parent_medication_id || !extIds.has(m.parent_medication_id),
+  );
   const extMedsHtml = extParents
     .map((m) => {
       const primary = m.composition || m.name;

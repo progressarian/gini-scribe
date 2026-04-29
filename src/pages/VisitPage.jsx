@@ -502,10 +502,18 @@ export default function VisitPage() {
     const activeDx = diagnoses.filter((d) => d.is_active !== false);
     const flags = computeFlags(data);
 
-    // Deduplicate meds by name (same med can appear from multiple visits)
+    // Deduplicate meds by name (same med can appear from multiple visits).
+    // Children (parent_medication_id != null) are excluded from the dedup map
+    // and appended verbatim — collapsing a child against an unrelated parent
+    // by name would orphan it on the print path.
     const dedupMeds = (meds) => {
       const grouped = {};
+      const children = [];
       (meds || []).forEach((m) => {
+        if (m.parent_medication_id) {
+          children.push({ ...m });
+          return;
+        }
         const key = (m.pharmacy_match || m.name || "").toUpperCase();
         if (!key) return;
         if (!grouped[key]) {
@@ -519,7 +527,7 @@ export default function VisitPage() {
           grouped[key] = { ...m };
         }
       });
-      return Object.values(grouped);
+      return [...Object.values(grouped), ...children];
     };
     const uniqueActiveMeds = dedupMeds(data.activeMeds);
     const uniqueStoppedMeds = dedupMeds(data.stoppedMeds);
@@ -657,7 +665,11 @@ export default function VisitPage() {
   // Filters out tracking-only / stopped meds.
   const visitPayload = useMemo(() => {
     if (!data?.patient) return null;
-    const activeOnly = (derived?.uniqueActiveMeds || []).filter((m) => {
+    // Use raw activeMeds (not the deduped list) so children stay linked to
+    // their parents. The prescription template builds its own parent/child
+    // map; passing the deduped list would orphan children whose parent row
+    // collided on name dedup.
+    const activeOnly = (data.activeMeds || []).filter((m) => {
       if (m.is_active === false) return false;
       if (typeof m.id === "string" && m.id.startsWith("genie:")) return false;
       if (m.source === "manual" && !m.consultation_id) return false;
