@@ -170,6 +170,12 @@ export async function ensureSyncColumns() {
       ON appointments(healthray_id) WHERE healthray_id IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_healthray
       ON doctors(healthray_id) WHERE healthray_id IS NOT NULL;
+    ALTER TABLE medications
+      ADD COLUMN IF NOT EXISTS parent_medication_id INTEGER REFERENCES medications(id) ON DELETE SET NULL;
+    ALTER TABLE medications
+      ADD COLUMN IF NOT EXISTS support_condition TEXT;
+    CREATE INDEX IF NOT EXISTS idx_medications_parent
+      ON medications(parent_medication_id);
   `);
   columnsReady = true;
 }
@@ -1217,6 +1223,82 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
         `dedup pass 3 (prefix match) DELETE failed for patient=${patientId}: ${e.message}`,
       ),
     );
+
+  // Pass 4: link support / conditional medications to their parent.
+  // Each med with `support_for: "<parent brand>"` becomes a child row
+  // pointing at the parent's id, with `support_condition` set.
+  await linkSupportMedications(patientId, meds);
+}
+
+// ── Resolve `support_for` hints into real parent_medication_id links ────────
+// Called from syncMedications after all parent rows are guaranteed to exist.
+// Looks up each support med's parent by canonical pharmacy_match key on the
+// same patient, then UPDATEs parent_medication_id + support_condition.
+async function linkSupportMedications(patientId, meds) {
+  const supportMeds = (meds || []).filter((m) => m?.support_for && m?.name);
+  if (supportMeds.length === 0) {
+    // Clear any stale links for this patient when no support meds are extracted
+    // for this prescription? No — leave existing links untouched, since they may
+    // belong to a previous prescription that didn't ship support meds again.
+    return;
+  }
+
+  // Build a canonical lookup of all active rows for this patient.
+  const activeR = await pool
+    .query(
+      `SELECT id, name, pharmacy_match FROM medications
+         WHERE patient_id = $1 AND is_active = true`,
+      [patientId],
+    )
+    .catch(() => ({ rows: [] }));
+  const idByCanonical = new Map();
+  for (const row of activeR.rows) {
+    const key = (
+      row.pharmacy_match ||
+      normalizeMedName(stripFormPrefix(row.name).name || row.name) ||
+      ""
+    )
+      .toUpperCase()
+      .trim();
+    if (key && !idByCanonical.has(key)) idByCanonical.set(key, row.id);
+  }
+
+  for (const med of supportMeds) {
+    const parentHint = stripFormPrefix(med.support_for).name || med.support_for;
+    const parentKey = (normalizeMedName(parentHint) || "").toUpperCase().trim();
+    const parentId = parentKey ? idByCanonical.get(parentKey) : null;
+
+    const childHint = stripFormPrefix(med.name).name || med.name;
+    const childKey = (normalizeMedName(childHint) || "").toUpperCase().trim();
+    if (!childKey) continue;
+
+    if (!parentId) {
+      error(
+        "syncMedications",
+        `support link unresolved for patient=${patientId} child="${med.name}" support_for="${med.support_for}"`,
+      );
+      continue;
+    }
+
+    await pool
+      .query(
+        `UPDATE medications
+           SET parent_medication_id = $1,
+               support_condition = COALESCE($2, support_condition),
+               updated_at = NOW()
+         WHERE patient_id = $3
+           AND is_active = true
+           AND UPPER(COALESCE(pharmacy_match, name)) = $4
+           AND id <> $1`,
+        [parentId, med.support_condition || null, patientId, childKey],
+      )
+      .catch((e) =>
+        error(
+          "syncMedications",
+          `support link UPDATE failed for patient=${patientId} child="${med.name}" parent="${med.support_for}": ${e.message}`,
+        ),
+      );
+  }
 }
 
 // ── Stop stale HealthRay meds not in the current prescription ───────────────

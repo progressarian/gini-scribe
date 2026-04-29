@@ -41,8 +41,7 @@ import VisitLoggedData from "../components/visit/VisitLoggedData";
 import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
-import PreVisitBrief from "../components/visit/PreVisitBrief";
-import PostVisitSummary from "../components/visit/PostVisitSummary";
+import VisitBrief from "../components/visit/VisitBrief";
 import DoctorSummarySection from "../components/visit/DoctorSummarySection";
 import PatientSummarySection from "../components/visit/PatientSummarySection";
 import RxPdfModal from "../components/visit/RxPdfModal";
@@ -56,6 +55,7 @@ import {
   AddMedicationModal,
   EditMedicationModal,
   StopMedicationModal,
+  RestartMedicationModal,
   DeleteMedicationModal,
   AddReferralModal,
   UploadReportModal,
@@ -359,6 +359,12 @@ export default function VisitPage() {
   // - Mutations elsewhere (saveConsultation, biomarkers, compliance) invalidate
   //   this key and trigger a background refetch without any manual refreshData call.
   const visitQuery = useVisit(dbPatientId, opdApptId);
+
+  // Appointment ID used to key cached AI summaries. Prefers the active OPD
+  // slot when the doctor came in via the OPD list; otherwise falls back to
+  // the patient's latest appointment (returned by the visit GET) so summary
+  // calls always carry an apptId and the server-side cache is hit.
+  const effectiveApptId = opdApptId || visitQuery.data?.latestAppointmentId || null;
 
   // Run the one-time medication reconcile after the first successful load.
   // If any rows are stopped, invalidate the visit cache so it refetches with
@@ -830,6 +836,23 @@ export default function VisitPage() {
   }, [data]);
 
   const handleEndVisit = useCallback(async () => {
+    // Generate + save the prescription PDF as a patient document before
+    // wrapping up. If this fails the visit still completes — the doctor
+    // can re-print/save manually.
+    if (visitPayload && (dbPatientId || data?.patient?.id)) {
+      try {
+        const visitSummaryText = pickVisitSummaryText();
+        const { data: saved } = await api.post(
+          `/api/visit/${dbPatientId || data.patient.id}/complete`,
+          { ...visitPayload, visitSummaryText },
+        );
+        toast(`Prescription saved: ${saved?.file_name || "PDF"}`, "success");
+      } catch (e) {
+        console.warn("[Visit] Save prescription on complete failed:", e?.message);
+        toast("Couldn't save prescription PDF — visit still completed.", "warn");
+      }
+    }
+
     // Mark appointment as "seen" in OPD (creates consultation record)
     const apptId = sessionStorage.getItem("gini_opd_appt_id");
     if (apptId) {
@@ -844,7 +867,7 @@ export default function VisitPage() {
     endVisitAction(true);
     toast("Visit completed", "success");
     navigate("/opd");
-  }, [endVisitAction, navigate]);
+  }, [endVisitAction, navigate, visitPayload, dbPatientId, data, pickVisitSummaryText]);
 
   // ── Tab badge counts (memoized) ──
   const tabBadges = useMemo(() => {
@@ -1052,14 +1075,13 @@ export default function VisitPage() {
             </div>
             <div className="scrl" ref={scrollRef}>
               <SyncStatusBanner syncStatus={data.syncStatus} />
-              <PostVisitSummary
+              <VisitBrief
                 patientId={dbPatientId}
-                appointmentId={opdApptId}
+                appointmentId={effectiveApptId}
                 patient={patient}
                 doctor={doctor}
               />
-              <PreVisitBrief patientId={dbPatientId} appointmentId={opdApptId} />
-              <VisitSummaryPanel patientId={dbPatientId} appointmentId={opdApptId} />
+              <VisitSummaryPanel patientId={dbPatientId} appointmentId={effectiveApptId} />
               <VisitBiomarkers
                 labResults={labResults}
                 labLatest={data.labLatest}
@@ -1090,17 +1112,33 @@ export default function VisitPage() {
                 activeMeds={uniqueActiveMeds}
                 stoppedMeds={uniqueStoppedMeds}
                 onAddMed={() => setModal({ type: "addMed" })}
+                onAddSubMed={(parent) =>
+                  setModal({ type: "addMed", data: { parentMed: parent } })
+                }
                 onEditMed={(m) => setModal({ type: "editMed", data: m })}
                 onStopMed={(m) => setModal({ type: "stopMed", data: m })}
+                onMoveToActive={(m) => mutations.moveMedToActive(m.id)}
                 onDeleteMed={(m) => setModal({ type: "deleteMed", data: m })}
-                onRestartMed={(m) => mutations.restartMedication(m.id)}
+                onRestartMed={(m) => {
+                  const hasStoppedChildren = (uniqueStoppedMeds || []).some(
+                    (c) => c.parent_medication_id === m.id,
+                  );
+                  const isOrphanSubMed =
+                    !!m.parent_medication_id &&
+                    !(uniqueActiveMeds || []).some((p) => p.id === m.parent_medication_id);
+                  if (hasStoppedChildren || isOrphanSubMed) {
+                    setModal({ type: "restartMed", data: m });
+                    return;
+                  }
+                  return mutations.restartMedication(m.id);
+                }}
               />
               <PatientSummarySection
                 patientId={dbPatientId}
-                appointmentId={opdApptId}
+                appointmentId={effectiveApptId}
                 visitPayload={visitPayload}
               />
-              <DoctorSummarySection patientId={dbPatientId} appointmentId={opdApptId} />
+              <DoctorSummarySection patientId={dbPatientId} appointmentId={effectiveApptId} />
               <VisitPlan
                 consultations={consultations}
                 apptPlan={appt_plan}
@@ -1538,6 +1576,7 @@ export default function VisitPage() {
           patient={data.patient}
           labResults={data.labResults}
           activeMeds={derived.uniqueActiveMeds}
+          parentMed={modal.data?.parentMed}
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.addMedication(d);
@@ -1548,6 +1587,7 @@ export default function VisitPage() {
       {modal?.type === "editMed" && (
         <EditMedicationModal
           medication={modal.data}
+          activeMeds={derived.uniqueActiveMeds}
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.editMedication(modal.data.id, d);
@@ -1558,9 +1598,22 @@ export default function VisitPage() {
       {modal?.type === "stopMed" && (
         <StopMedicationModal
           medication={modal.data}
+          activeMeds={derived.uniqueActiveMeds}
           onClose={closeModal}
           onSubmit={async (d) => {
             const r = await mutations.stopMedication(modal.data.id, d);
+            if (r.success) closeModal();
+          }}
+        />
+      )}
+      {modal?.type === "restartMed" && (
+        <RestartMedicationModal
+          medication={modal.data}
+          activeMeds={derived.uniqueActiveMeds}
+          stoppedMeds={derived.uniqueStoppedMeds}
+          onClose={closeModal}
+          onSubmit={async (d) => {
+            const r = await mutations.restartMedication(modal.data.id, d);
             if (r.success) closeModal();
           }}
         />

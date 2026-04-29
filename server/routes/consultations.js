@@ -12,6 +12,7 @@ import {
   canonicalMedKey,
   routeForForm,
 } from "../services/medication/normalize.js";
+import { invalidatePatientSummaries } from "../services/summaryCache.js";
 
 const require = createRequire(import.meta.url);
 let syncVisitToGenie = null;
@@ -427,6 +428,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
 
     await client.query("COMMIT");
     console.log(`✅ Saved: patient=${patientId} consultation=${consultationId}`);
+    invalidatePatientSummaries(patientId).catch(() => {});
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
 
     // Non-blocking side-effects fired in parallel so one slow call (Genie API)
@@ -617,6 +619,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
 
     await client.query("COMMIT");
     console.log(`✅ History saved: patient=${patientId} consultation=${cid}`);
+    invalidatePatientSummaries(patientId).catch(() => {});
     res.json({ success: true, consultation_id: cid });
   } catch (e) {
     await client.query("ROLLBACK");

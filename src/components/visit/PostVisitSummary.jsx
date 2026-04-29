@@ -1,13 +1,7 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import api from "../../services/api";
-import "./PostVisitSummary.css";
+import "./PreVisitBrief.css";
 import "../Shimmer.css";
-
-const PHASE_CLASS = {
-  "Phase 1 · Control": "pvs-phase-amber",
-  "Phase 2 · Stabilize": "pvs-phase-blue",
-  "Phase 3 · Sustain": "pvs-phase-green",
-};
 
 function fmtDate(iso) {
   if (!iso) return "";
@@ -22,58 +16,93 @@ function fmtDate(iso) {
   }
 }
 
-const PostVisitSummary = memo(function PostVisitSummary({
-  patientId,
-  appointmentId,
-  patient,
-  doctor,
-}) {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState(null);
-  const hasFiredRef = useRef(false);
+const PostVisitSummary = memo(function PostVisitSummary({ patientId, appointmentId, prefetched }) {
+  const [loading, setLoading] = useState(!prefetched);
+  const [data, setData] = useState(prefetched || null);
+  const hasFiredRef = useRef(!!prefetched);
+
+  const loadSummary = useCallback(
+    ({ regenerate = false } = {}) => {
+      if (!patientId) return;
+      const params = new URLSearchParams();
+      if (appointmentId) params.set("appointmentId", String(appointmentId));
+      if (regenerate) params.set("regenerate", "true");
+      const qs = params.toString();
+      const url = `/api/patients/${patientId}/post-visit-summary${qs ? "?" + qs : ""}`;
+      setLoading(true);
+      return api
+        .get(url)
+        .then(({ data }) => setData(data))
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    },
+    [patientId, appointmentId],
+  );
 
   useEffect(() => {
     if (!patientId || hasFiredRef.current) return;
     hasFiredRef.current = true;
-    const url = appointmentId
-      ? `/api/patients/${patientId}/post-visit-summary?appointmentId=${appointmentId}`
-      : `/api/patients/${patientId}/post-visit-summary`;
-    api
-      .get(url)
-      .then(({ data }) => setData(data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [patientId, appointmentId]);
+    loadSummary();
+  }, [patientId, loadSummary]);
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="pvb-card pvb-loading">
+        <div className="pvb-label">✦ Post-visit summary</div>
+        <div className="shimmer pvb-shimmer-line" style={{ width: "96%" }} />
+        <div className="shimmer pvb-shimmer-line" style={{ width: "92%" }} />
+        <div className="shimmer pvb-shimmer-line" style={{ width: "88%" }} />
+        <div className="shimmer pvb-shimmer-line" style={{ width: "75%" }} />
+      </div>
+    );
+  }
+
   if (!data?.ready || !data?.narrative) return null;
 
-  const phaseClass = (data.carePhase && PHASE_CLASS[data.carePhase]) || "pvs-phase-amber";
   const paragraphs = String(data.narrative)
     .split(/\n{2,}/)
     .map((p) => p.trim())
     .filter(Boolean);
 
-  const subBits = [];
-  if (doctor?.name) subBits.push(`Dr. ${String(doctor.name).replace(/^dr\.?\s*/i, "")}`);
-  if (data.totalVisits) subBits.push(`Visit ${data.totalVisits}`);
+  if (paragraphs.length === 0) return null;
 
   return (
-    <div className="pvs-card">
-      <div className="pvs-header">
-        <div>
-          <div className="pvs-title">Visit Summary — {fmtDate(data.visitDate)}</div>
-          {subBits.length > 0 && <div className="pvs-sub">{subBits.join(" · ")}</div>}
-        </div>
-        {data.carePhase && <span className={`pvs-phase ${phaseClass}`}>{data.carePhase}</span>}
+    <div className="pvb-card">
+      <div
+        className="pvb-label"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+      >
+        <span>
+          ✦ Post-visit summary{data.visitDate ? ` — ${fmtDate(data.visitDate)}` : ""}
+          {data.generatedAt && (
+            <span style={{ marginLeft: 8, fontWeight: 400, opacity: 0.65, fontSize: 11 }}>
+              v{" "}
+              {new Date(data.generatedAt).toLocaleString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {data.cached ? " · cached" : ""}
+            </span>
+          )}
+        </span>
+        <button
+          className="bx bx-n"
+          onClick={() => loadSummary({ regenerate: true })}
+          disabled={loading}
+          title="Regenerate summary from latest data"
+          style={{ fontSize: 12 }}
+        >
+          {loading ? "Regenerating…" : "↻ Regenerate"}
+        </button>
       </div>
-      <div className="pvs-body">
-        {paragraphs.map((p, i) => (
-          <p key={i} className="pvs-narrative">
-            {p}
-          </p>
-        ))}
-      </div>
+      {paragraphs.map((p, i) => (
+        <p key={i} className="pvb-narrative" style={i > 0 ? { marginTop: 10 } : undefined}>
+          {p}
+        </p>
+      ))}
     </div>
   );
 });

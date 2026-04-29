@@ -5,6 +5,7 @@ export { default as DiagnosisNoteModal } from "./DiagnosisNoteModal";
 export { default as AddMedicationModal } from "./AddMedicationModal";
 export { default as EditMedicationModal } from "./EditMedicationModal";
 export { default as StopMedicationModal } from "./StopMedicationModal";
+export { default as RestartMedicationModal } from "./RestartMedicationModal";
 export { default as DeleteMedicationModal } from "./DeleteMedicationModal";
 export { default as AddReferralModal } from "./AddReferralModal";
 export { default as UploadReportModal } from "./UploadReportModal";

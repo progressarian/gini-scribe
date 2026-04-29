@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useRef } from "react";
+import { memo, useState, useEffect, useRef, useCallback } from "react";
 import { fmtDate } from "./helpers";
 import api from "../../services/api";
 import "./VisitSummaryPanel.css";
@@ -36,13 +36,8 @@ const AiRow = memo(function AiRow({ zone, text }) {
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
-const VisitSummaryPanel = memo(function VisitSummaryPanel({
-  patientId,
-  appointmentId,
-  forceCollapsed = false,
-}) {
-  const [dismissed, setDismissed] = useState(false);
-  const [manualExpand, setManualExpand] = useState(false);
+const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointmentId }) {
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rules, setRules] = useState(null); // { red, amber, green }
   const [ai, setAi] = useState(null); // { red, amber, green } | null
@@ -51,67 +46,44 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
   const [latestReport, setLatestReport] = useState(null);
   const hasFiredRef = useRef(false);
 
+  const loadSummary = useCallback(
+    ({ regenerate = false } = {}) => {
+      if (!patientId) return;
+      const params = new URLSearchParams();
+      if (appointmentId) params.set("appointmentId", String(appointmentId));
+      if (regenerate) params.set("regenerate", "true");
+      const qs = params.toString();
+      const url = `/api/patients/${patientId}/summary${qs ? "?" + qs : ""}`;
+
+      setLoading(true);
+      return api
+        .get(url)
+        .then(({ data }) => {
+          setRules(data.rules || { red: [], amber: [], green: [] });
+          setAi(data.ai || null);
+          setDataAsOf(data.dataAsOf || null);
+          setFromCache(data.cached ?? false);
+          setLatestReport(data.latestReport || null);
+        })
+        .catch(() => {
+          // Silent fail — panel stays hidden (rules = null means nothing to show)
+        })
+        .finally(() => setLoading(false));
+    },
+    [patientId, appointmentId],
+  );
+
   useEffect(() => {
     if (!patientId || hasFiredRef.current) return;
     hasFiredRef.current = true;
-
-    const url = appointmentId
-      ? `/api/patients/${patientId}/summary?appointmentId=${appointmentId}`
-      : `/api/patients/${patientId}/summary`;
-
-    api
-      .get(url)
-      .then(({ data }) => {
-        setRules(data.rules || { red: [], amber: [], green: [] });
-        setAi(data.ai || null);
-        setDataAsOf(data.dataAsOf || null);
-        setFromCache(data.cached ?? false);
-        setLatestReport(data.latestReport || null);
-      })
-      .catch(() => {
-        // Silent fail — panel stays hidden (rules = null means nothing to show)
-      })
-      .finally(() => setLoading(false));
-  }, [patientId, appointmentId]);
-
-  if (dismissed) return null;
+    loadSummary();
+  }, [patientId, loadSummary]);
 
   if (loading) {
     return (
-      <div className="sp-panel sp-panel-loading">
-        <div className="sp-body">
-          {/* Zone header shimmer */}
-          <div className="sp-shimmer-zone-hd">
-            <div className="shimmer sp-shimmer-hd-text" />
-          </div>
-          {/* Alert row shimmers */}
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="sp-shimmer-row">
-              <div className="shimmer sp-shimmer-icon" />
-              <div
-                className="shimmer sp-shimmer-title"
-                style={{ width: i === 2 ? "75%" : "90%" }}
-              />
-            </div>
-          ))}
-          <div className="sp-divider" />
-          {/* Second zone */}
-          <div className="sp-shimmer-zone-hd sp-shimmer-zone-hd--alt">
-            <div className="shimmer sp-shimmer-hd-text" style={{ width: "30%" }} />
-          </div>
-          {[1, 2].map((i) => (
-            <div key={i} className="sp-shimmer-row">
-              <div className="shimmer sp-shimmer-icon" />
-              <div
-                className="shimmer sp-shimmer-title"
-                style={{ width: i === 1 ? "85%" : "60%" }}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="sp-footer">
-          <div className="shimmer sp-shimmer-footer" />
-        </div>
+      <div className="sp-panel-collapsed sp-panel-collapsed-loading">
+        <div className="shimmer sp-shimmer-collapsed-text" />
+        <div className="shimmer sp-shimmer-collapsed-btn" />
       </div>
     );
   }
@@ -124,9 +96,14 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
   const hasGreen = display.green.length > 0;
   if (!hasRed && !hasAmber && !hasGreen) return null;
 
-  const autoExpand = !forceCollapsed && (rules.red.length > 0 || rules.amber.length > 0);
-  const isExpanded = autoExpand || manualExpand;
   const topZone = rules.red.length > 0 ? "red" : rules.amber.length > 0 ? "amber" : "green";
+  const totalCount = display.red.length + display.amber.length + display.green.length;
+  const summaryText =
+    rules.red.length > 0
+      ? `🔴 ${rules.red.length} item${rules.red.length !== 1 ? "s" : ""} need attention`
+      : rules.amber.length > 0
+        ? `🟡 ${rules.amber.length} item${rules.amber.length !== 1 ? "s" : ""} to consider`
+        : `✅ All parameters on track — routine visit`;
 
   let footerText;
   if (latestReport) {
@@ -140,25 +117,6 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
   if (fromCache) footerText += " · cached";
   if (ai) footerText += " · ✦ AI";
 
-  // ── Collapsed state ──
-  if (!isExpanded) {
-    return (
-      <div className="sp-panel-collapsed">
-        <span className="sp-routine-text">✅ All parameters on track — routine visit</span>
-        <div className="sp-collapsed-actions">
-          {hasGreen && (
-            <button className="bx bx-n" onClick={() => setManualExpand(true)}>
-              Details ▾
-            </button>
-          )}
-          <button className="sp-close-btn" title="Dismiss" onClick={() => setDismissed(true)}>
-            ✕
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const renderZone = (zone, items) =>
     items.map((item, i) =>
       ai ? (
@@ -168,41 +126,48 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
       ),
     );
 
-  const controls = (
-    <div className="sp-actions">
-      {!autoExpand && manualExpand && (
-        <button className="bx bx-n" onClick={() => setManualExpand(false)}>
-          Collapse ▴
+  // Collapsed (default) — mini header bar with toggle
+  if (!open) {
+    return (
+      <div className={`sp-panel-collapsed zone-${topZone}`}>
+        <span className="sp-routine-text">{summaryText}</span>
+        <button className="bx bx-n sp-toggle-btn" onClick={() => setOpen(true)}>
+          Open ▾
         </button>
-      )}
-      <button className="sp-close-btn" title="Dismiss" onClick={() => setDismissed(true)}>
-        ✕
-      </button>
-    </div>
-  );
+      </div>
+    );
+  }
 
   return (
     <div className={`sp-panel zone-${topZone}`}>
       <div className="sp-body">
-        {hasRed && (
-          <>
-            <div className="sp-zone-hd zone-red">
-              <span>
-                🔴 Before you start — {display.red.length} item{display.red.length !== 1 ? "s" : ""}{" "}
-                need your attention today
-              </span>
-              {controls}
-            </div>
-            {renderZone("red", display.red)}
-          </>
-        )}
+        <div className={`sp-zone-hd zone-${topZone}`}>
+          <span>
+            {summaryText}
+            {totalCount > 0 ? ` · ${totalCount} item${totalCount !== 1 ? "s" : ""}` : ""}
+          </span>
+          <div className="sp-actions">
+            <button
+              className="bx bx-n sp-toggle-btn"
+              onClick={() => loadSummary({ regenerate: true })}
+              disabled={loading}
+              title="Regenerate summary from latest data"
+            >
+              {loading ? "Regenerating…" : "↻ Regenerate"}
+            </button>
+            <button className="bx bx-n sp-toggle-btn" onClick={() => setOpen(false)}>
+              Close ▴
+            </button>
+          </div>
+        </div>
+
+        {hasRed && <>{renderZone("red", display.red)}</>}
 
         {hasAmber && (
           <>
             {hasRed && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-amber">
               <span>🟡 Also consider</span>
-              {!hasRed && controls}
             </div>
             {renderZone("amber", display.amber)}
           </>
@@ -215,7 +180,6 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({
               <span>
                 ✅ Working well <span className="sp-zone-hd-sub">— tell the patient</span>
               </span>
-              {!hasRed && !hasAmber && controls}
             </div>
             {renderZone("green", display.green)}
           </>

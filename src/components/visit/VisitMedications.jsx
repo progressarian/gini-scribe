@@ -434,8 +434,10 @@ const VisitMedications = memo(function VisitMedications({
   activeMeds,
   stoppedMeds,
   onAddMed,
+  onAddSubMed,
   onEditMed,
   onStopMed,
+  onMoveToActive,
   onDeleteMed,
   onRestartMed,
 }) {
@@ -443,6 +445,7 @@ const VisitMedications = memo(function VisitMedications({
   const [showPrev, setShowPrev] = useState(false);
   const [expandedHist, setExpandedHist] = useState({});
   const [restartingId, setRestartingId] = useState(null);
+  const [movingId, setMovingId] = useState(null);
 
   const handleRestart = async (m) => {
     if (!onRestartMed || restartingId != null) return;
@@ -451,6 +454,16 @@ const VisitMedications = memo(function VisitMedications({
       await onRestartMed(m);
     } finally {
       setRestartingId(null);
+    }
+  };
+
+  const handleMoveToActive = async (m) => {
+    if (!onMoveToActive || movingId != null) return;
+    setMovingId(m.id);
+    try {
+      await onMoveToActive(m);
+    } finally {
+      setMovingId(null);
     }
   };
   const toggleHist = (key) => setExpandedHist((s) => ({ ...s, [key]: !s[key] }));
@@ -479,8 +492,294 @@ const VisitMedications = memo(function VisitMedications({
     };
   }, [uniqueActive]);
 
-  // Group medications by category
-  const groupedMeds = useMemo(() => groupMedsByCategory(lastVisitMeds), [lastVisitMeds]);
+  // Build a parent → children map for support / conditional medications.
+  // Children are still rendered, but indented under their parent rather than
+  // as siblings of it in the group lists.
+  const childrenByParent = useMemo(() => {
+    const m = {};
+    for (const med of lastVisitMeds) {
+      if (med.parent_medication_id) {
+        (m[med.parent_medication_id] ||= []).push(med);
+      }
+    }
+    return m;
+  }, [lastVisitMeds]);
+
+  const topLevelMeds = useMemo(
+    () => lastVisitMeds.filter((m) => !m.parent_medication_id),
+    [lastVisitMeds],
+  );
+
+  // Same parent→children grouping for the previous-visit bucket so support
+  // meds nest under their parent there too instead of appearing as orphaned rows.
+  const prevChildrenByParent = useMemo(() => {
+    const m = {};
+    for (const med of prevVisitMeds) {
+      if (med.parent_medication_id) {
+        (m[med.parent_medication_id] ||= []).push(med);
+      }
+    }
+    return m;
+  }, [prevVisitMeds]);
+
+  const prevTopLevelMeds = useMemo(
+    () => prevVisitMeds.filter((m) => !m.parent_medication_id),
+    [prevVisitMeds],
+  );
+
+  // Same grouping for the stopped bucket so the "Show stopped" list nests
+  // sub-medicines under the stopped parent they belonged to.
+  const stoppedChildrenByParent = useMemo(() => {
+    const m = {};
+    for (const med of uniqueStopped) {
+      if (med.parent_medication_id) {
+        (m[med.parent_medication_id] ||= []).push(med);
+      }
+    }
+    return m;
+  }, [uniqueStopped]);
+
+  const stoppedTopLevelMeds = useMemo(
+    () => uniqueStopped.filter((m) => !m.parent_medication_id),
+    [uniqueStopped],
+  );
+
+  // Children whose parent isn't in the stopped list (parent still active or
+  // missing). Render these flat at the bottom so they aren't lost.
+  const orphanStoppedChildren = useMemo(() => {
+    const stoppedIds = new Set(stoppedTopLevelMeds.map((m) => m.id));
+    return uniqueStopped.filter(
+      (m) => m.parent_medication_id && !stoppedIds.has(m.parent_medication_id),
+    );
+  }, [uniqueStopped, stoppedTopLevelMeds]);
+
+  // Shared renderer for support / sub-medicines so the visual treatment is
+  // identical in the current-visit, previous-visit, and stopped lists.
+  // Tree-line + accent border + a single combined "Support for X · condition"
+  // pill. `isPrev` softens the accent; `isStopped` switches it to grey and
+  // swaps the action buttons for a single Restart? button.
+  const SubMedRow = ({ child, parent, isPrev = false, isStopped = false }) => {
+    let accent = "#818CF8"; // current visit (indigo-400)
+    let accentBg = "#F5F3FF";
+    let connector = "#C7D2FE";
+    if (isStopped) {
+      accent = "#CBD5E1"; // slate-300
+      accentBg = "#F8FAFC";
+      connector = "#E2E8F0";
+    } else if (isPrev) {
+      accent = "#A5B4FC";
+      accentBg = "#F8FAFF";
+    }
+    return (
+      <div
+        className={`mtr${isPrev || isStopped ? " stp" : ""}`}
+        style={{
+          background: accentBg,
+          borderLeft: `3px solid ${accent}`,
+          position: "relative",
+        }}
+      >
+        <div className="mmain" style={{ paddingLeft: 30 }}>
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: 12,
+              top: 0,
+              height: "50%",
+              width: 1,
+              background: connector,
+            }}
+          />
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              width: 12,
+              height: 1,
+              background: connector,
+            }}
+          />
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: accent,
+              flexShrink: 0,
+              marginLeft: 8,
+              marginRight: 6,
+            }}
+          />
+          <div style={{ minWidth: 0 }}>
+            <div className="mbrand" style={{ fontSize: 13 }}>
+              {displayFormBadge(child) && (
+                <span
+                  style={{
+                    display: "inline-block",
+                    background: "var(--bg2, #eef2f7)",
+                    color: "var(--t2)",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: "1px 5px",
+                    marginRight: 6,
+                    borderRadius: 3,
+                    verticalAlign: "middle",
+                  }}
+                  title={child.form || child.route || ""}
+                >
+                  {displayFormBadge(child)}
+                </span>
+              )}
+              {displayMedName(child)}
+            </div>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 4,
+                marginTop: 3,
+                padding: "2px 7px",
+                background: isStopped ? "#F1F5F9" : "#EEF2FF",
+                color: isStopped ? "#475569" : "#4338CA",
+                fontSize: 10,
+                fontWeight: 600,
+                borderRadius: 10,
+                lineHeight: 1.5,
+                maxWidth: "100%",
+              }}
+              title={`Support medicine for ${displayMedName(parent)}`}
+            >
+              <span>↳ Support for</span>
+              <span style={{ fontWeight: 700 }}>{displayMedName(parent)}</span>
+              {child.support_condition && (
+                <>
+                  <span style={{ opacity: 0.55 }}>·</span>
+                  <span style={{ fontWeight: 500 }}>{child.support_condition}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="mtd">{child.dose || "—"}</div>
+        <div className="mtd">
+          {isPrev || isStopped ? "Was " : ""}
+          {child.frequency || "OD"}
+          {child.timing && (
+            <>
+              <br />
+              <span style={{ fontSize: 10, color: "var(--t3)" }}>{child.timing}</span>
+            </>
+          )}
+        </div>
+        <div>
+          {isStopped ? (
+            <>
+              <span className="stoptag">Stopped</span>
+              {child.stopped_date && (
+                <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 2 }}>
+                  {fmtDate(child.stopped_date)}
+                </div>
+              )}
+              {child.stop_reason && (
+                <div style={{ fontSize: 9, color: "var(--t3)", marginTop: 2 }}>
+                  {child.stop_reason}
+                </div>
+              )}
+            </>
+          ) : (
+            isPrev && <span className="stoptag">Prev Visit</span>
+          )}
+        </div>
+        <div className="mtd">{child.started_date ? fmtDate(child.started_date) : "—"}</div>
+        <div className="macts">
+          {isStopped ? (
+            <button
+              className="ma ma-r"
+              onClick={() => handleRestart(child)}
+              disabled={restartingId === child.id}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                opacity: restartingId === child.id ? 0.7 : 1,
+                cursor: restartingId === child.id ? "not-allowed" : "pointer",
+              }}
+            >
+              {restartingId === child.id && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 9,
+                    height: 9,
+                    border: "2px solid rgba(0,0,0,0.18)",
+                    borderTopColor: "currentColor",
+                    borderRadius: "50%",
+                    display: "inline-block",
+                    animation: "spin 0.7s linear infinite",
+                  }}
+                />
+              )}
+              {restartingId === child.id ? "Restarting…" : "Restart?"}
+            </button>
+          ) : (
+            <>
+              {isPrev && onMoveToActive && Number.isFinite(Number(child.id)) && (
+                <button
+                  type="button"
+                  className="ma"
+                  onClick={() => handleMoveToActive(child)}
+                  disabled={movingId === child.id}
+                  title="Re-prescribe today — moves this medicine into the current visit list"
+                  style={{
+                    color: "#047857",
+                    borderColor: "#A7F3D0",
+                    background: "#ECFDF5",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    opacity: movingId === child.id ? 0.7 : 1,
+                    cursor: movingId === child.id ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {movingId === child.id && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 9,
+                        height: 9,
+                        border: "2px solid rgba(4,120,87,0.3)",
+                        borderTopColor: "#047857",
+                        borderRadius: "50%",
+                        display: "inline-block",
+                        animation: "spin 0.7s linear infinite",
+                      }}
+                    />
+                  )}
+                  {movingId === child.id ? "Moving…" : "Active"}
+                </button>
+              )}
+              <button className="ma ma-e" onClick={() => onEditMed?.(child)}>
+                Edit
+              </button>
+              <button className="ma ma-s" onClick={() => onStopMed?.(child)}>
+                Stop
+              </button>
+              <button className="ma ma-d" onClick={() => onDeleteMed?.(child)}>
+                Delete
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Group medications by category (parents only — children render nested below their parent)
+  const groupedMeds = useMemo(() => groupMedsByCategory(topLevelMeds), [topLevelMeds]);
 
   // Group order
   const groupOrder = ["diabetes", "kidney", "bp", "lipids", "thyroid", "supplement", "external"];
@@ -827,6 +1126,34 @@ const VisitMedications = memo(function VisitMedications({
                       </div>
                     </div>
                     {isOpen && <MedHistoryPanel history={m.history} current={m} />}
+                    {(childrenByParent[m.id] || []).map((child) => (
+                      <SubMedRow
+                        key={child.id || `child-${m.id}-${child.name}`}
+                        child={child}
+                        parent={m}
+                      />
+                    ))}
+                    {onAddSubMed && Number.isFinite(Number(m.id)) && (
+                      <button
+                        type="button"
+                        onClick={() => onAddSubMed(m)}
+                        style={{
+                          marginLeft: 32,
+                          marginTop: 2,
+                          marginBottom: 4,
+                          padding: "2px 8px",
+                          fontSize: 11,
+                          color: "#4338CA",
+                          background: "transparent",
+                          border: "1px dashed #C7D2FE",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                        }}
+                        title={`Add a support medicine under ${displayMedName(m)}`}
+                      >
+                        + Add support medicine
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -844,37 +1171,82 @@ const VisitMedications = memo(function VisitMedications({
         {showPrev && prevVisitMeds.length > 0 && (
           <>
             <div className="stp-lbl">Previous Visit Medications</div>
-            {prevVisitMeds.map((m, i) => (
-              <div key={m.id || i} className="mtr stp">
-                <div className="mmain">
-                  <div className="mdot" style={{ background: "var(--t4)" }} />
+            {prevTopLevelMeds.map((m, i) => (
+              <div key={m.id || i}>
+                <div className="mtr stp">
+                  <div className="mmain">
+                    <div className="mdot" style={{ background: "var(--t4)" }} />
+                    <div>
+                      <div className="mbrand">{displayMedName(m)}</div>
+                      <div className="mgen">{m.composition || ""}</div>
+                    </div>
+                  </div>
+                  <div className="mtd">{m.dose || "—"}</div>
+                  <div className="mtd">Was {m.frequency || "OD"}</div>
                   <div>
-                    <div className="mbrand">{displayMedName(m)}</div>
-                    <div className="mgen">{m.composition || ""}</div>
+                    <span className="stoptag">Prev Visit</span>
+                    {m.prescribed_date && (
+                      <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 2 }}>
+                        {fmtDate(m.prescribed_date)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
+                  <div className="macts">
+                    {onMoveToActive && Number.isFinite(Number(m.id)) && (
+                      <button
+                        type="button"
+                        className="ma"
+                        onClick={() => handleMoveToActive(m)}
+                        disabled={movingId === m.id}
+                        title="Re-prescribe today — moves this medicine into the current visit list"
+                        style={{
+                          color: "#047857",
+                          borderColor: "#A7F3D0",
+                          background: "#ECFDF5",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          opacity: movingId === m.id ? 0.7 : 1,
+                          cursor: movingId === m.id ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {movingId === m.id && (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              width: 9,
+                              height: 9,
+                              border: "2px solid rgba(4,120,87,0.3)",
+                              borderTopColor: "#047857",
+                              borderRadius: "50%",
+                              display: "inline-block",
+                              animation: "spin 0.7s linear infinite",
+                            }}
+                          />
+                        )}
+                        {movingId === m.id ? "Moving…" : "Active"}
+                      </button>
+                    )}
+                    <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
+                      Edit
+                    </button>
+                    <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
+                      Stop
+                    </button>
+                    <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
+                      Delete
+                    </button>
                   </div>
                 </div>
-                <div className="mtd">{m.dose || "—"}</div>
-                <div className="mtd">Was {m.frequency || "OD"}</div>
-                <div>
-                  <span className="stoptag">Prev Visit</span>
-                  {m.prescribed_date && (
-                    <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 2 }}>
-                      {fmtDate(m.prescribed_date)}
-                    </div>
-                  )}
-                </div>
-                <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
-                <div className="macts">
-                  <button className="ma ma-e" onClick={() => onEditMed?.(m)}>
-                    Edit
-                  </button>
-                  <button className="ma ma-s" onClick={() => onStopMed?.(m)}>
-                    Stop
-                  </button>
-                  <button className="ma ma-d" onClick={() => onDeleteMed?.(m)}>
-                    Delete
-                  </button>
-                </div>
+                {(prevChildrenByParent[m.id] || []).map((child) => (
+                  <SubMedRow
+                    key={child.id || `prev-child-${m.id}-${child.name}`}
+                    child={child}
+                    parent={m}
+                    isPrev
+                  />
+                ))}
               </div>
             ))}
           </>
@@ -884,8 +1256,75 @@ const VisitMedications = memo(function VisitMedications({
         {showStopped && uniqueStopped.length > 0 && (
           <>
             <div className="stp-lbl">Stopped Medications</div>
-            {uniqueStopped.map((m, i) => (
-              <div key={m.id || i} className="mtr stp">
+            {stoppedTopLevelMeds.map((m, i) => (
+              <div key={m.id || i}>
+                <div className="mtr stp">
+                  <div className="mmain">
+                    <div className="mdot" style={{ background: "var(--t4)" }} />
+                    <div>
+                      <div className="mbrand">{displayMedName(m)}</div>
+                      <div className="mgen">{m.composition || ""}</div>
+                    </div>
+                  </div>
+                  <div className="mtd">{m.dose || "—"}</div>
+                  <div className="mtd">Was {m.frequency || "OD"}</div>
+                  <div>
+                    <span className="stoptag">Stopped</span>
+                    {m.stopped_date && (
+                      <div style={{ fontSize: 9, color: "var(--t4)", marginTop: 2 }}>
+                        {fmtDate(m.stopped_date)}
+                      </div>
+                    )}
+                    {m.stop_reason && (
+                      <div style={{ fontSize: 9, color: "var(--t3)", marginTop: 2 }}>
+                        {m.stop_reason}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mtd">{m.started_date ? fmtDate(m.started_date) : "—"}</div>
+                  <div className="macts">
+                    <button
+                      className="ma ma-r"
+                      onClick={() => handleRestart(m)}
+                      disabled={restartingId === m.id}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        opacity: restartingId === m.id ? 0.7 : 1,
+                        cursor: restartingId === m.id ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {restartingId === m.id && (
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: 9,
+                            height: 9,
+                            border: "2px solid rgba(0,0,0,0.18)",
+                            borderTopColor: "currentColor",
+                            borderRadius: "50%",
+                            display: "inline-block",
+                            animation: "spin 0.7s linear infinite",
+                          }}
+                        />
+                      )}
+                      {restartingId === m.id ? "Restarting…" : "Restart?"}
+                    </button>
+                  </div>
+                </div>
+                {(stoppedChildrenByParent[m.id] || []).map((child) => (
+                  <SubMedRow
+                    key={child.id || `stopped-child-${m.id}-${child.name}`}
+                    child={child}
+                    parent={m}
+                    isStopped
+                  />
+                ))}
+              </div>
+            ))}
+            {orphanStoppedChildren.map((m, i) => (
+              <div key={m.id || `orphan-${i}`} className="mtr stp">
                 <div className="mmain">
                   <div className="mdot" style={{ background: "var(--t4)" }} />
                   <div>
@@ -914,7 +1353,28 @@ const VisitMedications = memo(function VisitMedications({
                     className="ma ma-r"
                     onClick={() => handleRestart(m)}
                     disabled={restartingId === m.id}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      opacity: restartingId === m.id ? 0.7 : 1,
+                      cursor: restartingId === m.id ? "not-allowed" : "pointer",
+                    }}
                   >
+                    {restartingId === m.id && (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 9,
+                          height: 9,
+                          border: "2px solid rgba(0,0,0,0.18)",
+                          borderTopColor: "currentColor",
+                          borderRadius: "50%",
+                          display: "inline-block",
+                          animation: "spin 0.7s linear infinite",
+                        }}
+                      />
+                    )}
                     {restartingId === m.id ? "Restarting…" : "Restart?"}
                   </button>
                 </div>

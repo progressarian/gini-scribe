@@ -55,7 +55,12 @@ const AddMedicationModal = memo(function AddMedicationModal({
   patient,
   labResults,
   activeMeds,
+  parentMed,
 }) {
+  // Top-level active meds eligible to be a parent of a support medicine.
+  const parentCandidates = (activeMeds || []).filter(
+    (m) => m && !m.parent_medication_id && Number.isFinite(Number(m.id)),
+  );
   const [form, setForm] = useState({
     name: "",
     dose: "",
@@ -68,9 +73,13 @@ const AddMedicationModal = memo(function AddMedicationModal({
     external_doctor: "",
     clinical_note: "",
     notes: "",
+    parent_medication_id: parentMed?.id ? String(parentMed.id) : "",
+    support_condition: "",
   });
+  const isSubMed = !!form.parent_medication_id;
   const [timings, setTimings] = useState([]);
   const [warning, setWarning] = useState(null);
+  const [loading, setLoading] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const toggleTiming = (t) =>
@@ -123,21 +132,70 @@ const AddMedicationModal = memo(function AddMedicationModal({
   // Check if showing external doctor field
   const showExternalDoctor = form.med_group === "external";
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (loading) return;
     const submitData = {
       ...form,
       timing: timings.join(", "),
       // Only include relevant fields
       drug_class: showDrugClass ? form.drug_class : null,
       external_doctor: showExternalDoctor ? form.external_doctor : null,
+      parent_medication_id: form.parent_medication_id
+        ? Number(form.parent_medication_id)
+        : null,
+      support_condition: form.parent_medication_id ? form.support_condition || null : null,
     };
-    onSubmit(submitData);
+    setLoading(true);
+    try {
+      await onSubmit(submitData);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="mo open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="mo open"
+      onClick={(e) => {
+        if (loading) return;
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="mbox" style={{ width: 500 }}>
-        <div className="mttl">💊 Add New Medicine</div>
+        <div className="mttl">
+          💊 {isSubMed ? "Add Support Medicine" : "Add New Medicine"}
+        </div>
+
+        {/* Sub-medicine selector — pick a parent to make this a support med. */}
+        {parentCandidates.length > 0 && (
+          <div className="mf">
+            <label className="ml">Type</label>
+            <select
+              className="ms"
+              value={form.parent_medication_id}
+              onChange={(e) => set("parent_medication_id", e.target.value)}
+            >
+              <option value="">New medicine (standalone)</option>
+              {parentCandidates.map((m) => (
+                <option key={m.id} value={String(m.id)}>
+                  Support medicine for {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {isSubMed && (
+          <div className="mf">
+            <label className="ml">Support for what</label>
+            <input
+              className="mi"
+              placeholder="e.g. SOS for nausea/vomiting"
+              value={form.support_condition}
+              onChange={(e) => set("support_condition", e.target.value)}
+            />
+          </div>
+        )}
 
         {/* Medicine name */}
         <div className="mf">
@@ -283,43 +341,59 @@ const AddMedicationModal = memo(function AddMedicationModal({
           />
         </div>
 
-        <div className="g2">
-          <div className="mf">
-            <label className="ml">Prescribed for</label>
-            <select
-              className="ms"
-              value={form.for_diagnosis}
-              onChange={(e) => set("for_diagnosis", e.target.value)}
-            >
-              <option value="">Select...</option>
-              {(diagnoses || []).map((d) => (
-                <option key={d.id} value={d.label || d.diagnosis_id}>
-                  {d.label || d.diagnosis_id}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mf">
-            <label className="ml">Prescribed since</label>
-            <input
-              className="mi"
-              type="date"
-              value={form.started_date}
-              onChange={(e) => set("started_date", e.target.value)}
-            />
-          </div>
+        <div className="mf">
+          <label className="ml">Prescribed for</label>
+          <select
+            className="ms"
+            value={form.for_diagnosis}
+            onChange={(e) => set("for_diagnosis", e.target.value)}
+          >
+            <option value="">Select...</option>
+            {(diagnoses || []).map((d) => (
+              <option key={d.id} value={d.label || d.diagnosis_id}>
+                {d.label || d.diagnosis_id}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="macts">
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={onClose} disabled={loading}>
             Cancel
           </button>
           <button
             className="btn-p"
-            disabled={!form.name || (showExternalDoctor && !form.external_doctor)}
+            disabled={
+              loading || !form.name || (showExternalDoctor && !form.external_doctor)
+            }
             onClick={handleSubmit}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              opacity: loading ? 0.75 : 1,
+              cursor: loading
+                ? "not-allowed"
+                : !form.name || (showExternalDoctor && !form.external_doctor)
+                  ? "not-allowed"
+                  : "pointer",
+            }}
           >
-            Add Medicine
+            {loading && (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 12,
+                  height: 12,
+                  border: "2px solid rgba(255,255,255,0.4)",
+                  borderTopColor: "#fff",
+                  borderRadius: "50%",
+                  display: "inline-block",
+                  animation: "spin 0.7s linear infinite",
+                }}
+              />
+            )}
+            {loading ? (isSubMed ? "Adding…" : "Adding…") : isSubMed ? "Add Support Medicine" : "Add Medicine"}
           </button>
         </div>
       </div>

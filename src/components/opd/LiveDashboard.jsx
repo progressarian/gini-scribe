@@ -588,6 +588,7 @@ export default function LiveDashboard({
   const isMobile = useIsMobile();
   const isSmall = useIsMobile(480);
   const grid5 = isSmall ? "1fr 1fr" : isMobile ? "1fr 1fr 1fr" : "repeat(5,1fr)";
+  const grid6 = isSmall ? "1fr 1fr" : isMobile ? "1fr 1fr 1fr" : "repeat(6,1fr)";
   const grid3 = isMobile ? "1fr" : "1fr 1fr 1fr";
   const grid2 = isSmall ? "1fr" : "1fr 1fr";
   const [calOpen, setCalOpen] = useState(false);
@@ -737,6 +738,7 @@ export default function LiveDashboard({
     // Trendable = patients who have both current and previous HbA1c so a
     // direction can be computed. Stable = within ±5% threshold.
     const trendable = rows.filter((r) => r.hba1c && r.prevHba1c).length;
+    const newHba1c = withHba1c - trendable;
     const stableTrend = trendable - gettingBetter.length - gettingWorse.length;
     const pctBetter = trendable ? Math.round((gettingBetter.length / trendable) * 100) : 0;
     const pctWorse = trendable ? Math.round((gettingWorse.length / trendable) * 100) : 0;
@@ -777,6 +779,7 @@ export default function LiveDashboard({
       gettingBetter,
       gettingWorse,
       trendable,
+      newHba1c,
       stableTrend,
       pctBetter,
       pctWorse,
@@ -1161,7 +1164,7 @@ export default function LiveDashboard({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: grid5,
+              gridTemplateColumns: grid6,
               gap: 10,
               flexShrink: 0,
             }}
@@ -1193,6 +1196,12 @@ export default function LiveDashboard({
               valColor={m.gettingBetter.length ? GN : INK3}
               bg={m.gettingBetter.length ? GNL : WH}
               labelColor={m.gettingBetter.length ? GN : INK3}
+            />
+            <Stat
+              val={m.newHba1c}
+              label="First HbA1c — no prior"
+              valColor={m.newHba1c ? INK : INK3}
+              labelColor={INK3}
             />
           </div>
 

@@ -117,6 +117,18 @@ const splitMeds = (activeMeds = []) => {
   return { ownMeds, externalMeds };
 };
 
+// Build a parent → children[] map so support / conditional medications render
+// nested under their parent instead of as independent numbered rows.
+const buildChildrenMap = (meds) => {
+  const map = {};
+  for (const m of meds) {
+    if (m.parent_medication_id) {
+      (map[m.parent_medication_id] ||= []).push(m);
+    }
+  }
+  return map;
+};
+
 const splitTests = (tests = []) => {
   const referrals = tests.filter(
     (t) => typeof t === "object" && (t.referred_to || t.specialty || t.type === "referral"),
@@ -209,6 +221,11 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-med-dose{font-family:var(--fm);font-size:12px;font-weight:500}
 .rx-med-timing{font-size:11px;color:var(--ink3)}
 .rx-ext-badge{font-size:9px;background:var(--skl);color:var(--sk);font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
+.rx-med-sub{padding-left:38px;background:#fafbfc;border-bottom:none;border-left:3px solid var(--tl);margin-left:14px}
+.rx-med-sub .rx-med-name{font-size:12px;font-weight:600}
+.rx-med-sub .rx-med-arrow{color:var(--ink3);margin-right:6px;font-size:13px}
+.rx-sub-badge{font-size:9px;background:#eef2ff;color:#4338ca;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
+.rx-sub-cond{font-size:10px;color:var(--ink3);margin-top:1px;font-style:italic}
 
 .rx-ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .rx-ref{background:var(--skl);border-radius:6px;padding:9px 11px;border-left:3px solid var(--sk)}
@@ -574,8 +591,27 @@ function buildPrescriptionHtml(data = {}) {
     })
     .join("");
 
+  // ── Render a child support medicine row (no number, indented, badge + condition)
+  const renderChildMed = (child, parentName) => {
+    const childPrimary = child.composition || child.name;
+    return `
+        <div class="rx-med rx-med-sub">
+          <div class="rx-med-num"></div>
+          <div class="rx-med-body">
+            <div class="rx-med-name"><span class="rx-med-arrow">↳</span>${escape(childPrimary || "")}<span class="rx-sub-badge">SUPPORT</span></div>
+            <div class="rx-sub-cond">${escape(child.support_condition || `for ${parentName}`)}</div>
+          </div>
+          <div class="rx-med-right">
+            <div class="rx-med-dose">${escape(child.dose || child.dosage || child.frequency || "—")}</div>
+            <div class="rx-med-timing">${escape(child.timing || "")}</div>
+          </div>
+        </div>`;
+  };
+
   // ── Own medicines
-  const ownMedsHtml = ownMeds
+  const ownChildrenByParent = buildChildrenMap(ownMeds);
+  const ownParents = ownMeds.filter((m) => !m.parent_medication_id);
+  const ownMedsHtml = ownParents
     .map((m, i) => {
       const primary = m.composition || m.name;
       const secondary = m.composition && m.name && m.name !== m.composition ? m.name : null;
@@ -591,6 +627,9 @@ function buildPrescriptionHtml(data = {}) {
       const indication = Array.isArray(m.for_diagnosis)
         ? m.for_diagnosis.join(", ")
         : m.for_diagnosis || m.indication || m.purpose || "";
+      const childrenHtml = (ownChildrenByParent[m.id] || [])
+        .map((c) => renderChildMed(c, primary || ""))
+        .join("");
       return `
         <div class="rx-med" ${rowStyle}>
           <div class="rx-med-num">${i + 1}.</div>
@@ -602,17 +641,22 @@ function buildPrescriptionHtml(data = {}) {
             <div class="rx-med-dose">${escape(m.dose || m.dosage || m.frequency || "—")}</div>
             <div class="rx-med-timing">${escape(m.timing || "")}</div>
           </div>
-        </div>`;
+        </div>${childrenHtml}`;
     })
     .join("");
 
   // ── External medicines
-  const extMedsHtml = externalMeds
+  const extChildrenByParent = buildChildrenMap(externalMeds);
+  const extParents = externalMeds.filter((m) => !m.parent_medication_id);
+  const extMedsHtml = extParents
     .map((m) => {
       const primary = m.composition || m.name;
       const by = m.external_doctor
         ? `Prescribed by ${escape(m.external_doctor)}`
         : "Prescribed by external doctor";
+      const childrenHtml = (extChildrenByParent[m.id] || [])
+        .map((c) => renderChildMed(c, primary || ""))
+        .join("");
       return `
         <div class="rx-med" style="background:var(--skl);padding:8px 10px;border-radius:6px;border-bottom:none">
           <div class="rx-med-num">—</div>
@@ -624,7 +668,7 @@ function buildPrescriptionHtml(data = {}) {
             <div class="rx-med-dose">${escape(m.dose || m.dosage || m.frequency || "—")}</div>
             <div class="rx-med-timing">${escape(m.timing || "")}</div>
           </div>
-        </div>`;
+        </div>${childrenHtml}`;
     })
     .join("");
 

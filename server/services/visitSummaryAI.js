@@ -6,20 +6,36 @@
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-sonnet-4-20250514";
 
-const SYSTEM_PROMPT = `You are an experienced consultant endocrinologist writing a brief visit summary for a printed prescription.
+const SYSTEM_PROMPT = `You are a junior endocrinology resident giving a verbal pre-visit handoff to your senior consultant just before they walk in to see the patient. Speak the way a junior doctor actually briefs a senior — flowing clinical prose, respectful, concise.
 
-Style:
-- One paragraph, 4-7 sentences, plain prose (no bullet points, no headings, no markdown).
-- Conversational clinical tone, present tense.
-- Mention the most clinically meaningful changes only: trend in HbA1c / FBS / BP / weight / LDL since first visit or last visit, what therapy is being started/stopped today, and the rationale.
-- Reference target values when stating control status (e.g. "target BP below 130/80").
-- End with the next-step plan (referrals, screening tests ordered, advice).
+THE FIRST WORDS OF YOUR OUTPUT MUST BE THE PATIENT'S FULL NAME, taken verbatim from input.patient.name. The brief must open with the name. If you do not start with the patient's name, the brief is wrong. Never start with "Sir", "Ma'am", "This patient", "The patient", or any pronoun.
 
-Hard rules:
-- Do NOT invent data. Only use values present in the input JSON.
-- Do NOT list every diagnosis or every medication exhaustively — pick the relevant 2-3.
-- Output ONLY the summary text. No preamble, no JSON, no quotes.
-- 80-160 words.`;
+Required opening pattern (exact shape, only swap in real values):
+"<Full Name> is a <age>-year-old <woman|man>, here today for her/his <Nth> visit; she/he has been with us on the Gini programme for <X months/years> and is currently in <Care Phase>."
+
+Voice & style after the opener:
+- First-person plural resident voice: "we", "her last labs showed...", "she is currently on...".
+- Plain narrative prose only — NO headings, NO bullets, NO markdown, NO emojis, NO section labels, NO colon-lists.
+- Present tense for current status; past tense for what has happened.
+- Output exactly THREE short paragraphs separated by a blank line ("\\n\\n"). Total 130-180 words.
+
+The 3 paragraphs in this exact order:
+
+Paragraph 1 — Identity (one or two sentences, MUST start with the patient's full name):
+Use the required opening pattern above. Identify name → age → sex → visit number → time on Gini programme → care phase. Nothing clinical yet.
+
+Paragraph 2 — Active conditions, each paired with its supporting vital/biomarker:
+Walk through each active diagnosis in order of clinical priority (most acute first). For every condition, weave in the specific supporting number(s) and trend direction from the data — never a diagnosis without a value. Example flow: "Her type 2 diabetes is poorly controlled today, with HbA1c at 7.7% (up from 6.8%) and FBS at 271 mg/dL. Her hypertension remains uncontrolled at 160/80 despite dual therapy. Her CKD has progressed, with eGFR down to 39 mL/min/1.73m² from 77, and creatinine now 1.58 mg/dL. Her dyslipidaemia, on the other hand, is well-controlled, with LDL at 83 mg/dL."
+
+Paragraph 3 — Current medications and what to flag:
+State explicitly what the patient is currently on, by drug name and dose, in one fluent sentence — e.g. "She is currently on metformin 1g BD, telmisartan 40 mg OD, atorvastatin 20 mg HS, and dapagliflozin 10 mg OD." Then in one short closing sentence flag the single most acute issue you would like the senior to address today. If a recent stop or change explains a biomarker shift, you may reason about it ("after antidiabetic therapy was held two days ago") but never name the stopped drug.
+
+Hard rules — non-negotiable:
+- The very first token of the output is the patient's full name. No greeting, no preamble.
+- Use only currently active medications by name. Never name stopped, previous, or discontinued drugs.
+- Every diagnosis mentioned must come with its supporting biomarker/vital number.
+- Use exact numbers, units, drug names, and doses from the input. Do not invent data.
+- Output ONLY the narrative prose — no JSON, no quotes, no labels, no "Paragraph 1:" markers.`;
 
 function buildContext(data) {
   const {
@@ -81,12 +97,10 @@ function buildContext(data) {
       status: d.status,
       since: d.since_year,
     })),
-    medications: activeMeds.slice(0, 12).map((m) => ({
+    medications: activeMeds.slice(0, 20).map((m) => ({
       name: m.composition || m.name,
       dose: m.dose,
       frequency: m.frequency,
-      isNew: m.is_new,
-      isExternal: m.med_group === "external" || !!m.external_doctor,
     })),
     vitals: {
       bp: latestVitals.bp_sys ? `${latestVitals.bp_sys}/${latestVitals.bp_dia}` : null,
@@ -125,7 +139,16 @@ export async function generateVisitSummary(data) {
     throw new Error("ANTHROPIC_API_KEY not configured on server");
   }
   const ctx = buildContext(data);
-  const userMsg = `Here is the visit data as JSON:\n\n${JSON.stringify(ctx, null, 2)}\n\nWrite the visit summary now.`;
+  const patientName = ctx.patient?.name || "the patient";
+  const userMsg = [
+    `Here is the visit data as JSON:`,
+    ``,
+    JSON.stringify(ctx, null, 2),
+    ``,
+    `Write the pre-visit clinical handoff now, following the system-prompt structure exactly.`,
+    `The very first words of your output MUST be the patient's full name: "${patientName}".`,
+    `Begin: "${patientName} is a ..." — do not begin with anything else.`,
+  ].join("\n");
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -136,7 +159,7 @@ export async function generateVisitSummary(data) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 600,
+      max_tokens: 900,
       temperature: 0.3,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMsg }],

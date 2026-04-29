@@ -23,6 +23,8 @@
  * Usage:
  *   node server/scripts/reextract-last-prescription-by-date.js --date=2026-04-25
  *   node server/scripts/reextract-last-prescription-by-date.js --date=2026-04-25 --apply
+ *   node server/scripts/reextract-last-prescription-by-date.js --date=2026-04-29,2026-04-30
+ *   node server/scripts/reextract-last-prescription-by-date.js --date=2026-04-29 --date=2026-04-30 --apply
  */
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -33,20 +35,30 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const { default: pool } = await import("../config/db.js");
 const { fetchMedicalRecords } = await import("../services/healthray/client.js");
-const { syncDocuments } = await import("../services/healthray/db.js");
+const { syncDocuments, ensureSyncColumns } = await import("../services/healthray/db.js");
 const { runPrescriptionExtraction } = await import("../routes/documents.js");
+
+// Make sure the medications schema is up to date before any sync writes —
+// ensureSyncColumns is idempotent and normally runs at server startup, but
+// this script runs standalone.
+await ensureSyncColumns();
 
 const args = process.argv.slice(2);
 const DRY = !args.includes("--apply");
-const DATE = args.find((a) => a.startsWith("--date="))?.split("=")[1];
+// Accept multiple dates: repeated --date= flags AND comma-separated values.
+const DATES = args
+  .filter((a) => a.startsWith("--date="))
+  .flatMap((a) => a.split("=")[1].split(","))
+  .map((d) => d.trim())
+  .filter(Boolean);
 const BATCH_DELAY_MS = 1000;
 // Cap how far back we look per patient. A patient typically has a prescription
 // on their most recent completed visit; walking beyond ~10 appointments is
 // unlikely to help and wastes HealthRay API calls.
 const MAX_APPTS_WALK = 10;
 
-if (!DATE) {
-  console.error("Missing --date=YYYY-MM-DD");
+if (DATES.length === 0) {
+  console.error("Missing --date=YYYY-MM-DD (repeat or comma-separate for multiple dates)");
   process.exit(1);
 }
 
@@ -100,13 +112,13 @@ async function findLatestHealthrayPrescription(patientId) {
   return null;
 }
 
-function apptDateToString(apptDate) {
-  if (!apptDate) return DATE;
+function apptDateToString(apptDate, fallback) {
+  if (!apptDate) return fallback;
   if (apptDate instanceof Date) return apptDate.toISOString().slice(0, 10);
   return String(apptDate).slice(0, 10);
 }
 
-async function run() {
+async function runForDate(date) {
   const { rows: patients } = await pool.query(
     `SELECT DISTINCT COALESCE(p.id, a.patient_id) AS patient_id,
             COALESCE(p.name, a.patient_name) AS patient_name
@@ -116,10 +128,10 @@ async function run() {
          OR (a.file_no IS NULL AND p.id = a.patient_id)
       WHERE a.appointment_date = $1
         AND COALESCE(p.id, a.patient_id) IS NOT NULL`,
-    [DATE],
+    [date],
   );
 
-  console.log(`\nAppointments on ${DATE}: ${patients.length} unique patient(s)\n`);
+  console.log(`\n=== ${date}: ${patients.length} unique patient(s) ===\n`);
 
   const targets = [];
   const skipped = [];
@@ -144,7 +156,7 @@ async function run() {
         `attach=${rec.id} mrid=${rec.medical_record_id || "-"} ` +
         `rtype=${JSON.stringify(rec.record_type)} ` +
         `file=${JSON.stringify(rec.file_name)} ` +
-        `app_date=${rec.app_date_time || apptDateToString(t.apptDate)}`,
+        `app_date=${rec.app_date_time || apptDateToString(t.apptDate, date)}`,
     );
   }
   for (const s of skipped) {
@@ -154,19 +166,24 @@ async function run() {
   }
 
   if (DRY) {
-    console.log("\nDRY RUN — no changes made. Add --apply to execute.");
-    return;
+    console.log(`\n  DRY RUN (${date}) — no changes made. Add --apply to execute.`);
+    return { date, ok: 0, fail: 0, skipped: skipped.length, total: patients.length };
   }
 
   let ok = 0;
   let fail = 0;
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
-    const pfx = `  [${i + 1}/${targets.length}]`;
+    const pfx = `  [${date} ${i + 1}/${targets.length}]`;
     const rec = t.record;
     console.log(`${pfx} upserting doc patient=${t.patient_id} healthray_attach=${rec.id}...`);
     try {
-      await syncDocuments(t.patient_id, [rec], apptDateToString(t.apptDate), t.healthrayApptId);
+      await syncDocuments(
+        t.patient_id,
+        [rec],
+        apptDateToString(t.apptDate, date),
+        t.healthrayApptId,
+      );
 
       const { rows: docRows } = await pool.query(
         `SELECT id FROM documents
@@ -202,9 +219,21 @@ async function run() {
     if (i < targets.length - 1) await sleep(BATCH_DELAY_MS);
   }
 
-  console.log(
-    `\nSummary: extracted=${ok} failed=${fail} skipped=${skipped.length} total_patients=${patients.length}`,
-  );
+  return { date, ok, fail, skipped: skipped.length, total: patients.length };
+}
+
+async function run() {
+  const summary = [];
+  for (const date of DATES) {
+    const r = await runForDate(date);
+    summary.push(r);
+  }
+  console.log(`\n────────── Overall summary ──────────`);
+  for (const r of summary) {
+    console.log(
+      `  ${r.date}: extracted=${r.ok} failed=${r.fail} skipped=${r.skipped} total_patients=${r.total}`,
+    );
+  }
 }
 
 try {

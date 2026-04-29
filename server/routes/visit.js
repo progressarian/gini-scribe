@@ -8,7 +8,10 @@ import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
-import { generatePrescriptionPdf } from "../services/prescriptionHtmlPdf.js";
+import {
+  generatePrescriptionPdf,
+  buildPrescriptionFileName,
+} from "../services/prescriptionHtmlPdf.js";
 import { generateVisitSummary } from "../services/visitSummaryAI.js";
 import { generatePatientSummary } from "../services/patientSummaryAI.js";
 import {
@@ -16,6 +19,7 @@ import {
   syncVitalsFromExtraction,
 } from "../services/healthray/db.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
+import { invalidatePatientSummaries } from "../services/summaryCache.js";
 import {
   sortMedications,
   groupMedications,
@@ -46,6 +50,31 @@ const {
 } = require("../genie-sync.cjs");
 
 const router = Router();
+
+// Invalidate cached pre/post-visit summaries on any successful mutation under
+// /visit/:patientId/*. Read-only and pure-helper endpoints are skipped — these
+// don't change the data the summary derives from.
+const SUMMARY_INVALIDATE_SKIP = [
+  "/biomarkers/refresh",
+  "/parse-text",
+  "/doctor-summary/generate",
+  "/patient-summary/generate",
+  "/patient-summary", // saving the rendered summary doesn't change clinical data
+  "/scribe-prescription",
+  "/medications/reconcile", // self-invalidates only when rowCount > 0
+];
+router.use("/visit/:patientId", (req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD") return next();
+  if (SUMMARY_INVALIDATE_SKIP.some((s) => req.path === s || req.path.endsWith(s))) {
+    return next();
+  }
+  res.on("finish", () => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      invalidatePatientSummaries(req.params.patientId).catch(() => {});
+    }
+  });
+  next();
+});
 
 // Ensure visit_symptoms table exists
 pool
@@ -169,6 +198,7 @@ router.get("/visit/:patientId", async (req, res) => {
       labSyncR,
       patientMedsGenieR,
       patientCondsGenieR,
+      latestAnyApptR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -408,6 +438,16 @@ router.get("/visit/:patientId", async (req, res) => {
          WHERE patient_id=$1
          ORDER BY synced_at DESC
          LIMIT 100`,
+        [pid],
+      ),
+
+      // 24. Latest appointment of any kind — used by the client to stamp
+      //     summary requests so cache rows are always keyed.
+      pool.query(
+        `SELECT id FROM appointments
+          WHERE patient_id=$1
+          ORDER BY appointment_date DESC NULLS LAST, id DESC
+          LIMIT 1`,
         [pid],
       ),
     ]);
@@ -674,6 +714,7 @@ router.get("/visit/:patientId", async (req, res) => {
         monthsWithGini,
         carePhase,
       },
+      latestAppointmentId: latestAnyApptR.rows[0]?.id || null,
       syncStatus: {
         healthray: healthraySyncR.rows[0] || null,
         labs: labSyncR.rows || [],
@@ -956,8 +997,30 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       external_doctor,
       clinical_note,
       notes,
+      parent_medication_id,
+      support_condition,
     } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
+
+    // If this is a support medicine, the parent must belong to the same patient
+    // and currently be active. Reject otherwise so we never create dangling FKs.
+    let parentId = null;
+    if (parent_medication_id != null && parent_medication_id !== "") {
+      const pidNum = Number(parent_medication_id);
+      if (!Number.isFinite(pidNum)) {
+        return res.status(400).json({ error: "Invalid parent_medication_id" });
+      }
+      const parentRow = await pool.query(
+        `SELECT id FROM medications WHERE id = $1 AND patient_id = $2 AND is_active = true`,
+        [pidNum, pid],
+      );
+      if (!parentRow.rows[0]) {
+        return res
+          .status(400)
+          .json({ error: "Parent medication not found or not active for this patient" });
+      }
+      parentId = pidNum;
+    }
     const forDx = Array.isArray(for_diagnosis)
       ? for_diagnosis
       : for_diagnosis
@@ -976,9 +1039,22 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const detectedGroup = med_group || detectMedGroup({ name: storedName, composition });
     const detectedClass = drug_class || detectDrugClass({ name: storedName, composition });
 
+    // Pin the new row's last_prescribed_date to the current visit anchor
+    // (= max last_prescribed_date across the patient's active meds). This
+    // keeps the new med in the same "Last visit" bucket as the rest without
+    // pushing earlier meds into "Previous visits". If the patient has no
+    // active meds yet, fall back to today.
+    const anchorRes = await pool.query(
+      `SELECT MAX(last_prescribed_date)::text AS anchor
+         FROM medications
+        WHERE patient_id = $1 AND is_active = true AND last_prescribed_date IS NOT NULL`,
+      [pid],
+    );
+    const visitAnchor = anchorRes.rows[0]?.anchor || null;
+
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16)
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),NOW())
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -994,6 +1070,9 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          external_doctor = COALESCE(EXCLUDED.external_doctor, medications.external_doctor),
          clinical_note = COALESCE(EXCLUDED.clinical_note, medications.clinical_note),
          notes = COALESCE(EXCLUDED.notes, medications.notes),
+         parent_medication_id = COALESCE(EXCLUDED.parent_medication_id, medications.parent_medication_id),
+         support_condition = COALESCE(EXCLUDED.support_condition, medications.support_condition),
+         last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -1013,6 +1092,9 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         t(external_doctor, 200),
         t(clinical_note, 500),
         t(notes, 1000),
+        parentId,
+        parentId ? t(support_condition, 200) : null,
+        visitAnchor,
       ],
     );
     syncMedicationsToGenie(pid, pool).catch((e) =>
@@ -1054,7 +1136,15 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
   const mid = Number(rawId);
   if (!mid) return res.status(400).json({ error: "Invalid IDs" });
   try {
-    const { dose, frequency, timing, reason } = req.body;
+    const {
+      dose,
+      frequency,
+      timing,
+      reason,
+      last_prescribed_date,
+      parent_medication_id,
+      support_condition,
+    } = req.body;
 
     // Load existing row so we can snapshot the pre-edit state into history
     const existing = await pool.query(
@@ -1084,15 +1174,62 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
         ])
       : null;
 
+    // Optional: explicit last_prescribed_date bump (used by "Move to Active"
+    // on previous-visit rows). Only accept ISO date strings; null is allowed
+    // to reset.
+    const setLastPrescribed = last_prescribed_date !== undefined;
+    const nextLastPrescribed = setLastPrescribed ? n(last_prescribed_date) : null;
+
+    // Optional: change parent_medication_id / support_condition. `null`
+    // explicitly demotes a sub-med to standalone. A new parent must belong
+    // to the same patient and be currently active.
+    const setParent = parent_medication_id !== undefined;
+    let nextParentId = null;
+    if (setParent && parent_medication_id != null && parent_medication_id !== "") {
+      const pidNum = Number(parent_medication_id);
+      if (!Number.isFinite(pidNum) || pidNum === mid) {
+        return res.status(400).json({ error: "Invalid parent_medication_id" });
+      }
+      const parentRow = await pool.query(
+        `SELECT id FROM medications WHERE id = $1 AND patient_id = $2 AND is_active = true`,
+        [pidNum, pid],
+      );
+      if (!parentRow.rows[0]) {
+        return res
+          .status(400)
+          .json({ error: "Parent medication not found or not active for this patient" });
+      }
+      nextParentId = pidNum;
+    }
+    const setSupportCondition = support_condition !== undefined;
+    const nextSupportCondition = setSupportCondition ? t(support_condition, 200) : null;
+
     const r = await pool.query(
       `UPDATE medications SET
          dose = $1, frequency = $2, timing = $3,
          notes = COALESCE($4, notes),
          history = CASE WHEN $5::jsonb IS NULL THEN COALESCE(history, '[]'::jsonb)
                         ELSE COALESCE(history, '[]'::jsonb) || $5::jsonb END,
+         last_prescribed_date = CASE WHEN $8::boolean THEN $9::date ELSE last_prescribed_date END,
+         parent_medication_id = CASE WHEN $10::boolean THEN $11::int ELSE parent_medication_id END,
+         support_condition = CASE WHEN $12::boolean THEN $13 ELSE support_condition END,
          updated_at = NOW()
        WHERE id = $6 AND patient_id = $7 AND is_active = true RETURNING *`,
-      [nextDose, nextFreq, nextTiming, t(reason, 500), historyEntry, mid, pid],
+      [
+        nextDose,
+        nextFreq,
+        nextTiming,
+        t(reason, 500),
+        historyEntry,
+        mid,
+        pid,
+        setLastPrescribed,
+        nextLastPrescribed,
+        setParent,
+        nextParentId,
+        setSupportCondition,
+        nextSupportCondition,
+      ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
     syncMedicationsToGenie(pid, pool).catch((e) =>
@@ -1128,40 +1265,92 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
 
   const mid = Number(rawId);
   if (!mid) return res.status(400).json({ error: "Invalid IDs" });
+  const client = await pool.connect();
   try {
-    const { reason, notes } = req.body;
-    if (!reason) return res.status(400).json({ error: "reason is required" });
+    const { reason, notes, cascade } = req.body;
+    if (!reason) {
+      client.release();
+      return res.status(400).json({ error: "reason is required" });
+    }
 
-    // Get the medication name before stopping (needed to clear duplicate inactive rows)
-    const med = await pool.query(
+    await client.query("BEGIN");
+
+    const med = await client.query(
       "SELECT pharmacy_match, name FROM medications WHERE id = $1 AND patient_id = $2",
       [mid, pid],
     );
-    if (!med.rows[0]) return res.status(404).json({ error: "Medication not found" });
+    if (!med.rows[0]) {
+      await client.query("ROLLBACK");
+      client.release();
+      return res.status(404).json({ error: "Medication not found" });
+    }
 
-    // Remove any existing inactive duplicates with the same pharmacy_match/name
-    // so the inactive partial unique index doesn't reject our UPDATE
     const matchKey = med.rows[0].pharmacy_match || med.rows[0].name;
-    await pool.query(
+    await client.query(
       `DELETE FROM medications
        WHERE patient_id = $1 AND id != $2 AND is_active = false
          AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)`,
       [pid, mid, matchKey],
     );
 
-    const r = await pool.query(
+    const r = await client.query(
       `UPDATE medications SET is_active = false, stopped_date = CURRENT_DATE,
          stop_reason = $1, notes = COALESCE($2, notes), updated_at = NOW()
        WHERE id = $3 AND patient_id = $4 AND is_active = true RETURNING *`,
       [t(reason, 200), t(notes, 500), mid, pid],
     );
-    if (!r.rows[0])
+    if (!r.rows[0]) {
+      await client.query("ROLLBACK");
+      client.release();
       return res.status(404).json({ error: "Medication not found or already stopped" });
+    }
+
+    let cascadedCount = 0;
+    let promotedCount = 0;
+    if (cascade === true) {
+      const childRes = await client.query(
+        `UPDATE medications
+            SET is_active = false,
+                stopped_date = CURRENT_DATE,
+                stop_reason = COALESCE(stop_reason, $3),
+                updated_at = NOW()
+          WHERE patient_id = $1
+            AND parent_medication_id = $2
+            AND is_active = true
+          RETURNING id`,
+        [pid, mid, `Stopped with parent (${med.rows[0].name})`],
+      );
+      cascadedCount = childRes.rowCount;
+    } else {
+      // Doctor chose to keep the support meds active. Without their parent
+      // they'd render as orphan sub-meds; promote them to standalone so they
+      // appear as ordinary entries in the current-visit list.
+      const promoteRes = await client.query(
+        `UPDATE medications
+            SET parent_medication_id = NULL,
+                support_condition = NULL,
+                updated_at = NOW()
+          WHERE patient_id = $1
+            AND parent_medication_id = $2
+            AND is_active = true
+          RETURNING id`,
+        [pid, mid],
+      );
+      promotedCount = promoteRes.rowCount;
+    }
+
+    await client.query("COMMIT");
+    client.release();
+
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
-    res.json(r.rows[0]);
+    res.json({ ...r.rows[0], cascadedCount, promotedCount });
   } catch (e) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    client.release();
     handleError(res, e, "Stop medication");
   }
 });
@@ -1176,16 +1365,28 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
   const pid = Number(req.params.patientId);
   const mid = Number(req.params.id);
   if (!pid || !mid) return res.status(400).json({ error: "Invalid IDs" });
+  const { cascade, asStandalone } = req.body || {};
+  const client = await pool.connect();
   try {
-    const med = await pool.query(
-      "SELECT pharmacy_match, name, is_active FROM medications WHERE id = $1 AND patient_id = $2",
+    await client.query("BEGIN");
+
+    const med = await client.query(
+      "SELECT pharmacy_match, name, is_active, parent_medication_id FROM medications WHERE id = $1 AND patient_id = $2",
       [mid, pid],
     );
-    if (!med.rows[0]) return res.status(404).json({ error: "Medication not found" });
-    if (med.rows[0].is_active) return res.json({ ok: true, alreadyActive: true });
+    if (!med.rows[0]) {
+      await client.query("ROLLBACK");
+      client.release();
+      return res.status(404).json({ error: "Medication not found" });
+    }
+    if (med.rows[0].is_active) {
+      await client.query("ROLLBACK");
+      client.release();
+      return res.json({ ok: true, alreadyActive: true });
+    }
 
     const matchKey = med.rows[0].pharmacy_match || med.rows[0].name;
-    const dup = await pool.query(
+    const dup = await client.query(
       `SELECT id, name FROM medications
         WHERE patient_id = $1 AND id != $2 AND is_active = true
           AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)
@@ -1193,6 +1394,8 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
       [pid, mid, matchKey],
     );
     if (dup.rows[0]) {
+      await client.query("ROLLBACK");
+      client.release();
       return res.status(409).json({
         error: "An active medication with this name already exists",
         existingId: dup.rows[0].id,
@@ -1206,26 +1409,83 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
     // started_date instead of the original consultation's old visit_date.
     // Without this, the row keeps lining up with the old visit and the
     // frontend grouping puts it under "Prev Visit".
-    const r = await pool.query(
+    //
+    // If asStandalone is set on a child row, also clear the parent link so
+    // the restarted med is no longer rendered as a support medicine.
+    const promote = asStandalone === true && med.rows[0].parent_medication_id != null;
+    const r = await client.query(
       `UPDATE medications
           SET is_active = true,
               stopped_date = NULL,
               stop_reason = NULL,
               started_date = CURRENT_DATE,
+              last_prescribed_date = CURRENT_DATE,
               consultation_id = NULL,
+              parent_medication_id = CASE WHEN $3::boolean THEN NULL ELSE parent_medication_id END,
+              support_condition = CASE WHEN $3::boolean THEN NULL ELSE support_condition END,
               updated_at = NOW()
         WHERE id = $1 AND patient_id = $2 AND is_active = false
         RETURNING *`,
-      [mid, pid],
+      [mid, pid, promote],
     );
-    if (!r.rows[0])
+    if (!r.rows[0]) {
+      await client.query("ROLLBACK");
+      client.release();
       return res.status(404).json({ error: "Medication not found or already active" });
+    }
+
+    // Cascade-restart any inactive sub-meds that were attached to this parent.
+    // Skip any whose name collides with a currently-active row so the partial
+    // unique index doesn't blow up — return their ids so the UI can warn.
+    const cascadeRestarted = [];
+    const cascadeSkipped = [];
+    if (cascade === true) {
+      const children = await client.query(
+        `SELECT id, name, pharmacy_match FROM medications
+          WHERE patient_id = $1 AND parent_medication_id = $2 AND is_active = false`,
+        [pid, mid],
+      );
+      for (const ch of children.rows) {
+        const ckey = ch.pharmacy_match || ch.name;
+        const cdup = await client.query(
+          `SELECT id FROM medications
+            WHERE patient_id = $1 AND id != $2 AND is_active = true
+              AND UPPER(COALESCE(pharmacy_match, name)) = UPPER($3)
+            LIMIT 1`,
+          [pid, ch.id, ckey],
+        );
+        if (cdup.rows[0]) {
+          cascadeSkipped.push({ id: ch.id, name: ch.name, existingId: cdup.rows[0].id });
+          continue;
+        }
+        await client.query(
+          `UPDATE medications
+              SET is_active = true,
+                  stopped_date = NULL,
+                  stop_reason = NULL,
+                  started_date = CURRENT_DATE,
+                  last_prescribed_date = CURRENT_DATE,
+                  consultation_id = NULL,
+                  updated_at = NOW()
+            WHERE id = $1 AND patient_id = $2 AND is_active = false`,
+          [ch.id, pid],
+        );
+        cascadeRestarted.push(ch.id);
+      }
+    }
+
+    await client.query("COMMIT");
+    client.release();
 
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
-    res.json(r.rows[0]);
+    res.json({ ...r.rows[0], cascadeRestarted, cascadeSkipped });
   } catch (e) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    client.release();
     handleError(res, e, "Restart medication");
   }
 });
@@ -2107,6 +2367,12 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
        RETURNING id`,
       [pid],
     );
+    // Only invalidate cached summaries when the reconcile actually changed
+    // anything. The default no-op case (page load, nothing to stop) must not
+    // wipe the cache or every reload regenerates fresh.
+    if (r.rowCount > 0) {
+      invalidatePatientSummaries(pid).catch(() => {});
+    }
     res.json({ stopped: r.rowCount });
   } catch (e) {
     handleError(res, e, "Reconcile medications");
@@ -2361,6 +2627,101 @@ router.delete("/visit/:patientId/goal/:id", async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     handleError(res, e, "Delete goal");
+  }
+});
+
+// ── POST /visit/:patientId/complete ─────────────────────────────────────────
+// Called when the doctor ends a visit. Generates the prescription PDF from the
+// same visitPayload the client uses for the Rx preview, uploads it to Supabase
+// storage, and saves a `documents` row tagged source='visit' so the patient
+// record (and Genie app) shows the finalised prescription.
+router.post("/visit/:patientId/complete", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const payload = req.body || {};
+    const doctorName = payload?.doctor?.name || req.doctor?.name || "doctor";
+
+    const pdfBuffer = await generatePrescriptionPdf(payload);
+    const fileName = buildPrescriptionFileName(doctorName);
+    const dateLabel = new Date().toISOString().slice(0, 10);
+    const title = `Prescription — Visit — ${dateLabel}`;
+
+    // Hang the document off the latest consultation so it shows up under that
+    // visit in the patient timeline (mirrors scribe-prescription behaviour).
+    const latestCon = await pool.query(
+      `SELECT id FROM consultations WHERE patient_id = $1
+       ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
+      [pid],
+    );
+    const consultationId = latestCon.rows[0]?.id || null;
+
+    const ins = await pool.query(
+      `INSERT INTO documents
+         (patient_id, consultation_id, doc_type, title, file_name, doc_date,
+          source, notes, extracted_data)
+       VALUES ($1,$2,'prescription',$3,$4,CURRENT_DATE,
+               'visit','Generated on visit completion',$5::jsonb)
+       RETURNING *`,
+      [pid, consultationId, t(title, 200), t(fileName, 200), JSON.stringify(payload)],
+    );
+    const docRow = ins.rows[0];
+
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const safeName = sanitizeForStorageKey(fileName);
+      const storagePath = `patients/${pid}/prescription/${Date.now()}_${safeName}`;
+      try {
+        const uploadResp = await fetch(
+          `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+              "Content-Type": "application/pdf",
+              "x-upsert": "true",
+            },
+            body: pdfBuffer,
+          },
+        );
+        if (uploadResp.ok) {
+          await pool.query(
+            "UPDATE documents SET storage_path=$1, mime_type='application/pdf' WHERE id=$2",
+            [storagePath, docRow.id],
+          );
+          docRow.storage_path = storagePath;
+          docRow.mime_type = "application/pdf";
+        } else {
+          const errText = await uploadResp.text().catch(() => "");
+          console.warn(
+            "[Visit complete] PDF upload failed:",
+            uploadResp.status,
+            errText.slice(0, 200),
+          );
+        }
+      } catch (uploadErr) {
+        console.warn("[Visit complete] PDF upload error:", uploadErr.message);
+      }
+    }
+
+    if (consultationId) {
+      pool
+        .query("UPDATE consultations SET status='completed' WHERE id=$1", [consultationId])
+        .catch((e) =>
+          console.warn("[Visit complete] consultation status update skipped:", e.message),
+        );
+    }
+
+    syncDocumentsToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit complete] Genie doc push skipped:", e.message),
+    );
+
+    res.json({
+      document: docRow,
+      file_name: fileName,
+      storage_path: docRow.storage_path || null,
+    });
+  } catch (e) {
+    handleError(res, e, "Complete visit");
   }
 });
 

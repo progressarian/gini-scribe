@@ -3,6 +3,7 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
+import { invalidateAppointmentSummaries } from "../services/summaryCache.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
 import { markAppointmentAsSeen } from "../services/healthray/db.js";
 import {
@@ -10,6 +11,21 @@ import {
   canonicalMedKey,
   routeForForm,
 } from "../services/medication/normalize.js";
+
+// Invalidate summary cache after any successful mutation on /appointments/:id/*.
+// (List & status reads aren't matched here.) Skip the lightweight status flip,
+// which doesn't change clinical data.
+const APPT_INVALIDATE_SKIP = ["/status"];
+const apptInvalidateMw = (req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD") return next();
+  if (APPT_INVALIDATE_SKIP.some((s) => req.path === s || req.path.endsWith(s))) return next();
+  res.on("finish", () => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      invalidateAppointmentSummaries(req.params.id).catch(() => {});
+    }
+  });
+  next();
+};
 
 const require = createRequire(import.meta.url);
 const {
@@ -658,6 +674,8 @@ router.get("/opd/patient-docs/:patientId", async (req, res) => {
 });
 
 // ── PATCH /api/appointments/:id/status — direct status update, no side effects ──
+router.use("/appointments/:id", apptInvalidateMw);
+
 router.patch("/appointments/:id/status", async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid appointment ID" });

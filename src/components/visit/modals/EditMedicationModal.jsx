@@ -13,7 +13,12 @@ const TIMINGS = [
   "SOS only",
 ];
 
-const EditMedicationModal = memo(function EditMedicationModal({ medication, onClose, onSubmit }) {
+const EditMedicationModal = memo(function EditMedicationModal({
+  medication,
+  activeMeds,
+  onClose,
+  onSubmit,
+}) {
   const [dose, setDose] = useState(medication.dose || "");
   const [frequency, setFrequency] = useState(medication.frequency || "OD");
   const [timings, setTimings] = useState(() => {
@@ -26,6 +31,21 @@ const EditMedicationModal = memo(function EditMedicationModal({ medication, onCl
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Parent selection. Empty string = standalone (clear the link). Eligible
+  // parents: any other top-level active med for this patient.
+  const parentCandidates = (activeMeds || []).filter(
+    (m) =>
+      m &&
+      m.id !== medication.id &&
+      !m.parent_medication_id &&
+      Number.isFinite(Number(m.id)),
+  );
+  const [parentId, setParentId] = useState(
+    medication.parent_medication_id ? String(medication.parent_medication_id) : "",
+  );
+  const [supportCondition, setSupportCondition] = useState(medication.support_condition || "");
+  const isSubMed = !!parentId;
+
   const toggleTiming = (t) =>
     setTimings((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]));
 
@@ -33,7 +53,23 @@ const EditMedicationModal = memo(function EditMedicationModal({ medication, onCl
     if (loading) return;
     setLoading(true);
     try {
-      await onSubmit({ dose, frequency, timing: timings.join(", "), reason });
+      const payload = {
+        dose,
+        frequency,
+        timing: timings.join(", "),
+        reason,
+      };
+      const initialParent = medication.parent_medication_id
+        ? String(medication.parent_medication_id)
+        : "";
+      if (parentId !== initialParent) {
+        payload.parent_medication_id = parentId ? Number(parentId) : null;
+      }
+      const initialSupport = medication.support_condition || "";
+      if ((parentId ? supportCondition : "") !== initialSupport) {
+        payload.support_condition = parentId ? supportCondition || null : null;
+      }
+      await onSubmit(payload);
     } finally {
       setLoading(false);
     }
@@ -52,6 +88,36 @@ const EditMedicationModal = memo(function EditMedicationModal({ medication, onCl
         <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>
           Editing: <strong>{medication.name}</strong>
         </div>
+        {parentCandidates.length > 0 && (
+          <div className="mf">
+            <label className="ml">Type</label>
+            <select
+              className="ms"
+              value={parentId}
+              onChange={(e) => setParentId(e.target.value)}
+              disabled={loading}
+            >
+              <option value="">Standalone medicine</option>
+              {parentCandidates.map((m) => (
+                <option key={m.id} value={String(m.id)}>
+                  Support medicine for {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {isSubMed && (
+          <div className="mf">
+            <label className="ml">Support for what</label>
+            <input
+              className="mi"
+              placeholder="e.g. SOS for nausea/vomiting"
+              value={supportCondition}
+              onChange={(e) => setSupportCondition(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+        )}
         <div className="g2">
           <div className="mf">
             <label className="ml">Dosage</label>

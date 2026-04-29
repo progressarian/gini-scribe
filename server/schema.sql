@@ -147,11 +147,14 @@ CREATE TABLE IF NOT EXISTS medications (
   stopped_date    DATE,
   stop_reason     TEXT,                -- 'Side effect','Replaced','Goal met'
   notes           TEXT,
+  parent_medication_id INTEGER REFERENCES medications(id) ON DELETE SET NULL,
+  support_condition    TEXT,           -- 'for nausea Day 1-2', 'SOS for diarrhoea'
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_medications_patient ON medications(patient_id);
 CREATE INDEX idx_medications_active ON medications(patient_id, is_active);
 CREATE INDEX idx_medications_group ON medications(patient_id, med_group);
+CREATE INDEX idx_medications_parent ON medications(parent_medication_id);
 
 -- ============ LAB RESULTS ============
 -- Individual test results. Tracks biomarker trends.

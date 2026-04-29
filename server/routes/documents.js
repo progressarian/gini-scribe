@@ -1458,6 +1458,8 @@ async function runPrescriptionExtraction(docId) {
               route,
               status: m.status || null,
               reason: m.reason || null,
+              support_for: m.support_for || null,
+              support_condition: m.support_condition || null,
             });
           } else {
             existing.dose = join(existing.dose, m.dose || "");
@@ -1466,6 +1468,8 @@ async function runPrescriptionExtraction(docId) {
             if (!existing.route || existing.route === "Oral") existing.route = route;
             existing.status = existing.status || m.status || null;
             existing.reason = existing.reason || m.reason || null;
+            existing.support_for = existing.support_for || m.support_for || null;
+            existing.support_condition = existing.support_condition || m.support_condition || null;
           }
         }
         return map;
@@ -1525,6 +1529,61 @@ async function runPrescriptionExtraction(docId) {
           console.error(
             `[extract-prescription] active med insert failed doc=${docId} patient=${doc.patient_id} name="${m.storedName}" canonical="${m.canonical}": ${e.message}`,
           );
+        }
+      }
+
+      // ── Link support / conditional medications to their parent ───────
+      // Each med carrying `support_for: "<parent brand>"` becomes a child
+      // of the parent's row. Resolve the parent canonical key against the
+      // active rows we just upserted, then UPDATE parent_medication_id.
+      let supportLinked = 0;
+      const supportEntries = [...currentByKey.values()].filter((m) => m.support_for);
+      if (supportEntries.length > 0) {
+        const activeR = await client.query(
+          `SELECT id, name, pharmacy_match FROM medications
+             WHERE patient_id = $1 AND is_active = true`,
+          [doc.patient_id],
+        );
+        const idByCanonical = new Map();
+        for (const row of activeR.rows) {
+          const k = (
+            row.pharmacy_match ||
+            canonicalMedKey(stripFormPrefix(row.name).name || row.name) ||
+            ""
+          )
+            .toUpperCase()
+            .trim();
+          if (k && !idByCanonical.has(k)) idByCanonical.set(k, row.id);
+        }
+        for (const m of supportEntries) {
+          const parentHint = stripFormPrefix(m.support_for).name || m.support_for;
+          const parentKey = (canonicalMedKey(parentHint) || "").toUpperCase().trim();
+          const parentId = parentKey ? idByCanonical.get(parentKey) : null;
+          const childKey = (m.canonical || m.storedName.toUpperCase()).trim();
+          if (!parentId) {
+            console.error(
+              `[extract-prescription] support link unresolved doc=${docId} child="${m.storedName}" support_for="${m.support_for}"`,
+            );
+            continue;
+          }
+          try {
+            const r = await client.query(
+              `UPDATE medications
+                  SET parent_medication_id = $1,
+                      support_condition = COALESCE($2, support_condition),
+                      updated_at = NOW()
+                WHERE patient_id = $3
+                  AND is_active = true
+                  AND UPPER(COALESCE(pharmacy_match, name)) = $4
+                  AND id <> $1`,
+              [parentId, m.support_condition || null, doc.patient_id, childKey],
+            );
+            if (r.rowCount) supportLinked += r.rowCount;
+          } catch (e) {
+            console.error(
+              `[extract-prescription] support link UPDATE failed doc=${docId} child="${m.storedName}" parent="${m.support_for}": ${e.message}`,
+            );
+          }
         }
       }
 
@@ -1661,7 +1720,8 @@ async function runPrescriptionExtraction(docId) {
         `[extract-prescription] doc=${docId} meds: ` +
           `current extracted=${prescriptionMeds.length} merged=${currentByKey.size} inserted=${okCur} failed=${failCur} | ` +
           `previous extracted=${prevMeds.length} merged=${prevByKey.size} inserted=${okPrev} failed=${failPrev} | ` +
-          `stale swept=${staleSwept}`,
+          `stale swept=${staleSwept} | ` +
+          `support linked=${supportLinked}`,
       );
     }
 

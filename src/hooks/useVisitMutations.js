@@ -95,6 +95,26 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     [patientId, refreshData],
   );
 
+  // Bumps last_prescribed_date to today so a "Previous visit" med flips into
+  // the current-visit bucket on /visit. Stop button is unaffected.
+  const moveMedToActive = useCallback(
+    async (id) => {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        await api.patch(`/api/visit/${patientId}/medication/${id}`, {
+          last_prescribed_date: today,
+        });
+        toast("Moved to active", "success");
+        await refreshData();
+        return { success: true };
+      } catch {
+        toast("Failed to move medication to active", "error");
+        return { success: false };
+      }
+    },
+    [patientId, refreshData],
+  );
+
   const stopMedication = useCallback(
     async (id, data, opts = {}) => {
       try {
@@ -111,12 +131,25 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   );
 
   const restartMedication = useCallback(
-    async (id, opts = {}) => {
+    async (id, body = {}, opts = {}) => {
       try {
-        await api.patch(`/api/visit/${patientId}/medication/${id}/restart`);
-        if (!opts.silent) toast("Medication restarted", "success");
+        const { data } = await api.patch(
+          `/api/visit/${patientId}/medication/${id}/restart`,
+          body,
+        );
+        if (!opts.silent) {
+          const skipped = data?.cascadeSkipped?.length || 0;
+          if (skipped > 0) {
+            toast(
+              `Medication restarted, ${skipped} support med${skipped === 1 ? "" : "s"} skipped (already active)`,
+              "warning",
+            );
+          } else {
+            toast("Medication restarted", "success");
+          }
+        }
         if (!opts.skipRefresh) await refreshData();
-        return { success: true };
+        return { success: true, data };
       } catch (err) {
         const status = err?.response?.status;
         const msg =
@@ -282,6 +315,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
     updateSymptomStatus,
     addMedication,
     editMedication,
+    moveMedToActive,
     stopMedication,
     restartMedication,
     deleteMedication,

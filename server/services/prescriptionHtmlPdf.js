@@ -4,9 +4,41 @@
 // per-request cost only the page render.
 
 import { createRequire } from "module";
+import crypto from "crypto";
 import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
 
 const require = createRequire(import.meta.url);
+
+// Builds a prescription filename like:
+//   "Prescription_Rx - dr__anil_bhansali_29_01_2026_03_47_PM_1c5ywjwdy.pdf"
+// Date/time are formatted in Asia/Kolkata so the filename matches the local
+// clock the doctor sees when they end the visit.
+export function buildPrescriptionFileName(doctorName, now = new Date()) {
+  const slug =
+    (doctorName || "doctor")
+      .toString()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "doctor";
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .formatToParts(now)
+    .reduce((acc, p) => ((acc[p.type] = p.value), acc), {});
+
+  const date = `${parts.day}_${parts.month}_${parts.year}`;
+  const time = `${parts.hour}_${parts.minute}_${(parts.dayPeriod || "").toUpperCase()}`;
+  const shortId = crypto.randomBytes(5).toString("base64url").toLowerCase();
+
+  return `Prescription_Rx - ${slug}_${date}_${time}_${shortId}.pdf`;
+}
 
 let browserPromise = null;
 
