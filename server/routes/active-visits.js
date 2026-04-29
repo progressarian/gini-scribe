@@ -1,6 +1,10 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import {
+  savePrescriptionForVisit,
+  buildVisitPayloadFromDb,
+} from "../services/prescriptionAutoSave.js";
 
 const router = Router();
 
@@ -261,6 +265,23 @@ router.delete("/active-visit", async (req, res) => {
         `UPDATE appointments SET status = 'completed', updated_at = NOW() WHERE id = $1`,
         [visits[0].appointment_id],
       );
+
+      const pid = visits[0].patient_id;
+      const apptId = visits[0].appointment_id;
+      if (pid) {
+        (async () => {
+          const payload = await buildVisitPayloadFromDb(pid, { appointmentId: apptId });
+          if (payload) {
+            await savePrescriptionForVisit(pid, payload, {
+              appointmentId: apptId,
+              source: "visit",
+              titlePrefix: "Prescription — Visit",
+            });
+          }
+        })().catch((e) =>
+          console.warn("[active-visits/end] Rx auto-save failed:", e.message),
+        );
+      }
     }
 
     res.json({ success: true });

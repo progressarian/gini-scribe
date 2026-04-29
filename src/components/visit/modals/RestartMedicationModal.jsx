@@ -13,10 +13,7 @@ const RestartMedicationModal = memo(function RestartMedicationModal({
   onSubmit,
 }) {
   const stoppedChildren = useMemo(
-    () =>
-      (stoppedMeds || []).filter(
-        (m) => m && m.parent_medication_id === medication.id,
-      ),
+    () => (stoppedMeds || []).filter((m) => m && m.parent_medication_id === medication.id),
     [stoppedMeds, medication.id],
   );
 

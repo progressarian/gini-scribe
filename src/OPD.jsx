@@ -13,6 +13,7 @@ import ConfirmModal from "./components/ui/ConfirmModal.jsx";
 import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
 import { qk } from "./queries/keys.js";
 import { useIsMobile } from "./hooks/useIsMobile.js";
+import { classifyComposite } from "./utils/biomarkerClassify.js";
 import "./OPD.css";
 
 // ─── Inject fonts ────────────────────────────────────────────
@@ -755,10 +756,13 @@ function EmptyState({ onNew, onImport, onDashboard, stats }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
+          // Auto-fit lets the grid drop columns naturally at narrower widths:
+          // 7-up on desktop, 4-up on tablet, 2-up on phone — no media queries
+          // needed. minmax(120px, 1fr) keeps each card legible at any density.
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
           gap: 9,
           width: "100%",
-          maxWidth: 680,
+          maxWidth: 920,
           marginBottom: 24,
         }}
       >
@@ -768,6 +772,8 @@ function EmptyState({ onNew, onImport, onDashboard, stats }) {
           { ico: "🔵", val: stats.checkedin, l: "Checked In", c: stats.checkedin ? SK : INK3 },
           { ico: "🩺", val: stats.in_visit, l: "In Visit", c: stats.in_visit ? "#7c3aed" : INK3 },
           { ico: "✅", val: stats.seen, l: "Seen", c: stats.seen ? GN : INK3 },
+          { ico: "🚫", val: stats.no_show, l: "No-Show", c: stats.no_show ? RE : INK3 },
+          { ico: "❌", val: stats.cancelled, l: "Cancelled", c: stats.cancelled ? INK2 : INK3 },
         ].map((s) => (
           <div
             key={s.l}
@@ -3469,18 +3475,25 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                               ))}
                             </div>
                           )}
-                          {rx.advice && rx.advice.length > 0 && (
-                            <div
-                              style={{
-                                fontSize: 10,
-                                color: INK2,
-                                marginTop: 5,
-                                fontStyle: "italic",
-                              }}
-                            >
-                              {rx.advice.join("; ")}
-                            </div>
-                          )}
+                          {(() => {
+                            const adviceText = Array.isArray(rx.advice)
+                              ? rx.advice.join("; ")
+                              : typeof rx.advice === "string"
+                                ? rx.advice
+                                : "";
+                            return adviceText ? (
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: INK2,
+                                  marginTop: 5,
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                {adviceText}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       );
                     })()}
@@ -3796,6 +3809,20 @@ function CategorizeTab({ appt, doctors, allAppts, onSave, onContinue }) {
                 const worsening = hasPrev && h > prev;
                 const stable = hasPrev && !improving && !worsening;
 
+                // Tier-1/Tier-2 composite check — flips the headline label to
+                // "Mixed" when HbA1c is improving but a Tier-2 marker (FBS,
+                // LDL, TG, UACR, eGFR) or SBP is moving the wrong way.
+                const prevBio = appt.prev_biomarkers || {};
+                const composite = classifyComposite({
+                  hba1c: { cur: h, prev: hasPrev ? prev : null },
+                  sbp: { cur: parseFloat(bio.sbp), prev: parseFloat(prevBio.sbp) },
+                  fg: { cur: parseFloat(bio.fg), prev: parseFloat(prevBio.fg) },
+                  ldl: { cur: parseFloat(bio.ldl), prev: parseFloat(prevBio.ldl) },
+                  tg: { cur: parseFloat(bio.tg), prev: parseFloat(prevBio.tg) },
+                  uacr: { cur: parseFloat(bio.uacr), prev: parseFloat(prevBio.uacr) },
+                  egfr: { cur: parseFloat(bio.egfr), prev: parseFloat(prevBio.egfr) },
+                });
+
                 let trendText = "";
                 let trajectoryLabel = "";
                 let trajectoryColor = INK3;
@@ -3834,6 +3861,18 @@ function CategorizeTab({ appt, doctors, allAppts, onSave, onContinue }) {
                       : h > 7
                         ? "Not at target yet."
                         : "At target. Routine care.";
+                }
+
+                // If composite says mixed, override the colour and append
+                // the conflict reason — never let the label say "Better"
+                // when a Tier-2 marker is heading the wrong way.
+                const mixedNote =
+                  composite.outcome === "mixed" && composite.conflicts.length > 0
+                    ? composite.conflicts[0]
+                    : null;
+                if (mixedNote) {
+                  trajectoryColor = AM;
+                  trajectoryLabel = `⚠ Mixed signals — ${mixedNote}`;
                 }
 
                 return (
@@ -6514,12 +6553,28 @@ export default function OPD() {
     grouped[k].push(a);
   });
 
+  // Bucket every appointment by its workflow status. Pending absorbs every
+  // not-yet-actioned status (scheduled, null/empty, the literal "pending"),
+  // which is everything that isn't terminal (no_show / cancelled) and isn't
+  // already checkedin / in_visit / seen. Cards reconcile to Total:
+  //   total = pending + checkedin + in_visit + seen + no_show
+  // (cancelled, if present, also rolls into the difference; almost never used
+  // in practice, so we don't show its own card.)
+  const checkedinCount = appointments.filter((a) => a.status === "checkedin").length;
+  const inVisitCount = appointments.filter((a) => a.status === "in_visit").length;
+  const seenCount = appointments.filter((a) => a.status === "seen").length;
+  const noShowCount = appointments.filter((a) => a.status === "no_show").length;
+  const cancelledCount = appointments.filter((a) => a.status === "cancelled").length;
+  const total = appointments.length;
   const stats = {
-    total: appointments.length,
-    pending: appointments.filter((a) => !a.status || a.status === "pending").length,
-    checkedin: appointments.filter((a) => a.status === "checkedin").length,
-    in_visit: appointments.filter((a) => a.status === "in_visit").length,
-    seen: appointments.filter((a) => a.status === "seen").length,
+    total,
+    pending:
+      total - checkedinCount - inVisitCount - seenCount - noShowCount - cancelledCount,
+    checkedin: checkedinCount,
+    in_visit: inVisitCount,
+    seen: seenCount,
+    no_show: noShowCount,
+    cancelled: cancelledCount,
   };
 
   const changeDate = (delta) => {

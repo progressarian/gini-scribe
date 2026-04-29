@@ -13,6 +13,10 @@ import {
   routeForForm,
 } from "../services/medication/normalize.js";
 import { invalidatePatientSummaries } from "../services/summaryCache.js";
+import {
+  savePrescriptionForVisit,
+  buildVisitPayloadFromDb,
+} from "../services/prescriptionAutoSave.js";
 
 const require = createRequire(import.meta.url);
 let syncVisitToGenie = null;
@@ -436,10 +440,23 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     const markAppt = pool
       .query(
         `UPDATE appointments SET status='completed', updated_at=NOW()
-       WHERE patient_id=$1 AND appointment_date=CURRENT_DATE AND status='scheduled'`,
+       WHERE patient_id=$1 AND appointment_date=CURRENT_DATE AND status='scheduled'
+       RETURNING id`,
         [patientId],
       )
-      .catch(() => {});
+      .then(async (r) => {
+        const apptId = r.rows[0]?.id || null;
+        if (!apptId) return;
+        const payload = await buildVisitPayloadFromDb(patientId, { appointmentId: apptId });
+        if (!payload) return;
+        await savePrescriptionForVisit(patientId, payload, {
+          appointmentId: apptId,
+          consultationId,
+          source: "visit",
+          titlePrefix: "Prescription — Visit",
+        });
+      })
+      .catch((e) => console.warn("[consultations] Rx auto-save failed:", e?.message));
 
     // Sync to MyHealth Genie (non-blocking)
     const visit = {

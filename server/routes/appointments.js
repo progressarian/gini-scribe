@@ -117,23 +117,52 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
       }
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    const apptDate = appointment_date || new Date().toISOString().split("T")[0];
+    const apptSlot = time_slot || null;
+    const apptDoctor = doctor_name || null;
+    // Walk-in inserts always start scheduled — must match the index predicate
+    // so the ON CONFLICT arbiter is found.
+    const apptStatus = "scheduled";
+    // ON CONFLICT DO NOTHING against idx_appt_patient_day_slot_doc_status —
+    // a double-click or concurrent insert with the same (file_no, date, slot,
+    // doctor, status) returns the existing row instead of creating a duplicate.
+    // Different time_slot OR different doctor OR different status still creates
+    // a new row — that lets a cancelled stub + real visit coexist, and a
+    // patient seeing two doctors back-to-back is allowed.
+    let { rows } = await pool.query(
+      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (file_no, appointment_date, time_slot, doctor_name, status)
+         WHERE file_no IS NOT NULL AND appointment_date IS NOT NULL
+           AND time_slot IS NOT NULL AND doctor_name IS NOT NULL
+           AND status IS NOT NULL
+         DO NOTHING
+       RETURNING *`,
       [
         patient_id || null,
         patient_name,
         file_no || null,
         phone || null,
-        doctor_name || null,
-        appointment_date || new Date().toISOString().split("T")[0],
-        time_slot || null,
+        apptDoctor,
+        apptDate,
+        apptSlot,
         visit_type || "OPD",
         notes || null,
         category || null,
         is_walkin || false,
+        apptStatus,
       ],
     );
+    if (!rows[0] && file_no && apptDate && apptSlot && apptDoctor) {
+      const existing = await pool.query(
+        `SELECT * FROM appointments
+          WHERE file_no = $1 AND appointment_date = $2 AND time_slot = $3
+            AND doctor_name = $4 AND status = $5
+          LIMIT 1`,
+        [file_no, apptDate, apptSlot, apptDoctor, apptStatus],
+      );
+      rows = existing.rows;
+    }
     if (rows[0]?.patient_id) {
       syncAppointmentToGenie(rows[0].patient_id, pool).catch((e) =>
         console.warn("[Appt] Appointment push skipped:", e.message),

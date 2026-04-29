@@ -133,10 +133,7 @@ export function useVisitMutations(patientId, refreshData, appointmentId) {
   const restartMedication = useCallback(
     async (id, body = {}, opts = {}) => {
       try {
-        const { data } = await api.patch(
-          `/api/visit/${patientId}/medication/${id}/restart`,
-          body,
-        );
+        const { data } = await api.patch(`/api/visit/${patientId}/medication/${id}/restart`, body);
         if (!opts.silent) {
           const skipped = data?.cascadeSkipped?.length || 0;
           if (skipped > 0) {

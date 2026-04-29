@@ -12,6 +12,7 @@ import {
   generatePrescriptionPdf,
   buildPrescriptionFileName,
 } from "../services/prescriptionHtmlPdf.js";
+import { savePrescriptionForVisit } from "../services/prescriptionAutoSave.js";
 import { generateVisitSummary } from "../services/visitSummaryAI.js";
 import { generatePatientSummary } from "../services/patientSummaryAI.js";
 import {
@@ -2640,85 +2641,18 @@ router.post("/visit/:patientId/complete", async (req, res) => {
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
     const payload = req.body || {};
-    const doctorName = payload?.doctor?.name || req.doctor?.name || "doctor";
-
-    const pdfBuffer = await generatePrescriptionPdf(payload);
-    const fileName = buildPrescriptionFileName(doctorName);
-    const dateLabel = new Date().toISOString().slice(0, 10);
-    const title = `Prescription — Visit — ${dateLabel}`;
-
-    // Hang the document off the latest consultation so it shows up under that
-    // visit in the patient timeline (mirrors scribe-prescription behaviour).
-    const latestCon = await pool.query(
-      `SELECT id FROM consultations WHERE patient_id = $1
-       ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
-      [pid],
-    );
-    const consultationId = latestCon.rows[0]?.id || null;
-
-    const ins = await pool.query(
-      `INSERT INTO documents
-         (patient_id, consultation_id, doc_type, title, file_name, doc_date,
-          source, notes, extracted_data)
-       VALUES ($1,$2,'prescription',$3,$4,CURRENT_DATE,
-               'visit','Generated on visit completion',$5::jsonb)
-       RETURNING *`,
-      [pid, consultationId, t(title, 200), t(fileName, 200), JSON.stringify(payload)],
-    );
-    const docRow = ins.rows[0];
-
-    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-      const safeName = sanitizeForStorageKey(fileName);
-      const storagePath = `patients/${pid}/prescription/${Date.now()}_${safeName}`;
-      try {
-        const uploadResp = await fetch(
-          `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-              "Content-Type": "application/pdf",
-              "x-upsert": "true",
-            },
-            body: pdfBuffer,
-          },
-        );
-        if (uploadResp.ok) {
-          await pool.query(
-            "UPDATE documents SET storage_path=$1, mime_type='application/pdf' WHERE id=$2",
-            [storagePath, docRow.id],
-          );
-          docRow.storage_path = storagePath;
-          docRow.mime_type = "application/pdf";
-        } else {
-          const errText = await uploadResp.text().catch(() => "");
-          console.warn(
-            "[Visit complete] PDF upload failed:",
-            uploadResp.status,
-            errText.slice(0, 200),
-          );
-        }
-      } catch (uploadErr) {
-        console.warn("[Visit complete] PDF upload error:", uploadErr.message);
-      }
+    if (!payload.doctor?.name && req.doctor?.name) {
+      payload.doctor = { ...(payload.doctor || {}), name: req.doctor.name };
     }
-
-    if (consultationId) {
-      pool
-        .query("UPDATE consultations SET status='completed' WHERE id=$1", [consultationId])
-        .catch((e) =>
-          console.warn("[Visit complete] consultation status update skipped:", e.message),
-        );
-    }
-
-    syncDocumentsToGenie(pid, pool).catch((e) =>
-      console.warn("[Visit complete] Genie doc push skipped:", e.message),
-    );
-
+    const result = await savePrescriptionForVisit(pid, payload, {
+      source: "visit",
+      titlePrefix: "Prescription — Visit",
+      clientInitiated: true,
+    });
     res.json({
-      document: docRow,
-      file_name: fileName,
-      storage_path: docRow.storage_path || null,
+      document: result.document,
+      file_name: result.file_name,
+      storage_path: result.storage_path,
     });
   } catch (e) {
     handleError(res, e, "Complete visit");

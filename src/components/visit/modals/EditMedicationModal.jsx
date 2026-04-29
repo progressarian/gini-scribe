@@ -34,11 +34,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   // Parent selection. Empty string = standalone (clear the link). Eligible
   // parents: any other top-level active med for this patient.
   const parentCandidates = (activeMeds || []).filter(
-    (m) =>
-      m &&
-      m.id !== medication.id &&
-      !m.parent_medication_id &&
-      Number.isFinite(Number(m.id)),
+    (m) => m && m.id !== medication.id && !m.parent_medication_id && Number.isFinite(Number(m.id)),
   );
   const [parentId, setParentId] = useState(
     medication.parent_medication_id ? String(medication.parent_medication_id) : "",

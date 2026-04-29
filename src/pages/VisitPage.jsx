@@ -1112,9 +1112,7 @@ export default function VisitPage() {
                 activeMeds={uniqueActiveMeds}
                 stoppedMeds={uniqueStoppedMeds}
                 onAddMed={() => setModal({ type: "addMed" })}
-                onAddSubMed={(parent) =>
-                  setModal({ type: "addMed", data: { parentMed: parent } })
-                }
+                onAddSubMed={(parent) => setModal({ type: "addMed", data: { parentMed: parent } })}
                 onEditMed={(m) => setModal({ type: "editMed", data: m })}
                 onStopMed={(m) => setModal({ type: "stopMed", data: m })}
                 onMoveToActive={(m) => mutations.moveMedToActive(m.id)}

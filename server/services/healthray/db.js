@@ -7,6 +7,26 @@ import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
+import {
+  savePrescriptionForVisit,
+  buildVisitPayloadFromDb,
+} from "../prescriptionAutoSave.js";
+
+// Build the visit payload from current DB state and persist a prescription
+// PDF document for an appointment that has just been marked as seen. Always
+// invoked outside the transaction in markAppointmentAsSeen so a slow PDF
+// render or storage upload doesn't hold DB locks.
+async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultationId) {
+  if (!patientId) return;
+  const payload = await buildVisitPayloadFromDb(patientId, { appointmentId });
+  if (!payload) return;
+  await savePrescriptionForVisit(patientId, payload, {
+    appointmentId,
+    consultationId,
+    source: "visit",
+    titlePrefix: "Prescription — Visit",
+  });
+}
 const { log, error } = createLogger("HealthRay Sync");
 
 // ── Download HealthRay file and store in Supabase ───────────────────────────
@@ -177,6 +197,30 @@ export async function ensureSyncColumns() {
     CREATE INDEX IF NOT EXISTS idx_medications_parent
       ON medications(parent_medication_id);
   `);
+
+  // Stops TOCTOU duplicates from sheets sync, walk-in clicks, and no-show
+  // placeholders inserting a second row for the same booking. Two rows with
+  // the same (file_no, date, time, doctor) but different `status` are kept
+  // (e.g. a cancelled stub + the real seen visit), so status is part of the
+  // dedup key. Different time_slot OR different doctor still creates a new
+  // row (a patient seeing two doctors back-to-back is allowed). Run separately
+  // so any leftover duplicates don't abort the whole bootstrap.
+  try {
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_patient_day_slot_doc_status
+        ON appointments(file_no, appointment_date, time_slot, doctor_name, status)
+        WHERE file_no IS NOT NULL
+          AND appointment_date IS NOT NULL
+          AND time_slot IS NOT NULL
+          AND doctor_name IS NOT NULL
+          AND status IS NOT NULL;
+    `);
+  } catch (e) {
+    console.warn(
+      `[ensureSyncColumns] Skipping idx_appt_patient_day_slot_doc_status (existing duplicates block creation): ${e.message}`,
+    );
+  }
+
   columnsReady = true;
 }
 
@@ -2020,6 +2064,14 @@ export async function markAppointmentAsSeen(appointmentId) {
 
     await client.query("COMMIT");
     log("DB", `Auto-marked appointment ${appointmentId} as seen → consultation ${consultationId}`);
+
+    // Fire-and-log auto Rx save. Idempotency lives inside the helper so
+    // repeated calls (e.g. stuck-status recovery, manual PATCH that lands
+    // on an already-seen row) do not write duplicate prescriptions.
+    autoSavePrescriptionAfterSeen(appt.patient_id, appt.id, consultationId).catch((e) =>
+      console.warn("[markAppointmentAsSeen] Rx auto-save failed:", e.message),
+    );
+
     return consultationId;
   } catch (e) {
     await client.query("ROLLBACK");

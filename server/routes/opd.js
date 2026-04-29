@@ -312,6 +312,23 @@ const num = (v) => {
   return isNaN(n) ? null : n;
 };
 
+// Intake forms historically write blood pressure as bpSys / bpDia and weight
+// fields with mixed casing. The frontend tier classifier reads canonical keys
+// (sbp / dbp). Normalising at the API layer means every consumer sees the
+// same shape — without this, the daily dashboard and period report apply the
+// classifier against different field names and disagree on the outcome.
+function normalizeBiomarkerKeys(bio) {
+  if (!bio || typeof bio !== "object") return bio;
+  const aliases = { bpSys: "sbp", bpDia: "dbp", BPSys: "sbp", BPDia: "dbp" };
+  for (const [from, to] of Object.entries(aliases)) {
+    if (bio[from] != null && bio[to] == null) {
+      const n = parseFloat(bio[from]);
+      if (!isNaN(n)) bio[to] = n;
+    }
+  }
+  return bio;
+}
+
 // ── POST /api/opd/sync-noshow — trigger Google Sheet no-show sync on demand ──
 router.post("/opd/sync-noshow", async (_req, res) => {
   try {
@@ -464,11 +481,15 @@ router.get("/opd/appointments", async (req, res) => {
       }
     }
 
-    // 4) Latest lab_results by canonical for biomarker enrichment.
+    // 4) Latest + previous lab_results per canonical (for trend classification).
+    //    We pull the two most-recent values per (patient, canonical) so the
+    //    frontend tier-classifier has cur+prev for every Tier-1/Tier-2 marker.
     const CANONICAL_TO_BIO = {
       HbA1c: "hba1c",
       FBS: "fg",
+      PPBS: "ppbs",
       LDL: "ldl",
+      HDL: "hdl",
       Triglycerides: "tg",
       UACR: "uacr",
       Microalbumin: "uacr",
@@ -477,16 +498,25 @@ router.get("/opd/appointments", async (req, res) => {
       Haemoglobin: "hb",
       Hemoglobin: "hb",
       eGFR: "egfr",
+      ALT: "alt",
+      AST: "ast",
     };
     const labByPt = {};
+    const prevLabByPt = {};
     if (patientIds.length) {
       const { rows: labR } = await pool.query(
-        `SELECT DISTINCT ON (patient_id, canonical_name)
-           patient_id, canonical_name, result, test_date
-         FROM lab_results
-         WHERE patient_id = ANY($1)
-           AND result IS NOT NULL AND canonical_name IS NOT NULL
-         ORDER BY patient_id, canonical_name, test_date DESC NULLS LAST`,
+        `SELECT patient_id, canonical_name, result, test_date, rn
+         FROM (
+           SELECT patient_id, canonical_name, result, test_date,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY patient_id, canonical_name
+                    ORDER BY test_date DESC NULLS LAST, created_at DESC
+                  ) AS rn
+             FROM lab_results
+            WHERE patient_id = ANY($1)
+              AND result IS NOT NULL AND canonical_name IS NOT NULL
+         ) t
+         WHERE rn <= 2`,
         [patientIds],
       );
       for (const r of labR) {
@@ -494,11 +524,50 @@ router.get("/opd/appointments", async (req, res) => {
         if (!bioKey) continue;
         const val = parseFloat(r.result);
         if (isNaN(val)) continue;
-        if (!labByPt[r.patient_id]) labByPt[r.patient_id] = {};
-        const prev = labByPt[r.patient_id][bioKey];
-        if (!prev || r.test_date > prev.date) {
-          labByPt[r.patient_id][bioKey] = { val, date: r.test_date };
+        const bucket = r.rn === 1 ? labByPt : prevLabByPt;
+        if (!bucket[r.patient_id]) bucket[r.patient_id] = {};
+        const existing = bucket[r.patient_id][bioKey];
+        // For rn=1 we want the latest; for rn=2 we want the 2nd-latest.
+        // Multiple canonical_name aliases (Microalbumin↔UACR, Hemoglobin↔Haemoglobin)
+        // can collide on the same bioKey — keep the more recent one.
+        if (!existing || r.test_date > existing.date) {
+          bucket[r.patient_id][bioKey] = { val, date: r.test_date };
         }
+      }
+    }
+
+    // 4b) Latest + previous BP / weight / BMI from vitals (not in lab_results).
+    const vitalsByPt = {};
+    const prevVitalsByPt = {};
+    if (patientIds.length) {
+      try {
+        const { rows: vR } = await pool.query(
+          `SELECT patient_id, bp_sys, bp_dia, weight, bmi, recorded_at, rn
+           FROM (
+             SELECT patient_id, bp_sys, bp_dia, weight, bmi, recorded_at,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY patient_id
+                      ORDER BY recorded_at DESC NULLS LAST
+                    ) AS rn
+               FROM vitals
+              WHERE patient_id = ANY($1)
+                AND (bp_sys IS NOT NULL OR weight IS NOT NULL OR bmi IS NOT NULL)
+           ) t
+           WHERE rn <= 2`,
+          [patientIds],
+        );
+        for (const r of vR) {
+          const bucket = r.rn === 1 ? vitalsByPt : prevVitalsByPt;
+          bucket[r.patient_id] = {
+            sbp: r.bp_sys != null ? Number(r.bp_sys) : null,
+            dbp: r.bp_dia != null ? Number(r.bp_dia) : null,
+            weight: r.weight != null ? Number(r.weight) : null,
+            bmi: r.bmi != null ? Number(r.bmi) : null,
+            date: r.recorded_at,
+          };
+        }
+      } catch {
+        // vitals table may not exist in all deployments — silently skip.
       }
     }
 
@@ -549,6 +618,35 @@ router.get("/opd/appointments", async (req, res) => {
         }
         row.biomarkers = bio;
       }
+
+      // Vitals enrichment (BP / weight / BMI not in lab_results).
+      const vit = vitalsByPt[row.patient_id];
+      if (vit) {
+        const bio = row.biomarkers || {};
+        if (vit.sbp != null && bio.sbp == null) bio.sbp = vit.sbp;
+        if (vit.dbp != null && bio.dbp == null) bio.dbp = vit.dbp;
+        if (vit.weight != null && bio.weight == null) bio.weight = vit.weight;
+        if (vit.bmi != null && bio.bmi == null) bio.bmi = vit.bmi;
+        row.biomarkers = bio;
+      }
+      // Canonicalise key names (bpSys → sbp, bpDia → dbp) so the frontend
+      // classifier sees the same shape regardless of intake-form vintage.
+      row.biomarkers = normalizeBiomarkerKeys(row.biomarkers || {});
+
+      // Previous values per biomarker — used by frontend tier classifier.
+      // Surface as a single `prev_biomarkers` JSON object so we don't pollute
+      // the row with N nullable columns.
+      const prevLabs = prevLabByPt[row.patient_id] || {};
+      const prevVit = prevVitalsByPt[row.patient_id] || {};
+      const prev = {};
+      for (const [bioKey, { val }] of Object.entries(prevLabs)) prev[bioKey] = val;
+      if (prevVit.sbp != null) prev.sbp = prevVit.sbp;
+      if (prevVit.dbp != null) prev.dbp = prevVit.dbp;
+      if (prevVit.weight != null) prev.weight = prevVit.weight;
+      if (prevVit.bmi != null) prev.bmi = prevVit.bmi;
+      row.prev_biomarkers = normalizeBiomarkerKeys(prev);
+      // Keep prev_hba1c for backwards-compat with existing frontend code.
+      if (prev.hba1c != null && row.prev_hba1c == null) row.prev_hba1c = prev.hba1c;
 
       delete row._resolved_file_no;
     }
@@ -636,6 +734,40 @@ router.get("/opd/appointments-range", async (req, res) => {
                  a.created_at ASC`,
       params,
     );
+
+    // Per-row enrichment so the period report's classifier sees the same
+    // shape as the daily dashboard:
+    //   1. Normalise biomarker keys (bpSys → sbp).
+    //   2. Attach prev_biomarkers and prev_hba1c from the patient's most
+    //      recent earlier visit in the response. Rows are already ordered
+    //      by patient_id then date asc, so a single pass suffices.
+    const lastByPid = new Map();
+    for (const row of rows) {
+      row.biomarkers = normalizeBiomarkerKeys(row.biomarkers || {});
+      const prevRow = lastByPid.get(row.patient_id);
+      if (prevRow) {
+        // Merge each earlier visit's biomarkers forward — gives the most
+        // complete "prior reading" per marker, since not every visit captures
+        // every biomarker.
+        const prev = { ...(prevRow._merged_prev || {}), ...prevRow.biomarkers };
+        // Strip noisy non-clinical keys before exposing.
+        const clean = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (k.startsWith("_") || typeof v !== "number") continue;
+          clean[k] = v;
+        }
+        row.prev_biomarkers = clean;
+        row.prev_hba1c = clean.hba1c != null ? clean.hba1c : null;
+        row._merged_prev = prev;
+      } else {
+        row.prev_biomarkers = null;
+        row.prev_hba1c = null;
+        row._merged_prev = { ...row.biomarkers };
+      }
+      lastByPid.set(row.patient_id, row);
+    }
+    for (const row of rows) delete row._merged_prev;
+
     res.json(rows);
   } catch (e) {
     handleError(res, e, "OPD appointments range");

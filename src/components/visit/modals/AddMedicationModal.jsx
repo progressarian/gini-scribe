@@ -140,9 +140,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
       // Only include relevant fields
       drug_class: showDrugClass ? form.drug_class : null,
       external_doctor: showExternalDoctor ? form.external_doctor : null,
-      parent_medication_id: form.parent_medication_id
-        ? Number(form.parent_medication_id)
-        : null,
+      parent_medication_id: form.parent_medication_id ? Number(form.parent_medication_id) : null,
       support_condition: form.parent_medication_id ? form.support_condition || null : null,
     };
     setLoading(true);
@@ -162,9 +160,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
       }}
     >
       <div className="mbox" style={{ width: 500 }}>
-        <div className="mttl">
-          💊 {isSubMed ? "Add Support Medicine" : "Add New Medicine"}
-        </div>
+        <div className="mttl">💊 {isSubMed ? "Add Support Medicine" : "Add New Medicine"}</div>
 
         {/* Sub-medicine selector — pick a parent to make this a support med. */}
         {parentCandidates.length > 0 && (
@@ -363,9 +359,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
           </button>
           <button
             className="btn-p"
-            disabled={
-              loading || !form.name || (showExternalDoctor && !form.external_doctor)
-            }
+            disabled={loading || !form.name || (showExternalDoctor && !form.external_doctor)}
             onClick={handleSubmit}
             style={{
               display: "inline-flex",
@@ -393,7 +387,13 @@ const AddMedicationModal = memo(function AddMedicationModal({
                 }}
               />
             )}
-            {loading ? (isSubMed ? "Adding…" : "Adding…") : isSubMed ? "Add Support Medicine" : "Add Medicine"}
+            {loading
+              ? isSubMed
+                ? "Adding…"
+                : "Adding…"
+              : isSubMed
+                ? "Add Support Medicine"
+                : "Add Medicine"}
           </button>
         </div>
       </div>

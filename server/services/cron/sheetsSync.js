@@ -3,6 +3,7 @@
 import { readUpcomingAppointments } from "../sheets/reader.js";
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
+import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 
 const { log, error } = createLogger("Sheets Sync");
 
@@ -284,23 +285,50 @@ async function importSheetPatient(patient, tabDate) {
   }
 
   // ── Insert new appointment from sheet ──
+  // ON CONFLICT guards against the SELECT-then-INSERT race when overlapping
+  // sheets/today's-show runs both miss the existing-row check. The index has
+  // a doctor_name column too, but the sheets path doesn't write doctor_name,
+  // so the conflict can never fire here — kept as a no-op for symmetry with
+  // the other insert paths and to surface any schema drift early.
   const { rows } = await pool.query(
     `INSERT INTO appointments
        (patient_id, patient_name, file_no, phone,
         appointment_date, time_slot, visit_type, status,
         is_walkin, age, sex, sheet_condition, source)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'scheduled', false, $8, $9, $10, 'sheets')
+     ON CONFLICT (file_no, appointment_date, time_slot, doctor_name, status)
+       WHERE file_no IS NOT NULL AND appointment_date IS NOT NULL
+         AND time_slot IS NOT NULL AND doctor_name IS NOT NULL
+         AND status IS NOT NULL
+       DO NOTHING
      RETURNING id`,
     [patientId, name, fileNo, phone, apptDate, timeSlot, visitType, age, sex, condition],
   );
 
-  return { id: rows[0].id, action: "created" };
+  if (rows[0]) return { id: rows[0].id, action: "created" };
+
+  // Lost the race — another worker inserted the row first. Look it up so
+  // downstream callers still get an id, mirroring the existing-row branch.
+  const lookup = await pool.query(
+    `SELECT id FROM appointments
+      WHERE file_no = $1 AND appointment_date = $2 AND time_slot IS NOT DISTINCT FROM $3
+      LIMIT 1`,
+    [fileNo, apptDate, timeSlot],
+  );
+  return lookup.rows[0]
+    ? { id: lookup.rows[0].id, action: "skip-race" }
+    : { id: null, action: "skip-race" };
 }
 
 // ── Main sync: read all 3 tabs & import ────────────────────────────────────
 export async function syncFromSheets() {
   const startTime = Date.now();
   log("Sync", "Reading upcoming appointment tabs...");
+
+  // Per-family advisory lock — overlapping runs would race the SELECT-then-
+  // INSERT path and produce duplicate appointment rows.
+  const releaseLock = await tryAcquireCronLock("Sheets Sync", CRON_LOCK_KEYS.SHEETS_SYNC);
+  if (!releaseLock) return { totalCreated: 0, totalUpdated: 0, totalSkipped: 0, totalErrors: 0 };
 
   try {
     await ensureSheetColumns();
@@ -344,6 +372,8 @@ export async function syncFromSheets() {
   } catch (e) {
     error("Sync", `Fatal: ${e.message}`);
     throw e;
+  } finally {
+    await releaseLock();
   }
 }
 

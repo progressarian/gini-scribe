@@ -9,6 +9,7 @@
 import { readTodaysAppt } from "../sheets/reader.js";
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
+import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 
 const { log, error } = createLogger("Today's Show Sync");
 
@@ -65,6 +66,11 @@ function pickTimeSlot(row) {
 
 export async function syncTodaysShow() {
   const startTime = Date.now();
+  // Per-family advisory lock — prevents the 5-min cron from racing itself or
+  // an overlapping sheets-sync run when both try to insert the same no-show
+  // placeholder.
+  const releaseLock = await tryAcquireCronLock("Today's Show Sync", CRON_LOCK_KEYS.TODAYS_SHOW_SYNC);
+  if (!releaseLock) return { flipped: 0, inserted: 0, skipped: 0, noShow: 0 };
   try {
     const { patients = [] } = await readTodaysAppt();
 
@@ -192,14 +198,24 @@ export async function syncTodaysShow() {
         continue;
       }
 
-      await pool.query(
+      // ON CONFLICT prevents this no-show placeholder from racing against a
+      // concurrent sheets-sync run that may have just inserted the same
+      // (file_no, date, time_slot) tuple.
+      const ins = await pool.query(
         `INSERT INTO appointments
            (patient_id, file_no, patient_name, phone, doctor_name,
             appointment_date, time_slot, status, is_walkin, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'no_show', true, NOW(), NOW())`,
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'no_show', true, NOW(), NOW())
+         ON CONFLICT (file_no, appointment_date, time_slot, doctor_name, status)
+           WHERE file_no IS NOT NULL AND appointment_date IS NOT NULL
+             AND time_slot IS NOT NULL AND doctor_name IS NOT NULL
+             AND status IS NOT NULL
+           DO NOTHING
+         RETURNING id`,
         [patientId, fileNo || null, name || null, phone || null, doctor || null, timeSlot || null],
       );
-      inserted++;
+      if (ins.rows[0]) inserted++;
+      else skippedExisting++;
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -216,6 +232,8 @@ export async function syncTodaysShow() {
   } catch (e) {
     error("Sync", `Fatal: ${e.message}`);
     throw e;
+  } finally {
+    await releaseLock();
   }
 }
 
