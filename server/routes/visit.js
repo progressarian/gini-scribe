@@ -1233,6 +1233,21 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
+
+    // If this medicine just became a sub-medicine of another, re-point any of
+    // its own existing children to the new parent so we don't end up with
+    // nested parent → child → grandchild chains.
+    if (setParent && nextParentId != null) {
+      await pool.query(
+        `UPDATE medications
+            SET parent_medication_id = $1, updated_at = NOW()
+          WHERE patient_id = $2
+            AND parent_medication_id = $3
+            AND is_active = true`,
+        [nextParentId, pid, mid],
+      );
+    }
+
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
