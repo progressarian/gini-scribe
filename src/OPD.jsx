@@ -4535,6 +4535,8 @@ function PatientDetail({
                 });
                 setDbPatientId(appt.patient_id);
                 sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                sessionStorage.setItem("gini_opd_patient_id", String(appt.patient_id));
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
                 e.preventDefault();
                 navigate("/visit");
@@ -4707,6 +4709,8 @@ function PatientDetail({
                 });
                 setDbPatientId(appt.patient_id);
                 sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
+                sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                sessionStorage.setItem("gini_opd_patient_id", String(appt.patient_id));
                 if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1)) {
                   const url = `/visit?patient=${encodeURIComponent(appt.patient_id)}&appt=${encodeURIComponent(appt.id)}`;
                   window.open(url, "_blank", "noopener,noreferrer");

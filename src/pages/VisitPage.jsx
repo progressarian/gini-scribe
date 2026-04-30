@@ -254,29 +254,33 @@ export default function VisitPage() {
   const setConData = useClinicalStore((s) => s.setConData);
 
   // ── OPD appointment sync ──
-  // Falls back to URL `?appt=` so a Ctrl/Cmd-click "Open Scribe" opening a
-  // new tab can carry the appointment context (sessionStorage is per-tab).
-  // The stored apptId is only valid for the patient it was opened for —
-  // otherwise switching patients in the same tab would carry the previous
-  // patient's apptId forward and we'd serve the wrong cached summary.
+  // The URL `?patient=&appt=` is set by Ctrl/Cmd-click "Open Scribe"
+  // (sessionStorage is per-tab). The apptId is only valid for the patient
+  // it was opened for — otherwise switching patients in the same tab would
+  // carry the previous patient's apptId forward and we'd serve the wrong
+  // cached summary.
+  // We read the URL via react-router so this memo re-runs on every
+  // navigation, and we ALWAYS validate against the current dbPatientId.
+  const [_searchParamsForOpd] = useSearchParams();
   const opdApptId = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlAppt = params.get("appt");
-    const urlApptPatient = params.get("appt_pid");
-    if (urlAppt && (!urlApptPatient || Number(urlApptPatient) === Number(dbPatientId))) {
+    if (!dbPatientId) return null;
+    const urlAppt = _searchParamsForOpd.get("appt");
+    const urlPatient = _searchParamsForOpd.get("patient");
+    // Only trust the URL apptId when its companion `?patient=` matches the
+    // patient currently loaded in state. Without that, we cannot tell which
+    // patient the apptId was meant for.
+    if (urlAppt && urlPatient && Number(urlPatient) === Number(dbPatientId)) {
       sessionStorage.setItem("gini_opd_appt_id", String(urlAppt));
-      if (dbPatientId) sessionStorage.setItem("gini_opd_patient_id", String(dbPatientId));
+      sessionStorage.setItem("gini_opd_patient_id", String(urlPatient));
       return Number(urlAppt);
     }
+    // Fall back to sessionStorage, but only when its stored patient matches.
     const storedAppt = sessionStorage.getItem("gini_opd_appt_id");
     const storedPid = sessionStorage.getItem("gini_opd_patient_id");
-    if (!storedAppt) return null;
-    // Only honour the stored appt if it was recorded for the current patient.
-    // No stored patient_id means it was set by an older build — accept it
-    // only when there is no patient mismatch we can detect.
-    if (storedPid && Number(storedPid) !== Number(dbPatientId)) return null;
+    if (!storedAppt || !storedPid) return null;
+    if (Number(storedPid) !== Number(dbPatientId)) return null;
     return Number(storedAppt);
-  }, [dbPatientId]);
+  }, [_searchParamsForOpd, dbPatientId]);
   const [visitStart, setVisitStart] = useState(
     () => sessionStorage.getItem("gini_visit_start") || null,
   );
