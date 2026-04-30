@@ -6,6 +6,7 @@ import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { invalidateAppointmentSummaries } from "../services/summaryCache.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
 import { markAppointmentAsSeen } from "../services/healthray/db.js";
+import { getCanonical } from "../utils/labCanonical.js";
 import {
   stripFormPrefix,
   canonicalMedKey,
@@ -291,7 +292,7 @@ async function backfillHealthraySeenStatus() {
 
 // ── Lab test mapping: OPD biomarker keys → lab_results fields ────────────────
 // canonical values match getCanonical() output (proper case) for consistency
-const LAB_MAP = {
+export const LAB_MAP = {
   hba1c: { test_name: "HbA1c", panel: "Diabetes", unit: "%", canonical: "HbA1c" },
   fg: { test_name: "Fasting Glucose", panel: "Diabetes", unit: "mg/dL", canonical: "FBS" },
   ldl: { test_name: "LDL", panel: "Lipid Profile", unit: "mg/dL", canonical: "LDL" },
@@ -504,34 +505,46 @@ router.get("/opd/appointments", async (req, res) => {
     const labByPt = {};
     const prevLabByPt = {};
     if (patientIds.length) {
+      // Mirror /api/visit/:patientId — pull every lab row (canonical_name may
+      // be NULL on legacy entries) and resolve the canonical name in JS via
+      // getCanonical(test_name). Without this the dashboard misses prior
+      // readings for patients whose lab rows pre-date the canonical_name
+      // backfill, even though /visit page renders them fine.
       const { rows: labR } = await pool.query(
-        `SELECT patient_id, canonical_name, result, test_date, rn
-         FROM (
-           SELECT patient_id, canonical_name, result, test_date,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY patient_id, canonical_name
-                    ORDER BY test_date DESC NULLS LAST, created_at DESC
-                  ) AS rn
-             FROM lab_results
-            WHERE patient_id = ANY($1)
-              AND result IS NOT NULL AND canonical_name IS NOT NULL
-         ) t
-         WHERE rn <= 2`,
+        `SELECT patient_id, canonical_name, test_name, result, test_date, created_at
+           FROM lab_results
+          WHERE patient_id = ANY($1)
+            AND result IS NOT NULL
+          ORDER BY patient_id,
+                   test_date DESC NULLS LAST,
+                   created_at DESC`,
         [patientIds],
       );
+      // Per-(patient, bioKey) we collect every reading and pick the two most
+      // recent. Aliases (Microalbumin/UACR, Hemoglobin/Haemoglobin) collapse
+      // onto the same bioKey via CANONICAL_TO_BIO.
+      const seen = {}; // patient_id → bioKey → array of {val, date}
       for (const r of labR) {
-        const bioKey = CANONICAL_TO_BIO[r.canonical_name];
+        const canonical = r.canonical_name || getCanonical(r.test_name) || r.test_name;
+        const bioKey = CANONICAL_TO_BIO[canonical];
         if (!bioKey) continue;
         const val = parseFloat(r.result);
         if (isNaN(val)) continue;
-        const bucket = r.rn === 1 ? labByPt : prevLabByPt;
-        if (!bucket[r.patient_id]) bucket[r.patient_id] = {};
-        const existing = bucket[r.patient_id][bioKey];
-        // For rn=1 we want the latest; for rn=2 we want the 2nd-latest.
-        // Multiple canonical_name aliases (Microalbumin↔UACR, Hemoglobin↔Haemoglobin)
-        // can collide on the same bioKey — keep the more recent one.
-        if (!existing || r.test_date > existing.date) {
-          bucket[r.patient_id][bioKey] = { val, date: r.test_date };
+        const byPt = seen[r.patient_id] || (seen[r.patient_id] = {});
+        const list = byPt[bioKey] || (byPt[bioKey] = []);
+        list.push({ val, date: r.test_date });
+      }
+      for (const [pid, byKey] of Object.entries(seen)) {
+        for (const [bioKey, list] of Object.entries(byKey)) {
+          // Rows arrived ordered by test_date DESC, so list[0] is latest.
+          if (list.length >= 1) {
+            if (!labByPt[pid]) labByPt[pid] = {};
+            labByPt[pid][bioKey] = { val: list[0].val, date: list[0].date };
+          }
+          if (list.length >= 2) {
+            if (!prevLabByPt[pid]) prevLabByPt[pid] = {};
+            prevLabByPt[pid][bioKey] = { val: list[1].val, date: list[1].date };
+          }
         }
       }
     }
@@ -568,6 +581,93 @@ router.get("/opd/appointments", async (req, res) => {
         }
       } catch {
         // vitals table may not exist in all deployments — silently skip.
+      }
+    }
+
+    // 4b-app) Patient-app readings (patient_vitals_log) and clinic fasting-rbs
+    //         readings — same data the /visit page surfaces. Without these the
+    //         dashboard misses values that exist only as patient-logged
+    //         readings (BP, weight, BMI) or as fasting fingersticks (rbs with
+    //         meal_type='Fasting' on either the clinic vitals or the app log).
+    const appReadingsByPt = {}; // patient_id → bioKey → array of {val, date}
+    const pushApp = (pid, k, val, d) => {
+      const n = parseFloat(val);
+      if (!isFinite(n)) return;
+      const byPt = appReadingsByPt[pid] || (appReadingsByPt[pid] = {});
+      const list = byPt[k] || (byPt[k] = []);
+      list.push({ val: n, date: d || null });
+    };
+    if (patientIds.length) {
+      try {
+        const { rows: appR } = await pool.query(
+          `SELECT patient_id, bp_systolic, bp_diastolic, weight_kg, bmi,
+                  rbs, meal_type, waist, body_fat,
+                  COALESCE(created_at, recorded_date::timestamp) AS recorded_at
+             FROM patient_vitals_log
+            WHERE patient_id = ANY($1)`,
+          [patientIds],
+        );
+        for (const r of appR) {
+          const d = r.recorded_at;
+          pushApp(r.patient_id, "sbp", r.bp_systolic, d);
+          pushApp(r.patient_id, "dbp", r.bp_diastolic, d);
+          pushApp(r.patient_id, "weight", r.weight_kg, d);
+          pushApp(r.patient_id, "bmi", r.bmi, d);
+          pushApp(r.patient_id, "waist", r.waist, d);
+          pushApp(r.patient_id, "bodyFat", r.body_fat, d);
+          if (r.rbs != null && (r.meal_type || "").toLowerCase() === "fasting") {
+            pushApp(r.patient_id, "fg", r.rbs, d);
+          }
+        }
+      } catch {
+        // patient_vitals_log table may not exist in all deployments.
+      }
+      try {
+        const { rows: fastR } = await pool.query(
+          `SELECT patient_id, rbs, recorded_at
+             FROM vitals
+            WHERE patient_id = ANY($1)
+              AND rbs IS NOT NULL
+              AND LOWER(COALESCE(meal_type, '')) = 'fasting'`,
+          [patientIds],
+        );
+        for (const r of fastR) pushApp(r.patient_id, "fg", r.rbs, r.recorded_at);
+      } catch {
+        // vitals.meal_type/rbs may be absent on legacy deployments.
+      }
+    }
+
+    // 4c) Historical biomarker fallback — pull every prior appointment's
+    //     biomarkers JSON for these patients and merge newest-first per key.
+    //     Many markers (FBS/LDL/TG) aren't repeated each visit and may not be
+    //     in lab_results at all, so prevLabByPt comes up empty. Walking the
+    //     appointment history fills the gap with the most recent prior value
+    //     regardless of how old it is.
+    const prevHistByPt = {};
+    if (patientIds.length) {
+      try {
+        const { rows: histR } = await pool.query(
+          `SELECT patient_id, biomarkers, appointment_date
+             FROM appointments
+            WHERE patient_id = ANY($1::int[])
+              AND appointment_date < $2
+              AND biomarkers IS NOT NULL
+            ORDER BY patient_id, appointment_date DESC, created_at DESC`,
+          [patientIds, date],
+        );
+        for (const r of histR) {
+          const bio = normalizeBiomarkerKeys(r.biomarkers || {});
+          const bucket = prevHistByPt[r.patient_id] || (prevHistByPt[r.patient_id] = {});
+          for (const [k, v] of Object.entries(bio)) {
+            if (k.startsWith("_")) continue;
+            const n = parseFloat(v);
+            if (!isFinite(n)) continue;
+            // Rows arrive newest-first, so the first reading per key wins.
+            if (bucket[k] == null) bucket[k] = { val: n, date: r.appointment_date };
+          }
+        }
+      } catch {
+        // appointments.biomarkers may be absent on legacy rows — skip silently.
       }
     }
 
@@ -638,15 +738,56 @@ router.get("/opd/appointments", async (req, res) => {
       // the row with N nullable columns.
       const prevLabs = prevLabByPt[row.patient_id] || {};
       const prevVit = prevVitalsByPt[row.patient_id] || {};
+      const prevHist = prevHistByPt[row.patient_id] || {};
+      const appReads = appReadingsByPt[row.patient_id] || {};
+      // For each biomarker key, gather every candidate reading (with its date)
+      // across lab_results (latest + prev), vitals, appointment history, and
+      // patient-app log. Then take the two with the latest dates: the most
+      // recent becomes the chip's current value (only if not already in
+      // row.biomarkers), and the second-most-recent becomes the prev. This
+      // mirrors how the /visit page chart sources values from every stream.
+      const candidates = {};
+      const addCand = (k, val, d) => {
+        if (val == null || !isFinite(val)) return;
+        const list = candidates[k] || (candidates[k] = []);
+        list.push({ val, date: d || null });
+      };
+      for (const [k, { val, date: d }] of Object.entries(prevLabs)) addCand(k, val, d);
+      for (const [k, entry] of Object.entries(prevHist)) addCand(k, entry.val, entry.date);
+      if (prevVit.sbp != null) addCand("sbp", prevVit.sbp, prevVit.date);
+      if (prevVit.dbp != null) addCand("dbp", prevVit.dbp, prevVit.date);
+      if (prevVit.weight != null) addCand("weight", prevVit.weight, prevVit.date);
+      if (prevVit.bmi != null) addCand("bmi", prevVit.bmi, prevVit.date);
+      // Patient-app readings (rbs fasting → fg, app BP/weight/BMI/waist).
+      for (const [k, list] of Object.entries(appReads)) {
+        for (const e of list) addCand(k, e.val, e.date);
+      }
+      // Sort each key's candidates newest-first, dedupe rows that share the
+      // exact same date+value (lab + appointment biomarker JSON often mirror
+      // each other), then promote the freshest non-current reading to prev.
+      const curBio = row.biomarkers || {};
       const prev = {};
-      for (const [bioKey, { val }] of Object.entries(prevLabs)) prev[bioKey] = val;
-      if (prevVit.sbp != null) prev.sbp = prevVit.sbp;
-      if (prevVit.dbp != null) prev.dbp = prevVit.dbp;
-      if (prevVit.weight != null) prev.weight = prevVit.weight;
-      if (prevVit.bmi != null) prev.bmi = prevVit.bmi;
+      for (const [k, list] of Object.entries(candidates)) {
+        list.sort((x, y) => {
+          const dx = x.date ? new Date(x.date).getTime() : 0;
+          const dy = y.date ? new Date(y.date).getTime() : 0;
+          return dy - dx;
+        });
+        const cur = parseFloat(curBio[k]);
+        // Walk newest-first and pick the first reading whose value differs
+        // from the current chip value — anything equal would render as X→X.
+        for (const c of list) {
+          if (isFinite(cur) && c.val === cur) continue;
+          prev[k] = c.val;
+          break;
+        }
+      }
       row.prev_biomarkers = normalizeBiomarkerKeys(prev);
-      // Keep prev_hba1c for backwards-compat with existing frontend code.
-      if (prev.hba1c != null && row.prev_hba1c == null) row.prev_hba1c = prev.hba1c;
+      // Backwards-compat field: only set when the merged candidate logic
+      // actually found a real prior reading. We don't fall back to aggMap's
+      // OFFSET-1 value because it can echo today's reading when lab_results
+      // stores duplicate rows; that would render the chip as X→X.
+      row.prev_hba1c = prev.hba1c != null ? prev.hba1c : null;
 
       delete row._resolved_file_no;
     }

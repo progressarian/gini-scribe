@@ -69,7 +69,10 @@ export async function syncTodaysShow() {
   // Per-family advisory lock — prevents the 5-min cron from racing itself or
   // an overlapping sheets-sync run when both try to insert the same no-show
   // placeholder.
-  const releaseLock = await tryAcquireCronLock("Today's Show Sync", CRON_LOCK_KEYS.TODAYS_SHOW_SYNC);
+  const releaseLock = await tryAcquireCronLock(
+    "Today's Show Sync",
+    CRON_LOCK_KEYS.TODAYS_SHOW_SYNC,
+  );
   if (!releaseLock) return { flipped: 0, inserted: 0, skipped: 0, noShow: 0 };
   try {
     const { patients = [] } = await readTodaysAppt();

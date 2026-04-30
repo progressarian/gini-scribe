@@ -1,15 +1,21 @@
-import { memo, useRef, useCallback } from "react";
+import { memo, useRef, useCallback, useMemo } from "react";
 import { MED_COLORS } from "./helpers";
 import { TIME_SLOTS, groupMedsBySlot, printMedCard } from "./medCardPrint";
+import { cleanNote } from "../../utils/cleanNote";
 
 const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
   const cardRef = useRef(null);
 
-  const { grouped, slotsWithMeds } = groupMedsBySlot(activeMeds);
+  const mainMeds = useMemo(
+    () => (activeMeds || []).filter((m) => !m.parent_medication_id),
+    [activeMeds],
+  );
+
+  const { grouped, slotsWithMeds } = groupMedsBySlot(mainMeds);
 
   const handlePrint = useCallback(() => {
-    printMedCard(patient, activeMeds);
-  }, [patient, activeMeds]);
+    printMedCard(patient, mainMeds);
+  }, [patient, mainMeds]);
 
   return (
     <div className="panel-body">
@@ -55,7 +61,7 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
                     />
                     <div>
                       <div className="mbrand">{m.name}</div>
-                      <div className="mgen">{m.composition || m.notes || ""}</div>
+                      <div className="mgen">{m.composition || cleanNote(m.notes) || ""}</div>
                     </div>
                   </div>
                   <div className="mtd">{m.dose || "1 tablet"}</div>
@@ -71,8 +77,8 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
           ))}
 
           {slotsWithMeds.length === 0 &&
-            activeMeds.length > 0 &&
-            activeMeds.map((m, i) => (
+            mainMeds.length > 0 &&
+            mainMeds.map((m, i) => (
               <div key={m.id || i} className="mtr" style={{ marginBottom: 5 }}>
                 <div className="mmain">
                   <div className="mdot" style={{ background: MED_COLORS[i % MED_COLORS.length] }} />
@@ -91,7 +97,7 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
               </div>
             ))}
 
-          {activeMeds.length === 0 && (
+          {mainMeds.length === 0 && (
             <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
               No active medications
             </div>

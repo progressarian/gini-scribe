@@ -249,12 +249,12 @@ function ParamChip({ label, value, prev, status }) {
       }}
     >
       {label}{" "}
-      {prev != null && !isNaN(prev) ? (
+      {prev != null && !isNaN(prev) && prev !== value ? (
         <>
-          {prev}→<b>{value}</b>
+          {prev} <span style={{ opacity: 0.6, margin: "0 2px" }}>→</span> <b>{value}</b>
         </>
       ) : (
-        value
+        <b>{value}</b>
       )}
     </span>
   );
@@ -272,7 +272,12 @@ function ParamChips({ r }) {
         marginTop: 4,
       }}
     >
-      <ParamChip label="HbA1c" value={r.hba1c} prev={r.prevHba1c} status={targetStatus("hba1c", r.hba1c)} />
+      <ParamChip
+        label="HbA1c"
+        value={r.hba1c}
+        prev={r.prevHba1c}
+        status={targetStatus("hba1c", r.hba1c)}
+      />
       {r.sbp != null && (
         <ParamChip
           label={`BP${r.dbp ? "" : ""}`}
@@ -876,7 +881,8 @@ export default function LiveDashboard({
         const curV = Number.isFinite(c) ? c : null;
         const prevV = Number.isFinite(p) ? p : null;
         if (curV == null && prevV == null) continue;
-        const status = curV != null && prevV != null ? classifyBiomarker(key, curV, prevV) : "unknown";
+        const status =
+          curV != null && prevV != null ? classifyBiomarker(key, curV, prevV) : "unknown";
         if (status !== "unknown") anyTrend = true;
         per[key] = { cur: curV, prev: prevV, status };
       }
@@ -974,7 +980,11 @@ export default function LiveDashboard({
     // (better/worse/mixed/stable). Single = at least one reading but no prior
     // to compare against (matches the report's "Single Visit" bucket).
     const trendable = rows.filter(
-      (r) => r.outcome === "better" || r.outcome === "worse" || r.outcome === "mixed" || r.outcome === "stable",
+      (r) =>
+        r.outcome === "better" ||
+        r.outcome === "worse" ||
+        r.outcome === "mixed" ||
+        r.outcome === "stable",
     ).length;
     const singleVisit = rows.filter((r) => r.outcome === "single").length;
     // newHba1c kept for downstream label "First reading — no prior" — mirrors
@@ -1604,60 +1614,60 @@ export default function LiveDashboard({
                     paddingRight: 4,
                   }}
                 >
-                {m.gettingWorse.map((r) => {
-                  const delta = (r.hba1c - r.prevHba1c).toFixed(1);
-                  return (
-                    <div
-                      key={r.id}
-                      className="ld-row"
-                      onClick={(e) => select(r, e)}
-                      onAuxClick={(e) => select(r, e)}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "7px 10px",
-                        background: REL,
-                        border: `1px solid ${RE}22`,
-                        borderRadius: 7,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
-                          {r.name}
-                          <span
-                            style={{
-                              marginLeft: 6,
-                              fontSize: 8,
-                              fontWeight: 800,
-                              padding: "1px 5px",
-                              borderRadius: 6,
-                              background: GNL,
-                              color: GN,
-                              border: `1px solid ${GN}`,
-                              letterSpacing: ".04em",
-                            }}
-                          >
-                            T1
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                        {r.outcomeReason && (
-                          <div style={{ fontSize: 9, color: RE, marginTop: 2, fontWeight: 600 }}>
-                            {r.outcomeReason}
+                  {m.gettingWorse.map((r) => {
+                    const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+                    return (
+                      <div
+                        key={r.id}
+                        className="ld-row"
+                        onClick={(e) => select(r, e)}
+                        onAuxClick={(e) => select(r, e)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "7px 10px",
+                          background: REL,
+                          border: `1px solid ${RE}22`,
+                          borderRadius: 7,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
+                            {r.name}
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                fontSize: 8,
+                                fontWeight: 800,
+                                padding: "1px 5px",
+                                borderRadius: 6,
+                                background: GNL,
+                                color: GN,
+                                border: `1px solid ${GN}`,
+                                letterSpacing: ".04em",
+                              }}
+                            >
+                              T1
+                            </span>
                           </div>
-                        )}
-                        <ParamChips r={r} />
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}>
-                          +{delta} ↑
+                          <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                          {r.outcomeReason && (
+                            <div style={{ fontSize: 9, color: RE, marginTop: 2, fontWeight: 600 }}>
+                              {r.outcomeReason}
+                            </div>
+                          )}
+                          <ParamChips r={r} />
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}>
+                            +{delta} ↑
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -1714,337 +1724,399 @@ export default function LiveDashboard({
                     paddingRight: 4,
                   }}
                 >
-                {m.gettingBetter.map((r) => {
-                  const delta = (r.hba1c - r.prevHba1c).toFixed(1);
-                  return (
-                    <div
-                      key={r.id}
-                      className="ld-row"
-                      onClick={(e) => select(r, e)}
-                      onAuxClick={(e) => select(r, e)}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "7px 10px",
-                        background: GNL,
-                        border: `1px solid ${GN}22`,
-                        borderRadius: 7,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
-                          {r.name}
-                          <span
-                            style={{
-                              marginLeft: 6,
-                              fontSize: 8,
-                              fontWeight: 800,
-                              padding: "1px 5px",
-                              borderRadius: 6,
-                              background: GNL,
-                              color: GN,
-                              border: `1px solid ${GN}`,
-                              letterSpacing: ".04em",
-                            }}
-                          >
-                            T1
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                        {r.outcomeReason && (
-                          <div style={{ fontSize: 9, color: GN, marginTop: 2, fontWeight: 600 }}>
-                            {r.outcomeReason}
+                  {m.gettingBetter.map((r) => {
+                    const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+                    return (
+                      <div
+                        key={r.id}
+                        className="ld-row"
+                        onClick={(e) => select(r, e)}
+                        onAuxClick={(e) => select(r, e)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "7px 10px",
+                          background: GNL,
+                          border: `1px solid ${GN}22`,
+                          borderRadius: 7,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
+                            {r.name}
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                fontSize: 8,
+                                fontWeight: 800,
+                                padding: "1px 5px",
+                                borderRadius: 6,
+                                background: GNL,
+                                color: GN,
+                                border: `1px solid ${GN}`,
+                                letterSpacing: ".04em",
+                              }}
+                            >
+                              T1
+                            </span>
                           </div>
-                        )}
-                        <ParamChips r={r} />
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}>
-                          {delta} ↓
+                          <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                          {r.outcomeReason && (
+                            <div style={{ fontSize: 9, color: GN, marginTop: 2, fontWeight: 600 }}>
+                              {r.outcomeReason}
+                            </div>
+                          )}
+                          <ParamChips r={r} />
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}>
+                            {delta} ↓
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
                 </div>
               )}
             </Card>
 
-          {/* ── ⚠ Flag for review — Tier-1 better but Tier-2 conflicts ──────── */}
-          {(
-            <Card>
-              <SectionTitle
-                right={
-                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                    {m.mixedSignals.length} patients
-                  </span>
-                }
-              >
-                ⚠ Flag for review
-              </SectionTitle>
-              <div style={{ fontSize: 10, color: INK3, marginBottom: 8 }}>
-                Tier 1 and Tier 2 are moving in opposite directions, or one condition is improving
-                while another is deteriorating. Do not mark these patients "improving" without a
-                doctor review.
-              </div>
-              {m.mixedSignals.length === 0 ? (
-                <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
-                  ✓ No conflicting signals today
+            {/* ── ⚠ Flag for review — Tier-1 better but Tier-2 conflicts ──────── */}
+            {
+              <Card>
+                <SectionTitle
+                  right={
+                    <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                      {m.mixedSignals.length} patients
+                    </span>
+                  }
+                >
+                  ⚠ Flag for review
+                </SectionTitle>
+                <div style={{ fontSize: 10, color: INK3, marginBottom: 8 }}>
+                  Tier 1 and Tier 2 are moving in opposite directions, or one condition is improving
+                  while another is deteriorating. Do not mark these patients "improving" without a
+                  doctor review.
                 </div>
-              ) : (
-              <div
-                style={{
-                  maxHeight: TREND_BODY_HEIGHT_EXPANDED,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                }}
-              >
-              {m.mixedSignals.map((r) => {
-                const sbpBad = r.sbp && r.sbp >= 130;
-                return (
+                {m.mixedSignals.length === 0 ? (
+                  <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
+                    ✓ No conflicting signals today
+                  </div>
+                ) : (
                   <div
-                    key={r.id}
-                    className="ld-row"
-                    onClick={(e) => select(r, e)}
-                    onAuxClick={(e) => select(r, e)}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "7px 10px",
-                      background: AML,
-                      border: `1px solid ${AM}33`,
-                      borderRadius: 7,
-                      marginBottom: 6,
+                      maxHeight: TREND_BODY_HEIGHT_EXPANDED,
+                      overflowY: "auto",
+                      paddingRight: 4,
                     }}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
-                        {r.name}
-                        <span
+                    {m.mixedSignals.map((r) => {
+                      const sbpBad = r.sbp && r.sbp >= 130;
+                      return (
+                        <div
+                          key={r.id}
+                          className="ld-row"
+                          onClick={(e) => select(r, e)}
+                          onAuxClick={(e) => select(r, e)}
                           style={{
-                            marginLeft: 6,
-                            fontSize: 8,
-                            fontWeight: 800,
-                            padding: "1px 5px",
-                            borderRadius: 6,
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "7px 10px",
                             background: AML,
-                            color: AM,
-                            border: `1px solid ${AM}`,
-                            letterSpacing: ".04em",
+                            border: `1px solid ${AM}33`,
+                            borderRadius: 7,
+                            marginBottom: 6,
                           }}
                         >
-                          ⚠ MIXED
-                        </span>
-                      </div>
-                      {r.outcomeReason && (
-                        <div style={{ fontSize: 10, color: AM, marginTop: 2, fontWeight: 600 }}>
-                          {r.outcomeReason}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
+                              {r.name}
+                              <span
+                                style={{
+                                  marginLeft: 6,
+                                  fontSize: 8,
+                                  fontWeight: 800,
+                                  padding: "1px 5px",
+                                  borderRadius: 6,
+                                  background: AML,
+                                  color: AM,
+                                  border: `1px solid ${AM}`,
+                                  letterSpacing: ".04em",
+                                }}
+                              >
+                                ⚠ MIXED
+                              </span>
+                            </div>
+                            {r.outcomeReason && (
+                              <div
+                                style={{ fontSize: 10, color: AM, marginTop: 2, fontWeight: 600 }}
+                              >
+                                {r.outcomeReason}
+                              </div>
+                            )}
+                            <ParamChips r={r} />
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            {sbpBad && (
+                              <div
+                                style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 700 }}
+                              >
+                                ⚠
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      <ParamChips r={r} />
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      {sbpBad && (
-                        <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 700 }}>
-                          ⚠
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-              </div>
-              )}
-            </Card>
-          )}
+                )}
+              </Card>
+            }
 
-          {/* ── Stable patients — Tier-1 within ±0.3% / ±5 mmHg ───── */}
-          {(
+            {/* ── Stable patients — Tier-1 within ±0.3% / ±5 mmHg ───── */}
+            {
+              <Card>
+                <SectionTitle
+                  right={
+                    <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                      {m.stablePatients.length} patients · {m.pctStable}%
+                    </span>
+                  }
+                >
+                  ➖ Stable — Tier 1 (HbA1c / SBP)
+                </SectionTitle>
+                <div style={{ fontSize: 10, color: INK3, marginBottom: 8 }}>
+                  No meaningful change since last visit (HbA1c ±0.3% · SBP ±5 mmHg).
+                </div>
+                {m.stablePatients.length === 0 ? (
+                  <div style={{ fontSize: 12, color: INK3, padding: "8px 0" }}>
+                    No stable patients today
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      maxHeight: TREND_BODY_HEIGHT_EXPANDED,
+                      overflowY: "auto",
+                      paddingRight: 4,
+                    }}
+                  >
+                    {m.stablePatients.map((r) => {
+                      const sbpBad = r.sbp && r.sbp >= 130;
+                      const hbaBad = r.hba1c && r.hba1c > 9;
+                      return (
+                        <div
+                          key={r.id}
+                          className="ld-row"
+                          onClick={(e) => select(r, e)}
+                          onAuxClick={(e) => select(r, e)}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "7px 10px",
+                            background: BG,
+                            border: `1px solid ${BD}`,
+                            borderRadius: 7,
+                            marginBottom: 6,
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
+                              {r.name}
+                              <span
+                                style={{
+                                  marginLeft: 6,
+                                  fontSize: 8,
+                                  fontWeight: 800,
+                                  padding: "1px 5px",
+                                  borderRadius: 6,
+                                  background: WH,
+                                  color: INK3,
+                                  border: `1px solid ${INK3}`,
+                                  letterSpacing: ".04em",
+                                }}
+                              >
+                                → STABLE
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                            {(hbaBad || sbpBad) && (
+                              <div
+                                style={{ fontSize: 9, color: AM, marginTop: 2, fontWeight: 600 }}
+                              >
+                                stable but{hbaBad ? ` HbA1c ${r.hba1c}% above target` : ""}
+                                {hbaBad && sbpBad ? " · " : ""}
+                                {sbpBad ? `SBP ${r.sbp} above target` : ""}
+                              </div>
+                            )}
+                            <ParamChips r={r} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            }
+
+            {/* ── Needs extra attention ─────────────────────────────── */}
             <Card>
               <SectionTitle
                 right={
                   <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                    {m.stablePatients.length} patients · {m.pctStable}%
+                    {m.needsAttention.length} patients
                   </span>
                 }
               >
-                ➖ Stable — Tier 1 (HbA1c / SBP)
+                ⚠ Needs extra attention
               </SectionTitle>
-              <div style={{ fontSize: 10, color: INK3, marginBottom: 8 }}>
-                No meaningful change since last visit (HbA1c ±0.3% · SBP ±5 mmHg).
-              </div>
-              {m.stablePatients.length === 0 ? (
-                <div style={{ fontSize: 12, color: INK3, padding: "8px 0" }}>
-                  No stable patients today
+              {m.needsAttention.length === 0 ? (
+                <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
+                  ✓ All controlled patients today
                 </div>
               ) : (
-              <div
-                style={{
-                  maxHeight: TREND_BODY_HEIGHT_EXPANDED,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                }}
-              >
-              {m.stablePatients.map((r) => {
-                const sbpBad = r.sbp && r.sbp >= 130;
-                const hbaBad = r.hba1c && r.hba1c > 9;
-                return (
-                  <div
-                    key={r.id}
-                    className="ld-row"
-                    onClick={(e) => select(r, e)}
-                    onAuxClick={(e) => select(r, e)}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "7px 10px",
-                      background: BG,
-                      border: `1px solid ${BD}`,
-                      borderRadius: 7,
-                      marginBottom: 6,
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>
-                        {r.name}
-                        <span
-                          style={{
-                            marginLeft: 6,
-                            fontSize: 8,
-                            fontWeight: 800,
-                            padding: "1px 5px",
-                            borderRadius: 6,
-                            background: WH,
-                            color: INK3,
-                            border: `1px solid ${INK3}`,
-                            letterSpacing: ".04em",
-                          }}
-                        >
-                          → STABLE
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                      {(hbaBad || sbpBad) && (
-                        <div style={{ fontSize: 9, color: AM, marginTop: 2, fontWeight: 600 }}>
-                          stable but{hbaBad ? ` HbA1c ${r.hba1c}% above target` : ""}
-                          {hbaBad && sbpBad ? " · " : ""}
-                          {sbpBad ? `SBP ${r.sbp} above target` : ""}
+                <div
+                  style={{
+                    maxHeight: TREND_BODY_HEIGHT_EXPANDED,
+                    overflowY: "auto",
+                    paddingRight: 4,
+                  }}
+                >
+                  {m.needsAttention.map((r) => {
+                    const trend =
+                      r.prevHba1c && r.hba1c > r.prevHba1c
+                        ? "↑"
+                        : r.prevHba1c && r.hba1c < r.prevHba1c
+                          ? "↓"
+                          : "";
+                    const reasons = [];
+                    if (r.hba1c > 9) reasons.push("HbA1c " + r.hba1c + "%");
+                    if (r.prevHba1c && r.hba1c > r.prevHba1c)
+                      reasons.push("Rising from " + r.prevHba1c + "%");
+                    if (r.medPct != null && r.medPct < 60) reasons.push(r.medPct + "% compliance");
+                    return (
+                      <div
+                        key={r.id}
+                        className="ld-row"
+                        onClick={(e) => select(r, e)}
+                        onAuxClick={(e) => select(r, e)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "8px 10px",
+                          background: REL,
+                          border: `1px solid ${RE}22`,
+                          borderRadius: 7,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                          <div style={{ fontSize: 10, color: RE }}>{reasons.join(" · ")}</div>
+                          <ParamChips r={r} />
                         </div>
-                      )}
-                      <ParamChips r={r} />
-                    </div>
-                  </div>
-                );
-              })}
-              </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontFamily: FM, fontSize: 13, color: RE, fontWeight: 600 }}>
+                            <span style={{ color: trend === "↑" ? RE : GN }}>{trend}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </Card>
-          )}
 
-          {/* ── Needs extra attention ─────────────────────────────── */}
-          <Card>
-            <SectionTitle
-              right={
-                <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                  {m.needsAttention.length} patients
-                </span>
-              }
-            >
-              ⚠ Needs extra attention
-            </SectionTitle>
-            {m.needsAttention.length === 0 ? (
-              <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
-                ✓ All controlled patients today
-              </div>
-            ) : (
-              <div
-                style={{
-                  maxHeight: TREND_BODY_HEIGHT_EXPANDED,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                }}
+            {/* ── On track today ────────────────────────────────────── */}
+            <Card>
+              <SectionTitle
+                right={
+                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                    {m.onTrack.length} patients
+                  </span>
+                }
               >
-                {m.needsAttention.map((r) => {
-                  const trend =
-                    r.prevHba1c && r.hba1c > r.prevHba1c
-                      ? "↑"
-                      : r.prevHba1c && r.hba1c < r.prevHba1c
-                        ? "↓"
-                        : "";
-                  const reasons = [];
-                  if (r.hba1c > 9) reasons.push("HbA1c " + r.hba1c + "%");
-                  if (r.prevHba1c && r.hba1c > r.prevHba1c)
-                    reasons.push("Rising from " + r.prevHba1c + "%");
-                  if (r.medPct != null && r.medPct < 60)
-                    reasons.push(r.medPct + "% compliance");
-                  return (
-                    <div
-                      key={r.id}
-                      className="ld-row"
-                      onClick={(e) => select(r, e)}
-                      onAuxClick={(e) => select(r, e)}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "8px 10px",
-                        background: REL,
-                        border: `1px solid ${RE}22`,
-                        borderRadius: 7,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                        <div style={{ fontSize: 10, color: RE }}>{reasons.join(" · ")}</div>
-                        <ParamChips r={r} />
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontFamily: FM, fontSize: 13, color: RE, fontWeight: 600 }}>
-                          <span style={{ color: trend === "↑" ? RE : GN }}>{trend}</span>
+                ✅ On track today
+              </SectionTitle>
+              {m.onTrack.length === 0 ? (
+                <div style={{ fontSize: 12, color: INK3 }}>No patients at target today</div>
+              ) : (
+                <div
+                  style={{
+                    maxHeight: TREND_BODY_HEIGHT_EXPANDED,
+                    overflowY: "auto",
+                    paddingRight: 4,
+                  }}
+                >
+                  {m.onTrack.map((r) => {
+                    const trend =
+                      r.prevHba1c && r.hba1c > r.prevHba1c
+                        ? "↑"
+                        : r.prevHba1c && r.hba1c < r.prevHba1c
+                          ? "↓"
+                          : "";
+                    return (
+                      <div
+                        key={r.id}
+                        className="ld-row"
+                        onClick={(e) => select(r, e)}
+                        onAuxClick={(e) => select(r, e)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "7px 10px",
+                          background: GNL,
+                          border: `1px solid ${GN}22`,
+                          borderRadius: 7,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
+                          <div style={{ fontSize: 10, color: GN }}>
+                            {r.category === "ctrl" ? "Controlled" : "Improving"}
+                          </div>
+                          <ParamChips r={r} />
                         </div>
-                        <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
+                        <div style={{ fontFamily: FM, fontSize: 13, color: GN, fontWeight: 600 }}>
+                          <span>{trend}</span>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
 
-          {/* ── On track today ────────────────────────────────────── */}
-          <Card>
-            <SectionTitle
-              right={
-                <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                  {m.onTrack.length} patients
-                </span>
-              }
-            >
-              ✅ On track today
-            </SectionTitle>
-            {m.onTrack.length === 0 ? (
-              <div style={{ fontSize: 12, color: INK3 }}>No patients at target today</div>
-            ) : (
-              <div
-                style={{
-                  maxHeight: TREND_BODY_HEIGHT_EXPANDED,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                }}
+            {/* ── No biomarkers yet ─────────────────────────────────── */}
+            <Card>
+              <SectionTitle
+                right={
+                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                    {m.missingBio.length} patients
+                  </span>
+                }
               >
-                {m.onTrack.map((r) => {
-                  const trend =
-                    r.prevHba1c && r.hba1c > r.prevHba1c
-                      ? "↑"
-                      : r.prevHba1c && r.hba1c < r.prevHba1c
-                        ? "↓"
-                        : "";
-                  return (
+                ⚠ No biomarkers yet
+              </SectionTitle>
+              {m.missingBio.length === 0 ? (
+                <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
+                  ✓ All patients have biomarker data
+                </div>
+              ) : (
+                <div
+                  style={{
+                    maxHeight: TREND_BODY_HEIGHT_EXPANDED,
+                    overflowY: "auto",
+                    paddingRight: 4,
+                  }}
+                >
+                  {m.missingBio.map((r) => (
                     <div
                       key={r.id}
                       className="ld-row"
@@ -2055,80 +2127,22 @@ export default function LiveDashboard({
                         justifyContent: "space-between",
                         alignItems: "center",
                         padding: "7px 10px",
-                        background: GNL,
-                        border: `1px solid ${GN}22`,
+                        background: AML,
+                        border: `1px solid ${AM}22`,
                         borderRadius: 7,
                         marginBottom: 6,
                       }}
                     >
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>
                         <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                        <div style={{ fontSize: 10, color: GN }}>
-                          {r.category === "ctrl" ? "Controlled" : "Improving"}
-                        </div>
-                        <ParamChips r={r} />
+                        <div style={{ fontSize: 10, color: AM }}>Enter HbA1c before visit</div>
                       </div>
-                      <div style={{ fontFamily: FM, fontSize: 13, color: GN, fontWeight: 600 }}>
-                        <span>{trend}</span>
-                      </div>
+                      <div style={{ fontSize: 10, color: INK3, fontFamily: FM }}>{r.time}</div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
-          {/* ── No biomarkers yet ─────────────────────────────────── */}
-          <Card>
-            <SectionTitle
-              right={
-                <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                  {m.missingBio.length} patients
-                </span>
-              }
-            >
-              ⚠ No biomarkers yet
-            </SectionTitle>
-            {m.missingBio.length === 0 ? (
-              <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
-                ✓ All patients have biomarker data
-              </div>
-            ) : (
-              <div
-                style={{
-                  maxHeight: TREND_BODY_HEIGHT_EXPANDED,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                }}
-              >
-                {m.missingBio.map((r) => (
-                  <div
-                    key={r.id}
-                    className="ld-row"
-                    onClick={(e) => select(r, e)}
-                    onAuxClick={(e) => select(r, e)}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "7px 10px",
-                      background: AML,
-                      border: `1px solid ${AM}22`,
-                      borderRadius: 7,
-                      marginBottom: 6,
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                      <div style={{ fontSize: 10, color: AM }}>Enter HbA1c before visit</div>
-                    </div>
-                    <div style={{ fontSize: 10, color: INK3, fontFamily: FM }}>{r.time}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
+                  ))}
+                </div>
+              )}
+            </Card>
           </div>
         </>
       )}

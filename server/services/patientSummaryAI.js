@@ -52,11 +52,12 @@ function buildContext(data) {
   const fbsLatest = pickLab("fbs", "fasting");
   const ldlLatest = pickLab("ldl");
 
-  const firstOf = (key) => {
+  // labHistory[k] is newest-first; arr[1] is the immediately-prior reading.
+  const previousOf = (key) => {
     for (const k of Object.keys(labHistory || {})) {
       if (k.toLowerCase().includes(key)) {
         const arr = labHistory[k];
-        if (Array.isArray(arr) && arr.length >= 2) return arr[arr.length - 1];
+        if (Array.isArray(arr) && arr.length >= 2) return arr[1];
       }
     }
     return null;
@@ -96,7 +97,7 @@ function buildContext(data) {
       hba1c: hba1cLatest && {
         value: hba1cLatest.result,
         unit: hba1cLatest.unit,
-        first: firstOf("hba1c")?.result,
+        previous: previousOf("hba1c")?.result,
       },
       fbs: fbsLatest && {
         value: fbsLatest.result,

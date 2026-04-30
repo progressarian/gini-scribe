@@ -1,5 +1,6 @@
 import { memo, useState, useMemo } from "react";
 import { fmtDate } from "./helpers";
+import { cleanNote } from "../../utils/cleanNote";
 
 /* ── tiny helpers ── */
 const pct = (n, d) => (d > 0 ? Math.round((n / d) * 100) : 0);
@@ -288,7 +289,7 @@ function SymptomsSection({ symptoms, limit }) {
               {s.body_area ? ` · ${s.body_area}` : ""}
               {s.context ? ` · ${s.context}` : ""}
             </div>
-            {s.notes && <div className="ld-symptom-note">{s.notes}</div>}
+            {cleanNote(s.notes) && <div className="ld-symptom-note">{cleanNote(s.notes)}</div>}
             {s.follow_up_needed && <div className="ld-followup-tag">Follow-up needed</div>}
           </div>
         </div>
@@ -420,8 +421,10 @@ function PatientConditionsTable({ conditions }) {
                 Diagnosed {fmtDate(c.diagnosed_date)}
               </div>
             )}
-            {c.notes && (
-              <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 4 }}>{c.notes}</div>
+            {cleanNote(c.notes) && (
+              <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 4 }}>
+                {cleanNote(c.notes)}
+              </div>
             )}
           </div>
         );

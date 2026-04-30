@@ -491,8 +491,8 @@ export default function OpdRangeReport({ initialStart, initialEnd, onClose }) {
             📊 PERIOD REPORT
           </div>
           <div style={{ fontSize: 11, color: INK3, marginTop: 2 }}>
-            {fmtDate(start)} → {fmtDate(end)} · {totalAppts} appointments ·{" "}
-            {repeatPatients} with multiple visits
+            {fmtDate(start)} → {fmtDate(end)} · {totalAppts} appointments · {repeatPatients} with
+            multiple visits
           </div>
         </div>
         <div
@@ -779,8 +779,8 @@ export default function OpdRangeReport({ initialStart, initialEnd, onClose }) {
                 Tier 2 not worsening
               </div>
               <div>
-                <span style={{ color: AM, fontWeight: 700 }}>⚠ Flag for review</span> · Tier 1 improving but a
-                Tier 2 marker conflicts (e.g. HbA1c ↓ but FBS ↑)
+                <span style={{ color: AM, fontWeight: 700 }}>⚠ Flag for review</span> · Tier 1
+                improving but a Tier 2 marker conflicts (e.g. HbA1c ↓ but FBS ↑)
               </div>
               <div>
                 <span style={{ color: RE, fontWeight: 700 }}>Worse</span> · Tier 1 worsening, or
@@ -1742,7 +1742,6 @@ function PatientCard({ p, isOpen, onToggle, visibleBio, sectionColor, sectionBg,
           )}
         </div>
       )}
-
     </div>
   );
 }

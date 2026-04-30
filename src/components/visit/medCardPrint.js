@@ -110,9 +110,12 @@ export function getTimeSlot(med) {
 }
 
 // Build the grouping used by the printable HTML and by the in-tab renderer.
+// Child/support meds (those with a parent_medication_id) are excluded — the
+// card only lists primary medicines.
 export function groupMedsBySlot(activeMeds) {
   const grouped = {};
-  activeMeds.forEach((m, i) => {
+  const meds = (activeMeds || []).filter((m) => !m?.parent_medication_id);
+  meds.forEach((m, i) => {
     const slots = getTimeSlots(m);
     slots.forEach((slot) => {
       if (!grouped[slot]) grouped[slot] = [];
@@ -124,6 +127,7 @@ export function groupMedsBySlot(activeMeds) {
 }
 
 export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMeds) {
+  activeMeds = (activeMeds || []).filter((m) => !m?.parent_medication_id);
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",

@@ -1,9 +1,11 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { fmtDate } from "./helpers";
 import PdfViewerModal from "./PdfViewerModal";
 import { LAB_PANELS as PANELS } from "../../config/labOrder";
 import { getFallbackRange } from "../../config/labRanges";
 import { getDocStatus } from "../../utils/docStatus";
+import { cleanNote } from "../../utils/cleanNote";
 import DocStatusPill from "../ui/DocStatusPill";
 import MismatchActions from "./MismatchActions";
 import usePatientStore from "../../stores/patientStore";
@@ -207,46 +209,496 @@ function buildSections(rows, labOrders) {
   return sections;
 }
 
+// Parse the lab range string ("4 - 6", "<200", "70-100") into [low, high].
+function parseRangeBounds(range) {
+  if (!range) return [null, null];
+  const s = String(range).replace(/[,\s]/g, "");
+  const dash = s.match(/^(-?\d+(?:\.\d+)?)[-–to]+(-?\d+(?:\.\d+)?)$/i);
+  if (dash) return [Number(dash[1]), Number(dash[2])];
+  const lt = s.match(/^<=?(-?\d+(?:\.\d+)?)/);
+  if (lt) return [null, Number(lt[1])];
+  const gt = s.match(/^>=?(-?\d+(?:\.\d+)?)/);
+  if (gt) return [Number(gt[1]), null];
+  return [null, null];
+}
+
+const numericResult = (v) => {
+  if (v == null) return null;
+  const m = String(v).match(/-?\d+(?:\.\d+)?/);
+  return m ? Number(m[0]) : null;
+};
+
+const histKey = (s) =>
+  (s || "")
+    .toLowerCase()
+    .replace(/^(serum|plasma|s\.?|sr\.?|b\.?)[\s_]+/i, "")
+    .replace(/[^a-z0-9]/g, "");
+
+// All historical numeric readings for the test in `r`, oldest → newest.
+function buildHistorySeries(labResults, r) {
+  if (!labResults?.length) return [];
+  const target = histKey(r.canonical) || histKey(r.test_name);
+  if (!target) return [];
+  const points = [];
+  for (const row of labResults) {
+    const k = histKey(row.canonical_name) || histKey(row.test_name);
+    if (k !== target) continue;
+    const value = numericResult(row.result ?? row.result_text);
+    if (value == null) continue;
+    if (!row.test_date) continue;
+    points.push({
+      date: row.test_date.slice(0, 10),
+      value,
+      flag: row.flag,
+      unit: row.unit,
+      ref_range: row.ref_range,
+    });
+  }
+  points.sort((a, b) => a.date.localeCompare(b.date));
+  // Collapse same-day duplicates by keeping the worst (HIGH/LOW > normal) reading.
+  const byDate = new Map();
+  for (const p of points) {
+    const existing = byDate.get(p.date);
+    if (!existing) byDate.set(p.date, p);
+    else if (!existing.flag && p.flag) byDate.set(p.date, p);
+  }
+  return Array.from(byDate.values());
+}
+
+// Compact biomarker card with inline sparkline — mirrors the post-visit
+// brief card style. Single source of truth for the lab-row trend popout.
+function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) {
+  const [hover, setHover] = useState(null);
+  const scrollRef = useRef(null);
+  const svgRef = useRef(null);
+  const [wrapW, setWrapW] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!scrollRef.current) return;
+    const el = scrollRef.current;
+    const ro = new ResizeObserver(([entry]) => {
+      setWrapW(entry.contentRect.width);
+    });
+    ro.observe(el);
+    setWrapW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  // Reset hover on scroll so the portal tooltip doesn't drift away from the dot.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const close = () => setHover(null);
+    el.addEventListener("scroll", close, { passive: true });
+    return () => el.removeEventListener("scroll", close);
+  }, []);
+
+  if (!series || series.length === 0) {
+    return (
+      <div style={{ padding: "16px 14px", fontSize: 12, color: "var(--t3)" }}>
+        No numeric history available for this test.
+      </div>
+    );
+  }
+
+  const [lo, hi] = parseRangeBounds(displayRange);
+  const values = series.map((p) => p.value);
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const yMin = lo != null ? Math.min(dataMin, lo) : dataMin;
+  const yMax = hi != null ? Math.max(dataMax, hi) : dataMax;
+  const span = yMax - yMin || Math.abs(yMax) || 1;
+  const pad = span * 0.15;
+  const domainLo = yMin - pad;
+  const domainHi = yMax + pad;
+  const domainSpan = domainHi - domainLo || 1;
+
+  const H = 52;
+  const n = series.length;
+  // Always fill the container; only grow beyond it (and trigger scroll) when
+  // labels would otherwise crowd. ~44px per point keeps value labels readable.
+  const PER_POINT = 44;
+  const measured = wrapW > 0 ? wrapW : 260;
+  const minByPoints = n * PER_POINT;
+  const W = Math.max(measured, minByPoints);
+  const overflows = minByPoints > measured;
+  const xAt = (i) => (n === 1 ? W / 2 : (i / (n - 1)) * W);
+  const yAt = (v) => H - ((v - domainLo) / domainSpan) * H;
+
+  const points = series.map((p, i) => ({ ...p, cx: xAt(i), cy: yAt(p.value) }));
+
+  const last = points[points.length - 1];
+  const prev = points.length > 1 ? points[points.length - 2] : null;
+  const lastOut = (lo != null && last.value < lo) || (hi != null && last.value > hi);
+  const accent = lastOut ? "#dc2626" : "#059669";
+  const accentMuted = lastOut ? "#fee2e2" : "#05966915";
+
+  let arrow = "";
+  let deltaText = "";
+  if (prev) {
+    const delta = last.value - prev.value;
+    if (Math.abs(delta) >= 0.01) {
+      const towardGoal =
+        (hi != null && delta < 0 && last.value <= hi + Math.abs(hi) * 0.05) ||
+        (lo != null && delta > 0 && last.value >= lo - Math.abs(lo) * 0.05);
+      arrow = delta < 0 ? "↓" : "↑";
+      const fmtNum = (x) => {
+        const a = Math.abs(x);
+        return a < 1 ? a.toFixed(2) : a < 10 ? a.toFixed(1) : Math.round(a).toString();
+      };
+      deltaText = `${delta < 0 ? "▼" : "▲"} ${fmtNum(delta)}${unit ? " " + unit : ""} from ${fmtDate(prev.date)}`;
+      if (!towardGoal && (lo != null || hi != null)) {
+        // fall through; colour stays accent
+      }
+    }
+  }
+
+  const polyline = points.map((p) => `${p.cx},${p.cy}`).join(" ");
+  const polygon = `0,${H} ${polyline} ${W},${H}`;
+
+  // Goal text from range
+  let goalText = displayRange || "—";
+  if (displayRange && /^\s*\d/.test(displayRange) && lo != null && hi != null) {
+    goalText = `${lo}–${hi}${unit ? " " + unit : ""}`;
+  }
+
+  const fmtVal = (v) => {
+    const a = Math.abs(v);
+    return a < 1 ? v.toFixed(2) : a < 10 ? v.toFixed(1) : String(Math.round(v * 10) / 10);
+  };
+
+  return (
+    <div style={{ padding: "10px 14px 14px", background: "#f8fafc" }}>
+      <div
+        style={{
+          background: "white",
+          borderRadius: 12,
+          border: "1px solid #f1f5f9",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          width: "100%",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "10px 14px 6px",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>
+            {formatTestName(testName)}
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: accent, lineHeight: 1 }}>
+              {fmtVal(last.value)}
+            </span>
+            {unit && <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{unit}</span>}
+            {arrow && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>{arrow}</span>
+            )}
+          </div>
+        </div>
+
+        <div
+          ref={scrollRef}
+          className="slim-scroll-x"
+          style={{
+            padding: "0 14px",
+            position: "relative",
+            overflowX: overflows ? "auto" : "hidden",
+            overflowY: "visible",
+          }}
+        >
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            width={W}
+            height={H}
+            style={{
+              display: "block",
+              overflow: "visible",
+            }}
+            onMouseLeave={() => setHover(null)}
+          >
+            {/* Goal line — show upper bound when present */}
+            {hi != null && yAt(hi) >= 0 && yAt(hi) <= H && (
+              <>
+                <line
+                  x1={0}
+                  y1={yAt(hi)}
+                  x2={W}
+                  y2={yAt(hi)}
+                  stroke="#10b981"
+                  strokeDasharray="3,3"
+                  strokeWidth={0.8}
+                  opacity={0.5}
+                />
+                <text
+                  x={W - 2}
+                  y={yAt(hi) - 3}
+                  fill="#10b981"
+                  fontSize={6.5}
+                  textAnchor="end"
+                  opacity={0.7}
+                >
+                  target {hi}
+                </text>
+              </>
+            )}
+            {/* Goal line — lower bound */}
+            {lo != null && yAt(lo) >= 0 && yAt(lo) <= H && (
+              <line
+                x1={0}
+                y1={yAt(lo)}
+                x2={W}
+                y2={yAt(lo)}
+                stroke="#10b981"
+                strokeDasharray="3,3"
+                strokeWidth={0.8}
+                opacity={0.5}
+              />
+            )}
+            {n > 1 && <polygon points={polygon} fill={accentMuted} />}
+            {n > 1 && (
+              <polyline
+                points={polyline}
+                fill="none"
+                stroke={accent}
+                strokeWidth={2}
+                strokeLinejoin="round"
+              />
+            )}
+            {points.map((p, i) => {
+              const isFirst = i === 0;
+              const isLast = i === points.length - 1;
+              const isCurrent =
+                currentDate && p.date === String(currentDate).slice(0, 10);
+              const isHover = hover?.i === i;
+              const labelY = p.cy - 6 < 8 ? p.cy + 12 : p.cy - 6;
+              const anchor = isFirst ? "start" : isLast ? "end" : "middle";
+              const textX = isFirst ? p.cx + 1 : isLast ? p.cx - 1 : p.cx;
+              return (
+                <g
+                  key={i}
+                  style={{ cursor: "crosshair" }}
+                  onMouseEnter={() => setHover({ i, p })}
+                  onMouseMove={() => setHover({ i, p })}
+                >
+                  <circle
+                    cx={p.cx}
+                    cy={p.cy}
+                    r={isHover || isCurrent ? 4 : 3}
+                    fill={isHover ? accent : "white"}
+                    stroke={accent}
+                    strokeWidth={isCurrent ? 2.4 : 1.8}
+                  />
+                  <text
+                    x={textX}
+                    y={labelY}
+                    fill={accent}
+                    fontSize={8.5}
+                    fontWeight={700}
+                    textAnchor={anchor}
+                    fontFamily="DM Sans,sans-serif"
+                    style={{ paintOrder: "stroke", stroke: "white", strokeWidth: 2.5 }}
+                  >
+                    {fmtVal(p.value)}
+                  </text>
+                  <circle cx={p.cx} cy={p.cy} r={14} fill="transparent" />
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+        {hover &&
+          svgRef.current &&
+          (() => {
+            const rect = svgRef.current.getBoundingClientRect();
+            // SVG renders at width=W pixels with preserveAspectRatio=none, so
+            // viewBox cx maps 1:1 to screen px from the left edge of the SVG.
+            const screenX = rect.left + hover.p.cx;
+            const screenY = rect.top + hover.p.cy;
+            return createPortal(
+              <div
+                style={{
+                  position: "fixed",
+                  left: screenX,
+                  top: screenY - 10,
+                  transform: "translate(-50%, -100%)",
+                  background: "#0f172a",
+                  color: "white",
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  padding: "5px 8px",
+                  borderRadius: 6,
+                  whiteSpace: "nowrap",
+                  pointerEvents: "none",
+                  boxShadow: "0 4px 12px rgba(15,23,42,0.25)",
+                  zIndex: 9999,
+                }}
+              >
+                <div style={{ color: "#94a3b8", fontWeight: 500, fontSize: 9.5 }}>
+                  {fmtDate(hover.p.date)}
+                </div>
+                <div>
+                  {fmtVal(hover.p.value)}
+                  {unit ? ` ${unit}` : ""}
+                  {hover.p.flag ? (
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        fontSize: 8.5,
+                        padding: "1px 4px",
+                        borderRadius: 3,
+                        background: hover.p.flag === "HIGH" ? "#dc2626" : "#0284c7",
+                      }}
+                    >
+                      {hover.p.flag}
+                    </span>
+                  ) : null}
+                </div>
+              </div>,
+              document.body,
+            );
+          })()}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "3px 14px 6px",
+            fontSize: 8,
+            color: "#94a3b8",
+          }}
+        >
+          <span>{fmtDate(series[0].date)}</span>
+          <span style={{ color: "#cbd5e1" }}>
+            {n} reading{n === 1 ? "" : "s"}
+          </span>
+          <span>{fmtDate(series[n - 1].date)}</span>
+        </div>
+
+        {deltaText && (
+          <div
+            style={{
+              padding: "4px 14px 6px",
+              fontSize: 10,
+              fontWeight: 600,
+              color: accent,
+              borderTop: "1px solid #f8fafc",
+            }}
+          >
+            {deltaText}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "5px 14px 8px",
+            borderTop: "1px solid #f8fafc",
+            fontSize: 10,
+          }}
+        >
+          <span style={{ color: "#94a3b8", fontWeight: 600 }}>Goal</span>
+          <span style={{ fontWeight: 700, color: accent }}>{goalText}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Row ───────────────────────────────────────────────────────────────────────
-function ResultRow({ r }) {
+function ResultRow({ r, labResults }) {
+  const [expanded, setExpanded] = useState(false);
   const isAbnormal = r.flag === "HIGH" || r.flag === "LOW";
   const fallbackRange = r.ref_range ? null : getFallbackRange(r.canonical, r.test_name);
   const displayRange = r.ref_range || fallbackRange || "";
+  const series = useMemo(
+    () => (expanded ? buildHistorySeries(labResults, r) : []),
+    [expanded, labResults, r],
+  );
+  const hasNumeric = numericResult(r.result ?? r.result_text) != null;
+
   return (
-    <div
-      className="visit-lab-row"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "2fr 1fr 1fr 1fr",
-        padding: "7px 14px",
-        borderTop: "1px solid var(--border)",
-        gap: 6,
-        fontSize: 12,
-        background: isAbnormal ? "rgba(220,53,69,0.04)" : undefined,
-      }}
-    >
-      <span style={{ fontWeight: 500, color: "var(--text)" }}>{formatTestName(r.test_name)}</span>
-      <span style={{ fontWeight: 700, color: isAbnormal ? "var(--red)" : "var(--text)" }}>
-        {r.result ?? r.result_text ?? "—"}
-        {r.flag && <span style={{ fontSize: 9, marginLeft: 3 }}>({r.flag})</span>}
-      </span>
-      <span style={{ color: "var(--t3)" }}>{r.unit || ""}</span>
-      <span
+    <div style={{ borderTop: "1px solid var(--border)" }}>
+      <div
+        className="visit-lab-row"
+        onClick={() => hasNumeric && setExpanded((v) => !v)}
         style={{
-          color: fallbackRange ? "var(--t5, #9aa0a6)" : "var(--t4)",
-          fontSize: 11,
-          fontStyle: fallbackRange ? "italic" : "normal",
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr 1fr 1fr",
+          padding: "7px 14px",
+          gap: 6,
+          fontSize: 12,
+          background: expanded
+            ? "rgba(59,91,219,0.05)"
+            : isAbnormal
+              ? "rgba(220,53,69,0.04)"
+              : undefined,
+          cursor: hasNumeric ? "pointer" : "default",
         }}
-        title={fallbackRange ? "Typical reference range (lab did not provide one)" : undefined}
+        title={hasNumeric ? "Click to view trend" : undefined}
       >
-        {displayRange}
-      </span>
+        <span
+          style={{
+            fontWeight: 500,
+            color: "var(--text)",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          {hasNumeric && (
+            <span
+              style={{
+                fontSize: 9,
+                color: "var(--t3)",
+                transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+                transition: "transform 0.15s",
+                display: "inline-block",
+                width: 10,
+              }}
+            >
+              ▶
+            </span>
+          )}
+          {formatTestName(r.test_name)}
+        </span>
+        <span style={{ fontWeight: 700, color: isAbnormal ? "var(--red)" : "var(--text)" }}>
+          {r.result ?? r.result_text ?? "—"}
+          {r.flag && <span style={{ fontSize: 9, marginLeft: 3 }}>({r.flag})</span>}
+        </span>
+        <span style={{ color: "var(--t3)" }}>{r.unit || ""}</span>
+        <span
+          style={{
+            color: fallbackRange ? "var(--t5, #9aa0a6)" : "var(--t4)",
+            fontSize: 11,
+            fontStyle: fallbackRange ? "italic" : "normal",
+          }}
+          title={fallbackRange ? "Typical reference range (lab did not provide one)" : undefined}
+        >
+          {displayRange}
+        </span>
+      </div>
+      {expanded && (
+        <LabHistoryChart
+          series={series}
+          displayRange={displayRange}
+          unit={r.unit}
+          currentDate={r.test_date}
+          testName={r.test_name}
+        />
+      )}
     </div>
   );
 }
 
 // ── Panel block ───────────────────────────────────────────────────────────────
-function PanelBlock({ name, results, type }) {
+function PanelBlock({ name, results, type, labResults }) {
   const date = results[0]?.test_date;
   const isTest = type === "test";
   return (
@@ -315,7 +767,7 @@ function PanelBlock({ name, results, type }) {
       {results.map((r, i) => (
         // Key on the row's lab_results.id — canonical alone collapses React
         // renders when multiple reports on the same day carry the same test.
-        <ResultRow key={r.id ?? `${r.canonical}-${i}`} r={r} />
+        <ResultRow key={r.id ?? `${r.canonical}-${i}`} r={r} labResults={labResults} />
       ))}
     </div>
   );
@@ -473,7 +925,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
                           ? ` · Uploaded ${fmtDate(doc.created_at)}`
                           : ""}
-                        {doc.notes ? ` · ${doc.notes}` : ""}
+                        {cleanNote(doc.notes) ? ` · ${cleanNote(doc.notes)}` : ""}
                       </div>
                       {needsReview && (
                         <>
@@ -557,7 +1009,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                       <div className="report-dt">
                         {fmtDate(doc.doc_date)}
                         {doc.source ? ` · ${doc.source}` : ""}
-                        {doc.notes ? ` · ${doc.notes}` : ""}
+                        {cleanNote(doc.notes) ? ` · ${cleanNote(doc.notes)}` : ""}
                       </div>
                       {needsReview && (
                         <>
@@ -694,6 +1146,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                     name={sec.name}
                     results={sec.results}
                     type={sec.type}
+                    labResults={labResults}
                   />
                 ))
               ) : (

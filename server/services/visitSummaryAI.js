@@ -66,7 +66,9 @@ function buildContext(data) {
   const fbsLatest = pickLab("fbs");
   const ldlLatest = pickLab("ldl", "ldl cholesterol");
 
-  const firstOf = (key) => {
+  // labHistory[k] is newest-first (DB query ORDER BY test_date DESC),
+  // so arr[0] is the latest reading and arr[1] is the immediately-prior one.
+  const previousOf = (key) => {
     const aliases = {
       hba1c: ["HbA1c", "hba1c", "A1c"],
       fbs: ["FBS", "fbs", "fasting glucose"],
@@ -75,7 +77,7 @@ function buildContext(data) {
     for (const k of Object.keys(labHistory || {})) {
       if (aliases.some((a) => k.toLowerCase().includes(a.toLowerCase()))) {
         const arr = labHistory[k];
-        if (Array.isArray(arr) && arr.length >= 2) return arr[arr.length - 1]; // newest-first → last is oldest
+        if (Array.isArray(arr) && arr.length >= 2) return arr[1];
       }
     }
     return null;
@@ -112,17 +114,20 @@ function buildContext(data) {
       hba1c: hba1cLatest && {
         value: hba1cLatest.result,
         unit: hba1cLatest.unit,
-        first: firstOf("hba1c")?.result,
+        previous: previousOf("hba1c")?.result,
+        previousDate: previousOf("hba1c")?.date,
       },
       fbs: fbsLatest && {
         value: fbsLatest.result,
         unit: fbsLatest.unit,
-        first: firstOf("fbs")?.result,
+        previous: previousOf("fbs")?.result,
+        previousDate: previousOf("fbs")?.date,
       },
       ldl: ldlLatest && {
         value: ldlLatest.result,
         unit: ldlLatest.unit,
-        first: firstOf("ldl")?.result,
+        previous: previousOf("ldl")?.result,
+        previousDate: previousOf("ldl")?.date,
       },
     },
     goals: goals.map((g) => ({

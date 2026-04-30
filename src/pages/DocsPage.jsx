@@ -8,6 +8,7 @@ import { getDocStatus } from "../utils/docStatus.js";
 import { usePatientFullData } from "../queries/hooks/usePatientFullData.js";
 import DocStatusPill from "../components/ui/DocStatusPill.jsx";
 import MismatchActions from "../components/visit/MismatchActions.jsx";
+import { cleanNote } from "../utils/cleanNote.js";
 
 export default function DocsPage() {
   const patient = usePatientStore((s) => s.patient);
@@ -427,7 +428,9 @@ export default function DocsPage() {
                             )}
                           </div>
                         )}
-                        {doc.notes && !ed && <div className="docs__doc-notes">{doc.notes}</div>}
+                        {cleanNote(doc.notes) && !ed && (
+                          <div className="docs__doc-notes">{cleanNote(doc.notes)}</div>
+                        )}
                         {needsReview && (
                           <div
                             style={{

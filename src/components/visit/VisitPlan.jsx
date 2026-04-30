@@ -195,7 +195,10 @@ const VisitPlan = memo(function VisitPlan({
     : latestCon?.tests_ordered?.length
       ? latestCon.tests_ordered
       : apptPlan?.investigations_to_order || [];
-  const followUp = latestCon?.follow_up || apptPlan?.follow_up;
+  const followUp =
+    (latestCon?.follow_up?.date ? latestCon.follow_up : null) ||
+    apptPlan?.follow_up ||
+    latestCon?.follow_up;
   const today = new Date().toISOString().split("T")[0];
   const hba1c = getLabVal(labResults, "HbA1c");
   const fbs = getLabVal(labResults, "FBS");
@@ -717,13 +720,17 @@ const VisitPlan = memo(function VisitPlan({
 
       {/* CHANGES MADE THIS VISIT */}
       {(() => {
-        const newMeds = activeMeds.filter(
+        const parentActiveMeds = activeMeds.filter((m) => !m.parent_medication_id);
+        const newMeds = parentActiveMeds.filter(
           (m) => m.prescribed_date && m.prescribed_date.startsWith(today),
         );
         const stoppedToday = (stoppedMeds || []).filter(
-          (m) => m.stopped_date && m.stopped_date.startsWith(today),
+          (m) =>
+            !m.parent_medication_id &&
+            m.stopped_date &&
+            m.stopped_date.startsWith(today),
         );
-        const continuedMeds = activeMeds.filter(
+        const continuedMeds = parentActiveMeds.filter(
           (m) => !m.prescribed_date || !m.prescribed_date.startsWith(today),
         );
 
@@ -957,7 +964,12 @@ const VisitPlan = memo(function VisitPlan({
             </div>
             <div className="sum-row">
               <span className="sum-k">Medications</span>
-              <span className="sum-v">{activeMeds.map((m) => m.name).join(" · ") || "None"}</span>
+              <span className="sum-v">
+                {activeMeds
+                  .filter((m) => !m.parent_medication_id)
+                  .map((m) => m.name)
+                  .join(" · ") || "None"}
+              </span>
             </div>
             <div className="sum-acts">
               {onEndVisit && (

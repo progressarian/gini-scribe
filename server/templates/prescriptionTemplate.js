@@ -256,11 +256,19 @@ function buildPrescriptionHtml(data = {}) {
     labHistory = {},
     consultations = [],
     goals = [],
+    appt_plan = null,
   } = data;
 
   const today = new Date().toISOString().split("T")[0];
   const latestCon = consultations?.[0]?.con_data || {};
-  const followUp = latestCon.follow_up || {};
+  // Mirror VisitPlan.jsx: only use the consultation follow_up when it actually
+  // carries a date — otherwise fall through to the appointment-level follow_up
+  // (sourced from biomarkers.followup) so the printed Rx matches the UI chip.
+  const followUp =
+    (latestCon.follow_up?.date ? latestCon.follow_up : null) ||
+    appt_plan?.follow_up ||
+    latestCon.follow_up ||
+    {};
   const tests = latestCon.investigations_to_order || latestCon.tests_ordered || [];
   // Prefer the explicit visit summary the client passes in (current doctor's
   // summary or visit-level synopsis) over anything found on the consultation

@@ -7,10 +7,7 @@ import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
-import {
-  savePrescriptionForVisit,
-  buildVisitPayloadFromDb,
-} from "../prescriptionAutoSave.js";
+import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 
 // Build the visit payload from current DB state and persist a prescription
 // PDF document for an appointment that has just been marked as seen. Always
@@ -579,11 +576,10 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
-    // Use the AI-extracted date when present. If the note is truly undated
-    // (OBSERVATION baseline, unlabelled historical values) store NULL rather
-    // than defaulting to apptDate — force-attributing old values to "today"
-    // pollutes the latest-biomarker picker.
-    const labDate = lab.date || null;
+    // Use the AI-extracted date when present; fall back to the prescription
+    // (appointment) date for OBSERVATION / "for today" / undated values so
+    // every reading is anchored to a real visit date.
+    const labDate = lab.date || apptDate || null;
 
     // Skip if a better-or-equal source already exists for same patient + test + date.
     // IS NOT DISTINCT FROM handles the null-date case (undated OBSERVATION labs) too.

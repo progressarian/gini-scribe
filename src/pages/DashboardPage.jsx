@@ -11,6 +11,7 @@ import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
 import useLabStore from "../stores/labStore";
 import useMessagingStore from "../stores/messagingStore";
+import { cleanNote } from "../utils/cleanNote.js";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -1154,7 +1155,7 @@ export default function DashboardPage() {
                   </div>
                   <div style={{ fontSize: 10, color: "#64748b" }}>
                     {a.doc}
-                    {a.notes ? ` · ${a.notes}` : ""}
+                    {cleanNote(a.notes) ? ` · ${cleanNote(a.notes)}` : ""}
                   </div>
                 </div>
                 <span

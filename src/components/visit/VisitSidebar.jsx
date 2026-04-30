@@ -1,6 +1,7 @@
 import { memo, useState, useCallback } from "react";
 import { MED_COLORS, DX_STATUS_STYLE, DX_STATUS_DEFAULT, findLab, fmtLabVal } from "./helpers";
 import { autoDetectGroup, getGroupLabel } from "./VisitMedications";
+import { cleanNote } from "../../utils/cleanNote";
 
 const SIDEBAR_GROUP_ORDER = [
   "diabetes",
@@ -473,7 +474,7 @@ const VisitSidebar = memo(function VisitSidebar({
                     </div>
                     <div className="sdx-sub">
                       {dx.since_year ? `Since ${dx.since_year}` : ""}
-                      {dx.notes ? ` · ${dx.notes}` : ""}
+                      {cleanNote(dx.notes) ? ` · ${cleanNote(dx.notes)}` : ""}
                     </div>
                   </div>
                   <span
@@ -501,64 +502,64 @@ const VisitSidebar = memo(function VisitSidebar({
           const parentMeds = activeMeds.filter((m) => !m.parent_medication_id);
           if (parentMeds.length === 0) return null;
           return (
-          <div className="sbsec">
-            <div className="sbsec-title">Active Meds ({parentMeds.length})</div>
-            {(() => {
-              const groups = {};
-              parentMeds.forEach((m) => {
-                const g = m.med_group || autoDetectGroup(m.name);
-                if (!groups[g]) groups[g] = [];
-                groups[g].push(m);
-              });
-              const orderedKeys = [
-                ...SIDEBAR_GROUP_ORDER.filter((k) => groups[k]?.length),
-                ...Object.keys(groups).filter((k) => !SIDEBAR_GROUP_ORDER.includes(k)),
-              ];
-              let colorIdx = 0;
-              return orderedKeys.map((gKey) => {
-                const isExternal = gKey === "external";
-                return (
-                  <div key={gKey}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "6px 0 4px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: isExternal ? "rgb(220, 38, 38)" : "var(--t2)",
-                      }}
-                    >
-                      <span>{getGroupLabel(gKey)}</span>
-                      <span style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500 }}>
-                        ({groups[gKey].length})
-                      </span>
-                    </div>
-                    {groups[gKey].map((m) => {
-                      const dot = MED_COLORS[colorIdx % MED_COLORS.length];
-                      colorIdx += 1;
-                      return (
-                        <div key={m.id || `${gKey}-${m.name}-${colorIdx}`} className="smed">
-                          <div className="smed-dot" style={{ background: dot }} />
-                          <div>
-                            <div className="smed-nm">{m.name}</div>
-                            <div className="smed-dose">
-                              {m.dose} · {m.frequency || "OD"}
-                              {m.timing ? ` · ${m.timing}` : ""}
+            <div className="sbsec">
+              <div className="sbsec-title">Active Meds ({parentMeds.length})</div>
+              {(() => {
+                const groups = {};
+                parentMeds.forEach((m) => {
+                  const g = m.med_group || autoDetectGroup(m.name);
+                  if (!groups[g]) groups[g] = [];
+                  groups[g].push(m);
+                });
+                const orderedKeys = [
+                  ...SIDEBAR_GROUP_ORDER.filter((k) => groups[k]?.length),
+                  ...Object.keys(groups).filter((k) => !SIDEBAR_GROUP_ORDER.includes(k)),
+                ];
+                let colorIdx = 0;
+                return orderedKeys.map((gKey) => {
+                  const isExternal = gKey === "external";
+                  return (
+                    <div key={gKey}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "6px 0 4px",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: isExternal ? "rgb(220, 38, 38)" : "var(--t2)",
+                        }}
+                      >
+                        <span>{getGroupLabel(gKey)}</span>
+                        <span style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500 }}>
+                          ({groups[gKey].length})
+                        </span>
+                      </div>
+                      {groups[gKey].map((m) => {
+                        const dot = MED_COLORS[colorIdx % MED_COLORS.length];
+                        colorIdx += 1;
+                        return (
+                          <div key={m.id || `${gKey}-${m.name}-${colorIdx}`} className="smed">
+                            <div className="smed-dot" style={{ background: dot }} />
+                            <div>
+                              <div className="smed-nm">{m.name}</div>
+                              <div className="smed-dose">
+                                {m.dose} · {m.frequency || "OD"}
+                                {m.timing ? ` · ${m.timing}` : ""}
+                              </div>
+                              {m.for_diagnosis?.length > 0 && (
+                                <div className="smed-for">{m.for_diagnosis.join(", ")}</div>
+                              )}
                             </div>
-                            {m.for_diagnosis?.length > 0 && (
-                              <div className="smed-for">{m.for_diagnosis.join(", ")}</div>
-                            )}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              });
-            })()}
-          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                });
+              })()}
+            </div>
           );
         })()}
 

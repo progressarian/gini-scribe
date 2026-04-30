@@ -3,6 +3,7 @@ import { fmtDate } from "./helpers";
 import { toast } from "../../stores/uiStore";
 import PdfViewerModal from "./PdfViewerModal";
 import { getDocStatus } from "../../utils/docStatus";
+import { cleanNote } from "../../utils/cleanNote";
 import DocStatusPill from "../ui/DocStatusPill";
 import MismatchActions from "./MismatchActions";
 import usePatientStore from "../../stores/patientStore";
@@ -96,7 +97,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUp
             (doc.created_at || "").slice(0, 10) !== (doc.doc_date || "").slice(0, 10)
               ? ` · Uploaded ${fmtDate(doc.created_at)}`
               : ""}
-            {doc.notes ? ` · ${doc.notes}` : ""}
+            {cleanNote(doc.notes) ? ` · ${cleanNote(doc.notes)}` : ""}
           </div>
           {needsReview && (
             <>

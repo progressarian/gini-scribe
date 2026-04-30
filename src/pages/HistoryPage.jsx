@@ -4,6 +4,7 @@ import usePatientStore from "../stores/patientStore";
 import useReportsStore from "../stores/reportsStore";
 import useHistoryStore from "../stores/historyStore";
 import AudioInput from "../components/AudioInput.jsx";
+import { cleanNote } from "../utils/cleanNote.js";
 
 export default function HistoryPage() {
   const dgKey = useAuthStore((s) => s.dgKey);
@@ -792,7 +793,7 @@ export default function HistoryPage() {
                           ))}
                         </div>
                       )}
-                      {v.notes && (
+                      {cleanNote(v.notes) && (
                         <div
                           style={{
                             marginTop: 3,
@@ -801,7 +802,7 @@ export default function HistoryPage() {
                             fontStyle: "italic",
                           }}
                         >
-                          {v.notes}
+                          {cleanNote(v.notes)}
                         </div>
                       )}
                     </div>

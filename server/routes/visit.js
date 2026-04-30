@@ -6,6 +6,7 @@ import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
+import { LAB_MAP } from "./opd.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
 import {
@@ -200,6 +201,7 @@ router.get("/visit/:patientId", async (req, res) => {
       patientMedsGenieR,
       patientCondsGenieR,
       latestAnyApptR,
+      latestFollowupApptR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -451,6 +453,18 @@ router.get("/visit/:patientId", async (req, res) => {
           LIMIT 1`,
         [pid],
       ),
+
+      // 25. Latest appointment that carries a biomarkers.followup value.
+      //     Mirrors the OPD page, which reads appt.biomarkers.followup per row,
+      //     so the visit page surfaces the same scheduled date even when the
+      //     latest clinical-notes appointment lags behind.
+      pool.query(
+        `SELECT biomarkers, healthray_follow_up FROM appointments
+          WHERE patient_id=$1 AND biomarkers ? 'followup'
+          ORDER BY appointment_date DESC NULLS LAST, id DESC
+          LIMIT 1`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -547,15 +561,112 @@ router.get("/visit/:patientId", async (req, res) => {
     // Prefer compliance from today's OPD appointment; fall back to last HealthRay-synced one
     const apptCompliance = opdCompliance || apptPlan?.compliance || {};
     const apptBiomarkers = apptPlan?.biomarkers || {};
+
+    // Seed labLatest + labHistory from appointments.biomarkers across all
+    // appointments. Mirrors the OPD enrichment so values that live only in
+    // HealthRay clinical-note biomarkers (e.g. HbA1c on the latest appt, or
+    // a prior FBS reading like 170 → 319.6) surface on /visit too. lab_results
+    // stays authoritative when a row already covers that canonical+date.
+    {
+      const { rows: bioRows } = await pool.query(
+        `SELECT appointment_date, biomarkers FROM appointments
+          WHERE patient_id = $1 AND biomarkers IS NOT NULL
+            AND appointment_date IS NOT NULL
+          ORDER BY appointment_date DESC, created_at DESC`,
+        [pid],
+      );
+      const dayOf = (d) => (d ? String(d).slice(0, 10) : null);
+      // HealthRay copies the last-known biomarker value forward into every
+      // subsequent appointment. To avoid phantom trend points we sort
+      // oldest→newest and only honour the FIRST appearance of each
+      // (canonical, value) carry-forward. When `_lab_dates[bioKey]` is set,
+      // we trust it as the real lab draw date.
+      const sortedBioRows = [...bioRows].sort((a, b) =>
+        String(a.appointment_date || "").localeCompare(String(b.appointment_date || "")),
+      );
+      const firstSeenCarry = new Map();
+      for (const row of sortedBioRows) {
+        const bio = row.biomarkers || {};
+        const bioLabDates = bio._lab_dates || {};
+        for (const [bioKey, meta] of Object.entries(LAB_MAP)) {
+          const raw = bio[bioKey];
+          if (raw == null) continue;
+          const v = parseFloat(raw);
+          if (!isFinite(v)) continue;
+          const canonical = meta.canonical;
+          const labDate = bioLabDates[bioKey];
+          let date;
+          if (labDate) {
+            date = labDate;
+          } else {
+            const dedupKey = `${canonical}|${v}`;
+            if (firstSeenCarry.has(dedupKey)) continue;
+            firstSeenCarry.set(dedupKey, true);
+            date = row.appointment_date;
+          }
+          const dayKey = dayOf(date);
+          if (!labHistory[canonical]) labHistory[canonical] = [];
+          const dup = labHistory[canonical].some((h) => dayOf(h.date) === dayKey);
+          if (!dup) {
+            labHistory[canonical].push({
+              result: v,
+              result_text: null,
+              unit: meta.unit || null,
+              flag: null,
+              date,
+              ref_range: null,
+              panel_name: meta.panel || null,
+            });
+          }
+          if (!labLatest[canonical]) {
+            labLatest[canonical] = {
+              test_name: meta.test_name,
+              result: v,
+              result_text: null,
+              unit: meta.unit || null,
+              flag: null,
+              date,
+              ref_range: null,
+              is_critical: false,
+              source: "biomarkers",
+              panel_name: meta.panel || null,
+            };
+          }
+        }
+      }
+      // Re-sort each affected labHistory bucket by date DESC.
+      for (const arr of Object.values(labHistory)) {
+        arr.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      }
+    }
+
     const prep = {
       medPct: apptCompliance.medPct ?? null,
       missed: apptCompliance.missed || null,
       symptoms: apptCompliance.symptoms || [],
     };
+    const followupApptRow = latestFollowupApptR.rows[0] || null;
+    const followupApptBio = followupApptRow?.biomarkers || {};
+    // healthray_follow_up may be `{date:null, notes:..., timing:null}` even when
+    // biomarkers.followup carries the real date — only honour it when it has a
+    // date, otherwise fall through to the biomarkers fallback.
+    const withDate = (fu) => (fu && fu.date ? fu : null);
     const followUpDate =
-      apptPlan?.healthray_follow_up ||
+      withDate(apptPlan?.healthray_follow_up) ||
       (apptBiomarkers.followup
-        ? { date: apptBiomarkers.followup, notes: null, timing: null }
+        ? {
+            date: apptBiomarkers.followup,
+            notes: apptPlan?.healthray_follow_up?.notes || null,
+            timing: apptPlan?.healthray_follow_up?.timing || null,
+          }
+        : null) ||
+      withDate(followupApptRow?.healthray_follow_up) ||
+      (followupApptBio.followup
+        ? {
+            date: followupApptBio.followup,
+            notes: followupApptRow?.healthray_follow_up?.notes || null,
+            timing: followupApptRow?.healthray_follow_up?.timing || null,
+          }
         : null);
 
     const healthrayDxAppt = healthrayDxApptR.rows[0] || null;
@@ -687,19 +798,20 @@ router.get("/visit/:patientId", async (req, res) => {
       goals: goalsR.rows,
       prep,
       appt_doctor_note: apptDoctorNote,
-      appt_plan: apptPlan
-        ? {
-            investigations_to_order: (apptPlan.healthray_investigations || []).map((t) =>
-              typeof t === "string" ? { name: t, urgency: "routine" } : t,
-            ),
-            follow_up: followUpDate,
-            diet_lifestyle: [
-              apptCompliance.diet,
-              apptCompliance.exercise,
-              apptCompliance.stress,
-            ].filter(Boolean),
-          }
-        : null,
+      appt_plan:
+        apptPlan || followUpDate
+          ? {
+              investigations_to_order: (apptPlan?.healthray_investigations || []).map((t) =>
+                typeof t === "string" ? { name: t, urgency: "routine" } : t,
+              ),
+              follow_up: followUpDate,
+              diet_lifestyle: [
+                apptCompliance.diet,
+                apptCompliance.exercise,
+                apptCompliance.stress,
+              ].filter(Boolean),
+            }
+          : null,
       loggedData: {
         vitals: vitalsLogR.rows,
         activity: activityLogR.rows,

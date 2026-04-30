@@ -1,6 +1,8 @@
 // ── Diagnosis Sorting Utility ──────────────────────────────────────────────
 // Implements clinical ordering rules from diagnosis-rx-brief
 
+import { extractDiagnosisGrade } from "./diagnosisGrade.js";
+
 // Category rank: Primary → Complication → Comorbidity → External → Monitoring
 const CATEGORY_RANK = {
   primary: 1,
@@ -203,9 +205,11 @@ export function formatDiagnosis(dx, index) {
   // Diagnosis name
   parts.push(dx.label || dx.diagnosis_id);
 
-  // Key value (e.g. "HbA1c 10.6%")
-  if (dx.key_value) {
-    parts.push(`— ${dx.key_value}`);
+  // Key value / grade (e.g. "HbA1c 10.6%", "G3bA3"). Falls back to parsing
+  // the Healthray-synced notes payload when key_value is not set.
+  const grade = extractDiagnosisGrade(dx);
+  if (grade) {
+    parts.push(`— ${grade}`);
   }
 
   // Status label

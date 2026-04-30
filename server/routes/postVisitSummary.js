@@ -2,6 +2,8 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
+import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
+import { buildVisitLabContext } from "../services/visitLabContext.js";
 
 const router = Router();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -40,6 +42,24 @@ Format output as JSON: { "narrative": "<the two narrative paragraphs joined with
 Hard rules:
 - Do not invent data. Only use values present in the input.
 - Use exact numbers, units, drug names, and doses from the input.
+
+DIAGNOSIS FORMAT STANDARD (applies to EVERY diagnosis you mention — primary, comorbid, complication, or incidental):
+- ABSOLUTE GRADE/STAGE/SEVERITY RULE (highest priority — failure to follow this invalidates the entire brief): If the input line for a diagnosis carries a "grade/marker:", "severity:", or "stage" value (e.g. "grade/marker: moderate NPDR", "severity: Grade 2", "Stage 3"), that exact grade/stage/severity token MUST appear attached to the diagnosis name in the narrative — verbatim, in the same mention, never separated, never dropped, never paraphrased. Examples: input "diabetic retinopathy · grade/marker: moderate NPDR" → narrative must say "moderate NPDR" or "diabetic retinopathy (moderate NPDR)", never bare "retinopathy". Input "fatty liver · grade/marker: Grade 2" → "Grade 2 fatty liver", never bare "fatty liver". Input "CKD · grade/marker: Stage 3 (G3a/A2)" → "CKD Stage 3 (G3a/A2)", never bare "CKD" or "kidney disease". If you write a complication or condition name without its grade when the grade is in the input, the brief is wrong — rewrite it.
+- NEVER lump two graded complications into a single phrase ("neuropathy and retinopathy as complications"). Each complication must be named separately with its own grade/severity/marker attached, even if it makes the sentence longer.
+- Never name a condition by its bare label when the input carries ANY of the following qualifiers: grade, stage, severity, class, type, marker, duration, since-year, age-of-onset (AOO), status, or trend. Always inline EVERY qualifier present in the input, verbatim, immediately attached to the diagnosis name.
+- Specifically: if the input shows "since 2015", "Duration: Since 2015", "since 2008", or an AOO value, you MUST state it (e.g. "type 2 diabetes since 2015 (AOO 44)", "hypertension since 2008"). Do NOT drop "since <year>" or AOO — these are part of the diagnosis label.
+- Acceptable shapes: "type 2 diabetes since 2015 (AOO 44), well-controlled", "hypertension since 2008, controlled", "CKD Stage 3 (G3a/A2)", "moderate NPDR", "NYHA II heart failure", "Grade 2 fatty liver", "MASLD (no liver enzymes on file)", "diabetic neuropathy", "diabetic nephropathy (A2, microalbuminuria)".
+- If multiple qualifiers exist (since + AOO, stage + class, severity + type, etc.) state ALL of them in the same mention — do not pick one and drop the rest.
+- Do not paraphrase qualifiers into vague words (never reduce "Stage 3 CKD" to "kidney disease"; never reduce "G3a/A2" to "mixed signals"; never drop "since 2015" because it feels like clutter). Qualifiers from the input must appear in the prose, in the same mention as the diagnosis.
+- This applies to comorbidities and incidental diagnoses too — if "MASLD", "anxiety spells", "post CK arthralgia", "sinusitis", "dual adiposity" appear in the input, list each by name in the active-problem walk-through. Do not collapse them into a vague phrase like "and other comorbidities".
+
+NUMBER FORMAT STANDARD (applies to every biomarker, vital, or lab value you cite):
+- Always cite a value WITH its unit (e.g. "7.7%", "124 mg/dL", "143/96 mmHg", "108 mL/min/1.73m²", "10.4 g/dL"). Never a bare number.
+- Whenever a previous value is available in the input, state the current value AND the previous value in the form "<current> <unit> from <previous> <unit>" (e.g. "HbA1c 7.7% from 5.1%", "FBS 124 mg/dL from 88 mg/dL", "haemoglobin 10.4 g/dL from 13.4 g/dL", "eGFR 108 mL/min/1.73m² from 92"). The unit may be omitted on the "from" half only when it is identical and obvious.
+- Use this same "X from Y" shape for every value with a prior — do not mix "rising to 7.7% from 5.1%", "down to 39 from 77", and "now 1.58, previously 1.4" within the same brief. One shape, applied uniformly.
+- If no previous value exists, state the current value alone with its unit and do not invent a prior.
+- Every diagnosis you mention must be paired with at least one supporting number in this format. No bare diagnosis without a value when a value exists in the input.
+
 - List ONLY currently active medications by name. NEVER name stopped, previous, or discontinued drugs — not in the current-meds sentence, not as a parenthetical, not as a list, not anywhere. If active meds is empty, say "She/He is currently on no active medications." and stop. Do not enumerate the discontinued list as a substitute. Stopped drugs may only appear as anonymous class-level reasoning ("antihypertensive therapy was held two days ago") and only when needed to explain a specific biomarker shift.
 - Narrative must contain ONLY flowing prose — no labels, no bullets, no preamble.`;
 
@@ -150,13 +170,21 @@ function fmtPrep(prep) {
 function fmtDiagnoses(diagnoses) {
   if (!diagnoses || diagnoses.length === 0) return "Diagnoses: (none)";
   return (
-    "Diagnoses (full list):\n" +
+    "Diagnoses (full list — include grade/stage/severity verbatim when present):\n" +
     diagnoses
       .slice(0, 15)
       .map((d) => {
-        const bits = [d.label || d.name || "Unknown"];
-        if (d.since) bits.push(`since ${d.since}`);
-        if (d.severity) bits.push(d.severity);
+        const baseLabel = d.label || d.name || "Unknown";
+        const grade = extractDiagnosisGrade(d);
+        const labelWithGrade = grade ? `${baseLabel} (${grade})` : baseLabel;
+        const bits = [labelWithGrade];
+        if (d.since || d.since_year) bits.push(`since ${d.since || d.since_year}`);
+        if (d.age_of_onset) bits.push(`AOO ${d.age_of_onset}`);
+        if (d.duration) bits.push(`duration: ${d.duration}`);
+        if (d.complication_type) bits.push(`type: ${d.complication_type}`);
+        if (grade) bits.push(`MUST-INCLUDE grade/marker verbatim in narrative: ${grade}`);
+        if (d.status) bits.push(`status: ${d.status}`);
+        if (d.trend) bits.push(`trend: ${d.trend}`);
         if (d.is_active === false) bits.push("(inactive)");
         return `  - ${bits.join(" · ")}`;
       })
@@ -166,11 +194,25 @@ function fmtDiagnoses(diagnoses) {
 
 async function generatePostVisitNarrative(args) {
   let result = await _generatePostVisitNarrativeInner(args, "1");
-  if (!result || !String(result).trim()) {
-    console.warn("[post-visit AI] first attempt produced no narrative — retrying once");
-    result = await _generatePostVisitNarrativeInner(args, "2");
+  if (result && typeof result === "object" && result.error) {
+    console.warn(
+      `[post-visit AI] first attempt failed (${result.error}) — retrying once after backoff`,
+    );
+    await new Promise((r) => setTimeout(r, 1500));
+    const retry = await _generatePostVisitNarrativeInner(args, "2");
+    if (retry && typeof retry === "string" && retry.trim()) return { narrative: retry };
+    const finalError = (retry && retry.error) || result.error;
+    console.error(`[post-visit AI] both attempts failed — reason: ${finalError}`);
+    return { error: finalError };
   }
-  return result || null;
+  if (!result || (typeof result === "string" && !result.trim())) {
+    console.warn("[post-visit AI] first attempt produced empty narrative — retrying once");
+    await new Promise((r) => setTimeout(r, 1500));
+    const retry = await _generatePostVisitNarrativeInner(args, "2");
+    if (retry && typeof retry === "string" && retry.trim()) return { narrative: retry };
+    return { error: (retry && retry.error) || "Empty narrative on both attempts" };
+  }
+  return { narrative: result };
 }
 
 async function _generatePostVisitNarrativeInner(
@@ -235,7 +277,7 @@ async function _generatePostVisitNarrativeInner(
     `Lab panel (latest vs. previous):`,
     fmtLabs(labHistory),
     ``,
-    `Generate the post-visit clinical brief as a JSON object { "narrative": "..." } using the 5-section structured format from the system prompt. Use exact numbers from above; do not invent values. Only list currently active medications.`,
+    `Generate the post-visit clinical brief as a JSON object { "narrative": "..." } using the two-paragraph structure from the system prompt. Use exact numbers from above; do not invent values. Only list currently active medications. Every diagnosis you mention must inline EVERY qualifier present above (since-year, AOO, grade/marker, severity, status, trend, complication type) verbatim.`,
   ].join("\n");
 
   try {
@@ -248,19 +290,19 @@ async function _generatePostVisitNarrativeInner(
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 700,
+        max_tokens: 1500,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
       }),
     });
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
-      console.error(
-        `[post-visit AI attempt=${attemptLabel}] Anthropic ${resp.status}: ${body.slice(0, 400)}`,
-      );
-      return null;
+      const reason = `Anthropic API ${resp.status}: ${body.slice(0, 200)}`;
+      console.error(`[post-visit AI attempt=${attemptLabel}] ${reason}`);
+      return { error: reason };
     }
     const data = await resp.json();
+    const stopReason = data.stop_reason || "";
     let text = (data.content || []).map((c) => c.text || "").join("");
     text = text
       .replace(/```json\s*/g, "")
@@ -271,22 +313,79 @@ async function _generatePostVisitNarrativeInner(
     if (firstBrace !== -1 && lastBrace > firstBrace) {
       text = text.slice(firstBrace, lastBrace + 1);
     }
-    let parsed;
+    const parsed = safeParseJson(text);
+    if (parsed) {
+      const narrative = typeof parsed.narrative === "string" ? parsed.narrative.trim() : null;
+      if (!narrative) {
+        return { error: `Parsed JSON but "narrative" field was empty or non-string` };
+      }
+      return narrative;
+    }
+    // Last-resort recovery — extract narrative by regex when strict JSON
+    // fails (usually an unescaped quote inside the narrative string).
+    const recovered = recoverNarrativeFromRaw(text);
+    if (recovered) {
+      console.warn(
+        `[post-visit AI attempt=${attemptLabel}] strict JSON parse failed; recovered narrative via regex (stop_reason=${stopReason || "unknown"})`,
+      );
+      return recovered;
+    }
+    const reason =
+      stopReason === "max_tokens"
+        ? `Model output truncated at max_tokens — JSON incomplete`
+        : `Model returned malformed JSON (stop_reason=${stopReason || "unknown"})`;
+    console.error(`[post-visit AI attempt=${attemptLabel}] ${reason}`);
+    console.error(`[post-visit AI attempt=${attemptLabel}] raw text:`, text.slice(0, 600));
+    return { error: reason };
+  } catch (err) {
+    const reason = `Network/runtime error: ${err?.message || String(err)}`;
+    console.error(`[post-visit AI attempt=${attemptLabel}] ${reason}`);
+    return { error: reason };
+  }
+}
+
+function safeParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const sanitized = text
+      .replace(/\r\n/g, "\\n")
+      .replace(/(?<!\\)\n/g, "\\n")
+      .replace(/(?<!\\)\r/g, "\\r")
+      .replace(/(?<!\\)\t/g, "\\t")
+      .replace(/[\u0000-\u001F]/g, "");
     try {
-      parsed = JSON.parse(text);
-    } catch (e) {
-      console.error(`[post-visit AI attempt=${attemptLabel}] JSON parse failed:`, e.message);
-      console.error(`[post-visit AI attempt=${attemptLabel}] raw text:`, text.slice(0, 600));
+      return JSON.parse(sanitized);
+    } catch {
       return null;
     }
-    return typeof parsed.narrative === "string" ? parsed.narrative.trim() : null;
-  } catch (err) {
-    console.error(
-      `[post-visit AI attempt=${attemptLabel}] generation failed:`,
-      err?.message || err,
-    );
-    return null;
   }
+}
+
+
+// Pulls the value of the "narrative" JSON field out of a model response
+// that failed strict parsing. Tolerates unescaped quotes inside the value
+// by stopping at the closing brace of the object.
+function recoverNarrativeFromRaw(text) {
+  if (!text || typeof text !== "string") return null;
+  const startMatch = text.match(/"narrative"\s*:\s*"/);
+  if (!startMatch) return null;
+  const start = startMatch.index + startMatch[0].length;
+  // Find the end of the narrative: the LAST `"` before either the closing
+  // `}` of the object or the end of the buffer.
+  const window = text.slice(start);
+  const closeBraceIdx = window.search(/"\s*}\s*$/);
+  const searchUpTo = closeBraceIdx !== -1 ? closeBraceIdx + 1 : window.length;
+  const lastQuote = window.lastIndexOf('"', searchUpTo);
+  if (lastQuote <= 0) return null;
+  let body = window.slice(0, lastQuote);
+  body = body
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
+  return body.trim() || null;
 }
 
 // ── GET /api/patients/:id/post-visit-summary ──────────────────────────────────
@@ -386,30 +485,24 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
         if (inFlight.get(flightKey) === flightPromise) inFlight.delete(flightKey);
       });
 
-    // Pull data
+    // Pull data — labs/vitals come from the shared helper so this brief
+    // mirrors the /visit page exactly (same labLatest/labHistory/vitals,
+    // including appointments.biomarkers JSONB and patient_vitals_log
+    // app readings).
+    const labCtxPromise = buildVisitLabContext(pool, pid);
     const [
       patientR,
       diagnosesR,
-      labsR,
       activeMedsR,
       stoppedMedsR,
       recentChangesR,
       consAllR,
-      vitalsR,
       apptComplianceR,
     ] = await Promise.all([
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
       pool.query(
         `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
            WHERE patient_id=$1 ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
-        [pid],
-      ),
-      pool.query(
-        `SELECT * FROM (
-             SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date) *
-             FROM lab_results WHERE patient_id=$1
-             ORDER BY COALESCE(canonical_name, test_name), test_date::date, created_at DESC
-           ) d ORDER BY test_date DESC`,
         [pid],
       ),
       pool.query(
@@ -453,9 +546,6 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
           LIMIT 200`,
         [pid],
       ),
-      pool.query(`SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC LIMIT 5`, [
-        pid,
-      ]),
       apptId
         ? pool.query(`SELECT compliance FROM appointments WHERE id=$1`, [apptId])
         : pool.query(
@@ -467,12 +557,7 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
     const patient = patientR.rows[0];
     if (!patient) return res.status(404).json({ error: "Patient not found" });
 
-    const labHistory = {};
-    for (const r of labsR.rows) {
-      const key = r.canonical_name || r.test_name;
-      if (!labHistory[key]) labHistory[key] = [];
-      labHistory[key].push({ result: r.result, unit: r.unit, flag: r.flag, date: r.test_date });
-    }
+    const { labHistory, vitals: mergedVitals } = await labCtxPromise;
 
     // Mirror the JS dedup from /visit/:patientId — collapse duplicate
     // (visit_date, status) pairs from the SQL union.
@@ -515,22 +600,25 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       symptoms: apptCompliance.symptoms || [],
     };
 
-    const narrative = await generatePostVisitNarrative({
+    const aiResult = await generatePostVisitNarrative({
       patient,
       diagnoses: sortDiagnoses(diagnosesR.rows),
       labHistory,
       activeMeds: activeMedsR.rows,
       stoppedMeds: stoppedMedsR.rows,
       recentChanges: recentChangesR.rows,
-      vitals: vitalsR.rows,
+      vitals: mergedVitals,
       prep,
       ctx: { totalVisits, monthsWithGini, daysWithGini, carePhase },
       doctorNote,
     });
+    const narrative = aiResult?.narrative || null;
+    const aiError = aiResult?.error || null;
 
     const generatedAt = new Date().toISOString();
     const payload = {
       narrative,
+      aiError,
       carePhase,
       visitDate: checkDate,
       totalVisits,
@@ -561,7 +649,7 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       console.warn(`[post-visit] cache NOT WRITTEN patient=${pid} — no appointment row`);
     } else {
       console.warn(
-        `[post-visit] cache NOT WRITTEN patient=${pid} appt=${apptId} — narrative empty; next request will retry`,
+        `[post-visit] cache NOT WRITTEN patient=${pid} appt=${apptId} — AI failed (reason: ${aiError || "unknown"}); next request will retry`,
       );
     }
 

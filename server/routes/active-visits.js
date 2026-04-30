@@ -278,9 +278,7 @@ router.delete("/active-visit", async (req, res) => {
               titlePrefix: "Prescription — Visit",
             });
           }
-        })().catch((e) =>
-          console.warn("[active-visits/end] Rx auto-save failed:", e.message),
-        );
+        })().catch((e) => console.warn("[active-visits/end] Rx auto-save failed:", e.message));
       }
     }
 

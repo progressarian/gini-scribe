@@ -14,6 +14,7 @@ import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
 import { qk } from "./queries/keys.js";
 import { useIsMobile } from "./hooks/useIsMobile.js";
 import { classifyComposite } from "./utils/biomarkerClassify.js";
+import { cleanNote } from "./utils/cleanNote.js";
 import "./OPD.css";
 
 // ─── Inject fonts ────────────────────────────────────────────
@@ -1097,7 +1098,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
         )}
 
         {/* Notes */}
-        {appt.notes && (
+        {cleanNote(appt.notes) && (
           <div
             style={{
               background: WH,
@@ -1111,7 +1112,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
             <div style={{ fontSize: 13, fontWeight: 600, color: INK, marginBottom: 6 }}>
               APPOINTMENT INFO
             </div>
-            <div style={{ fontSize: 12, color: INK3, lineHeight: 1.6 }}>{appt.notes}</div>
+            <div style={{ fontSize: 12, color: INK3, lineHeight: 1.6 }}>{cleanNote(appt.notes)}</div>
           </div>
         )}
 
@@ -6568,8 +6569,7 @@ export default function OPD() {
   const total = appointments.length;
   const stats = {
     total,
-    pending:
-      total - checkedinCount - inVisitCount - seenCount - noShowCount - cancelledCount,
+    pending: total - checkedinCount - inVisitCount - seenCount - noShowCount - cancelledCount,
     checkedin: checkedinCount,
     in_visit: inVisitCount,
     seen: seenCount,

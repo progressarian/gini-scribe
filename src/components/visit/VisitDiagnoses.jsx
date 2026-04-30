@@ -219,18 +219,20 @@ function getBiomarkerTag(dx, labResults, vitals) {
   return null;
 }
 
-// Extract clinical detail from notes like "healthray:234347328 - G2A1" to "G2A1"
+// Extract clinical detail from notes like "healthray:234347328 - G2A1" to "G2A1".
+// IDs may be numeric or slug-like (e.g. opd-doc-30905).
 function extractHRDetail(notes) {
   if (!notes) return null;
-  const m = notes.match(/^healthray:\d+\s*[—–-]+\s*(.+)$/i);
+  const m = notes.match(/^healthray:[\w-]+\s*[—–-]+\s*(.+)$/i);
   return m ? m[1].trim() : null;
 }
 
 function displayNote(notes) {
   if (!notes) return null;
-  if (/^healthray:\d+$/.test(notes.trim())) return null;
-  if (/^healthray:\d+\s*[—–-]+/.test(notes)) return null;
-  return notes;
+  const trimmed = notes.trim();
+  if (/^healthray:[\w-]+$/i.test(trimmed)) return null;
+  if (/^healthray:[\w-]+\s*[—–-]+/i.test(trimmed)) return null;
+  return trimmed.replace(/healthray:[\w-]+\s*[—–-]*\s*/gi, "").trim() || null;
 }
 
 function normalizeLabel(label) {

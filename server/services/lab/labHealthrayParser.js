@@ -149,9 +149,19 @@ export function classifyCaseSource(listRowOrDetail) {
   return "mixed";
 }
 
+// "Writable" === would yield a numeric value in mapParam → syncLabCaseResults.
+// Text-only results ("Positive", "2-3/HPF", remarks) are intentionally not
+// considered ready: lab_results only stores numeric values, so a text-only
+// case has nothing to display and must stay in pending.
+function isWritableResult(testResult) {
+  if (testResult == null || testResult === "") return false;
+  return !isNaN(parseFloat(testResult));
+}
+
 // Counts of in-house tests expected vs in-house tests with a usable result,
 // from a case detail object. Used by the retry loop to decide if results are
-// still pending.
+// still pending. "ready" mirrors what syncLabCaseResults would actually write
+// (numeric only), so inhouseComplete cannot fire on a text-only payload.
 export function countInhouseProgress(caseDetail) {
   let expected = 0;
   let ready = 0;
@@ -160,13 +170,11 @@ export function countInhouseProgress(caseDetail) {
     if (test.parameters && test.parameters.length > 0) {
       for (const p of test.parameters) {
         expected++;
-        const v = p?.result?.test_result;
-        if (v != null && v !== "") ready++;
+        if (isWritableResult(p?.result?.test_result)) ready++;
       }
     } else {
       expected++;
-      const v = test?.result?.test_result;
-      if (v != null && v !== "") ready++;
+      if (isWritableResult(test?.result?.test_result)) ready++;
     }
   }
   return { expected, ready };

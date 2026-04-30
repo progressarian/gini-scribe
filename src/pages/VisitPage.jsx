@@ -687,6 +687,7 @@ export default function VisitPage() {
       labHistory: data.labHistory || {},
       consultations: data.consultations || [],
       goals: data.goals || [],
+      appt_plan: data.appt_plan || null,
     };
   }, [data, derived, doctor]);
 

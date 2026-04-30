@@ -118,8 +118,11 @@ async function processCase(listRow) {
     await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
     await abandonLabCase(caseNo, "outsource-only");
   } else if (patientId && (written > 0 || inhouseComplete)) {
-    // Either we wrote rows OR all in-house tests have results (even if nothing
-    // landed because of source-priority skips). Either way, terminal.
+    // Terminal only when we have *writable* results: either rows were written,
+    // or every in-house parameter has a numeric value (so a higher-priority
+    // source pre-empted our writes). Both legs depend on countInhouseProgress
+    // counting numeric-only — do not loosen it to accept text-only results,
+    // or empty cases will be marked synced and render blank in the UI.
     await markLabCaseSynced(caseNo, { patientId, appointmentId, rawDetailJson: detail });
   }
   // Otherwise leave results_synced=false so the recovery loop keeps trying.

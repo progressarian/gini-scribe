@@ -92,7 +92,13 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       console.warn(
         `[prescriptionAutoSave] Skipping pid=${pid} appt=${appointmentId} — empty meds & diagnoses`,
       );
-      return { document: null, file_name: null, storage_path: null, skipped: true, reason: "empty-payload" };
+      return {
+        document: null,
+        file_name: null,
+        storage_path: null,
+        skipped: true,
+        reason: "empty-payload",
+      };
     }
   }
 
@@ -115,7 +121,9 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       t(title, 200),
       t(fileName, 200),
       source,
-      clientInitiated ? "Generated on visit completion" : "Auto-generated on appointment completion",
+      clientInitiated
+        ? "Generated on visit completion"
+        : "Auto-generated on appointment completion",
       JSON.stringify(data),
     ],
   );
@@ -194,60 +202,71 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     labsR,
     consultationsR,
     goalsR,
+    followupApptR,
   ] = await Promise.all([
-    pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
-    appointmentId
-      ? pool.query(
-          `SELECT id, doctor_name, appointment_date, post_visit_summary
+      pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
+      appointmentId
+        ? pool.query(
+            `SELECT id, doctor_name, appointment_date, post_visit_summary
              FROM appointments WHERE id=$1`,
-          [appointmentId],
-        )
-      : pool.query(
-          `SELECT id, doctor_name, appointment_date, post_visit_summary
+            [appointmentId],
+          )
+        : pool.query(
+            `SELECT id, doctor_name, appointment_date, post_visit_summary
              FROM appointments WHERE patient_id=$1
             ORDER BY appointment_date DESC NULLS LAST, id DESC LIMIT 1`,
-          [pid],
-        ),
-    pool.query(
-      `SELECT m.*, c.con_name AS prescriber,
+            [pid],
+          ),
+      pool.query(
+        `SELECT m.*, c.con_name AS prescriber,
               COALESCE(c.visit_date, m.started_date) AS prescribed_date,
               COALESCE(m.last_prescribed_date, c.visit_date, m.started_date) AS last_prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
         WHERE m.patient_id=$1 AND m.is_active = true
         ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
-      [pid],
-    ),
-    pool.query(
-      `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
+        [pid],
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
         WHERE patient_id=$1 AND is_active != false
         ORDER BY diagnosis_id, updated_at DESC`,
-      [pid],
-    ),
-    pool.query(
-      `SELECT * FROM vitals WHERE patient_id=$1
+        [pid],
+      ),
+      pool.query(
+        `SELECT * FROM vitals WHERE patient_id=$1
         ORDER BY recorded_at DESC LIMIT 2`,
-      [pid],
-    ),
-    pool.query(
-      `SELECT id, patient_id, appointment_id, test_date, test_name, canonical_name,
+        [pid],
+      ),
+      pool.query(
+        `SELECT id, patient_id, appointment_id, test_date, test_name, canonical_name,
               result, result_text, unit, ref_range, flag, is_critical, source,
               panel_name, created_at
          FROM lab_results
         WHERE patient_id=$1
           AND test_date >= NOW() - INTERVAL '5 years'
         ORDER BY test_date DESC, created_at DESC`,
-      [pid],
-    ),
-    pool.query(
-      `SELECT id, visit_date, visit_type, con_name, status, con_data, created_at
+        [pid],
+      ),
+      pool.query(
+        `SELECT id, visit_date, visit_type, con_name, status, con_data, created_at
          FROM consultations
         WHERE patient_id=$1
         ORDER BY visit_date DESC, created_at DESC
         LIMIT 50`,
-      [pid],
-    ),
-    pool.query(`SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC`, [pid]),
-  ]);
+        [pid],
+      ),
+      pool.query(`SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC`, [pid]),
+      // Latest appointment carrying biomarkers.followup — same source the OPD
+      // page reads, used as fallback when consultation/healthray follow-up
+      // lacks a date.
+      pool.query(
+        `SELECT biomarkers, healthray_follow_up FROM appointments
+          WHERE patient_id=$1 AND biomarkers ? 'followup'
+          ORDER BY appointment_date DESC NULLS LAST, id DESC
+          LIMIT 1`,
+        [pid],
+      ),
+    ]);
 
   const patient = patientR.rows[0];
   if (!patient) return null;
@@ -290,6 +309,19 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const latestVitals = vitalsR.rows[0] || {};
   const prevVitals = vitalsR.rows[1] || {};
 
+  const fuRow = followupApptR.rows[0] || null;
+  const fuBio = fuRow?.biomarkers || {};
+  const withDate = (fu) => (fu && fu.date ? fu : null);
+  const followUpDate =
+    withDate(fuRow?.healthray_follow_up) ||
+    (fuBio.followup
+      ? {
+          date: fuBio.followup,
+          notes: fuRow?.healthray_follow_up?.notes || null,
+          timing: fuRow?.healthray_follow_up?.timing || null,
+        }
+      : null);
+
   return {
     patient,
     doctor,
@@ -302,6 +334,7 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     labHistory,
     consultations: consultationsR.rows,
     goals: goalsR.rows,
+    appt_plan: followUpDate ? { follow_up: followUpDate } : null,
     visitSummaryText: appt?.post_visit_summary || undefined,
   };
 }
