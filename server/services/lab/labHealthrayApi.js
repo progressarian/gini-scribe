@@ -304,7 +304,28 @@ export async function fetchLabReportPdf(caseUid, caseId) {
       return null;
     }
 
-    await new Promise((r) => setTimeout(r, 2000));
+    // Wait for the blob size to STABILIZE — HealthRay's renderer commonly
+    // emits an early empty/header-only PDF then replaces it once test rows
+    // are fetched. We poll the largest captured blob's size and only proceed
+    // once it stops growing for ~3 consecutive seconds.
+    await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let lastSize = window.__pdfBlob?.size || 0;
+      let stableTicks = 0;
+      const tickMs = 1000;
+      const maxTicks = 30; // 30s ceiling
+      for (let i = 0; i < maxTicks; i++) {
+        await sleep(tickMs);
+        const size = window.__pdfBlob?.size || 0;
+        if (size > 0 && size === lastSize) {
+          stableTicks++;
+          if (stableTicks >= 3) return;
+        } else {
+          stableTicks = 0;
+          lastSize = size;
+        }
+      }
+    });
 
     // ── Step 7: Extract the PDF blob ──────────────────────────────────
     const pdfArray = await page.evaluate(async () => {

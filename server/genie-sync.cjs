@@ -1342,35 +1342,35 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           .eq("patient_id", genieUUID)
           .or("source.is.null,source.not.in.(doctor,scribe)")
           .order("recorded_date", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       safeFetch('activity_logs', () =>
         db.from("activity_logs")
           .select("*")
           .eq("patient_id", genieUUID)
           .order("log_date", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       safeFetch('symptom_logs', () =>
         db.from("symptom_logs")
           .select("*")
           .eq("patient_id", genieUUID)
           .order("log_date", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       safeFetch('medication_logs', () =>
         db.from("medication_logs")
           .select(`*, medications ( name, dose )`)
           .eq("patient_id", genieUUID)
           .order("log_date", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       safeFetch('meal_logs', () =>
         db.from("meal_logs")
           .select("*")
           .eq("patient_id", genieUUID)
           .order("log_date", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       // Master medications list the patient (or scribe) has attached to the
       // Genie profile. We mirror these so the scribe visit page can show
@@ -1380,14 +1380,14 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           .select("*")
           .eq("patient_id", genieUUID)
           .order("created_at", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       safeFetch('conditions', () =>
         db.from("conditions")
           .select("*")
           .eq("patient_id", genieUUID)
           .order("created_at", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
       // Patient-app self-logged labs (HbA1c, LDL, TSH, Haemoglobin, eGFR
       // entered via LogModal). Filter on source='patient' so we don't
@@ -1399,7 +1399,7 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           .eq("patient_id", genieUUID)
           .eq("source", "patient")
           .order("test_date", { ascending: false })
-          .limit(500),
+          .limit(2000),
       ),
     ]);
 

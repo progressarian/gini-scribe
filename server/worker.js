@@ -2,6 +2,7 @@ import "dotenv/config";
 import { startCronJobs, stopCronJobs } from "./services/cron/index.js";
 import { startSheetsCron, stopSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron, stopTodaysShowCron } from "./services/cron/todaysShowSync.js";
+import { startGenieSyncCron, stopGenieSyncCron } from "./services/cron/genieSync.js";
 import pool from "./config/db.js";
 
 console.log("🛠️  Gini Scribe Worker starting...");
@@ -9,6 +10,7 @@ console.log("🛠️  Gini Scribe Worker starting...");
 startCronJobs();
 startSheetsCron();
 startTodaysShowCron();
+startGenieSyncCron();
 
 console.log("✅ Worker ready — cron jobs active (separate from API process)");
 
@@ -21,6 +23,7 @@ async function shutdown(signal) {
     stopCronJobs();
     stopSheetsCron();
     stopTodaysShowCron();
+    stopGenieSyncCron();
   } catch (e) {
     console.error("[Worker] error stopping cron:", e.message);
   }
