@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useRef, useCallback } from "react";
+import { memo, useState, useEffect, useCallback } from "react";
 import { fmtDate } from "./helpers";
 import api from "../../services/api";
 import "./VisitSummaryPanel.css";
@@ -44,7 +44,6 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
   const [dataAsOf, setDataAsOf] = useState(null);
   const [fromCache, setFromCache] = useState(false);
   const [latestReport, setLatestReport] = useState(null);
-  const hasFiredRef = useRef(false);
 
   const loadSummary = useCallback(
     ({ regenerate = false } = {}) => {
@@ -74,10 +73,12 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
   );
 
   useEffect(() => {
-    if (!patientId || hasFiredRef.current) return;
-    hasFiredRef.current = true;
+    if (!patientId) return;
+    // Re-fetch whenever the patient or the appointment changes so we never
+    // show a stale summary belonging to a previously-opened patient.
     loadSummary();
-  }, [patientId, loadSummary]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId, appointmentId]);
 
   if (loading) {
     return (

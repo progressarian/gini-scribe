@@ -404,9 +404,25 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
 
   try {
     // Resolve the appointment date — needed to detect "consultation saved today".
-    // If the client didn't send appointmentId, fall back to the patient's latest
-    // appointment so the cache key is stable across calls.
+    // If the client sent an appointmentId, verify it belongs to this patient
+    // (cache is keyed by appointmentId, so a mismatch would return another
+    // patient's cached summary). Mismatched or missing → fall back to latest.
     let apptDate = null;
+    if (apptId) {
+      const r = await pool.query(
+        `SELECT patient_id, appointment_date FROM appointments WHERE id=$1`,
+        [apptId],
+      );
+      const ownerPid = r.rows[0]?.patient_id ?? null;
+      if (ownerPid !== pid) {
+        console.warn(
+          `[post-visit] MISMATCH patient=${pid} sent appt=${apptId} which belongs to patient=${ownerPid ?? "none"} — ignoring and falling back to latest`,
+        );
+        apptId = null;
+      } else {
+        apptDate = r.rows[0]?.appointment_date || null;
+      }
+    }
     if (!apptId) {
       const latestR = await pool.query(
         `SELECT id, appointment_date FROM appointments
@@ -417,9 +433,6 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       );
       apptId = latestR.rows[0]?.id || null;
       apptDate = latestR.rows[0]?.appointment_date || null;
-    } else {
-      const r = await pool.query(`SELECT appointment_date FROM appointments WHERE id=$1`, [apptId]);
-      apptDate = r.rows[0]?.appointment_date || null;
     }
 
     // Readiness check: a consultation exists for this patient on the appointment date

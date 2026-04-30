@@ -468,9 +468,24 @@ router.get("/patients/:id/summary", async (req, res) => {
   let rejectFlight = null;
 
   try {
-    // ── 0. Resolve the appointment ID up front. If the client didn't send
-    // one, fall back to the patient's latest appointment so the cache is
-    // still keyed and we don't regenerate on every call. ──
+    // ── 0. Resolve the appointment ID up front. If the client sent one,
+    // verify it actually belongs to this patient — otherwise we'd return
+    // the cached summary for a different patient (cache is keyed by
+    // appointmentId). If the client didn't send one (or sent a mismatched
+    // one), fall back to the patient's latest appointment. ──
+    if (apptId) {
+      const ownerR = await pool.query(
+        `SELECT patient_id FROM appointments WHERE id=$1`,
+        [apptId],
+      );
+      const ownerPid = ownerR.rows[0]?.patient_id ?? null;
+      if (ownerPid !== pid) {
+        console.warn(
+          `[summary] MISMATCH patient=${pid} sent appt=${apptId} which belongs to patient=${ownerPid ?? "none"} — ignoring and falling back to latest`,
+        );
+        apptId = null;
+      }
+    }
     if (!apptId) {
       const latestR = await pool.query(
         `SELECT id FROM appointments

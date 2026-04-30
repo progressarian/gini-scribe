@@ -4484,6 +4484,7 @@ function PatientDetail({
                   if (!newTab) e.preventDefault();
                   await onPatchStatus(appt.id, "in_visit");
                   sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                  sessionStorage.setItem("gini_opd_patient_id", String(appt.patient_id));
                   sessionStorage.setItem("gini_visit_start", new Date().toISOString());
                   setDbPatientId(appt.patient_id);
                   sessionStorage.setItem("gini_active_patient", String(appt.patient_id));
@@ -4689,6 +4690,7 @@ function PatientDetail({
               if (appt.patient_id) {
                 await onPatchStatus(appt.id, "in_visit");
                 sessionStorage.setItem("gini_opd_appt_id", String(appt.id));
+                sessionStorage.setItem("gini_opd_patient_id", String(appt.patient_id));
                 setPatient({
                   name: appt.patient_name || "",
                   phone: appt.phone || "",

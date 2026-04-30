@@ -256,17 +256,27 @@ export default function VisitPage() {
   // ── OPD appointment sync ──
   // Falls back to URL `?appt=` so a Ctrl/Cmd-click "Open Scribe" opening a
   // new tab can carry the appointment context (sessionStorage is per-tab).
-  const [opdApptId] = useState(() => {
-    const id = sessionStorage.getItem("gini_opd_appt_id");
-    if (id) return Number(id);
+  // The stored apptId is only valid for the patient it was opened for —
+  // otherwise switching patients in the same tab would carry the previous
+  // patient's apptId forward and we'd serve the wrong cached summary.
+  const opdApptId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     const urlAppt = params.get("appt");
-    if (urlAppt) {
+    const urlApptPatient = params.get("appt_pid");
+    if (urlAppt && (!urlApptPatient || Number(urlApptPatient) === Number(dbPatientId))) {
       sessionStorage.setItem("gini_opd_appt_id", String(urlAppt));
+      if (dbPatientId) sessionStorage.setItem("gini_opd_patient_id", String(dbPatientId));
       return Number(urlAppt);
     }
-    return null;
-  });
+    const storedAppt = sessionStorage.getItem("gini_opd_appt_id");
+    const storedPid = sessionStorage.getItem("gini_opd_patient_id");
+    if (!storedAppt) return null;
+    // Only honour the stored appt if it was recorded for the current patient.
+    // No stored patient_id means it was set by an older build — accept it
+    // only when there is no patient mismatch we can detect.
+    if (storedPid && Number(storedPid) !== Number(dbPatientId)) return null;
+    return Number(storedAppt);
+  }, [dbPatientId]);
   const [visitStart, setVisitStart] = useState(
     () => sessionStorage.getItem("gini_visit_start") || null,
   );
