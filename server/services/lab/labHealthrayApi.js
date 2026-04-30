@@ -214,6 +214,9 @@ export async function fetchLabReportPdf(caseUid, caseId) {
     });
 
     // ── Step 2: Hook blob creation to capture the PDF ─────────────────
+    // Keep the LARGEST blob seen — HealthRay often emits an interim/partial
+    // blob before the final PDF is rendered. Picking the first > 5KB blob
+    // would cache the partial one and produce a corrupt download.
     await page.evaluateOnNewDocument(() => {
       window.__pdfBlob = null;
       window.__pdfBlobUrl = null;
@@ -221,8 +224,10 @@ export async function fetchLabReportPdf(caseUid, caseId) {
       URL.createObjectURL = function (blob) {
         const url = orig.call(URL, blob);
         if (blob && blob.size > 5000) {
-          window.__pdfBlob = blob;
-          window.__pdfBlobUrl = url;
+          if (!window.__pdfBlob || blob.size > window.__pdfBlob.size) {
+            window.__pdfBlob = blob;
+            window.__pdfBlobUrl = url;
+          }
         }
         return url;
       };
@@ -350,6 +355,19 @@ export async function fetchLabReportPdf(caseUid, caseId) {
     }
 
     const buffer = Buffer.from(pdfArray);
+
+    // Validate PDF integrity — guard against partial/garbage captures slipping
+    // through. A real PDF starts with "%PDF-" and ends with "%%EOF".
+    const head = buffer.subarray(0, 5).toString("ascii");
+    const tail = buffer.subarray(-1024).toString("ascii");
+    if (head !== "%PDF-" || !tail.includes("%%EOF")) {
+      log(
+        "PDF",
+        `Reject case ${caseId}: invalid PDF (head="${head}", hasEOF=${tail.includes("%%EOF")}, bytes=${buffer.length})`,
+      );
+      return null;
+    }
+
     log("PDF", `Captured ${buffer.length} bytes for case ${caseId} (exact HealthRay PDF)`);
     return { buffer, contentType: "application/pdf" };
   } catch (e) {

@@ -2691,21 +2691,35 @@ router.post("/visit/:patientId/goal", async (req, res) => {
     if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
     const { marker, current_value, target_value, timeline, priority, notes } = req.body || {};
     if (!marker?.trim()) return res.status(400).json({ error: "marker is required" });
-    const ins = await pool.query(
-      `INSERT INTO goals (patient_id, marker, current_value, target_value, timeline, priority, notes, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'active')
-       RETURNING *`,
-      [
-        pid,
-        marker.trim(),
-        current_value || null,
-        target_value || null,
-        timeline || null,
-        priority || null,
-        notes || null,
-      ],
+    const m = marker.trim();
+    const tv = target_value || null;
+    const tl = timeline || null;
+    const existing = await pool.query(
+      `SELECT id FROM goals
+        WHERE patient_id=$1 AND marker=$2
+          AND COALESCE(target_value,'')=COALESCE($3,'')
+          AND COALESCE(timeline,'')=COALESCE($4,'')
+        LIMIT 1`,
+      [pid, m, tv, tl],
     );
-    res.json(ins.rows[0]);
+    let row;
+    if (existing.rows.length) {
+      const upd = await pool.query(
+        `UPDATE goals SET current_value=$2, priority=$3, notes=$4, status='active', updated_at=NOW()
+          WHERE id=$1 RETURNING *`,
+        [existing.rows[0].id, current_value || null, priority || null, notes || null],
+      );
+      row = upd.rows[0];
+    } else {
+      const ins = await pool.query(
+        `INSERT INTO goals (patient_id, marker, current_value, target_value, timeline, priority, notes, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'active')
+         RETURNING *`,
+        [pid, m, current_value || null, tv, tl, priority || null, notes || null],
+      );
+      row = ins.rows[0];
+    }
+    res.json(row);
   } catch (e) {
     handleError(res, e, "Create goal");
   }
@@ -2778,7 +2792,6 @@ router.post("/visit/:patientId/complete", async (req, res) => {
     }
     const result = await savePrescriptionForVisit(pid, payload, {
       source: "visit",
-      titlePrefix: "Prescription — Visit",
       clientInitiated: true,
     });
     res.json({

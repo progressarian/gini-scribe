@@ -12,7 +12,10 @@ export function cleanNote(notes) {
   // Strip pipe-joined groups of these tokens as a single unit (with surrounding
   // pipes/whitespace).
   let cleaned = trimmed
-    .replace(/(?:^|\s|·)\s*(?:healthray(?:_[a-z]+)?:[^|\s]+)(?:\s*\|\s*healthray(?:_[a-z]+)?:[^|\s]+)*/gi, "")
+    .replace(
+      /(?:^|\s|·)\s*(?:healthray(?:_[a-z]+)?:[^|\s]+)(?:\s*\|\s*healthray(?:_[a-z]+)?:[^|\s]+)*/gi,
+      "",
+    )
     .replace(idTokenRe, "")
     .replace(/\s*[—–-]+\s*/g, " — ")
     .replace(/^\s*[—–-]+\s*|\s*[—–-]+\s*$/g, "")

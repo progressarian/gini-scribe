@@ -220,6 +220,9 @@ CREATE TABLE IF NOT EXISTS goals (
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_goals_patient ON goals(patient_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_goals_consultation_marker
+  ON goals(consultation_id, marker)
+  WHERE consultation_id IS NOT NULL;
 
 -- ============ COMPLICATIONS ============
 CREATE TABLE IF NOT EXISTS complications (

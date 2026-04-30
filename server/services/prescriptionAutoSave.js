@@ -50,7 +50,6 @@ async function findExistingPrescription(client, pid, consultationId, source) {
 export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   const {
     source = "visit",
-    titlePrefix = "Prescription — Visit",
     appointmentId = null,
     consultationId: consultationIdOverride = null,
     clientInitiated = false,
@@ -105,8 +104,25 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   const doctorName = data?.doctor?.name || "doctor";
   const pdfBuffer = await generatePrescriptionPdf(data);
   const fileName = buildPrescriptionFileName(doctorName);
-  const dateLabel = new Date().toISOString().slice(0, 10);
-  const title = `${titlePrefix} — ${dateLabel}`;
+  const now = new Date();
+  const istParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .formatToParts(now)
+    .reduce((acc, p) => ((acc[p.type] = p.value), acc), {});
+  const dateLabel = `${istParts.year}-${istParts.month}-${istParts.day}`;
+  const timeLabel = `${istParts.hour}:${istParts.minute} ${(istParts.dayPeriod || "").toUpperCase()}`;
+  const doctorLabel = (data?.doctor?.name || "").trim();
+  const doctorSegment = doctorLabel
+    ? ` — ${/^dr\.?\s/i.test(doctorLabel) ? doctorLabel : `Dr. ${doctorLabel}`}`
+    : "";
+  const title = `Prescription${doctorSegment} — Visit — ${dateLabel} ${timeLabel}`;
 
   const ins = await pool.query(
     `INSERT INTO documents
@@ -204,69 +220,69 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     goalsR,
     followupApptR,
   ] = await Promise.all([
-      pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
-      appointmentId
-        ? pool.query(
-            `SELECT id, doctor_name, appointment_date, post_visit_summary
+    pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
+    appointmentId
+      ? pool.query(
+          `SELECT id, doctor_name, appointment_date, post_visit_summary
              FROM appointments WHERE id=$1`,
-            [appointmentId],
-          )
-        : pool.query(
-            `SELECT id, doctor_name, appointment_date, post_visit_summary
+          [appointmentId],
+        )
+      : pool.query(
+          `SELECT id, doctor_name, appointment_date, post_visit_summary
              FROM appointments WHERE patient_id=$1
             ORDER BY appointment_date DESC NULLS LAST, id DESC LIMIT 1`,
-            [pid],
-          ),
-      pool.query(
-        `SELECT m.*, c.con_name AS prescriber,
+          [pid],
+        ),
+    pool.query(
+      `SELECT m.*, c.con_name AS prescriber,
               COALESCE(c.visit_date, m.started_date) AS prescribed_date,
               COALESCE(m.last_prescribed_date, c.visit_date, m.started_date) AS last_prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
         WHERE m.patient_id=$1 AND m.is_active = true
         ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
-        [pid],
-      ),
-      pool.query(
-        `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
+      [pid],
+    ),
+    pool.query(
+      `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
         WHERE patient_id=$1 AND is_active != false
         ORDER BY diagnosis_id, updated_at DESC`,
-        [pid],
-      ),
-      pool.query(
-        `SELECT * FROM vitals WHERE patient_id=$1
+      [pid],
+    ),
+    pool.query(
+      `SELECT * FROM vitals WHERE patient_id=$1
         ORDER BY recorded_at DESC LIMIT 2`,
-        [pid],
-      ),
-      pool.query(
-        `SELECT id, patient_id, appointment_id, test_date, test_name, canonical_name,
+      [pid],
+    ),
+    pool.query(
+      `SELECT id, patient_id, appointment_id, test_date, test_name, canonical_name,
               result, result_text, unit, ref_range, flag, is_critical, source,
               panel_name, created_at
          FROM lab_results
         WHERE patient_id=$1
           AND test_date >= NOW() - INTERVAL '5 years'
         ORDER BY test_date DESC, created_at DESC`,
-        [pid],
-      ),
-      pool.query(
-        `SELECT id, visit_date, visit_type, con_name, status, con_data, created_at
+      [pid],
+    ),
+    pool.query(
+      `SELECT id, visit_date, visit_type, con_name, status, con_data, created_at
          FROM consultations
         WHERE patient_id=$1
         ORDER BY visit_date DESC, created_at DESC
         LIMIT 50`,
-        [pid],
-      ),
-      pool.query(`SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC`, [pid]),
-      // Latest appointment carrying biomarkers.followup — same source the OPD
-      // page reads, used as fallback when consultation/healthray follow-up
-      // lacks a date.
-      pool.query(
-        `SELECT biomarkers, healthray_follow_up FROM appointments
+      [pid],
+    ),
+    pool.query(`SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC`, [pid]),
+    // Latest appointment carrying biomarkers.followup — same source the OPD
+    // page reads, used as fallback when consultation/healthray follow-up
+    // lacks a date.
+    pool.query(
+      `SELECT biomarkers, healthray_follow_up FROM appointments
           WHERE patient_id=$1 AND biomarkers ? 'followup'
           ORDER BY appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
-        [pid],
-      ),
-    ]);
+      [pid],
+    ),
+  ]);
 
   const patient = patientR.rows[0];
   if (!patient) return null;

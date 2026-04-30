@@ -725,10 +725,7 @@ const VisitPlan = memo(function VisitPlan({
           (m) => m.prescribed_date && m.prescribed_date.startsWith(today),
         );
         const stoppedToday = (stoppedMeds || []).filter(
-          (m) =>
-            !m.parent_medication_id &&
-            m.stopped_date &&
-            m.stopped_date.startsWith(today),
+          (m) => !m.parent_medication_id && m.stopped_date && m.stopped_date.startsWith(today),
         );
         const continuedMeds = parentActiveMeds.filter(
           (m) => !m.prescribed_date || !m.prescribed_date.startsWith(today),

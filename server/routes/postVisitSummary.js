@@ -362,7 +362,6 @@ function safeParseJson(text) {
   }
 }
 
-
 // Pulls the value of the "narrative" JSON field out of a model response
 // that failed strict parsing. Tolerates unescaped quotes inside the value
 // by stopping at the closing brace of the object.

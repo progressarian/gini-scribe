@@ -474,10 +474,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     // appointmentId). If the client didn't send one (or sent a mismatched
     // one), fall back to the patient's latest appointment. ──
     if (apptId) {
-      const ownerR = await pool.query(
-        `SELECT patient_id FROM appointments WHERE id=$1`,
-        [apptId],
-      );
+      const ownerR = await pool.query(`SELECT patient_id FROM appointments WHERE id=$1`, [apptId]);
       const ownerPid = ownerR.rows[0]?.patient_id ?? null;
       if (ownerPid !== pid) {
         console.warn(

@@ -1112,7 +1112,9 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
             <div style={{ fontSize: 13, fontWeight: 600, color: INK, marginBottom: 6 }}>
               APPOINTMENT INFO
             </div>
-            <div style={{ fontSize: 12, color: INK3, lineHeight: 1.6 }}>{cleanNote(appt.notes)}</div>
+            <div style={{ fontSize: 12, color: INK3, lineHeight: 1.6 }}>
+              {cleanNote(appt.notes)}
+            </div>
           </div>
         )}
 

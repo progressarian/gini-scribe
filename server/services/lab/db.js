@@ -180,6 +180,21 @@ export async function downloadAndStoreLabPdf(
     return null;
   }
 
+  // For PDFs, verify magic header + EOF marker so partial/garbage captures
+  // never get stored as openable lab reports. Image content types skip this.
+  const isPdf = !contentType || contentType === "application/pdf";
+  if (isPdf) {
+    const head = buffer.subarray(0, 5).toString("ascii");
+    const tail = buffer.subarray(-1024).toString("ascii");
+    if (head !== "%PDF-" || !tail.includes("%%EOF")) {
+      labLog(
+        "Reject",
+        `Invalid PDF for case ${caseNo} (head="${head}", hasEOF=${tail.includes("%%EOF")}, bytes=${buffer.length})`,
+      );
+      return null;
+    }
+  }
+
   const ext = contentType === "image/jpeg" ? "jpg" : contentType === "image/png" ? "png" : "pdf";
   const fileName = pdfFileName || `lab_case_${caseNo}.${ext}`;
   const storagePath = `patients/${patientId}/lab/${fileName}`;

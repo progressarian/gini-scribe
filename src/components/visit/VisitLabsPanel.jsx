@@ -393,10 +393,10 @@ function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) 
             <span style={{ fontSize: 16, fontWeight: 800, color: accent, lineHeight: 1 }}>
               {fmtVal(last.value)}
             </span>
-            {unit && <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{unit}</span>}
-            {arrow && (
-              <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>{arrow}</span>
+            {unit && (
+              <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{unit}</span>
             )}
+            {arrow && <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>{arrow}</span>}
           </div>
         </div>
 
@@ -473,8 +473,7 @@ function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) 
             {points.map((p, i) => {
               const isFirst = i === 0;
               const isLast = i === points.length - 1;
-              const isCurrent =
-                currentDate && p.date === String(currentDate).slice(0, 10);
+              const isCurrent = currentDate && p.date === String(currentDate).slice(0, 10);
               const isHover = hover?.i === i;
               const labelY = p.cy - 6 < 8 ? p.cy + 12 : p.cy - 6;
               const anchor = isFirst ? "start" : isLast ? "end" : "middle";

@@ -361,13 +361,25 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       }
     }
     {
+      // Goals = "latest prescription only": each consultation save fully
+      // replaces the patient's goal set. Empty/missing goals → wipe to nothing.
+      // Manual UI edits happen on the post-save set via the goal endpoints.
+      await client.query(`DELETE FROM goals WHERE patient_id = $1`, [patientId]);
+
       const goalRows = (conData?.goals || []).filter((g) => g?.marker);
       if (goalRows.length) {
         await client.query(
           `INSERT INTO goals (patient_id, consultation_id, marker, current_value, target_value, timeline, priority)
            SELECT $1, $2, marker, current_value, target_value, timeline, priority
              FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
-                  AS t(marker, current_value, target_value, timeline, priority)`,
+                  AS t(marker, current_value, target_value, timeline, priority)
+           ON CONFLICT (consultation_id, marker) WHERE consultation_id IS NOT NULL
+           DO UPDATE SET
+             current_value = EXCLUDED.current_value,
+             target_value  = EXCLUDED.target_value,
+             timeline      = EXCLUDED.timeline,
+             priority      = EXCLUDED.priority,
+             updated_at    = NOW()`,
           [
             patientId,
             consultationId,
@@ -453,7 +465,6 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
           appointmentId: apptId,
           consultationId,
           source: "visit",
-          titlePrefix: "Prescription — Visit",
         });
       })
       .catch((e) => console.warn("[consultations] Rx auto-save failed:", e?.message));
