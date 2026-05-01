@@ -31,8 +31,8 @@ let running = false;
 function isEnabled() {
   return Boolean(
     process.env.GENIE_SUPABASE_URL &&
-      process.env.GENIE_SUPABASE_SERVICE_KEY &&
-      genieSync?.syncPatientLogsFromGenieThrottled,
+    process.env.GENIE_SUPABASE_SERVICE_KEY &&
+    genieSync?.syncPatientLogsFromGenieThrottled,
   );
 }
 
@@ -147,9 +147,7 @@ async function runSweep({ mode = "recent" } = {}) {
 
 export function startGenieSyncCron() {
   if (!isEnabled()) {
-    console.log(
-      "[GenieCron] Genie credentials missing or genie-sync.cjs unavailable — disabled",
-    );
+    console.log("[GenieCron] Genie credentials missing or genie-sync.cjs unavailable — disabled");
     return;
   }
   console.log(

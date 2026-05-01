@@ -8,6 +8,7 @@ import {
   extractCaseDate,
   classifyCaseSource,
   countInhouseProgress,
+  isLabCasePrintable,
 } from "../lab/labHealthrayParser.js";
 import {
   ensureLabCasesTable,
@@ -127,17 +128,25 @@ async function processCase(listRow) {
   }
   // Otherwise leave results_synced=false so the recovery loop keeps trying.
 
-  // Step h: download lab report PDF (fire-and-forget — never blocks sync)
+  // Step h: download lab report PDF (fire-and-forget — never blocks sync).
+  // Gate on case readiness — HealthRay's /download-report URL still resolves
+  // for in-process cases but produces a structurally valid blank PDF that
+  // would pass the integrity check and persist forever.
   if (patientId) {
-    downloadAndStoreLabPdf(
-      patientId,
-      caseNo,
-      caseUid,
-      labCaseId,
-      labUserId,
-      listRow.case_attachment_file_name,
-      caseDate,
-    ).catch((e) => log("PDF", `${patientCaseNo}: PDF download failed — ${e.message}`));
+    const printable = isLabCasePrintable(listRow.case_status, detail);
+    if (printable.ready) {
+      downloadAndStoreLabPdf(
+        patientId,
+        caseNo,
+        caseUid,
+        labCaseId,
+        labUserId,
+        listRow.case_attachment_file_name,
+        caseDate,
+      ).catch((e) => log("PDF", `${patientCaseNo}: PDF download failed — ${e.message}`));
+    } else {
+      log("PDF", `${patientCaseNo}: skip PDF download (${printable.reason})`);
+    }
   }
 
   log(
@@ -353,17 +362,26 @@ export async function retryPendingLabCases() {
           await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
         }
 
-        // Download PDF if not already stored
+        // Download PDF if not already stored — gated on case readiness.
+        // row.case_status may be stale (column is written-once-at-insert),
+        // so the inhouseComplete fallback inside isLabCasePrintable is the
+        // robust signal here.
         if (patientId && !row.pdf_storage_path) {
-          downloadAndStoreLabPdf(
-            patientId,
-            row.case_no,
-            row.case_uid,
-            row.lab_case_id,
-            row.lab_user_id,
-            row.pdf_file_name,
-            caseDate,
-          ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
+          const status = row.case_status || row.raw_list_json?.case_status;
+          const printable = isLabCasePrintable(status, detail);
+          if (printable.ready) {
+            downloadAndStoreLabPdf(
+              patientId,
+              row.case_no,
+              row.case_uid,
+              row.lab_case_id,
+              row.lab_user_id,
+              row.pdf_file_name,
+              caseDate,
+            ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
+          } else {
+            log("Recovery", `${row.patient_case_no}: skip PDF (${printable.reason})`);
+          }
         }
 
         log(
@@ -384,13 +402,21 @@ export async function retryPendingLabCases() {
 export async function backfillLabPdfs({ concurrency = 2 } = {}) {
   const pool = (await import("../../config/db.js")).default;
 
+  // Only attempt PDF download for cases that look printable. case_status is
+  // the explicit signal; results_synced=TRUE is the inhouseComplete proxy
+  // (set in markLabCaseSynced when results were written or all in-house
+  // params have numeric values).
   const { rows } = await pool.query(
     `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
-            patient_id, pdf_file_name, case_date
+            patient_id, pdf_file_name, case_date, case_status
      FROM lab_cases
      WHERE patient_id IS NOT NULL
        AND pdf_storage_path IS NULL
        AND COALESCE(retry_abandoned, FALSE) = FALSE
+       AND (
+         LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) = 'printable'
+         OR results_synced = TRUE
+       )
      ORDER BY case_date DESC`,
   );
 
@@ -409,6 +435,15 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
           ? row.case_date.slice(0, 10)
           : row.case_date.toISOString().slice(0, 10)
         : null;
+
+      // Belt-and-braces — the SQL filter already excludes non-printable rows,
+      // but check again so any future query change cannot regress the bug.
+      const printable = isLabCasePrintable(row.case_status, null);
+      if (!printable.ready) {
+        skipped++;
+        log("PDF Backfill", `${row.patient_case_no} skipped (${printable.reason})`);
+        return;
+      }
 
       const path = await downloadAndStoreLabPdf(
         row.patient_id,

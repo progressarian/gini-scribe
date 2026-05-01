@@ -29,9 +29,11 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
           </button>
         </div>
         <div className="scb" ref={cardRef}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t2)", marginBottom: 14 }}>
-            {patient.name} ji, apni dawaiyan roz iss tarah leni hain:
-          </div>
+          {mainMeds.length > 1 && (
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t2)", marginBottom: 14 }}>
+              {patient.name} ji, apni dawaiyan roz iss tarah leni hain:
+            </div>
+          )}
 
           {slotsWithMeds.map((slot) => (
             <div key={slot.key} className="mc-mg" style={{ marginBottom: 12 }}>

@@ -2078,11 +2078,17 @@ router.post("/sync/lab/backfill-pdfs", async (req, res) => {
   }
 
   try {
+    // Mirror the printable-or-synced filter from backfillLabPdfs so the
+    // displayed `total` matches the number of rows we will actually process.
     const { rows } = await pool.query(
       `SELECT COUNT(*) AS cnt FROM lab_cases
        WHERE patient_id IS NOT NULL
          AND pdf_storage_path IS NULL
-         AND COALESCE(retry_abandoned, FALSE) = FALSE`,
+         AND COALESCE(retry_abandoned, FALSE) = FALSE
+         AND (
+           LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) = 'printable'
+           OR results_synced = TRUE
+         )`,
     );
     const total = parseInt(rows[0].cnt, 10);
 
@@ -2187,7 +2193,7 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
     const patientId = patients[0].id;
 
     const { rows } = await pool.query(
-      `SELECT case_no, case_uid, lab_case_id, lab_user_id, pdf_file_name, case_date
+      `SELECT case_no, case_uid, lab_case_id, lab_user_id, pdf_file_name, case_date, case_status
        FROM lab_cases
        WHERE patient_id = $1 AND pdf_storage_path IS NULL
        ORDER BY case_date DESC`,
@@ -2197,6 +2203,7 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
     if (!rows.length) return res.json({ message: "No cases missing PDFs for this patient" });
 
     const { downloadAndStoreLabPdf } = await import("../services/lab/db.js");
+    const { isLabCasePrintable } = await import("../services/lab/labHealthrayParser.js");
     const results = [];
 
     for (const row of rows) {
@@ -2205,6 +2212,14 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
           ? row.case_date.slice(0, 10)
           : row.case_date.toISOString().slice(0, 10)
         : null;
+
+      // Skip in-process / unknown-status cases — HealthRay would otherwise
+      // return a structurally valid blank PDF that gets persisted permanently.
+      const printable = isLabCasePrintable(row.case_status, null);
+      if (!printable.ready) {
+        results.push({ case_no: row.case_no, status: "skipped", reason: printable.reason });
+        continue;
+      }
 
       try {
         const path = await downloadAndStoreLabPdf(

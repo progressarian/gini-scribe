@@ -221,9 +221,9 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
     </div>
   </div>
 
-  <div style="font-size:13px;font-weight:600;color:#3d4f63;margin-bottom:14px">
+  ${activeMeds.length > 1 ? `<div style="font-size:13px;font-weight:600;color:#3d4f63;margin-bottom:14px">
     ${patient.name} ji, apni dawaiyan roz iss tarah leni hain:
-  </div>
+  </div>` : ""}
 
   ${medsHTML}
 

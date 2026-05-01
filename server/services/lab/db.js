@@ -1,7 +1,7 @@
 // ── Lab HealthRay Sync — DB operations ──────────────────────────────────────
 
 import pool from "../../config/db.js";
-import { extractInvestigationSummary } from "./labHealthrayParser.js";
+import { extractInvestigationSummary, isLabCasePrintable } from "./labHealthrayParser.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { createLogger } from "../logger.js";
 
@@ -149,12 +149,21 @@ export async function downloadAndStoreLabPdf(
     return null;
   }
 
-  // Avoid re-downloading if already stored
-  const existing = await pool.query(
-    `SELECT pdf_storage_path FROM lab_cases WHERE case_no = $1 AND pdf_storage_path IS NOT NULL`,
+  // Avoid re-downloading if already stored, and verify the case is in a
+  // printable state — defends against any future caller that forgets to gate.
+  // HealthRay's /download-report URL still resolves for in-process cases but
+  // returns a structurally valid blank PDF, so without this check a blank PDF
+  // gets persisted and pdf_storage_path is set, blocking future re-download.
+  const { rows: pre } = await pool.query(
+    `SELECT pdf_storage_path, case_status FROM lab_cases WHERE case_no = $1`,
     [caseNo],
   );
-  if (existing.rows[0]?.pdf_storage_path) return existing.rows[0].pdf_storage_path;
+  if (pre[0]?.pdf_storage_path) return pre[0].pdf_storage_path;
+  const printable = isLabCasePrintable(pre[0]?.case_status, null);
+  if (!printable.ready) {
+    labLog("Skip", `case ${caseNo}: not printable (${printable.reason})`);
+    return null;
+  }
 
   let result;
   try {

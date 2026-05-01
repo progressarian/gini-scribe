@@ -186,3 +186,41 @@ export function extractCaseDate(listRow) {
   if (!raw) return null;
   return raw.slice(0, 10); // YYYY-MM-DD
 }
+
+// ── Case status normalization ───────────────────────────────────────────────
+// HealthRay sends case_status with inconsistent casing/spacing
+// (e.g. "In Process", "in_process", "PRINTABLE"). Collapse to lowercase with
+// no whitespace/underscores so all downstream checks compare a single shape.
+export function normalizeCaseStatus(status) {
+  if (status == null) return "";
+  return String(status).trim().toLowerCase().replace(/[\s_]+/g, "");
+}
+
+export const LAB_CASE_STATUS = {
+  PRINTABLE: "printable",
+  IN_PROCESS: "inprocess",
+  CANCELLED: "cancelled",
+};
+
+// Decide whether the lab report PDF is safe to download for this case.
+// Returns { ready: boolean, reason: string }. Default-skip when no signal:
+// a missed download is recovered on the next sync tick, but a blank PDF gets
+// stored permanently and prevents future re-download (pdf_storage_path set).
+export function isLabCasePrintable(caseStatus, caseDetail = null) {
+  const norm = normalizeCaseStatus(caseStatus);
+
+  if (norm === LAB_CASE_STATUS.CANCELLED) return { ready: false, reason: "cancelled" };
+  if (norm === LAB_CASE_STATUS.IN_PROCESS) return { ready: false, reason: "in-process" };
+  if (norm === LAB_CASE_STATUS.PRINTABLE) return { ready: true, reason: "printable" };
+
+  // Fallback: trust the same in-house completeness signal that
+  // markLabCaseSynced uses to declare the case terminal.
+  if (caseDetail) {
+    const { expected, ready } = countInhouseProgress(caseDetail);
+    if (expected > 0 && ready >= expected) {
+      return { ready: true, reason: "inhouse-complete" };
+    }
+  }
+
+  return { ready: false, reason: norm ? "unknown-status" : "no-signal" };
+}
