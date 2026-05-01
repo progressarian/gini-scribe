@@ -206,12 +206,24 @@ export const LAB_CASE_STATUS = {
 // Returns { ready: boolean, reason: string }. Default-skip when no signal:
 // a missed download is recovered on the next sync tick, but a blank PDF gets
 // stored permanently and prevents future re-download (pdf_storage_path set).
-export function isLabCasePrintable(caseStatus, caseDetail = null) {
+//
+// `opts.resultsSynced` should mirror lab_cases.results_synced — when our DB
+// has already written at least one numeric result for this case (or marked
+// it terminal), the PDF on HealthRay is real even if case_status came back
+// empty and not every in-house parameter has a numeric value yet. This is
+// load-bearing: without it we'd treat partially-filled cases (e.g. one
+// numeric panel + several text-only results) as "no-signal" and incorrectly
+// delete real PDFs.
+export function isLabCasePrintable(caseStatus, caseDetail = null, opts = {}) {
+  const { resultsSynced = false } = opts;
   const norm = normalizeCaseStatus(caseStatus);
 
   if (norm === LAB_CASE_STATUS.CANCELLED) return { ready: false, reason: "cancelled" };
   if (norm === LAB_CASE_STATUS.IN_PROCESS) return { ready: false, reason: "in-process" };
   if (norm === LAB_CASE_STATUS.PRINTABLE) return { ready: true, reason: "printable" };
+
+  // DB-side signal: our sync has already terminated this case.
+  if (resultsSynced) return { ready: true, reason: "results-synced" };
 
   // Fallback: trust the same in-house completeness signal that
   // markLabCaseSynced uses to declare the case terminal.

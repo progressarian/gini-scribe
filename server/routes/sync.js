@@ -2085,6 +2085,7 @@ router.post("/sync/lab/backfill-pdfs", async (req, res) => {
        WHERE patient_id IS NOT NULL
          AND pdf_storage_path IS NULL
          AND COALESCE(retry_abandoned, FALSE) = FALSE
+         AND COALESCE(pdf_unavailable, FALSE) = FALSE
          AND (
            LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) = 'printable'
            OR results_synced = TRUE
@@ -2180,9 +2181,18 @@ router.post("/sync/lab/clear-pdfs", async (req, res) => {
 
 // ── Import PDF for a single patient ──────────────────────────────────────────
 // POST /api/sync/lab/import-pdf?file_no=P_177437
+// POST /api/sync/lab/import-pdf?file_no=P_177437&force=1
+//   force=1 retries cases previously marked pdf_unavailable=TRUE. Use when
+//   HealthRay may have generated a PDF since the prior "No Report Found"
+//   verdict. On successful download the flag is cleared automatically.
 router.post("/sync/lab/import-pdf", async (req, res) => {
   const fileNo = req.query.file_no || req.body.file_no;
   if (!fileNo) return res.status(400).json({ error: "file_no required" });
+  const force =
+    req.query.force === "1" ||
+    req.query.force === "true" ||
+    req.body?.force === true ||
+    req.body?.force === "1";
 
   try {
     const { rows: patients } = await pool.query(
@@ -2192,10 +2202,15 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
     if (!patients[0]) return res.status(404).json({ error: `Patient ${fileNo} not found` });
     const patientId = patients[0].id;
 
+    // Default: skip cases marked unavailable. With force=1 attempt them too.
+    const unavailableFilter = force
+      ? ""
+      : "AND COALESCE(pdf_unavailable, FALSE) = FALSE";
     const { rows } = await pool.query(
-      `SELECT case_no, case_uid, lab_case_id, lab_user_id, pdf_file_name, case_date, case_status
+      `SELECT case_no, case_uid, lab_case_id, lab_user_id, pdf_file_name, case_date,
+              case_status, results_synced, pdf_unavailable
        FROM lab_cases
-       WHERE patient_id = $1 AND pdf_storage_path IS NULL
+       WHERE patient_id = $1 AND pdf_storage_path IS NULL ${unavailableFilter}
        ORDER BY case_date DESC`,
       [patientId],
     );
@@ -2215,7 +2230,9 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
 
       // Skip in-process / unknown-status cases — HealthRay would otherwise
       // return a structurally valid blank PDF that gets persisted permanently.
-      const printable = isLabCasePrintable(row.case_status, null);
+      const printable = isLabCasePrintable(row.case_status, null, {
+        resultsSynced: !!row.results_synced,
+      });
       if (!printable.ready) {
         results.push({ case_no: row.case_no, status: "skipped", reason: printable.reason });
         continue;
@@ -2231,13 +2248,25 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
           row.pdf_file_name,
           caseDate,
         );
-        results.push({ case_no: row.case_no, status: path ? "downloaded" : "skipped", path });
+        if (path) {
+          results.push({ case_no: row.case_no, status: "downloaded", path });
+        } else {
+          // Re-query so we can distinguish "still unavailable" from generic
+          // transient failure. downloadAndStoreLabPdf flips pdf_unavailable
+          // to TRUE when HealthRay returns "No Report Found".
+          const { rows: cur } = await pool.query(
+            `SELECT pdf_unavailable FROM lab_cases WHERE case_no = $1`,
+            [row.case_no],
+          );
+          const status = cur[0]?.pdf_unavailable ? "still-unavailable" : "skipped";
+          results.push({ case_no: row.case_no, status });
+        }
       } catch (e) {
         results.push({ case_no: row.case_no, status: "error", error: e.message });
       }
     }
 
-    res.json({ patient: fileNo, cases: results });
+    res.json({ patient: fileNo, force, cases: results });
   } catch (e) {
     handleError(res, e, "Import PDF for patient");
   }

@@ -49,6 +49,7 @@ export async function ensureLabCasesTable() {
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMPTZ;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS retry_abandoned BOOLEAN DEFAULT FALSE;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_storage_path TEXT;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_unavailable BOOLEAN DEFAULT FALSE;
     CREATE INDEX IF NOT EXISTS idx_lab_cases_patient    ON lab_cases(patient_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_appt       ON lab_cases(appointment_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_date       ON lab_cases(case_date);
@@ -154,12 +155,18 @@ export async function downloadAndStoreLabPdf(
   // HealthRay's /download-report URL still resolves for in-process cases but
   // returns a structurally valid blank PDF, so without this check a blank PDF
   // gets persisted and pdf_storage_path is set, blocking future re-download.
+  //
+  // results_synced=TRUE is a positive signal: our sync has already written
+  // results for this case, so the PDF is genuinely available even when
+  // case_status comes back null/unknown from the API.
   const { rows: pre } = await pool.query(
-    `SELECT pdf_storage_path, case_status FROM lab_cases WHERE case_no = $1`,
+    `SELECT pdf_storage_path, case_status, results_synced FROM lab_cases WHERE case_no = $1`,
     [caseNo],
   );
   if (pre[0]?.pdf_storage_path) return pre[0].pdf_storage_path;
-  const printable = isLabCasePrintable(pre[0]?.case_status, null);
+  const printable = isLabCasePrintable(pre[0]?.case_status, null, {
+    resultsSynced: !!pre[0]?.results_synced,
+  });
   if (!printable.ready) {
     labLog("Skip", `case ${caseNo}: not printable (${printable.reason})`);
     return null;
@@ -171,6 +178,18 @@ export async function downloadAndStoreLabPdf(
     result = await fetchLabReportPdf(caseUid, caseId, userId);
   } catch (e) {
     labLog("Error", `PDF fetch failed for case ${caseNo}: ${e.message}`);
+    return null;
+  }
+  // Discriminated outcome from fetchLabReportPdf:
+  //   { buffer, contentType } → success
+  //   { unavailable: true }   → HealthRay says no report exists (definitive)
+  //   null / no buffer        → transient failure (retry on next cron tick)
+  if (result?.unavailable) {
+    await pool.query(
+      `UPDATE lab_cases SET pdf_unavailable = TRUE WHERE case_no = $1`,
+      [caseNo],
+    );
+    labLog("Skip", `case ${caseNo}: marked pdf_unavailable (no report on HealthRay)`);
     return null;
   }
   if (!result?.buffer?.length) {
@@ -247,7 +266,10 @@ export async function downloadAndStoreLabPdf(
     );
 
     // Update lab_cases with storage path
-    await pool.query(`UPDATE lab_cases SET pdf_storage_path = $1 WHERE case_no = $2`, [
+    // Clear pdf_unavailable too — a successful download means whatever
+    // earlier "No Report Found" verdict is now stale (HealthRay can produce
+    // a PDF later for cases that had none before).
+    await pool.query(`UPDATE lab_cases SET pdf_storage_path = $1, pdf_unavailable = FALSE WHERE case_no = $2`, [
       storagePath,
       caseNo,
     ]);

@@ -132,8 +132,13 @@ async function processCase(listRow) {
   // Gate on case readiness — HealthRay's /download-report URL still resolves
   // for in-process cases but produces a structurally valid blank PDF that
   // would pass the integrity check and persist forever.
+  // resultsSynced mirrors the markLabCaseSynced terminal condition above.
   if (patientId) {
-    const printable = isLabCasePrintable(listRow.case_status, detail);
+    const willMarkSynced =
+      caseSource === "outsource" || written > 0 || inhouseComplete;
+    const printable = isLabCasePrintable(listRow.case_status, detail, {
+      resultsSynced: willMarkSynced,
+    });
     if (printable.ready) {
       downloadAndStoreLabPdf(
         patientId,
@@ -365,10 +370,16 @@ export async function retryPendingLabCases() {
         // Download PDF if not already stored — gated on case readiness.
         // row.case_status may be stale (column is written-once-at-insert),
         // so the inhouseComplete fallback inside isLabCasePrintable is the
-        // robust signal here.
+        // robust signal here. resultsSynced mirrors the terminal condition
+        // we just evaluated above (or row.results_synced if it was already
+        // terminal on a prior pass).
         if (patientId && !row.pdf_storage_path) {
           const status = row.case_status || row.raw_list_json?.case_status;
-          const printable = isLabCasePrintable(status, detail);
+          const willMarkSynced =
+            caseSource === "outsource" || written > 0 || inhouseComplete;
+          const printable = isLabCasePrintable(status, detail, {
+            resultsSynced: row.results_synced || willMarkSynced,
+          });
           if (printable.ready) {
             downloadAndStoreLabPdf(
               patientId,
@@ -408,11 +419,12 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
   // params have numeric values).
   const { rows } = await pool.query(
     `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
-            patient_id, pdf_file_name, case_date, case_status
+            patient_id, pdf_file_name, case_date, case_status, results_synced
      FROM lab_cases
      WHERE patient_id IS NOT NULL
        AND pdf_storage_path IS NULL
        AND COALESCE(retry_abandoned, FALSE) = FALSE
+       AND COALESCE(pdf_unavailable, FALSE) = FALSE
        AND (
          LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) = 'printable'
          OR results_synced = TRUE
@@ -438,7 +450,9 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
 
       // Belt-and-braces — the SQL filter already excludes non-printable rows,
       // but check again so any future query change cannot regress the bug.
-      const printable = isLabCasePrintable(row.case_status, null);
+      const printable = isLabCasePrintable(row.case_status, null, {
+        resultsSynced: !!row.results_synced,
+      });
       if (!printable.ready) {
         skipped++;
         log("PDF Backfill", `${row.patient_case_no} skipped (${printable.reason})`);

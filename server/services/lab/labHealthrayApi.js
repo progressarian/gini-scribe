@@ -14,6 +14,41 @@ const LAB_TIMEOUT_MS = 20000;
 // In-memory token cache — seeded from .env, refreshed automatically on 401
 let authToken = process.env.LAB_HEALTHRAY_AUTH_TOKEN || null;
 let accessToken = process.env.LAB_HEALTHRAY_ACCESS_TOKEN || null;
+let lastLoginAt = 0;
+let loginInFlight = null; // Promise singleton — coalesces concurrent logins
+
+// Tokens have empirically lasted well over an hour, but long batch runs
+// (the resync script) can outlast them. Refresh proactively before that
+// becomes a problem — the puppeteer path can't auto-401-retry like labFetch.
+const TOKEN_MAX_AGE_MS = 30 * 60 * 1000; // 30 min
+
+// HealthRay's PDF renderer falls over under heavy concurrent load — multiple
+// simultaneous /download-report requests get stuck on "Generating PDF preview..."
+// because the backend serialises generation. Default to 1 (strictly serial)
+// so the outer concurrency (case_detail fetches) can stay high without
+// overwhelming HealthRay's PDF service. Override via LAB_PUPPETEER_CONCURRENCY
+// once steady-state cron resumes (e.g. =2 for incremental syncs).
+const PUPPETEER_MAX_CONCURRENT = parseInt(
+  process.env.LAB_PUPPETEER_CONCURRENCY || "1",
+  10,
+);
+let puppeteerInFlight = 0;
+const puppeteerWaiters = [];
+
+async function acquirePuppeteerSlot() {
+  if (puppeteerInFlight < PUPPETEER_MAX_CONCURRENT) {
+    puppeteerInFlight++;
+    return;
+  }
+  await new Promise((resolve) => puppeteerWaiters.push(resolve));
+  puppeteerInFlight++;
+}
+
+function releasePuppeteerSlot() {
+  puppeteerInFlight--;
+  const next = puppeteerWaiters.shift();
+  if (next) next();
+}
 
 // Device token is fixed per device/browser (Firebase push token) — never changes
 const DEVICE_TOKEN = process.env.LAB_HEALTHRAY_DEVICE_TOKEN;
@@ -31,7 +66,16 @@ const LAB_HEADERS = () => ({
 });
 
 // ── Auto-login using credentials from .env ───────────────────────────────────
+// Coalesces concurrent calls so 10 parallel workers don't all hit /sign_in.
 export async function labLogin() {
+  if (loginInFlight) return loginInFlight;
+  loginInFlight = doLogin().finally(() => {
+    loginInFlight = null;
+  });
+  return loginInFlight;
+}
+
+async function doLogin() {
   const mobile = process.env.LAB_HEALTHRAY_MOBILE;
   const password = process.env.LAB_HEALTHRAY_PASSWORD;
   const countryCode = process.env.LAB_HEALTHRAY_COUNTRY_CODE || "+91";
@@ -82,9 +126,18 @@ export async function labLogin() {
 
   authToken = newAuthToken;
   if (newAccessToken) accessToken = newAccessToken;
+  lastLoginAt = Date.now();
 
   log("Login", "Tokens refreshed successfully");
   return { authToken, accessToken };
+}
+
+// Refresh tokens if missing or older than TOKEN_MAX_AGE_MS — used by the
+// puppeteer path which has no 401 retry of its own.
+async function ensureFreshTokens() {
+  if (!authToken || Date.now() - lastLoginAt > TOKEN_MAX_AGE_MS) {
+    await labLogin();
+  }
 }
 
 // ── Core fetch with auto-retry on 401 ───────────────────────────────────────
@@ -186,15 +239,68 @@ async function getBrowser() {
 // The report page generates a PDF client-side but needs auth tokens for its
 // internal API calls. We inject tokens via localStorage + request interception,
 // then capture the resulting blob from the <iframe src="blob:...">.
+//
+// Returns one of:
+//   { buffer, contentType }  — success
+//   { unavailable: true }    — HealthRay's UI explicitly says "No Report Found"
+//                              (definitive — no PDF exists for this case)
+//   null                     — transient failure (nav timeout, render stuck,
+//                              extraction failure). Caller may retry later.
 export async function fetchLabReportPdf(caseUid, caseId) {
+  // Throttle to PUPPETEER_MAX_CONCURRENT — HealthRay's PDF backend serialises
+  // generation, so concurrent /download-report navigations stall on
+  // "Generating PDF preview..." until the underlying queue drains. Default 1.
+  await acquirePuppeteerSlot();
   const reportUrl = `https://lab.healthray.com/download-report/pt/1/${caseUid}/${caseId}`;
-  let page;
-  try {
-    // Ensure we have fresh auth tokens
-    if (!authToken) await labLogin();
 
+  try {
+    await ensureFreshTokens();
     const browser = await getBrowser();
-    page = await browser.newPage();
+
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const result = await attemptFetchPdf(browser, reportUrl, caseId, attempt);
+
+      if (result.outcome === "success") {
+        return { buffer: result.buffer, contentType: "application/pdf" };
+      }
+      if (result.outcome === "no-report") {
+        // Definitive — HealthRay has no PDF for this case. Don't retry.
+        return { unavailable: true };
+      }
+      if (result.outcome === "render-stuck") {
+        // HealthRay's PDF backend never finished. Retrying queues another
+        // generation request behind the slow one — counterproductive.
+        return null;
+      }
+      // 'transient-failure' — falls through to next attempt
+      if (attempt < MAX_ATTEMPTS) {
+        log("PDF", `case ${caseId}: retrying after transient failure (attempt ${attempt + 1}/${MAX_ATTEMPTS})`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+    return null;
+  } catch (e) {
+    log("PDF", `FAIL case ${caseId}: ${e.message}`);
+    return null;
+  } finally {
+    releasePuppeteerSlot();
+  }
+}
+
+// One PDF download attempt with a fresh isolated context. Returns a
+// discriminated outcome the caller uses to decide whether to retry.
+async function attemptFetchPdf(browser, reportUrl, caseId, attempt) {
+  let page;
+  let context;
+  try {
+    // Use an isolated browser context per attempt — the HealthRay SPA reads
+    // and rewrites localStorage during boot, and concurrent pages in the
+    // shared default context were racing to clobber each other's tokens.
+    context = await (browser.createBrowserContext
+      ? browser.createBrowserContext()
+      : browser.createIncognitoBrowserContext());
+    page = await context.newPage();
 
     // ── Step 1: Intercept all API requests and inject auth headers ────
     await page.setRequestInterception(true);
@@ -213,33 +319,26 @@ export async function fetchLabReportPdf(caseUid, caseId) {
       }
     });
 
-    // ── Step 2: Hook blob creation to capture the PDF ─────────────────
-    // Keep the LARGEST blob seen — HealthRay often emits an interim/partial
-    // blob before the final PDF is rendered. Picking the first > 5KB blob
-    // would cache the partial one and produce a corrupt download.
-    await page.evaluateOnNewDocument(() => {
-      window.__pdfBlob = null;
-      window.__pdfBlobUrl = null;
-      const orig = URL.createObjectURL;
-      URL.createObjectURL = function (blob) {
-        const url = orig.call(URL, blob);
-        if (blob && blob.size > 5000) {
-          if (!window.__pdfBlob || blob.size > window.__pdfBlob.size) {
-            window.__pdfBlob = blob;
-            window.__pdfBlobUrl = url;
-          }
-        }
-        return url;
-      };
-    });
-
-    // ── Step 3: Navigate to lab.healthray.com to set domain context ───
-    await page.goto("https://lab.healthray.com", { waitUntil: "domcontentloaded", timeout: 30000 });
-
-    // ── Step 4: Inject auth tokens into localStorage ──────────────────
-    await page.evaluate(
+    // ── Step 2: Hook blob creation + inject auth tokens BEFORE any page
+    // script runs. evaluateOnNewDocument runs on every new document as soon
+    // as it's created and BEFORE page scripts execute, so the SPA boots
+    // with our tokens already in localStorage on the first navigation.
+    await page.evaluateOnNewDocument(
       (tokens) => {
-        // Try all common key patterns HealthRay might use
+        window.__pdfBlob = null;
+        window.__pdfBlobUrl = null;
+        const orig = URL.createObjectURL;
+        URL.createObjectURL = function (blob) {
+          const url = orig.call(URL, blob);
+          if (blob && blob.size > 5000) {
+            if (!window.__pdfBlob || blob.size > window.__pdfBlob.size) {
+              window.__pdfBlob = blob;
+              window.__pdfBlobUrl = url;
+            }
+          }
+          return url;
+        };
+
         const keys = [
           "auth_token",
           "access_token",
@@ -252,47 +351,70 @@ export async function fetchLabReportPdf(caseUid, caseId) {
           "token",
           "user_token",
         ];
-        for (const k of keys) {
-          if (k.includes("access")) {
-            localStorage.setItem(k, tokens.accessToken || "");
-          } else {
-            localStorage.setItem(k, tokens.authToken || "");
+        try {
+          for (const k of keys) {
+            if (k.includes("access")) {
+              localStorage.setItem(k, tokens.accessToken || "");
+            } else {
+              localStorage.setItem(k, tokens.authToken || "");
+            }
           }
+          try {
+            const u = JSON.parse(localStorage.getItem("user") || "{}");
+            u.authentication_token = tokens.authToken;
+            u.healthray_access_token = tokens.accessToken;
+            u.healthray_auth_token = tokens.authToken;
+            localStorage.setItem("user", JSON.stringify(u));
+          } catch {}
+          try {
+            const root = JSON.parse(localStorage.getItem("persist:root") || "{}");
+            if (typeof root === "object") {
+              root.auth_token = JSON.stringify(tokens.authToken);
+              root.access_token = JSON.stringify(tokens.accessToken);
+              localStorage.setItem("persist:root", JSON.stringify(root));
+            }
+          } catch {}
+        } catch {
+          // localStorage unavailable on the bootstrap origin (about:blank);
+          // the next document load runs this block again with proper origin.
         }
-        // Also store as a user object (common pattern)
-        try {
-          const existing = JSON.parse(localStorage.getItem("user") || "{}");
-          existing.authentication_token = tokens.authToken;
-          existing.healthray_access_token = tokens.accessToken;
-          existing.healthray_auth_token = tokens.authToken;
-          localStorage.setItem("user", JSON.stringify(existing));
-        } catch {}
-        try {
-          const existing = JSON.parse(localStorage.getItem("persist:root") || "{}");
-          if (typeof existing === "object") {
-            existing.auth_token = JSON.stringify(tokens.authToken);
-            existing.access_token = JSON.stringify(tokens.accessToken);
-            localStorage.setItem("persist:root", JSON.stringify(existing));
-          }
-        } catch {}
       },
       { authToken, accessToken },
     );
 
-    // ── Step 5: Navigate to the report page ───────────────────────────
-    log("PDF", `Navigating to ${reportUrl} (with auth)`);
-    await page.goto(reportUrl, { waitUntil: "networkidle2", timeout: 90000 });
-
-    // ── Step 6: Wait for blob capture or iframe ───────────────────────
-    log("PDF", `Waiting for PDF for case ${caseId}...`);
+    // ── Step 3: Navigate directly to the report URL ───────────────────
+    log("PDF", `Navigating to ${reportUrl} (attempt ${attempt})`);
     try {
-      await page.waitForFunction(
-        () =>
-          window.__pdfBlobUrl ||
-          document.querySelector('iframe[src^="blob:"]') ||
-          document.querySelector('iframe[src^="data:application/pdf"]'),
-        { timeout: 60000 },
+      await page.goto(reportUrl, { waitUntil: "networkidle2", timeout: 90000 });
+    } catch (e) {
+      log("PDF", `Nav timeout for case ${caseId} (attempt ${attempt}): ${e.message}`);
+      return { outcome: "transient-failure" };
+    }
+
+    // ── Step 4: Wait for a discriminated outcome ──────────────────────
+    // The predicate now distinguishes:
+    //   "no-report"  → HealthRay's UI says no PDF exists (definitive)
+    //   "pdf-ready"  → blob/iframe ready to extract
+    // On timeout, classify as render-stuck (body still says "preparing") or
+    // transient-failure (anything else).
+    log("PDF", `Waiting for PDF for case ${caseId}...`);
+    let tag;
+    try {
+      const handle = await page.waitForFunction(
+        () => {
+          const text = document.body?.innerText || "";
+          if (/no report found/i.test(text)) return "no-report";
+          if (
+            window.__pdfBlobUrl ||
+            document.querySelector('iframe[src^="blob:"]') ||
+            document.querySelector('iframe[src^="data:application/pdf"]')
+          )
+            return "pdf-ready";
+          return false;
+        },
+        { timeout: 180000 },
       );
+      tag = await handle.jsonValue();
     } catch {
       const debug = await page.evaluate(() => ({
         bodySnippet: document.body?.innerText?.slice(0, 500),
@@ -300,20 +422,27 @@ export async function fetchLabReportPdf(caseUid, caseId) {
         blobUrl: window.__pdfBlobUrl,
         localStorage: Object.keys(localStorage).join(", "),
       }));
-      log("PDF", `Timeout for case ${caseId}: ${JSON.stringify(debug)}`);
-      return null;
+      log("PDF", `Timeout for case ${caseId} (attempt ${attempt}): ${JSON.stringify(debug)}`);
+      const stuck = /preparing your pdf|generating pdf preview/i.test(debug.bodySnippet || "");
+      return { outcome: stuck ? "render-stuck" : "transient-failure" };
     }
 
+    if (tag === "no-report") {
+      log("PDF", `No report found for case ${caseId} — marking unavailable`);
+      return { outcome: "no-report" };
+    }
+
+    // tag === "pdf-ready" — extract the blob.
     // Wait for the blob size to STABILIZE — HealthRay's renderer commonly
     // emits an early empty/header-only PDF then replaces it once test rows
-    // are fetched. We poll the largest captured blob's size and only proceed
+    // are fetched. Poll the largest captured blob's size and only proceed
     // once it stops growing for ~3 consecutive seconds.
     await page.evaluate(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       let lastSize = window.__pdfBlob?.size || 0;
       let stableTicks = 0;
       const tickMs = 1000;
-      const maxTicks = 30; // 30s ceiling
+      const maxTicks = 30;
       for (let i = 0; i < maxTicks; i++) {
         await sleep(tickMs);
         const size = window.__pdfBlob?.size || 0;
@@ -327,9 +456,8 @@ export async function fetchLabReportPdf(caseUid, caseId) {
       }
     });
 
-    // ── Step 7: Extract the PDF blob ──────────────────────────────────
+    // ── Step 5: Extract the PDF blob ──────────────────────────────────
     const pdfArray = await page.evaluate(async () => {
-      // Try hooked blob first
       if (window.__pdfBlob) {
         try {
           const ab = await window.__pdfBlob.arrayBuffer();
@@ -351,7 +479,6 @@ export async function fetchLabReportPdf(caseUid, caseId) {
           if (ab.byteLength > 1000) return Array.from(new Uint8Array(ab));
         } catch {}
       }
-      // Try data: URI iframe (HealthRay sometimes embeds PDF as base64 data URI)
       const dataIframe = document.querySelector('iframe[src^="data:application/pdf"]');
       if (dataIframe?.src) {
         try {
@@ -371,14 +498,13 @@ export async function fetchLabReportPdf(caseUid, caseId) {
     });
 
     if (!pdfArray || pdfArray.length === 0) {
-      log("PDF", `No PDF data extracted for case ${caseId}`);
-      return null;
+      log("PDF", `No PDF data extracted for case ${caseId} (attempt ${attempt})`);
+      return { outcome: "transient-failure" };
     }
 
     const buffer = Buffer.from(pdfArray);
 
-    // Validate PDF integrity — guard against partial/garbage captures slipping
-    // through. A real PDF starts with "%PDF-" and ends with "%%EOF".
+    // Validate PDF integrity — guard against partial/garbage captures.
     const head = buffer.subarray(0, 5).toString("ascii");
     const tail = buffer.subarray(-1024).toString("ascii");
     if (head !== "%PDF-" || !tail.includes("%%EOF")) {
@@ -386,15 +512,16 @@ export async function fetchLabReportPdf(caseUid, caseId) {
         "PDF",
         `Reject case ${caseId}: invalid PDF (head="${head}", hasEOF=${tail.includes("%%EOF")}, bytes=${buffer.length})`,
       );
-      return null;
+      return { outcome: "transient-failure" };
     }
 
-    log("PDF", `Captured ${buffer.length} bytes for case ${caseId} (exact HealthRay PDF)`);
-    return { buffer, contentType: "application/pdf" };
+    log("PDF", `Captured ${buffer.length} bytes for case ${caseId} (attempt ${attempt})`);
+    return { outcome: "success", buffer };
   } catch (e) {
-    log("PDF", `FAIL case ${caseId}: ${e.message}`);
-    return null;
+    log("PDF", `attempt ${attempt} fail case ${caseId}: ${e.message}`);
+    return { outcome: "transient-failure" };
   } finally {
     if (page) await page.close().catch(() => {});
+    if (context) await context.close().catch(() => {});
   }
 }
