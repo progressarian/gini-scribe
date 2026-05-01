@@ -2203,9 +2203,7 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
     const patientId = patients[0].id;
 
     // Default: skip cases marked unavailable. With force=1 attempt them too.
-    const unavailableFilter = force
-      ? ""
-      : "AND COALESCE(pdf_unavailable, FALSE) = FALSE";
+    const unavailableFilter = force ? "" : "AND COALESCE(pdf_unavailable, FALSE) = FALSE";
     const { rows } = await pool.query(
       `SELECT case_no, case_uid, lab_case_id, lab_user_id, pdf_file_name, case_date,
               case_status, results_synced, pdf_unavailable

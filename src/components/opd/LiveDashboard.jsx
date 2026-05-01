@@ -260,9 +260,92 @@ function ParamChip({ label, value, prev, status }) {
   );
 }
 
+// Compute the visit-over-visit delta to display next to a trend row. Prefers
+// the first triggerKey that has both a current and prior reading (so a "TSH
+// worsening" row shows the TSH delta, not HbA1c). Falls back to HbA1c when no
+// trigger key has comparable readings. Returns null if nothing is comparable.
+function triggerDelta(r) {
+  const candidates = [...(r.triggerKeys || []), "hba1c"];
+  for (const key of candidates) {
+    const cur = r[key];
+    const prevKey = "prev" + key.charAt(0).toUpperCase() + key.slice(1);
+    const prev = r[prevKey];
+    if (cur != null && prev != null && !isNaN(cur) && !isNaN(prev) && cur !== prev) {
+      const diff = cur - prev;
+      return {
+        key,
+        label: BIO_CHIP_LABEL[key] || key.toUpperCase(),
+        diff,
+        text: `${diff > 0 ? "+" : ""}${diff.toFixed(1)}`,
+      };
+    }
+  }
+  return null;
+}
+
+// Display label per biomarker key (matches the upper-cased tokens that
+// classifyComposite emits in its reasons strings, e.g. "TSH worsening").
+const BIO_CHIP_LABEL = {
+  hba1c: "HbA1c",
+  sbp: "SBP",
+  dbp: "DBP",
+  tsh: "TSH",
+  fg: "FBS",
+  ppbs: "PPBS",
+  ldl: "LDL",
+  tg: "TG",
+  hdl: "HDL",
+  uacr: "UACR",
+  egfr: "eGFR",
+};
+
 // Render the standard set of Tier-1/Tier-2 chips for a patient row.
 // HbA1c + SBP are always shown if present; FBS/LDL/TG show when recorded.
+// When the row has trigger biomarkers (parsed from the composite outcome
+// reason — e.g. "TSH worsening" → ["tsh"]), those chips are rendered FIRST
+// so the doctor can see *why* the patient is in this bucket without having
+// to read the reason text. Triggers also surface markers that aren't in the
+// default set (TSH, UACR, eGFR, PPBS, HDL).
 function ParamChips({ r }) {
+  const standard = ["hba1c", "sbp", "fg", "ldl", "tg"];
+  const triggers = Array.isArray(r.triggerKeys) ? r.triggerKeys : [];
+  // Trigger keys first (deduped), then the standard set with triggers removed.
+  const seen = new Set();
+  const order = [];
+  for (const k of [...triggers, ...standard]) {
+    if (!seen.has(k)) {
+      seen.add(k);
+      order.push(k);
+    }
+  }
+
+  const chipFor = (key) => {
+    if (key === "sbp") {
+      if (r.sbp == null) return null;
+      return (
+        <ParamChip
+          key="sbp"
+          label="BP"
+          value={r.dbp ? `${r.sbp}/${r.dbp}` : r.sbp}
+          prev={r.prevSbp}
+          status={targetStatus("sbp", r.sbp)}
+        />
+      );
+    }
+    const value = r[key];
+    if (value == null || isNaN(value)) return null;
+    const prevKey = "prev" + key.charAt(0).toUpperCase() + key.slice(1);
+    return (
+      <ParamChip
+        key={key}
+        label={BIO_CHIP_LABEL[key] || key.toUpperCase()}
+        value={value}
+        prev={r[prevKey]}
+        status={targetStatus(key, value)}
+      />
+    );
+  };
+
   return (
     <div
       style={{
@@ -272,23 +355,7 @@ function ParamChips({ r }) {
         marginTop: 4,
       }}
     >
-      <ParamChip
-        label="HbA1c"
-        value={r.hba1c}
-        prev={r.prevHba1c}
-        status={targetStatus("hba1c", r.hba1c)}
-      />
-      {r.sbp != null && (
-        <ParamChip
-          label={`BP${r.dbp ? "" : ""}`}
-          value={r.dbp ? `${r.sbp}/${r.dbp}` : r.sbp}
-          prev={r.prevSbp}
-          status={targetStatus("sbp", r.sbp)}
-        />
-      )}
-      <ParamChip label="FBS" value={r.fg} prev={r.prevFg} status={targetStatus("fg", r.fg)} />
-      <ParamChip label="LDL" value={r.ldl} prev={r.prevLdl} status={targetStatus("ldl", r.ldl)} />
-      <ParamChip label="TG" value={r.tg} prev={r.prevTg} status={targetStatus("tg", r.tg)} />
+      {order.map(chipFor).filter(Boolean)}
     </div>
   );
 }
@@ -891,6 +958,27 @@ export default function LiveDashboard({
         outcome: anyTrend ? compositeRaw.outcome : "single",
         reasons: compositeRaw.reasons || [],
       };
+      // Pull biomarker tokens out of the composite reason strings (e.g.
+      // "TSH worsening", "HBA1C/SBP improving but LDL rising — review")
+      // so the row can foreground the triggering markers as chips. Lower-
+      // case + map to the keys used elsewhere (BIO_TIER / row fields).
+      const TOKEN_TO_KEY = {
+        HBA1C: "hba1c", SBP: "sbp", DBP: "dbp", TSH: "tsh",
+        FG: "fg", PPBS: "ppbs", LDL: "ldl", TG: "tg", HDL: "hdl",
+        UACR: "uacr", EGFR: "egfr",
+      };
+      const triggerKeys = [];
+      const seenTrigger = new Set();
+      for (const reason of composite.reasons) {
+        const tokens = String(reason).match(/[A-Z][A-Z0-9]+/g) || [];
+        for (const t of tokens) {
+          const k = TOKEN_TO_KEY[t];
+          if (k && !seenTrigger.has(k)) {
+            seenTrigger.add(k);
+            triggerKeys.push(k);
+          }
+        }
+      }
       // Pull Tier-2 supporting values too — surfaced as small chips on each
       // patient row so the coordinator sees the full picture, not just HbA1c.
       return {
@@ -911,10 +999,19 @@ export default function LiveDashboard({
         tg: Number(bio.tg) || null,
         prevTg: Number(prevBio.tg) || null,
         uacr: Number(bio.uacr) || null,
+        prevUacr: Number(prevBio.uacr) || null,
         egfr: Number(bio.egfr) || null,
+        prevEgfr: Number(prevBio.egfr) || null,
+        tsh: Number(bio.tsh) || null,
+        prevTsh: Number(prevBio.tsh) || null,
+        ppbs: Number(bio.ppbs) || null,
+        prevPpbs: Number(prevBio.ppbs) || null,
+        hdl: Number(bio.hdl) || null,
+        prevHdl: Number(prevBio.hdl) || null,
         medPct: compl.medPct != null ? Number(compl.medPct) : null,
         outcome: composite.outcome,
         outcomeReason: composite.reasons[0] || "",
+        triggerKeys,
         raw: a,
       };
     };
@@ -1615,7 +1712,7 @@ export default function LiveDashboard({
                   }}
                 >
                   {m.gettingWorse.map((r) => {
-                    const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+                    const td = triggerDelta(r);
                     return (
                       <div
                         key={r.id}
@@ -1661,9 +1758,14 @@ export default function LiveDashboard({
                           <ParamChips r={r} />
                         </div>
                         <div style={{ textAlign: "right" }}>
-                          <div style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}>
-                            +{delta} ↑
-                          </div>
+                          {td && (
+                            <div
+                              style={{ fontFamily: FM, fontSize: 10, color: RE, fontWeight: 600 }}
+                              title={`${td.label} ${td.text}`}
+                            >
+                              {td.text} {td.label} {td.diff > 0 ? "↑" : "↓"}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1725,7 +1827,7 @@ export default function LiveDashboard({
                   }}
                 >
                   {m.gettingBetter.map((r) => {
-                    const delta = (r.hba1c - r.prevHba1c).toFixed(1);
+                    const td = triggerDelta(r);
                     return (
                       <div
                         key={r.id}
@@ -1771,9 +1873,14 @@ export default function LiveDashboard({
                           <ParamChips r={r} />
                         </div>
                         <div style={{ textAlign: "right" }}>
-                          <div style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}>
-                            {delta} ↓
-                          </div>
+                          {td && (
+                            <div
+                              style={{ fontFamily: FM, fontSize: 10, color: GN, fontWeight: 600 }}
+                              title={`${td.label} ${td.text}`}
+                            >
+                              {td.text} {td.label} {td.diff > 0 ? "↑" : "↓"}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

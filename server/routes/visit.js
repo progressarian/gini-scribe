@@ -544,17 +544,19 @@ router.get("/visit/:patientId", async (req, res) => {
     if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
     else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
 
-    // Load doctor note + compliance from active OPD appointment if present
+    // Load doctor note + compliance + assigned doctor from active OPD appointment if present
     let apptDoctorNote = null;
     let opdCompliance = null;
+    let apptDoctorName = null;
     if (req.query.appointment_id) {
       const opdR = await pool.query(
-        `SELECT opd_vitals->>'doctor_note' AS doctor_note, compliance
+        `SELECT opd_vitals->>'doctor_note' AS doctor_note, compliance, doctor_name
          FROM appointments WHERE id=$1`,
         [Number(req.query.appointment_id)],
       );
       apptDoctorNote = opdR.rows[0]?.doctor_note || null;
       opdCompliance = opdR.rows[0]?.compliance || null;
+      apptDoctorName = opdR.rows[0]?.doctor_name || null;
     }
 
     const apptPlan = latestApptR.rows[0] || null;
@@ -798,6 +800,7 @@ router.get("/visit/:patientId", async (req, res) => {
       goals: goalsR.rows,
       prep,
       appt_doctor_note: apptDoctorNote,
+      appt_doctor_name: apptDoctorName,
       appt_plan:
         apptPlan || followUpDate
           ? {

@@ -15,6 +15,7 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
   labLatest,
   labHistory,
   vitals,
+  activeDx,
   flags,
   onOpenAI,
   onAddLab,
@@ -231,6 +232,90 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     pulseH,
   } = markers;
 
+  // ── Severity helpers ──────────────────────────────────────────────
+  // Maps a numeric value against a per-marker rule into a severity ordinal:
+  //   2 = bad / out-of-range, 1 = warn / borderline, 0 = good / at-target,
+  //  -1 = no data (so it sorts last).
+  // Mirrors the trendDir thresholds already used per BiomarkerCard below so
+  // section ordering and the cards' own colours stay in lock-step.
+  const sev = (label, ...args) => {
+    const num = (x) => (x == null || x === "" ? NaN : Number(x));
+    const v = num(args[0]);
+    if (Number.isNaN(v)) return -1;
+    switch (label) {
+      case "HbA1c":
+        return v <= 7 ? 0 : v <= 8 ? 1 : 2;
+      case "FBS":
+        return v <= 100 ? 0 : v <= 126 ? 1 : 2;
+      case "LDL":
+        return v <= 70 ? 0 : v <= 130 ? 1 : 2;
+      case "TG":
+        return v <= 150 ? 0 : v <= 200 ? 1 : 2;
+      case "TSH":
+        return v >= 0.5 && v <= 4.5 ? 0 : v <= 6 || v < 0.5 ? 1 : 2;
+      case "eGFR":
+        return v >= 90 ? 0 : v >= 60 ? 1 : 2;
+      case "Creatinine":
+        return v <= 1.2 ? 0 : v <= 1.5 ? 1 : 2;
+      case "UACR":
+        return v < 30 ? 0 : v < 300 ? 1 : 2;
+      case "BP": {
+        const dia = num(args[1]);
+        if (Number.isNaN(dia)) return -1;
+        if (v < 140 && dia < 90) return 0;
+        if (v < 160 && dia < 100) return 1;
+        return 2;
+      }
+      case "Hb":
+        return v >= 13 ? 0 : v >= 10 ? 1 : 2;
+      case "BMI":
+        return v >= 18.5 && v < 25 ? 0 : v >= 25 && v < 30 ? 1 : v < 18.5 || v >= 30 ? 2 : 0;
+      case "BodyFat":
+        return v < 25 ? 0 : v < 30 ? 1 : 2;
+      case "Waist":
+        return v < 90 ? 0 : v < 102 ? 1 : 2;
+      case "HOMA":
+        return v < 2.5 ? 0 : v < 4 ? 1 : 2;
+      default:
+        return -1;
+    }
+  };
+
+  // Aggregate severity of a section = highest individual marker severity.
+  // Sections with no data fall back to -1 so they sink to the bottom.
+  const sectionScore = (...sevs) => Math.max(-1, ...sevs.filter((s) => s != null));
+
+  // ── Diagnosis-relevance boost ───────────────────────────────────
+  // Doctors triage by "what does this patient have, and what looks bad for
+  // those conditions". We tag each clinical section with the diagnoses it
+  // tracks; if the patient has a matching active diagnosis, we add a small
+  // boost (+2) to that section's score so it outranks a same-severity
+  // section the patient doesn't have a condition for.
+  //
+  // The match is keyword-based against diagnosis_id + label so we don't
+  // depend on a fixed coding system — works for ICD-10, snomed, free-text,
+  // or healthray IDs alike. Only diagnoses that are still active count
+  // (resolved conditions stop driving order).
+  const diagnosisBoost = useMemo(() => {
+    const SECTION_KEYWORDS = {
+      diabetes: ["diabetes", "dm1", "dm2", "t1dm", "t2dm", "prediabetes", "hyperglycemia"],
+      vitals: ["hypertension", "htn", "hypertensive", "cad", "coronary", "ihd", "cvd", "cva"],
+      renal: ["ckd", "kidney", "renal", "nephropathy", "nephritis", "uacr", "albuminuria"],
+      lipids: ["dyslipid", "hyperlipid", "cholesterol", "lipid", "atherosclero"],
+      thyroid: ["thyroid", "hypothyroid", "hyperthyroid", "hashimoto", "graves", "goiter"],
+      body: ["obesity", "obese", "overweight", "adiposity", "nafld", "masld", "fatty liver", "metabolic syndrome", "sarcopen"],
+    };
+    const dxText = (activeDx || [])
+      .filter((d) => d && d.is_active !== false)
+      .map((d) => `${d.diagnosis_id || ""} ${d.label || ""}`.toLowerCase())
+      .join(" | ");
+    const out = {};
+    for (const [section, words] of Object.entries(SECTION_KEYWORDS)) {
+      out[section] = words.some((w) => dxText.includes(w)) ? 2 : 0;
+    }
+    return out;
+  }, [activeDx]);
+
   const biomarkerSummary = useMemo(() => {
     if (!labLatest) return null;
     const entries = [];
@@ -255,7 +340,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
         const hist = labHistory?.[e.name] || [];
         const prev = hist.find((h) => !isSameDate(h.date, latestDate));
         return { ...e, prev: prev?.result ?? null };
-      });
+      })
+      // Worst-first: bad markers surface ahead of warn / good in the popover
+      // so the doctor reads the most critical change before the rest.
+      .sort((a, b) => sev(b.name, b.result) - sev(a.name, a.result));
 
     const fmtChange = (e) => {
       if (e.prev != null && String(e.prev) !== String(e.result)) {
@@ -331,9 +419,24 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
         </div>
       </div>
       <div className="scb">
-        {/* ── DIABETES MARKERS ── */}
-        <div className="subsec">Diabetes Markers</div>
-        <div className="bmg">
+        {(() => {
+        // Build each clinical group as an entry { score, jsx }, then render
+        // them sorted by severity (highest first) so the doctor sees the
+        // most concerning panel at the top of the section without scrolling.
+        const sections = [];
+
+        // ── DIABETES MARKERS ──
+        sections.push({
+          key: "diabetes",
+          score: sectionScore(
+            sev("HbA1c", hba1c?.result),
+            sev("FBS", fbs?.result),
+            sev("HOMA", homaIr?.result),
+          ),
+          jsx: (
+            <div key="diabetes">
+              <div className="subsec">Diabetes Markers</div>
+              <div className="bmg">
           <BiomarkerCard
             label="HbA1c"
             value={hba1c?.result}
@@ -389,15 +492,24 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             goalLabel="Normal"
             history={homaIrH}
           />
-        </div>
-
-        {/* ── VITAL SIGNS / CARDIOVASCULAR ── */}
-        {(latestV?.bp_sys || latestV?.pulse) && (
-          <>
-            <div className="subsec" style={{ marginTop: 4 }}>
-              Vital Signs / Cardiovascular
+              </div>
             </div>
-            <div className="bmg">
+          ),
+        });
+
+        // ── VITAL SIGNS / CARDIOVASCULAR ──
+        if (latestV?.bp_sys || latestV?.pulse) {
+          sections.push({
+            key: "vitals",
+            score: sectionScore(
+              latestV?.bp_sys && latestV?.bp_dia ? sev("BP", latestV.bp_sys, latestV.bp_dia) : -1,
+            ),
+            jsx: (
+              <div key="vitals">
+                <div className="subsec" style={{ marginTop: 4 }}>
+                  Vital Signs / Cardiovascular
+                </div>
+                <div className="bmg">
               {latestV?.bp_sys && latestV?.bp_dia && (
                 <BiomarkerCard
                   label="Blood Pressure"
@@ -432,15 +544,26 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
                   history={pulseH}
                 />
               )}
-            </div>
-          </>
-        )}
+                </div>
+              </div>
+            ),
+          });
+        }
 
-        {/* ── KIDNEY / RENAL FUNCTION ── */}
-        <div className="subsec" style={{ marginTop: 4 }}>
-          Renal Function (RFT + UACR)
-        </div>
-        <div className="bmg">
+        // ── KIDNEY / RENAL FUNCTION ──
+        sections.push({
+          key: "renal",
+          score: sectionScore(
+            sev("eGFR", egfr?.result),
+            sev("Creatinine", cr?.result),
+            sev("UACR", uacr?.result),
+          ),
+          jsx: (
+            <div key="renal">
+              <div className="subsec" style={{ marginTop: 4 }}>
+                Renal Function (RFT + UACR)
+              </div>
+              <div className="bmg">
           {/* eGFR card — primary kidney biomarker, matches the patient app
               which logs and displays eGFR. Pulled from labLatest/labHistory
               so doctor-entered + patient-self-logged + Healthray-imported
@@ -507,13 +630,21 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
               history={uacrH}
             />
           )}
-        </div>
+              </div>
+            </div>
+          ),
+        });
 
-        {/* ── LIPIDS ── */}
-        <div className="subsec" style={{ marginTop: 4 }}>
-          Lipid Profile
-        </div>
-        <div className="bmg">
+        // ── LIPIDS ──
+        sections.push({
+          key: "lipids",
+          score: sectionScore(sev("LDL", ldl?.result), sev("TG", tg?.result)),
+          jsx: (
+            <div key="lipids">
+              <div className="subsec" style={{ marginTop: 4 }}>
+                Lipid Profile
+              </div>
+              <div className="bmg">
           <BiomarkerCard
             label="LDL Cholesterol"
             value={ldl?.result}
@@ -546,13 +677,21 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             goal="<150"
             history={tgH}
           />
-        </div>
+              </div>
+            </div>
+          ),
+        });
 
-        {/* ── THYROID ── */}
-        <div className="subsec" style={{ marginTop: 4 }}>
-          Thyroid
-        </div>
-        <div className="bmg">
+        // ── THYROID ──
+        sections.push({
+          key: "thyroid",
+          score: sectionScore(sev("TSH", tsh?.result)),
+          jsx: (
+            <div key="thyroid">
+              <div className="subsec" style={{ marginTop: 4 }}>
+                Thyroid
+              </div>
+              <div className="bmg">
           <BiomarkerCard
             label="TSH (Thyroid)"
             value={tsh?.result}
@@ -569,13 +708,26 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
             goal="<4.5"
             history={tshH}
           />
-        </div>
+              </div>
+            </div>
+          ),
+        });
 
-        {/* ── BODY COMPOSITION / HAEMATOLOGY ── */}
-        <div className="subsec" style={{ marginTop: 4 }}>
-          Body Composition / Haematology
-        </div>
-        <div className="bmg">
+        // ── BODY COMPOSITION / HAEMATOLOGY ──
+        sections.push({
+          key: "body",
+          score: sectionScore(
+            sev("Hb", hb?.result),
+            latestV?.body_fat ? sev("BodyFat", latestV.body_fat) : -1,
+            latestV?.bmi ? sev("BMI", latestV.bmi) : -1,
+            latestV?.waist || waistLab ? sev("Waist", latestV?.waist ?? waistLab?.result) : -1,
+          ),
+          jsx: (
+            <div key="body">
+              <div className="subsec" style={{ marginTop: 4 }}>
+                Body Composition / Haematology
+              </div>
+              <div className="bmg">
           {(latestV?.weight || weightLab) &&
             (() => {
               const wVal = latestV?.weight ?? weightLab?.result;
@@ -684,7 +836,25 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
               history={muscleMassH}
             />
           )}
-        </div>
+              </div>
+            </div>
+          ),
+        });
+
+        // Final ranking: severity + diagnosis-relevance boost. The boost
+        // only applies when the section has data of its own (score > -1)
+        // so we never resurrect an empty panel just because the patient
+        // carries a related diagnosis. Stable sort preserves the original
+        // clinical order when totals tie.
+        const ranked = sections
+          .map((s, i) => {
+            const boost = s.score > -1 ? diagnosisBoost[s.key] || 0 : 0;
+            return { ...s, total: s.score + boost, idx: i };
+          })
+          .sort((a, b) => b.total - a.total || a.idx - b.idx);
+
+        return ranked.map((s) => s.jsx);
+        })()}
 
         {flags.length > 0 && (
           <div className="noticebar amb">

@@ -62,15 +62,10 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const { default: pool } = await import("../config/db.js");
 const { fetchLabCaseDetail } = await import("../services/lab/labHealthrayApi.js");
-const { isLabCasePrintable, normalizeCaseStatus } = await import(
-  "../services/lab/labHealthrayParser.js"
-);
-const { downloadAndStoreLabPdf, ensureLabCasesTable } = await import(
-  "../services/lab/db.js"
-);
-const { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } = await import(
-  "../config/storage.js"
-);
+const { isLabCasePrintable, normalizeCaseStatus } =
+  await import("../services/lab/labHealthrayParser.js");
+const { downloadAndStoreLabPdf, ensureLabCasesTable } = await import("../services/lab/db.js");
+const { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } = await import("../config/storage.js");
 
 // Apply any pending ALTER TABLEs (e.g. pdf_unavailable). Normally this runs
 // when the cron service boots; the script bypasses that, so call it here.
@@ -157,13 +152,10 @@ const stats = {
 };
 
 async function deleteSupabaseFile(storagePath) {
-  const res = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
-    {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
-    },
-  ).catch(() => null);
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+  }).catch(() => null);
   return res?.ok ?? false;
 }
 
@@ -245,8 +237,7 @@ async function processOne(row) {
     // ready. Anything else, leave the PDF alone — over-deletion is worse
     // than missing a cleanup, because re-downloading is unreliable.
     const wasInProcess = normalizeCaseStatus(row.case_status) === "inprocess";
-    const safeToDelete =
-      row.pdf_storage_path && !row.results_synced && wasInProcess && !noDelete;
+    const safeToDelete = row.pdf_storage_path && !row.results_synced && wasInProcess && !noDelete;
 
     if (safeToDelete) {
       if (apply) {
@@ -358,8 +349,12 @@ console.log(`Already OK (kept):  ${stats.alreadyOk}`);
 console.log(`Protected real PDF: ${stats.protectedRealPdf}`);
 console.log(`Blank deleted:      ${stats.deletedBlank}${apply ? "" : " (would)"}`);
 console.log(`Downloaded:         ${stats.downloaded}${apply ? "" : " (would)"}`);
-console.log(`Marked unavailable: ${stats.markedUnavailable}   (HealthRay: "No Report Found" — won't be retried)`);
-console.log(`Transient failures: ${stats.downloadFailed}   (nav timeout / render stuck — re-run later may succeed)`);
+console.log(
+  `Marked unavailable: ${stats.markedUnavailable}   (HealthRay: "No Report Found" — won't be retried)`,
+);
+console.log(
+  `Transient failures: ${stats.downloadFailed}   (nav timeout / render stuck — re-run later may succeed)`,
+);
 console.log(`Errors:             ${stats.errors}`);
 
 await pool.end();

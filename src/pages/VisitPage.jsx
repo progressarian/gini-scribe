@@ -689,14 +689,22 @@ export default function VisitPage() {
       if (m.source === "manual" && !m.consultation_id) return false;
       return true;
     });
+    // Prefer the doctor assigned to this OPD appointment (what the patient
+    // booked) over the logged-in user — the printed Rx should attribute meds
+    // to the consulting doctor, not whoever happens to be at the workstation.
+    const apptDoctorName = data.appt_doctor_name;
+    const rxDoctor = apptDoctorName
+      ? { ...(doctor || {}), name: apptDoctorName }
+      : doctor;
     return {
       patient: data.patient,
-      doctor,
+      doctor: rxDoctor,
       summary: data.summary,
       activeDx: derived?.activeDx || [],
       activeMeds: activeOnly,
       latestVitals: derived?.latestV || null,
       prevVitals: derived?.prevV || null,
+      vitalsHistory: data.vitals || [],
       labResults: data.labResults || [],
       labHistory: data.labHistory || {},
       consultations: data.consultations || [],
@@ -1114,6 +1122,7 @@ export default function VisitPage() {
                 labLatest={data.labLatest}
                 labHistory={labHistory}
                 vitals={vitals}
+                activeDx={activeDx}
                 flags={flags}
                 onOpenAI={() => setAiOpen(true)}
                 onAddLab={() => setModal({ type: "addLab" })}

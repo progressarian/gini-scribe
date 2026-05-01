@@ -193,7 +193,10 @@ export function extractCaseDate(listRow) {
 // no whitespace/underscores so all downstream checks compare a single shape.
 export function normalizeCaseStatus(status) {
   if (status == null) return "";
-  return String(status).trim().toLowerCase().replace(/[\s_]+/g, "");
+  return String(status)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "");
 }
 
 export const LAB_CASE_STATUS = {

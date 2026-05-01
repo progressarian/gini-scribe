@@ -210,6 +210,30 @@ function catSty(c) {
   );
 }
 
+// AI-suggested category derived from biomarkers when the user hasn't set one.
+// Mirrors the logic in CategorizeTab so the row badge and the modal agree:
+//   HbA1c > 9 → complex (Uncontrolled)
+//   HbA1c > 7 → maint   (Maintenance)
+//   HbA1c ≤ 7 → ctrl    (Continuous Care)
+//   New-Patient visit type → new
+//   No HbA1c and not a new-patient visit → null (can't suggest)
+function aiSuggestedCategory(a) {
+  const h = parseFloat(a?.biomarkers?.hba1c);
+  if (!isNaN(h)) {
+    if (h > 9) return "complex";
+    if (h > 7) return "maint";
+    return "ctrl";
+  }
+  if (a?.visit_type === "New Patient") return "new";
+  return null;
+}
+
+// Effective category for filtering & display: the manually-saved category
+// if present, otherwise the AI suggestion. Returns null if neither exists.
+function effectiveCategory(a) {
+  return a?.category || aiSuggestedCategory(a);
+}
+
 function stepsDone(a) {
   const ps = a.prep_steps || {};
   return [ps.biomarkers, ps.compliance, ps.categorized, ps.assigned].filter(Boolean).length;
@@ -473,7 +497,7 @@ function ApptRow({ a, sel, onSelect }) {
             </span>
           )}
           <VisitChip a={a} />
-          {a.category && (
+          {a.category ? (
             <span
               style={{
                 fontSize: 8,
@@ -485,6 +509,32 @@ function ApptRow({ a, sel, onSelect }) {
             >
               {catIcon(a.category)} {catLabel(a.category)}
             </span>
+          ) : (
+            (() => {
+              // Show the AI suggestion as a dashed/outlined badge so it's
+              // visually distinct from a confirmed category — same colour
+              // family, but reads as "suggested, not assigned yet".
+              const ai = aiSuggestedCategory(a);
+              if (!ai) return null;
+              const sty = catSty(ai);
+              return (
+                <span
+                  title={`AI suggestion based on HbA1c ${a?.biomarkers?.hba1c ?? "—"}`}
+                  style={{
+                    fontSize: 8,
+                    padding: "1px 6px",
+                    borderRadius: 9,
+                    fontWeight: 700,
+                    background: "transparent",
+                    color: sty.color,
+                    border: `1px dashed ${sty.color}`,
+                    opacity: 0.85,
+                  }}
+                >
+                  ✨ {catIcon(ai)} {catLabel(ai)}
+                </span>
+              );
+            })()
           )}
         </div>
 
@@ -6541,9 +6591,11 @@ export default function OPD() {
     } else if (filterDoc !== "all") {
       if (a.doctor_name !== filterDoc) return false;
     }
-    if (filterCat === "complex" && a.category !== "complex") return false;
-    if (filterCat === "maint" && a.category !== "maint") return false;
-    if (filterCat === "ctrl" && a.category !== "ctrl") return false;
+    // Filter against the effective category (manually-set OR AI-suggested) so
+    // un-assigned appointments still surface under the suggested bucket.
+    if (filterCat === "complex" || filterCat === "maint" || filterCat === "ctrl") {
+      if (effectiveCategory(a) !== filterCat) return false;
+    }
     if (searchQ.trim()) {
       const q = searchQ.trim().toLowerCase();
       const name = (a.patient_name || "").toLowerCase();

@@ -134,8 +134,7 @@ async function processCase(listRow) {
   // would pass the integrity check and persist forever.
   // resultsSynced mirrors the markLabCaseSynced terminal condition above.
   if (patientId) {
-    const willMarkSynced =
-      caseSource === "outsource" || written > 0 || inhouseComplete;
+    const willMarkSynced = caseSource === "outsource" || written > 0 || inhouseComplete;
     const printable = isLabCasePrintable(listRow.case_status, detail, {
       resultsSynced: willMarkSynced,
     });
@@ -375,8 +374,7 @@ export async function retryPendingLabCases() {
         // terminal on a prior pass).
         if (patientId && !row.pdf_storage_path) {
           const status = row.case_status || row.raw_list_json?.case_status;
-          const willMarkSynced =
-            caseSource === "outsource" || written > 0 || inhouseComplete;
+          const willMarkSynced = caseSource === "outsource" || written > 0 || inhouseComplete;
           const printable = isLabCasePrintable(status, detail, {
             resultsSynced: row.results_synced || willMarkSynced,
           });

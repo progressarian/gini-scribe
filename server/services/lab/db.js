@@ -185,10 +185,7 @@ export async function downloadAndStoreLabPdf(
   //   { unavailable: true }   → HealthRay says no report exists (definitive)
   //   null / no buffer        → transient failure (retry on next cron tick)
   if (result?.unavailable) {
-    await pool.query(
-      `UPDATE lab_cases SET pdf_unavailable = TRUE WHERE case_no = $1`,
-      [caseNo],
-    );
+    await pool.query(`UPDATE lab_cases SET pdf_unavailable = TRUE WHERE case_no = $1`, [caseNo]);
     labLog("Skip", `case ${caseNo}: marked pdf_unavailable (no report on HealthRay)`);
     return null;
   }
@@ -269,10 +266,10 @@ export async function downloadAndStoreLabPdf(
     // Clear pdf_unavailable too — a successful download means whatever
     // earlier "No Report Found" verdict is now stale (HealthRay can produce
     // a PDF later for cases that had none before).
-    await pool.query(`UPDATE lab_cases SET pdf_storage_path = $1, pdf_unavailable = FALSE WHERE case_no = $2`, [
-      storagePath,
-      caseNo,
-    ]);
+    await pool.query(
+      `UPDATE lab_cases SET pdf_storage_path = $1, pdf_unavailable = FALSE WHERE case_no = $2`,
+      [storagePath, caseNo],
+    );
 
     labLog("Stored", `${buffer.length} bytes for case ${caseNo} → ${storagePath}`);
     return storagePath;

@@ -28,10 +28,7 @@ const TOKEN_MAX_AGE_MS = 30 * 60 * 1000; // 30 min
 // so the outer concurrency (case_detail fetches) can stay high without
 // overwhelming HealthRay's PDF service. Override via LAB_PUPPETEER_CONCURRENCY
 // once steady-state cron resumes (e.g. =2 for incremental syncs).
-const PUPPETEER_MAX_CONCURRENT = parseInt(
-  process.env.LAB_PUPPETEER_CONCURRENCY || "1",
-  10,
-);
+const PUPPETEER_MAX_CONCURRENT = parseInt(process.env.LAB_PUPPETEER_CONCURRENCY || "1", 10);
 let puppeteerInFlight = 0;
 const puppeteerWaiters = [];
 
@@ -275,7 +272,10 @@ export async function fetchLabReportPdf(caseUid, caseId) {
       }
       // 'transient-failure' — falls through to next attempt
       if (attempt < MAX_ATTEMPTS) {
-        log("PDF", `case ${caseId}: retrying after transient failure (attempt ${attempt + 1}/${MAX_ATTEMPTS})`);
+        log(
+          "PDF",
+          `case ${caseId}: retrying after transient failure (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+        );
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
