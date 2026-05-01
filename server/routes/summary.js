@@ -243,9 +243,13 @@ async function generateAiBrief(patient, diagnoses, alerts, labHistory, ctx = {})
     return { error: "ANTHROPIC_API_KEY not configured on server" };
   }
   const total = alerts.red.length + alerts.amber.length + alerts.green.length;
-  if (total === 0) {
+  const isFirstVisit = (ctx.totalVisits ?? 0) <= 1;
+  if (total === 0 && !isFirstVisit) {
     console.warn("[summary AI] no rule alerts — skipping narrative");
     return { error: "No rule-engine alerts produced for this patient — narrative skipped" };
+  }
+  if (total === 0 && isFirstVisit) {
+    console.log("[summary AI] no rule alerts but first visit — generating basic intro narrative");
   }
   // First attempt; on null/empty narrative, retry with backoff (transient API
   // or model-format hiccups are common; one retry hides most of them).
@@ -274,6 +278,9 @@ async function _generateAiBriefInner(
   attemptLabel = "1",
 ) {
   const fullName = (patient?.name || "").trim() || "Patient";
+  const totalAlerts = alerts.red.length + alerts.amber.length + alerts.green.length;
+  const isFirstVisit = (ctx.totalVisits ?? 0) <= 1;
+  const basicMode = totalAlerts === 0 && isFirstVisit;
   const sexWord =
     patient?.sex && /^m/i.test(patient.sex)
       ? "man"
@@ -308,7 +315,14 @@ async function _generateAiBriefInner(
     `Lab panel (latest vs. previous, newest tests first):`,
     formatLabs(labHistory),
     ``,
-    `Generate the clinical briefing as described in the system prompt. Return only valid JSON with fields narrative, red_alerts, amber_alerts, green_notes. The "narrative" string MUST begin with the patient's full name "${fullName}" — start the narrative literally with: "${fullName} is a ...". When labs or vitals have changed meaningfully vs. previous, surface that in the narrative and the appropriate zone with exact numbers and delta. Cross-reference active medications against diagnoses to flag protocol gaps (e.g. nephropathy without ACE/ARB, CAD without statin/aspirin) and stopped high-weight drugs against their corresponding biomarker trends.`,
+    basicMode
+      ? `BASIC INTRO MODE — this is a brand-new patient on their first visit with no rule-engine alerts and likely minimal clinical data. Do NOT follow the full 130–180 word three-paragraph structure. Instead, produce a SHORT 2–4 sentence intro narrative (60–100 words, single paragraph, no blank lines) that:
+         (1) opens with the required first-visit opener: "${fullName} is a <age>-year-old <woman|man>, here today for her/his first visit on the Gini programme; she/he is currently in <Care Phase>.",
+         (2) briefly notes any diagnoses present in the input (with grades/qualifiers verbatim) — if none, say "no prior diagnoses on file",
+         (3) briefly notes current active medications by name & dose — if none, say "no active medications on file",
+         (4) closes by stating this is an initial visit and a baseline workup / history-taking is what's needed today.
+         Do NOT invent labs, vitals, or biomarker values. Do NOT fabricate diagnoses. Return red_alerts: [], amber_alerts: [], green_notes: [] as empty arrays. Return only valid JSON with fields narrative, red_alerts, amber_alerts, green_notes.`
+      : `Generate the clinical briefing as described in the system prompt. Return only valid JSON with fields narrative, red_alerts, amber_alerts, green_notes. The "narrative" string MUST begin with the patient's full name "${fullName}" — start the narrative literally with: "${fullName} is a ...". When labs or vitals have changed meaningfully vs. previous, surface that in the narrative and the appropriate zone with exact numbers and delta. Cross-reference active medications against diagnoses to flag protocol gaps (e.g. nephropathy without ACE/ARB, CAD without statin/aspirin) and stopped high-weight drugs against their corresponding biomarker trends.`,
   ].join("\n");
 
   try {

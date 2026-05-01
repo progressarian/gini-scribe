@@ -4,45 +4,77 @@ import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
 
+// After a deploy, the user's already-loaded index-*.js still references the
+// PREVIOUS hashed chunk filenames (e.g. OPD-oBuNrVUz.js). Those files no
+// longer exist on the server, so `import()` rejects with "Failed to fetch
+// dynamically imported module". Recover by forcing one hard reload so the
+// browser pulls the fresh index.html with new chunk hashes. The
+// sessionStorage guard prevents an infinite reload loop if the failure is a
+// genuine network/server problem rather than a stale-chunk mismatch.
+const lazyWithRetry = (importer) =>
+  lazy(async () => {
+    try {
+      return await importer();
+    } catch (err) {
+      const msg = String(err?.message || err);
+      const isChunkError =
+        /Failed to fetch dynamically imported module/i.test(msg) ||
+        /Importing a module script failed/i.test(msg) ||
+        /error loading dynamically imported module/i.test(msg);
+      if (isChunkError && typeof window !== "undefined") {
+        const KEY = "__chunk_reload_at__";
+        const last = Number(sessionStorage.getItem(KEY) || 0);
+        if (Date.now() - last > 10000) {
+          sessionStorage.setItem(KEY, String(Date.now()));
+          window.location.reload();
+          // Return a never-resolving promise so React doesn't surface the
+          // error UI in the split-second before reload kicks in.
+          return new Promise(() => {});
+        }
+      }
+      throw err;
+    }
+  });
+
 // Route-level code-splitting. Each page becomes its own async chunk so a user
 // who only visits /opd doesn't download /lab-portal, /fu-gen, etc. Kept the
 // shell (AppLayout, ProtectedRoute, LoginPage) eager because they render on
 // every route and gate navigation.
-const Companion = lazy(() => import("./Companion"));
-const HomeScreen = lazy(() => import("./companion/HomeScreen"));
-const PatientScreen = lazy(() => import("./companion/PatientScreen"));
-const CaptureScreen = lazy(() => import("./companion/CaptureScreen"));
-const MultiCaptureScreen = lazy(() => import("./companion/MultiCaptureScreen"));
-const HomePage = lazy(() => import("./pages/HomePage"));
-const DashboardPage = lazy(() => import("./pages/DashboardPage"));
-const QuickPage = lazy(() => import("./pages/QuickPage"));
-const PatientPage = lazy(() => import("./pages/PatientPage"));
-const IntakePage = lazy(() => import("./pages/IntakePage"));
-const FULoadPage = lazy(() => import("./pages/FULoadPage"));
-const FUReviewPage = lazy(() => import("./pages/FUReviewPage"));
-const FUEditPage = lazy(() => import("./pages/FUEditPage"));
-const FUSymptomsPage = lazy(() => import("./pages/FUSymptomsPage"));
-const FUGenPage = lazy(() => import("./pages/FUGenPage"));
-const HistoryClinicalPage = lazy(() => import("./pages/HistoryClinicalPage"));
-const ExamPage = lazy(() => import("./pages/ExamPage"));
-const AssessPage = lazy(() => import("./pages/AssessPage"));
-const VitalsPage = lazy(() => import("./pages/VitalsPage"));
-const MOPage = lazy(() => import("./pages/MOPage"));
-const ConsultantPage = lazy(() => import("./pages/ConsultantPage"));
-const PlanPage = lazy(() => import("./pages/PlanPage"));
-const DocsPage = lazy(() => import("./pages/DocsPage"));
-const MessagesPage = lazy(() => import("./pages/MessagesPage"));
-const LabInboxPage = lazy(() => import("./pages/LabInboxPage"));
-const ReceptionInboxPage = lazy(() => import("./pages/ReceptionInboxPage"));
-const LabPortalPage = lazy(() => import("./pages/LabPortalPage"));
-const HistoryPage = lazy(() => import("./pages/HistoryPage"));
-const OutcomesPage = lazy(() => import("./pages/OutcomesPage"));
-const AIPage = lazy(() => import("./pages/AIPage"));
-const ReportsPage = lazy(() => import("./pages/ReportsPage"));
-const CIPage = lazy(() => import("./pages/CIPage"));
-const FindPage = lazy(() => import("./pages/FindPage"));
-const OPD = lazy(() => import("./OPD"));
-const VisitPage = lazy(() => import("./pages/VisitPage"));
+const Companion = lazyWithRetry(() => import("./Companion"));
+const HomeScreen = lazyWithRetry(() => import("./companion/HomeScreen"));
+const PatientScreen = lazyWithRetry(() => import("./companion/PatientScreen"));
+const CaptureScreen = lazyWithRetry(() => import("./companion/CaptureScreen"));
+const MultiCaptureScreen = lazyWithRetry(() => import("./companion/MultiCaptureScreen"));
+const HomePage = lazyWithRetry(() => import("./pages/HomePage"));
+const DashboardPage = lazyWithRetry(() => import("./pages/DashboardPage"));
+const QuickPage = lazyWithRetry(() => import("./pages/QuickPage"));
+const PatientPage = lazyWithRetry(() => import("./pages/PatientPage"));
+const IntakePage = lazyWithRetry(() => import("./pages/IntakePage"));
+const FULoadPage = lazyWithRetry(() => import("./pages/FULoadPage"));
+const FUReviewPage = lazyWithRetry(() => import("./pages/FUReviewPage"));
+const FUEditPage = lazyWithRetry(() => import("./pages/FUEditPage"));
+const FUSymptomsPage = lazyWithRetry(() => import("./pages/FUSymptomsPage"));
+const FUGenPage = lazyWithRetry(() => import("./pages/FUGenPage"));
+const HistoryClinicalPage = lazyWithRetry(() => import("./pages/HistoryClinicalPage"));
+const ExamPage = lazyWithRetry(() => import("./pages/ExamPage"));
+const AssessPage = lazyWithRetry(() => import("./pages/AssessPage"));
+const VitalsPage = lazyWithRetry(() => import("./pages/VitalsPage"));
+const MOPage = lazyWithRetry(() => import("./pages/MOPage"));
+const ConsultantPage = lazyWithRetry(() => import("./pages/ConsultantPage"));
+const PlanPage = lazyWithRetry(() => import("./pages/PlanPage"));
+const DocsPage = lazyWithRetry(() => import("./pages/DocsPage"));
+const MessagesPage = lazyWithRetry(() => import("./pages/MessagesPage"));
+const LabInboxPage = lazyWithRetry(() => import("./pages/LabInboxPage"));
+const ReceptionInboxPage = lazyWithRetry(() => import("./pages/ReceptionInboxPage"));
+const LabPortalPage = lazyWithRetry(() => import("./pages/LabPortalPage"));
+const HistoryPage = lazyWithRetry(() => import("./pages/HistoryPage"));
+const OutcomesPage = lazyWithRetry(() => import("./pages/OutcomesPage"));
+const AIPage = lazyWithRetry(() => import("./pages/AIPage"));
+const ReportsPage = lazyWithRetry(() => import("./pages/ReportsPage"));
+const CIPage = lazyWithRetry(() => import("./pages/CIPage"));
+const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
+const OPD = lazyWithRetry(() => import("./OPD"));
+const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
 
 // Minimal fallback — matches the visual tone of the app without pulling in
 // extra CSS. Each page typically fetches data on mount anyway, so this only
