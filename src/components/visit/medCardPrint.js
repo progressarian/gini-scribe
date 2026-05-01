@@ -63,7 +63,16 @@ export const TIME_SLOTS = [
   { key: "weekly", label: "Weekly", emoji: "📅", colorVar: "--purple", bgCls: "pur-lt" },
 ];
 
-// Returns an ARRAY of slot keys — a medicine can appear in multiple slots
+// Returns an ARRAY of slot keys — a medicine can appear in multiple slots.
+//
+// Detection order:
+//   1. Explicit phrase match in `timing` ("after dinner", "bedtime", …).
+//   2. Numeric clock parse in `timing` ("8 PM", "10pm", "20:00") — bucketed
+//      by hour-of-day. Without this step, doctor-typed times like "8 PM"
+//      silently fell through to the frequency fallback and OD meds landed
+//      in after_breakfast even when the doctor explicitly said "8 PM".
+//   3. Soft phrase match ("morning", "evening").
+//   4. Frequency fallback (TDS/BD/OD).
 export function getTimeSlots(med) {
   const t = (med.timing || "").toLowerCase();
   const f = (med.frequency || "").toLowerCase();
@@ -85,9 +94,31 @@ export function getTimeSlots(med) {
     t.includes("night")
   )
     slots.add("bedtime");
-  if (t.includes("morning") || t.includes("am")) slots.add("after_breakfast");
+
+  // Clock-time parse — picks up "8 PM" / "10pm" / "8:30 pm" / "20:00".
+  // Only runs when no explicit phrase matched, otherwise "after dinner at 8pm"
+  // would land in two slots.
+  if (slots.size === 0) {
+    const m = t.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+    if (m) {
+      let h = parseInt(m[1], 10);
+      const ap = m[3];
+      if (ap === "pm" && h < 12) h += 12;
+      if (ap === "am" && h === 12) h = 0;
+      if (!Number.isNaN(h) && h >= 0 && h < 24) {
+        if (h >= 5 && h < 11) slots.add("after_breakfast");
+        else if (h >= 11 && h < 15) slots.add("after_lunch");
+        else if (h >= 15 && h < 21) slots.add("after_dinner");
+        else slots.add("bedtime");
+      }
+    }
+  }
+
+  if (t.includes("morning") || /\bam\b/.test(t)) slots.add("after_breakfast");
   if (t.includes("evening")) slots.add("after_dinner");
   if (f.includes("weekly") || f.includes("week")) slots.add("weekly");
+  if (/15 days|fortnight|once in \d+ days/.test(t) || /15 days|fortnight/.test(f))
+    slots.add("weekly");
 
   if (slots.size === 0) {
     if (f.includes("tds") || f.includes("tid") || f.includes("three")) {

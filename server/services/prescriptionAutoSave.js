@@ -23,12 +23,8 @@ import { generatePrescriptionPdf, buildPrescriptionFileName } from "./prescripti
 import { getCanonical } from "../utils/labCanonical.js";
 
 const require = createRequire(import.meta.url);
-let syncDocumentsToGenie = null;
-try {
-  ({ syncDocumentsToGenie } = require("../genie-sync.cjs"));
-} catch {
-  // Genie sync optional in dev
-}
+// Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
+const syncDocumentsToGenie = null;
 
 // Returns a row already saved for this consultation/source, or null.
 async function findExistingPrescription(client, pid, consultationId, source) {

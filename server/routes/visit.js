@@ -35,21 +35,24 @@ import {
 } from "../services/medication/normalize.js";
 
 const require = createRequire(import.meta.url);
-const {
-  syncPatientLogsFromGenie,
-  syncPatientLogsFromGenieThrottled,
-  syncDiagnosesToGenie,
-  syncMedicationsToGenie,
-  deleteGenieMedication,
-  updateGenieMedication,
-  syncLabsToGenie,
-  syncDocumentsToGenie,
-  syncAppointmentToGenie,
-  syncCareTeamToGenie,
-  syncVitalsRowToGenie,
-  updateGenieVitalsByGenieId,
-  updateGenieLabByGenieId,
-} = require("../genie-sync.cjs");
+// Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
+// Stubs preserve the call sites below as harmless no-ops; remove the calls
+// next time we touch each handler.
+const noop = () => Promise.resolve();
+const noopOk = () => Promise.resolve({ ok: true });
+const syncPatientLogsFromGenie = noop;
+const syncPatientLogsFromGenieThrottled = noop;
+const syncDiagnosesToGenie = noop;
+const syncMedicationsToGenie = noop;
+const deleteGenieMedication = noopOk;
+const updateGenieMedication = noopOk;
+const syncLabsToGenie = noop;
+const syncDocumentsToGenie = noop;
+const syncAppointmentToGenie = noop;
+const syncCareTeamToGenie = noop;
+const syncVitalsRowToGenie = noop;
+const updateGenieVitalsByGenieId = noopOk;
+const updateGenieLabByGenieId = noopOk;
 
 const router = Router();
 

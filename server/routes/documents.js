@@ -3,11 +3,11 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 
 const require = createRequire(import.meta.url);
-const {
-  syncDocumentsToGenie,
-  syncLabsToGenie,
-  syncMedicationsToGenie,
-} = require("../genie-sync.cjs");
+// Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
+const noop = () => Promise.resolve();
+const syncDocumentsToGenie = noop;
+const syncLabsToGenie = noop;
+const syncMedicationsToGenie = noop;
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";

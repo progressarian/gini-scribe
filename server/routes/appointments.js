@@ -6,7 +6,10 @@ import { validate } from "../middleware/validate.js";
 import { appointmentCreateSchema, appointmentUpdateSchema } from "../schemas/index.js";
 
 const require = createRequire(import.meta.url);
-const { syncAppointmentToGenie, syncCareTeamToGenie } = require("../genie-sync.cjs");
+// Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
+const noop = () => Promise.resolve();
+const syncAppointmentToGenie = noop;
+const syncCareTeamToGenie = noop;
 
 const router = Router();
 

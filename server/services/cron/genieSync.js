@@ -146,23 +146,10 @@ async function runSweep({ mode = "recent" } = {}) {
 }
 
 export function startGenieSyncCron() {
-  if (!isEnabled()) {
-    console.log("[GenieCron] Genie credentials missing or genie-sync.cjs unavailable — disabled");
-    return;
-  }
-  console.log(
-    `[GenieCron] catch-up scheduled in ${Math.round(STARTUP_DELAY_MS / 1000)}s, then every ${SWEEP_INTERVAL_MS / 60000} min`,
-  );
-  bootTimeoutId = setTimeout(() => {
-    runSweep({ mode: "full" }).catch((e) =>
-      console.error("[GenieCron] startup sweep failed:", e.message),
-    );
-    intervalId = setInterval(() => {
-      runSweep({ mode: "recent" }).catch((e) =>
-        console.error("[GenieCron] interval sweep failed:", e.message),
-      );
-    }, SWEEP_INTERVAL_MS);
-  }, STARTUP_DELAY_MS);
+  // Disabled 2026-05-01: gini patients live in scribe Postgres only and the
+  // patient app reads/writes them directly via the Gini Supabase client.
+  // Pulling patient logs from Genie is no longer needed.
+  console.log("[GenieCron] disabled — dual-DB routing replaces sync");
 }
 
 export function stopGenieSyncCron() {

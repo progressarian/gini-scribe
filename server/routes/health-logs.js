@@ -4,15 +4,16 @@ import pool from "../config/db.js";
 
 const require = createRequire(import.meta.url);
 
-// Import CJS module
-const {
-  syncPatientLogsFromGenie,
-  syncPatientLogsFromGenieThrottled,
-  syncDiagnosesToGenie,
-  syncMedicationsToGenie,
-  syncLabsToGenie,
-  syncDocumentsToGenie,
-} = require("../genie-sync.cjs");
+// Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
+// Stub the previously-imported sync helpers so the existing call sites (kept
+// to minimise blast radius) become harmless no-ops.
+const noop = () => Promise.resolve({ pulled: 0 });
+const syncPatientLogsFromGenie = noop;
+const syncPatientLogsFromGenieThrottled = noop;
+const syncDiagnosesToGenie = noop;
+const syncMedicationsToGenie = noop;
+const syncLabsToGenie = noop;
+const syncDocumentsToGenie = noop;
 
 const router = express.Router();
 

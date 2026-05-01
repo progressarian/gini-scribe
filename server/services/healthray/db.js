@@ -1963,10 +1963,22 @@ export async function markAppointmentAsSeen(appointmentId) {
     if (notes.length) transcriptParts.push("COMPLIANCE:\n" + notes.join("\n"));
     const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
 
+    // Upsert by (patient_id, visit_date, doctor) — see migration
+    // 2026-05-01_dedup_consultations.sql. If a manually-saved consultation
+    // already exists for this patient/day/doctor, preserve its richer fields
+    // (mo_transcript, plan_edits, exam_data) and only fill missing pieces
+    // from the HealthRay payload.
     const conRes = await client.query(
       `INSERT INTO consultations
          (patient_id, visit_date, visit_type, con_name, status, mo_data, con_data, con_transcript)
        VALUES ($1, $2, 'OPD', $3, 'completed', $4, $5, $6)
+       ON CONFLICT (patient_id, (visit_date::date), (COALESCE(con_doctor_id, mo_doctor_id, -1))) DO UPDATE SET
+         visit_type     = COALESCE(consultations.visit_type, EXCLUDED.visit_type),
+         con_name       = COALESCE(consultations.con_name, EXCLUDED.con_name),
+         mo_data        = COALESCE(consultations.mo_data, EXCLUDED.mo_data),
+         con_data       = COALESCE(consultations.con_data, EXCLUDED.con_data),
+         con_transcript = COALESCE(consultations.con_transcript, EXCLUDED.con_transcript),
+         updated_at     = NOW()
        RETURNING id`,
       [
         appt.patient_id,

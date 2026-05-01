@@ -19,19 +19,9 @@ import {
 } from "../services/prescriptionAutoSave.js";
 
 const require = createRequire(import.meta.url);
-let syncVisitToGenie = null;
-try {
-  syncVisitToGenie = require("../genie-sync.cjs").syncVisitToGenie;
-} catch (e) {
-  console.log("genie-sync.js not found — Genie sync disabled");
-}
-
-let syncPatientLogsFromGenie = null;
-try {
-  syncPatientLogsFromGenie = require("../genie-sync.cjs").syncPatientLogsFromGenie;
-} catch (e) {
-  console.log("Genie reverse sync not available");
-}
+// Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
+const syncVisitToGenie = null;
+const syncPatientLogsFromGenie = null;
 
 const router = Router();
 
@@ -126,13 +116,30 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
 
     let consultationId;
     {
-      // Always create a new consultation row
+      // Upsert by (patient_id, visit_date, doctor) — see migration
+      // 2026-05-01_dedup_consultations.sql for the unique index definition.
+      // Re-saving the same visit (same patient, same day, same doctor) now
+      // UPDATEs the existing row instead of creating a duplicate. The
+      // COALESCE(...,-1) on the right-hand side mirrors the index expression.
       const examDataJson = examData
         ? safeJson({ findings: examData, notes: examNotes || null, summary: examSummary || null })
         : null;
       const con = await client.query(
         `INSERT INTO consultations (patient_id, visit_date, mo_name, con_name, mo_transcript, con_transcript, quick_transcript, mo_data, con_data, plan_edits, status, mo_doctor_id, con_doctor_id, exam_data)
-         VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12,$13) RETURNING id`,
+         VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,'completed',$11,$12,$13)
+         ON CONFLICT (patient_id, (visit_date::date), (COALESCE(con_doctor_id, mo_doctor_id, -1))) DO UPDATE SET
+           mo_name          = COALESCE(EXCLUDED.mo_name, consultations.mo_name),
+           con_name         = COALESCE(EXCLUDED.con_name, consultations.con_name),
+           mo_transcript    = COALESCE(EXCLUDED.mo_transcript, consultations.mo_transcript),
+           con_transcript   = COALESCE(EXCLUDED.con_transcript, consultations.con_transcript),
+           quick_transcript = COALESCE(EXCLUDED.quick_transcript, consultations.quick_transcript),
+           mo_data          = COALESCE(EXCLUDED.mo_data, consultations.mo_data),
+           con_data         = COALESCE(EXCLUDED.con_data, consultations.con_data),
+           plan_edits       = COALESCE(EXCLUDED.plan_edits, consultations.plan_edits),
+           status           = EXCLUDED.status,
+           exam_data        = COALESCE(EXCLUDED.exam_data, consultations.exam_data),
+           updated_at       = NOW()
+         RETURNING id`,
         [
           patientId,
           effectiveDate,

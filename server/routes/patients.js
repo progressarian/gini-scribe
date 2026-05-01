@@ -6,15 +6,12 @@ import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-let syncPatientLogsFromGenie;
-let syncPatientToGenie;
-try {
-  const genieSync = require("../genie-sync.cjs");
-  syncPatientLogsFromGenie = genieSync.syncPatientLogsFromGenie;
-  syncPatientToGenie = genieSync.syncPatientToGenie;
-} catch {}
+import { lookupGeniePatientByPhone, convertGeniePatientByPhone } from "../services/genieImport.js";
+
+// Outbound Genie sync removed (2026-05-01): patients live in exactly one DB
+// (this scribe Postgres OR the Genie Supabase), and the patient app picks the
+// right one at login. See server/services/genieImport.js for the one-shot
+// import used when reception converts a Genie-only patient into a gini patient.
 
 const router = Router();
 
@@ -429,16 +426,6 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
-      // Mirror patient profile to MyHealth Genie so the mobile app recognises
-      // them as a gini_patient on their first phone-OTP login. Fire-and-forget.
-      if (syncPatientToGenie) {
-        syncPatientToGenie(row)
-          .then((r) => {
-            if (r?.synced)
-              console.log(`📲 Genie sync (update) patient ${row.id}: ${r.mhgPatientId}`);
-          })
-          .catch(() => {});
-      }
       res.json({ ...row, _isNew: false });
     } else {
       const result = await pool.query(
@@ -462,14 +449,6 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
-      if (syncPatientToGenie) {
-        syncPatientToGenie(row)
-          .then((r) => {
-            if (r?.synced)
-              console.log(`📲 Genie sync (create) patient ${row.id}: ${r.mhgPatientId}`);
-          })
-          .catch(() => {});
-      }
       res.json({ ...row, _isNew: true });
     }
   } catch (e) {
@@ -509,16 +488,52 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
     if (!result.rows[0]) return res.status(404).json({ error: "Patient not found" });
     const row = result.rows[0];
     if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
-    if (syncPatientToGenie) {
-      syncPatientToGenie(row)
-        .then((r) => {
-          if (r?.synced) console.log(`📲 Genie sync (PUT) patient ${row.id}: ${r.mhgPatientId}`);
-        })
-        .catch(() => {});
-    }
     res.json(row);
   } catch (e) {
     handleError(res, e, "Patient update");
+  }
+});
+
+// Lookup a Genie-only patient by phone (for IntakePage "import from app").
+router.get("/patients/genie-lookup", async (req, res) => {
+  try {
+    const phone = String(req.query.phone || "").trim();
+    if (!phone) return res.status(400).json({ error: "phone required" });
+    const found = await lookupGeniePatientByPhone(phone);
+    if (!found) return res.json({ found: false });
+    res.json({
+      found: true,
+      already_migrated: !!found.migrated_to_gini,
+      patient: {
+        id: found.id,
+        name: found.name,
+        phone: found.phone,
+        dob: found.dob,
+        sex: found.sex,
+        blood_group: found.blood_group,
+        email: found.email,
+      },
+    });
+  } catch (e) {
+    handleError(res, e, "Genie lookup");
+  }
+});
+
+// Convert a Genie patient into scribe (one-shot import). Idempotent on the
+// patient row; safe to retry if it failed mid-import. The Genie row is
+// flagged migrated_to_gini=true so the patient app stops writing to it.
+router.post("/patients/convert-from-genie", async (req, res) => {
+  try {
+    const phone = String(req.body?.phone || "").trim();
+    if (!phone) return res.status(400).json({ error: "phone required" });
+    const result = await convertGeniePatientByPhone(phone);
+    if (!result.ok) {
+      const status = result.reason === "no_genie_patient_for_phone" ? 404 : 409;
+      return res.status(status).json(result);
+    }
+    res.json(result);
+  } catch (e) {
+    handleError(res, e, "Convert from genie");
   }
 });
 
