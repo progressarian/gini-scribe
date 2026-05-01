@@ -538,8 +538,7 @@ function buildPrescriptionHtml(data = {}) {
 
   // Rank: condition-relevant cards first, ties broken by clinical order.
   // A card is "relevant" when any of its `tracks` matches an active dx.
-  const relevance = (c) =>
-    (c.tracks || []).some((t) => dx[t]) ? 1 : 0;
+  const relevance = (c) => ((c.tracks || []).some((t) => dx[t]) ? 1 : 0);
   const biomarkerCards = candidates
     .map((c, i) => ({ ...c, _r: relevance(c), _i: i }))
     .sort((a, b) => b._r - a._r || a.defaultOrder - b.defaultOrder)
@@ -809,9 +808,7 @@ function buildPrescriptionHtml(data = {}) {
       let trendSvg = "";
       if (bars.length >= 2) {
         const stepX = 100 / bars.length;
-        const points = bars
-          .map((s, i) => `${(i + 0.5) * stepX},${100 - s.height}`)
-          .join(" ");
+        const points = bars.map((s, i) => `${(i + 0.5) * stepX},${100 - s.height}`).join(" ");
         trendSvg = `<svg class="sp-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
           <polyline points="${points}" fill="none" stroke="#1a2332" stroke-opacity="0.45" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
         </svg>`;

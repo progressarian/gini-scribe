@@ -12,6 +12,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/st
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
 import { getCanonical } from "../utils/labCanonical.js";
+import { parseLabDate } from "../utils/labDate.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema } from "../schemas/index.js";
 import { fetchMedicalRecords } from "../services/healthray/client.js";
@@ -711,7 +712,7 @@ router.patch("/documents/:id", async (req, res) => {
       // Remove previous entries synced from this document
       await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);
 
-      const testDate =
+      const fallbackDate =
         extracted_data.report_date ||
         extracted_data.collection_date ||
         (doc.doc_date
@@ -722,6 +723,19 @@ router.patch("/documents/:id", async (req, res) => {
         for (const test of panel.tests || []) {
           if (test.result == null && !test.result_text) continue;
           const numResult = typeof test.result === "number" ? test.result : parseFloat(test.result);
+          const canonical = getCanonical(test.test_name) || test.test_name;
+          const testDate = parseLabDate(test.date || test.test_date, fallbackDate);
+          if (!testDate) continue;
+
+          // Skip if (patient, canonical, date) already exists from any source —
+          // one value per test per day, regardless of which document/path put it there.
+          const { rows: existing } = await client.query(
+            `SELECT id FROM lab_results
+              WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+              LIMIT 1`,
+            [doc.patient_id, canonical, testDate],
+          );
+          if (existing.length) continue;
 
           await client.query(
             `INSERT INTO lab_results
@@ -734,7 +748,7 @@ router.patch("/documents/:id", async (req, res) => {
               testDate,
               panel.panel_name || null,
               test.test_name,
-              getCanonical(test.test_name) || test.test_name,
+              canonical,
               isNaN(numResult) ? null : numResult,
               test.result_text || null,
               test.unit || null,
@@ -1090,7 +1104,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
 
       if (extracted?.panels && doc.patient_id) {
         await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);
-        const testDate =
+        const fallbackDate =
           extracted.report_date ||
           extracted.collection_date ||
           (doc.doc_date
@@ -1101,6 +1115,18 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
             if (test.result == null && !test.result_text) continue;
             const numResult =
               typeof test.result === "number" ? test.result : parseFloat(test.result);
+            const canonical = getCanonical(test.test_name) || test.test_name;
+            const testDate = parseLabDate(test.date || test.test_date, fallbackDate);
+            if (!testDate) continue;
+
+            const { rows: existing } = await client.query(
+              `SELECT id FROM lab_results
+                WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+                LIMIT 1`,
+              [doc.patient_id, canonical, testDate],
+            );
+            if (existing.length) continue;
+
             await client.query(
               `INSERT INTO lab_results
                  (patient_id, document_id, test_date, panel_name, test_name, canonical_name, result, result_text, unit, flag, ref_range, source)
@@ -1111,7 +1137,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
                 testDate,
                 panel.panel_name || null,
                 test.test_name,
-                getCanonical(test.test_name) || test.test_name,
+                canonical,
                 isNaN(numResult) ? null : numResult,
                 test.result_text || null,
                 test.unit || null,

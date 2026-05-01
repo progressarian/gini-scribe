@@ -963,9 +963,17 @@ export default function LiveDashboard({
       // so the row can foreground the triggering markers as chips. Lower-
       // case + map to the keys used elsewhere (BIO_TIER / row fields).
       const TOKEN_TO_KEY = {
-        HBA1C: "hba1c", SBP: "sbp", DBP: "dbp", TSH: "tsh",
-        FG: "fg", PPBS: "ppbs", LDL: "ldl", TG: "tg", HDL: "hdl",
-        UACR: "uacr", EGFR: "egfr",
+        HBA1C: "hba1c",
+        SBP: "sbp",
+        DBP: "dbp",
+        TSH: "tsh",
+        FG: "fg",
+        PPBS: "ppbs",
+        LDL: "ldl",
+        TG: "tg",
+        HDL: "hdl",
+        UACR: "uacr",
+        EGFR: "egfr",
       };
       const triggerKeys = [];
       const seenTrigger = new Set();

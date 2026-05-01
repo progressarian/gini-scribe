@@ -120,6 +120,7 @@ const CANONICAL_MAP = {
   "blood glucose fasting": "FBS",
   "fasting blood glucose": "FBS",
   fbg: "FBS",
+  fg: "FBS",
   "insulin fasting": "Fasting Insulin",
   "fasting insulin": "Fasting Insulin",
   "insulin f": "Fasting Insulin",

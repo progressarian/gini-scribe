@@ -5,6 +5,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
+import { parseLabDate } from "../../utils/labDate.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
@@ -577,35 +578,22 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
     // Use the AI-extracted date when present; fall back to the prescription
-    // (appointment) date for OBSERVATION / "for today" / undated values so
-    // every reading is anchored to a real visit date.
-    const labDate = lab.date || apptDate || null;
+    // (appointment) date for OBSERVATION / "today" / undated values so every
+    // reading is anchored to a real visit date. parseLabDate accepts the
+    // string "today", DD/MM/YYYY, "1 May 2026", etc. and returns ISO YYYY-MM-DD.
+    const labDate = parseLabDate(lab.date, apptDate);
+    if (!labDate) continue;
 
-    // Skip if a better-or-equal source already exists for same patient + test + date.
-    // IS NOT DISTINCT FROM handles the null-date case (undated OBSERVATION labs) too.
+    // One reading per (patient, canonical test, date). Whichever source got
+    // there first wins — skip if anything already exists for this combination.
+    // IS NOT DISTINCT FROM handles the null-date case (undated OBSERVATION labs).
     const existing = await pool.query(
-      `SELECT source FROM lab_results
+      `SELECT id FROM lab_results
        WHERE patient_id = $1 AND canonical_name = $2 AND test_date IS NOT DISTINCT FROM $3::date
-       ORDER BY CASE source
-         WHEN 'opd' THEN 1 WHEN 'report_extract' THEN 2 WHEN 'lab_healthray' THEN 3
-         WHEN 'vitals_sheet' THEN 4 WHEN 'prescription_parsed' THEN 5 WHEN 'healthray' THEN 6 ELSE 7
-       END ASC LIMIT 1`,
+       LIMIT 1`,
       [patientId, canonicalName, labDate],
     );
-    if (existing.rows[0]) {
-      const existingPriority = SOURCE_PRIORITY[existing.rows[0].source] ?? 99;
-      if (existingPriority <= SOURCE_PRIORITY.healthray) continue;
-    }
-
-    // Skip if exact same data already exists (any source) — same test + value + date
-    const exact = await pool.query(
-      `SELECT id FROM lab_results
-       WHERE patient_id = $1 AND canonical_name = $2
-         AND result::numeric = $3::numeric AND test_date IS NOT DISTINCT FROM $4::date
-       LIMIT 1`,
-      [patientId, canonicalName, val, labDate],
-    );
-    if (exact.rows[0]) continue;
+    if (existing.rows[0]) continue;
 
     await pool
       .query(

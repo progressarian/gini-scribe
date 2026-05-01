@@ -46,11 +46,7 @@ export async function lookupGeniePatientByPhone(phone) {
   if (!db) return null;
   const variants = normalisePhone(phone);
   if (variants.length === 0) return null;
-  const { data, error } = await db
-    .from("patients")
-    .select("*")
-    .in("phone", variants)
-    .limit(1);
+  const { data, error } = await db.from("patients").select("*").in("phone", variants).limit(1);
   if (error || !data || data.length === 0) return null;
   return data[0];
 }
@@ -198,11 +194,31 @@ export async function convertGeniePatientByPhone(phone) {
 
   // Pull each history table.
   const [vitals, labs, meds, conditions, mealLogs] = await Promise.all([
-    db.from("vitals").select("*").eq("patient_id", geniePatient.id).then((r) => r.data ?? []),
-    db.from("lab_results").select("*").eq("patient_id", geniePatient.id).then((r) => r.data ?? []),
-    db.from("medications").select("*").eq("patient_id", geniePatient.id).then((r) => r.data ?? []),
-    db.from("conditions").select("*").eq("patient_id", geniePatient.id).then((r) => r.data ?? []),
-    db.from("meal_logs").select("*").eq("patient_id", geniePatient.id).then((r) => r.data ?? []),
+    db
+      .from("vitals")
+      .select("*")
+      .eq("patient_id", geniePatient.id)
+      .then((r) => r.data ?? []),
+    db
+      .from("lab_results")
+      .select("*")
+      .eq("patient_id", geniePatient.id)
+      .then((r) => r.data ?? []),
+    db
+      .from("medications")
+      .select("*")
+      .eq("patient_id", geniePatient.id)
+      .then((r) => r.data ?? []),
+    db
+      .from("conditions")
+      .select("*")
+      .eq("patient_id", geniePatient.id)
+      .then((r) => r.data ?? []),
+    db
+      .from("meal_logs")
+      .select("*")
+      .eq("patient_id", geniePatient.id)
+      .then((r) => r.data ?? []),
   ]);
 
   const counts = { vitals: 0, lab_results: 0, medications: 0, diagnoses: 0, meal_logs: 0 };

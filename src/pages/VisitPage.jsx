@@ -693,9 +693,7 @@ export default function VisitPage() {
     // booked) over the logged-in user — the printed Rx should attribute meds
     // to the consulting doctor, not whoever happens to be at the workstation.
     const apptDoctorName = data.appt_doctor_name;
-    const rxDoctor = apptDoctorName
-      ? { ...(doctor || {}), name: apptDoctorName }
-      : doctor;
+    const rxDoctor = apptDoctorName ? { ...(doctor || {}), name: apptDoctorName } : doctor;
     return {
       patient: data.patient,
       doctor: rxDoctor,

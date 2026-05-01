@@ -303,7 +303,17 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       renal: ["ckd", "kidney", "renal", "nephropathy", "nephritis", "uacr", "albuminuria"],
       lipids: ["dyslipid", "hyperlipid", "cholesterol", "lipid", "atherosclero"],
       thyroid: ["thyroid", "hypothyroid", "hyperthyroid", "hashimoto", "graves", "goiter"],
-      body: ["obesity", "obese", "overweight", "adiposity", "nafld", "masld", "fatty liver", "metabolic syndrome", "sarcopen"],
+      body: [
+        "obesity",
+        "obese",
+        "overweight",
+        "adiposity",
+        "nafld",
+        "masld",
+        "fatty liver",
+        "metabolic syndrome",
+        "sarcopen",
+      ],
     };
     const dxText = (activeDx || [])
       .filter((d) => d && d.is_active !== false)
@@ -420,440 +430,440 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
       </div>
       <div className="scb">
         {(() => {
-        // Build each clinical group as an entry { score, jsx }, then render
-        // them sorted by severity (highest first) so the doctor sees the
-        // most concerning panel at the top of the section without scrolling.
-        const sections = [];
+          // Build each clinical group as an entry { score, jsx }, then render
+          // them sorted by severity (highest first) so the doctor sees the
+          // most concerning panel at the top of the section without scrolling.
+          const sections = [];
 
-        // ── DIABETES MARKERS ──
-        sections.push({
-          key: "diabetes",
-          score: sectionScore(
-            sev("HbA1c", hba1c?.result),
-            sev("FBS", fbs?.result),
-            sev("HOMA", homaIr?.result),
-          ),
-          jsx: (
-            <div key="diabetes">
-              <div className="subsec">Diabetes Markers</div>
-              <div className="bmg">
-          <BiomarkerCard
-            label="HbA1c"
-            value={hba1c?.result}
-            unit="%"
-            target={7}
-            trend={
-              hba1cH.length > 1
-                ? `${hba1c?.result < hba1cH[hba1cH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(hba1c?.result - hba1cH[hba1cH.length - 2]?.result).toFixed(1)}% from ${fmtDate(hba1cH[hba1cH.length - 2]?.date)}`
-                : null
-            }
-            trendDir={hba1c?.result <= 7 ? "good" : hba1c?.result <= 8 ? "warn" : "bad"}
-            goal="<7.0%"
-            history={hba1cH}
-          />
-          <BiomarkerCard
-            label="Fasting Blood Sugar"
-            value={fbs?.result}
-            unit="mg/dL"
-            target={100}
-            trend={
-              fbsH.length > 1
-                ? `${fbs?.result < fbsH[fbsH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(fbs?.result - fbsH[fbsH.length - 2]?.result).toFixed(0)} from ${fmtDate(fbsH[fbsH.length - 2]?.date)}`
-                : null
-            }
-            trendDir={fbs?.result <= 100 ? "good" : fbs?.result <= 126 ? "warn" : "bad"}
-            goal="<100"
-            history={fbsH}
-          />
-          <BiomarkerCard
-            label="No Hypoglycemia"
-            value={fbs?.result < 70 ? "⚠ Low" : "✓ None"}
-            unit=""
-            valueColor={fbs?.result < 70 ? "var(--red)" : "#12b981"}
-            trend={fbs?.result < 70 ? "Hypoglycemia detected" : "No GMI reported"}
-            trendDir={fbs?.result < 70 ? "bad" : "good"}
-            goal="Safe"
-            goalLabel="Status"
-            history={[]}
-          />
-          <BiomarkerCard
-            label={homaIrCalc ? "HOMA-IR (calc.)" : "HOMA-IR"}
-            value={homaIr?.result}
-            unit="IR"
-            trend={
-              homaIr?.result > 2.5
-                ? "↑ Insulin resistant"
-                : homaIr?.result
-                  ? "✓ Normal"
-                  : "Add Fasting Insulin to calculate"
-            }
-            trendDir={homaIr?.result > 2.5 ? "bad" : homaIr?.result ? "good" : "ok"}
-            goal="<2.5"
-            goalLabel="Normal"
-            history={homaIrH}
-          />
-              </div>
-            </div>
-          ),
-        });
-
-        // ── VITAL SIGNS / CARDIOVASCULAR ──
-        if (latestV?.bp_sys || latestV?.pulse) {
+          // ── DIABETES MARKERS ──
           sections.push({
-            key: "vitals",
+            key: "diabetes",
             score: sectionScore(
-              latestV?.bp_sys && latestV?.bp_dia ? sev("BP", latestV.bp_sys, latestV.bp_dia) : -1,
+              sev("HbA1c", hba1c?.result),
+              sev("FBS", fbs?.result),
+              sev("HOMA", homaIr?.result),
             ),
             jsx: (
-              <div key="vitals">
-                <div className="subsec" style={{ marginTop: 4 }}>
-                  Vital Signs / Cardiovascular
-                </div>
+              <div key="diabetes">
+                <div className="subsec">Diabetes Markers</div>
                 <div className="bmg">
-              {latestV?.bp_sys && latestV?.bp_dia && (
-                <BiomarkerCard
-                  label="Blood Pressure"
-                  value={`${latestV.bp_sys}/${latestV.bp_dia}`}
-                  unit="mmHg"
-                  trend={
-                    bpH.length > 1
-                      ? `${latestV.bp_sys >= 140 || latestV.bp_dia >= 90 ? "↑ Elevated" : "✓ Normal"} from ${bpH[0]?.display}`
-                      : latestV.bp_sys >= 140 || latestV.bp_dia >= 90
-                        ? "↑ Elevated"
-                        : "✓ Normal"
-                  }
-                  trendDir={latestV.bp_sys >= 140 || latestV.bp_dia >= 90 ? "bad" : "good"}
-                  goal="<140/90"
-                  goalLabel="Target"
-                  history={bpH}
-                />
-              )}
-              {latestV?.pulse && (
-                <BiomarkerCard
-                  label="Heart Rate"
-                  value={latestV.pulse}
-                  unit="bpm"
-                  trend={
-                    pulseH.length > 1
-                      ? `${latestV.pulse > 90 ? "↑" : "✓"} From ${pulseH[0]?.result} bpm`
-                      : null
-                  }
-                  trendDir={latestV.pulse > 90 ? "warn" : "good"}
-                  goal="60–100"
-                  goalLabel="Normal"
-                  history={pulseH}
-                />
-              )}
+                  <BiomarkerCard
+                    label="HbA1c"
+                    value={hba1c?.result}
+                    unit="%"
+                    target={7}
+                    trend={
+                      hba1cH.length > 1
+                        ? `${hba1c?.result < hba1cH[hba1cH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(hba1c?.result - hba1cH[hba1cH.length - 2]?.result).toFixed(1)}% from ${fmtDate(hba1cH[hba1cH.length - 2]?.date)}`
+                        : null
+                    }
+                    trendDir={hba1c?.result <= 7 ? "good" : hba1c?.result <= 8 ? "warn" : "bad"}
+                    goal="<7.0%"
+                    history={hba1cH}
+                  />
+                  <BiomarkerCard
+                    label="Fasting Blood Sugar"
+                    value={fbs?.result}
+                    unit="mg/dL"
+                    target={100}
+                    trend={
+                      fbsH.length > 1
+                        ? `${fbs?.result < fbsH[fbsH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(fbs?.result - fbsH[fbsH.length - 2]?.result).toFixed(0)} from ${fmtDate(fbsH[fbsH.length - 2]?.date)}`
+                        : null
+                    }
+                    trendDir={fbs?.result <= 100 ? "good" : fbs?.result <= 126 ? "warn" : "bad"}
+                    goal="<100"
+                    history={fbsH}
+                  />
+                  <BiomarkerCard
+                    label="No Hypoglycemia"
+                    value={fbs?.result < 70 ? "⚠ Low" : "✓ None"}
+                    unit=""
+                    valueColor={fbs?.result < 70 ? "var(--red)" : "#12b981"}
+                    trend={fbs?.result < 70 ? "Hypoglycemia detected" : "No GMI reported"}
+                    trendDir={fbs?.result < 70 ? "bad" : "good"}
+                    goal="Safe"
+                    goalLabel="Status"
+                    history={[]}
+                  />
+                  <BiomarkerCard
+                    label={homaIrCalc ? "HOMA-IR (calc.)" : "HOMA-IR"}
+                    value={homaIr?.result}
+                    unit="IR"
+                    trend={
+                      homaIr?.result > 2.5
+                        ? "↑ Insulin resistant"
+                        : homaIr?.result
+                          ? "✓ Normal"
+                          : "Add Fasting Insulin to calculate"
+                    }
+                    trendDir={homaIr?.result > 2.5 ? "bad" : homaIr?.result ? "good" : "ok"}
+                    goal="<2.5"
+                    goalLabel="Normal"
+                    history={homaIrH}
+                  />
                 </div>
               </div>
             ),
           });
-        }
 
-        // ── KIDNEY / RENAL FUNCTION ──
-        sections.push({
-          key: "renal",
-          score: sectionScore(
-            sev("eGFR", egfr?.result),
-            sev("Creatinine", cr?.result),
-            sev("UACR", uacr?.result),
-          ),
-          jsx: (
-            <div key="renal">
-              <div className="subsec" style={{ marginTop: 4 }}>
-                Renal Function (RFT + UACR)
-              </div>
-              <div className="bmg">
-          {/* eGFR card — primary kidney biomarker, matches the patient app
+          // ── VITAL SIGNS / CARDIOVASCULAR ──
+          if (latestV?.bp_sys || latestV?.pulse) {
+            sections.push({
+              key: "vitals",
+              score: sectionScore(
+                latestV?.bp_sys && latestV?.bp_dia ? sev("BP", latestV.bp_sys, latestV.bp_dia) : -1,
+              ),
+              jsx: (
+                <div key="vitals">
+                  <div className="subsec" style={{ marginTop: 4 }}>
+                    Vital Signs / Cardiovascular
+                  </div>
+                  <div className="bmg">
+                    {latestV?.bp_sys && latestV?.bp_dia && (
+                      <BiomarkerCard
+                        label="Blood Pressure"
+                        value={`${latestV.bp_sys}/${latestV.bp_dia}`}
+                        unit="mmHg"
+                        trend={
+                          bpH.length > 1
+                            ? `${latestV.bp_sys >= 140 || latestV.bp_dia >= 90 ? "↑ Elevated" : "✓ Normal"} from ${bpH[0]?.display}`
+                            : latestV.bp_sys >= 140 || latestV.bp_dia >= 90
+                              ? "↑ Elevated"
+                              : "✓ Normal"
+                        }
+                        trendDir={latestV.bp_sys >= 140 || latestV.bp_dia >= 90 ? "bad" : "good"}
+                        goal="<140/90"
+                        goalLabel="Target"
+                        history={bpH}
+                      />
+                    )}
+                    {latestV?.pulse && (
+                      <BiomarkerCard
+                        label="Heart Rate"
+                        value={latestV.pulse}
+                        unit="bpm"
+                        trend={
+                          pulseH.length > 1
+                            ? `${latestV.pulse > 90 ? "↑" : "✓"} From ${pulseH[0]?.result} bpm`
+                            : null
+                        }
+                        trendDir={latestV.pulse > 90 ? "warn" : "good"}
+                        goal="60–100"
+                        goalLabel="Normal"
+                        history={pulseH}
+                      />
+                    )}
+                  </div>
+                </div>
+              ),
+            });
+          }
+
+          // ── KIDNEY / RENAL FUNCTION ──
+          sections.push({
+            key: "renal",
+            score: sectionScore(
+              sev("eGFR", egfr?.result),
+              sev("Creatinine", cr?.result),
+              sev("UACR", uacr?.result),
+            ),
+            jsx: (
+              <div key="renal">
+                <div className="subsec" style={{ marginTop: 4 }}>
+                  Renal Function (RFT + UACR)
+                </div>
+                <div className="bmg">
+                  {/* eGFR card — primary kidney biomarker, matches the patient app
               which logs and displays eGFR. Pulled from labLatest/labHistory
               so doctor-entered + patient-self-logged + Healthray-imported
               all roll into one trend (single lab_results stream). */}
-          <BiomarkerCard
-            label="eGFR (Kidney)"
-            value={egfr?.result}
-            unit="mL/min"
-            target={90}
-            lowerBetter={false}
-            trend={
-              egfrH.length > 1
-                ? `${egfr?.result > egfrH[egfrH.length - 2]?.result ? "▲" : "▼"} ${Math.abs(egfr?.result - egfrH[egfrH.length - 2]?.result).toFixed(0)} from ${fmtDate(egfrH[egfrH.length - 2]?.date)}`
-                : egfr?.result >= 90
-                  ? "✓ Normal"
-                  : egfr?.result >= 60
-                    ? "→ Mildly reduced"
-                    : "↑ Review"
-            }
-            trendDir={egfr?.result >= 90 ? "good" : egfr?.result >= 60 ? "warn" : "bad"}
-            goal="≥90"
-            goalLabel="Normal"
-            history={egfrH}
-          />
-          {/* Creatinine card — kept alongside eGFR for clinicians who track
+                  <BiomarkerCard
+                    label="eGFR (Kidney)"
+                    value={egfr?.result}
+                    unit="mL/min"
+                    target={90}
+                    lowerBetter={false}
+                    trend={
+                      egfrH.length > 1
+                        ? `${egfr?.result > egfrH[egfrH.length - 2]?.result ? "▲" : "▼"} ${Math.abs(egfr?.result - egfrH[egfrH.length - 2]?.result).toFixed(0)} from ${fmtDate(egfrH[egfrH.length - 2]?.date)}`
+                        : egfr?.result >= 90
+                          ? "✓ Normal"
+                          : egfr?.result >= 60
+                            ? "→ Mildly reduced"
+                            : "↑ Review"
+                    }
+                    trendDir={egfr?.result >= 90 ? "good" : egfr?.result >= 60 ? "warn" : "bad"}
+                    goal="≥90"
+                    goalLabel="Normal"
+                    history={egfrH}
+                  />
+                  {/* Creatinine card — kept alongside eGFR for clinicians who track
               both. Hidden if no Creatinine data exists. */}
-          {cr?.result != null && (
-            <BiomarkerCard
-              label="Creatinine"
-              value={cr?.result}
-              unit="mg/dL"
-              target={1.2}
-              trend={
-                crH.length > 1
-                  ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
-                  : cr?.result <= 1.2
-                    ? "✓ Normal"
-                    : "↑ Review"
-              }
-              trendDir={cr?.result <= 1.2 ? "good" : "bad"}
-              goal="<1.2"
-              goalLabel="Normal"
-              history={crH}
-            />
-          )}
-          {uacr?.result != null && (
-            <BiomarkerCard
-              label="UACR"
-              value={uacr.result}
-              unit={uacr.unit || "mg/g"}
-              target={30}
-              trend={
-                uacrH.length > 1
-                  ? `${uacr.result < uacrH[uacrH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(uacr.result - uacrH[uacrH.length - 2]?.result).toFixed(1)} from ${fmtDate(uacrH[uacrH.length - 2]?.date)}`
-                  : uacr.result < 30
-                    ? "✓ Normal"
-                    : uacr.result < 300
-                      ? "→ Microalbuminuria"
-                      : "↑ Macroalbuminuria"
-              }
-              trendDir={uacr.result < 30 ? "good" : uacr.result < 300 ? "warn" : "bad"}
-              goal="<30"
-              goalLabel="Normal"
-              history={uacrH}
-            />
-          )}
+                  {cr?.result != null && (
+                    <BiomarkerCard
+                      label="Creatinine"
+                      value={cr?.result}
+                      unit="mg/dL"
+                      target={1.2}
+                      trend={
+                        crH.length > 1
+                          ? `${cr?.result < crH[crH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(cr?.result - crH[crH.length - 2]?.result).toFixed(2)} from ${fmtDate(crH[crH.length - 2]?.date)}`
+                          : cr?.result <= 1.2
+                            ? "✓ Normal"
+                            : "↑ Review"
+                      }
+                      trendDir={cr?.result <= 1.2 ? "good" : "bad"}
+                      goal="<1.2"
+                      goalLabel="Normal"
+                      history={crH}
+                    />
+                  )}
+                  {uacr?.result != null && (
+                    <BiomarkerCard
+                      label="UACR"
+                      value={uacr.result}
+                      unit={uacr.unit || "mg/g"}
+                      target={30}
+                      trend={
+                        uacrH.length > 1
+                          ? `${uacr.result < uacrH[uacrH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(uacr.result - uacrH[uacrH.length - 2]?.result).toFixed(1)} from ${fmtDate(uacrH[uacrH.length - 2]?.date)}`
+                          : uacr.result < 30
+                            ? "✓ Normal"
+                            : uacr.result < 300
+                              ? "→ Microalbuminuria"
+                              : "↑ Macroalbuminuria"
+                      }
+                      trendDir={uacr.result < 30 ? "good" : uacr.result < 300 ? "warn" : "bad"}
+                      goal="<30"
+                      goalLabel="Normal"
+                      history={uacrH}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          ),
-        });
+            ),
+          });
 
-        // ── LIPIDS ──
-        sections.push({
-          key: "lipids",
-          score: sectionScore(sev("LDL", ldl?.result), sev("TG", tg?.result)),
-          jsx: (
-            <div key="lipids">
-              <div className="subsec" style={{ marginTop: 4 }}>
-                Lipid Profile
+          // ── LIPIDS ──
+          sections.push({
+            key: "lipids",
+            score: sectionScore(sev("LDL", ldl?.result), sev("TG", tg?.result)),
+            jsx: (
+              <div key="lipids">
+                <div className="subsec" style={{ marginTop: 4 }}>
+                  Lipid Profile
+                </div>
+                <div className="bmg">
+                  <BiomarkerCard
+                    label="LDL Cholesterol"
+                    value={ldl?.result}
+                    unit="mg/dL"
+                    target={70}
+                    trend={
+                      ldlH.length > 1
+                        ? `${ldl?.result < ldlH[ldlH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(ldl?.result - ldlH[ldlH.length - 2]?.result).toFixed(0)} from ${fmtDate(ldlH[ldlH.length - 2]?.date)}`
+                        : ldl?.result <= 70
+                          ? "✓ At goal"
+                          : "→ Above target"
+                    }
+                    trendDir={ldl?.result <= 70 ? "good" : "warn"}
+                    goal="<70"
+                    history={ldlH}
+                  />
+                  <BiomarkerCard
+                    label="Triglycerides"
+                    value={tg?.result}
+                    unit="mg/dL"
+                    target={150}
+                    trend={
+                      tgH.length > 1
+                        ? `${tg?.result < tgH[tgH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(tg?.result - tgH[tgH.length - 2]?.result).toFixed(0)} from ${fmtDate(tgH[tgH.length - 2]?.date)}`
+                        : tg?.result > 150
+                          ? "→ Borderline"
+                          : "✓ Normal"
+                    }
+                    trendDir={tg?.result > 150 ? "warn" : "good"}
+                    goal="<150"
+                    history={tgH}
+                  />
+                </div>
               </div>
-              <div className="bmg">
-          <BiomarkerCard
-            label="LDL Cholesterol"
-            value={ldl?.result}
-            unit="mg/dL"
-            target={70}
-            trend={
-              ldlH.length > 1
-                ? `${ldl?.result < ldlH[ldlH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(ldl?.result - ldlH[ldlH.length - 2]?.result).toFixed(0)} from ${fmtDate(ldlH[ldlH.length - 2]?.date)}`
-                : ldl?.result <= 70
-                  ? "✓ At goal"
-                  : "→ Above target"
-            }
-            trendDir={ldl?.result <= 70 ? "good" : "warn"}
-            goal="<70"
-            history={ldlH}
-          />
-          <BiomarkerCard
-            label="Triglycerides"
-            value={tg?.result}
-            unit="mg/dL"
-            target={150}
-            trend={
-              tgH.length > 1
-                ? `${tg?.result < tgH[tgH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(tg?.result - tgH[tgH.length - 2]?.result).toFixed(0)} from ${fmtDate(tgH[tgH.length - 2]?.date)}`
-                : tg?.result > 150
-                  ? "→ Borderline"
-                  : "✓ Normal"
-            }
-            trendDir={tg?.result > 150 ? "warn" : "good"}
-            goal="<150"
-            history={tgH}
-          />
-              </div>
-            </div>
-          ),
-        });
+            ),
+          });
 
-        // ── THYROID ──
-        sections.push({
-          key: "thyroid",
-          score: sectionScore(sev("TSH", tsh?.result)),
-          jsx: (
-            <div key="thyroid">
-              <div className="subsec" style={{ marginTop: 4 }}>
-                Thyroid
+          // ── THYROID ──
+          sections.push({
+            key: "thyroid",
+            score: sectionScore(sev("TSH", tsh?.result)),
+            jsx: (
+              <div key="thyroid">
+                <div className="subsec" style={{ marginTop: 4 }}>
+                  Thyroid
+                </div>
+                <div className="bmg">
+                  <BiomarkerCard
+                    label="TSH (Thyroid)"
+                    value={tsh?.result}
+                    unit="µIU/mL"
+                    target={4.5}
+                    trend={
+                      tshH.length > 1
+                        ? `${tsh?.result < tshH[tshH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(tsh?.result - tshH[tshH.length - 2]?.result).toFixed(2)} from ${fmtDate(tshH[tshH.length - 2]?.date)}`
+                        : tsh?.result > 4.5
+                          ? "↑ Elevated (needs review)"
+                          : "✓ Normal"
+                    }
+                    trendDir={tsh?.result > 4.5 ? "bad" : "good"}
+                    goal="<4.5"
+                    history={tshH}
+                  />
+                </div>
               </div>
-              <div className="bmg">
-          <BiomarkerCard
-            label="TSH (Thyroid)"
-            value={tsh?.result}
-            unit="µIU/mL"
-            target={4.5}
-            trend={
-              tshH.length > 1
-                ? `${tsh?.result < tshH[tshH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(tsh?.result - tshH[tshH.length - 2]?.result).toFixed(2)} from ${fmtDate(tshH[tshH.length - 2]?.date)}`
-                : tsh?.result > 4.5
-                  ? "↑ Elevated (needs review)"
-                  : "✓ Normal"
-            }
-            trendDir={tsh?.result > 4.5 ? "bad" : "good"}
-            goal="<4.5"
-            history={tshH}
-          />
-              </div>
-            </div>
-          ),
-        });
+            ),
+          });
 
-        // ── BODY COMPOSITION / HAEMATOLOGY ──
-        sections.push({
-          key: "body",
-          score: sectionScore(
-            sev("Hb", hb?.result),
-            latestV?.body_fat ? sev("BodyFat", latestV.body_fat) : -1,
-            latestV?.bmi ? sev("BMI", latestV.bmi) : -1,
-            latestV?.waist || waistLab ? sev("Waist", latestV?.waist ?? waistLab?.result) : -1,
-          ),
-          jsx: (
-            <div key="body">
-              <div className="subsec" style={{ marginTop: 4 }}>
-                Body Composition / Haematology
+          // ── BODY COMPOSITION / HAEMATOLOGY ──
+          sections.push({
+            key: "body",
+            score: sectionScore(
+              sev("Hb", hb?.result),
+              latestV?.body_fat ? sev("BodyFat", latestV.body_fat) : -1,
+              latestV?.bmi ? sev("BMI", latestV.bmi) : -1,
+              latestV?.waist || waistLab ? sev("Waist", latestV?.waist ?? waistLab?.result) : -1,
+            ),
+            jsx: (
+              <div key="body">
+                <div className="subsec" style={{ marginTop: 4 }}>
+                  Body Composition / Haematology
+                </div>
+                <div className="bmg">
+                  {(latestV?.weight || weightLab) &&
+                    (() => {
+                      const wVal = latestV?.weight ?? weightLab?.result;
+                      const wPrev = prevV?.weight ?? weightH?.[weightH.length - 2]?.result;
+                      const wPrevDate = prevV?.recorded_at ?? weightH?.[weightH.length - 2]?.date;
+                      return (
+                        <BiomarkerCard
+                          label="Weight"
+                          value={wVal}
+                          unit="kg"
+                          trend={
+                            wPrev
+                              ? `${wVal > wPrev ? "↑" : "▼"} ${Math.abs(wVal - wPrev).toFixed(1)} kg since ${fmtDate(wPrevDate)}`
+                              : null
+                          }
+                          trendDir={wPrev && wVal > wPrev ? "warn" : "good"}
+                          goal="<90 kg"
+                          goalLabel="Target"
+                          history={weightH}
+                        />
+                      );
+                    })()}
+                  {latestV?.body_fat && (
+                    <BiomarkerCard
+                      label="Body Fat %"
+                      value={latestV.body_fat}
+                      unit="%"
+                      trend={
+                        bodyFatH.length > 1
+                          ? `${latestV.body_fat > bodyFatH[0]?.result ? "▲" : "▼"} From ${bodyFatH[0]?.result}%`
+                          : null
+                      }
+                      trendDir={latestV.body_fat > 25 ? "warn" : "good"}
+                      goal="<25%"
+                      goalLabel="Target"
+                      history={bodyFatH}
+                    />
+                  )}
+                  <BiomarkerCard
+                    label="Haemoglobin"
+                    value={hb?.result}
+                    unit="g/dL"
+                    target={13}
+                    lowerBetter={false}
+                    trend={
+                      hbH.length > 1
+                        ? `${hb?.result < hbH[hbH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(hb?.result - hbH[hbH.length - 2]?.result).toFixed(1)} from ${fmtDate(hbH[hbH.length - 2]?.date)}`
+                        : hb?.result < 13
+                          ? "→ Borderline low"
+                          : "✓ Normal"
+                    }
+                    trendDir={hb?.result < 13 ? "warn" : "good"}
+                    goal="13–17"
+                    goalLabel="Normal"
+                    history={hbH}
+                  />
+                  {(latestV?.waist || waistLab) && (
+                    <BiomarkerCard
+                      label="Waist Circumference"
+                      value={latestV?.waist ?? waistLab?.result}
+                      unit="cm"
+                      trend={
+                        waistH.length > 1
+                          ? `${(latestV?.waist ?? waistLab?.result) > waistH[waistH.length - 2]?.result ? "▲" : "▼"} ${Math.abs((latestV?.waist ?? waistLab?.result) - waistH[waistH.length - 2]?.result).toFixed(1)} cm from ${fmtDate(waistH[waistH.length - 2]?.date)}`
+                          : null
+                      }
+                      trendDir={(latestV?.waist ?? waistLab?.result) > 90 ? "warn" : "good"}
+                      goal="<90 cm"
+                      goalLabel="Target"
+                      history={waistH}
+                    />
+                  )}
+                  {latestV?.bmi && (
+                    <BiomarkerCard
+                      label="BMI"
+                      value={latestV.bmi}
+                      unit="kg/m²"
+                      trend={
+                        bmiH.length > 1
+                          ? `${latestV.bmi > bmiH[bmiH.length - 2]?.result ? "▲" : "▼"} ${Math.abs(latestV.bmi - bmiH[bmiH.length - 2]?.result).toFixed(1)} from ${fmtDate(bmiH[bmiH.length - 2]?.date)}`
+                          : latestV.bmi >= 25
+                            ? "→ Overweight"
+                            : latestV.bmi < 18.5
+                              ? "↓ Underweight"
+                              : "✓ Normal"
+                      }
+                      trendDir={latestV.bmi >= 25 || latestV.bmi < 18.5 ? "warn" : "good"}
+                      goal="18.5–24.9"
+                      goalLabel="Normal"
+                      history={bmiH}
+                    />
+                  )}
+                  {latestV?.muscle_mass && (
+                    <BiomarkerCard
+                      label="Muscle Mass"
+                      value={latestV.muscle_mass}
+                      unit="kg"
+                      lowerBetter={false}
+                      trend={
+                        muscleMassH.length > 1
+                          ? `${latestV.muscle_mass < muscleMassH[muscleMassH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(latestV.muscle_mass - muscleMassH[muscleMassH.length - 2]?.result).toFixed(1)} kg from ${fmtDate(muscleMassH[muscleMassH.length - 2]?.date)}`
+                          : null
+                      }
+                      trendDir="good"
+                      goalLabel="Track"
+                      history={muscleMassH}
+                    />
+                  )}
+                </div>
               </div>
-              <div className="bmg">
-          {(latestV?.weight || weightLab) &&
-            (() => {
-              const wVal = latestV?.weight ?? weightLab?.result;
-              const wPrev = prevV?.weight ?? weightH?.[weightH.length - 2]?.result;
-              const wPrevDate = prevV?.recorded_at ?? weightH?.[weightH.length - 2]?.date;
-              return (
-                <BiomarkerCard
-                  label="Weight"
-                  value={wVal}
-                  unit="kg"
-                  trend={
-                    wPrev
-                      ? `${wVal > wPrev ? "↑" : "▼"} ${Math.abs(wVal - wPrev).toFixed(1)} kg since ${fmtDate(wPrevDate)}`
-                      : null
-                  }
-                  trendDir={wPrev && wVal > wPrev ? "warn" : "good"}
-                  goal="<90 kg"
-                  goalLabel="Target"
-                  history={weightH}
-                />
-              );
-            })()}
-          {latestV?.body_fat && (
-            <BiomarkerCard
-              label="Body Fat %"
-              value={latestV.body_fat}
-              unit="%"
-              trend={
-                bodyFatH.length > 1
-                  ? `${latestV.body_fat > bodyFatH[0]?.result ? "▲" : "▼"} From ${bodyFatH[0]?.result}%`
-                  : null
-              }
-              trendDir={latestV.body_fat > 25 ? "warn" : "good"}
-              goal="<25%"
-              goalLabel="Target"
-              history={bodyFatH}
-            />
-          )}
-          <BiomarkerCard
-            label="Haemoglobin"
-            value={hb?.result}
-            unit="g/dL"
-            target={13}
-            lowerBetter={false}
-            trend={
-              hbH.length > 1
-                ? `${hb?.result < hbH[hbH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(hb?.result - hbH[hbH.length - 2]?.result).toFixed(1)} from ${fmtDate(hbH[hbH.length - 2]?.date)}`
-                : hb?.result < 13
-                  ? "→ Borderline low"
-                  : "✓ Normal"
-            }
-            trendDir={hb?.result < 13 ? "warn" : "good"}
-            goal="13–17"
-            goalLabel="Normal"
-            history={hbH}
-          />
-          {(latestV?.waist || waistLab) && (
-            <BiomarkerCard
-              label="Waist Circumference"
-              value={latestV?.waist ?? waistLab?.result}
-              unit="cm"
-              trend={
-                waistH.length > 1
-                  ? `${(latestV?.waist ?? waistLab?.result) > waistH[waistH.length - 2]?.result ? "▲" : "▼"} ${Math.abs((latestV?.waist ?? waistLab?.result) - waistH[waistH.length - 2]?.result).toFixed(1)} cm from ${fmtDate(waistH[waistH.length - 2]?.date)}`
-                  : null
-              }
-              trendDir={(latestV?.waist ?? waistLab?.result) > 90 ? "warn" : "good"}
-              goal="<90 cm"
-              goalLabel="Target"
-              history={waistH}
-            />
-          )}
-          {latestV?.bmi && (
-            <BiomarkerCard
-              label="BMI"
-              value={latestV.bmi}
-              unit="kg/m²"
-              trend={
-                bmiH.length > 1
-                  ? `${latestV.bmi > bmiH[bmiH.length - 2]?.result ? "▲" : "▼"} ${Math.abs(latestV.bmi - bmiH[bmiH.length - 2]?.result).toFixed(1)} from ${fmtDate(bmiH[bmiH.length - 2]?.date)}`
-                  : latestV.bmi >= 25
-                    ? "→ Overweight"
-                    : latestV.bmi < 18.5
-                      ? "↓ Underweight"
-                      : "✓ Normal"
-              }
-              trendDir={latestV.bmi >= 25 || latestV.bmi < 18.5 ? "warn" : "good"}
-              goal="18.5–24.9"
-              goalLabel="Normal"
-              history={bmiH}
-            />
-          )}
-          {latestV?.muscle_mass && (
-            <BiomarkerCard
-              label="Muscle Mass"
-              value={latestV.muscle_mass}
-              unit="kg"
-              lowerBetter={false}
-              trend={
-                muscleMassH.length > 1
-                  ? `${latestV.muscle_mass < muscleMassH[muscleMassH.length - 2]?.result ? "▼" : "▲"} ${Math.abs(latestV.muscle_mass - muscleMassH[muscleMassH.length - 2]?.result).toFixed(1)} kg from ${fmtDate(muscleMassH[muscleMassH.length - 2]?.date)}`
-                  : null
-              }
-              trendDir="good"
-              goalLabel="Track"
-              history={muscleMassH}
-            />
-          )}
-              </div>
-            </div>
-          ),
-        });
+            ),
+          });
 
-        // Final ranking: severity + diagnosis-relevance boost. The boost
-        // only applies when the section has data of its own (score > -1)
-        // so we never resurrect an empty panel just because the patient
-        // carries a related diagnosis. Stable sort preserves the original
-        // clinical order when totals tie.
-        const ranked = sections
-          .map((s, i) => {
-            const boost = s.score > -1 ? diagnosisBoost[s.key] || 0 : 0;
-            return { ...s, total: s.score + boost, idx: i };
-          })
-          .sort((a, b) => b.total - a.total || a.idx - b.idx);
+          // Final ranking: severity + diagnosis-relevance boost. The boost
+          // only applies when the section has data of its own (score > -1)
+          // so we never resurrect an empty panel just because the patient
+          // carries a related diagnosis. Stable sort preserves the original
+          // clinical order when totals tie.
+          const ranked = sections
+            .map((s, i) => {
+              const boost = s.score > -1 ? diagnosisBoost[s.key] || 0 : 0;
+              return { ...s, total: s.score + boost, idx: i };
+            })
+            .sort((a, b) => b.total - a.total || a.idx - b.idx);
 
-        return ranked.map((s) => s.jsx);
+          return ranked.map((s) => s.jsx);
         })()}
 
         {flags.length > 0 && (

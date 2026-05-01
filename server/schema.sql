@@ -180,6 +180,13 @@ CREATE INDEX idx_labs_patient ON lab_results(patient_id);
 CREATE INDEX idx_labs_test ON lab_results(patient_id, test_name);
 CREATE INDEX idx_labs_date ON lab_results(test_date);
 CREATE INDEX idx_lab_canonical ON lab_results(patient_id, canonical_name);
+-- One reading per (patient, canonical test, date). Partial — leaves raw lab
+-- feeds (source='lab') unconstrained in case external feeds legitimately
+-- carry multiple readings per day.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lab_results_per_date
+  ON lab_results (patient_id, canonical_name, test_date)
+  WHERE canonical_name IS NOT NULL
+    AND source IN ('report_extract','manual','opd','healthray','prescription_parsed','lab_healthray','vitals_sheet','scribe','import');
 
 -- ============ DOCUMENTS / REPORTS ============
 -- Uploaded PDFs, images, previous prescriptions
