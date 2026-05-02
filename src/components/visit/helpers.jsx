@@ -181,8 +181,7 @@ export const getLabHist = (labHistory, name) => {
 const fastingVitalsAsFbs = (vitals) =>
   (vitals || [])
     .filter(
-      (v) =>
-        v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting",
+      (v) => v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting",
     )
     .map((v) => ({
       result: parseFloat(v.rbs),

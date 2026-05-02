@@ -221,10 +221,14 @@ router.get("/conversations/:id/messages/:messageId/attachment-url", async (req, 
   try {
     const { conv, error } = await loadAuthorizedConversation(req, req.params.id);
     if (error) return res.status(error.status).json({ error: error.message });
-    if (!genie?.getGenieDb || !genie?.signChatAttachmentUrl) {
+    if (!genie?.dbForConversation || !genie?.signChatAttachmentUrl) {
       return res.status(503).json({ error: "Storage not configured" });
     }
-    const db = genie.getGenieDb();
+    // Route the message lookup to the same DB the conversation lives in
+    // (Genie or Gini). Without this, lookups for Gini-DB messages would
+    // miss because the previous code hardcoded the Genie client.
+    const db = genie.dbForConversation(conv);
+    if (!db) return res.status(503).json({ error: "Storage not configured" });
     const { data, error: rowErr } = await db
       .from("patient_messages")
       .select("attachment_path, conversation_id")
@@ -316,9 +320,11 @@ async function ensureGenieLinkForScribePatient(rawId) {
   const existing = await genie.resolveGeniePatientId?.(patient.id);
   if (existing) return;
 
-  await genie.syncPatientToGenie(patient).catch((e) =>
-    console.warn(`[ensureGenieLink] syncPatientToGenie failed for ${patient.id}: ${e.message}`),
-  );
+  await genie
+    .syncPatientToGenie(patient)
+    .catch((e) =>
+      console.warn(`[ensureGenieLink] syncPatientToGenie failed for ${patient.id}: ${e.message}`),
+    );
 }
 
 /**

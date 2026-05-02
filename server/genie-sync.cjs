@@ -5,6 +5,7 @@
 const { createClient } = require('@supabase/supabase-js');
 
 let genieDb = null;
+let giniDb = null;
 
 function getGenieDb() {
   if (genieDb) return genieDb;
@@ -13,6 +14,45 @@ function getGenieDb() {
   if (!url || !key) return null; // Graceful: no env vars = no sync
   genieDb = createClient(url, key);
   return genieDb;
+}
+
+// Scribe's own Postgres exposed via Supabase (vuukipgdegewpwucdgxa). This
+// is where Gini-program patients chat — non-Gini patients chat on the
+// main Genie DB (purzqfmfycfowyxfaumc). The scribe inbox aggregates
+// conversations from BOTH databases so a single inbox view shows every
+// patient's threads regardless of which DB hosts them.
+function getGiniDb() {
+  if (giniDb) return giniDb;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) return null;
+  giniDb = createClient(url, key);
+  return giniDb;
+}
+
+// Returns all configured chat DBs in stable order, each tagged with a
+// `name` so callers can route follow-up operations (getById, send, mark
+// read) back to the same DB the conversation came from.
+function getChatDbs() {
+  const dbs = [];
+  const genie = getGenieDb();
+  if (genie) dbs.push({ name: 'genie', db: genie });
+  const gini = getGiniDb();
+  if (gini) dbs.push({ name: 'gini', db: gini });
+  return dbs;
+}
+
+// Resolve which chat DB a conversation lives in. Conversations returned
+// from getConversationById carry `_source` — use that fast-path; otherwise
+// probe both DBs.
+function dbForConversation(conv) {
+  const dbs = getChatDbs();
+  if (!dbs.length) return null;
+  if (conv?._source) {
+    const found = dbs.find((d) => d.name === conv._source);
+    if (found) return found.db;
+  }
+  return getGenieDb();
 }
 
 // ─── Retry helpers ────────────────────────────────────────────────────────────
@@ -1905,19 +1945,29 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
  * get distinct threads.
  */
 async function ensureConversation({ patientId, kind, doctorId = null, doctorName = null } = {}) {
-  const db = getGenieDb();
-  if (!db) return null;
   if (!patientId || !['doctor', 'lab', 'reception'].includes(kind)) {
     throw new Error('ensureConversation: patientId + valid kind required');
   }
-  // conversations.patient_id is TEXT but holds the genie UUID-as-text (see
-  // 2026-04-23_conversations.sql backfill). Resolve scribe-int callers up
-  // front so /patients/:scribeIntId/conversations/ensure works for the
-  // reception + lab inboxes started from /visit / /opd.
-  const pid = await resolveAnyToGenieUuid(patientId);
-  if (!pid) {
-    console.error('[conv ensure]', `no genie patient for id=${patientId}`);
+  // Route by patient ID format: UUID → Genie DB (standalone Genie patients);
+  // numeric / non-UUID → Gini DB (scribe-int Gini-program patients). The
+  // patient app's chat client uses the same routing so both sides agree
+  // on which DB hosts the conversation.
+  const sId = String(patientId).trim();
+  const isUuid = UUID_RX.test(sId);
+  const db = isUuid ? getGenieDb() : getGiniDb();
+  if (!db) {
+    console.error('[conv ensure] no DB for patient', sId);
     return null;
+  }
+  // For Genie DB we historically stored patient_id as the genie UUID. For
+  // Gini DB, store the raw scribe int as text. Resolve only when writing
+  // to Genie DB and the input wasn't already a UUID.
+  let pid = sId;
+  if (isUuid) {
+    pid = sId;
+  } else if (db === getGenieDb()) {
+    const resolved = await resolveAnyToGenieUuid(patientId);
+    if (resolved) pid = resolved;
   }
   const did = doctorId != null ? String(doctorId) : null;
 
@@ -1999,16 +2049,47 @@ async function listConversationsForDoctor(doctorId) {
  * across all patients; the scribe UI renders one row per patient.
  */
 async function listConversationsForTeam(kind) {
-  const db = getGenieDb();
-  if (!db || !['lab', 'reception'].includes(kind)) return [];
-  const { data, error } = await db
-    .from('conversations')
-    .select('*')
-    .eq('kind', kind)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(500);
-  if (error) { console.error('[conv listForTeam]', error.message); return []; }
-  return attachPatientDetails(db, data || []);
+  if (!['lab', 'reception'].includes(kind)) return [];
+  const dbs = getChatDbs();
+  if (!dbs.length) return [];
+
+  // Query both DBs in parallel; tag each row with its source so the inbox
+  // can route follow-up operations (open thread, reply, mark read) back
+  // to the right DB. Failures on one DB don't poison the other.
+  const results = await Promise.all(
+    dbs.map(async ({ name, db }) => {
+      try {
+        const { data, error } = await db
+          .from('conversations')
+          .select('*')
+          .eq('kind', kind)
+          .order('last_message_at', { ascending: false, nullsFirst: false })
+          .limit(500);
+        if (error) {
+          console.error(`[conv listForTeam:${name}]`, error.message);
+          return [];
+        }
+        const tagged = (data || []).map((c) => ({ ...c, _source: name }));
+        return await attachPatientDetails(db, tagged);
+      } catch (e) {
+        console.error(`[conv listForTeam:${name}]`, e?.message || e);
+        return [];
+      }
+    }),
+  );
+
+  const merged = [].concat(...results);
+  // Sort the merged list by last_message_at desc (nulls last) so the
+  // freshest conversation across both DBs sits at the top.
+  merged.sort((a, b) => {
+    const at = a.last_message_at || '';
+    const bt = b.last_message_at || '';
+    if (!at && !bt) return 0;
+    if (!at) return 1;
+    if (!bt) return -1;
+    return bt.localeCompare(at);
+  });
+  return merged;
 }
 
 /**
@@ -2031,39 +2112,86 @@ async function searchGeniePatients(query, { limit = 20 } = {}) {
 
 /**
  * List all conversations for a patient (care-team view used by patient app).
+ * Queries BOTH the Genie DB and the Gini DB and merges. Each row is tagged
+ * with `_source` so the patient app can route follow-up sends back to the
+ * correct DB. Without this tag the patient app could pick a conversation
+ * from one DB and try to insert a message into the other, hitting an FK
+ * violation on `patient_messages_conversation_id_fkey`.
  */
 async function listConversationsForPatient(patientId) {
-  const db = getGenieDb();
-  if (!db) return [];
-  const uuid = await resolveAnyToGenieUuid(patientId);
-  if (!uuid) return [];
-  const { data, error } = await db
-    .from('conversations')
-    .select('*')
-    .eq('patient_id', uuid)
-    .order('kind', { ascending: true });
-  if (error) { console.error('[conv listForPatient]', error.message); return []; }
-  return data || [];
+  if (patientId == null || patientId === '') return [];
+  const dbs = getChatDbs();
+  if (!dbs.length) return [];
+
+  // Build the candidate ids the conversations.patient_id column might hold:
+  //  - The original input as text (covers scribe-int patients on Gini DB).
+  //  - The genie UUID (covers Genie-side rows where patient_id is the UUID).
+  const idSet = new Set([String(patientId)]);
+  try {
+    const uuid = await resolveAnyToGenieUuid(patientId);
+    if (uuid) idSet.add(String(uuid));
+  } catch {
+    /* non-fatal */
+  }
+  const ids = [...idSet];
+
+  const results = await Promise.all(
+    dbs.map(async ({ name, db }) => {
+      try {
+        const { data, error } = await db
+          .from('conversations')
+          .select('*')
+          .in('patient_id', ids)
+          .order('kind', { ascending: true });
+        if (error) {
+          console.error(`[conv listForPatient:${name}]`, error.message);
+          return [];
+        }
+        return (data || []).map((c) => ({ ...c, _source: name }));
+      } catch (e) {
+        console.error(`[conv listForPatient:${name}]`, e?.message || e);
+        return [];
+      }
+    }),
+  );
+  return [].concat(...results);
 }
 
 async function getConversationById(conversationId) {
-  const db = getGenieDb();
-  if (!db || !conversationId) return null;
-  const { data, error } = await db
-    .from('conversations')
-    .select('*')
-    .eq('id', conversationId)
-    .maybeSingle();
-  if (error) { console.error('[conv getById]', error.message); return null; }
-  return data || null;
+  if (!conversationId) return null;
+  const dbs = getChatDbs();
+  if (!dbs.length) return null;
+  // Probe each DB in order; first match wins. Tag with source so callers
+  // (sendMessage, getMessages, markRead) can route to the same DB.
+  for (const { name, db } of dbs) {
+    try {
+      const { data, error } = await db
+        .from('conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (error) {
+        console.error(`[conv getById:${name}]`, error.message);
+        continue;
+      }
+      if (data) return { ...data, _source: name };
+    } catch (e) {
+      console.error(`[conv getById:${name}]`, e?.message || e);
+    }
+  }
+  return null;
 }
 
 /**
  * Paginated messages for a single conversation (oldest → newest within page).
  */
 async function getConversationMessages(conversationId, { limit = 30, before = null } = {}) {
-  const db = getGenieDb();
-  if (!db || !conversationId) return { data: [], nextCursor: null, hasMore: false };
+  if (!conversationId) return { data: [], nextCursor: null, hasMore: false };
+  // Resolve which DB hosts the conversation, then query that DB's
+  // patient_messages. Falls back to the genie DB if the lookup fails.
+  const conv = await getConversationById(conversationId);
+  const db = dbForConversation(conv) || getGenieDb();
+  if (!db) return { data: [], nextCursor: null, hasMore: false };
 
   let q = db
     .from('patient_messages')
@@ -2109,14 +2237,16 @@ async function sendMessageToConversation({
   attachmentMime = null,
   attachmentName = null,
 } = {}) {
-  const db = getGenieDb();
-  if (!db || !conversationId) return null;
+  if (!conversationId) return null;
   // Either text body or attachment must be present.
   const hasText = typeof message === 'string' && message.trim().length > 0;
   if (!hasText && !attachmentPath) return null;
 
   const conv = await getConversationById(conversationId);
   if (!conv) return null;
+  // Insert into the same DB the conversation lives in so the FK resolves.
+  const db = dbForConversation(conv);
+  if (!db) return null;
 
   const payload = {
     patient_id: conv.patient_id,
@@ -2247,8 +2377,10 @@ async function signChatAttachmentUrl(storagePath, expiresIn = 300) {
 }
 
 async function markConversationRead({ conversationId, side } = {}) {
-  const db = getGenieDb();
-  if (!db || !conversationId || !['team', 'patient'].includes(side)) return false;
+  if (!conversationId || !['team', 'patient'].includes(side)) return false;
+  const conv = await getConversationById(conversationId);
+  const db = dbForConversation(conv) || getGenieDb();
+  if (!db) return false;
 
   const targetDirection = side === 'team' ? 'outbound' : 'inbound';
   const updateCols = side === 'team'
@@ -2338,4 +2470,6 @@ module.exports = {
   uploadChatAttachment,
   signChatAttachmentUrl,
   getGenieDb,
+  getGiniDb,
+  dbForConversation,
 };
