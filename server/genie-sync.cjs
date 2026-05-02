@@ -213,6 +213,10 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_start_date: med.started_date || med.start_date || visit.visit_date || null,
         p_expiry_date: med.expiry_date || null,
         p_for_conditions: med.for_diagnosis || med.for_conditions || null,
+        // Meds attached to a fresh visit payload are by definition the latest
+        // prescription — bucket them as 'current' unless scribe already
+        // stamped a value (e.g. older rows being replayed).
+        p_visit_status: med.visit_status || 'current',
       }, { step: 'medication', extra: { name: med.name } });
     }
 
@@ -451,7 +455,7 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
     const { rows } = await localDb.query(
       `SELECT id, name, dose, frequency, timing, clinical_note, notes, is_active,
               drug_class, med_group, route, pharmacy_match, started_date,
-              for_diagnosis
+              for_diagnosis, visit_status
          FROM medications
         WHERE patient_id = $1
         ORDER BY updated_at DESC
@@ -480,6 +484,7 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
               p_start_date: med.started_date || null,
               p_expiry_date: null,
               p_for_conditions: med.for_diagnosis || null,
+              p_visit_status: med.visit_status || null,
             }),
           { label: `gini_sync_medication(${med.name})` },
         );
@@ -1099,7 +1104,11 @@ async function getMessagesFromGenie(giniPatientId = null, senderRole = null) {
     .limit(200);
 
   if (giniPatientId) {
-    query = query.eq('patient_id', String(giniPatientId));
+    // patient_messages.patient_id is UUID — coerce a scribe int into the
+    // genie UUID before filtering, otherwise PostgREST throws 22P02.
+    const uuid = await resolveAnyToGenieUuid(giniPatientId);
+    if (!uuid) return [];
+    query = query.eq('patient_id', uuid);
   }
   if (senderRole === 'doctor') {
     // Doctor inbox: include legacy untagged rows so pre-tagging messages
@@ -1122,8 +1131,13 @@ async function sendReplyToGenie(patientId, message, senderName, senderRole) {
   const db = getGenieDb();
   if (!db) return null;
 
+  const uuid = await resolveAnyToGenieUuid(patientId);
+  if (!uuid) {
+    console.error('[Genie Reply] No genie patient for id:', patientId);
+    return null;
+  }
   const payload = {
-    patient_id: String(patientId),
+    patient_id: uuid,
     direction: 'inbound',
     message,
     sender_name: senderName || 'Dr. Bhansali',
@@ -1168,6 +1182,15 @@ async function getThreadFromGenie(
 ) {
   const db = getGenieDb();
   if (!db) return { data: [], nextCursor: null, hasMore: false };
+
+  // patient_messages.patient_id is UUID. The scribe UI may pass either a
+  // scribe int (e.g. "16709") or the genie UUID — normalize once so we
+  // never hit Postgres 22P02 "invalid input syntax for type uuid".
+  const uuid = await resolveAnyToGenieUuid(patientId);
+  if (!uuid) {
+    return limit ? { data: [], nextCursor: null, hasMore: false } : [];
+  }
+  patientId = uuid;
 
   // Helper: apply role + doctor filters to a Supabase query builder.
   const applyRoleFilters = (q) => {
@@ -1281,6 +1304,20 @@ async function resolveGeniePatientId(giniPatientId) {
     console.error("[Genie Resolve Patient] Exception:", err.message || err);
     return null;
   }
+}
+
+// Coerce any patient identifier the scribe side might pass — scribe int
+// (e.g. "16709"), genie UUID, or already-resolved UUID — into the genie
+// `patients.id` UUID. Required because `patient_messages.patient_id` is
+// UUID-typed: passing a scribe int directly throws Postgres 22P02
+// "invalid input syntax for type uuid". Returns null if no mapping
+// exists (patient never synced to genie).
+const UUID_RX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+async function resolveAnyToGenieUuid(input) {
+  if (input == null || input === "") return null;
+  const s = String(input).trim();
+  if (UUID_RX.test(s)) return s;
+  return await resolveGeniePatientId(s);
 }
 
 
@@ -1407,14 +1444,20 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
     // row cannot nuke the rest of the batch.
     const safeUpsert = async (bucket, sql, params) => {
       try {
-        await withRetry(() => localDb.query(sql, params), { label: `upsert:${bucket}` });
-        return true;
+        const r = await withRetry(() => localDb.query(sql, params), { label: `upsert:${bucket}` });
+        return { ok: true, rowCount: r?.rowCount || 0 };
       } catch (err) {
         upsertFailures[bucket] = (upsertFailures[bucket] || 0) + 1;
         console.error(`[Genie Sync][upsert:${bucket}] Failed: ${err.message}`);
-        return false;
+        return { ok: false, rowCount: 0 };
       }
     };
+
+    // Track whether any patient-app lab was inserted or materially updated
+    // during this sync. If so, the doctor's cached visit summary is stale
+    // (it was generated against the previous lab values) and must be
+    // cleared so the next /summary call regenerates against fresh labs.
+    let labsChangedRows = 0;
 
 
     // -------------------------
@@ -1474,7 +1517,7 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
         lab.status === 'high' ? 'HIGH' :
         lab.status === 'low' ? 'LOW' : null;
       const canonical = getCanonical(lab.test_name) || lab.test_name;
-      await safeUpsert('labs', `
+      const labRes = await safeUpsert('labs', `
         INSERT INTO lab_results (
           patient_id, genie_id, test_date, test_name, canonical_name,
           result, unit, ref_range, flag, panel_name,
@@ -1492,6 +1535,11 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
           ref_range      = EXCLUDED.ref_range,
           flag           = EXCLUDED.flag,
           panel_name     = EXCLUDED.panel_name
+        WHERE lab_results.result    IS DISTINCT FROM EXCLUDED.result
+           OR lab_results.test_date IS DISTINCT FROM EXCLUDED.test_date
+           OR lab_results.unit      IS DISTINCT FROM EXCLUDED.unit
+           OR lab_results.flag      IS DISTINCT FROM EXCLUDED.flag
+           OR lab_results.test_name IS DISTINCT FROM EXCLUDED.test_name
       `, [
         scribePatientId,
         lab.id,
@@ -1506,6 +1554,34 @@ async function syncPatientLogsFromGenie(scribePatientId, localDb) {
         'patient_app',
         lab.created_at || new Date().toISOString(),
       ]);
+      labsChangedRows += labRes?.rowCount || 0;
+    }
+
+    // If a patient-app lab actually changed (insert or value/date/unit/flag
+    // diff), wipe the cached pre/post-visit AI summary on the patient's most
+    // recent appointment so the next /summary call regenerates against the
+    // fresh lab values. Past appointments stay frozen — that snapshot is
+    // what was true at the time of that visit.
+    if (labsChangedRows > 0) {
+      try {
+        await localDb.query(
+          `UPDATE appointments
+              SET ai_summary = NULL,
+                  ai_summary_generated_at = NULL,
+                  post_visit_summary = NULL,
+                  post_visit_summary_generated_at = NULL
+            WHERE id = (
+              SELECT id FROM appointments
+               WHERE patient_id = $1
+               ORDER BY appointment_date DESC NULLS LAST, id DESC
+               LIMIT 1
+            )
+              AND (ai_summary IS NOT NULL OR post_visit_summary IS NOT NULL)`,
+          [scribePatientId],
+        );
+      } catch (err) {
+        console.error('[Genie Sync][labs] summary invalidate failed:', err?.message || err);
+      }
     }
 
 
@@ -1834,7 +1910,15 @@ async function ensureConversation({ patientId, kind, doctorId = null, doctorName
   if (!patientId || !['doctor', 'lab', 'reception'].includes(kind)) {
     throw new Error('ensureConversation: patientId + valid kind required');
   }
-  const pid = String(patientId);
+  // conversations.patient_id is TEXT but holds the genie UUID-as-text (see
+  // 2026-04-23_conversations.sql backfill). Resolve scribe-int callers up
+  // front so /patients/:scribeIntId/conversations/ensure works for the
+  // reception + lab inboxes started from /visit / /opd.
+  const pid = await resolveAnyToGenieUuid(patientId);
+  if (!pid) {
+    console.error('[conv ensure]', `no genie patient for id=${patientId}`);
+    return null;
+  }
   const did = doctorId != null ? String(doctorId) : null;
 
   // 1. Try to read existing.
@@ -1951,10 +2035,12 @@ async function searchGeniePatients(query, { limit = 20 } = {}) {
 async function listConversationsForPatient(patientId) {
   const db = getGenieDb();
   if (!db) return [];
+  const uuid = await resolveAnyToGenieUuid(patientId);
+  if (!uuid) return [];
   const { data, error } = await db
     .from('conversations')
     .select('*')
-    .eq('patient_id', String(patientId))
+    .eq('patient_id', uuid)
     .order('kind', { ascending: true });
   if (error) { console.error('[conv listForPatient]', error.message); return []; }
   return data || [];

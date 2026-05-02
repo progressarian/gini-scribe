@@ -12,6 +12,7 @@ import {
   canonicalMedKey,
   routeForForm,
 } from "../services/medication/normalize.js";
+import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
 
 // Invalidate summary cache after any successful mutation on /appointments/:id/*.
 // (List & status reads aren't matched here.) Skip the lightweight status flip,
@@ -1535,6 +1536,11 @@ router.post("/appointments/:id/compliance", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    if (appt.patient_id) {
+      await markMedicationVisitStatus(appt.patient_id).catch((e) =>
+        console.warn("[OPD] markMedicationVisitStatus failed:", e.message),
+      );
+    }
     res.json(rows[0]);
   } catch (e) {
     await client.query("ROLLBACK");

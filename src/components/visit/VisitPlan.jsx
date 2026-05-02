@@ -962,10 +962,24 @@ const VisitPlan = memo(function VisitPlan({
             <div className="sum-row">
               <span className="sum-k">Medications</span>
               <span className="sum-v">
-                {activeMeds
-                  .filter((m) => !m.parent_medication_id)
-                  .map((m) => m.name)
-                  .join(" · ") || "None"}
+                {(() => {
+                  const dayKey = (d) => (d ? String(d).slice(0, 10) : null);
+                  const lpDates = activeMeds
+                    .map((m) => dayKey(m.last_prescribed_date))
+                    .filter(Boolean);
+                  const latest = lpDates.length ? lpDates.reduce((a, b) => (a > b ? a : b)) : null;
+                  const currentVisitMeds = latest
+                    ? activeMeds.filter(
+                        (m) => !m.last_prescribed_date || dayKey(m.last_prescribed_date) === latest,
+                      )
+                    : activeMeds;
+                  return (
+                    currentVisitMeds
+                      .filter((m) => !m.parent_medication_id)
+                      .map((m) => m.name)
+                      .join(" · ") || "None"
+                  );
+                })()}
               </span>
             </div>
             <div className="sum-acts">

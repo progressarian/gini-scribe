@@ -174,6 +174,56 @@ export const getLabHist = (labHistory, name) => {
   return h ? h.slice().reverse() : [];
 };
 
+// ── Patient-app fasting finger-stick readings as lab-shaped rows ──
+// Why: the FBS trend card and the sidebar must agree on "latest FBS". Both
+// merge doctor-entered lab_results with patient_vitals_log entries where
+// meal_type='Fasting'. Centralised here so the two views can't drift.
+const fastingVitalsAsFbs = (vitals) =>
+  (vitals || [])
+    .filter(
+      (v) =>
+        v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting",
+    )
+    .map((v) => ({
+      result: parseFloat(v.rbs),
+      date: v.recorded_at || v.recorded_date,
+      unit: "mg/dL",
+      source: v.source || "patient_app",
+    }))
+    .filter((r) => Number.isFinite(r.result) && r.date);
+
+const tsOf = (r) => {
+  const d = r?.date || r?.test_date || r?.recorded_at || r?.recorded_date;
+  const t = d ? new Date(d).getTime() : 0;
+  return Number.isFinite(t) ? t : 0;
+};
+
+// ── Merged FBS history (oldest-first): lab_results + fasting finger-sticks ──
+export const getMergedFbsHist = (labHistory, vitals) => {
+  const labH = getLabHist(labHistory, "FBS");
+  return [...labH, ...fastingVitalsAsFbs(vitals)].sort((a, b) => tsOf(a) - tsOf(b));
+};
+
+// ── Latest FBS across both streams. Falls back to labResults if no history. ──
+export const getLatestFbsMerged = (labResults, vitals) => {
+  const fastings = fastingVitalsAsFbs(vitals);
+  const labFbs = findLab(labResults || [], "FBS");
+  const candidates = [...fastings];
+  if (labFbs) {
+    candidates.push({
+      result: labFbs.result,
+      result_text: labFbs.result_text,
+      date: labFbs.test_date || labFbs.date,
+      unit: labFbs.unit || "mg/dL",
+      source: "lab",
+      _lab: labFbs,
+    });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => tsOf(a) - tsOf(b));
+  return candidates[candidates.length - 1];
+};
+
 // ── Get HTN status from latest BP reading ──
 export const getHtnStatusFromBP = (vitals) => {
   if (!vitals?.length) return null;

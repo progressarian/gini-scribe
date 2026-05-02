@@ -17,6 +17,7 @@ import {
   savePrescriptionForVisit,
   buildVisitPayloadFromDb,
 } from "../services/prescriptionAutoSave.js";
+import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -452,6 +453,9 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
     await client.query("COMMIT");
     console.log(`✅ Saved: patient=${patientId} consultation=${consultationId}`);
     invalidatePatientSummaries(patientId).catch(() => {});
+    await markMedicationVisitStatus(patientId).catch((e) =>
+      console.warn("[Consultations] markMedicationVisitStatus failed:", e.message),
+    );
     res.json({ success: true, patient_id: patientId, consultation_id: consultationId });
 
     // Non-blocking side-effects fired in parallel so one slow call (Genie API)
@@ -655,6 +659,9 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     await client.query("COMMIT");
     console.log(`✅ History saved: patient=${patientId} consultation=${cid}`);
     invalidatePatientSummaries(patientId).catch(() => {});
+    await markMedicationVisitStatus(patientId).catch((e) =>
+      console.warn("[Consultations] markMedicationVisitStatus failed:", e.message),
+    );
     res.json({ success: true, consultation_id: cid });
   } catch (e) {
     await client.query("ROLLBACK");

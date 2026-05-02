@@ -1,5 +1,12 @@
 import { memo, useState, useCallback } from "react";
-import { MED_COLORS, DX_STATUS_STYLE, DX_STATUS_DEFAULT, findLab, fmtLabVal } from "./helpers";
+import {
+  MED_COLORS,
+  DX_STATUS_STYLE,
+  DX_STATUS_DEFAULT,
+  findLab,
+  fmtLabVal,
+  getLatestFbsMerged,
+} from "./helpers";
 import { autoDetectGroup, getGroupLabel } from "./VisitMedications";
 import { cleanNote } from "../../utils/cleanNote";
 
@@ -56,6 +63,7 @@ const VisitSidebar = memo(function VisitSidebar({
   activeMeds,
   flags,
   labResults = [],
+  vitals = [],
   onSaveVitals,
   onSaveLab,
 }) {
@@ -370,7 +378,11 @@ const VisitSidebar = memo(function VisitSidebar({
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: labEditing ? 6 : 4 }}>
             {KEY_BIOMARKERS.map(({ name, unit, flag }) => {
-              const lab = findLab(labResults, name);
+              // FBS must reflect the same merged stream (lab_results +
+              // patient fasting finger-sticks) used by the trend card, so the
+              // sidebar and the trend never disagree on "latest FBS".
+              const lab =
+                name === "FBS" ? getLatestFbsMerged(labResults, vitals) : findLab(labResults, name);
               if (!labEditing && !lab) return null;
               const val = parseFloat(lab?.result);
               const status = lab && !isNaN(val) ? flag(val) : "ok";

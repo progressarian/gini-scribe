@@ -1043,6 +1043,7 @@ export default function VisitPage() {
           activeMeds={latestVisitMeds}
           flags={flags}
           labResults={labResults}
+          vitals={vitals}
           onSaveVitals={(data) => mutations.updateVitals(data, latestV)}
           onSaveLab={(data) => mutations.addLab(data)}
         />

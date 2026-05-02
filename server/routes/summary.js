@@ -55,7 +55,9 @@ Voice & style for the narrative:
 - First-person plural resident voice: "we", "her last labs showed...", "she is currently on...".
 - Plain narrative prose only — no headings, no bullets, no markdown, no emojis, no section labels, no colon-lists.
 - Present tense for current status; past tense for what has happened.
-- Use only currently active medications by name. NEVER name stopped, previous, or discontinued drugs in the narrative — not in the current-meds sentence, not as a parenthetical, not as a list, not anywhere. Stopped meds may only appear as anonymous class-level reasoning ("antihypertensive therapy was held"), and only when needed to explain a specific biomarker shift. If you find yourself listing more than zero stopped drug names in the narrative, you have made an error — rewrite it.
+- Use only CURRENT-VISIT active medications by name (the "Active medications — CURRENT VISIT" list in the input). NEVER name stopped, discontinued, or previous-visit drugs in the narrative — not in the current-meds sentence, not as a parenthetical, not as a list, not anywhere.
+- "Previous-visit medications" in the input are drugs still flagged active in the chart but NOT re-prescribed at today's visit. They are CONTEXT ONLY — do NOT include them in the "currently on …" sentence, do NOT merge them with the current-visit list, do NOT enumerate them. If the current-visit list is non-empty, the "currently on …" sentence must contain ONLY those drugs and nothing from the previous-visit bucket. If the current-visit list is empty, say "no medications were prescribed at today's visit" and STOP — do NOT fall back to listing previous-visit drugs.
+- Stopped meds may only appear as anonymous class-level reasoning ("antihypertensive therapy was held"), and only when needed to explain a specific biomarker shift. If you find yourself listing more than zero stopped or previous-visit drug names in the narrative, you have made an error — rewrite it.
 - Use exact numbers, units, drug names, and doses from the input. Do not invent data.
 
 DIAGNOSIS FORMAT STANDARD (applies to EVERY diagnosis you mention — primary, comorbid, complication, or incidental — in narrative AND alerts):
@@ -301,7 +303,15 @@ async function _generateAiBriefInner(
     ``,
     fmtDiagnoses(diagnoses),
     ``,
-    fmtMedList(ctx.activeMeds || [], "Active medications"),
+    fmtMedList(
+      ctx.activeMeds || [],
+      "Active medications — CURRENT VISIT (re-prescribed today; THESE are the only drugs the patient is 'currently on' — name these in the current-meds sentence)",
+    ),
+    ``,
+    fmtMedList(
+      ctx.prevVisitMeds || [],
+      "Previous-visit medications (still flagged active in the chart but NOT re-prescribed at today's visit — context only; do NOT name these in the 'currently on …' sentence, do NOT list them as active drugs, do NOT mix them with the current-visit list)",
+    ),
     ``,
     fmtMedList(ctx.stoppedMeds || [], "Recently stopped (last 60 days)"),
     ``,
@@ -594,9 +604,16 @@ router.get("/patients/:id/summary", async (req, res) => {
           [pid],
         ),
 
-        // Active medications (for drug-interaction and protocol-gap rules)
+        // Active medications (for drug-interaction and protocol-gap rules).
+        // visit_status = 'current' = re-prescribed at the most recent visit;
+        // 'previous' = still active but carried over from an earlier visit.
+        // The AI must only name current-visit meds in its "currently on …"
+        // sentence — previous-visit meds are context only.
         pool.query(
-          `SELECT id, name, dose, frequency FROM medications WHERE patient_id=$1 AND is_active=true`,
+          `SELECT id, name, dose, frequency, timing, started_date,
+                  last_prescribed_date, visit_status
+             FROM medications
+            WHERE patient_id=$1 AND is_active=true`,
           [pid],
         ),
 
@@ -624,11 +641,19 @@ router.get("/patients/:id/summary", async (req, res) => {
       symptoms: apptCompliance.symptoms || [],
     };
 
+    // ── 4b. Split active meds into current-visit vs previous-visit buckets
+    // off the persisted `visit_status` column (stamped by scribe write paths
+    // — see services/medication/visitStatus.js). Previous-visit meds must
+    // NOT be named as "currently on" in the AI narrative. ──
+    const allActiveMeds = activeMedsR.rows;
+    const currentVisitMeds = allActiveMeds.filter((m) => m.visit_status !== "previous");
+    const prevVisitMeds = allActiveMeds.filter((m) => m.visit_status === "previous");
+
     // ── 5. Run rule engine ──
     const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
     const rules = runSummaryRules({
       diagnoses: sortedDiagnoses,
-      activeMeds: activeMedsR.rows,
+      activeMeds: allActiveMeds,
       stoppedMeds: stoppedMedsR.rows,
       labResults: rawLabs,
       labHistory,
@@ -689,8 +714,9 @@ router.get("/patients/:id/summary", async (req, res) => {
       monthsWithGini,
       daysWithGini,
       carePhase,
-      activeMedsCount: activeMedsR.rows.length,
-      activeMeds: activeMedsR.rows,
+      activeMedsCount: currentVisitMeds.length,
+      activeMeds: currentVisitMeds,
+      prevVisitMeds,
       stoppedMeds: stoppedMedsR.rows,
       vitals: mergedVitals,
       prep,

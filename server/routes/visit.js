@@ -33,6 +33,7 @@ import {
   canonicalMedKey,
   routeForForm,
 } from "../services/medication/normalize.js";
+import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -1216,6 +1217,9 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         visitAnchor,
       ],
     );
+    await markMedicationVisitStatus(pid).catch((e) =>
+      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
+    );
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
@@ -1366,6 +1370,9 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       );
     }
 
+    await markMedicationVisitStatus(pid).catch((e) =>
+      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
+    );
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
@@ -1476,6 +1483,9 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
     await client.query("COMMIT");
     client.release();
 
+    await markMedicationVisitStatus(pid).catch((e) =>
+      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
+    );
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
@@ -1616,6 +1626,9 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
     await client.query("COMMIT");
     client.release();
 
+    await markMedicationVisitStatus(pid).catch((e) =>
+      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
+    );
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
@@ -1676,6 +1689,9 @@ router.delete("/visit/:patientId/medication/:id", async (req, res) => {
     );
     if (!r.rows.length) return res.status(404).json({ error: "Medication not found" });
 
+    await markMedicationVisitStatus(pid).catch((e) =>
+      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
+    );
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );

@@ -471,26 +471,18 @@ const VisitMedications = memo(function VisitMedications({
   const uniqueActive = useMemo(() => dedup(activeMeds), [activeMeds]);
   const uniqueStopped = useMemo(() => dedup(stoppedMeds), [stoppedMeds]);
 
-  // Split: last visit meds (active) vs previous visit meds.
-  // Source of truth is `last_prescribed_date` — set on the medications row
-  // every time HealthRay re-prescribes it (see syncMedications). Comparing
-  // started_date / prescribed_date is wrong because those are pinned to the
-  // earliest start, so a long-running drug re-prescribed today still carries
-  // its original 2025 start date and would be mis-bucketed as "previous".
-  const dayKey = (d) => (d ? String(d).slice(0, 10) : null);
-  const { lastVisitMeds, prevVisitMeds } = useMemo(() => {
-    const dates = uniqueActive.map((m) => dayKey(m.last_prescribed_date)).filter(Boolean);
-    const latestDate = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
-    if (!latestDate) return { lastVisitMeds: uniqueActive, prevVisitMeds: [] };
-    return {
-      lastVisitMeds: uniqueActive.filter(
-        (m) => !m.last_prescribed_date || dayKey(m.last_prescribed_date) === latestDate,
-      ),
-      prevVisitMeds: uniqueActive.filter(
-        (m) => m.last_prescribed_date && dayKey(m.last_prescribed_date) !== latestDate,
-      ),
-    };
-  }, [uniqueActive]);
+  // Split: last visit meds (active) vs previous visit meds. Source of truth
+  // is the `visit_status` column stamped by scribe on every med-write path
+  // (see services/medication/visitStatus.js). Rows missing the key (legacy
+  // / mid-migration) default to 'current' so nothing disappears from the UI.
+  const lastVisitMeds = useMemo(
+    () => uniqueActive.filter((m) => m.visit_status !== "previous"),
+    [uniqueActive],
+  );
+  const prevVisitMeds = useMemo(
+    () => uniqueActive.filter((m) => m.visit_status === "previous"),
+    [uniqueActive],
+  );
 
   // Build a parent → children map for support / conditional medications.
   // Children are still rendered, but indented under their parent rather than

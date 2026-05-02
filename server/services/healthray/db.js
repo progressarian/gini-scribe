@@ -8,6 +8,7 @@ import { normalizeTestName } from "../../utils/labNormalization.js";
 import { parseLabDate } from "../../utils/labDate.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
+import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 
 // Build the visit payload from current DB state and persist a prescription
@@ -1256,6 +1257,16 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   // Each med with `support_for: "<parent brand>"` becomes a child row
   // pointing at the parent's id, with `support_condition` set.
   await linkSupportMedications(patientId, meds);
+
+  // Pass 5: stamp visit_status on every active row so consumers can filter
+  // on the column instead of re-deriving "current vs previous visit" from
+  // last_prescribed_date at render time.
+  await markMedicationVisitStatus(patientId).catch((e) =>
+    error(
+      "syncMedications",
+      `markMedicationVisitStatus failed for patient=${patientId}: ${e.message}`,
+    ),
+  );
 }
 
 // ── Resolve `support_for` hints into real parent_medication_id links ────────

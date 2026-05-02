@@ -46,7 +46,18 @@ async function loadAuthorizedConversation(req, conversationId) {
 // Look up the scribe-side patient.id for a given Supabase (Genie) patient UUID.
 // The linkage lives on the Supabase patients table via `gini_patient_id`
 // (which stores the scribe INT id). Reverse-maps UUID → scribe INT id.
+//
+// Tolerates being called with a scribe int directly: if the input doesn't
+// look like a UUID we treat it as already-scribe-int and short-circuit so a
+// stray scribe id from the UI doesn't 22P02 against the UUID column.
+const UUID_RX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 async function resolveScribePatientIdFromGenieUuid(genieUuid) {
+  if (genieUuid == null || genieUuid === "") return null;
+  const s = String(genieUuid).trim();
+  if (!UUID_RX.test(s)) {
+    const id = parseInt(s, 10);
+    return Number.isFinite(id) ? id : null;
+  }
   if (!genie?.getGenieDb) return null;
   const db = typeof genie.getGenieDb === "function" ? genie.getGenieDb() : null;
   if (!db) return null;
@@ -54,7 +65,7 @@ async function resolveScribePatientIdFromGenieUuid(genieUuid) {
     const { data, error } = await db
       .from("patients")
       .select("gini_patient_id")
-      .eq("id", String(genieUuid))
+      .eq("id", s)
       .maybeSingle();
     if (error || !data) return null;
     const id = parseInt(data.gini_patient_id, 10);
@@ -267,8 +278,54 @@ router.get("/genie-patients/search", async (req, res) => {
   }
 });
 
+// If the caller passed a scribe-int id for a patient that has no genie row
+// yet (non-gini patient — scribe-only history, never synced to Supabase),
+// look the patient up in scribe Postgres and push a minimal profile to
+// genie via gini_link_patient. After this, resolveAnyToGenieUuid in
+// genie-sync.cjs returns a UUID and chat ensure / message routes work the
+// same as for gini patients. No-op for callers passing a UUID.
+async function ensureGenieLinkForScribePatient(rawId) {
+  if (rawId == null || rawId === "") return;
+  const s = String(rawId).trim();
+  if (UUID_RX.test(s)) return; // already a genie UUID, nothing to do
+  if (!genie?.syncPatientToGenie) return;
+
+  // Resolve to a scribe `patients` row. The slug may be either:
+  //   - a scribe int id (e.g. "16709") — happy path, look up by id
+  //   - a gini_patient_id / file_no string (e.g. "TEST_COMPANION_USER")
+  //     used by the patient app's resolveChatPatientId, which doesn't
+  //     know the scribe int. Look up by file_no in that case.
+  let patient = null;
+  const asInt = parseInt(s, 10);
+  if (Number.isFinite(asInt) && String(asInt) === s) {
+    const { rows } = await pool.query(
+      "SELECT id, name, phone, mobile, dob, sex, gender, blood_group, uhid, file_no FROM patients WHERE id = $1",
+      [asInt],
+    );
+    patient = rows[0] || null;
+  } else {
+    const { rows } = await pool.query(
+      "SELECT id, name, phone, mobile, dob, sex, gender, blood_group, uhid, file_no FROM patients WHERE file_no = $1 LIMIT 1",
+      [s],
+    );
+    patient = rows[0] || null;
+  }
+  if (!patient) return;
+
+  // Fast path: skip if the link already exists.
+  const existing = await genie.resolveGeniePatientId?.(patient.id);
+  if (existing) return;
+
+  await genie.syncPatientToGenie(patient).catch((e) =>
+    console.warn(`[ensureGenieLink] syncPatientToGenie failed for ${patient.id}: ${e.message}`),
+  );
+}
+
 /**
  * Ensure (find-or-create) a conversation for a patient. Idempotent.
+ *
+ * Auto-links non-gini patients to genie on first call so reception/lab
+ * chat works for every patient — not just those already on the Genie app.
  */
 router.post(
   "/patients/:id/conversations/ensure",
@@ -282,6 +339,7 @@ router.post(
       if (kind === "doctor" && !doctor_id) {
         return res.status(400).json({ error: "doctor_id required for kind=doctor" });
       }
+      await ensureGenieLinkForScribePatient(req.params.id);
       const conv = await genie.ensureConversation({
         patientId: req.params.id,
         kind,
@@ -313,6 +371,7 @@ router.get("/patients/:id/care-team", async (req, res) => {
       return res.json({ data: [] });
     }
     const patientId = req.params.id;
+    await ensureGenieLinkForScribePatient(patientId);
 
     // Always ensure the shared team conversations exist.
     const [lab, reception] = await Promise.all([

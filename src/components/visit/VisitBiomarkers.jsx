@@ -4,6 +4,7 @@ import {
   getLabVal,
   getLabValFromLatest,
   getLabHist,
+  getMergedFbsHist,
   fmtDate,
   fmtDateShort,
   isSameDate,
@@ -80,29 +81,10 @@ const VisitBiomarkers = memo(function VisitBiomarkers({
     const hba1cFirst = hba1cH.length > 0 ? hba1cH[0] : null;
     const hba1c = getLabValFromLatest(labLatest, "HbA1c");
     const fbsLab = getLabValFromLatest(labLatest, "FBS");
-    const fbsLabH = getLabHist(labHistory, "FBS");
-    // FBS trend merges two streams so this card behaves like HbA1c — one
-    // unified trend that includes every fasting reading regardless of
-    // origin: doctor-entered lab_results + patient finger-stick readings
-    // from patient_vitals_log (vitals.rbs with meal_type='Fasting').
-    const tsOf = (r) => {
-      const d = r.date || r.test_date || r.recorded_at || r.recorded_date;
-      const t = d ? new Date(d).getTime() : 0;
-      return Number.isFinite(t) ? t : 0;
-    };
-    const fastingVitals = (vitals || [])
-      .filter(
-        (v) =>
-          v && v.rbs != null && v.rbs !== "" && (v.meal_type || "").toLowerCase() === "fasting",
-      )
-      .map((v) => ({
-        result: parseFloat(v.rbs),
-        date: v.recorded_at || v.recorded_date,
-        unit: "mg/dL",
-        source: v.source || "patient_app",
-      }))
-      .filter((r) => Number.isFinite(r.result) && r.date);
-    const fbsH = [...fbsLabH, ...fastingVitals].sort((a, b) => tsOf(a) - tsOf(b));
+    // Merged FBS stream (lab_results + patient fasting finger-sticks) lives
+    // in helpers.jsx so the sidebar's "Latest FBS" pill cannot drift from
+    // this trend card.
+    const fbsH = getMergedFbsHist(labHistory, vitals);
     const fbs = fbsH.length > 0 ? fbsH[fbsH.length - 1] : fbsLab;
     const ldl = getLabValFromLatest(labLatest, "LDL");
     const ldlH = getLabHist(labHistory, "LDL");
