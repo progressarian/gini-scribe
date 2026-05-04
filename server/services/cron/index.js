@@ -17,8 +17,8 @@ import {
 } from "./labSync.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
 
-// ── Sync interval (every 5 minutes) ────────────────────────────────────────
-const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+// ── Sync interval (every 1 minute) ─────────────────────────────────────────
+const SYNC_INTERVAL_MS = 1 * 60 * 1000;
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
 const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 
@@ -34,12 +34,12 @@ export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
     console.log("[Cron] HealthRay credentials not set — walking appointment sync disabled");
   } else {
-    console.log("[Cron] Starting walking appointment sync (every 5 min)...");
+    console.log("[Cron] Starting walking appointment sync (every 1 min)...");
 
     // Run initial full sync on startup
     syncWalkingAppointments().catch((e) => console.error("[Cron] Initial sync failed:", e.message));
 
-    // Then sync today's walkins every 5 minutes
+    // Then sync today's walkins every 1 minute
     intervalId = setInterval(() => {
       syncTodayWalkingAppointments().catch((e) =>
         console.error("[Cron] Scheduled sync failed:", e.message),
@@ -47,13 +47,13 @@ export function startCronJobs() {
     }, SYNC_INTERVAL_MS);
   }
 
-  // ── Lab HealthRay sync (every 5 min, staggered) ───────────────────────────
-  // Offset by ~2.5 min so the lab sync and healthray sync never start at the
+  // ── Lab HealthRay sync (every 1 min, staggered) ───────────────────────────
+  // Offset by ~30s so the lab sync and healthray sync never start at the
   // same moment — the global advisory lock would still serialize them, but
-  // staggering spreads the load across the 5-min window so users see fewer
+  // staggering spreads the load across the 1-min window so users see fewer
   // back-to-back latency spikes.
-  const LAB_SYNC_OFFSET_MS = Math.floor(SYNC_INTERVAL_MS / 2); // 2.5 min offset
-  console.log("[Cron] Starting lab sync (every 5 min, staggered +2.5 min)...");
+  const LAB_SYNC_OFFSET_MS = Math.floor(SYNC_INTERVAL_MS / 2); // 30s offset
+  console.log("[Cron] Starting lab sync (every 1 min, staggered +30s)...");
 
   setTimeout(() => {
     runLabSync().catch((e) => console.error("[Cron] Lab initial sync failed:", e.message));
