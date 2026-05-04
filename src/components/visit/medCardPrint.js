@@ -61,6 +61,14 @@ export const TIME_SLOTS = [
     bgCls: "pur-lt",
   },
   { key: "weekly", label: "Weekly", emoji: "📅", colorVar: "--purple", bgCls: "pur-lt" },
+  {
+    key: "anytime",
+    label: "Anytime",
+    emoji: "🕒",
+    colorVar: "--t3",
+    bgCls: "bg",
+    border: true,
+  },
 ];
 
 // Returns an ARRAY of slot keys — a medicine can appear in multiple slots.
@@ -74,7 +82,15 @@ export const TIME_SLOTS = [
 //   3. Soft phrase match ("morning", "evening").
 //   4. Frequency fallback (TDS/BD/OD).
 export function getTimeSlots(med) {
-  const t = (med.timing || "").toLowerCase();
+  // Mirror myhealthgenie GiniCareV9.getTimeSlots so the printed card matches
+  // the patient-app care tab. Key differences vs the older scribe logic:
+  //   • notes joined into the phrase haystack so doctor-typed timing in the
+  //     notes column ("after dinner", "8 PM") is honored
+  //   • word-boundary regex on morning/evening/night/am to stop substring
+  //     false-positives ("tomorrow" → morning, "code" → od, etc.)
+  //   • unmatched meds land in a dedicated "anytime" slot rather than being
+  //     silently dumped into after_breakfast
+  const t = `${med.timing || ""} ${med.notes || ""}`.toLowerCase();
   const f = (med.frequency || "").toLowerCase();
   const slots = new Set();
 
@@ -91,13 +107,10 @@ export function getTimeSlots(med) {
     t.includes("bedtime") ||
     t.includes("at bedtime") ||
     t.includes("before bed") ||
-    t.includes("night")
+    /\bnight\b/.test(t)
   )
     slots.add("bedtime");
 
-  // Clock-time parse — picks up "8 PM" / "10pm" / "8:30 pm" / "20:00".
-  // Only runs when no explicit phrase matched, otherwise "after dinner at 8pm"
-  // would land in two slots.
   if (slots.size === 0) {
     const m = t.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
     if (m) {
@@ -114,25 +127,26 @@ export function getTimeSlots(med) {
     }
   }
 
-  if (t.includes("morning") || /\bam\b/.test(t)) slots.add("after_breakfast");
-  if (t.includes("evening")) slots.add("after_dinner");
-  if (f.includes("weekly") || f.includes("week")) slots.add("weekly");
+  if (/\bmorning\b/.test(t) || /\bam\b/.test(t)) slots.add("after_breakfast");
+  if (/\bevening\b/.test(t)) slots.add("after_dinner");
+  if (/weekly|once in 7|every week/.test(t) || /weekly|week/.test(f)) slots.add("weekly");
   if (/15 days|fortnight|once in \d+ days/.test(t) || /15 days|fortnight/.test(f))
     slots.add("weekly");
 
   if (slots.size === 0) {
-    if (f.includes("tds") || f.includes("tid") || f.includes("three")) {
+    if (/tds|tid|three/.test(f)) {
       slots.add("after_breakfast");
       slots.add("after_lunch");
       slots.add("after_dinner");
-    } else if (f.includes("bd") || f.includes("twice")) {
+    } else if (/bd|twice/.test(f)) {
       slots.add("after_breakfast");
       slots.add("after_dinner");
-    } else if (f.includes("od") || f.includes("once") || f.includes("hs"))
+    } else if (/od|once|hs/.test(f)) {
       slots.add("after_breakfast");
-    else slots.add("after_breakfast");
+    }
   }
 
+  if (slots.size === 0) slots.add("anytime");
   return [...slots];
 }
 
@@ -175,6 +189,7 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
     after_dinner: { color: "#6b7d90", bg: "#f0f4f7" },
     bedtime: { color: "#7c3aed", bg: "#f5f3ff" },
     weekly: { color: "#7c3aed", bg: "#f5f3ff" },
+    anytime: { color: "#6b7d90", bg: "#f0f4f7" },
   };
 
   let medsHTML = "";

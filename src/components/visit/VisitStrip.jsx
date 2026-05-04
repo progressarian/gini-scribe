@@ -8,6 +8,7 @@ const VisitStrip = memo(function VisitStrip({
   latestVitals,
   prevVitals,
   activeMeds,
+  tab,
 }) {
   const weightCurr = latestVitals?.weight;
   const weightPrev = prevVitals?.weight;
@@ -118,23 +119,30 @@ const VisitStrip = memo(function VisitStrip({
 
       <div className="ss-sep" />
 
-      {activeMeds.length > 0 && (
-        <div className="ss-item">
-          <div>
-            <div className="ss-label">Current Regimen</div>
-            <div className="regimen-tags">
-              {activeMeds.slice(0, 4).map((m, i) => (
-                <span key={i} className="reg-tag">
-                  {m.name}
-                </span>
-              ))}
-              {activeMeds.length > 4 && (
-                <span className="reg-tag">+{activeMeds.length - 4} more</span>
-              )}
+      {(() => {
+        if (tab === "medcard") return null;
+        const currentMeds = (activeMeds || []).filter(
+          (m) => m.is_active !== false && !m.parent_medication_id,
+        );
+        if (currentMeds.length === 0) return null;
+        return (
+          <div className="ss-item">
+            <div>
+              <div className="ss-label">Current Regimen</div>
+              <div className="regimen-tags">
+                {currentMeds.slice(0, 4).map((m, i) => (
+                  <span key={i} className="reg-tag">
+                    {m.name}
+                  </span>
+                ))}
+                {currentMeds.length > 4 && (
+                  <span className="reg-tag">+{currentMeds.length - 4} more</span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 });

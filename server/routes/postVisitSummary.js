@@ -95,23 +95,13 @@ function fmtLabs(labHistory) {
 function fmtMeds(active, stopped = [], recentChanges = []) {
   const lines = ["Currently active (THESE are the only meds to list in the Current: line):"];
   if (active.length === 0) lines.push("  (none)");
-  const childrenByParent = {};
-  for (const m of active) {
-    if (m.parent_medication_id) {
-      (childrenByParent[m.parent_medication_id] ||= []).push(m);
-    }
-  }
+  // Only top-level parent meds are listed in the brief; child/support meds
+  // are intentionally excluded so the narrative names the primary regimen only.
   const parents = active.filter((m) => !m.parent_medication_id);
   for (const m of parents) {
     lines.push(
       `  - ${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " (" + m.timing + ")" : ""}`,
     );
-    for (const child of childrenByParent[m.id] || []) {
-      const cond = child.support_condition ? ` — ${child.support_condition}` : "";
-      lines.push(
-        `      ↳ ${child.name}${child.dose ? " " + child.dose : ""}${child.frequency ? " " + child.frequency : ""}${cond}`,
-      );
-    }
   }
   if (stopped.length) {
     lines.push(

@@ -1044,6 +1044,14 @@ const normalizeMedName = canonicalMedKey;
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
 
+  // Capture sync start so we can identify rows tagged with the same
+  // healthrayId that were NOT touched by this run — those belong to an
+  // older extraction of the same prescription and should be demoted to
+  // `visit_status = 'previous'`. (HealthRay sometimes returns a partial
+  // prescription first, then the full one a few minutes later; without
+  // this, the dropped meds stay marked 'current'.)
+  const syncStart = new Date();
+
   // Historical started_date lookup — if the patient was already on this drug
   // in an earlier prescription, backdate started_date to the first known
   // occurrence instead of stamping it with the current apptDate.
@@ -1267,6 +1275,33 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       `markMedicationVisitStatus failed for patient=${patientId}: ${e.message}`,
     ),
   );
+
+  // Pass 6: demote same-healthrayId rows not touched in this sync.
+  // When HealthRay re-emits the same prescription (same healthray ID) with
+  // fewer meds, the previously-synced ones keep `notes = healthray:<id>` so
+  // stopStaleHealthrayMeds won't deactivate them, and they share the same
+  // last_prescribed_date so markMedicationVisitStatus keeps them 'current'.
+  // The only signal we have is `updated_at` — anything tagged with this id
+  // whose `updated_at` predates this sync run is from an older extraction.
+  await pool
+    .query(
+      `UPDATE medications
+         SET visit_status = 'previous',
+             updated_at = NOW()
+       WHERE patient_id = $1
+         AND is_active = true
+         AND source = 'healthray'
+         AND notes LIKE 'healthray:' || $2 || '%'
+         AND updated_at < $3
+         AND visit_status IS DISTINCT FROM 'previous'`,
+      [patientId, String(healthrayId), syncStart.toISOString()],
+    )
+    .catch((e) =>
+      error(
+        "syncMedications",
+        `stale same-healthrayId demote failed for patient=${patientId} healthrayId=${healthrayId}: ${e.message}`,
+      ),
+    );
 }
 
 // ── Resolve `support_for` hints into real parent_medication_id links ────────
@@ -1781,7 +1816,9 @@ export async function markAppointmentAsCheckedIn(appointmentId) {
 // ── Auto-mark a completed HealthRay appointment as "seen" ──────────────────
 // Creates a consultation and links all OPD records, mirroring the manual
 // "mark as seen" flow in /api/appointments/:id PATCH.
-export async function markAppointmentAsSeen(appointmentId) {
+// `finalStatus` lets callers land on 'completed' instead of 'seen' — used
+// when HealthRay reports checkout/completed (prescription printed there).
+export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen") {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -1806,12 +1843,16 @@ export async function markAppointmentAsSeen(appointmentId) {
       return null;
     }
 
-    // Update status to 'seen' if not already
-    if (rows[0].status !== "seen") {
-      await client.query(
-        `UPDATE appointments SET status = 'seen', updated_at = NOW() WHERE id = $1`,
-        [appointmentId],
-      );
+    // Update status if not already at the target. Never downgrade a
+    // 'completed' appointment back to 'seen' — completed is terminal.
+    const currentStatus = rows[0].status;
+    const shouldUpdate =
+      currentStatus !== finalStatus && !(finalStatus === "seen" && currentStatus === "completed");
+    if (shouldUpdate) {
+      await client.query(`UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`, [
+        appointmentId,
+        finalStatus,
+      ]);
     }
 
     const appt = rows[0];
@@ -1962,63 +2003,89 @@ export async function markAppointmentAsSeen(appointmentId) {
     if (notes.length) transcriptParts.push("COMPLIANCE:\n" + notes.join("\n"));
     const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
 
-    // Upsert by (patient_id, visit_date, doctor) — see migration
-    // 2026-05-01_dedup_consultations.sql. If a manually-saved consultation
-    // already exists for this patient/day/doctor, preserve its richer fields
-    // (mo_transcript, plan_edits, exam_data) and only fill missing pieces
-    // from the HealthRay payload.
-    const conRes = await client.query(
-      `INSERT INTO consultations
-         (patient_id, visit_date, visit_type, con_name, status, mo_data, con_data, con_transcript)
-       VALUES ($1, $2, 'OPD', $3, 'completed', $4, $5, $6)
-       ON CONFLICT (patient_id, (visit_date::date), (COALESCE(con_doctor_id, mo_doctor_id, -1))) DO UPDATE SET
-         visit_type     = COALESCE(consultations.visit_type, EXCLUDED.visit_type),
-         con_name       = COALESCE(consultations.con_name, EXCLUDED.con_name),
-         mo_data        = COALESCE(consultations.mo_data, EXCLUDED.mo_data),
-         con_data       = COALESCE(consultations.con_data, EXCLUDED.con_data),
-         con_transcript = COALESCE(consultations.con_transcript, EXCLUDED.con_transcript),
-         updated_at     = NOW()
-       RETURNING id`,
-      [
-        appt.patient_id,
-        appt.appointment_date,
-        appt.doctor_name || null,
-        JSON.stringify({
-          compliance,
-          coordinator_notes: appt.coordinator_notes || [],
-          category: appt.category,
-          diagnoses: opdDiags,
-          previous_medications: opdMeds,
-          stopped_medications: opdStopped,
-          chief_complaints: opdDiags.map((d) => d.label),
-        }),
-        JSON.stringify({
-          biomarkers,
-          opd_notes: notes.join("\n"),
-          medications_confirmed: opdMeds,
-          investigations_to_order: (() => {
-            const inv = appt.healthray_investigations || [];
-            return inv.map((t) =>
-              typeof t === "string"
-                ? { name: t, urgency: "routine" }
-                : { name: t.name || t.test || String(t), urgency: t.urgency || "routine" },
-            );
-          })(),
-          diet_lifestyle: (() => {
-            const c = appt.compliance || {};
-            const lines = [];
-            if (c.diet) lines.push(c.diet);
-            if (c.exercise) lines.push(c.exercise);
-            if (c.stress) lines.push(c.stress);
-            return lines;
-          })(),
-          follow_up: appt.healthray_follow_up || null,
-        }),
-        conTranscript || null,
-      ],
-    );
-    const consultationId = conRes.rows[0].id;
+    // Upsert by (patient_id, visit_date::date, doctor). Done as explicit
+    // SELECT-then-UPDATE-or-INSERT instead of ON CONFLICT because the prod
+    // DB has legacy duplicate consultations and we don't want to delete
+    // them to add the unique index. If a row already exists for this
+    // patient/day/doctor we preserve its richer fields (mo_transcript,
+    // plan_edits, exam_data) and only fill missing pieces from HealthRay.
+    const moData = JSON.stringify({
+      compliance,
+      coordinator_notes: appt.coordinator_notes || [],
+      category: appt.category,
+      diagnoses: opdDiags,
+      previous_medications: opdMeds,
+      stopped_medications: opdStopped,
+      chief_complaints: opdDiags.map((d) => d.label),
+    });
+    const conData = JSON.stringify({
+      biomarkers,
+      opd_notes: notes.join("\n"),
+      medications_confirmed: opdMeds,
+      investigations_to_order: (() => {
+        const inv = appt.healthray_investigations || [];
+        return inv.map((t) =>
+          typeof t === "string"
+            ? { name: t, urgency: "routine" }
+            : { name: t.name || t.test || String(t), urgency: t.urgency || "routine" },
+        );
+      })(),
+      diet_lifestyle: (() => {
+        const c = appt.compliance || {};
+        const lines = [];
+        if (c.diet) lines.push(c.diet);
+        if (c.exercise) lines.push(c.exercise);
+        if (c.stress) lines.push(c.stress);
+        return lines;
+      })(),
+      follow_up: appt.healthray_follow_up || null,
+    });
+    const transcriptArg = conTranscript || null;
+    const docName = appt.doctor_name || null;
 
+    // Pick the richest existing row for this patient/day. We don't filter by
+    // doctor because the HealthRay insert below leaves both doctor FKs NULL,
+    // so the original ON CONFLICT effectively grouped any same-day rows
+    // missing doctor FKs together. Picking the richest mirrors the dedup
+    // migration's winner-selection score so we update the same row the UI
+    // already considers canonical.
+    const existingConRes = await client.query(
+      `SELECT id FROM consultations
+        WHERE patient_id = $1
+          AND visit_date::date = ($2::timestamptz)::date
+        ORDER BY
+          (COALESCE(length(mo_data::text),0) + COALESCE(length(con_data::text),0)
+           + COALESCE(length(mo_transcript),0) + COALESCE(length(con_transcript),0)
+           + COALESCE(length(quick_transcript),0)) DESC,
+          created_at DESC, id DESC
+        LIMIT 1`,
+      [appt.patient_id, appt.appointment_date],
+    );
+
+    let consultationId;
+    if (existingConRes.rows[0]) {
+      consultationId = existingConRes.rows[0].id;
+      await client.query(
+        `UPDATE consultations SET
+           visit_type     = COALESCE(visit_type, 'OPD'),
+           con_name       = COALESCE(con_name, $2),
+           mo_data        = COALESCE(mo_data, $3::jsonb),
+           con_data       = COALESCE(con_data, $4::jsonb),
+           con_transcript = COALESCE(con_transcript, $5),
+           updated_at     = NOW()
+         WHERE id = $1`,
+        [consultationId, docName, moData, conData, transcriptArg],
+      );
+    } else {
+      const insRes = await client.query(
+        `INSERT INTO consultations
+           (patient_id, visit_date, visit_type, con_name, status, mo_data, con_data, con_transcript)
+         VALUES ($1, $2, 'OPD', $3, 'completed', $4, $5, $6)
+         RETURNING id`,
+        [appt.patient_id, appt.appointment_date, docName, moData, conData, transcriptArg],
+      );
+      consultationId = insRes.rows[0].id;
+    }
     // Link all patient records to this consultation
     await client.query(
       `UPDATE diagnoses SET consultation_id = $1
@@ -2037,11 +2104,21 @@ export async function markAppointmentAsSeen(appointmentId) {
       consultationId,
       appt.id,
     ]);
-    await client.query(
-      `UPDATE medications SET consultation_id = $1
-       WHERE patient_id = $2 AND is_active = true AND consultation_id IS NULL`,
-      [consultationId, appt.patient_id],
-    );
+    // Attach only meds belonging to THIS appointment's healthray batch (matched by
+    // `notes = healthray:<id>`). The previous broad sweep over all NULL-consultation
+    // rows was first-come-first-served: the oldest appointment to be marked-seen would
+    // grab every orphaned med across every Rx, so newer prescriptions ended up tied to
+    // the oldest visit_date and got nuked by the visit-page reconcile sweep.
+    if (appt.healthray_id != null) {
+      await client.query(
+        `UPDATE medications SET consultation_id = $1
+         WHERE patient_id = $2
+           AND is_active = true
+           AND notes = 'healthray:' || $3::text
+           AND (consultation_id IS NULL OR consultation_id <> $1)`,
+        [consultationId, appt.patient_id, String(appt.healthray_id)],
+      );
+    }
     await client.query(
       `UPDATE documents SET consultation_id = $1 WHERE patient_id = $2 AND source = 'opd_upload' AND consultation_id IS NULL`,
       [consultationId, appt.patient_id],
@@ -2070,7 +2147,10 @@ export async function markAppointmentAsSeen(appointmentId) {
     );
 
     await client.query("COMMIT");
-    log("DB", `Auto-marked appointment ${appointmentId} as seen → consultation ${consultationId}`);
+    log(
+      "DB",
+      `Auto-marked appointment ${appointmentId} as ${finalStatus} → consultation ${consultationId}`,
+    );
 
     // Fire-and-log auto Rx save. Idempotency lives inside the helper so
     // repeated calls (e.g. stuck-status recovery, manual PATCH that lands

@@ -375,8 +375,9 @@ async function syncAppointment(appt, localDoctorName) {
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
   if (existing && existing.healthray_clinical_notes && alreadyEnriched) {
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
-    // Auto-mark as seen if not already done
-    await markAppointmentAsSeen(existing.id);
+    // Auto-mark as seen — promote to 'completed' when HealthRay reports
+    // checkout/completed (prescription printed there).
+    await markAppointmentAsSeen(existing.id, isCompleted ? "completed" : "seen");
     return { skipped: true, id: existing.id };
   }
 
@@ -586,9 +587,19 @@ async function syncAppointment(appt, localDoctorName) {
 
   // ── Auto-mark status based on HealthRay data ──
   if (clinical.healthrayDiagnoses?.length > 0 && clinical.healthrayMedications?.length > 0) {
-    // Prescription exists → mark as "seen" (creates consultation + fills prep steps)
-    await markAppointmentAsSeen(localApptId);
-  } else if (!isCompleted && status !== "cancelled" && status !== "no_show") {
+    // Prescription exists → create consultation + fill prep steps. If
+    // HealthRay reports checkout/completed (prescription printed), land on
+    // 'completed'; otherwise on 'seen'.
+    await markAppointmentAsSeen(localApptId, isCompleted ? "completed" : "seen");
+  } else if (isCompleted) {
+    // HealthRay says completed but no clinical data extracted yet — still
+    // reflect the printed-prescription state locally.
+    await pool.query(
+      `UPDATE appointments SET status = 'completed', updated_at = NOW()
+        WHERE id = $1 AND status <> 'completed'`,
+      [localApptId],
+    );
+  } else if (status !== "cancelled" && status !== "no_show") {
     // Appointment exists in HealthRay but no prescription yet → patient checked in
     await markAppointmentAsCheckedIn(localApptId);
   }
@@ -897,7 +908,7 @@ export async function runStuckStatusRecovery(windowDays) {
     const { rows } = await pool.query(
       `SELECT id, file_no
        FROM appointments
-      WHERE status NOT IN ('seen', 'cancelled', 'no_show')
+      WHERE status NOT IN ('seen', 'completed', 'cancelled', 'no_show')
         AND appointment_date >= (CURRENT_DATE - ($1 || ' days')::interval)
         AND jsonb_array_length(COALESCE(healthray_diagnoses,'[]'::jsonb))  > 0
         AND jsonb_array_length(COALESCE(healthray_medications,'[]'::jsonb)) > 0

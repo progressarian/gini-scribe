@@ -611,7 +611,7 @@ router.get("/patients/:id/summary", async (req, res) => {
         // sentence — previous-visit meds are context only.
         pool.query(
           `SELECT id, name, dose, frequency, timing, started_date,
-                  last_prescribed_date, visit_status
+                  last_prescribed_date, visit_status, parent_medication_id
              FROM medications
             WHERE patient_id=$1 AND is_active=true`,
           [pid],
@@ -645,7 +645,9 @@ router.get("/patients/:id/summary", async (req, res) => {
     // off the persisted `visit_status` column (stamped by scribe write paths
     // — see services/medication/visitStatus.js). Previous-visit meds must
     // NOT be named as "currently on" in the AI narrative. ──
-    const allActiveMeds = activeMedsR.rows;
+    // Exclude child/support meds (those with a parent_medication_id) from the
+    // brief — only top-level parents should be named in the narrative.
+    const allActiveMeds = activeMedsR.rows.filter((m) => !m.parent_medication_id);
     const currentVisitMeds = allActiveMeds.filter((m) => m.visit_status !== "previous");
     const prevVisitMeds = allActiveMeds.filter((m) => m.visit_status === "previous");
 

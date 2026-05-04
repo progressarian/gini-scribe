@@ -2079,9 +2079,38 @@ async function listConversationsForTeam(kind) {
   );
 
   const merged = [].concat(...results);
-  // Sort the merged list by last_message_at desc (nulls last) so the
-  // freshest conversation across both DBs sits at the top.
-  merged.sort((a, b) => {
+  // Dedupe by (patient_id, kind, doctor_id). When both DBs hold a row for
+  // the same logical conversation (common for Gini patients whose lab/
+  // reception placeholder got created on both sides), keep the one with
+  // messages; if both have messages, keep the newer one.
+  const dedupeKey = (c) => `${c.patient_id || ''}::${c.kind || ''}::${c.doctor_id || ''}`;
+  const winners = new Map();
+  for (const c of merged) {
+    const k = dedupeKey(c);
+    const existing = winners.get(k);
+    if (!existing) {
+      winners.set(k, c);
+      continue;
+    }
+    const existingHasActivity = !!existing.last_message_at;
+    const candidateHasActivity = !!c.last_message_at;
+    if (candidateHasActivity && !existingHasActivity) {
+      winners.set(k, c);
+    } else if (candidateHasActivity && existingHasActivity) {
+      // Both active: keep the more-recent one.
+      if ((c.last_message_at || '') > (existing.last_message_at || '')) {
+        winners.set(k, c);
+      }
+    } else if (!candidateHasActivity && !existingHasActivity) {
+      // Neither active: keep the newer created_at.
+      if ((c.created_at || '') > (existing.created_at || '')) {
+        winners.set(k, c);
+      }
+    }
+    // else: existing has activity, candidate doesn't — keep existing.
+  }
+  const deduped = [...winners.values()];
+  deduped.sort((a, b) => {
     const at = a.last_message_at || '';
     const bt = b.last_message_at || '';
     if (!at && !bt) return 0;
@@ -2089,7 +2118,7 @@ async function listConversationsForTeam(kind) {
     if (!bt) return -1;
     return bt.localeCompare(at);
   });
-  return merged;
+  return deduped;
 }
 
 /**
@@ -2154,7 +2183,23 @@ async function listConversationsForPatient(patientId) {
       }
     }),
   );
-  return [].concat(...results);
+
+  const merged = [].concat(...results);
+  // Dedupe duplicates of the same (patient, kind, doctor) across DBs —
+  // see listConversationsForTeam for the rule.
+  const key = (c) => `${c.patient_id || ''}::${c.kind || ''}::${c.doctor_id || ''}`;
+  const winners = new Map();
+  for (const c of merged) {
+    const k = key(c);
+    const ex = winners.get(k);
+    if (!ex) { winners.set(k, c); continue; }
+    const exAct = !!ex.last_message_at;
+    const cAct = !!c.last_message_at;
+    if (cAct && !exAct) winners.set(k, c);
+    else if (cAct && exAct && (c.last_message_at || '') > (ex.last_message_at || '')) winners.set(k, c);
+    else if (!cAct && !exAct && (c.created_at || '') > (ex.created_at || '')) winners.set(k, c);
+  }
+  return [...winners.values()];
 }
 
 async function getConversationById(conversationId) {
@@ -2237,18 +2282,30 @@ async function sendMessageToConversation({
   attachmentMime = null,
   attachmentName = null,
 } = {}) {
-  if (!conversationId) return null;
+  if (!conversationId) {
+    console.error('[conv sendMessage] missing conversationId');
+    return null;
+  }
   // Either text body or attachment must be present.
   const hasText = typeof message === 'string' && message.trim().length > 0;
-  if (!hasText && !attachmentPath) return null;
+  if (!hasText && !attachmentPath) {
+    console.error('[conv sendMessage] no text and no attachment');
+    return null;
+  }
 
   const conv = await getConversationById(conversationId);
-  if (!conv) return null;
+  if (!conv) {
+    console.error('[conv sendMessage] conversation not found in any DB:', conversationId);
+    return null;
+  }
   // Insert into the same DB the conversation lives in so the FK resolves.
   const db = dbForConversation(conv);
-  if (!db) return null;
+  if (!db) {
+    console.error('[conv sendMessage] no DB resolved for conv source:', conv._source);
+    return null;
+  }
 
-  const payload = {
+  let payload = {
     patient_id: conv.patient_id,
     conversation_id: conversationId,
     direction,
@@ -2261,14 +2318,52 @@ async function sendMessageToConversation({
     attachment_name: attachmentName || null,
   };
 
-  const { data, error } = await db
-    .from('patient_messages')
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error) { console.error('[conv sendMessage]', error.message); return null; }
-  return data;
+  // Insert with column-drop + NOT-NULL recovery loop:
+  //  - PGRST204 missing column → drop named column and retry.
+  //  - 23502 null in NOT NULL column → set the column to '' and retry
+  //    (covers older `message NOT NULL` schemas that don't allow
+  //    attachment-only rows with message=null).
+  //  - any other error → log code/details and return null.
+  for (let i = 0; i < 10; i++) {
+    const { data, error } = await db
+      .from('patient_messages')
+      .insert(payload)
+      .select()
+      .single();
+    if (!error && data) return data;
+    const msg = error?.message || '';
+    const code = error?.code || '';
+    const details = error?.details || '';
+    const hint = error?.hint || '';
+    // PGRST204 — schema cache: missing column.
+    if (code === 'PGRST204') {
+      const m = msg.match(/'([^']+)' column/i) || msg.match(/column "([^"]+)"/i);
+      const missing = m ? m[1] : null;
+      if (missing && missing in payload) {
+        const { [missing]: _drop, ...rest } = payload;
+        payload = rest;
+        console.warn(`[conv sendMessage] dropping missing column "${missing}" and retrying`);
+        continue;
+      }
+    }
+    // 23502 — NOT NULL violation. Find the column from details (e.g.
+    // "Failing row contains ..., column \"message\" violates not-null
+    // constraint") and provide an empty-string default to satisfy it.
+    if (code === '23502') {
+      const m = msg.match(/column "([^"]+)" of relation/i)
+        || details.match(/column "([^"]+)"/i);
+      const col = m ? m[1] : null;
+      if (col && (col in payload) && payload[col] == null) {
+        payload = { ...payload, [col]: '' };
+        console.warn(`[conv sendMessage] NOT NULL on "${col}" — defaulting to '' and retrying`);
+        continue;
+      }
+    }
+    console.error('[conv sendMessage]', code, msg, '|', details, '|', hint);
+    return null;
+  }
+  console.error('[conv sendMessage] retry budget exhausted');
+  return null;
 }
 
 /**

@@ -994,6 +994,7 @@ export default function VisitPage() {
         latestVitals={latestV}
         prevVitals={prevV}
         activeMeds={uniqueActiveMeds}
+        tab={tab}
       />
 
       {/* Extraction in progress modal overlay */}

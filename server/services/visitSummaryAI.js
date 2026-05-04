@@ -99,11 +99,14 @@ function buildContext(data) {
       status: d.status,
       since: d.since_year,
     })),
-    medications: activeMeds.slice(0, 20).map((m) => ({
-      name: m.composition || m.name,
-      dose: m.dose,
-      frequency: m.frequency,
-    })),
+    medications: activeMeds
+      .filter((m) => !m.parent_medication_id)
+      .slice(0, 20)
+      .map((m) => ({
+        name: m.composition || m.name,
+        dose: m.dose,
+        frequency: m.frequency,
+      })),
     vitals: {
       bp: latestVitals.bp_sys ? `${latestVitals.bp_sys}/${latestVitals.bp_dia}` : null,
       weight: latestVitals.weight,

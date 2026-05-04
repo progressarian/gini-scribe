@@ -20,7 +20,6 @@ const dotenv = await import("dotenv");
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const { default: pool } = await import("../config/db.js");
-const { markMedicationVisitStatus } = await import("../services/medication/visitStatus.js");
 const require = createRequire(import.meta.url);
 const { syncMedicationsToGenie } = require("../genie-sync.cjs");
 
@@ -54,14 +53,43 @@ function logProgress(pid, force = false) {
   );
 }
 
+// Per-patient: run the same-healthrayId staleness sweep. We skip
+// markMedicationVisitStatus here — its last_prescribed_date rule would
+// re-promote the rows the sweep just demoted (stale rows share the same
+// last_prescribed_date as their survivors). The sweep does NOT touch
+// updated_at, so the staleness signal is preserved on re-runs.
+const SWEEP_SQL = `
+  WITH hr_latest AS (
+    SELECT notes, MAX(updated_at) AS max_updated
+      FROM medications
+     WHERE patient_id = $1
+       AND is_active = true
+       AND source = 'healthray'
+       AND notes LIKE 'healthray:%'
+     GROUP BY notes
+  )
+  UPDATE medications m
+     SET visit_status = 'previous'
+    FROM hr_latest h
+   WHERE m.patient_id = $1
+     AND m.notes = h.notes
+     AND m.is_active = true
+     AND m.source = 'healthray'
+     AND m.notes LIKE 'healthray:%'
+     AND m.updated_at < h.max_updated - INTERVAL '5 seconds'
+     AND m.visit_status IS DISTINCT FROM 'previous'
+`;
+let demoted = 0;
+
 for (const r of rows) {
   const pid = r.patient_id;
   try {
-    await markMedicationVisitStatus(pid);
+    const sw = await pool.query(SWEEP_SQL, [pid]);
+    demoted += sw.rowCount || 0;
     stamped += 1;
   } catch (e) {
     errors += 1;
-    console.warn(`[stamp ${pid}] ${e.message}`);
+    console.warn(`[sweep ${pid}] ${e.message}`);
     processed += 1;
     logProgress(pid);
     continue;
@@ -80,6 +108,6 @@ for (const r of rows) {
 
 logProgress(rows[rows.length - 1]?.patient_id, true);
 console.log(
-  `Done. patients=${total} stamped=${stamped} medsPushedToGenie=${pushed} errors=${errors}`,
+  `Done. patients=${total} stamped=${stamped} demoted=${demoted} medsPushedToGenie=${pushed} errors=${errors}`,
 );
 await pool.end();
