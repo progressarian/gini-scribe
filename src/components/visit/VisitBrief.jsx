@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import api from "../../services/api";
 import PreVisitBrief from "./PreVisitBrief";
 import PostVisitSummary from "./PostVisitSummary";
@@ -8,19 +8,27 @@ import "../Shimmer.css";
 const VisitBrief = memo(function VisitBrief({ patientId, appointmentId, patient, doctor }) {
   const [loading, setLoading] = useState(true);
   const [postData, setPostData] = useState(null);
-  const hasFiredRef = useRef(false);
 
   useEffect(() => {
-    if (!patientId || hasFiredRef.current) return;
-    hasFiredRef.current = true;
+    if (!patientId) return;
+    let cancelled = false;
+    setLoading(true);
+    setPostData(null);
     const url = appointmentId
       ? `/api/patients/${patientId}/post-visit-summary?appointmentId=${appointmentId}`
       : `/api/patients/${patientId}/post-visit-summary`;
     api
       .get(url)
-      .then(({ data }) => setPostData(data))
+      .then(({ data }) => {
+        if (!cancelled) setPostData(data);
+      })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [patientId, appointmentId]);
 
   if (loading) {

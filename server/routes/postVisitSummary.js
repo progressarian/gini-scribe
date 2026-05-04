@@ -397,9 +397,10 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
     // (cache is keyed by appointmentId, so a mismatch would return another
     // patient's cached summary). Mismatched or missing → fall back to latest.
     let apptDate = null;
+    let apptStatus = null;
     if (apptId) {
       const r = await pool.query(
-        `SELECT patient_id, appointment_date FROM appointments WHERE id=$1`,
+        `SELECT patient_id, appointment_date, status FROM appointments WHERE id=$1`,
         [apptId],
       );
       const ownerPid = r.rows[0]?.patient_id ?? null;
@@ -410,22 +411,58 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
         apptId = null;
       } else {
         apptDate = r.rows[0]?.appointment_date || null;
+        apptStatus = r.rows[0]?.status || null;
       }
     }
     if (!apptId) {
+      // Prefer today's appointment over any past one. Otherwise a patient
+      // with a pending appointment today and a previously-completed visit
+      // would resolve to the past appointment and incorrectly serve its
+      // cached post-summary.
       const latestR = await pool.query(
-        `SELECT id, appointment_date FROM appointments
+        `SELECT id, appointment_date, status FROM appointments
           WHERE patient_id=$1
-          ORDER BY appointment_date DESC NULLS LAST, id DESC
+          ORDER BY (appointment_date::date = CURRENT_DATE) DESC,
+                   appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
         [pid],
       );
       apptId = latestR.rows[0]?.id || null;
       apptDate = latestR.rows[0]?.appointment_date || null;
+      apptStatus = latestR.rows[0]?.status || null;
+    } else if (apptDate) {
+      // Explicit apptId was passed, but if it points to a past date AND the
+      // patient has a today's appointment, prefer today's. The frontend often
+      // falls back to `latestAppointmentId` (a previously completed visit),
+      // which would otherwise serve its post-summary while today's pending
+      // visit is what the doctor is actually looking at.
+      const apptDateStr = new Date(apptDate).toISOString().slice(0, 10);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      if (apptDateStr < todayStr) {
+        const todayR = await pool.query(
+          `SELECT id, appointment_date, status FROM appointments
+            WHERE patient_id=$1 AND appointment_date::date = CURRENT_DATE
+            ORDER BY id DESC LIMIT 1`,
+          [pid],
+        );
+        if (todayR.rows[0]) {
+          console.log(
+            `[post-visit] SWAP patient=${pid} from past appt=${apptId} (${apptDateStr}) to today's appt=${todayR.rows[0].id} (status=${todayR.rows[0].status})`,
+          );
+          apptId = todayR.rows[0].id;
+          apptDate = todayR.rows[0].appointment_date;
+          apptStatus = todayR.rows[0].status || null;
+        }
+      }
     }
 
-    // Readiness check: a consultation exists for this patient on the appointment date
-    // (or today, if no appointment provided).
+    // Readiness gate: post-visit summary is "ready" once the appointment is
+    // marked 'seen' or 'completed'. Anything earlier (scheduled, etc.) keeps
+    // the UI on the pre-visit summary.
+    if (apptStatus !== "seen" && apptStatus !== "completed") {
+      return res.json({ ready: false, status: apptStatus });
+    }
+
     const checkDate = apptDate
       ? new Date(apptDate).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
@@ -436,7 +473,7 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       [pid, checkDate],
     );
     const consultation = consCheckR.rows[0];
-    if (!consultation) return res.json({ ready: false });
+    if (!consultation) return res.json({ ready: false, status: apptStatus });
 
     // Cache check (per-appointment) — valid until invalidated, no TTL.
     if (apptId && !forceRegen) {

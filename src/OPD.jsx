@@ -244,11 +244,13 @@ function isReady(a) {
 }
 
 function statusSty(s) {
-  if (s === "seen") return { dot: "#22c55e", label: "Seen", bg: GNL, color: GN };
+  if (s === "seen" || s === "completed")
+    return { dot: "#22c55e", label: "Seen", bg: GNL, color: GN };
   if (s === "in_visit")
     return { dot: "#8b5cf6", label: "In Visit", bg: "#f5f3ff", color: "#7c3aed" };
   if (s === "checkedin") return { dot: SK, label: "Checked In", bg: SKL, color: SK };
   if (s === "prepped") return { dot: T, label: "Ready", bg: TL, color: T };
+  if (s === "no_show") return { dot: BD2, label: "No Show", bg: BG, color: INK3 };
   return { dot: BD2, label: "Pending", bg: BG, color: INK3 };
 }
 
@@ -429,7 +431,12 @@ function ApptRow({ a, sel, onSelect }) {
         borderBottom: `1px solid rgba(0,0,0,.04)`,
         cursor: "pointer",
         alignItems: "flex-start",
-        opacity: a.status === "seen" ? 0.6 : a.status === "in_visit" ? 0.85 : 1,
+        opacity:
+          a.status === "seen" || a.status === "completed"
+            ? 0.6
+            : a.status === "in_visit"
+              ? 0.85
+              : 1,
         background: isSel ? TL : "transparent",
         borderLeft: isSel ? `3px solid ${T}` : "3px solid transparent",
         transition: "background .1s",
@@ -705,7 +712,9 @@ function ApptRow({ a, sel, onSelect }) {
 // ══════════════════════════════════════════════════════════════
 function DocSection({ docName, appts, selAppt, onSelect }) {
   const [open, setOpen] = useState(true);
-  const seen = appts.filter((a) => a.status === "seen" || a.status === "in_visit").length;
+  const seen = appts.filter(
+    (a) => a.status === "seen" || a.status === "completed" || a.status === "in_visit",
+  ).length;
   const initials =
     docName
       .replace(/^Dr\.\s*/i, "")
@@ -1169,7 +1178,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
         )}
 
         {/* Check In button */}
-        {appt.status !== "checkedin" && appt.status !== "seen" && appt.status !== "completed" && (
+        {appt.status !== "checkedin" && appt.status !== "seen" && appt.status !== "completed" && appt.status !== "in_visit" && (
           <button
             onClick={onCheckIn}
             style={{
@@ -1270,7 +1279,8 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
         {ready &&
           appt.status !== "checkedin" &&
           appt.status !== "in_visit" &&
-          appt.status !== "seen" && (
+          appt.status !== "seen" &&
+          appt.status !== "completed" && (
             <button
               onClick={onCheckIn}
               style={{
@@ -4139,7 +4149,7 @@ function CheckInTab({ appt, onCheckIn, onMarkSeen }) {
   ];
   const isCI = appt.status === "checkedin",
     isIV = appt.status === "in_visit",
-    isSeen = appt.status === "seen";
+    isSeen = appt.status === "seen" || appt.status === "completed";
 
   return (
     <div>
@@ -4356,7 +4366,10 @@ function PatientDetail({
   const ps = appt.prep_steps || {},
     ss = statusSty(appt.status);
   const showVitals =
-    appt.status === "checkedin" || appt.status === "in_visit" || appt.status === "seen";
+    appt.status === "checkedin" ||
+    appt.status === "in_visit" ||
+    appt.status === "seen" ||
+    appt.status === "completed";
   const STEPS = [
     { k: "biomarkers", l: "Labs" },
     { k: "compliance", l: "Compliance" },
@@ -4502,6 +4515,7 @@ function PatientDetail({
             {appt.status !== "checkedin" &&
               appt.status !== "in_visit" &&
               appt.status !== "seen" &&
+              appt.status !== "completed" &&
               isReady(appt) && (
                 <button
                   onClick={() => onPatchStatus(appt.id, "checkedin")}
@@ -6580,10 +6594,10 @@ export default function OPD() {
     if (filterStatus === "pending" && a.status && a.status !== "pending") return false;
     if (filterStatus === "checkedin" && a.status !== "checkedin") return false;
     if (filterStatus === "in_visit" && a.status !== "in_visit") return false;
-    if (filterStatus === "seen" && a.status !== "seen") return false;
+    if (filterStatus === "seen" && a.status !== "seen" && a.status !== "completed") return false;
     if (
       filterStatus === "ready" &&
-      (!isReady(a) || ["checkedin", "in_visit", "seen"].includes(a.status))
+      (!isReady(a) || ["checkedin", "in_visit", "seen", "completed"].includes(a.status))
     )
       return false;
     if (filterDoc === "__noshow__") {
@@ -6623,7 +6637,9 @@ export default function OPD() {
   // in practice, so we don't show its own card.)
   const checkedinCount = appointments.filter((a) => a.status === "checkedin").length;
   const inVisitCount = appointments.filter((a) => a.status === "in_visit").length;
-  const seenCount = appointments.filter((a) => a.status === "seen").length;
+  const seenCount = appointments.filter(
+    (a) => a.status === "seen" || a.status === "completed",
+  ).length;
   const noShowCount = appointments.filter((a) => a.status === "no_show").length;
   const cancelledCount = appointments.filter((a) => a.status === "cancelled").length;
   const total = appointments.length;
