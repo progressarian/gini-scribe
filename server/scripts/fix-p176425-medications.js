@@ -35,10 +35,9 @@ const { syncMedicationsToGenie } = require("../genie-sync.cjs");
 const APPLY = process.argv.includes("--apply");
 const FILE_NO = "P_176425";
 
-const patRes = await pool.query(
-  `SELECT id, file_no, name FROM patients WHERE file_no = $1`,
-  [FILE_NO],
-);
+const patRes = await pool.query(`SELECT id, file_no, name FROM patients WHERE file_no = $1`, [
+  FILE_NO,
+]);
 if (!patRes.rowCount) {
   console.error(`No patient with file_no=${FILE_NO}`);
   await pool.end();

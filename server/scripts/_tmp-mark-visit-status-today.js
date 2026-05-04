@@ -13,9 +13,7 @@ const dotenv = await import("dotenv");
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const { default: pool } = await import("../config/db.js");
-const { markMedicationVisitStatus } = await import(
-  "../services/medication/visitStatus.js"
-);
+const { markMedicationVisitStatus } = await import("../services/medication/visitStatus.js");
 const require = createRequire(import.meta.url);
 const { syncMedicationsToGenie } = require("../genie-sync.cjs");
 

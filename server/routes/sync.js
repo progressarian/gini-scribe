@@ -2078,18 +2078,16 @@ router.post("/sync/lab/backfill-pdfs", async (req, res) => {
   }
 
   try {
-    // Mirror the printable-or-synced filter from backfillLabPdfs so the
-    // displayed `total` matches the number of rows we will actually process.
+    // Mirror the filter inside backfillLabPdfs so the displayed `total`
+    // matches the number of rows that will actually be processed (the
+    // per-row live-detail check then decides which ones are downloadable).
     const { rows } = await pool.query(
       `SELECT COUNT(*) AS cnt FROM lab_cases
        WHERE patient_id IS NOT NULL
          AND pdf_storage_path IS NULL
          AND COALESCE(retry_abandoned, FALSE) = FALSE
          AND COALESCE(pdf_unavailable, FALSE) = FALSE
-         AND (
-           LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) = 'printable'
-           OR results_synced = TRUE
-         )`,
+         AND LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) <> 'cancelled'`,
     );
     const total = parseInt(rows[0].cnt, 10);
 
@@ -2226,13 +2224,11 @@ router.post("/sync/lab/import-pdf", async (req, res) => {
           : row.case_date.toISOString().slice(0, 10)
         : null;
 
-      // Skip in-process / unknown-status cases — HealthRay would otherwise
-      // return a structurally valid blank PDF that gets persisted permanently.
-      const printable = isLabCasePrintable(row.case_status, null, {
-        resultsSynced: !!row.results_synced,
-      });
-      if (!printable.ready) {
-        results.push({ case_no: row.case_no, status: "skipped", reason: printable.reason });
+      // Cheap pre-skip on stored case_status. The authoritative gate (live
+      // detail + every test reported) runs inside downloadAndStoreLabPdf,
+      // so we deliberately leave borderline cases for that path to decide.
+      if (row.case_status && /cancel|in[\s_]?process/i.test(row.case_status)) {
+        results.push({ case_no: row.case_no, status: "skipped", reason: row.case_status });
         continue;
       }
 

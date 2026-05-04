@@ -132,6 +132,10 @@ export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawD
 }
 
 // ── Download lab report PDF and store in Supabase ──────────────────────────
+// `caseDetail` (optional) is the live HealthRay detail payload — when
+// provided, the printable check verifies every in-house test has a result.
+// If omitted, we fetch detail ourselves so we always check against fresh
+// state rather than the stored (often stale) case_status column.
 export async function downloadAndStoreLabPdf(
   patientId,
   caseNo,
@@ -140,6 +144,7 @@ export async function downloadAndStoreLabPdf(
   userId,
   pdfFileName,
   caseDate,
+  caseDetail = null,
 ) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
     labLog("Skip", "Storage not configured");
@@ -155,18 +160,27 @@ export async function downloadAndStoreLabPdf(
   // HealthRay's /download-report URL still resolves for in-process cases but
   // returns a structurally valid blank PDF, so without this check a blank PDF
   // gets persisted and pdf_storage_path is set, blocking future re-download.
-  //
-  // results_synced=TRUE is a positive signal: our sync has already written
-  // results for this case, so the PDF is genuinely available even when
-  // case_status comes back null/unknown from the API.
   const { rows: pre } = await pool.query(
-    `SELECT pdf_storage_path, case_status, results_synced FROM lab_cases WHERE case_no = $1`,
+    `SELECT pdf_storage_path, case_status FROM lab_cases WHERE case_no = $1`,
     [caseNo],
   );
   if (pre[0]?.pdf_storage_path) return pre[0].pdf_storage_path;
-  const printable = isLabCasePrintable(pre[0]?.case_status, null, {
-    resultsSynced: !!pre[0]?.results_synced,
-  });
+
+  // Refresh detail when the caller didn't pass one — partial-results cases
+  // would otherwise pass the stale case_status check and waste a Puppeteer
+  // slot on a "No Report Found" round-trip that flips pdf_unavailable=TRUE.
+  let detail = caseDetail;
+  if (!detail) {
+    try {
+      const { fetchLabCaseDetail } = await import("./labHealthrayApi.js");
+      detail = await fetchLabCaseDetail(caseUid, caseId, userId);
+    } catch (e) {
+      labLog("Skip", `case ${caseNo}: detail refresh failed — ${e.message}`);
+      return null;
+    }
+  }
+
+  const printable = isLabCasePrintable(pre[0]?.case_status, detail);
   if (!printable.ready) {
     labLog("Skip", `case ${caseNo}: not printable (${printable.reason})`);
     return null;

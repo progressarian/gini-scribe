@@ -169,7 +169,9 @@ for (const pid of impactedPatients) {
   await markMedicationVisitStatus(pid, pool);
   if (++i % 200 === 0) console.log(`  visit_status: ${i}/${impactedPatients.size}`);
 }
-console.log(`  visit_status refreshed for ${i} patients in ${Math.round((Date.now() - t4) / 1000)}s`);
+console.log(
+  `  visit_status refreshed for ${i} patients in ${Math.round((Date.now() - t4) / 1000)}s`,
+);
 
 // 6) Push to Genie (limited concurrency to avoid throttling). Skipped if --no-push.
 if (NO_PUSH) {
@@ -200,9 +202,7 @@ if (NO_PUSH) {
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
-  console.log(
-    `  pushed ${pushed} (errors ${errors}) in ${Math.round((Date.now() - t5) / 1000)}s`,
-  );
+  console.log(`  pushed ${pushed} (errors ${errors}) in ${Math.round((Date.now() - t5) / 1000)}s`);
 }
 
 await pool.end();

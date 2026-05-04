@@ -261,7 +261,7 @@ router.get("/visit/:patientId", async (req, res) => {
       pool.query(
         `SELECT
            lr.id, lr.patient_id, lr.appointment_id,
-           COALESCE(a.appointment_date::date, lr.test_date) AS test_date,
+           COALESCE(lr.test_date, a.appointment_date::date) AS test_date,
            lr.test_date AS lab_test_date,
            lr.test_name, lr.canonical_name, lr.result, lr.result_text, lr.unit,
            lr.ref_range, lr.flag, lr.is_critical, lr.source, lr.panel_name, lr.created_at

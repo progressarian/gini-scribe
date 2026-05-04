@@ -39,10 +39,9 @@ const { syncMedicationsToGenie } = require("../genie-sync.cjs");
 // Resolve patient_id from either a numeric id or a file_no string.
 async function resolvePatient(id) {
   if (/^\d+$/.test(id)) {
-    const r = await pool.query(
-      `SELECT id, file_no, name FROM patients WHERE id = $1`,
-      [Number(id)],
-    );
+    const r = await pool.query(`SELECT id, file_no, name FROM patients WHERE id = $1`, [
+      Number(id),
+    ]);
     if (r.rows[0]) return r.rows[0];
   }
   // Try file_no exact, then with/without P_ prefix.
@@ -84,8 +83,7 @@ for (const r of before.rows) {
     r.notes &&
     String(r.notes).startsWith("healthray:") &&
     r.group_max &&
-    new Date(r.updated_at).getTime() <
-      new Date(r.group_max).getTime() - 5000;
+    new Date(r.updated_at).getTime() < new Date(r.group_max).getTime() - 5000;
   console.log(
     `  [${r.id}] ${r.name} ${r.dose || ""}  status=${r.visit_status}  notes=${r.notes || "-"}  ` +
       `updated_at=${new Date(r.updated_at).toISOString()}${stale ? "  ← STALE" : ""}`,
@@ -143,7 +141,9 @@ const after = await pool.query(
 );
 console.log(`\nAfter backfill:`);
 for (const r of after.rows) {
-  console.log(`  [${r.id}] ${r.name} ${r.dose || ""}  status=${r.visit_status}  notes=${r.notes || "-"}`);
+  console.log(
+    `  [${r.id}] ${r.name} ${r.dose || ""}  status=${r.visit_status}  notes=${r.notes || "-"}`,
+  );
 }
 
 // Step 4: optionally push to Genie.

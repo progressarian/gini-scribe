@@ -180,6 +180,33 @@ export function countInhouseProgress(caseDetail) {
   return { expected, ready };
 }
 
+// Counts of in-house tests expected vs tests with ANY result (numeric OR text).
+// Stricter than countInhouseProgress for PDF gating: HealthRay only generates
+// the report PDF after every test in the case has been entered. Numeric and
+// text results both count here because both signal "the lab tech has finalised
+// this test." Used to avoid attempting a PDF download for partially-reported
+// cases — those return "No Report Found" from HealthRay and would otherwise
+// be marked pdf_unavailable=TRUE permanently.
+export function countAllInhouseResults(caseDetail) {
+  let expected = 0;
+  let reported = 0;
+  for (const test of iterCaseTests(caseDetail)) {
+    if (isOutsourceTest(test)) continue;
+    if (test.parameters && test.parameters.length > 0) {
+      for (const p of test.parameters) {
+        expected++;
+        const v = p?.result?.test_result;
+        if (v != null && v !== "") reported++;
+      }
+    } else {
+      expected++;
+      const v = test?.result?.test_result;
+      if (v != null && v !== "") reported++;
+    }
+  }
+  return { expected, reported };
+}
+
 // Determine best date for the case
 export function extractCaseDate(listRow) {
   const raw = listRow.collected_on || listRow.registered_at || listRow.created_at;
@@ -210,32 +237,36 @@ export const LAB_CASE_STATUS = {
 // a missed download is recovered on the next sync tick, but a blank PDF gets
 // stored permanently and prevents future re-download (pdf_storage_path set).
 //
-// `opts.resultsSynced` should mirror lab_cases.results_synced — when our DB
-// has already written at least one numeric result for this case (or marked
-// it terminal), the PDF on HealthRay is real even if case_status came back
-// empty and not every in-house parameter has a numeric value yet. This is
-// load-bearing: without it we'd treat partially-filled cases (e.g. one
-// numeric panel + several text-only results) as "no-signal" and incorrectly
-// delete real PDFs.
-export function isLabCasePrintable(caseStatus, caseDetail = null, opts = {}) {
-  const { resultsSynced = false } = opts;
+// Why we require live `caseDetail`: results trickle in from HealthRay over
+// hours — one panel finalises, others stay pending. The DB-side
+// `results_synced` flag flips to TRUE as soon as a single numeric panel is
+// written, so trusting it for PDF gating triggers downloads on partially-
+// reported cases. HealthRay then returns "No Report Found" for those, and
+// we mark pdf_unavailable=TRUE permanently. The fix is to gate on the
+// detail payload: every in-house test must carry a result (numeric or text)
+// before we attempt the PDF.
+export function isLabCasePrintable(caseStatus, caseDetail = null, _opts = {}) {
   const norm = normalizeCaseStatus(caseStatus);
 
   if (norm === LAB_CASE_STATUS.CANCELLED) return { ready: false, reason: "cancelled" };
   if (norm === LAB_CASE_STATUS.IN_PROCESS) return { ready: false, reason: "in-process" };
-  if (norm === LAB_CASE_STATUS.PRINTABLE) return { ready: true, reason: "printable" };
 
-  // DB-side signal: our sync has already terminated this case.
-  if (resultsSynced) return { ready: true, reason: "results-synced" };
-
-  // Fallback: trust the same in-house completeness signal that
-  // markLabCaseSynced uses to declare the case terminal.
+  // Authoritative signal when we have live detail: every in-house test must
+  // have a result before HealthRay will generate the report PDF.
   if (caseDetail) {
-    const { expected, ready } = countInhouseProgress(caseDetail);
-    if (expected > 0 && ready >= expected) {
-      return { ready: true, reason: "inhouse-complete" };
+    const { expected, reported } = countAllInhouseResults(caseDetail);
+    if (expected > 0 && reported < expected) {
+      return { ready: false, reason: `partial-results (${reported}/${expected})` };
     }
+    if (expected > 0 && reported === expected) {
+      return { ready: true, reason: "all-tests-reported" };
+    }
+    // expected === 0 → no in-house tests visible; fall through to status.
   }
 
-  return { ready: false, reason: norm ? "unknown-status" : "no-signal" };
+  // No detail in hand: rely on HealthRay's case_status alone. We deliberately
+  // do NOT trust results_synced here — see header comment.
+  if (norm === LAB_CASE_STATUS.PRINTABLE) return { ready: true, reason: "printable" };
+
+  return { ready: false, reason: norm ? "unknown-status" : "no-detail" };
 }

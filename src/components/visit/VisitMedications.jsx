@@ -187,6 +187,14 @@ export function autoDetectGroup(name) {
   return "supplement"; // fallback
 }
 
+// Strip leading source tag (e.g. "report_extract:32059 — ", "healthray:233038167 - ")
+// from a stop_reason before display. The tag is debug noise; only the human
+// reason after the dash is shown.
+function cleanStopReason(s) {
+  if (!s) return s;
+  return String(s).replace(/^[a-z_]+:[A-Za-z0-9_-]+\s*[—–-]\s*/i, "");
+}
+
 // Deduplicate meds by name (same logic as Outcomes page)
 function dedup(meds) {
   const grouped = {};
@@ -678,7 +686,7 @@ const VisitMedications = memo(function VisitMedications({
               )}
               {child.stop_reason && (
                 <div style={{ fontSize: 9, color: "var(--t3)", marginTop: 2 }}>
-                  {child.stop_reason}
+                  {cleanStopReason(child.stop_reason)}
                 </div>
               )}
             </>
@@ -1269,7 +1277,7 @@ const VisitMedications = memo(function VisitMedications({
                     )}
                     {m.stop_reason && (
                       <div style={{ fontSize: 9, color: "var(--t3)", marginTop: 2 }}>
-                        {m.stop_reason}
+                        {cleanStopReason(m.stop_reason)}
                       </div>
                     )}
                   </div>
@@ -1335,7 +1343,7 @@ const VisitMedications = memo(function VisitMedications({
                   )}
                   {m.stop_reason && (
                     <div style={{ fontSize: 9, color: "var(--t3)", marginTop: 2 }}>
-                      {m.stop_reason}
+                      {cleanStopReason(m.stop_reason)}
                     </div>
                   )}
                 </div>

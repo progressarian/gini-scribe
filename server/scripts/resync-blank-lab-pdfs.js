@@ -205,26 +205,13 @@ async function processOne(row) {
     return;
   }
 
-  // Strongest available signal: live status + detail + our own results_synced.
+  // Live detail is authoritative — every in-house test must have a result
+  // before HealthRay generates the PDF. isLabCasePrintable verifies that.
   const liveStatus = detail.case_status || row.case_status;
-  const printable = isLabCasePrintable(liveStatus, detail, {
-    resultsSynced: !!row.results_synced,
-  });
+  const printable = isLabCasePrintable(liveStatus, detail);
 
-  // Persist the freshest status so the gate inside downloadAndStoreLabPdf
-  // sees reality. If we determined the case is ready via inhouseComplete or
-  // results-synced but case_status is null/empty, write "Printable" so the
-  // gate (which only sees stored case_status, not detail) lets us through.
-  let statusToWrite = liveStatus;
-  if (
-    printable.ready &&
-    (printable.reason === "inhouse-complete" || printable.reason === "results-synced") &&
-    normalizeCaseStatus(statusToWrite) !== "printable"
-  ) {
-    statusToWrite = "Printable";
-  }
-  if (apply && statusToWrite && statusToWrite !== row.case_status) {
-    await setCaseStatus(row.case_no, statusToWrite);
+  if (apply && liveStatus && liveStatus !== row.case_status) {
+    await setCaseStatus(row.case_no, liveStatus);
   }
 
   // ── Decision branches ────────────────────────────────────────────────────
@@ -290,6 +277,7 @@ async function processOne(row) {
       row.lab_user_id,
       row.pdf_file_name,
       caseDateStr(row),
+      detail,
     );
     if (path) {
       stats.downloaded++;

@@ -129,15 +129,12 @@ async function processCase(listRow) {
   // Otherwise leave results_synced=false so the recovery loop keeps trying.
 
   // Step h: download lab report PDF (fire-and-forget — never blocks sync).
-  // Gate on case readiness — HealthRay's /download-report URL still resolves
-  // for in-process cases but produces a structurally valid blank PDF that
-  // would pass the integrity check and persist forever.
-  // resultsSynced mirrors the markLabCaseSynced terminal condition above.
+  // Gate on the live detail payload — every in-house test must have a result
+  // (numeric or text) before HealthRay will generate the PDF. Hitting
+  // /download-report on a partially-reported case returns "No Report Found"
+  // and would mark pdf_unavailable=TRUE permanently.
   if (patientId) {
-    const willMarkSynced = caseSource === "outsource" || written > 0 || inhouseComplete;
-    const printable = isLabCasePrintable(listRow.case_status, detail, {
-      resultsSynced: willMarkSynced,
-    });
+    const printable = isLabCasePrintable(listRow.case_status, detail);
     if (printable.ready) {
       downloadAndStoreLabPdf(
         patientId,
@@ -147,6 +144,7 @@ async function processCase(listRow) {
         labUserId,
         listRow.case_attachment_file_name,
         caseDate,
+        detail,
       ).catch((e) => log("PDF", `${patientCaseNo}: PDF download failed — ${e.message}`));
     } else {
       log("PDF", `${patientCaseNo}: skip PDF download (${printable.reason})`);
@@ -366,18 +364,13 @@ export async function retryPendingLabCases() {
           await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
         }
 
-        // Download PDF if not already stored — gated on case readiness.
-        // row.case_status may be stale (column is written-once-at-insert),
-        // so the inhouseComplete fallback inside isLabCasePrintable is the
-        // robust signal here. resultsSynced mirrors the terminal condition
-        // we just evaluated above (or row.results_synced if it was already
-        // terminal on a prior pass).
+        // Download PDF if not already stored — gate on the live detail
+        // payload. Every in-house test must have a result before we hit
+        // /download-report; otherwise HealthRay returns "No Report Found"
+        // and the row gets marked pdf_unavailable=TRUE permanently.
         if (patientId && !row.pdf_storage_path) {
           const status = row.case_status || row.raw_list_json?.case_status;
-          const willMarkSynced = caseSource === "outsource" || written > 0 || inhouseComplete;
-          const printable = isLabCasePrintable(status, detail, {
-            resultsSynced: row.results_synced || willMarkSynced,
-          });
+          const printable = isLabCasePrintable(status, detail);
           if (printable.ready) {
             downloadAndStoreLabPdf(
               patientId,
@@ -387,6 +380,7 @@ export async function retryPendingLabCases() {
               row.lab_user_id,
               row.pdf_file_name,
               caseDate,
+              detail,
             ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
           } else {
             log("Recovery", `${row.patient_case_no}: skip PDF (${printable.reason})`);
@@ -411,10 +405,10 @@ export async function retryPendingLabCases() {
 export async function backfillLabPdfs({ concurrency = 2 } = {}) {
   const pool = (await import("../../config/db.js")).default;
 
-  // Only attempt PDF download for cases that look printable. case_status is
-  // the explicit signal; results_synced=TRUE is the inhouseComplete proxy
-  // (set in markLabCaseSynced when results were written or all in-house
-  // params have numeric values).
+  // Pull every case that's missing a PDF. The per-row live-detail check
+  // inside isLabCasePrintable is now the source of truth for readiness, so
+  // we no longer pre-filter on stale case_status / results_synced (those
+  // miss cases that became printable after the row was first inserted).
   const { rows } = await pool.query(
     `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
             patient_id, pdf_file_name, case_date, case_status, results_synced
@@ -423,10 +417,7 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
        AND pdf_storage_path IS NULL
        AND COALESCE(retry_abandoned, FALSE) = FALSE
        AND COALESCE(pdf_unavailable, FALSE) = FALSE
-       AND (
-         LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) = 'printable'
-         OR results_synced = TRUE
-       )
+       AND LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) <> 'cancelled'
      ORDER BY case_date DESC`,
   );
 
@@ -446,11 +437,20 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
           : row.case_date.toISOString().slice(0, 10)
         : null;
 
-      // Belt-and-braces — the SQL filter already excludes non-printable rows,
-      // but check again so any future query change cannot regress the bug.
-      const printable = isLabCasePrintable(row.case_status, null, {
-        resultsSynced: !!row.results_synced,
-      });
+      // Re-fetch the case detail so we can verify EVERY in-house test now has
+      // a result before attempting the PDF. Stored case_status is written
+      // once at insert and goes stale; results_synced flips to TRUE on the
+      // first numeric write, so neither stored signal is reliable on its own.
+      let detail = null;
+      try {
+        detail = await fetchLabCaseDetail(row.case_uid, row.lab_case_id, row.lab_user_id);
+      } catch (e) {
+        log("PDF Backfill", `${row.patient_case_no}: detail fetch failed — ${e.message}`);
+        errors++;
+        return;
+      }
+
+      const printable = isLabCasePrintable(row.case_status, detail);
       if (!printable.ready) {
         skipped++;
         log("PDF Backfill", `${row.patient_case_no} skipped (${printable.reason})`);
@@ -465,6 +465,7 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
         row.lab_user_id,
         row.pdf_file_name,
         caseDate,
+        detail,
       );
 
       if (path) {
