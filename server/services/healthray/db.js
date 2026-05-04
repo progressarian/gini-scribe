@@ -578,10 +578,14 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
-    // Use the AI-extracted date when present; fall back to the prescription
-    // (appointment) date for OBSERVATION / "today" / undated values so every
-    // reading is anchored to a real visit date. parseLabDate accepts the
-    // string "today", DD/MM/YYYY, "1 May 2026", etc. and returns ISO YYYY-MM-DD.
+    // Only accept labs with an explicit date in the notes. Clinical notes often
+    // carry forward historical sections (e.g. "PATIENT VISITED TODAY HBA1C: 11.5"
+    // copied from an earlier visit) — anchoring those undated values to the
+    // current appointment date makes stale readings look like today's labs and
+    // overwrites the genuine current reading. P_137100 (appt 31150): the
+    // undated 11.5 was old text while the dated "LABS (19/4/26) HBA1C-7.9" was
+    // the real recent value.
+    if (!lab.date) continue;
     const labDate = parseLabDate(lab.date, apptDate);
     if (!labDate) continue;
 
