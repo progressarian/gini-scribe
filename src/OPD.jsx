@@ -8,6 +8,7 @@ import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
 import OpdRangeReport from "./components/opd/OpdRangeReport.jsx";
+import TriageView from "./components/opd/TriageView.jsx";
 import DocStatusPill from "./components/ui/DocStatusPill.jsx";
 import ConfirmModal from "./components/ui/ConfirmModal.jsx";
 import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
@@ -424,6 +425,7 @@ function ApptRow({ a, sel, onSelect }) {
 
   return (
     <div
+      data-appt-id={a.id}
       onClick={() => onSelect(a)}
       style={{
         display: "flex",
@@ -6416,12 +6418,14 @@ export default function OPD() {
   const TAB_TO_VIEW = {
     schedule: "list",
     dashboard: "dashboard",
+    triage: "triage",
     "new-appt": "new-appt",
     excel: "excel",
   };
   const VIEW_TO_TAB = {
     list: "schedule",
     dashboard: "dashboard",
+    triage: "triage",
     "new-appt": "new-appt",
     excel: "excel",
   };
@@ -6511,6 +6515,25 @@ export default function OPD() {
       .then((d) => setDoctors(Array.isArray(d) && d.length > 0 ? d : SAMPLE_DOCTORS))
       .catch(() => setDoctors(SAMPLE_DOCTORS));
   }, []);
+
+  // Smooth-scroll the schedule list to the selected appointment row whenever
+  // the selection changes while the list view is visible. The data-appt-id
+  // attribute on each ApptRow is the lookup key. We retry briefly because the
+  // row may not be in the DOM yet right after a view-switch (e.g. arriving
+  // from Triage → Schedule).
+  useEffect(() => {
+    if (!selAppt?.id || view !== "list") return;
+    let attempts = 0;
+    const tryScroll = () => {
+      const el = document.querySelector(`[data-appt-id="${selAppt.id}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (attempts++ < 6) setTimeout(tryScroll, 60);
+    };
+    tryScroll();
+  }, [selAppt?.id, view]);
 
   const updateLocal = (u) => {
     setAppointments((prev) => prev.map((a) => (a.id === u.id ? { ...a, ...u } : a)));
@@ -6727,6 +6750,7 @@ export default function OPD() {
           {[
             ["list", "📋 Schedule"],
             ["dashboard", "📊 Live Dashboard"],
+            ["triage", "🔴🟡✅ Triage"],
             ["new-appt", "➕ New Appointment"],
             ["excel", "📊 Import Excel"],
           ].map(([v, l]) => (
@@ -7110,6 +7134,39 @@ export default function OPD() {
                 </div>
               </div>
             )}
+          </div>
+        ) : view === "triage" ? (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              background: BG,
+              overflow: "auto",
+            }}
+          >
+            <TriageView
+              appointments={appointments}
+              doctors={doctors}
+              date={date}
+              onDateChange={setDate}
+              onRefresh={() => apptsQuery.refetch()}
+              isFetching={apptsQuery.isFetching}
+              isPending={apptsQuery.isPending}
+              updatedAt={apptsQuery.dataUpdatedAt}
+              onUpdateAppt={(id, patch) =>
+                patchCategoryDoc(id, patch.category ?? null, patch.doctor_name)
+              }
+              onSelectAppt={(a) => {
+                setSearchQ("");
+                setFilterStatus("all");
+                setFilterDoc("all");
+                setFilterCat("all");
+                setSelAppt(a);
+                setActiveTab("overview");
+                setView("list");
+              }}
+            />
           </div>
         ) : (
           <>
