@@ -1178,25 +1178,28 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
         )}
 
         {/* Check In button */}
-        {appt.status !== "checkedin" && appt.status !== "seen" && appt.status !== "completed" && appt.status !== "in_visit" && (
-          <button
-            onClick={onCheckIn}
-            style={{
-              width: "100%",
-              padding: "10px 14px",
-              borderRadius: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              background: SK,
-              color: "#fff",
-              border: "none",
-              cursor: "pointer",
-              fontFamily: FB,
-            }}
-          >
-            ✓ Check In Patient
-          </button>
-        )}
+        {appt.status !== "checkedin" &&
+          appt.status !== "seen" &&
+          appt.status !== "completed" &&
+          appt.status !== "in_visit" && (
+            <button
+              onClick={onCheckIn}
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                background: SK,
+                color: "#fff",
+                border: "none",
+                cursor: "pointer",
+                fontFamily: FB,
+              }}
+            >
+              ✓ Check In Patient
+            </button>
+          )}
       </div>
     );
   }

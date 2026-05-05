@@ -167,6 +167,10 @@ pool
 router.get("/visit/:patientId", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  // Optional ?appointment_id=<id> tells us exactly which OPD appointment
+  // row this visit page is for, so the status pill matches the OPD list
+  // 1:1 even when a patient has multiple appointments on the same day.
+  const apptIdParam = Number(req.query.appointment_id) || Number(req.query.appt) || null;
 
   // Pull the patient's fresh Track logs from Genie before we SELECT. The
   // throttled variant coalesces concurrent requests and skips entirely if
@@ -206,6 +210,7 @@ router.get("/visit/:patientId", async (req, res) => {
       patientCondsGenieR,
       latestAnyApptR,
       latestFollowupApptR,
+      labStatusR,
     ] = await Promise.all([
       // 1. Patient
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
@@ -450,12 +455,23 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 24. Latest appointment of any kind — used by the client to stamp
       //     summary requests so cache rows are always keyed.
+      //     Also returns status / prep_steps / checked_in_at so the visit
+      //     topbar can render the same status pill OPD shows.
+      //     Selection priority (so this matches the OPD list row exactly):
+      //       1. The exact appointment id when ?appt=<id> is passed.
+      //       2. Today's appointment (OPD list is keyed on today).
+      //       3. Most recent appointment overall (fallback).
       pool.query(
-        `SELECT id FROM appointments
+        `SELECT id, status, prep_steps, checked_in_at, appointment_date
+           FROM appointments
           WHERE patient_id=$1
-          ORDER BY appointment_date DESC NULLS LAST, id DESC
+          ORDER BY
+            CASE WHEN id = $2 THEN 0 ELSE 1 END,
+            CASE WHEN appointment_date = CURRENT_DATE THEN 0 ELSE 1 END,
+            appointment_date DESC NULLS LAST,
+            id DESC
           LIMIT 1`,
-        [pid],
+        [pid, apptIdParam],
       ),
 
       // 25. Latest appointment that carries a biomarkers.followup value.
@@ -467,6 +483,61 @@ router.get("/visit/:patientId", async (req, res) => {
           WHERE patient_id=$1 AND biomarkers ? 'followup'
           ORDER BY appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
+        [pid],
+      ),
+
+      // 26. Lab status — mirrors the OPD lab tags (Gini Lab Processing /
+      //     Received / Lab Uploaded). Pulls from lab_cases (Gini lab pipeline)
+      //     and lab_results / documents (manually-uploaded reports).
+      pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM lab_cases lc
+              WHERE (lc.patient_id = $1
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = (
+                        SELECT file_no FROM patients WHERE id = $1
+                      )))
+                AND lc.results_synced = FALSE
+                AND COALESCE(lc.retry_abandoned, FALSE) = FALSE) AS pending_labs,
+           (SELECT COUNT(*)::int FROM lab_cases lc
+              WHERE (lc.patient_id = $1
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = (
+                        SELECT file_no FROM patients WHERE id = $1
+                      )))
+                AND lc.results_synced = TRUE
+                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days') AS recent_labs,
+           (SELECT MAX(lc.case_date) FROM lab_cases lc
+              WHERE (lc.patient_id = $1
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = (
+                        SELECT file_no FROM patients WHERE id = $1
+                      )))
+                AND lc.results_synced = TRUE
+                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days') AS recent_labs_date,
+           GREATEST(
+             (SELECT COUNT(DISTINCT lr.canonical_name)::int FROM lab_results lr
+                WHERE lr.patient_id = $1
+                  AND lr.source = 'report_extract'
+                  AND lr.test_date >= CURRENT_DATE - INTERVAL '7 days'),
+             (SELECT COUNT(*)::int FROM documents d
+                WHERE d.patient_id = $1
+                  AND d.doc_type IN ('lab_report', 'blood_test')
+                  AND d.source NOT IN ('healthray', 'lab_healthray')
+                  AND COALESCE(d.doc_date, d.created_at::date) >= CURRENT_DATE - INTERVAL '7 days')
+           ) AS uploaded_labs,
+           (SELECT MAX(dt) FROM (
+              SELECT MAX(lr.test_date) AS dt FROM lab_results lr
+               WHERE lr.patient_id = $1
+                 AND lr.source = 'report_extract'
+                 AND lr.test_date >= CURRENT_DATE - INTERVAL '7 days'
+              UNION ALL
+              SELECT MAX(COALESCE(d.doc_date, d.created_at::date)) AS dt FROM documents d
+               WHERE d.patient_id = $1
+                 AND d.doc_type IN ('lab_report', 'blood_test')
+                 AND d.source NOT IN ('healthray', 'lab_healthray')
+                 AND COALESCE(d.doc_date, d.created_at::date) >= CURRENT_DATE - INTERVAL '7 days'
+           ) x) AS uploaded_labs_date`,
         [pid],
       ),
     ]);
@@ -790,6 +861,13 @@ router.get("/visit/:patientId", async (req, res) => {
       labResults: labsR.rows,
       labHistory,
       labLatest,
+      labStatus: labStatusR.rows[0] || {
+        pending_labs: 0,
+        recent_labs: 0,
+        recent_labs_date: null,
+        uploaded_labs: 0,
+        uploaded_labs_date: null,
+      },
       labOrders: labOrdersR.rows.map((r) => ({
         caseNo: r.case_no,
         patientCaseNo: r.patient_case_no,
@@ -835,6 +913,15 @@ router.get("/visit/:patientId", async (req, res) => {
         carePhase,
       },
       latestAppointmentId: latestAnyApptR.rows[0]?.id || null,
+      latestAppointment: latestAnyApptR.rows[0]
+        ? {
+            id: latestAnyApptR.rows[0].id,
+            status: latestAnyApptR.rows[0].status || null,
+            prep_steps: latestAnyApptR.rows[0].prep_steps || null,
+            checked_in_at: latestAnyApptR.rows[0].checked_in_at || null,
+            appointment_date: latestAnyApptR.rows[0].appointment_date || null,
+          }
+        : null,
       syncStatus: {
         healthray: healthraySyncR.rows[0] || null,
         labs: labSyncR.rows || [],
@@ -2494,6 +2581,29 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
+    // Guard: only run the sweep when the latest consultation actually has a
+    // prescription — i.e. meds attached OR clinical notes (con_data). An
+    // empty/just-opened visit must not deactivate prior meds.
+    // Bug seen on P_54890 where a fresh empty consultation wiped 19 active meds.
+    const guard = await pool.query(
+      `WITH latest AS (
+         SELECT id, con_data FROM consultations
+          WHERE patient_id = $1
+          ORDER BY visit_date DESC NULLS LAST, id DESC
+          LIMIT 1
+       )
+       SELECT
+         EXISTS (SELECT 1 FROM medications m, latest l
+                  WHERE m.patient_id = $1 AND m.consultation_id = l.id) AS has_meds,
+         (SELECT con_data IS NOT NULL AND con_data::text <> '{}'
+            FROM latest) AS has_notes`,
+      [pid],
+    );
+    const g = guard.rows[0] || {};
+    if (!g.has_meds && !g.has_notes) {
+      return res.json({ stopped: 0, skipped: "latest-visit-empty" });
+    }
+
     // Stop medications from older consultations AND old document medicines
     const r = await pool.query(
       `UPDATE medications

@@ -21,7 +21,9 @@ export function buildName(fm) {
   const parts = [fm.first_name, fm.middle_name, fm.last_name].filter(
     (p) => p && p !== "None" && p !== "." && p !== null,
   );
-  return parts.join(" ").replace(/\s+/g, " ").trim() || "Unknown";
+  const joined = parts.join(" ").replace(/\s+/g, " ").trim();
+  if (!joined) return "Unknown";
+  return joined.replace(/\b([a-z])/g, (m) => m.toUpperCase());
 }
 
 export function mapGender(gender) {

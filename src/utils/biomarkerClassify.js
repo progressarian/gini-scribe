@@ -1,5 +1,5 @@
 // Shared biomarker classification used by:
-//   - LiveDashboard (daily, HbA1c + SBP only)
+//   - LiveDashboard (daily, full Tier-1 + Tier-2 composite)
 //   - OpdRangeReport (period, full tier model)
 //   - OPD visit detail trajectory label
 //
@@ -99,16 +99,51 @@ export function targetStatus(key, value) {
 }
 
 // classifyBiomarker(key, cur, prev) → 'better' | 'worse' | 'stable' | 'unknown'
-// Uses absolute STABILITY threshold when defined; falls back to 5% relative.
+//
+// Zone-aware classification (clinical model):
+//   1. If the reading crossed a target zone (good ↔ warn ↔ bad), zone direction
+//      decides the trend regardless of delta — a small move that crosses into
+//      a worse zone is "worse"; a move into a better zone is "better".
+//   2. Same zone, both in 'good': any movement is treated as within-target
+//      jitter → stable. Avoids flagging benign noise like LDL 66 → 89.
+//   3. Same zone, in 'warn' or 'bad': delta direction matters even if the
+//      patient stays in that zone — improvement (e.g. HbA1c 11 → 9.8) is
+//      surfaced as "better"; deterioration as "worse". Sub-stability deltas
+//      still fall back to "stable".
+//   4. Range markers (TSH) follow the same zone rules; the range itself is the
+//      'good' zone, so within-band movement is stable.
+const ZONE_RANK = { good: 0, warn: 1, bad: 2 };
+
 export function classifyBiomarker(key, cur, prev) {
   if (cur == null || prev == null || isNaN(cur) || isNaN(prev)) return "unknown";
   const diff = cur - prev;
   const absStab = STABILITY[key];
-  const stable = absStab != null ? Math.abs(diff) <= absStab : Math.abs(diff / prev) * 100 <= 5;
-  if (stable) return "stable";
+  const withinStability =
+    absStab != null ? Math.abs(diff) <= absStab : Math.abs(diff / prev) * 100 <= 5;
   const t = BIO_TARGET[key];
-  // Range markers (TSH): movement toward the [low, high] band is "better"
+
+  // 1) Zone crossing wins over everything — clinical zone change is what the
+  //    care team needs to see, even if the absolute delta is small.
+  if (t) {
+    const curStatus = targetStatus(key, cur);
+    const prevStatus = targetStatus(key, prev);
+    if (curStatus !== "unknown" && prevStatus !== "unknown" && curStatus !== prevStatus) {
+      const curRank = ZONE_RANK[curStatus];
+      const prevRank = ZONE_RANK[prevStatus];
+      if (curRank > prevRank) return "worse"; // good→warn, warn→bad, good→bad
+      if (curRank < prevRank) return "better"; // bad→warn, warn→good, bad→good
+    }
+    // 2) Same zone, both 'good' → stable (ignore within-target jitter).
+    if (curStatus === "good" && prevStatus === "good") return "stable";
+  }
+
+  // 3) Sub-stability delta in the same non-good zone → stable.
+  if (withinStability) return "stable";
+
+  // 4) Significant delta in same warn/bad zone (or marker has no target):
+  //    use direction.
   if (t && t.range) {
+    // For range markers any non-good movement still uses midpoint distance.
     const mid = (t.low + t.high) / 2;
     return Math.abs(cur - mid) < Math.abs(prev - mid) ? "better" : "worse";
   }
@@ -202,6 +237,17 @@ export function classifyComposite(perBiomarker) {
   if (t1Stable.length > 0 && t2Worse.length > 0) {
     conflicts.push(
       `Tier-1 stable but ${t2Worse.map((e) => e.key.toUpperCase()).join("/")} worsening`,
+    );
+    return { outcome: "mixed", reasons: conflicts.slice(), conflicts };
+  }
+
+  // Tier 1 stable but a Tier 2 marker is parked in 'bad' zone (no movement).
+  // Symmetric with the t1Better + t2Bad branch above — a chronically off-target
+  // supporting marker still warrants review even when nothing is actively
+  // worsening this visit.
+  if (t1Stable.length > 0 && t2Bad.length > 0) {
+    conflicts.push(
+      `Tier-1 stable but ${t2Bad.map((e) => e.key.toUpperCase()).join(", ")} outside target`,
     );
     return { outcome: "mixed", reasons: conflicts.slice(), conflicts };
   }

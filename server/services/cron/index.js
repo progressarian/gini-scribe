@@ -22,8 +22,38 @@ const SYNC_INTERVAL_MS = 1 * 60 * 1000;
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
 const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 
-let intervalId = null;
+// HealthRay has no webhook, so we run a continuous loop: each iteration waits
+// for the previous sync to finish, then sleeps a short random break (10–15s)
+// before starting the next one. This gives near real-time updates without
+// stacking concurrent runs.
+const HEALTHRAY_LOOP_MIN_BREAK_MS = 10 * 1000;
+const HEALTHRAY_LOOP_MAX_BREAK_MS = 15 * 1000;
+
+let healthrayLoopRunning = false;
+let healthrayLoopTimeoutId = null;
 let labIntervalId = null;
+
+function scheduleNextHealthraySync(delayMs) {
+  if (!healthrayLoopRunning) return;
+  healthrayLoopTimeoutId = setTimeout(async () => {
+    healthrayLoopTimeoutId = null;
+    if (!healthrayLoopRunning) return;
+    const startedAt = Date.now();
+    try {
+      await syncTodayWalkingAppointments();
+    } catch (e) {
+      console.error("[Cron] Scheduled sync failed:", e.message);
+    }
+    const elapsed = Date.now() - startedAt;
+    const breakMs =
+      HEALTHRAY_LOOP_MIN_BREAK_MS +
+      Math.floor(Math.random() * (HEALTHRAY_LOOP_MAX_BREAK_MS - HEALTHRAY_LOOP_MIN_BREAK_MS + 1));
+    console.log(
+      `[Cron] HealthRay sync finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
+    );
+    scheduleNextHealthraySync(breakMs);
+  }, delayMs);
+}
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
@@ -34,17 +64,21 @@ export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
     console.log("[Cron] HealthRay credentials not set — walking appointment sync disabled");
   } else {
-    console.log("[Cron] Starting walking appointment sync (every 1 min)...");
+    console.log(
+      "[Cron] Starting walking appointment sync (continuous loop, 10–15s break between runs)...",
+    );
 
-    // Run initial full sync on startup
-    syncWalkingAppointments().catch((e) => console.error("[Cron] Initial sync failed:", e.message));
+    healthrayLoopRunning = true;
 
-    // Then sync today's walkins every 1 minute
-    intervalId = setInterval(() => {
-      syncTodayWalkingAppointments().catch((e) =>
-        console.error("[Cron] Scheduled sync failed:", e.message),
-      );
-    }, SYNC_INTERVAL_MS);
+    // Run initial full sync on startup, then enter the continuous today-sync loop
+    (async () => {
+      try {
+        await syncWalkingAppointments();
+      } catch (e) {
+        console.error("[Cron] Initial sync failed:", e.message);
+      }
+      scheduleNextHealthraySync(0);
+    })();
   }
 
   // ── Lab HealthRay sync (every 1 min, staggered) ───────────────────────────
@@ -135,9 +169,12 @@ export function startCronJobs() {
 }
 
 export function stopCronJobs() {
-  if (intervalId) {
-    clearInterval(intervalId);
-    intervalId = null;
+  if (healthrayLoopRunning || healthrayLoopTimeoutId) {
+    healthrayLoopRunning = false;
+    if (healthrayLoopTimeoutId) {
+      clearTimeout(healthrayLoopTimeoutId);
+      healthrayLoopTimeoutId = null;
+    }
     console.log("[Cron] Walking appointment sync stopped");
   }
   if (labIntervalId) {

@@ -63,8 +63,11 @@ function buildContext(data) {
     return null;
   };
 
+  // Drop child/support meds (those with a parent_medication_id) so the
+  // patient-facing summary names only top-level prescriptions, matching
+  // the rule used by the doctor brief and post-visit summary.
   const newOrChanged = (activeMeds || [])
-    .filter((m) => m.is_new)
+    .filter((m) => m.is_new && !m.parent_medication_id)
     .map((m) => ({
       name: m.composition || m.name,
       dose: m.dose,

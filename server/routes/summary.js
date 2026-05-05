@@ -49,15 +49,13 @@ Paragraph 1 — Identity (one or two sentences, MUST start with the full name us
 
 Paragraph 2 — Active conditions, each paired with its supporting vital/biomarker. Walk through each active diagnosis in order of clinical priority (most acute first). For every condition, weave in the specific supporting number(s) and trend direction from the data — never a diagnosis without a value. Example flow: "Her type 2 diabetes is poorly controlled today, with HbA1c at 7.7% (up from 6.8%) and FBS at 271 mg/dL. Her hypertension remains uncontrolled at 160/80 despite dual therapy. Her CKD has progressed, with eGFR down to 39 mL/min/1.73m² from 77, and creatinine now 1.58 mg/dL. Her dyslipidaemia is well-controlled, with LDL at 83 mg/dL."
 
-Paragraph 3 — Current medications and what to flag. State explicitly what the patient is currently on, by drug name and dose, in one fluent sentence — e.g. "She is currently on metformin 1g BD, telmisartan 40 mg OD, atorvastatin 20 mg HS, and dapagliflozin 10 mg OD." If the active-medications list is empty, say so plainly — e.g. "She is currently on no active medications." — and STOP. Do NOT enumerate, name, or list the discontinued drugs as a substitute, even if that is the only medication context available. Then close with one short sentence flagging the single most acute issue you'd want the senior to address today. If — and only if — a specific recent stop is the direct cause of a measured biomarker change, you may refer to it generically by drug class ("after antidiabetic therapy was held two days ago"), but never by drug name, never as a list, and never to fill space.
+Paragraph 3 — Current medications and what to flag. State explicitly what the patient is currently on, by drug name and dose, in one fluent sentence — e.g. "She is currently on metformin 1g BD, telmisartan 40 mg OD, atorvastatin 20 mg HS, and dapagliflozin 10 mg OD." If the active-medications list is empty, say so plainly — e.g. "She is currently on no active medications." — and STOP. Then close with one short sentence flagging the single most acute issue you'd want the senior to address today. NEVER mention, name, list, hint at, or reason about any previous, prior, stopped, discontinued, or held medication — those are not in the input and must not appear in the output in any form (not by drug name, not by class, not as a parenthetical, not as "previously on …", not as "after X was stopped", not as "the cessation of …"). The only medications that exist for this brief are the currently active ones.
 
 Voice & style for the narrative:
 - First-person plural resident voice: "we", "her last labs showed...", "she is currently on...".
 - Plain narrative prose only — no headings, no bullets, no markdown, no emojis, no section labels, no colon-lists.
 - Present tense for current status; past tense for what has happened.
-- Use only CURRENT-VISIT active medications by name (the "Active medications — CURRENT VISIT" list in the input). NEVER name stopped, discontinued, or previous-visit drugs in the narrative — not in the current-meds sentence, not as a parenthetical, not as a list, not anywhere.
-- "Previous-visit medications" in the input are drugs still flagged active in the chart but NOT re-prescribed at today's visit. They are CONTEXT ONLY — do NOT include them in the "currently on …" sentence, do NOT merge them with the current-visit list, do NOT enumerate them. If the current-visit list is non-empty, the "currently on …" sentence must contain ONLY those drugs and nothing from the previous-visit bucket. If the current-visit list is empty, say "no medications were prescribed at today's visit" and STOP — do NOT fall back to listing previous-visit drugs.
-- Stopped meds may only appear as anonymous class-level reasoning ("antihypertensive therapy was held"), and only when needed to explain a specific biomarker shift. If you find yourself listing more than zero stopped or previous-visit drug names in the narrative, you have made an error — rewrite it.
+- Use only CURRENT-VISIT active medications by name (the "Active medications — CURRENT VISIT" list in the input). NEVER mention previous, prior, stopped, discontinued, or held medications in any form — not by drug name, not by class, not as "previously on …", not as "after X was stopped/held", not as "cessation of …", not in the closing flag sentence, not anywhere. The narrative must contain zero references to non-current medications.
 - Use exact numbers, units, drug names, and doses from the input. Do not invent data.
 
 DIAGNOSIS FORMAT STANDARD (applies to EVERY diagnosis you mention — primary, comorbid, complication, or incidental — in narrative AND alerts):
@@ -83,12 +81,7 @@ Use BOTH the rule-engine alerts AND the lab panel below as source material.
 When a lab has a prior value, compare: note direction (↑/↓), magnitude, and whether it crossed into/out of target range.
 Prefer lab-grounded observations (with exact numbers, units, and delta vs. previous) over generic rule restatements.
 Do not hallucinate — only use numbers that appear in the data below.
-
-Handling stopped medications:
-- Never lump different drug classes into one sentence like "multiple medications discontinued". Each stopped drug of a high-weight class (thyroid, antihypertensive, antidiabetic, statin, antiplatelet, anticoagulant) gets its own specific red_alert naming the drug, days since stop, and the class-specific consequence.
-- When a stop coincides with a corroborating lab/vital change (BP up after an antihypertensive stop, TSH up after thyroid stop, LDL up after statin stop, FBS up after antidiabetic stop), state the link explicitly with exact numbers from the data.
-- Supplements and symptomatic drugs (already flagged [AMBER] by the rule engine) belong in amber_alerts, never red_alerts. Do not promote them.
-- If there are more high-weight stops than red slots, keep the ones with visible clinical consequence first, then longest gap, then most critical class. Drop the lowest-priority stop entirely rather than merging it into a generic bullet.`;
+Alerts must NEVER reference previous, prior, stopped, discontinued, or held medications — not by drug name, not by class, not as "after X was stopped". The only medications that exist for this brief are the currently active ones.`;
 
 // Returns a string like "2y 5m" / "6m" / "12d" / "new patient (first visit today)".
 // `totalDays` is the precise day count since first visit; preferred when months=0.
@@ -305,15 +298,8 @@ async function _generateAiBriefInner(
     ``,
     fmtMedList(
       ctx.activeMeds || [],
-      "Active medications — CURRENT VISIT (re-prescribed today; THESE are the only drugs the patient is 'currently on' — name these in the current-meds sentence)",
+      "Active medications — CURRENT VISIT (the ONLY medications that exist for this brief; if this list is empty, the patient is on no active medications and you must not mention any drug at all)",
     ),
-    ``,
-    fmtMedList(
-      ctx.prevVisitMeds || [],
-      "Previous-visit medications (still flagged active in the chart but NOT re-prescribed at today's visit — context only; do NOT name these in the 'currently on …' sentence, do NOT list them as active drugs, do NOT mix them with the current-visit list)",
-    ),
-    ``,
-    fmtMedList(ctx.stoppedMeds || [], "Recently stopped (last 60 days)"),
     ``,
     fmtVitals(ctx.vitals || []),
     ``,
@@ -618,8 +604,10 @@ router.get("/patients/:id/summary", async (req, res) => {
         ),
 
         // Recently stopped medications (for R4 rule — stopped within last 60 days)
+        // parent_medication_id is selected so we can exclude child/support
+        // meds from the brief — same rule used for active meds.
         pool.query(
-          `SELECT id, name, dose, stopped_date, stop_reason FROM medications
+          `SELECT id, name, dose, stopped_date, stop_reason, parent_medication_id FROM medications
          WHERE patient_id=$1 AND is_active=false AND stopped_date > CURRENT_DATE - INTERVAL '60 days'`,
           [pid],
         ),
@@ -650,13 +638,16 @@ router.get("/patients/:id/summary", async (req, res) => {
     const allActiveMeds = activeMedsR.rows.filter((m) => !m.parent_medication_id);
     const currentVisitMeds = allActiveMeds.filter((m) => m.visit_status !== "previous");
     const prevVisitMeds = allActiveMeds.filter((m) => m.visit_status === "previous");
+    // Same rule for stopped meds — only top-level parents count toward the
+    // R4 rule and the AI's "stopped recently" context.
+    const stoppedParents = stoppedMedsR.rows.filter((m) => !m.parent_medication_id);
 
     // ── 5. Run rule engine ──
     const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
     const rules = runSummaryRules({
       diagnoses: sortedDiagnoses,
       activeMeds: allActiveMeds,
-      stoppedMeds: stoppedMedsR.rows,
+      stoppedMeds: stoppedParents,
       labResults: rawLabs,
       labHistory,
       vitals: mergedVitals,
@@ -719,7 +710,7 @@ router.get("/patients/:id/summary", async (req, res) => {
       activeMedsCount: currentVisitMeds.length,
       activeMeds: currentVisitMeds,
       prevVisitMeds,
-      stoppedMeds: stoppedMedsR.rows,
+      stoppedMeds: stoppedParents,
       vitals: mergedVitals,
       prep,
     });

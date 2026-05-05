@@ -552,12 +552,12 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
         [pid],
       ),
       pool.query(
-        `SELECT id, name, dose, stopped_date, stop_reason FROM medications
+        `SELECT id, name, dose, stopped_date, stop_reason, parent_medication_id FROM medications
            WHERE patient_id=$1 AND is_active=false AND stopped_date > CURRENT_DATE - INTERVAL '60 days'`,
         [pid],
       ),
       pool.query(
-        `SELECT id, name, dose, frequency, started_date FROM medications
+        `SELECT id, name, dose, frequency, started_date, parent_medication_id FROM medications
            WHERE patient_id=$1 AND started_date > CURRENT_DATE - INTERVAL '14 days'`,
         [pid],
       ),
@@ -643,9 +643,11 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       patient,
       diagnoses: sortDiagnoses(diagnosesR.rows),
       labHistory,
-      activeMeds: activeMedsR.rows,
-      stoppedMeds: stoppedMedsR.rows,
-      recentChanges: recentChangesR.rows,
+      // Drop child/support meds from every bucket — only top-level parent
+      // meds should appear (or be reasoned about) in the post-visit brief.
+      activeMeds: activeMedsR.rows.filter((m) => !m.parent_medication_id),
+      stoppedMeds: stoppedMedsR.rows.filter((m) => !m.parent_medication_id),
+      recentChanges: recentChangesR.rows.filter((m) => !m.parent_medication_id),
       vitals: mergedVitals,
       prep,
       ctx: { totalVisits, monthsWithGini, daysWithGini, carePhase },

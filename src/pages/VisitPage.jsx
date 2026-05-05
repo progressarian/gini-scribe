@@ -977,6 +977,7 @@ export default function VisitPage() {
         doctor={doctor}
         summary={summary}
         latestVitals={latestV}
+        appointment={data.latestAppointment}
         onToggleAI={toggleAI}
         onEndVisit={hasActiveVisit ? openEndModal : null}
         onPasteNotes={handlePasteNotes}
@@ -994,6 +995,7 @@ export default function VisitPage() {
         latestVitals={latestV}
         prevVitals={prevV}
         activeMeds={uniqueActiveMeds}
+        labStatus={data.labStatus}
         tab={tab}
       />
 

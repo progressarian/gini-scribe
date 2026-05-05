@@ -8,10 +8,37 @@ const VisitStrip = memo(function VisitStrip({
   latestVitals,
   prevVitals,
   activeMeds,
+  labStatus,
   tab,
 }) {
   const weightCurr = latestVitals?.weight;
   const weightPrev = prevVitals?.weight;
+
+  // Mirrors the OPD lab tags. labStatus is computed server-side in
+  // /api/visit/:patientId so the chip shown here always matches what the
+  // OPD list shows for the same patient.
+  const labChips = (() => {
+    if (!labStatus) return [];
+    const chips = [];
+    if (labStatus.pending_labs > 0) {
+      chips.push({ label: "🔬 Gini Lab Processing", tone: "ss-a" });
+    }
+    if (labStatus.recent_labs > 0) {
+      chips.push({
+        label: "✅ Gini Lab Received",
+        tone: "ss-g",
+        date: labStatus.recent_labs_date ? fmtDate(labStatus.recent_labs_date) : null,
+      });
+    }
+    if (labStatus.uploaded_labs > 0) {
+      chips.push({
+        label: "📄 Lab Uploaded",
+        tone: "ss-b",
+        date: labStatus.uploaded_labs_date ? fmtDate(labStatus.uploaded_labs_date) : null,
+      });
+    }
+    return chips;
+  })();
 
   return (
     <div className="summary-strip">
@@ -42,6 +69,23 @@ const VisitStrip = memo(function VisitStrip({
           </div>
         </div>
       </div>
+
+      {labChips.length > 0 && (
+        <div className="ss-item">
+          <div>
+            <div className="ss-label">Lab Status</div>
+            <div className="ss-val" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {labChips.map((c, i) => (
+                <span key={i} className={`ss-badge ${c.tone}`}>
+                  {c.label}
+                  {c.date ? ` · ${c.date}` : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="ss-sep" />
 
       {hba1cCurr && (

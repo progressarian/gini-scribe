@@ -79,6 +79,69 @@ const Clock = memo(function Clock() {
   );
 });
 
+// Mirrors statusSty() in src/OPD.jsx so the visit topbar pill matches the
+// chip OPD shows for the same appointment.
+function apptStatusStyle(s) {
+  if (s === "seen" || s === "completed")
+    return {
+      label: "Seen",
+      bg: "#dcfce7",
+      color: "#15803d",
+      border: "#bbf7d0",
+      dot: "#22c55e",
+      icon: "✓",
+    };
+  if (s === "in_visit")
+    return {
+      label: "In Visit",
+      bg: "#f5f3ff",
+      color: "#7c3aed",
+      border: "#ddd6fe",
+      dot: "#8b5cf6",
+      icon: "●",
+    };
+  if (s === "checkedin")
+    return {
+      label: "Checked In",
+      bg: "#eff6ff",
+      color: "#2563eb",
+      border: "#bfdbfe",
+      dot: "#3b82f6",
+      icon: "→",
+    };
+  if (s === "prepped")
+    return {
+      label: "Ready",
+      bg: "#ecfeff",
+      color: "#0e7490",
+      border: "#a5f3fc",
+      dot: "#06b6d4",
+      icon: "✦",
+    };
+  if (s === "no_show")
+    return {
+      label: "No Show",
+      bg: "#f3f4f6",
+      color: "#6b7280",
+      border: "#e5e7eb",
+      dot: "#9ca3af",
+      icon: "—",
+    };
+  return {
+    label: "Pending",
+    bg: "#f9fafb",
+    color: "#6b7280",
+    border: "#e5e7eb",
+    dot: "#9ca3af",
+    icon: "○",
+  };
+}
+
+function isApptReady(prepSteps) {
+  const ps = prepSteps || {};
+  return !!(ps.biomarkers && ps.compliance && ps.categorized && ps.assigned);
+}
+
 const printMenuItemStyle = {
   display: "block",
   width: "100%",
@@ -105,7 +168,19 @@ const VisitTopbar = memo(function VisitTopbar({
   onPrintBoth,
   visitStart,
   hasActiveVisit,
+  appointment,
 }) {
+  // Derive the OPD-style status label. When prep is fully done but the
+  // appointment hasn't been flipped to a downstream state, OPD shows "Ready"
+  // — mirror that promotion here.
+  const apptStatusRaw = appointment?.status || null;
+  const promotedStatus =
+    apptStatusRaw &&
+    !["in_visit", "seen", "completed", "no_show"].includes(apptStatusRaw) &&
+    isApptReady(appointment?.prep_steps)
+      ? "prepped"
+      : apptStatusRaw;
+  const apptSty = apptStatusRaw ? apptStatusStyle(promotedStatus) : null;
   const today = new Date().toISOString().split("T")[0];
   const [printOpen, setPrintOpen] = useState(false);
   const printRef = useRef(null);
@@ -147,37 +222,66 @@ const VisitTopbar = memo(function VisitTopbar({
           <span className="allergy">{patient.allergies || "No known drug allergies"}</span>
         </div>
       </div>
-      {(hasActiveVisit || latestVitals) && (
+      {apptSty && (
         <div
           className="visit-status-pill"
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            padding: "4px 12px",
-            borderRadius: 20,
-            border: "1px solid #16a34a",
-            background: "#f0fdf4",
-            color: "#15803d",
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 600,
+            padding: "4px 10px 4px 8px",
+            borderRadius: 999,
+            background: apptSty.bg,
+            color: apptSty.color,
+            border: `1px solid ${apptSty.border}`,
             whiteSpace: "nowrap",
             marginLeft: 12,
+            letterSpacing: 0.1,
+            boxShadow: "0 1px 1px rgba(15, 23, 42, 0.04)",
           }}
         >
           <span
+            aria-hidden
             style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: "#16a34a",
               display: "inline-block",
-              flexShrink: 0,
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: apptSty.dot,
+              boxShadow: `0 0 0 3px ${apptSty.bg}, 0 0 0 4px ${apptSty.dot}22`,
             }}
           />
-          <span className="visit-status-label">
-            Checked in{latestVitals ? " · Vitals done" : ""}
-          </span>
+          <span className="visit-status-label">{apptSty.label}</span>
+          {promotedStatus === "checkedin" && latestVitals && (
+            <>
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: 1,
+                  height: 10,
+                  background: apptSty.border,
+                  margin: "0 2px",
+                }}
+              />
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  fontWeight: 500,
+                  opacity: 0.85,
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 10 }}>
+                  ✓
+                </span>
+                Vitals done
+              </span>
+            </>
+          )}
         </div>
       )}
       <div className="sep" />
