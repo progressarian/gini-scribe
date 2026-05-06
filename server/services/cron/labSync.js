@@ -8,13 +8,13 @@ import {
   extractCaseDate,
   classifyCaseSource,
   countInhouseProgress,
-  isLabCasePrintable,
 } from "../lab/labHealthrayParser.js";
 import {
   ensureLabCasesTable,
   insertLabCase,
   markLabCaseSynced,
   getPendingLabCases,
+  getPdfPendingCases,
   matchLabPatient,
   ensureLabPatient,
   linkLabAppointment,
@@ -129,26 +129,23 @@ async function processCase(listRow) {
   // Otherwise leave results_synced=false so the recovery loop keeps trying.
 
   // Step h: download lab report PDF (fire-and-forget — never blocks sync).
-  // Gate on the live detail payload — every in-house test must have a result
-  // (numeric or text) before HealthRay will generate the PDF. Hitting
-  // /download-report on a partially-reported case returns "No Report Found"
-  // and would mark pdf_unavailable=TRUE permanently.
+  // No printable pre-gate: fetchLabReportPdf returns {unavailable:true} only
+  // when Healthray definitively says "No Report Found", and a transient/null
+  // outcome triggers the backoff scheduler in downloadAndStoreLabPdf
+  // (30–40 min, then 4 h for up to 3 days). Some partial cases still produce
+  // a valid PDF — gating on isLabCasePrintable was preventing those from
+  // ever being captured.
   if (patientId) {
-    const printable = isLabCasePrintable(listRow.case_status, detail);
-    if (printable.ready) {
-      downloadAndStoreLabPdf(
-        patientId,
-        caseNo,
-        caseUid,
-        labCaseId,
-        labUserId,
-        listRow.case_attachment_file_name,
-        caseDate,
-        detail,
-      ).catch((e) => log("PDF", `${patientCaseNo}: PDF download failed — ${e.message}`));
-    } else {
-      log("PDF", `${patientCaseNo}: skip PDF download (${printable.reason})`);
-    }
+    downloadAndStoreLabPdf(
+      patientId,
+      caseNo,
+      caseUid,
+      labCaseId,
+      labUserId,
+      listRow.case_attachment_file_name,
+      caseDate,
+      detail,
+    ).catch((e) => log("PDF", `${patientCaseNo}: PDF download failed — ${e.message}`));
   }
 
   log(
@@ -364,27 +361,20 @@ export async function retryPendingLabCases() {
           await markLabCaseSynced(row.case_no, { patientId, appointmentId, rawDetailJson: detail });
         }
 
-        // Download PDF if not already stored — gate on the live detail
-        // payload. Every in-house test must have a result before we hit
-        // /download-report; otherwise HealthRay returns "No Report Found"
-        // and the row gets marked pdf_unavailable=TRUE permanently.
+        // Download PDF if not already stored. The downloader handles its own
+        // backoff (30–40 min, then 4 h for up to 3 days) and distinguishes
+        // a transient failure from a definitive "No Report Found".
         if (patientId && !row.pdf_storage_path) {
-          const status = row.case_status || row.raw_list_json?.case_status;
-          const printable = isLabCasePrintable(status, detail);
-          if (printable.ready) {
-            downloadAndStoreLabPdf(
-              patientId,
-              row.case_no,
-              row.case_uid,
-              row.lab_case_id,
-              row.lab_user_id,
-              row.pdf_file_name,
-              caseDate,
-              detail,
-            ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
-          } else {
-            log("Recovery", `${row.patient_case_no}: skip PDF (${printable.reason})`);
-          }
+          downloadAndStoreLabPdf(
+            patientId,
+            row.case_no,
+            row.case_uid,
+            row.lab_case_id,
+            row.lab_user_id,
+            row.pdf_file_name,
+            caseDate,
+            detail,
+          ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
         }
 
         log(
@@ -450,12 +440,10 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
         return;
       }
 
-      const printable = isLabCasePrintable(row.case_status, detail);
-      if (!printable.ready) {
-        skipped++;
-        log("PDF Backfill", `${row.patient_case_no} skipped (${printable.reason})`);
-        return;
-      }
+      // No printable pre-gate — let downloadAndStoreLabPdf differentiate
+      // "No Report Found" (definitive) from a transient failure (retry via
+      // its own backoff schedule). The old gate was rejecting partial-results
+      // cases that Healthray actually serves a PDF for.
 
       const path = await downloadAndStoreLabPdf(
         row.patient_id,
@@ -482,4 +470,62 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
 
   log("PDF Backfill", `Done — ${downloaded} downloaded, ${skipped} skipped, ${errors} errors`);
   return { total: rows.length, downloaded, skipped, errors };
+}
+
+// ── Scheduled PDF retry recovery ────────────────────────────────────────────
+// Picks up cases whose backoff window (pdf_next_attempt_at) has elapsed and
+// retries the PDF download. The downloader itself handles attempt counting,
+// next-window scheduling, and the 3-day budget abandonment — so this loop
+// just iterates due rows and lets downloadAndStoreLabPdf do the work.
+export async function runPdfRetryRecovery({ concurrency = 1 } = {}) {
+  const releaseLock = await tryAcquireCronLock("Lab PDF Retry", CRON_LOCK_KEYS.LAB_SYNC);
+  if (!releaseLock) return { total: 0, downloaded: 0, skipped: 0, errors: 0 };
+  try {
+    await ensureLabCasesTable();
+    const rows = await getPdfPendingCases({ limit: 30 });
+    if (!rows.length) {
+      log("PDF Retry", "no cases due for retry");
+      return { total: 0, downloaded: 0, skipped: 0, errors: 0 };
+    }
+    log("PDF Retry", `${rows.length} cases due for retry`);
+
+    let downloaded = 0,
+      skipped = 0,
+      errors = 0;
+
+    await runBatch(rows, concurrency, async (row) => {
+      try {
+        const caseDate = row.case_date
+          ? typeof row.case_date === "string"
+            ? row.case_date.slice(0, 10)
+            : row.case_date.toISOString().slice(0, 10)
+          : null;
+        const path = await downloadAndStoreLabPdf(
+          row.patient_id,
+          row.case_no,
+          row.case_uid,
+          row.lab_case_id,
+          row.lab_user_id,
+          row.pdf_file_name,
+          caseDate,
+          null, // let the downloader fetch fresh detail
+        );
+        if (path) {
+          downloaded++;
+          log("PDF Retry", `${row.patient_case_no} -> ${path}`);
+        } else {
+          skipped++;
+        }
+      } catch (e) {
+        errors++;
+        log("PDF Retry", `${row.patient_case_no} error: ${e.message}`);
+      }
+      await yieldToApp(YIELD_BETWEEN_ITEMS_MS);
+    });
+
+    log("PDF Retry", `Done — ${downloaded} downloaded, ${skipped} skipped, ${errors} errors`);
+    return { total: rows.length, downloaded, skipped, errors };
+  } finally {
+    await releaseLock();
+  }
 }

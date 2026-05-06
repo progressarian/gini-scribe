@@ -1,7 +1,7 @@
 // ── Lab HealthRay Sync — DB operations ──────────────────────────────────────
 
 import pool from "../../config/db.js";
-import { extractInvestigationSummary, isLabCasePrintable } from "./labHealthrayParser.js";
+import { extractInvestigationSummary } from "./labHealthrayParser.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { createLogger } from "../logger.js";
 
@@ -50,10 +50,19 @@ export async function ensureLabCasesTable() {
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS retry_abandoned BOOLEAN DEFAULT FALSE;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_storage_path TEXT;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_unavailable BOOLEAN DEFAULT FALSE;
+    -- PDF download backoff schedule. Initial attempt happens at sync time;
+    -- failures schedule a retry via pdf_next_attempt_at (30–40 min, then 4 h
+    -- repeating for up to 3 days from pdf_first_attempt_at).
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_attempt_count INTEGER DEFAULT 0;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_first_attempt_at TIMESTAMPTZ;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_last_attempt_at TIMESTAMPTZ;
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_next_attempt_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_lab_cases_patient    ON lab_cases(patient_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_appt       ON lab_cases(appointment_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_date       ON lab_cases(case_date);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_pending    ON lab_cases(results_synced) WHERE results_synced = FALSE;
+    CREATE INDEX IF NOT EXISTS idx_lab_cases_pdf_retry  ON lab_cases(pdf_next_attempt_at)
+      WHERE pdf_storage_path IS NULL AND COALESCE(pdf_unavailable, FALSE) = FALSE;
   `);
   tableReady = true;
 }
@@ -136,6 +145,66 @@ export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawD
 // provided, the printable check verifies every in-house test has a result.
 // If omitted, we fetch detail ourselves so we always check against fresh
 // state rather than the stored (often stale) case_status column.
+// PDF retry backoff. Some Healthray cases briefly return an error while a
+// pending test result is still trickling in; the PDF becomes available later.
+// Schedule:
+//   attempt 1 (sync time) → fail → next in 30–40 min
+//   attempt 2 onwards     → fail → next in 4 h
+//   total budget          → 3 days from first attempt; after that mark
+//                            pdf_unavailable=TRUE so we stop trying.
+const PDF_RETRY_BUDGET_MS = 3 * 24 * 60 * 60 * 1000;
+const PDF_FIRST_BACKOFF_MIN_MS = 30 * 60 * 1000;
+const PDF_FIRST_BACKOFF_JITTER_MS = 10 * 60 * 1000; // → 30–40 min
+const PDF_LATER_BACKOFF_MS = 4 * 60 * 60 * 1000;
+
+function computePdfNextAttemptDelayMs(attemptCount) {
+  if (attemptCount <= 1) {
+    return PDF_FIRST_BACKOFF_MIN_MS + Math.floor(Math.random() * PDF_FIRST_BACKOFF_JITTER_MS);
+  }
+  return PDF_LATER_BACKOFF_MS;
+}
+
+async function recordPdfAttemptStart(caseNo) {
+  const { rows } = await pool.query(
+    `UPDATE lab_cases
+        SET pdf_attempt_count   = COALESCE(pdf_attempt_count, 0) + 1,
+            pdf_first_attempt_at = COALESCE(pdf_first_attempt_at, NOW()),
+            pdf_last_attempt_at  = NOW()
+      WHERE case_no = $1
+      RETURNING pdf_attempt_count, pdf_first_attempt_at`,
+    [caseNo],
+  );
+  return rows[0] || { pdf_attempt_count: 1, pdf_first_attempt_at: new Date() };
+}
+
+async function schedulePdfRetry(caseNo, attemptCount, firstAttemptAt) {
+  const ageMs = firstAttemptAt ? Date.now() - new Date(firstAttemptAt).getTime() : 0;
+  if (ageMs >= PDF_RETRY_BUDGET_MS) {
+    // Exhausted 3-day budget — mark unavailable so retry loops stop hitting it.
+    await pool.query(
+      `UPDATE lab_cases
+          SET pdf_unavailable = TRUE,
+              pdf_next_attempt_at = NULL
+        WHERE case_no = $1`,
+      [caseNo],
+    );
+    labLog(
+      "Abandon",
+      `case ${caseNo}: PDF retry budget exhausted after ${attemptCount} attempts — marked unavailable`,
+    );
+    return null;
+  }
+  const delayMs = computePdfNextAttemptDelayMs(attemptCount);
+  const nextAt = new Date(Date.now() + delayMs);
+  await pool.query(`UPDATE lab_cases SET pdf_next_attempt_at = $2 WHERE case_no = $1`, [
+    caseNo,
+    nextAt,
+  ]);
+  const minutes = Math.round(delayMs / 60000);
+  labLog("Retry", `case ${caseNo}: attempt ${attemptCount} failed — next try in ${minutes} min`);
+  return nextAt;
+}
+
 export async function downloadAndStoreLabPdf(
   patientId,
   caseNo,
@@ -155,36 +224,32 @@ export async function downloadAndStoreLabPdf(
     return null;
   }
 
-  // Avoid re-downloading if already stored, and verify the case is in a
-  // printable state — defends against any future caller that forgets to gate.
-  // HealthRay's /download-report URL still resolves for in-process cases but
-  // returns a structurally valid blank PDF, so without this check a blank PDF
-  // gets persisted and pdf_storage_path is set, blocking future re-download.
+  // Skip if already stored, abandoned, or scheduled for a later retry.
+  // The retry scheduler honours the user-defined backoff (30–40 min, then 4 h
+  // for up to 3 days) instead of hammering Healthray on every cron tick.
   const { rows: pre } = await pool.query(
-    `SELECT pdf_storage_path, case_status FROM lab_cases WHERE case_no = $1`,
+    `SELECT pdf_storage_path, pdf_unavailable, pdf_next_attempt_at, case_status
+       FROM lab_cases WHERE case_no = $1`,
     [caseNo],
   );
   if (pre[0]?.pdf_storage_path) return pre[0].pdf_storage_path;
-
-  // Refresh detail when the caller didn't pass one — partial-results cases
-  // would otherwise pass the stale case_status check and waste a Puppeteer
-  // slot on a "No Report Found" round-trip that flips pdf_unavailable=TRUE.
-  let detail = caseDetail;
-  if (!detail) {
-    try {
-      const { fetchLabCaseDetail } = await import("./labHealthrayApi.js");
-      detail = await fetchLabCaseDetail(caseUid, caseId, userId);
-    } catch (e) {
-      labLog("Skip", `case ${caseNo}: detail refresh failed — ${e.message}`);
-      return null;
-    }
-  }
-
-  const printable = isLabCasePrintable(pre[0]?.case_status, detail);
-  if (!printable.ready) {
-    labLog("Skip", `case ${caseNo}: not printable (${printable.reason})`);
+  if (pre[0]?.pdf_unavailable) {
+    labLog("Skip", `case ${caseNo}: pdf_unavailable=true`);
     return null;
   }
+  if (pre[0]?.pdf_next_attempt_at && new Date(pre[0].pdf_next_attempt_at) > new Date()) {
+    const minLeft = Math.round(
+      (new Date(pre[0].pdf_next_attempt_at).getTime() - Date.now()) / 60000,
+    );
+    labLog("Skip", `case ${caseNo}: next retry in ${minLeft} min`);
+    return null;
+  }
+
+  // Record this attempt up-front so backoff scheduling has accurate counters
+  // even if Healthray hangs / we crash mid-fetch.
+  const attempt = await recordPdfAttemptStart(caseNo);
+  const attemptCount = attempt.pdf_attempt_count;
+  const firstAttemptAt = attempt.pdf_first_attempt_at;
 
   let result;
   try {
@@ -192,14 +257,21 @@ export async function downloadAndStoreLabPdf(
     result = await fetchLabReportPdf(caseUid, caseId, userId);
   } catch (e) {
     labLog("Error", `PDF fetch failed for case ${caseNo}: ${e.message}`);
+    await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
   // Discriminated outcome from fetchLabReportPdf:
   //   { buffer, contentType } → success
   //   { unavailable: true }   → HealthRay says no report exists (definitive)
-  //   null / no buffer        → transient failure (retry on next cron tick)
+  //   null / no buffer        → transient failure — schedule next retry
   if (result?.unavailable) {
-    await pool.query(`UPDATE lab_cases SET pdf_unavailable = TRUE WHERE case_no = $1`, [caseNo]);
+    await pool.query(
+      `UPDATE lab_cases
+          SET pdf_unavailable = TRUE,
+              pdf_next_attempt_at = NULL
+        WHERE case_no = $1`,
+      [caseNo],
+    );
     labLog("Skip", `case ${caseNo}: marked pdf_unavailable (no report on HealthRay)`);
     return null;
   }
@@ -208,14 +280,15 @@ export async function downloadAndStoreLabPdf(
       "Skip",
       `case ${caseNo}: API returned empty/null (uid=${caseUid}, id=${caseId}, user=${userId})`,
     );
+    await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
-
   const { buffer, contentType } = result;
 
-  // Reject JSON error bodies
+  // Reject JSON error bodies — schedule retry, may resolve later.
   if (contentType === "application/json" || (buffer.length < 2000 && buffer[0] === 0x7b)) {
     labLog("Reject", `JSON response for case ${caseNo}`);
+    await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
 
@@ -230,6 +303,7 @@ export async function downloadAndStoreLabPdf(
         "Reject",
         `Invalid PDF for case ${caseNo} (head="${head}", hasEOF=${tail.includes("%%EOF")}, bytes=${buffer.length})`,
       );
+      await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
       return null;
     }
   }
@@ -257,6 +331,7 @@ export async function downloadAndStoreLabPdf(
         "Error",
         `Supabase upload failed ${uploadRes.status} for case ${caseNo}: ${errText.slice(0, 200)}`,
       );
+      await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
       return null;
     }
 
@@ -277,11 +352,15 @@ export async function downloadAndStoreLabPdf(
     );
 
     // Update lab_cases with storage path
-    // Clear pdf_unavailable too — a successful download means whatever
-    // earlier "No Report Found" verdict is now stale (HealthRay can produce
-    // a PDF later for cases that had none before).
+    // Clear pdf_unavailable + pdf_next_attempt_at too — a successful download
+    // means whatever earlier "No Report Found" verdict is now stale (HealthRay
+    // can produce a PDF later for cases that had none before).
     await pool.query(
-      `UPDATE lab_cases SET pdf_storage_path = $1, pdf_unavailable = FALSE WHERE case_no = $2`,
+      `UPDATE lab_cases
+          SET pdf_storage_path = $1,
+              pdf_unavailable = FALSE,
+              pdf_next_attempt_at = NULL
+        WHERE case_no = $2`,
       [storagePath, caseNo],
     );
 
@@ -289,8 +368,31 @@ export async function downloadAndStoreLabPdf(
     return storagePath;
   } catch (e) {
     labLog("Error", `Storage failed for case ${caseNo}: ${e.message}`);
+    await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
+}
+
+// ── Cases due for a PDF retry ──────────────────────────────────────────────
+// Selects rows whose backoff window has elapsed (or never had a first
+// attempt). Used by the dedicated PDF-retry recovery cron.
+export async function getPdfPendingCases({ limit = 50 } = {}) {
+  const { rows } = await pool.query(
+    `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
+            patient_id, pdf_file_name, case_date, case_status, results_synced,
+            pdf_attempt_count, pdf_first_attempt_at, pdf_next_attempt_at
+       FROM lab_cases
+      WHERE patient_id IS NOT NULL
+        AND pdf_storage_path IS NULL
+        AND COALESCE(pdf_unavailable, FALSE) = FALSE
+        AND COALESCE(retry_abandoned, FALSE) = FALSE
+        AND LOWER(REGEXP_REPLACE(COALESCE(case_status, ''), '[\\s_]', '', 'g')) <> 'cancelled'
+        AND (pdf_next_attempt_at IS NULL OR pdf_next_attempt_at <= NOW())
+      ORDER BY pdf_next_attempt_at ASC NULLS FIRST, case_date DESC
+      LIMIT $1`,
+    [limit],
+  );
+  return rows;
 }
 
 // ── Get cases pending retry ─────────────────────────────────────────────────

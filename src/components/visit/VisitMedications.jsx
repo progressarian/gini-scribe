@@ -522,15 +522,12 @@ const VisitMedications = memo(function VisitMedications({
     return m;
   }, [prevVisitMeds]);
 
-  const prevTopLevelMeds = useMemo(
-    () => {
-      const prevIds = new Set(prevVisitMeds.map((m) => m.id));
-      return prevVisitMeds.filter(
-        (m) => !m.parent_medication_id || !prevIds.has(m.parent_medication_id),
-      );
-    },
-    [prevVisitMeds],
-  );
+  const prevTopLevelMeds = useMemo(() => {
+    const prevIds = new Set(prevVisitMeds.map((m) => m.id));
+    return prevVisitMeds.filter(
+      (m) => !m.parent_medication_id || !prevIds.has(m.parent_medication_id),
+    );
+  }, [prevVisitMeds]);
 
   // Same grouping for the stopped bucket so the "Show stopped" list nests
   // sub-medicines under the stopped parent they belonged to.

@@ -45,8 +45,6 @@ const syncPatientLogsFromGenie = noop;
 const syncPatientLogsFromGenieThrottled = noop;
 const syncDiagnosesToGenie = noop;
 const syncMedicationsToGenie = noop;
-const deleteGenieMedication = noopOk;
-const updateGenieMedication = noopOk;
 const syncLabsToGenie = noop;
 const syncDocumentsToGenie = noop;
 const syncAppointmentToGenie = noop;
@@ -206,7 +204,7 @@ router.get("/visit/:patientId", async (req, res) => {
       healthrayDxApptR,
       healthraySyncR,
       labSyncR,
-      patientMedsGenieR,
+      _patientMedsGenieRetired,
       patientCondsGenieR,
       latestAnyApptR,
       latestFollowupApptR,
@@ -434,15 +432,12 @@ router.get("/visit/:patientId", async (req, res) => {
         [pid],
       ),
 
-      // 22. Genie master medications mirror — medicines the patient has added
-      //     in the Genie app (populated by syncPatientLogsFromGenie).
-      pool.query(
-        `SELECT * FROM patient_medications_genie
-         WHERE patient_id=$1
-         ORDER BY is_active DESC, synced_at DESC
-         LIMIT 200`,
-        [pid],
-      ),
+      // 22. Genie master medications mirror — retired 2026-05-06.
+      //     Genie sync is disabled (dual-DB routing replaces it) and the mirror
+      //     was producing duplicate "genie:<id>" rows that shadowed real
+      //     medications. Return an empty result set in the same shape so the
+      //     destructure below stays valid.
+      Promise.resolve({ rows: [] }),
 
       // 23. Genie conditions mirror — what the patient is seeing on their app.
       pool.query(
@@ -750,65 +745,10 @@ router.get("/visit/:patientId", async (req, res) => {
 
     // Apply clinical sorting to diagnoses and medications
     const sortedDiagnoses = sortDiagnoses(diagnosesR.rows);
-    // Merge patient-added Genie meds (e.g. "Test Med (Track Sync)" added from
-    // the app) into the active medications list so the scribe web count
-    // matches what the patient sees in the app. Dedupe by normalised name
-    // against the doctor-prescribed rows; a doctor entry always wins on
-    // collision since it carries fuller metadata (prescriber, consultation
-    // link, started_date, etc.).
-    const doctorNamesSet = new Set(
-      (activeMedsR.rows || []).map((m) =>
-        String(m.pharmacy_match || m.name || "")
-          .trim()
-          .toUpperCase(),
-      ),
-    );
-    const patientOnlyMeds = (patientMedsGenieR.rows || [])
-      .filter((m) => m.is_active !== false)
-      .filter(
-        (m) =>
-          !doctorNamesSet.has(
-            String(m.name || "")
-              .trim()
-              .toUpperCase(),
-          ),
-      )
-      .map((m) => {
-        // Normalise to YYYY-MM-DD so the frontend's string-equality split of
-        // lastVisit vs prevVisit (in VisitMedications.jsx) compares apples
-        // to apples. The SQL side returns prescribed_date as a DATE; if we
-        // hand back a TIMESTAMPTZ for patient-added rows, every doctor-
-        // prescribed med written on the same day fails the latestDate match
-        // and gets shoved into the collapsed "Prev Visit" bucket — leaving
-        // only the patient-added row visible in the active table.
-        // NOTE: pg returns TIMESTAMPTZ columns as JS Date objects. Plain
-        // String(date) calls .toString() ("Sat Apr 25 2026 ...") — we need
-        // .toISOString() to get the YYYY-MM-DD prefix.
-        const ts = m.created_at || m.synced_at || null;
-        const toIso = (v) => {
-          if (!v) return null;
-          if (v instanceof Date) return v.toISOString();
-          return String(v);
-        };
-        const dayOnly = ts ? toIso(ts).slice(0, 10) : null;
-        return {
-          id: `genie:${m.genie_id || m.id}`,
-          name: m.name,
-          dose: m.dose,
-          frequency: m.frequency,
-          timing: m.timing,
-          instructions: m.instructions,
-          is_active: m.is_active !== false,
-          started_date: dayOnly,
-          prescribed_date: dayOnly,
-          last_prescribed_date: dayOnly,
-          prescriber: null,
-          source: m.source || "patient_app",
-          for_conditions: m.for_conditions || null,
-        };
-      });
-    const combinedActive = [...activeMedsR.rows, ...patientOnlyMeds];
-    const sortedActiveMeds = sortMedications(combinedActive);
+    // Active meds come solely from the `medications` table now. The genie
+    // mirror used to be merged here with `genie:<id>` prefixed ids — that
+    // duplicated drugs against real medications rows and broke PATCH/DELETE.
+    const sortedActiveMeds = sortMedications(activeMedsR.rows || []);
 
     // Merge app-logged vitals (patient_vitals_log) into the doctor-side
     // `vitals` array so the visit response surfaces both streams in one
@@ -903,7 +843,7 @@ router.get("/visit/:patientId", async (req, res) => {
         symptoms: symptomLogR.rows,
         meds: medLogR.rows,
         meals: mealLogR.rows,
-        patientMedications: patientMedsGenieR.rows,
+        patientMedications: [],
         patientConditions: patientCondsGenieR.rows,
       },
       summary: {
@@ -1338,27 +1278,6 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
   const rawId = String(req.params.id || "");
   if (!pid) return res.status(400).json({ error: "Invalid IDs" });
 
-  // Genie-sourced (patient-added) meds — update mirror + Genie Supabase so
-  // the change reflects in the app.
-  if (rawId.startsWith("genie:")) {
-    const genieMedId = rawId.slice("genie:".length);
-    if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
-    try {
-      const { dose, frequency, timing } = req.body;
-      const fields = {};
-      if (dose !== undefined) fields.dose = t(dose, 100);
-      if (frequency !== undefined) fields.frequency = t(frequency, 100);
-      if (timing !== undefined) fields.timing = t(timing, 200);
-      const result = await updateGenieMedication(pid, genieMedId, fields, pool);
-      if (!result.updated) {
-        return res.status(500).json({ error: result.reason || "Update failed" });
-      }
-      return res.json({ success: true, source: "genie" });
-    } catch (e) {
-      return handleError(res, e, "Edit Genie medication");
-    }
-  }
-
   const mid = Number(rawId);
   if (!mid) return res.status(400).json({ error: "Invalid IDs" });
   try {
@@ -1568,22 +1487,6 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
   const pid = Number(req.params.patientId);
   const rawId = String(req.params.id || "");
   if (!pid) return res.status(400).json({ error: "Invalid IDs" });
-
-  // Genie-sourced meds — flag as inactive in Genie + mirror so the app stops
-  // showing the med as active.
-  if (rawId.startsWith("genie:")) {
-    const genieMedId = rawId.slice("genie:".length);
-    if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
-    try {
-      const result = await updateGenieMedication(pid, genieMedId, { is_active: false }, pool);
-      if (!result.updated) {
-        return res.status(500).json({ error: result.reason || "Stop failed" });
-      }
-      return res.json({ success: true, source: "genie" });
-    } catch (e) {
-      return handleError(res, e, "Stop Genie medication");
-    }
-  }
 
   const mid = Number(rawId);
   if (!mid) return res.status(400).json({ error: "Invalid IDs" });
@@ -1828,23 +1731,6 @@ router.delete("/visit/:patientId/medication/:id", async (req, res) => {
   const pid = Number(req.params.patientId);
   const rawId = String(req.params.id || "");
   if (!pid) return res.status(400).json({ error: "Invalid IDs" });
-
-  // Genie-sourced meds use `genie:<uuid>` ids (the Supabase medications.id).
-  // They aren't in the local `medications` table, so number coercion fails —
-  // delete from the mirror + Genie Supabase instead.
-  if (rawId.startsWith("genie:")) {
-    const genieMedId = rawId.slice("genie:".length);
-    if (!genieMedId) return res.status(400).json({ error: "Invalid IDs" });
-    try {
-      const result = await deleteGenieMedication(pid, genieMedId, pool);
-      if (!result.deleted) {
-        return res.status(500).json({ error: result.reason || "Delete failed" });
-      }
-      return res.json({ success: true, deleted: 1, source: "genie" });
-    } catch (e) {
-      return handleError(res, e, "Delete Genie medication");
-    }
-  }
 
   const mid = Number(rawId);
   if (!mid) return res.status(400).json({ error: "Invalid IDs" });

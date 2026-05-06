@@ -11,6 +11,7 @@ import {
 import {
   runLabSync,
   retryPendingLabCases,
+  runPdfRetryRecovery,
   getLabSyncStatus,
   backfillLabRanges,
   backfillLabPdfs,
@@ -59,6 +60,7 @@ let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
 let docRecoveryIntervalId = null;
 let missingMedsIntervalId = null;
+let pdfRetryIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -100,6 +102,25 @@ export function startCronJobs() {
   recoveryIntervalId = setInterval(() => {
     retryPendingLabCases().catch((e) => console.error("[Cron] Lab recovery failed:", e.message));
   }, RECOVERY_INTERVAL_MS);
+
+  // ── Lab PDF retry recovery ────────────────────────────────────────────────
+  // Picks up lab cases whose PDF backoff window (pdf_next_attempt_at) has
+  // elapsed and re-attempts the download. Per-case backoff is 30–40 min after
+  // the first failure, then every 4 h for up to 3 days. We only need to wake
+  // up often enough to catch the shortest window — every 15 min is plenty.
+  const PDF_RETRY_INTERVAL_MS = 15 * 60 * 1000;
+  console.log("[Cron] Starting lab PDF retry recovery (every 15 min)...");
+  setTimeout(
+    () => {
+      runPdfRetryRecovery().catch((e) => console.error("[Cron] Lab PDF retry failed:", e.message));
+      pdfRetryIntervalId = setInterval(() => {
+        runPdfRetryRecovery().catch((e) =>
+          console.error("[Cron] Lab PDF retry failed:", e.message),
+        );
+      }, PDF_RETRY_INTERVAL_MS);
+    },
+    5 * 60 * 1000,
+  ); // start 5 min after boot to let the regular sync settle
 
   // ── Daily OPD re-parse: fixes diagnoses + medicines for today's patients ──
   // Runs 30 min after startup (lets initial sync settle), then every 24 hours.
@@ -206,6 +227,11 @@ export function stopCronJobs() {
     missingMedsIntervalId = null;
     console.log("[Cron] Missing meds recovery stopped");
   }
+  if (pdfRetryIntervalId) {
+    clearInterval(pdfRetryIntervalId);
+    pdfRetryIntervalId = null;
+    console.log("[Cron] Lab PDF retry recovery stopped");
+  }
 }
 
 // Manual trigger exports
@@ -219,6 +245,7 @@ export {
   getLabSyncStatus,
   backfillLabRanges,
   backfillLabPdfs,
+  runPdfRetryRecovery,
   runDailyOpdBackfill,
   runStuckStatusRecovery,
   runMissingMedsRecovery,
