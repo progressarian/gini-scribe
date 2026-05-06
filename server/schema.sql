@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS medications (
   notes           TEXT,
   parent_medication_id INTEGER REFERENCES medications(id) ON DELETE SET NULL,
   support_condition    TEXT,           -- 'for nausea Day 1-2', 'SOS for diarrhoea'
+  days_of_week    INTEGER[],           -- [0..6] (Sun..Sat); null when not weekly
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_medications_patient ON medications(patient_id);

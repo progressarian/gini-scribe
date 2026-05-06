@@ -257,6 +257,7 @@ async function syncVisitToGenie(visit, patient, doctor) {
         // prescription — bucket them as 'current' unless scribe already
         // stamped a value (e.g. older rows being replayed).
         p_visit_status: med.visit_status || 'current',
+        p_days_of_week: Array.isArray(med.days_of_week) && med.days_of_week.length ? med.days_of_week : null,
       }, { step: 'medication', extra: { name: med.name } });
     }
 

@@ -58,10 +58,10 @@ const EditMedicationModal = memo(function EditMedicationModal({
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  // Preserve any legacy/freeform tokens (e.g. "Before meals") that aren't in
-  // the canonical TIMINGS list so editing other fields doesn't silently drop
-  // them.
-  const extraTimings = initialTimingTokens.filter(
+  // Legacy/freeform tokens (e.g. "Morning", "Before meals") that aren't in
+  // the canonical TIMINGS list. We render them as extra pills so the user
+  // can see what's currently set and toggle them off.
+  const initialExtraTimings = initialTimingTokens.filter(
     (e) => !TIMINGS.some((t) => t.toLowerCase() === e.toLowerCase()),
   );
   const initialMedGroup = medication.med_group || "";
@@ -90,6 +90,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const [timings, setTimings] = useState(() =>
     TIMINGS.filter((t) => initialTimingTokens.some((e) => e.toLowerCase() === t.toLowerCase())),
   );
+  const [extraTimings, setExtraTimings] = useState(initialExtraTimings);
   const [medGroup, setMedGroup] = useState(initialMedGroup);
   const [drugClass, setDrugClass] = useState(initialDrugClass);
   const [externalDoctor, setExternalDoctor] = useState(initialExternalDoctor);
@@ -115,6 +116,8 @@ const EditMedicationModal = memo(function EditMedicationModal({
 
   const toggleTiming = (t) =>
     setTimings((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]));
+  const toggleExtraTiming = (t) =>
+    setExtraTimings((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]));
   const toggleWeekday = (d) =>
     setWeekdays((ws) => (ws.includes(d) ? ws.filter((x) => x !== d) : [...ws, d]));
 
@@ -371,6 +374,17 @@ const EditMedicationModal = memo(function EditMedicationModal({
                   type="checkbox"
                   checked={timings.includes(t)}
                   onChange={() => toggleTiming(t)}
+                  disabled={loading}
+                />
+                <span>{t}</span>
+              </label>
+            ))}
+            {extraTimings.map((t) => (
+              <label key={`extra-${t}`}>
+                <input
+                  type="checkbox"
+                  checked={true}
+                  onChange={() => toggleExtraTiming(t)}
                   disabled={loading}
                 />
                 <span>{t}</span>
