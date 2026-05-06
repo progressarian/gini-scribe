@@ -1206,8 +1206,22 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       notes,
       parent_medication_id,
       support_condition,
+      days_of_week,
     } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
+
+    // Normalise days_of_week to a clean int[] (0=Sun … 6=Sat) or null.
+    // Anything else (strings, out-of-range, dupes) is filtered out.
+    const cleanDays = Array.isArray(days_of_week)
+      ? Array.from(
+          new Set(
+            days_of_week
+              .map((d) => Number(d))
+              .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+          ),
+        ).sort((a, b) => a - b)
+      : null;
+    const finalDays = cleanDays && cleanDays.length ? cleanDays : null;
 
     // If this is a support medicine, the parent must belong to the same patient
     // and currently be active. Reject otherwise so we never create dangling FKs.
@@ -1260,8 +1274,8 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const visitAnchor = anchorRes.rows[0]?.anchor || null;
 
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),NOW())
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],NOW())
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1280,6 +1294,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          parent_medication_id = COALESCE(EXCLUDED.parent_medication_id, medications.parent_medication_id),
          support_condition = COALESCE(EXCLUDED.support_condition, medications.support_condition),
          last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
+         days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -1302,6 +1317,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         parentId,
         parentId ? t(support_condition, 200) : null,
         visitAnchor,
+        finalDays,
       ],
     );
     await markMedicationVisitStatus(pid).catch((e) =>
@@ -1354,6 +1370,18 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       last_prescribed_date,
       parent_medication_id,
       support_condition,
+      // Extended-edit fields — let doctors update richer metadata on an
+      // active medicine without going through stop+re-add.
+      med_group,
+      drug_class,
+      external_doctor,
+      route,
+      clinical_note,
+      notes,
+      for_diagnosis,
+      started_date,
+      side_effects,
+      days_of_week,
     } = req.body;
 
     // Load existing row so we can snapshot the pre-edit state into history
@@ -1414,15 +1442,61 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const setSupportCondition = support_condition !== undefined;
     const nextSupportCondition = setSupportCondition ? t(support_condition, 200) : null;
 
+    // Optional extended-edit fields. Each uses an explicit "set" boolean so
+    // we can distinguish "not provided" (keep existing) from "set to null"
+    // (clear). for_diagnosis is normalised to text[] (array) or null.
+    const setMedGroup = med_group !== undefined;
+    const setDrugClass = drug_class !== undefined;
+    const setExternalDoctor = external_doctor !== undefined;
+    const setRoute = route !== undefined;
+    const setClinicalNote = clinical_note !== undefined;
+    const setNotesField = notes !== undefined;
+    const setForDx = for_diagnosis !== undefined;
+    const setStartedDate = started_date !== undefined;
+    const setSideEffects = side_effects !== undefined;
+    const setDaysOfWeek = days_of_week !== undefined;
+    // Normalise to int[] (0=Sun … 6=Sat) or null. Anything outside that
+    // range is dropped so we don't poison the column with bad values.
+    const nextDaysOfWeek = setDaysOfWeek
+      ? Array.isArray(days_of_week)
+        ? (() => {
+            const cleaned = Array.from(
+              new Set(
+                days_of_week
+                  .map((d) => Number(d))
+                  .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+              ),
+            ).sort((a, b) => a - b);
+            return cleaned.length ? cleaned : null;
+          })()
+        : null
+      : null;
+    const nextForDx = setForDx
+      ? Array.isArray(for_diagnosis)
+        ? for_diagnosis
+        : for_diagnosis
+          ? [for_diagnosis]
+          : null
+      : null;
+
     const r = await pool.query(
       `UPDATE medications SET
          dose = $1, frequency = $2, timing = $3,
-         notes = COALESCE($4, notes),
+         notes = CASE WHEN $20::boolean THEN $21 ELSE COALESCE($4, notes) END,
          history = CASE WHEN $5::jsonb IS NULL THEN COALESCE(history, '[]'::jsonb)
                         ELSE COALESCE(history, '[]'::jsonb) || $5::jsonb END,
          last_prescribed_date = CASE WHEN $8::boolean THEN $9::date ELSE last_prescribed_date END,
          parent_medication_id = CASE WHEN $10::boolean THEN $11::int ELSE parent_medication_id END,
          support_condition = CASE WHEN $12::boolean THEN $13 ELSE support_condition END,
+         med_group       = CASE WHEN $14::boolean THEN $15 ELSE med_group END,
+         drug_class      = CASE WHEN $16::boolean THEN $17 ELSE drug_class END,
+         external_doctor = CASE WHEN $18::boolean THEN $19 ELSE external_doctor END,
+         route           = CASE WHEN $22::boolean THEN $23 ELSE route END,
+         clinical_note   = CASE WHEN $24::boolean THEN $25 ELSE clinical_note END,
+         for_diagnosis   = CASE WHEN $26::boolean THEN $27::text[] ELSE for_diagnosis END,
+         started_date    = CASE WHEN $28::boolean THEN $29::date ELSE started_date END,
+         side_effects    = CASE WHEN $30::boolean THEN $31 ELSE side_effects END,
+         days_of_week    = CASE WHEN $32::boolean THEN $33::int[] ELSE days_of_week END,
          updated_at = NOW()
        WHERE id = $6 AND patient_id = $7 AND is_active = true RETURNING *`,
       [
@@ -1439,6 +1513,26 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
         nextParentId,
         setSupportCondition,
         nextSupportCondition,
+        setMedGroup,
+        t(med_group, 50),
+        setDrugClass,
+        t(drug_class, 50),
+        setExternalDoctor,
+        t(external_doctor, 200),
+        setNotesField,
+        t(notes, 1000),
+        setRoute,
+        t(route, 50),
+        setClinicalNote,
+        t(clinical_note, 500),
+        setForDx,
+        nextForDx,
+        setStartedDate,
+        setStartedDate ? n(started_date) : null,
+        setSideEffects,
+        t(side_effects, 500),
+        setDaysOfWeek,
+        nextDaysOfWeek,
       ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });

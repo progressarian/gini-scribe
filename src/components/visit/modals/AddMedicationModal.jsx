@@ -5,8 +5,6 @@ import {
   DIABETES_CLASSES,
   TIMING_OPTIONS,
   findDrug,
-  getDefaultTiming,
-  getDefaultDose,
 } from "../../../config/drugDatabase";
 
 const DRUG_LIST = [
@@ -48,6 +46,15 @@ const DRUG_LIST = [
   "Pantoprazole 40mg",
 ];
 
+// Day-of-week tokens for weekly medicines. Selected days are appended to the
+// `frequency` string as " · Mon, Wed" so no schema change is needed and the
+// info displays naturally wherever frequency is rendered.
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// Map a weekday token to JS Date.getDay() ints (Sun = 0 … Sat = 6) so the
+// structured `days_of_week` column lines up with what the patient app reads.
+const WEEKDAY_TO_INT = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
 const AddMedicationModal = memo(function AddMedicationModal({
   onClose,
   onSubmit,
@@ -78,12 +85,15 @@ const AddMedicationModal = memo(function AddMedicationModal({
   });
   const isSubMed = !!form.parent_medication_id;
   const [timings, setTimings] = useState([]);
+  const [weekdays, setWeekdays] = useState([]); // only used when frequency = "Once weekly"
   const [warning, setWarning] = useState(null);
   const [loading, setLoading] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const toggleTiming = (t) =>
     setTimings((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]));
+  const toggleWeekday = (d) =>
+    setWeekdays((ws) => (ws.includes(d) ? ws.filter((x) => x !== d) : [...ws, d]));
 
   const handleNameChange = (e) => {
     const name = e.target.value;
@@ -132,11 +142,29 @@ const AddMedicationModal = memo(function AddMedicationModal({
   // Check if showing external doctor field
   const showExternalDoctor = form.med_group === "external";
 
+  const supportsWeekday = form.frequency === "Once weekly" || form.frequency === "Once in 14 days";
+
   const handleSubmit = async () => {
     if (loading) return;
+    // For weekly / fortnightly medicines, append the selected day(s) to the
+    // frequency string so it persists without a schema change.
+    // EditMedicationModal parses this suffix back out.
+    const finalFrequency =
+      supportsWeekday && weekdays.length
+        ? `${form.frequency} · ${weekdays.join(", ")}`
+        : form.frequency;
+    const daysOfWeek =
+      supportsWeekday && weekdays.length
+        ? weekdays
+            .map((d) => WEEKDAY_TO_INT[d])
+            .filter((n) => typeof n === "number")
+            .sort((a, b) => a - b)
+        : null;
     const submitData = {
       ...form,
+      frequency: finalFrequency,
       timing: timings.join(", "),
+      days_of_week: daysOfWeek,
       // Only include relevant fields
       drug_class: showDrugClass ? form.drug_class : null,
       external_doctor: showExternalDoctor ? form.external_doctor : null,
@@ -300,6 +328,27 @@ const AddMedicationModal = memo(function AddMedicationModal({
           </div>
         </div>
 
+        {supportsWeekday && (
+          <div className="mf">
+            <label className="ml">
+              On which day{weekdays.length > 1 ? "s" : ""}{" "}
+              <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 11 }}>(optional)</span>
+            </label>
+            <div className="time-pills">
+              {WEEKDAYS.map((d) => (
+                <label key={d}>
+                  <input
+                    type="checkbox"
+                    checked={weekdays.includes(d)}
+                    onChange={() => toggleWeekday(d)}
+                  />
+                  <span>{d}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="mf">
           <label className="ml">When to take</label>
           <div className="time-pills">
@@ -313,6 +362,38 @@ const AddMedicationModal = memo(function AddMedicationModal({
                 <span>{t.label}</span>
               </label>
             ))}
+          </div>
+        </div>
+
+        {/* Route + Started date */}
+        <div className="g2">
+          <div className="mf">
+            <label className="ml">Route</label>
+            <select
+              className="ms"
+              value={form.route}
+              onChange={(e) => set("route", e.target.value)}
+            >
+              <option value="Oral">Oral</option>
+              <option value="Subcutaneous">Subcutaneous</option>
+              <option value="Intramuscular">Intramuscular</option>
+              <option value="Intravenous">Intravenous</option>
+              <option value="Topical">Topical</option>
+              <option value="Inhaled">Inhaled</option>
+              <option value="Sublingual">Sublingual</option>
+            </select>
+          </div>
+          <div className="mf">
+            <label className="ml">
+              Started on{" "}
+              <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 11 }}>(optional)</span>
+            </label>
+            <input
+              type="date"
+              className="mi"
+              value={form.started_date}
+              onChange={(e) => set("started_date", e.target.value)}
+            />
           </div>
         </div>
 

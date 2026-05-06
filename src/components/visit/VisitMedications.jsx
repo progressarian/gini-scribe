@@ -523,7 +523,12 @@ const VisitMedications = memo(function VisitMedications({
   }, [prevVisitMeds]);
 
   const prevTopLevelMeds = useMemo(
-    () => prevVisitMeds.filter((m) => !m.parent_medication_id),
+    () => {
+      const prevIds = new Set(prevVisitMeds.map((m) => m.id));
+      return prevVisitMeds.filter(
+        (m) => !m.parent_medication_id || !prevIds.has(m.parent_medication_id),
+      );
+    },
     [prevVisitMeds],
   );
 

@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gini OPD — Floor Dashboard v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f0f4f7;--white:#fff;--ink:#1a2332;--ink2:#3d4f63;--ink3:#6b7d90;
+  --bd:#dde3ea;--bd2:#c4cdd8;
+  --tl:#009e8c;--tll:#e6f6f4;--tlb:rgba(0,158,140,.2);
+  --nv:#0e2240;
+  --re:#d94f4f;--rel:#fdf0f0;--reb:rgba(217,79,79,.15);
+  --am:#d97a0a;--aml:#fef6e6;--amb:rgba(217,122,10,.15);
+  --gn:#15803d;--gnl:#edfcf0;--gnb:rgba(21,128,61,.15);
+  --sk:#2563eb;--skl:#eff6ff;--skb:rgba(37,99,235,.15);
+  --lv:#6d28d9;--lvl:#f5f3ff;--lvb:rgba(109,40,217,.15);
+  --sh:0 1px 3px rgba(0,0,0,.08);--shm:0 4px 16px rgba(0,0,0,.12);
+  --r:9px;--fb:'Outfit',sans-serif;--fm:'DM Mono',monospace;--fd:'Instrument Serif',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--fb);color:var(--ink);background:var(--bg);font-size:13px}
+
+/* ── NAV ── */
+.tb{background:var(--nv);height:50px;display:flex;align-items:center;padding:0 20px;gap:14px;flex-shrink:0;position:sticky;top:0;z-index:300}
+.logo{font-family:var(--fd);font-size:19px;color:#fff}.logo em{font-style:italic;color:#5dd6ca}
+.tb-sep{width:1px;height:16px;background:rgba(255,255,255,.15)}
+.tb-tabs{display:flex;gap:2px}
+.tbt{padding:5px 13px;border-radius:6px;font-size:11px;font-weight:600;color:rgba(255,255,255,.5);cursor:pointer;border:none;background:transparent;font-family:var(--fb);transition:all .15s}
+.tbt:hover{color:rgba(255,255,255,.85);background:rgba(255,255,255,.08)}.tbt.ta{color:#fff;background:rgba(255,255,255,.13)}
+.tb-r{margin-left:auto;display:flex;align-items:center;gap:10px}
+.clkp{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 10px;font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.7)}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
+.live-lbl{font-size:10px;font-weight:700;color:rgba(255,255,255,.6)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+.screen{display:none}.screen.active{display:block}
+
+/* ── SHARED CONTROL BAR ── */
+.ctl-bar{background:var(--white);border-bottom:1px solid var(--bd);padding:8px 20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:50px;z-index:200}
+.cb-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);flex-shrink:0}
+.cb-sep{width:1px;height:18px;background:var(--bd);flex-shrink:0}
+.date-pill{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--white);color:var(--ink3);font-family:var(--fb);white-space:nowrap;transition:all .15s}
+.date-pill:hover{border-color:var(--bd2)}.date-pill.dp-active{background:var(--nv);color:#fff;border-color:var(--nv)}
+.dp-confirm{font-size:9px;margin-top:2px;text-align:center}
+.dp-today{color:var(--tl);font-weight:700}.dp-tomorrow{color:var(--sk);font-weight:700}
+.dp-plus2{color:var(--am)}.dp-plus3{color:var(--ink3)}
+.toggle-group{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden}
+.tg-btn{padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:var(--white);color:var(--ink3);font-family:var(--fb);transition:all .15s;border-right:1px solid var(--bd)}
+.tg-btn:last-child{border-right:none}
+.tg-btn.active{background:var(--nv);color:#fff}
+.dept-chip{padding:3px 10px;border-radius:11px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid}
+.dept-active{background:var(--tl);color:#fff;border-color:var(--tl)}
+.dept-inactive{background:var(--white);color:var(--tl);border-color:var(--tlb)}
+
+/* ════════════════════
+   TRIAGE VIEW
+════════════════════ */
+.triage-wrap{padding:14px 20px;max-width:1400px;margin:0 auto}
+
+/* Huddle bar */
+.huddle-bar{background:var(--nv);border-radius:var(--r);padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;font-size:11px;color:rgba(255,255,255,.65);flex-wrap:wrap}
+.hb-title{font-weight:700;color:#5dd6ca;font-size:12px}
+.hb-sep{width:1px;height:14px;background:rgba(255,255,255,.2);flex-shrink:0}
+.hb-flag{background:rgba(217,79,79,.25);color:#fca5a5;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700}
+.hb-btn{padding:3px 11px;border-radius:5px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.2);font-family:var(--fb);font-size:10px;font-weight:700;cursor:pointer;margin-left:auto}
+
+/* Summary strip */
+.triage-summary{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.ts-chip{padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;display:flex;align-items:center;gap:5px}
+
+/* View mode bar */
+.view-mode-bar{display:flex;gap:0;border:1px solid var(--bd);border-radius:7px;overflow:hidden;margin-bottom:12px;width:fit-content}
+.vm-btn{padding:6px 16px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:var(--white);color:var(--ink3);font-family:var(--fb);border-right:1px solid var(--bd)}
+.vm-btn:last-child{border-right:none}
+.vm-btn.active{background:var(--nv);color:#fff}
+
+/* ASSIGNMENT VIEW */
+.assign-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.assign-col{border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;background:var(--white)}
+.ac-header{padding:10px 14px;background:var(--bg);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.ac-title{font-size:12px;font-weight:700}
+.ac-count{font-family:var(--fm);font-size:12px;font-weight:500;color:var(--ink3)}
+.ac-body{padding:8px;display:flex;flex-direction:column;gap:5px}
+
+/* CATEGORY VIEW */
+.triage-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.tcol{border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;background:var(--white)}
+.tcol-header{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bd)}
+.tcol-title{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
+.tcol-count{font-family:var(--fm);font-size:14px;font-weight:500;color:var(--ink3)}
+.tcol-body{padding:8px;display:flex;flex-direction:column;gap:5px;background:var(--bg)}
+
+/* Patient cards — WHITE background, only chips coloured */
+.pt-card{background:var(--white);border:1px solid var(--bd);border-radius:8px;padding:10px 11px;cursor:pointer;transition:all .15s;position:relative}
+.pt-card:hover{border-color:var(--tl);box-shadow:0 0 0 2px var(--tlb)}
+.pt-card.unassigned{border-left:3px solid var(--am)}
+.pt-card.assigned{border-left:3px solid var(--gn)}
+.pt-card.no-reports{border-left:3px solid var(--re)}
+.pc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px}
+.pc-name{font-size:12px;font-weight:700;color:var(--ink)}
+.pc-meta{font-size:10px;color:var(--ink3);margin-top:1px}
+.pc-slot{font-family:var(--fm);font-size:11px;font-weight:500;color:var(--ink2);text-align:right;flex-shrink:0}
+.pc-confirm{font-size:9px;margin-top:2px;text-align:right}
+/* Biomarker chips — COLOUR here not card */
+.pc-bios{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.bc{font-size:10px;font-weight:700;padding:2px 7px;border-radius:11px;white-space:nowrap}
+.bc-red{background:var(--rel);color:var(--re);border:1px solid var(--reb)}
+.bc-amb{background:var(--aml);color:var(--am);border:1px solid var(--amb)}
+.bc-grn{background:var(--gnl);color:var(--gn);border:1px solid var(--gnb)}
+.bc-ink{background:var(--bg);color:var(--ink3);border:1px solid var(--bd)}
+.bc-flag{background:var(--nv);color:rgba(255,255,255,.9);border:1px solid transparent;font-size:9px}
+/* Card bottom row */
+.pc-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.pc-assign-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px}
+.pat-grn{background:var(--gnl);color:var(--gn)}.pat-am{background:var(--aml);color:var(--am)}
+.pat-re{background:var(--rel);color:var(--re)}.pat-bl{background:var(--skl);color:var(--sk)}
+.pc-actions{display:flex;gap:5px;margin-left:auto}
+.pc-btn{font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px;border:1px solid;cursor:pointer;font-family:var(--fb);transition:all .15s}
+.pb-assign{background:var(--tl);color:#fff;border-color:var(--tl)}.pb-assign:hover{opacity:.85}
+.pb-reassign{background:var(--white);color:var(--tl);border-color:var(--tlb)}.pb-reassign:hover{background:var(--tll)}
+.pb-open{background:var(--white);color:var(--ink3);border-color:var(--bd)}.pb-open:hover{color:var(--ink)}
+
+/* No-reports indicator */
+.no-rep-banner{background:var(--rel);border-radius:5px;padding:4px 7px;font-size:9px;font-weight:700;color:var(--re);margin-bottom:5px;display:flex;align-items:center;gap:4px}
+
+/* Assign modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:500;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--white);border-radius:12px;padding:20px;width:380px;box-shadow:var(--shm)}
+.modal-title{font-size:14px;font-weight:700;margin-bottom:4px}
+.modal-sub{font-size:11px;color:var(--ink3);margin-bottom:14px}
+.sd-option{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:7px;border:1px solid var(--bd);margin-bottom:6px;cursor:pointer;transition:all .15s}
+.sd-option:hover{border-color:var(--tl);background:var(--tll)}
+.sd-option.selected{border-color:var(--tl);background:var(--tll)}
+.sd-name{font-size:12px;font-weight:700}.sd-load{font-size:11px;color:var(--ink3)}
+.sd-bar{height:5px;background:var(--bd);border-radius:3px;margin-top:4px;overflow:hidden;width:100%}
+.sd-bar-fill{height:100%;border-radius:3px;background:var(--tl)}
+.modal-actions{display:flex;gap:8px;margin-top:14px}
+.modal-btn{flex:1;padding:8px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--fb);border:1px solid}
+.mb-cancel{background:var(--white);color:var(--ink3);border-color:var(--bd)}
+.mb-confirm{background:var(--tl);color:#fff;border-color:var(--tl)}
+.triage-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px}
+.tb-red{background:var(--rel);color:var(--re)}.tb-amb{background:var(--aml);color:var(--am)}.tb-grn{background:var(--gnl);color:var(--gn)}
+
+/* ════════════════════
+   FLOOR DASHBOARD
+════════════════════ */
+.floor-wrap{padding:14px 20px;max-width:1400px;margin:0 auto}
+
+/* Granular stats */
+.stat-section{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:12px 16px;margin-bottom:12px;box-shadow:var(--sh)}
+.ss-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.stat-grid{display:grid;gap:8px}
+.stat-row-group{display:flex;gap:8px;flex-wrap:wrap}
+.stat-item{flex:1;min-width:100px;text-align:center;padding:9px 10px;border-radius:7px;background:var(--bg);border:1px solid var(--bd)}
+.si-val{font-family:var(--fm);font-size:20px;font-weight:500;line-height:1;margin-bottom:3px}
+.si-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);line-height:1.3}
+.si-sub{font-size:9px;color:var(--ink3);margin-top:3px}
+.si-split{display:flex;gap:4px;justify-content:center;margin-top:3px}
+.si-new{font-size:9px;background:var(--skl);color:var(--sk);padding:1px 5px;border-radius:3px;font-weight:700}
+.si-fu{font-size:9px;background:var(--lvl);color:var(--lv);padding:1px 5px;border-radius:3px;font-weight:700}
+/* Filter bar */
+.filter-bar{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.fb-label{font-size:10px;font-weight:700;color:var(--ink3)}
+.fb-chip{padding:3px 10px;border-radius:11px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid;transition:all .15s}
+.fb-all{background:var(--nv);color:#fff;border-color:var(--nv)}
+.fb-sd{background:var(--white);color:var(--lv);border-color:var(--lvb)}
+.fb-sd:hover{background:var(--lvl)}.fb-sd.active{background:var(--lv);color:#fff;border-color:var(--lv)}
+.fb-db{background:var(--white);color:var(--am);border-color:var(--amb)}
+.fb-db:hover{background:var(--aml)}.fb-db.active{background:var(--am);color:#fff;border-color:var(--am)}
+.fb-sep{width:1px;height:16px;background:var(--bd)}
+
+/* Patient cards */
+.floor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.fc{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh);cursor:pointer;transition:all .15s;overflow:hidden}
+.fc:hover{box-shadow:var(--shm);border-color:var(--tl)}
+.fc-strip{height:4px}
+.fc-body{padding:10px 12px}
+.fc-name{font-size:12px;font-weight:700;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fc-sub{font-size:10px;color:var(--ink3);margin-bottom:6px;display:flex;gap:6px;align-items:center}
+.fc-triage{font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px}
+/* Journey bar */
+.jbar{display:flex;gap:2px;margin-bottom:3px}
+.js{flex:1;height:5px;border-radius:2px;background:var(--bd)}
+.js-done{background:var(--gn)}.js-active{background:var(--am);animation:blink 1.2s infinite}
+.js-over{background:var(--re);animation:blink .8s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.jbar-labels{display:flex;justify-content:space-between;font-size:7px;color:var(--ink3);margin-bottom:6px}
+.fc-current{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.fc-step{font-size:10px;font-weight:700}
+.fc-elapsed{font-family:var(--fm);font-size:11px;font-weight:500}
+.fc-bench{font-size:9px;margin-bottom:4px}
+/* Expanded timestamp detail (shown on click) */
+.fc-ts-detail{display:none;margin-top:8px;border-top:1px solid var(--bd);padding-top:8px}
+.fc-ts-detail.open{display:block}
+.ts-line{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:10px;border-bottom:1px solid rgba(0,0,0,.04)}
+.ts-line:last-child{border:none}
+.ts-num{font-family:var(--fm);font-size:9px;color:var(--ink3);min-width:14px;flex-shrink:0}
+.ts-name{flex:1;color:var(--ink2)}
+.ts-val{font-family:var(--fm);font-size:10px;font-weight:500;flex-shrink:0}
+.ts-dur{font-size:9px;flex-shrink:0;min-width:40px;text-align:right}
+.ts-tap-btn{width:100%;padding:5px;border-radius:5px;border:1px solid var(--tl);background:var(--tll);color:var(--tl);font-size:10px;font-weight:700;cursor:pointer;font-family:var(--fb);margin-top:5px}
+.ts-tap-btn:hover{background:var(--tl);color:#fff}
+/* Alert footer */
+.fc-alert{padding:5px 10px;font-size:10px;font-weight:700;border-top:1px solid var(--bd);display:flex;align-items:center;gap:4px}
+.al-ok{background:var(--gnl);color:var(--gn)}.al-warn{background:var(--aml);color:var(--am)}.al-red{background:var(--rel);color:var(--re)}.al-gray{background:var(--bg);color:var(--ink3)}.al-blue{background:var(--skl);color:var(--sk)}
+/* No-reports routing */
+.route-sd-banner{background:var(--rel);border-top:1px solid var(--reb);padding:5px 10px;font-size:10px;font-weight:700;color:var(--re);display:flex;align-items:center;gap:4px}
+
+/* ════════════════════
+   ROLE ARCHITECTURE
+════════════════════ */
+.arch-wrap{padding:14px 20px;max-width:1000px;margin:0 auto}
+.arch-card{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:16px;margin-bottom:12px;box-shadow:var(--sh)}
+.arch-title{font-size:14px;font-weight:700;color:var(--nv);margin-bottom:6px}
+.arch-sub{font-size:12px;color:var(--ink3);line-height:1.7;margin-bottom:12px}
+.role-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.role-cell{border-radius:8px;padding:12px;border:1px solid}
+.role-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.role-item{font-size:11px;padding:3px 0;border-bottom:1px dashed rgba(0,0,0,.07);color:var(--ink2);line-height:1.4}
+.role-item:last-child{border:none}
+.arch-flow{display:flex;align-items:center;gap:0;overflow-x:auto;padding:14px 0;margin-bottom:12px}
+.af-step{text-align:center;min-width:110px;flex-shrink:0}
+.af-ico{font-size:22px;margin-bottom:4px}
+.af-name{font-size:11px;font-weight:700;margin-bottom:2px}
+.af-who{font-size:9px;color:var(--ink3)}
+.af-arrow{font-size:18px;color:var(--bd2);flex-shrink:0;padding:0 4px;margin-top:-12px}
+.recommendation-box{background:var(--nv);border-radius:var(--r);padding:14px 18px;color:rgba(255,255,255,.8);font-size:12px;line-height:1.8}
+.rb-title{font-size:15px;font-weight:700;color:#5dd6ca;margin-bottom:10px;font-family:var(--fd);font-style:italic}
+.rb-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.rb-head{font-weight:700;color:#fff;margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<div class="tb">
+  <div class="logo">Gini <em>Scribe</em></div>
+  <div class="tb-sep"></div>
+  <div class="tb-tabs">
+    <button class="tbt ta" onclick="showScreen('triage',this)">🔴🟡✅ Triage</button>
+    <button class="tbt" onclick="showScreen('floor',this)">🏥 Floor Dashboard</button>
+    <button class="tbt" onclick="showScreen('arch',this)">👤 Role Architecture</button>
+  </div>
+  <div class="tb-r">
+    <div class="live-dot"></div><div class="live-lbl">Live OPD</div>
+    <div class="clkp" id="clk">--</div>
+  </div>
+</div>
+
+<!-- ASSIGN MODAL -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">Assign Specialist Doctor</div>
+    <div class="modal-sub" id="modalSub">Choose which Specialist Doctor sees this patient first</div>
+    <div id="modalContent">
+      <div class="sd-option" onclick="selectSD(this,'Dr. Beant Sidhu')">
+        <div style="flex:1">
+          <div class="sd-name">Dr. Beant Sidhu</div>
+          <div class="sd-load">4 patients assigned today · Load: 57%</div>
+          <div class="sd-bar"><div class="sd-bar-fill" style="width:57%"></div></div>
+        </div>
+      </div>
+      <div class="sd-option" onclick="selectSD(this,'Dr. Simranpreet Kaur')">
+        <div style="flex:1">
+          <div class="sd-name">Dr. Simranpreet Kaur</div>
+          <div class="sd-load">3 patients assigned today · Load: 43%</div>
+          <div class="sd-bar"><div class="sd-bar-fill" style="width:43%"></div></div>
+        </div>
+      </div>
+      <div class="sd-option" onclick="selectSD(this,'Dr. Bhansali (direct)')">
+        <div style="flex:1">
+          <div class="sd-name">Dr. Bhansali (direct — Red only)</div>
+          <div class="sd-load">Only for Red category patients</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn mb-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-btn mb-confirm" onclick="confirmAssign()">Confirm assignment</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════
+     SCREEN 1: TRIAGE VIEW
+═══════════════════════════════ -->
+<div class="screen active" id="screen-triage">
+
+<!-- Control bar -->
+<div class="ctl-bar">
+  <span class="cb-label">Date</span>
+  <div class="date-pill dp-active" onclick="setDate(this,'today')">
+    Today · 5 May
+    <div class="dp-confirm dp-today">16 confirmed · 2 walk-in</div>
+  </div>
+  <div class="date-pill" onclick="setDate(this,'tomorrow')">
+    Tomorrow · 6 May
+    <div class="dp-confirm dp-tomorrow">11 confirmed · 3 tentative</div>
+  </div>
+  <div class="date-pill" onclick="setDate(this,'plus2')">
+    Wed · 7 May
+    <div class="dp-confirm dp-plus2">8 booked · scheduling</div>
+  </div>
+  <div class="date-pill" onclick="setDate(this,'plus3')">
+    Thu · 8 May
+    <div class="dp-confirm dp-plus3">5 early bookings</div>
+  </div>
+  <div class="cb-sep"></div>
+  <span class="cb-label">View</span>
+  <div class="toggle-group">
+    <button class="tg-btn active" onclick="setView('category',this)">By category</button>
+    <button class="tg-btn" onclick="setView('assign',this)">By assignment</button>
+  </div>
+  <div class="cb-sep"></div>
+  <span class="cb-label">Dept</span>
+  <span class="dept-chip dept-active">Diabetes</span>
+  <span class="dept-chip dept-inactive" style="color:var(--sk);border-color:var(--skb)">Ortho</span>
+  <span class="dept-chip dept-inactive" style="color:var(--lv);border-color:var(--lvb)">Pulmo</span>
+</div>
+
+<div class="triage-wrap">
+
+  <!-- Huddle bar -->
+  <div class="huddle-bar">
+    <span class="hb-title">☕ Morning Huddle — 9:00 AM · 5 May 2026</span>
+    <div class="hb-sep"></div>
+    <span>16 patients · Dr. Beant Sidhu + Dr. Simranpreet Kaur on duty</span>
+    <div class="hb-sep"></div>
+    <span class="hb-flag">🔴 Gurmail — UACR 4643 critical · discuss first</span>
+    <span class="hb-flag">🔴 Amrit Lal — FBS 300, conflicting signals</span>
+    <div class="hb-sep"></div>
+    <span style="color:#5dd6ca">3 patients no reports → route to SD first for test prescriptions</span>
+    <button class="hb-btn">✓ Confirm assignments</button>
+  </div>
+
+  <!-- Summary chips -->
+  <div class="triage-summary">
+    <span class="ts-chip" style="background:var(--rel);color:var(--re)">🔴 4 Red · Dr. Bhansali leads</span>
+    <span class="ts-chip" style="background:var(--aml);color:var(--am)">🟡 7 Amber · SD leads, validate</span>
+    <span class="ts-chip" style="background:var(--gnl);color:var(--gn)">✅ 5 Green · SD closes independently</span>
+    <span class="ts-chip" style="background:var(--gnb);color:var(--gn)">✓ 13 assigned</span>
+    <span class="ts-chip" style="background:var(--amb);color:var(--am)">⏳ 3 unassigned</span>
+    <span class="ts-chip" style="background:var(--reb);color:var(--re)">📋 3 no reports → SD first</span>
+  </div>
+
+  <!-- CATEGORY VIEW -->
+  <div id="view-category">
+  <div class="triage-cols">
+
+    <!-- RED -->
+    <div class="tcol">
+      <div class="tcol-header">
+        <div class="tcol-title">🔴 Uncontrolled — Complex <span style="font-size:10px;font-weight:400;color:var(--ink3)">· Dr. Bhansali leads</span></div>
+        <div class="tcol-count">4</div>
+      </div>
+      <div class="tcol-body">
+
+        <div class="pt-card assigned">
+          <div class="no-rep-banner">⚠ No recent reports — route to SD first for test prescription</div>
+          <div class="pc-top">
+            <div><div class="pc-name">Gurmail Singh Sandhu</div><div class="pc-meta">71M · P_14207 · Visit 8</div></div>
+            <div><div class="pc-slot">10:00 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-red">UACR 4643 ↑↑</span>
+            <span class="bc bc-red">No ACE/ARB</span>
+            <span class="bc bc-red">eGFR 11</span>
+            <span class="bc bc-grn">HbA1c 5.9%</span>
+            <span class="bc bc-grn">BP 111/63</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Bhansali</span>
+            <span class="triage-badge tb-red">🔴 Red</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-reassign" onclick="openModal('Gurmail Singh Sandhu','reassign')">↺ Reassign</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Amrit Lal</div><div class="pc-meta">61M · P_89700 · Visit 4</div></div>
+            <div><div class="pc-slot">10:30 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-amb">HbA1c 6.8% ↑</span>
+            <span class="bc bc-red">FBS 300 ↑↑</span>
+            <span class="bc bc-flag">⚠ Mixed signals</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Bhansali</span>
+            <span class="triage-badge tb-red">🔴 Red</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-reassign" onclick="openModal('Amrit Lal','reassign')">↺ Reassign</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card unassigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Harjinder Singh Dhaliwal</div><div class="pc-meta">54M · P_14332 · New patient</div></div>
+            <div><div class="pc-slot">9:15 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-red">HbA1c 11.2%</span>
+            <span class="bc bc-red">FBS 264</span>
+            <span class="bc bc-ink">New patient</span>
+            <span class="bc bc-flag">Intake pending</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-am">⏳ Unassigned</span>
+            <span class="triage-badge tb-red">🔴 Red</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-assign" onclick="openModal('Harjinder Singh Dhaliwal','assign')">+ Assign SD</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Ashwinder Singh Kohli</div><div class="pc-meta">60M · P_159440 · Visit 9</div></div>
+            <div><div class="pc-slot">11:00 AM</div><div class="pc-confirm" style="color:var(--am)">Day-before confirm</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-red">HbA1c 8.4% ↑</span>
+            <span class="bc bc-red">FBS 182.9 ↑</span>
+            <span class="bc bc-amb">BP rising</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Beant Sidhu</span>
+            <span class="triage-badge tb-red">🔴 Red</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-reassign" onclick="openModal('Ashwinder Singh Kohli','reassign')">↺ Reassign</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AMBER -->
+    <div class="tcol">
+      <div class="tcol-header">
+        <div class="tcol-title">🟡 Stabilize — Adjust <span style="font-size:10px;font-weight:400;color:var(--ink3)">· SD leads, Dr. Bhansali validates</span></div>
+        <div class="tcol-count">7</div>
+      </div>
+      <div class="tcol-body">
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Kulwinder Kaur Randhawa</div><div class="pc-meta">44F · P_11822 · Visit 4</div></div>
+            <div><div class="pc-slot">9:00 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-amb">HbA1c 7.4% ↓</span>
+            <span class="bc bc-red">BP 148/94 ↑</span>
+            <span class="bc bc-grn">LDL 88</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Beant Sidhu</span>
+            <span class="triage-badge tb-amb">🟡 Amber</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-reassign" onclick="openModal('Kulwinder','reassign')">↺ Reassign</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Amrit Kaur</div><div class="pc-meta">74F · P_67810 · Visit 14</div></div>
+            <div><div class="pc-slot">9:30 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-amb">HbA1c 8.1% ↑</span>
+            <span class="bc bc-amb">LDL rising</span>
+            <span class="bc bc-amb">TG 102 ↑</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Simranpreet Kaur</span>
+            <span class="triage-badge tb-amb">🟡 Amber</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-reassign" onclick="openModal('Amrit Kaur','reassign')">↺ Reassign</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card unassigned">
+          <div class="no-rep-banner">⚠ No UACR or eGFR — ask patient to do blood test or send phlebotomist</div>
+          <div class="pc-top">
+            <div><div class="pc-name">Anupama Mahajan</div><div class="pc-meta">58F · P_89250 · Visit 4</div></div>
+            <div><div class="pc-slot">10:00 AM</div><div class="pc-confirm" style="color:var(--am)">Day-before confirm</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-grn">HbA1c 6.3%</span>
+            <span class="bc bc-amb">FBS 93.3 ↑</span>
+            <span class="bc bc-ink">UACR missing</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-am">⏳ Unassigned</span>
+            <span class="triage-badge tb-amb">🟡 Amber</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-assign" onclick="openModal('Anupama Mahajan','assign')">+ Assign SD</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned" style="opacity:.75">
+          <div class="pc-top">
+            <div><div class="pc-name">Bhawna ..</div><div class="pc-meta">47F · P_120770 · Visit 6 · 11:30 AM</div></div>
+            <div><div class="pc-slot">11:30 AM</div><div class="pc-confirm" style="color:var(--ink3)">Not yet confirmed</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-grn">HbA1c 6.1% ↓</span>
+            <span class="bc bc-amb">FBS 90</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Beant Sidhu</span>
+            <span class="triage-badge tb-amb">🟡 Amber</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align:center;padding:8px;font-size:10px;color:var(--ink3)">+ 3 more · 11:00 AM onwards</div>
+      </div>
+    </div>
+
+    <!-- GREEN -->
+    <div class="tcol">
+      <div class="tcol-header">
+        <div class="tcol-title">✅ Sustain — Routine <span style="font-size:10px;font-weight:400;color:var(--ink3)">· SD closes, Dr. Bhansali reviews async</span></div>
+        <div class="tcol-count">5</div>
+      </div>
+      <div class="tcol-body">
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Dr. S.K. Mahajan</div><div class="pc-meta">68M · P_14011 · Visit 12</div></div>
+            <div><div class="pc-slot">9:40 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-grn">HbA1c 7.0% ✓</span>
+            <span class="bc bc-grn">BP 118/74 ✓</span>
+            <span class="bc bc-grn">LDL 68 ✓</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Simranpreet Kaur</span>
+            <span class="triage-badge tb-grn">✅ Green</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Aman Jolly</div><div class="pc-meta">29M · P_88834 · Visit 6</div></div>
+            <div><div class="pc-slot">9:30 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-grn">HbA1c 6.1% ✓</span>
+            <span class="bc bc-grn">All targets met</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Simranpreet Kaur</span>
+            <span class="triage-badge tb-grn">✅ Green</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card unassigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Amarjit Kaur Sekhon</div><div class="pc-meta">57F · P_34910 · Visit 8</div></div>
+            <div><div class="pc-slot">9:00 AM</div><div class="pc-confirm" style="color:var(--am)">Day-before confirm</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-amb">HbA1c 7.4% ↓</span>
+            <span class="bc bc-grn">BP controlled</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-am">⏳ Unassigned</span>
+            <span class="triage-badge tb-grn">✅ Green</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-assign" onclick="openModal('Amarjit Kaur Sekhon','assign')">+ Assign SD</button>
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Surjit Singh Dhaliwal</div><div class="pc-meta">64M · P_71030 · Visit 7</div></div>
+            <div><div class="pc-slot">9:25 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-grn">HbA1c 7.1% ↓</span>
+            <span class="bc bc-grn">Stable regimen</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Beant Sidhu</span>
+            <span class="triage-badge tb-grn">✅ Green</span>
+            <div class="pc-actions">
+              <button class="pc-btn pb-open">↗ Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-card assigned">
+          <div class="pc-top">
+            <div><div class="pc-name">Deepak Sharma</div><div class="pc-meta">46M · P_55210 · Visit 5</div></div>
+            <div><div class="pc-slot">9:15 AM</div><div class="pc-confirm" style="color:var(--gn)">✓ Confirmed call</div></div>
+          </div>
+          <div class="pc-bios">
+            <span class="bc bc-grn">HbA1c 8.1% ↓</span>
+            <span class="bc bc-grn">Compliance 80%</span>
+          </div>
+          <div class="pc-bottom">
+            <span class="pc-assign-tag pat-grn">→ Dr. Simranpreet Kaur</span>
+            <span class="triage-badge tb-grn">✅ Green</span>
+            <div class="pc-actions"><button class="pc-btn pb-open">↗ Open</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /triage-cols -->
+  </div><!-- /view-category -->
+
+  <!-- ASSIGNMENT VIEW -->
+  <div id="view-assign" style="display:none">
+  <div class="assign-cols">
+    <div class="assign-col">
+      <div class="ac-header"><div class="ac-title" style="color:var(--gn)">✓ Assigned (13)</div><div class="ac-count">ready for OPD</div></div>
+      <div class="ac-body">
+        <div class="pt-card assigned"><div class="pc-top"><div><div class="pc-name">Gurmail Singh Sandhu</div><div class="pc-meta">71M · 🔴 Red</div></div><div><div class="pc-slot">10:00</div></div></div><div class="pc-bios"><span class="bc bc-red">UACR 4643</span><span class="bc bc-red">eGFR 11</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-grn">→ Dr. Bhansali</span><div class="pc-actions"><button class="pc-btn pb-reassign" onclick="openModal('Gurmail','reassign')">↺ Reassign</button></div></div></div>
+        <div class="pt-card assigned"><div class="pc-top"><div><div class="pc-name">Kulwinder Kaur Randhawa</div><div class="pc-meta">44F · 🟡 Amber</div></div><div><div class="pc-slot">9:00</div></div></div><div class="pc-bios"><span class="bc bc-amb">HbA1c 7.4%</span><span class="bc bc-red">BP 148/94</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-grn">→ Dr. Beant Sidhu</span><div class="pc-actions"><button class="pc-btn pb-reassign" onclick="openModal('Kulwinder','reassign')">↺ Reassign</button></div></div></div>
+        <div class="pt-card assigned"><div class="pc-top"><div><div class="pc-name">Amrit Lal</div><div class="pc-meta">61M · 🔴 Red</div></div><div><div class="pc-slot">10:30</div></div></div><div class="pc-bios"><span class="bc bc-red">FBS 300 ↑↑</span><span class="bc bc-flag">⚠ Mixed</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-grn">→ Dr. Bhansali</span><div class="pc-actions"><button class="pc-btn pb-reassign" onclick="openModal('Amrit Lal','reassign')">↺ Reassign</button></div></div></div>
+        <div class="pt-card assigned"><div class="pc-top"><div><div class="pc-name">Aman Jolly</div><div class="pc-meta">29M · ✅ Green</div></div><div><div class="pc-slot">9:30</div></div></div><div class="pc-bios"><span class="bc bc-grn">HbA1c 6.1% ✓</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-grn">→ Dr. Simranpreet Kaur</span></div></div>
+        <div style="text-align:center;padding:8px;font-size:10px;color:var(--ink3)">+ 9 more assigned patients</div>
+      </div>
+    </div>
+    <div class="assign-col">
+      <div class="ac-header"><div class="ac-title" style="color:var(--am)">⏳ Not yet assigned (3)</div><div class="ac-count">action needed</div></div>
+      <div class="ac-body">
+        <div class="pt-card unassigned"><div class="pc-top"><div><div class="pc-name">Harjinder Singh Dhaliwal</div><div class="pc-meta">54M · 🔴 Red · New patient</div></div><div><div class="pc-slot">9:15</div></div></div><div class="pc-bios"><span class="bc bc-red">HbA1c 11.2%</span><span class="bc bc-red">FBS 264</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-am">⏳ Unassigned</span><div class="pc-actions"><button class="pc-btn pb-assign" onclick="openModal('Harjinder Singh Dhaliwal','assign')">+ Assign SD</button></div></div></div>
+        <div class="pt-card unassigned"><div class="no-rep-banner">⚠ Missing UACR — send phlebotomist</div><div class="pc-top"><div><div class="pc-name">Anupama Mahajan</div><div class="pc-meta">58F · 🟡 Amber</div></div><div><div class="pc-slot">10:00</div></div></div><div class="pc-bios"><span class="bc bc-grn">HbA1c 6.3%</span><span class="bc bc-amb">FBS 93</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-am">⏳ Unassigned</span><div class="pc-actions"><button class="pc-btn pb-assign" onclick="openModal('Anupama Mahajan','assign')">+ Assign SD</button></div></div></div>
+        <div class="pt-card unassigned"><div class="pc-top"><div><div class="pc-name">Amarjit Kaur Sekhon</div><div class="pc-meta">57F · ✅ Green</div></div><div><div class="pc-slot">9:00</div></div></div><div class="pc-bios"><span class="bc bc-amb">HbA1c 7.4% ↓</span></div><div class="pc-bottom"><span class="pc-assign-tag pat-am">⏳ Unassigned</span><div class="pc-actions"><button class="pc-btn pb-assign" onclick="openModal('Amarjit Kaur Sekhon','assign')">+ Assign SD</button></div></div></div>
+      </div>
+    </div>
+  </div>
+  </div><!-- /view-assign -->
+</div>
+</div><!-- /screen-triage -->
+
+<!-- ═══════════════════════════════
+     SCREEN 2: FLOOR DASHBOARD
+═══════════════════════════════ -->
+<div class="screen" id="screen-floor">
+<div class="ctl-bar">
+  <span class="cb-label">Date</span>
+  <div class="date-pill dp-active">Today · 5 May 2026</div>
+  <div class="cb-sep"></div>
+  <span class="cb-label">Filter by</span>
+  <div class="fb-chip fb-all active" onclick="setFilter('all',this)">All patients</div>
+  <div class="fb-chip fb-sd" onclick="setFilter('sd',this)">Dr. Beant Sidhu</div>
+  <div class="fb-chip fb-sd" onclick="setFilter('sd2',this)">Dr. Simranpreet Kaur</div>
+  <div class="fb-chip fb-db" onclick="setFilter('db',this)">Dr. Bhansali</div>
+  <div class="cb-sep"></div>
+  <span class="cb-label">Dept</span>
+  <span class="dept-chip dept-active">Diabetes</span>
+  <span class="dept-chip dept-inactive" style="color:var(--sk);border-color:var(--skb)">Ortho</span>
+</div>
+<div class="floor-wrap">
+
+  <!-- GRANULAR STATS -->
+  <div class="stat-section">
+    <div class="ss-title">Today's OPD at a glance — live counts</div>
+    <div class="stat-row-group">
+      <div class="stat-item">
+        <div class="si-val" style="color:var(--nv)">16</div>
+        <div class="si-lbl">Appointments</div>
+        <div class="si-split"><span class="si-new">New 3</span><span class="si-fu">F/U 13</span></div>
+      </div>
+      <div class="stat-item">
+        <div class="si-val" style="color:var(--ink3)">2</div>
+        <div class="si-lbl">Walk-ins</div>
+        <div class="si-split"><span class="si-new">New 1</span><span class="si-fu">F/U 1</span></div>
+      </div>
+      <div class="stat-item" style="border-color:var(--tlb)">
+        <div class="si-val" style="color:var(--tl)">14</div>
+        <div class="si-lbl">Checked in</div>
+        <div class="si-sub">2 not yet arrived</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--gnb)">
+        <div class="si-val" style="color:var(--gn)">11</div>
+        <div class="si-lbl">Vitals done</div>
+        <div class="si-sub">3 in progress</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--reb)">
+        <div class="si-val" style="color:var(--re)">3</div>
+        <div class="si-lbl">Awaiting test result</div>
+        <div class="si-sub">Sent to lab today</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--lvb)">
+        <div class="si-val" style="color:var(--lv)">4</div>
+        <div class="si-lbl">Waiting for SD</div>
+        <div class="si-sub">Beant 2 · Simran 2</div>
+      </div>
+    </div>
+    <div class="stat-row-group" style="margin-top:8px">
+      <div class="stat-item" style="border-color:var(--amb)">
+        <div class="si-val" style="color:var(--am)">1</div>
+        <div class="si-lbl">Waiting for MO</div>
+        <div class="si-sub">Programme doctor</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--amb)">
+        <div class="si-val" style="color:var(--am)">2</div>
+        <div class="si-lbl">Waiting — Dr. Bhansali</div>
+        <div class="si-sub">In queue for Dr. B</div>
+      </div>
+      <div class="stat-item">
+        <div class="si-val" style="color:var(--ink3)">1</div>
+        <div class="si-lbl">Waiting prescription</div>
+        <div class="si-sub">Visit done, Rx pending</div>
+      </div>
+      <div class="stat-item">
+        <div class="si-val" style="color:var(--ink3)">1</div>
+        <div class="si-lbl">Waiting pharmacy</div>
+        <div class="si-sub">Prescription issued</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--gnb)">
+        <div class="si-val" style="color:var(--gn)">5</div>
+        <div class="si-lbl">Seen by SDs</div>
+        <div class="si-sub">Beant 3 · Simran 2</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--gnb)">
+        <div class="si-val" style="color:var(--gn)">4</div>
+        <div class="si-lbl">Seen by Dr. Bhansali</div>
+        <div class="si-sub">+ 2 async reviews</div>
+      </div>
+    </div>
+    <div class="stat-row-group" style="margin-top:8px">
+      <div class="stat-item" style="border-color:var(--gnb);flex:none;min-width:160px">
+        <div class="si-val" style="color:var(--gn)">6</div>
+        <div class="si-lbl">Visit completed</div>
+        <div class="si-sub">Exited · NPS sent</div>
+      </div>
+      <div class="stat-item" style="border-color:var(--reb);flex:none;min-width:160px">
+        <div class="si-val" style="color:var(--re)">2</div>
+        <div class="si-lbl">Benchmark breached</div>
+        <div class="si-sub">Service recovery triggered</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PATIENT CARDS GRID -->
+  <div class="filter-bar">
+    <span class="fb-label">Showing:</span>
+    <span style="font-size:12px;font-weight:600;color:var(--ink)">All 14 checked-in patients</span>
+    <span style="font-size:11px;color:var(--ink3)">· Click any card to see journey detail</span>
+  </div>
+
+  <div class="floor-grid">
+
+    <!-- Card 1: Complete -->
+    <div class="fc" onclick="toggleTS(this)">
+      <div class="fc-strip" style="background:var(--gn)"></div>
+      <div class="fc-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px">
+          <div><div class="fc-name">Dr. S.K. Mahajan</div><div class="fc-sub"><span class="fc-triage tb-grn">✅ Green</span>68M · Visit 12 · Phase 3</div></div>
+          <span style="font-size:10px;font-weight:700;background:var(--gnl);color:var(--gn);padding:2px 7px;border-radius:4px">Done</span>
+        </div>
+        <div class="jbar"><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div></div>
+        <div class="jbar-labels"><span>Arr</span><span>Vital</span><span>SD in</span><span>SD out</span><span>Dr.B in</span><span>Dr.B out</span><span>Exit</span></div>
+        <div class="fc-current"><div class="fc-step grn">Complete</div><div class="fc-elapsed grn">38 min</div></div>
+        <div class="fc-bench" style="color:var(--gn)">✓ Under 45 min benchmark</div>
+        <div class="fc-ts-detail">
+          <div class="ts-line"><span class="ts-num">1</span><span class="ts-name">Arrival</span><span class="ts-val grn">9:14 AM</span><span class="ts-dur">—</span></div>
+          <div class="ts-line"><span class="ts-num">2</span><span class="ts-name">Vitals done</span><span class="ts-val grn">9:21 AM</span><span class="ts-dur grn">7 min</span></div>
+          <div class="ts-line"><span class="ts-num">3</span><span class="ts-name">SD in</span><span class="ts-val grn">9:30 AM</span><span class="ts-dur grn">9 min wait</span></div>
+          <div class="ts-line"><span class="ts-num">4</span><span class="ts-name">SD out</span><span class="ts-val grn">9:47 AM</span><span class="ts-dur grn">17 min</span></div>
+          <div class="ts-line"><span class="ts-num">5</span><span class="ts-name">Dr. Bhansali in</span><span class="ts-val grn">9:50 AM</span><span class="ts-dur grn">3 min wait</span></div>
+          <div class="ts-line"><span class="ts-num">6</span><span class="ts-name">Dr. Bhansali out</span><span class="ts-val grn">9:54 AM</span><span class="ts-dur grn">4 min</span></div>
+          <div class="ts-line"><span class="ts-num">7</span><span class="ts-name">Billing done</span><span class="ts-val grn">9:57 AM</span><span class="ts-dur grn">3 min</span></div>
+          <div class="ts-line"><span class="ts-num">8</span><span class="ts-name">Exit</span><span class="ts-val grn">9:58 AM</span><span class="ts-dur grn">Total 44 min ✓</span></div>
+        </div>
+      </div>
+      <div class="fc-alert al-ok">✅ SD closed · Dr. Bhansali async review done</div>
+    </div>
+
+    <!-- Card 2: With SD -->
+    <div class="fc" onclick="toggleTS(this)">
+      <div class="fc-strip" style="background:var(--lv)"></div>
+      <div class="fc-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px">
+          <div><div class="fc-name">Kulwinder K. Randhawa</div><div class="fc-sub"><span class="fc-triage tb-amb">🟡</span>44F · Visit 4 · Dr. Beant Sidhu</div></div>
+          <span style="font-size:10px;font-weight:700;background:var(--lvl);color:var(--lv);padding:2px 7px;border-radius:4px">With SD</span>
+        </div>
+        <div class="jbar"><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-active"></div><div class="js"></div><div class="js"></div><div class="js"></div></div>
+        <div class="jbar-labels"><span>Arr</span><span>Vital</span><span>SD in</span><span>SD out</span><span>Dr.B in</span><span>Dr.B out</span><span>Exit</span></div>
+        <div class="fc-current"><div class="fc-step" style="color:var(--lv)">With Dr. Beant Sidhu</div><div class="fc-elapsed" style="color:var(--lv)">12 min</div></div>
+        <div class="fc-bench" style="color:var(--gn)">✓ On track · benchmark 15–20 min</div>
+        <div class="fc-ts-detail">
+          <div class="ts-line"><span class="ts-num">1</span><span class="ts-name">Arrival</span><span class="ts-val grn">9:00 AM</span><span class="ts-dur">—</span></div>
+          <div class="ts-line"><span class="ts-num">2</span><span class="ts-name">Vitals done</span><span class="ts-val grn">9:08 AM</span><span class="ts-dur grn">8 min</span></div>
+          <div class="ts-line"><span class="ts-num">3</span><span class="ts-name">SD in</span><span class="ts-val grn">9:22 AM</span><span class="ts-dur grn">14 min wait</span></div>
+          <div class="ts-line" style="background:var(--lvl)"><span class="ts-num">4</span><span class="ts-name" style="color:var(--lv);font-weight:700">SD out · in progress</span><span class="ts-val" style="color:var(--lv)">~9:34 AM</span><span class="ts-dur" style="color:var(--lv)">12 min ↑</span></div>
+          <div class="ts-line" style="opacity:.4"><span class="ts-num">5</span><span class="ts-name">Dr. Bhansali in</span><span class="ts-val">—</span><span class="ts-dur">—</span></div>
+          <div class="ts-line" style="opacity:.4"><span class="ts-num">6</span><span class="ts-name">Exit</span><span class="ts-val">—</span><span class="ts-dur">—</span></div>
+        </div>
+      </div>
+      <div class="fc-alert al-blue">⏱ BP 148/94 — Dr. Bhansali will need ~5 min after SD</div>
+    </div>
+
+    <!-- Card 3: Breached -->
+    <div class="fc" onclick="toggleTS(this)" style="box-shadow:0 0 0 2px var(--re)">
+      <div class="fc-strip" style="background:var(--re)"></div>
+      <div class="fc-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px">
+          <div><div class="fc-name">Harjinder S. Dhaliwal</div><div class="fc-sub"><span class="fc-triage tb-red">🔴</span>54M · New patient · No reports</div></div>
+          <span style="font-size:10px;font-weight:700;background:var(--rel);color:var(--re);padding:2px 7px;border-radius:4px">⚠ Breach</span>
+        </div>
+        <div class="jbar"><div class="js js-done"></div><div class="js js-done"></div><div class="js js-over"></div><div class="js"></div><div class="js"></div><div class="js"></div><div class="js"></div></div>
+        <div class="jbar-labels"><span>Arr</span><span>Vital</span><span>SD in</span><span>SD out</span><span>Dr.B in</span><span>Dr.B out</span><span>Exit</span></div>
+        <div class="fc-current"><div class="fc-step red">Waiting for SD</div><div class="fc-elapsed red">47 min ↑</div></div>
+        <div class="fc-bench red">🔴 Breached 30 min benchmark +17 min</div>
+        <div class="fc-ts-detail">
+          <div class="ts-line"><span class="ts-num">1</span><span class="ts-name">Arrival</span><span class="ts-val grn">8:47 AM</span><span class="ts-dur">—</span></div>
+          <div class="ts-line"><span class="ts-num">2</span><span class="ts-name">Vitals done</span><span class="ts-val grn">8:58 AM</span><span class="ts-dur grn">11 min</span></div>
+          <div class="ts-line" style="background:var(--rel)"><span class="ts-num">3</span><span class="ts-name" style="color:var(--re);font-weight:700">SD in · OVERDUE</span><span class="ts-val red">Pending</span><span class="ts-dur red">47 min</span></div>
+          <button class="ts-tap-btn">⏺ Tap to log SD arrival time</button>
+        </div>
+      </div>
+      <div class="route-sd-banner">📋 No reports — SD to prescribe tests first before Dr. Bhansali</div>
+      <div class="fc-alert al-red">⚠ Breach +17 min · Service recovery: chai + ₹200 credit</div>
+    </div>
+
+    <!-- Card 4: Waiting Dr. Bhansali -->
+    <div class="fc" onclick="toggleTS(this)">
+      <div class="fc-strip" style="background:var(--am)"></div>
+      <div class="fc-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px">
+          <div><div class="fc-name">Gurmail Singh Sandhu</div><div class="fc-sub"><span class="fc-triage tb-red">🔴</span>71M · Visit 8 · Critical</div></div>
+          <span style="font-size:10px;font-weight:700;background:var(--aml);color:var(--am);padding:2px 7px;border-radius:4px">Wait Dr.B</span>
+        </div>
+        <div class="jbar"><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-active"></div><div class="js"></div><div class="js"></div></div>
+        <div class="jbar-labels"><span>Arr</span><span>Vital</span><span>SD in</span><span>SD out</span><span>Dr.B in</span><span>Dr.B out</span><span>Exit</span></div>
+        <div class="fc-current"><div class="fc-step amb">Queue for Dr. Bhansali</div><div class="fc-elapsed amb">8 min wait</div></div>
+        <div class="fc-bench" style="color:var(--am)">⚠ At 80% of 10 min benchmark</div>
+        <div class="fc-ts-detail">
+          <div class="ts-line"><span class="ts-num">1</span><span class="ts-name">Arrival</span><span class="ts-val grn">9:14 AM</span><span class="ts-dur">—</span></div>
+          <div class="ts-line"><span class="ts-num">2</span><span class="ts-name">Vitals done</span><span class="ts-val grn">9:21 AM</span><span class="ts-dur grn">7 min</span></div>
+          <div class="ts-line"><span class="ts-num">3</span><span class="ts-name">SD in</span><span class="ts-val grn">9:34 AM</span><span class="ts-dur grn">13 min</span></div>
+          <div class="ts-line"><span class="ts-num">4</span><span class="ts-name">SD out</span><span class="ts-val grn">9:52 AM</span><span class="ts-dur grn">18 min</span></div>
+          <div class="ts-line" style="background:var(--aml)"><span class="ts-num">5</span><span class="ts-name" style="color:var(--am);font-weight:700">Dr. Bhansali in · waiting</span><span class="ts-val amb">10:00 AM</span><span class="ts-dur amb">8 min ↑</span></div>
+          <button class="ts-tap-btn" style="border-color:var(--am);color:var(--am);background:var(--aml)">⏺ Tap when Dr. Bhansali enters</button>
+        </div>
+      </div>
+      <div class="fc-alert al-warn">🟡 UACR 4643 · ACE/ARB decision needed · complex visit</div>
+    </div>
+
+    <!-- Card 5: Pharmacy -->
+    <div class="fc" onclick="toggleTS(this)">
+      <div class="fc-strip" style="background:var(--tl)"></div>
+      <div class="fc-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px">
+          <div><div class="fc-name">Aman Jolly</div><div class="fc-sub"><span class="fc-triage tb-grn">✅</span>29M · Visit 6 · Phase 3</div></div>
+          <span style="font-size:10px;font-weight:700;background:var(--tll);color:var(--tl);padding:2px 7px;border-radius:4px">Pharmacy</span>
+        </div>
+        <div class="jbar"><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-active" style="background:var(--tl)"></div></div>
+        <div class="jbar-labels"><span>Arr</span><span>Vital</span><span>SD in</span><span>SD out</span><span>Dr.B in</span><span>Dr.B out</span><span>Exit</span></div>
+        <div class="fc-current"><div class="fc-step tl">At pharmacy counter</div><div class="fc-elapsed tl">41 min</div></div>
+        <div class="fc-bench" style="color:var(--gn)">✓ On track · total ≤ 45 min</div>
+        <div class="fc-ts-detail">
+          <div class="ts-line"><span class="ts-num">1–6</span><span class="ts-name">All journey steps complete</span><span class="ts-val grn">✓</span><span class="ts-dur grn">41 min</span></div>
+          <div class="ts-line" style="background:var(--tll)"><span class="ts-num">7</span><span class="ts-name" style="color:var(--tl);font-weight:700">Pharmacy · in progress</span><span class="ts-val tl">Now</span><span class="ts-dur">—</span></div>
+          <button class="ts-tap-btn" style="border-color:var(--tl);color:var(--tl);background:var(--tll)">⏺ Tap to confirm exit</button>
+        </div>
+      </div>
+      <div class="fc-alert" style="background:var(--tll);color:var(--tl)">✅ HbA1c 6.1% — NPS sent to MHG · Exit soon</div>
+    </div>
+
+    <!-- Card 6: Awaiting test result -->
+    <div class="fc" onclick="toggleTS(this)">
+      <div class="fc-strip" style="background:var(--re)"></div>
+      <div class="fc-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px">
+          <div><div class="fc-name">Amrit Lal</div><div class="fc-sub"><span class="fc-triage tb-red">🔴</span>61M · Visit 4 · Tests sent to lab</div></div>
+          <span style="font-size:10px;font-weight:700;background:var(--skl);color:var(--sk);padding:2px 7px;border-radius:4px">Awaiting lab</span>
+        </div>
+        <div class="jbar"><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-done"></div><div class="js js-active" style="background:var(--sk)"></div><div class="js"></div><div class="js"></div></div>
+        <div class="jbar-labels"><span>Arr</span><span>Vital</span><span>SD in</span><span>SD out</span><span>Lab</span><span>Dr.B in</span><span>Exit</span></div>
+        <div class="fc-current"><div class="fc-step" style="color:var(--sk)">Lab results pending</div><div class="fc-elapsed" style="color:var(--sk)">~45 min</div></div>
+        <div class="fc-bench" style="color:var(--sk)">⏱ SD ordered HbA1c + FBS · results expected 11:30 AM</div>
+        <div class="fc-ts-detail">
+          <div class="ts-line"><span class="ts-num">1–4</span><span class="ts-name">SD visit complete · tests ordered</span><span class="ts-val grn">✓ 9:52 AM</span><span class="ts-dur">—</span></div>
+          <div class="ts-line" style="background:var(--skl)"><span class="ts-num">Lab</span><span class="ts-name" style="color:var(--sk);font-weight:700">Awaiting results — FBS, HbA1c</span><span class="ts-val" style="color:var(--sk)">~11:30</span><span class="ts-dur" style="color:var(--sk)">45 min</span></div>
+          <div class="ts-line" style="opacity:.4"><span class="ts-num">5</span><span class="ts-name">Dr. Bhansali — after results</span><span class="ts-val">—</span><span class="ts-dur">—</span></div>
+        </div>
+      </div>
+      <div class="fc-alert" style="background:var(--skl);color:var(--sk)">🔬 Lab running · FBS 300 flagged — Dr. Bhansali to review results on arrival</div>
+    </div>
+
+  </div><!-- /floor-grid -->
+</div>
+</div><!-- /screen-floor -->
+
+<!-- ═══════════════════════════════
+     SCREEN 3: ROLE ARCHITECTURE
+═══════════════════════════════ -->
+<div class="screen" id="screen-arch">
+<div class="arch-wrap">
+  <div style="border-left:4px solid var(--tl);padding:10px 14px;background:var(--tll);border-radius:0 var(--r) var(--r) 0;margin-bottom:16px">
+    <div style="font-family:var(--fd);font-size:20px;color:var(--nv)">Role-based views — do you need separate dashboards?</div>
+    <div style="font-size:12px;color:var(--ink3);margin-top:4px">Short answer: one shared database, role-filtered views. Not entirely separate apps.</div>
+  </div>
+
+  <div class="arch-card">
+    <div class="arch-title">The answer — one database, filtered by role</div>
+    <div class="arch-sub">You don't need to build 6 separate dashboards. You need one data model with role-based filters applied. Every role sees the same patient journey data — just filtered to what is relevant to them and what actions they can take. The coordinator sees everything. The vitals staff sees only the vitals step. The SD sees only their assigned patients. Dr. Bhansali sees only Red and Amber patients who have completed the SD step.</div>
+
+    <!-- Flow -->
+    <div class="arch-flow">
+      <div class="af-step"><div class="af-ico">📍</div><div class="af-name">Reception</div><div class="af-who">Checks in patient</div></div>
+      <div class="af-arrow">→</div>
+      <div class="af-step"><div class="af-ico">⚖️</div><div class="af-name">Vitals station</div><div class="af-who">Enters vitals, taps done</div></div>
+      <div class="af-arrow">→</div>
+      <div class="af-step"><div class="af-ico">👩‍⚕️</div><div class="af-name">Specialist Doctor</div><div class="af-who">History, Scribe, tests</div></div>
+      <div class="af-arrow">→</div>
+      <div class="af-step"><div class="af-ico">🔬</div><div class="af-name">Lab (if tests)</div><div class="af-who">Results in → Scribe</div></div>
+      <div class="af-arrow">→</div>
+      <div class="af-step"><div class="af-ico">👨‍⚕️</div><div class="af-name">Dr. Bhansali</div><div class="af-who">Decision + Rx</div></div>
+      <div class="af-arrow">→</div>
+      <div class="af-step"><div class="af-ico">💳</div><div class="af-name">Billing</div><div class="af-who">Taps done</div></div>
+      <div class="af-arrow">→</div>
+      <div class="af-step"><div class="af-ico">💊</div><div class="af-name">Pharmacy</div><div class="af-who">Dispenses, logs exit</div></div>
+    </div>
+
+    <!-- Role grid -->
+    <div class="role-grid">
+      <div class="role-cell" style="border-color:var(--tlb);background:var(--tll)">
+        <div class="role-title" style="color:var(--tl)">Coordinator / Reception</div>
+        <div class="role-item">✅ Sees entire floor dashboard</div>
+        <div class="role-item">✅ Manages triage assignments</div>
+        <div class="role-item">✅ Gets benchmark breach alerts</div>
+        <div class="role-item">✅ Triggers service recovery</div>
+        <div class="role-item">✅ Sees all pending statuses</div>
+      </div>
+      <div class="role-cell" style="border-color:var(--skb);background:var(--skl)">
+        <div class="role-title" style="color:var(--sk)">Vitals Staff</div>
+        <div class="role-item">Sees: patients in "vitals pending" queue only</div>
+        <div class="role-item">Action: enter weight, BP, SpO2, height</div>
+        <div class="role-item">Action: tap "Vitals done" → auto-routes to SD queue</div>
+        <div class="role-item">Cannot see: other steps, visit notes, Rx</div>
+        <div class="role-item" style="color:var(--sk);font-weight:700">→ Same app, role filter</div>
+      </div>
+      <div class="role-cell" style="border-color:var(--lvb);background:var(--lvl)">
+        <div class="role-title" style="color:var(--lv)">Specialist Doctor (SD)</div>
+        <div class="role-item">Sees: their assigned patients only</div>
+        <div class="role-item">Action: complete history intake in Scribe</div>
+        <div class="role-item">Action: order tests or write plan</div>
+        <div class="role-item">Action: "Hold — await lab results" or "Ready for Dr. Bhansali"</div>
+        <div class="role-item">Action: for Green patients, close independently</div>
+      </div>
+      <div class="role-cell" style="border-color:var(--amb);background:var(--aml)">
+        <div class="role-title" style="color:var(--am)">Dr. Bhansali</div>
+        <div class="role-item">Sees: Red + Amber queue only</div>
+        <div class="role-item">Sees: pre-filled brief from SD + lab results</div>
+        <div class="role-item">Action: validate SD plan or override</div>
+        <div class="role-item">Action: finalise Rx</div>
+        <div class="role-item">Action: Green patients — async chart review</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch-card">
+    <div class="arch-title">How the SD handles "tests first — then Dr. Bhansali"</div>
+    <div class="arch-sub">When the SD sees a patient with no reports (or after prescribing tests), they have two options to record in Scribe:</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="background:var(--skl);border-radius:8px;padding:12px;border:1px solid var(--skb)">
+        <div style="font-size:11px;font-weight:700;color:var(--sk);margin-bottom:6px">Option A — Same-day results</div>
+        <div style="font-size:12px;color:var(--ink2);line-height:1.8">SD orders tests → patient goes to lab → results land in Scribe → patient automatically re-enters the queue marked "Results received — ready for Dr. Bhansali." The floor dashboard shows them as "Awaiting lab results" with estimated lab turnaround time visible to the coordinator.</div>
+      </div>
+      <div style="background:var(--aml);border-radius:8px;padding:12px;border:1px solid var(--amb)">
+        <div style="font-size:11px;font-weight:700;color:var(--am);margin-bottom:6px">Option B — Next visit with results</div>
+        <div style="font-size:12px;color:var(--ink2);line-height:1.8">SD records the visit, orders tests, and marks "Next appointment — bring results." A new appointment is created in Scribe pre-tagged with the required tests. When the patient books, the coordinator can see the pending test list and chase them up before the next visit via MHG or phone call.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch-card">
+    <div class="arch-title">For Ortho and Pulmo — same structure, no separate build</div>
+    <div class="arch-sub">The department dropdown in the triage and floor dashboard controls which patients are shown. For a single-doctor clinic (Dr. Harjoban in Ortho) there is no SD layer — the patient goes directly from vitals to the doctor. The triage column becomes one column (the doctor's queue) instead of three. The role filter then shows "Dr. Harjoban" patients only. One codebase with department and role filters covers all three specialties.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px">
+      <div style="background:var(--tll);border-radius:7px;padding:10px;border:1px solid var(--tlb)">
+        <div style="font-size:11px;font-weight:700;color:var(--tl);margin-bottom:4px">Diabetes (multi-doctor)</div>
+        <div style="font-size:11px;color:var(--ink2);line-height:1.7">Vitals → SD → Dr. Bhansali<br>3-column triage<br>Red/Amber/Green routing<br>2 SDs + 1 Dr. B</div>
+      </div>
+      <div style="background:var(--skl);border-radius:7px;padding:10px;border:1px solid var(--skb)">
+        <div style="font-size:11px;font-weight:700;color:var(--sk);margin-bottom:4px">Ortho (single doctor)</div>
+        <div style="font-size:11px;color:var(--ink2);line-height:1.7">Vitals → Dr. Harjoban<br>1-column queue<br>No triage complexity<br>Same timestamp model</div>
+      </div>
+      <div style="background:var(--lvl);border-radius:7px;padding:10px;border:1px solid var(--lvb)">
+        <div style="font-size:11px;font-weight:700;color:var(--lv);margin-bottom:4px">Pulmo (single doctor)</div>
+        <div style="font-size:11px;color:var(--ink2);line-height:1.7">Vitals → Doctor<br>1-column queue<br>Spirometry step added<br>Same floor dashboard</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="recommendation-box">
+    <div class="rb-title">Developer brief — what to build</div>
+    <div class="rb-grid">
+      <div>
+        <div class="rb-head">Role-based login</div>
+        Add a role field to the existing doctor/staff login. Roles: coordinator, vitals_staff, specialist_doctor, senior_doctor, billing, pharmacy. Each role gets a filtered view of the same appointment data — not a separate app. The existing PIN login can be extended with a role dropdown.
+      </div>
+      <div>
+        <div class="rb-head">New status values</div>
+        Extend appointment status to: booked → confirmed_call → confirmed_day_before → checked_in → vitals_in_progress → vitals_done → waiting_sd → with_sd → awaiting_lab → results_received → waiting_dr_bhansali → with_dr_bhansali → prescription_pending → billing → pharmacy → completed. Each status transition also writes a timestamp field.
+      </div>
+      <div>
+        <div class="rb-head">Who sees what</div>
+        Vitals staff: only appointments in status checked_in or vitals_in_progress. SD: only their assigned appointments in vitals_done, waiting_sd, with_sd. Dr. Bhansali: Red+Amber in results_received or waiting_dr_bhansali. Coordinator: all. Auto-advance status when SD taps "ready for Dr. Bhansali."
+      </div>
+      <div>
+        <div class="rb-head">Department filter</div>
+        Add department field to appointments (diabetes, ortho, pulmo). The floor dashboard and triage view filter by selected department. The triage column count adjusts — 3 columns for diabetes (multi-doctor), 1 column for single-doctor departments. Same codebase, department config determines the layout.
+      </div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /screen-arch -->
+
+<script>
+// Navigation
+function showScreen(id,btn){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tbt').forEach(b=>b.classList.remove('ta'));
+  document.getElementById('screen-'+id).classList.add('active');
+  btn.classList.add('ta');
+}
+
+// Date filter
+function setDate(el,d){
+  document.querySelectorAll('.date-pill').forEach(p=>p.classList.remove('dp-active'));
+  el.classList.add('dp-active');
+}
+
+// View toggle (category/assign)
+let currentView='category';
+function setView(v,btn){
+  document.querySelectorAll('.tg-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('view-category').style.display=v==='category'?'':'none';
+  document.getElementById('view-assign').style.display=v==='assign'?'':'none';
+}
+
+// Filter
+function setFilter(f,btn){
+  document.querySelectorAll('.fb-chip').forEach(c=>c.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// Assign modal
+let currentPatient='',currentMode='assign';
+function openModal(name,mode){
+  currentPatient=name;currentMode=mode;
+  document.getElementById('modalTitle').textContent=mode==='assign'?`Assign Specialist Doctor — ${name}`:`Reassign — ${name}`;
+  document.getElementById('modalSub').textContent=mode==='assign'?'Choose which Specialist Doctor sees this patient first':'Move patient to a different Specialist Doctor';
+  document.getElementById('assignModal').classList.add('open');
+}
+function closeModal(){
+  document.getElementById('assignModal').classList.remove('open');
+  document.querySelectorAll('.sd-option').forEach(o=>o.classList.remove('selected'));
+}
+function selectSD(el,name){
+  document.querySelectorAll('.sd-option').forEach(o=>o.classList.remove('selected'));
+  el.classList.add('selected');
+}
+function confirmAssign(){
+  const sel=document.querySelector('.sd-option.selected');
+  if(!sel){alert('Please select a Specialist Doctor');return;}
+  closeModal();
+  // In production: PATCH /api/appointments/:id { assigned_sd: name }
+  const t=document.createElement('div');
+  t.textContent=`✓ ${currentPatient} assigned`;
+  Object.assign(t.style,{position:'fixed',bottom:'18px',right:'18px',background:'var(--gn)',color:'#fff',padding:'8px 16px',borderRadius:'7px',fontFamily:'Outfit,sans-serif',fontWeight:'700',fontSize:'12px',zIndex:'9999'});
+  document.body.appendChild(t);setTimeout(()=>t.remove(),2000);
+}
+
+// Toggle timestamp detail on card click
+function toggleTS(card){
+  const d=card.querySelector('.fc-ts-detail');
+  if(d)d.classList.toggle('open');
+}
+
+// Clock
+function tick(){
+  const n=new Date(),p2=x=>String(x).padStart(2,'0');
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const ms=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('clk').textContent=`${p2(n.getHours())}:${p2(n.getMinutes())}:${p2(n.getSeconds())} · ${days[n.getDay()]} ${n.getDate()} ${ms[n.getMonth()]}`;
+}
+setInterval(tick,1000);tick();
+</script>
+</body>
+</html>

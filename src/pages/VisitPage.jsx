@@ -546,19 +546,17 @@ export default function VisitPage() {
     const uniqueActiveMeds = dedupMeds(data.activeMeds);
     const uniqueStoppedMeds = dedupMeds(data.stoppedMeds);
 
-    // Filter to latest prescription date only (for sidebar — mirrors the
-    // lastVisitMeds split inside VisitMedications). Source of truth is
-    // `last_prescribed_date` (re-set on every re-prescription); meds without
-    // it are kept (legacy/active rows) so they don't disappear.
-    const _activeOnly = uniqueActiveMeds.filter((m) => m.is_active !== false);
-    const _dayKey = (d) => (d ? String(d).slice(0, 10) : null);
-    const _dates = _activeOnly.map((m) => _dayKey(m.last_prescribed_date)).filter(Boolean);
-    const _latestDate = _dates.length ? _dates.reduce((a, b) => (a > b ? a : b)) : null;
-    const latestVisitMeds = _latestDate
-      ? _activeOnly.filter(
-          (m) => !m.last_prescribed_date || _dayKey(m.last_prescribed_date) === _latestDate,
-        )
-      : _activeOnly;
+    // Sidebar shows ALL active meds the patient is currently on, including
+    // ones carried over from previous visits (still is_active=true even if
+    // not re-prescribed today). Previously this was pinned to the latest
+    // last_prescribed_date — that hid carry-over meds (e.g. Pregabalin /
+    // Amlong 5) and made the patient app's count diverge from clinical
+    // reality. We still drop visit_status='previous' rows so the sidebar
+    // matches the main Medications panel (those rows live under the
+    // "Prev Visit" expander, not in the active list).
+    const latestVisitMeds = uniqueActiveMeds
+      .filter((m) => m.is_active !== false)
+      .filter((m) => m.visit_status !== "previous");
 
     // HbA1c trend for the summary strip
     const hba1cH = getLabHist(labHistory, "HbA1c");
@@ -1623,6 +1621,8 @@ export default function VisitPage() {
       {modal?.type === "editMed" && (
         <EditMedicationModal
           medication={modal.data}
+          diagnoses={activeDx}
+          patient={data.patient}
           activeMeds={derived.uniqueActiveMeds}
           onClose={closeModal}
           onSubmit={async (d) => {
