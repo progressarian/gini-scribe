@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS medications (
   parent_medication_id INTEGER REFERENCES medications(id) ON DELETE SET NULL,
   support_condition    TEXT,           -- 'for nausea Day 1-2', 'SOS for diarrhoea'
   days_of_week    INTEGER[],           -- [0..6] (Sun..Sat); null when not weekly
+  common_side_effects JSONB DEFAULT '[]'::jsonb, -- [{name, desc, severity}] up to 3 entries
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_medications_patient ON medications(patient_id);

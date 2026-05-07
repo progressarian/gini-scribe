@@ -51,6 +51,15 @@ const PUBLIC_PATTERNS = [
   // in the URL path, validated against conversation ownership server-side.
   /^\/api\/patients\/[^/]+\/conversations\/[^/]+\/chat-attachment$/,
   /^\/api\/patients\/[^/]+\/chat-attachments\/sign-url$/,
+  // Patient app — list a patient's own appointments (past + upcoming) so
+  // Genie's Care/Visit tab and home post-visit pill can render even when
+  // the gini→supabase sync hasn't replicated the row yet. Scoped by
+  // patient_id in the URL path.
+  /^\/api\/patients\/[^/]+\/appointments$/,
+  // Patient-app pre-visit symptom save. Public (no scribe JWT); scoped
+  // by patient_id + appointment id, and the route re-checks that the
+  // appointment actually belongs to that patient before writing.
+  /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-symptoms$/,
 ];
 
 export const requireAuth = (req, res, next) => {

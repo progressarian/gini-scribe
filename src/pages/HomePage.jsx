@@ -7,6 +7,7 @@ import useVisitStore from "../stores/visitStore.js";
 import useUiStore from "../stores/uiStore.js";
 import useMessagingStore from "../stores/messagingStore.js";
 import useAlertStore from "../stores/alertStore.js";
+import useRefillStore from "../stores/refillStore.js";
 import Shimmer from "../components/Shimmer.jsx";
 import "./HomePage.css";
 
@@ -29,12 +30,19 @@ export default function HomePage() {
   const { unreadCount, inbox, inboxLoading, setActiveThread, fetchInbox, fetchThread, markRead } =
     useMessagingStore();
   const { alerts, alertsLoading, fetchAlerts } = useAlertStore();
+  const {
+    requests: refills,
+    loading: refillsLoading,
+    fetchPending: fetchRefills,
+    updateStatus: updateRefillStatus,
+  } = useRefillStore();
 
   useEffect(() => {
     fetchTodayAppointments();
     fetchInbox();
     fetchAlerts();
-  }, [fetchTodayAppointments, fetchInbox, fetchAlerts]);
+    fetchRefills();
+  }, [fetchTodayAppointments, fetchInbox, fetchAlerts, fetchRefills]);
 
   return (
     <div className="home">
@@ -62,6 +70,7 @@ export default function HomePage() {
             fetchTodayAppointments();
             fetchInbox();
             fetchAlerts();
+            fetchRefills();
           }}
           className="home__refresh-btn"
         >
@@ -488,6 +497,189 @@ export default function HomePage() {
                         <div className="home__msg-preview">{a.message || ""}</div>
                       </div>
                       <div className="home__msg-time">{ts}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Medicine Refill Requests */}
+        <div
+          className="home__panel"
+          style={{
+            border: `1.5px solid ${refills.length > 0 ? "#fde68a" : "#e2e8f0"}`,
+            boxShadow:
+              refills.length > 0 ? "0 2px 8px rgba(245,158,11,.10)" : "0 2px 8px rgba(0,0,0,.04)",
+          }}
+        >
+          <div
+            className="home__panel-header"
+            style={{
+              background:
+                refills.length > 0 ? "linear-gradient(135deg,#1e293b,#f59e0b)" : "#1e293b",
+            }}
+          >
+            <div className="home__msg-header-title">
+              <span className="home__panel-title">{"💊"} MEDICINE REFILL REQUESTS</span>
+              {refills.length > 0 && (
+                <span className="home__msg-badge" style={{ background: "#f59e0b" }}>
+                  {refills.length}
+                </span>
+              )}
+            </div>
+            <button onClick={fetchRefills} className="home__msg-view-all-btn">
+              Refresh
+            </button>
+          </div>
+          {refillsLoading ? (
+            <div style={{ padding: 14 }}>
+              <Shimmer type="list" count={3} />
+            </div>
+          ) : refills.length === 0 ? (
+            <div className="home__panel-empty">
+              <div className="home__panel-empty-icon">{"✅"}</div>
+              <div className="home__panel-empty-text">No pending refill requests</div>
+              <div className="home__panel-empty-hint">
+                Refill orders from MyHealth Genie app appear here
+              </div>
+            </div>
+          ) : (
+            <div className="home__panel-scroll">
+              {refills.map((r, i) => {
+                const ts = r.requested_at
+                  ? (() => {
+                      const d = new Date(r.requested_at);
+                      const now = new Date();
+                      const diff = (now - d) / 1000;
+                      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                      if (diff < 86400)
+                        return d.toLocaleTimeString("en-IN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        });
+                      return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+                    })()
+                  : "";
+                const items = Array.isArray(r.items) ? r.items : [];
+                return (
+                  <div
+                    key={r.id}
+                    style={{
+                      padding: "10px 14px",
+                      borderBottom: i < refills.length - 1 ? "1px solid #f1f5f9" : "none",
+                      background: "white",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>
+                        Refill request
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: "#92400e",
+                            background: "#fef3c7",
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            marginLeft: 8,
+                          }}
+                        >
+                          {r.status?.toUpperCase() || "PENDING"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{ts}</div>
+                    </div>
+                    <ul
+                      style={{
+                        margin: "4px 0 6px 18px",
+                        padding: 0,
+                        fontSize: 12,
+                        color: "#374151",
+                      }}
+                    >
+                      {items.map((it, j) => (
+                        <li key={j}>
+                          <strong>{it.quantity}×</strong> {it.medication_name}
+                          {it.dose ? ` (${it.dose})` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                    {!!r.notes && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          fontStyle: "italic",
+                          marginBottom: 6,
+                        }}
+                      >
+                        Note: {r.notes}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      <button
+                        onClick={async () => {
+                          await updateRefillStatus(r.id, "approved");
+                          fetchRefills();
+                        }}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #10b981",
+                          background: "#ecfdf5",
+                          color: "#047857",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await updateRefillStatus(r.id, "fulfilled");
+                          fetchRefills();
+                        }}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #2563eb",
+                          background: "#eff6ff",
+                          color: "#1d4ed8",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Mark fulfilled
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await updateRefillStatus(r.id, "rejected");
+                          fetchRefills();
+                        }}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #ef4444",
+                          background: "#fef2f2",
+                          color: "#b91c1c",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Reject
+                      </button>
                     </div>
                   </div>
                 );

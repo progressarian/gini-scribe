@@ -42,6 +42,7 @@ import VisitAIPanel from "../components/visit/VisitAIPanel";
 import VisitEndModal from "../components/visit/VisitEndModal";
 import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
 import VisitBrief from "../components/visit/VisitBrief";
+import VisitPreVisitSymptoms from "../components/visit/VisitPreVisitSymptoms";
 import DoctorSummarySection from "../components/visit/DoctorSummarySection";
 import PatientSummarySection from "../components/visit/PatientSummarySection";
 import RxPdfModal from "../components/visit/RxPdfModal";
@@ -1116,6 +1117,7 @@ export default function VisitPage() {
                 patient={patient}
                 doctor={doctor}
               />
+              <VisitPreVisitSymptoms appointmentId={effectiveApptId} />
               <VisitSummaryPanel patientId={dbPatientId} appointmentId={effectiveApptId} />
               <VisitBiomarkers
                 labResults={labResults}

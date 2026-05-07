@@ -1,5 +1,6 @@
 import "./PlanPage.css";
 import { useNavigate } from "react-router-dom";
+import { makeNavClick } from "../lib/navClick";
 import { toast } from "../stores/uiStore";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
@@ -22,6 +23,7 @@ import RemoveBtn from "../components/RemoveBtn.jsx";
 
 export default function PlanPage() {
   const navigate = useNavigate();
+  const navClick = makeNavClick(navigate);
   const moName = useAuthStore((s) => s.moName);
   const conName = useAuthStore((s) => s.conName);
   const patient = usePatientStore((s) => s.patient);

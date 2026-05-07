@@ -12,6 +12,7 @@ import "../styles/App.css";
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: () => true },
   { path: "/find", label: "🔍 Find", show: () => true },
+  { path: "/refills", label: "💊 Refills", show: () => true },
   { path: "/opd", label: "🏥 OPD", show: () => true },
   { path: "/dashboard", label: "📋 Patient", show: (s) => s.hasPatient },
   { path: "/visit", label: "👁 Visit", show: (s) => s.hasPatient },

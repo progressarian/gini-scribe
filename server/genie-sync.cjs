@@ -496,7 +496,7 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
     const { rows } = await localDb.query(
       `SELECT id, name, dose, frequency, timing, clinical_note, notes, is_active,
               drug_class, med_group, route, pharmacy_match, started_date,
-              for_diagnosis, visit_status, days_of_week
+              for_diagnosis, visit_status, days_of_week, common_side_effects
          FROM medications
         WHERE patient_id = $1
         ORDER BY updated_at DESC
@@ -527,6 +527,9 @@ async function syncMedicationsToGenie(scribePatientId, localDb) {
               p_for_conditions: med.for_diagnosis || null,
               p_visit_status: med.visit_status || null,
               p_days_of_week: med.days_of_week || null,
+              p_common_side_effects: Array.isArray(med.common_side_effects)
+                ? med.common_side_effects
+                : med.common_side_effects || null,
             }),
           { label: `gini_sync_medication(${med.name})` },
         );

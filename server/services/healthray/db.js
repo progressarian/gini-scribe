@@ -1078,6 +1078,12 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     const pharmacyMatch = normalizeMedName(storedName);
     const storedRoute = med.route || routeForForm(detectedForm) || "Oral";
     const startedDate = resolveStartedDate(earliestByKey, pharmacyMatch, apptDate);
+    // Common side effects extracted by the AI parser. Capped at 3 entries and
+    // serialised as JSON so the DB column (jsonb) round-trips cleanly even
+    // when downstream callers pass a literal JS array.
+    const sideEffectsJson = Array.isArray(med.common_side_effects)
+      ? JSON.stringify(med.common_side_effects.slice(0, 3))
+      : null;
     const params = [
       patientId,
       storedName,
@@ -1089,6 +1095,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       startedDate,
       `healthray:${healthrayId}`,
       apptDate || null,
+      sideEffectsJson,
     ];
 
     // Step 1: reactivate any existing inactive row with the same name first.
@@ -1151,8 +1158,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     await pool
       .query(
         `INSERT INTO medications
-         (patient_id, name, pharmacy_match, dose, frequency, timing, route, is_active, started_date, notes, last_prescribed_date, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, 'healthray')
+         (patient_id, name, pharmacy_match, dose, frequency, timing, route, is_active, started_date, notes, last_prescribed_date, source, common_side_effects)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, 'healthray', COALESCE($11::jsonb, '[]'::jsonb))
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
@@ -1163,6 +1170,11 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            last_prescribed_date = GREATEST(COALESCE(medications.last_prescribed_date, EXCLUDED.last_prescribed_date), EXCLUDED.last_prescribed_date),
            notes = EXCLUDED.notes,
            pharmacy_match = EXCLUDED.pharmacy_match,
+           common_side_effects = CASE
+             WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
+               THEN EXCLUDED.common_side_effects
+             ELSE medications.common_side_effects
+           END,
            source = 'healthray',
            consultation_id = NULL,
            document_id = NULL,

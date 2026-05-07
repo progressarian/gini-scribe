@@ -1446,10 +1446,10 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         if (rows.length) {
           await client.query(
             `INSERT INTO medications
-               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active, source)
-             SELECT $1, $2, name, pharm, composition, dose, freq, timing, route, false, true, 'opd'
-               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
-                    AS t(name, pharm, composition, dose, freq, timing, route)
+               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active, source, common_side_effects)
+             SELECT $1, $2, name, pharm, composition, dose, freq, timing, route, false, true, 'opd', COALESCE(side_fx::jsonb, '[]'::jsonb)
+               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[])
+                    AS t(name, pharm, composition, dose, freq, timing, route, side_fx)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1458,6 +1458,11 @@ router.post("/appointments/:id/compliance", async (req, res) => {
                frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
                timing = COALESCE(EXCLUDED.timing, medications.timing),
                route = COALESCE(EXCLUDED.route, medications.route),
+               common_side_effects = CASE
+                 WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
+                   THEN EXCLUDED.common_side_effects
+                 ELSE medications.common_side_effects
+               END,
                source = EXCLUDED.source,
                updated_at = NOW()`,
             [
@@ -1470,6 +1475,11 @@ router.post("/appointments/:id/compliance", async (req, res) => {
               rows.map((m) => (m.frequency || "").slice(0, 100)),
               rows.map((m) => (m.timing || "").slice(0, 100)),
               rows.map((m) => (m.route || routeForForm(m._detected_form) || "Oral").slice(0, 50)),
+              rows.map((m) =>
+                Array.isArray(m.common_side_effects)
+                  ? JSON.stringify(m.common_side_effects.slice(0, 3))
+                  : null,
+              ),
             ],
           );
         }

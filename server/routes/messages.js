@@ -426,6 +426,136 @@ router.get("/patients/:id/care-team", async (req, res) => {
 });
 
 /**
+ * Patient-app appointments list. Public by design (mirrors /care-team) —
+ * the patient app has no scribe JWT, and the patient_id in the URL
+ * scopes the response so there's no cross-patient leak. Returns past +
+ * upcoming appointments straight from scribe `appointments`, which is
+ * the source of truth (the gini→supabase mirror can lag).
+ *
+ * Optional ?from=YYYY-MM-DD&to=YYYY-MM-DD windows the query (defaults
+ * to ±90 days from today). Status='cancelled' rows are still returned —
+ * the patient app filters them client-side so it can show e.g. "your
+ * last visit was cancelled" if needed.
+ */
+router.get("/patients/:id/appointments", async (req, res) => {
+  try {
+    const scribePid = await resolveScribePatientIdFromGenieUuid(req.params.id);
+    if (scribePid == null) return res.json({ data: [] });
+
+    const today = new Date();
+    const from = String(req.query.from || "").match(/^\d{4}-\d{2}-\d{2}$/)
+      ? req.query.from
+      : new Date(today.getFullYear(), today.getMonth(), today.getDate() - 90)
+          .toISOString()
+          .slice(0, 10);
+    const to = String(req.query.to || "").match(/^\d{4}-\d{2}-\d{2}$/)
+      ? req.query.to
+      : new Date(today.getFullYear(), today.getMonth(), today.getDate() + 90)
+          .toISOString()
+          .slice(0, 10);
+
+    // Front-desk-booked OPD rows often have only `file_no` set (no
+    // patient_id) — scribe's own OPD list joins on either column, so we
+    // mirror that here. Without this match, freshly-booked OPD slots
+    // never reach the patient app's pre-visit pill / Visits tab.
+    const fileNoR = await pool.query(`SELECT file_no FROM patients WHERE id = $1`, [scribePid]);
+    const fileNo = fileNoR.rows[0]?.file_no || null;
+
+    const { rows } = await pool.query(
+      `SELECT id, patient_id, patient_name, file_no, doctor_name,
+              appointment_date, time_slot, visit_type, status, notes,
+              location, healthray_id, created_at,
+              pre_visit_symptoms, pre_visit_notes, pre_visit_symptoms_at
+         FROM appointments
+        WHERE (patient_id = $1
+               OR ($2::text IS NOT NULL AND file_no = $2))
+          AND appointment_date BETWEEN $3 AND $4
+        ORDER BY appointment_date DESC, time_slot DESC NULLS LAST
+        LIMIT 200`,
+      [scribePid, fileNo, from, to],
+    );
+
+    // Dedup by id — the OR condition double-counts rows that have BOTH
+    // matching patient_id and matching file_no.
+    const seen = new Set();
+    const data = [];
+    for (const r of rows) {
+      const k = String(r.id);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      data.push(r);
+    }
+    res.json({ data });
+  } catch (e) {
+    handleError(res, e, "Patient appointments");
+  }
+});
+
+/**
+ * Patient-app: save pre-visit symptoms onto a booked appointment.
+ * Public endpoint (no scribe JWT) — scoped by both patient_id and
+ * appointment id in the URL, and we re-validate ownership via
+ * patient_id/file_no before writing so a stray appointment id can't
+ * be hijacked.
+ *
+ * Body: { symptoms: string[], notes?: string }
+ *   - symptoms: chip labels selected by the patient (deduped, max 30)
+ *   - notes: free-text ("kuch aur batana hai?"), max 2000 chars
+ *
+ * Resubmissions overwrite — the row reflects the latest state and
+ * pre_visit_symptoms_at is bumped so the doctor sees how fresh it is.
+ */
+router.post("/patients/:id/appointments/:apptId/pre-visit-symptoms", async (req, res) => {
+  try {
+    const scribePid = await resolveScribePatientIdFromGenieUuid(req.params.id);
+    if (scribePid == null) return res.status(404).json({ error: "Patient not found" });
+
+    const apptId = parseInt(req.params.apptId, 10);
+    if (!Number.isFinite(apptId)) return res.status(400).json({ error: "Invalid appointment id" });
+
+    const rawSyms = Array.isArray(req.body?.symptoms) ? req.body.symptoms : [];
+    const symptoms = Array.from(
+      new Set(
+        rawSyms
+          .map((s) => (typeof s === "string" ? s.trim() : ""))
+          .filter((s) => s.length > 0 && s.length <= 80),
+      ),
+    ).slice(0, 30);
+    const notes = typeof req.body?.notes === "string"
+      ? req.body.notes.trim().slice(0, 2000) || null
+      : null;
+
+    // Ownership check: appointment must belong to this patient (by id or file_no).
+    const fileNoR = await pool.query(`SELECT file_no FROM patients WHERE id = $1`, [scribePid]);
+    const fileNo = fileNoR.rows[0]?.file_no || null;
+    const ownership = await pool.query(
+      `SELECT id FROM appointments
+        WHERE id = $1
+          AND (patient_id = $2 OR ($3::text IS NOT NULL AND file_no = $3))
+        LIMIT 1`,
+      [apptId, scribePid, fileNo],
+    );
+    if (!ownership.rows[0]) {
+      return res.status(404).json({ error: "Appointment not found for this patient" });
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE appointments
+          SET pre_visit_symptoms = $2,
+              pre_visit_notes = $3,
+              pre_visit_symptoms_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, pre_visit_symptoms, pre_visit_notes, pre_visit_symptoms_at`,
+      [apptId, symptoms, notes],
+    );
+    res.json({ data: rows[0] });
+  } catch (e) {
+    handleError(res, e, "Pre-visit symptoms save");
+  }
+});
+
+/**
  * Patient-app chat attachment upload. Public by design (mirrors
  * /care-team) — the patient app has no scribe JWT. Authorization comes
  * from the conversation lookup: the route only accepts uploads when the
