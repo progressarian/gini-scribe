@@ -79,7 +79,7 @@ RULES:
 - Extract ALL medicines even if partially readable
 - stopped_medications: medicines marked as stopped/omit/discontinue/band karo/tapering off
 - Parse Hindi/Punjabi terms: "sugar ki dawai"=diabetes medication, "BP ki goli"=antihypertensive, "band karo"=stop
-- If date not found, return null
+- visit_date: ONLY extract if an explicit specific date is clearly written (e.g. 12/03/2024, 12-Mar-2024). Do NOT infer, assume, or use today's date. If no specific date is written or only vague terms like "today" are used, set visit_date to null AND return empty arrays for medications, diagnoses, stopped_medications, advice and null for all vitals and follow_up — do not extract any data without a confirmed written date.
 - Name must be in English/Roman script`;
 
 function sleep(ms) {
@@ -94,6 +94,7 @@ function sleep(ms) {
 function isExtractionUsable(data, docType) {
   if (!data || typeof data !== "object") return false;
   if (docType === "prescription") {
+    if (!data.visit_date) return false;
     return (data.medications?.length || 0) > 0 || (data.diagnoses?.length || 0) > 0;
   }
   if (docType === "imaging" || docType === "radiology") {
