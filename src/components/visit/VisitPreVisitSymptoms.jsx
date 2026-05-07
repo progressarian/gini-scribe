@@ -120,7 +120,16 @@ export default function VisitPreVisitSymptoms({ appointmentId }) {
             lineHeight: 1.4,
           }}
         >
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--violet, #6d4ef5)", textTransform: "uppercase", letterSpacing: 0.4, marginRight: 6 }}>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: "var(--violet, #6d4ef5)",
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              marginRight: 6,
+            }}
+          >
             Patient note
           </span>
           {notes}

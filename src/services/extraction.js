@@ -203,12 +203,44 @@ export async function extractImaging(base64, mediaType) {
   );
 }
 
+// Day-of-week tokens — must match the ordering used by the medication
+// modals so the frequency suffix renders identically.
+const RX_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const RX_WEEKDAY_TO_INT = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+// Weekly / fortnightly meds extracted from a prescription rarely come back
+// with a specific day. The patient app needs an anchor day to schedule from,
+// so we default to the day the prescription is being processed (today) —
+// the patient will continue from that weekday on the weekly/biweekly cadence.
+function applyWeeklyDayDefaults(extraction) {
+  if (!extraction || !Array.isArray(extraction.medications)) return extraction;
+  const todayToken = RX_WEEKDAYS[(new Date().getDay() + 6) % 7];
+  const todayInt = RX_WEEKDAY_TO_INT[todayToken];
+  extraction.medications = extraction.medications.map((m) => {
+    if (!m) return m;
+    const freqRaw = String(m.frequency || "");
+    const isWeekly = /once\s*weekly|^\s*weekly/i.test(freqRaw);
+    const isBiweekly = /14\s*days|fortnight|bi-?weekly|once\s*in\s*14/i.test(freqRaw);
+    if (!isWeekly && !isBiweekly) return m;
+    // Skip if the AI already specified a day suffix.
+    if (/·/.test(freqRaw)) return m;
+    if (Array.isArray(m.days_of_week) && m.days_of_week.length) return m;
+    const baseFreq = isBiweekly ? "Once in 14 days" : "Once weekly";
+    return {
+      ...m,
+      frequency: `${baseFreq} · ${todayToken}`,
+      days_of_week: [todayInt],
+    };
+  });
+  return extraction;
+}
+
 export async function extractRx(base64, mediaType) {
   ({ base64, mediaType } = await compressForClaude(base64, mediaType));
   const { timeoutMs } = budgetFor(base64, mediaType);
   // Rx prompt stays at 3000 output tokens — prescriptions are short.
   // Large scans still get the longer timeout.
-  return runWithRetry(
+  const result = await runWithRetry(
     "Prescription extraction",
     () => ({
       messages: [
@@ -222,4 +254,6 @@ export async function extractRx(base64, mediaType) {
     }),
     { timeoutMs, kind: "rx" },
   );
+  if (result?.data) applyWeeklyDayDefaults(result.data);
+  return result;
 }

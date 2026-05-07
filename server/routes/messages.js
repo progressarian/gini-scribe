@@ -521,9 +521,8 @@ router.post("/patients/:id/appointments/:apptId/pre-visit-symptoms", async (req,
           .filter((s) => s.length > 0 && s.length <= 80),
       ),
     ).slice(0, 30);
-    const notes = typeof req.body?.notes === "string"
-      ? req.body.notes.trim().slice(0, 2000) || null
-      : null;
+    const notes =
+      typeof req.body?.notes === "string" ? req.body.notes.trim().slice(0, 2000) || null : null;
 
     // Ownership check: appointment must belong to this patient (by id or file_no).
     const fileNoR = await pool.query(`SELECT file_no FROM patients WHERE id = $1`, [scribePid]);

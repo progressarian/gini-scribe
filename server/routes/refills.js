@@ -63,14 +63,19 @@ function buildFilters(req, { includeStatus }) {
   if (patientTerm) {
     const asInt = parseInt(patientTerm, 10);
     if (Number.isFinite(asInt) && String(asInt) === patientTerm) {
+      // Pure-numeric input: match patient id or file_no exactly, but also
+      // allow numeric strings to appear inside a name (e.g. "Patient 12").
       params.push(asInt);
       const i = params.length;
       params.push(patientTerm);
       const j = params.length;
-      where.push(`(r.patient_id = $${i} OR p.file_no = $${j})`);
+      params.push(`%${patientTerm}%`);
+      const k = params.length;
+      where.push(`(r.patient_id = $${i} OR p.file_no = $${j} OR p.name ILIKE $${k})`);
     } else {
       params.push(`%${patientTerm}%`);
-      where.push(`p.file_no ILIKE $${params.length}`);
+      const i = params.length;
+      where.push(`(p.name ILIKE $${i} OR p.file_no ILIKE $${i} OR p.phone ILIKE $${i})`);
     }
   }
 

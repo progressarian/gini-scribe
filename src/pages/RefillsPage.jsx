@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import Shimmer from "../components/Shimmer.jsx";
+import DatePicker from "../components/DatePicker.jsx";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All", color: "#475569", bg: "#f1f5f9" },
@@ -28,6 +29,14 @@ function fmtTime(iso) {
 }
 
 const PAGE_SIZE = 30;
+
+function todayIsoLocal() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 function buildParams({ status, patientTerm, fromIso, toIso, page, includeStatus }) {
   const p = new URLSearchParams();
@@ -281,68 +290,134 @@ export default function RefillsPage() {
       </div>
 
       {/* Filters */}
-      <div
-        style={{
-          background: "#fff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 12,
-          padding: 12,
-          marginBottom: 14,
-          display: "grid",
-          gridTemplateColumns: "1fr 160px 160px auto",
-          gap: 10,
-          alignItems: "end",
-        }}
-      >
-        <div>
-          <label style={labelStyle}>Search</label>
-          <input
-            type="text"
-            value={patientTerm}
-            onChange={(e) => setPatientTerm(e.target.value)}
-            placeholder="Patient ID or File No (e.g. 1234 or F-2025-009)"
-            style={inputStyle}
-          />
-        </div>
-        <div>
-          <label style={labelStyle}>From</label>
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            style={inputStyle}
-          />
-        </div>
-        <div>
-          <label style={labelStyle}>To</label>
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            style={inputStyle}
-          />
-        </div>
-        <button
-          onClick={() => {
-            setPatientTerm("");
-            setFrom("");
-            setTo("");
-            setStatus("all");
-          }}
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #e2e8f0",
-            background: "#fff",
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 600,
-            color: "#475569",
-            cursor: "pointer",
-          }}
-        >
-          Clear
-        </button>
-      </div>
+      {(() => {
+        const activeCount =
+          (debouncedTerm ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) + (status !== "all" ? 1 : 0);
+        return (
+          <div
+            style={{
+              background: "linear-gradient(135deg,#ffffff 0%,#f8fafc 100%)",
+              border: "1px solid #e2e8f0",
+              borderRadius: 14,
+              padding: 14,
+              marginBottom: 14,
+              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.04)",
+              display: "grid",
+              gridTemplateColumns: "1.6fr 1fr 1fr auto",
+              gap: 12,
+              alignItems: "end",
+            }}
+          >
+            <div style={{ position: "relative" }}>
+              <label style={labelStyle}>
+                Search
+                {activeCount > 0 && (
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: 9,
+                      background: "#7c3aed",
+                      color: "#fff",
+                      padding: "1px 6px",
+                      borderRadius: 999,
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {activeCount} ACTIVE
+                  </span>
+                )}
+              </label>
+              <span
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: 30,
+                  fontSize: 14,
+                  color: "#94a3b8",
+                  pointerEvents: "none",
+                }}
+              >
+                🔍
+              </span>
+              <input
+                type="text"
+                value={patientTerm}
+                onChange={(e) => setPatientTerm(e.target.value)}
+                placeholder="Patient name, ID or File No (e.g. 1234 or F-2025-009)"
+                style={{ ...inputStyle, paddingLeft: 34, paddingRight: patientTerm ? 30 : 10 }}
+              />
+              {patientTerm && (
+                <button
+                  onClick={() => setPatientTerm("")}
+                  aria-label="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: 6,
+                    top: 26,
+                    width: 22,
+                    height: 22,
+                    borderRadius: 999,
+                    border: "none",
+                    background: "#e2e8f0",
+                    color: "#475569",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <DatePicker
+              label="From"
+              value={from}
+              onChange={(v) => {
+                setFrom(v);
+                if (v && to && new Date(to) < new Date(v)) setTo("");
+              }}
+              maxDate={to || todayIsoLocal()}
+              placeholder="Start date"
+            />
+            <DatePicker
+              label="To"
+              value={to}
+              onChange={setTo}
+              minDate={from || ""}
+              maxDate={todayIsoLocal()}
+              placeholder="End date"
+            />
+            <button
+              onClick={() => {
+                setPatientTerm("");
+                setFrom("");
+                setTo("");
+                setStatus("all");
+              }}
+              disabled={activeCount === 0}
+              style={{
+                padding: "9px 16px",
+                border: "1px solid",
+                borderColor: activeCount > 0 ? "#fecaca" : "#e2e8f0",
+                background: activeCount > 0 ? "#fef2f2" : "#f8fafc",
+                color: activeCount > 0 ? "#b91c1c" : "#94a3b8",
+                borderRadius: 10,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: activeCount > 0 ? "pointer" : "not-allowed",
+                whiteSpace: "nowrap",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              ✕ Clear{activeCount > 0 ? ` (${activeCount})` : ""}
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Status pills */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
@@ -408,6 +483,15 @@ export default function RefillsPage() {
               }}
             >
               <div
+                onClick={() => toggleCollapsed(g.patient_id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleCollapsed(g.patient_id);
+                  }
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -416,11 +500,35 @@ export default function RefillsPage() {
                   background: "#f8fafc",
                   borderBottom: "1px solid #e2e8f0",
                   gap: 12,
+                  cursor: "pointer",
+                  userSelect: "none",
                 }}
               >
                 <div
                   style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}
                 >
+                  <span
+                    aria-label={isClosed ? "Expand" : "Collapse"}
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 999,
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      color: "#475569",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      lineHeight: 1,
+                      transform: isClosed ? "rotate(-90deg)" : "rotate(0deg)",
+                      transition: "transform 0.18s ease",
+                    }}
+                  >
+                    ▾
+                  </span>
                   <div
                     style={{
                       width: 40,
@@ -483,28 +591,6 @@ export default function RefillsPage() {
                   >
                     {g.history.length} PAST
                   </span>
-                  <button
-                    onClick={() => toggleCollapsed(g.patient_id)}
-                    title={isClosed ? "Expand" : "Close requests list"}
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 999,
-                      border: "1px solid #e2e8f0",
-                      background: "#fff",
-                      cursor: "pointer",
-                      marginLeft: 4,
-                      padding: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      color: "#475569",
-                      lineHeight: 1,
-                    }}
-                  >
-                    {isClosed ? "+" : "×"}
-                  </button>
                 </div>
               </div>
 
@@ -793,14 +879,21 @@ const labelStyle = {
 
 const inputStyle = {
   width: "100%",
-  padding: "8px 10px",
+  padding: "9px 10px",
   border: "1px solid #e2e8f0",
-  borderRadius: 8,
+  borderRadius: 10,
   fontSize: 13,
   color: "#0f172a",
   background: "#fff",
   outline: "none",
   boxSizing: "border-box",
+  transition: "border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease",
+};
+
+const activeInputStyle = {
+  borderColor: "#7c3aed",
+  background: "#faf5ff",
+  boxShadow: "0 0 0 3px rgba(124,58,237,0.12)",
 };
 
 function btnStyle(borderColor, bg, color) {

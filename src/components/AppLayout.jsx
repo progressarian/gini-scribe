@@ -12,7 +12,6 @@ import "../styles/App.css";
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: () => true },
   { path: "/find", label: "🔍 Find", show: () => true },
-  { path: "/refills", label: "💊 Refills", show: () => true },
   { path: "/opd", label: "🏥 OPD", show: () => true },
   { path: "/dashboard", label: "📋 Patient", show: (s) => s.hasPatient },
   { path: "/visit", label: "👁 Visit", show: (s) => s.hasPatient },
@@ -67,6 +66,7 @@ const NAV_ITEMS = [
   { path: "/plan", label: "📄 Plan", show: (s) => !s.isLabRole },
   { path: "/docs", label: "📎 Docs", show: (s) => s.hasPatient },
   { path: "/lab-portal", label: "🔬 Upload", show: (s) => s.isLabRole },
+  { path: "/refills", label: "💊 Refills", show: () => true },
   { path: "/messages", label: "💬 Messages", show: () => true, badge: (s) => s.unreadCount > 0 },
   { path: "/reception-inbox", label: "🏥 Reception", show: (s) => !s.isLabRole },
   { path: "/lab-inbox", label: "🔬 Lab Chat", show: () => true },
