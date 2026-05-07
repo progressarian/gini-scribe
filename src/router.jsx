@@ -73,6 +73,7 @@ const AIPage = lazyWithRetry(() => import("./pages/AIPage"));
 const ReportsPage = lazyWithRetry(() => import("./pages/ReportsPage"));
 const CIPage = lazyWithRetry(() => import("./pages/CIPage"));
 const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
+const RefillsPage = lazyWithRetry(() => import("./pages/RefillsPage"));
 const OPD = lazyWithRetry(() => import("./OPD"));
 const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
 
@@ -124,6 +125,7 @@ const router = createBrowserRouter([
         children: [
           { path: "/", element: lazyEl(HomePage) },
           { path: "/find", element: lazyEl(FindPage) },
+          { path: "/refills", element: lazyEl(RefillsPage) },
           { path: "/dashboard", element: lazyEl(DashboardPage) },
           { path: "/quick", element: lazyEl(QuickPage) },
           { path: "/patient", element: lazyEl(PatientPage) },
