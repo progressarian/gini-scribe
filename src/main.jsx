@@ -16,7 +16,6 @@ window.addEventListener("unhandledrejection", (e) => {
   e.preventDefault();
 });
 
-
 // Global error handler
 window.addEventListener("error", (e) => {
   console.error("Uncaught error:", e.error);

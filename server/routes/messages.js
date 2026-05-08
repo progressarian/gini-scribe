@@ -548,6 +548,16 @@ router.post("/patients/:id/appointments/:apptId/pre-visit-symptoms", async (req,
         RETURNING id, pre_visit_symptoms, pre_visit_notes, pre_visit_symptoms_at`,
       [apptId, symptoms, notes],
     );
+    // Push the new pre-visit fields into the Genie Supabase mirror so the
+    // patient home re-reads them on next refresh without depending on the
+    // scribe REST list-fetcher (which can return [] when the genie→scribe
+    // patient-id resolver fails). Best-effort — the response succeeds even
+    // if the mirror push errors; patient sees their own write either way.
+    if (genie?.syncAppointmentToGenie) {
+      genie.syncAppointmentToGenie(scribePid, pool).catch((err) => {
+        console.warn("[pre-visit-symptoms] genie mirror push failed:", err?.message || err);
+      });
+    }
     res.json({ data: rows[0] });
   } catch (e) {
     handleError(res, e, "Pre-visit symptoms save");

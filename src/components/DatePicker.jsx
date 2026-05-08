@@ -6,8 +6,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const WEEK_DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function toIso(d) {
@@ -100,7 +110,8 @@ export default function DatePicker({
 
   const canPrev =
     !min ||
-    new Date(view.getFullYear(), view.getMonth(), 0) >= new Date(min.getFullYear(), min.getMonth(), 1);
+    new Date(view.getFullYear(), view.getMonth(), 0) >=
+      new Date(min.getFullYear(), min.getMonth(), 1);
   const canNext =
     !max ||
     new Date(view.getFullYear(), view.getMonth() + 1, 1) <=
@@ -312,13 +323,7 @@ export default function DatePicker({
                     border: isToday && !isSelected ? "1px solid #c7d2fe" : "1px solid transparent",
                     borderRadius: 8,
                     background: isSelected ? "#7c3aed" : dis ? "transparent" : "#fff",
-                    color: isSelected
-                      ? "#fff"
-                      : dis
-                        ? "#cbd5e1"
-                        : isToday
-                          ? "#4338ca"
-                          : "#0f172a",
+                    color: isSelected ? "#fff" : dis ? "#cbd5e1" : isToday ? "#4338ca" : "#0f172a",
                     fontSize: 12,
                     fontWeight: isSelected || isToday ? 800 : 600,
                     cursor: dis ? "not-allowed" : "pointer",

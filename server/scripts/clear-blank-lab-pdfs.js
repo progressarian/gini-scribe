@@ -35,8 +35,7 @@ const dotenv = await import("dotenv");
 dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const { default: pool } = await import("../config/db.js");
-const { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } =
-  await import("../config/storage.js");
+const { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } = await import("../config/storage.js");
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
@@ -74,7 +73,8 @@ console.log(`scanning ${rows.length} stored lab PDFs\n`);
 function looksLikeBlankLabPdf(buffer) {
   if (buffer.length >= 61_000) return false;
   const ascii = buffer.toString("latin1");
-  let cursor = 0, totalTj = 0;
+  let cursor = 0,
+    totalTj = 0;
   while (true) {
     const sStart = ascii.indexOf("stream\n", cursor);
     if (sStart < 0) break;
@@ -82,7 +82,9 @@ function looksLikeBlankLabPdf(buffer) {
     const sEnd = ascii.indexOf("\nendstream", dataStart);
     if (sEnd < 0) break;
     let decoded = buffer.subarray(dataStart, sEnd);
-    try { decoded = inflateSync(decoded); } catch {}
+    try {
+      decoded = inflateSync(decoded);
+    } catch {}
     const text = decoded.toString("latin1");
     totalTj += (text.match(/\bTj\b/g) || []).length + (text.match(/\bTJ\b/g) || []).length;
     if (totalTj >= 60) return false;
@@ -94,13 +96,16 @@ function looksLikeBlankLabPdf(buffer) {
 async function fetchBytes(path) {
   const sign = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({ expiresIn: 60 }),
   });
   if (!sign.ok) return null;
   const sj = await sign.json();
   const url = (sj.signedURL || sj.signedUrl).startsWith("http")
-    ? (sj.signedURL || sj.signedUrl)
+    ? sj.signedURL || sj.signedUrl
     : `${SUPABASE_URL}/storage/v1${sj.signedURL || sj.signedUrl}`;
   const r = await fetch(url);
   if (!r.ok) return null;
@@ -125,7 +130,7 @@ for (const r of rows) {
   if (!looksLikeBlankLabPdf(buf)) continue;
   blanks.push(r);
   console.log(
-    `  [BLANK] ${r.file_no || "?"} case=${r.case_no} ${r.case_date?.toISOString?.().slice(0,10) || r.case_date} bytes=${buf.length}`,
+    `  [BLANK] ${r.file_no || "?"} case=${r.case_no} ${r.case_date?.toISOString?.().slice(0, 10) || r.case_date} bytes=${buf.length}`,
   );
 }
 
@@ -137,7 +142,8 @@ if (!apply) {
   process.exit(0);
 }
 
-let cleared = 0, errors = 0;
+let cleared = 0,
+  errors = 0;
 for (const r of blanks) {
   try {
     await deleteObject(r.pdf_storage_path);

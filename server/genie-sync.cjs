@@ -854,7 +854,8 @@ async function syncAppointmentToGenie(scribePatientId, localDb) {
   try {
     // Prefer the next scheduled appointment; fall back to most recent.
     const { rows } = await localDb.query(
-      `SELECT id, appointment_date, time_slot, doctor_name, status, notes, visit_type
+      `SELECT id, appointment_date, time_slot, doctor_name, status, notes, visit_type,
+              pre_visit_symptoms, pre_visit_notes, pre_visit_symptoms_at
          FROM appointments
         WHERE patient_id = $1
         ORDER BY
@@ -879,6 +880,14 @@ async function syncAppointmentToGenie(scribePatientId, localDb) {
             p_status: appt.status || 'scheduled',
             p_appointment_time: appt.time_slot || null,
             p_purpose: appt.visit_type || null,
+            // Mirror pre-visit symptoms so the Genie home form shows
+            // chips the patient already submitted (without depending on
+            // the scribe REST list-fetcher resolving the patient id).
+            p_pre_visit_symptoms: Array.isArray(appt.pre_visit_symptoms)
+              ? appt.pre_visit_symptoms
+              : null,
+            p_pre_visit_notes: appt.pre_visit_notes || null,
+            p_pre_visit_symptoms_at: appt.pre_visit_symptoms_at || null,
           }),
         { label: `gini_sync_appointment(${appt.id})` },
       );

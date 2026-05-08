@@ -116,23 +116,39 @@ export default function VisitPreVisitSymptoms({ appointmentId }) {
             border: "1px solid var(--violet-border, #d9c8ff)",
             borderRadius: 8,
             padding: "8px 10px",
-            whiteSpace: "pre-wrap",
-            lineHeight: 1.4,
+            lineHeight: 1.45,
           }}
         >
-          <span
+          <div
             style={{
               fontSize: 10,
               fontWeight: 700,
               color: "var(--violet, #6d4ef5)",
               textTransform: "uppercase",
               letterSpacing: 0.4,
-              marginRight: 6,
+              marginBottom: 6,
             }}
           >
             Patient note
-          </span>
-          {notes}
+          </div>
+          {(() => {
+            const lines = String(notes)
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .filter(Boolean);
+            if (lines.length <= 1) {
+              return <div style={{ whiteSpace: "pre-wrap" }}>{notes}</div>;
+            }
+            return (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {lines.map((line, i) => (
+                  <li key={i} style={{ marginBottom: i === lines.length - 1 ? 0 : 3 }}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            );
+          })()}
         </div>
       ) : null}
     </section>

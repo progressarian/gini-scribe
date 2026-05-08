@@ -702,7 +702,9 @@ export default function HomePage() {
           style={{
             border: `1.5px solid ${doseRequests.length > 0 ? "#fde68a" : "#e2e8f0"}`,
             boxShadow:
-              doseRequests.length > 0 ? "0 2px 8px rgba(124,92,255,.10)" : "0 2px 8px rgba(0,0,0,.04)",
+              doseRequests.length > 0
+                ? "0 2px 8px rgba(124,92,255,.10)"
+                : "0 2px 8px rgba(0,0,0,.04)",
           }}
         >
           <div
@@ -762,7 +764,8 @@ export default function HomePage() {
                     onClick={() => navigate("/dose-change-requests")}
                     style={{
                       padding: "10px 14px",
-                      borderBottom: i < Math.min(doseRequests.length, 5) - 1 ? "1px solid #f1f5f9" : "none",
+                      borderBottom:
+                        i < Math.min(doseRequests.length, 5) - 1 ? "1px solid #f1f5f9" : "none",
                       background: "white",
                       cursor: "pointer",
                     }}
@@ -781,7 +784,7 @@ export default function HomePage() {
                       <div style={{ fontSize: 11, color: "#6b7280" }}>{ts}</div>
                     </div>
                     <div style={{ fontSize: 12, color: "#374151" }}>
-                      <strong>{r.medication_name}</strong>: {r.current_dose} → {" "}
+                      <strong>{r.medication_name}</strong>: {r.current_dose} →{" "}
                       <span style={{ color: "#7c3aed", fontWeight: 700 }}>{r.requested_dose}</span>
                       {r.dose_unit ? ` ${r.dose_unit}` : ""}
                     </div>

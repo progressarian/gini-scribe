@@ -66,10 +66,23 @@ export default function DoseChangeRequestsPage() {
     getNextPageParam: (lp) => (lp && lp.page < lp.totalPages ? lp.page + 1 : undefined),
   });
 
-  const rows = useMemo(
-    () => (listQuery.data?.pages || []).flatMap((p) => p?.rows || []),
-    [listQuery.data],
-  );
+  const rows = useMemo(() => {
+    const raw = (listQuery.data?.pages || []).flatMap((p) => p?.rows || []);
+    const ts = (r) => new Date(r.requested_at || 0).getTime();
+    if (status === "pending") {
+      return [...raw].sort((a, b) => ts(a) - ts(b));
+    }
+    if (status === "all") {
+      const pending = raw
+        .filter((r) => (r.status || "pending") === "pending")
+        .sort((a, b) => ts(a) - ts(b));
+      const others = raw
+        .filter((r) => (r.status || "pending") !== "pending")
+        .sort((a, b) => ts(b) - ts(a));
+      return [...pending, ...others];
+    }
+    return [...raw].sort((a, b) => ts(b) - ts(a));
+  }, [listQuery.data, status]);
   const total = listQuery.data?.pages?.[0]?.total ?? 0;
   const stats = statsQuery.data || { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
 
@@ -129,9 +142,27 @@ export default function DoseChangeRequestsPage() {
       >
         {[
           { key: "pending", label: "Pending", color: "#92400e", bg: "#fef3c7", border: "#fde68a" },
-          { key: "approved", label: "Approved", color: "#047857", bg: "#d1fae5", border: "#a7f3d0" },
-          { key: "rejected", label: "Rejected", color: "#b91c1c", bg: "#fee2e2", border: "#fecaca" },
-          { key: "cancelled", label: "Cancelled", color: "#475569", bg: "#f1f5f9", border: "#e2e8f0" },
+          {
+            key: "approved",
+            label: "Approved",
+            color: "#047857",
+            bg: "#d1fae5",
+            border: "#a7f3d0",
+          },
+          {
+            key: "rejected",
+            label: "Rejected",
+            color: "#b91c1c",
+            bg: "#fee2e2",
+            border: "#fecaca",
+          },
+          {
+            key: "cancelled",
+            label: "Cancelled",
+            color: "#475569",
+            bg: "#f1f5f9",
+            border: "#e2e8f0",
+          },
         ].map((s) => (
           <div
             key={s.key}
@@ -214,7 +245,11 @@ export default function DoseChangeRequestsPage() {
         </div>
       ) : (
         rows.map((r) => (
-          <DoseChangeRequestCard key={r.id} request={r} onDecide={(payload) => decide(r.id, payload)} />
+          <DoseChangeRequestCard
+            key={r.id}
+            request={r}
+            onDecide={(payload) => decide(r.id, payload)}
+          />
         ))
       )}
 

@@ -13,8 +13,6 @@
 //   Tier 3 — Monitored only, not part of outcome.
 //     weight, alt, ast, hb, wbc
 
-
-
 //
 export const BIO_TIER = {
   hba1c: 1,

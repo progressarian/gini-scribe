@@ -908,8 +908,24 @@ export default function VisitPage() {
     const visibleDocs = data.documents.filter(
       (d) => d.storage_path || d.file_url || d.source === "healthray",
     );
+    // Mirror VisitLabsPanel: every uploaded doc except prescriptions and
+    // radiology sub-categories is shown under the Labs tab.
+    const RADIOLOGY_DOC_TYPES = new Set([
+      "imaging",
+      "radiology",
+      "xray",
+      "usg",
+      "mri",
+      "dexa",
+      "ecg",
+      "ncs",
+      "eye",
+    ]);
     return {
-      labs: visibleDocs.filter((d) => d.doc_type === "lab_report").length || null,
+      labs:
+        visibleDocs.filter(
+          (d) => d.doc_type !== "prescription" && !RADIOLOGY_DOC_TYPES.has(d.doc_type),
+        ).length || null,
       docs: visibleDocs.length || null,
       messages: null, // populated when messaging is wired up
     };

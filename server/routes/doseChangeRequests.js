@@ -200,7 +200,9 @@ router.post("/dose-change-requests", async (req, res) => {
     res.status(201).json(rows[0]);
   } catch (e) {
     if (e.code === "23505") {
-      return res.status(409).json({ error: "A pending request already exists for this medication" });
+      return res
+        .status(409)
+        .json({ error: "A pending request already exists for this medication" });
     }
     handleError(res, e, "Create dose-change request");
   }

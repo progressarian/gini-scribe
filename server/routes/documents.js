@@ -1659,70 +1659,11 @@ async function runPrescriptionExtraction(docId) {
         }
       }
 
-      // ── Stale-med sweep ───────────────────────────────────────────────
-      // Deactivate any active meds for this patient that the new
-      // prescription doesn't mention (neither current nor previous).
-      // Only touches auto-synced rows (source in report_extract/healthray);
-      // manually-added rows (source NULL / 'manual' / 'scribe' / 'consultation'
-      // / 'opd_upload') are preserved.
-      //
-      // Safety: skip the sweep entirely when the extraction produced zero
-      // medications AND zero previous_medications — mirrors
-      // stopStaleHealthrayMeds which refuses to sweep against an empty
-      // prescription (prevents a failed Claude call from wiping the regimen).
-      let staleSwept = 0;
-      if (currentByKey.size > 0 || prevByKey.size > 0) {
-        const keepKeys = [...currentByKey.keys(), ...prevByKey.keys()];
-        const stopReason = `report_extract:${docId} — not in latest prescription`;
-
-        // Phase 1: DELETE inactive-row collisions that would block the UPDATE
-        // (same canonical already sits inactive). Same pattern as
-        // stopStaleHealthrayMeds:1209-1246.
-        await client
-          .query(
-            `DELETE FROM medications
-                WHERE patient_id = $1
-                  AND is_active = false
-                  AND UPPER(COALESCE(pharmacy_match, name)) IN (
-                    SELECT UPPER(COALESCE(pharmacy_match, name))
-                      FROM medications
-                     WHERE patient_id = $1
-                       AND is_active = true
-                       AND source IN ('report_extract', 'healthray')
-                       AND UPPER(COALESCE(pharmacy_match, name)) <> ALL($2::text[])
-                       AND (document_id IS NULL OR document_id <> $3)
-                  )`,
-            [doc.patient_id, keepKeys, docId],
-          )
-          .catch((e) =>
-            console.error(
-              `[extract-prescription] stale-sweep DELETE failed doc=${docId} patient=${doc.patient_id}: ${e.message}`,
-            ),
-          );
-
-        // Phase 2: deactivate the stale active rows.
-        const sweepRes = await client
-          .query(
-            `UPDATE medications
-                  SET is_active = false,
-                      stopped_date = $4::date,
-                      stop_reason = $5,
-                      updated_at = NOW()
-                WHERE patient_id = $1
-                  AND is_active = true
-                  AND source IN ('report_extract', 'healthray')
-                  AND UPPER(COALESCE(pharmacy_match, name)) <> ALL($2::text[])
-                  AND (document_id IS NULL OR document_id <> $3)`,
-            [doc.patient_id, keepKeys, docId, rxDate, stopReason],
-          )
-          .catch((e) => {
-            console.error(
-              `[extract-prescription] stale-sweep UPDATE failed doc=${docId} patient=${doc.patient_id}: ${e.message}`,
-            );
-            return { rowCount: 0 };
-          });
-        staleSwept = sweepRes?.rowCount || 0;
-      }
+      // Stale-med sweep disabled: prescription extraction must only add new
+      // medicines and never auto-deactivate existing active meds that the
+      // new prescription doesn't mention. Existing meds stay active until
+      // the doctor stops them explicitly.
+      const staleSwept = 0;
 
       console.log(
         `[extract-prescription] doc=${docId} meds: ` +

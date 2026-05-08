@@ -159,7 +159,8 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
             marginBottom: 8,
           }}
         >
-          <strong style={{ fontWeight: 700, color: "#334155" }}>Patient note:</strong> {r.patient_reason}
+          <strong style={{ fontWeight: 700, color: "#334155" }}>Patient note:</strong>{" "}
+          {r.patient_reason}
         </div>
       )}
 
@@ -210,14 +211,33 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
           }}
         >
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div style={{ flex: "0 0 140px" }}>
-              <label style={labelStyle}>Final dose</label>
-              <input
-                type="text"
-                value={finalDose}
-                onChange={(e) => setFinalDose(e.target.value)}
-                style={inputStyle}
-              />
+            <div style={{ flex: "0 0 200px" }}>
+              <label style={labelStyle}>Final dose{r.dose_unit ? ` (${r.dose_unit})` : ""}</label>
+              <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+                <button
+                  type="button"
+                  onClick={() => setFinalDose(stepDose(finalDose, -0.25))}
+                  style={stepBtnStyle}
+                  title="−0.25"
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={finalDose}
+                  onChange={(e) => setFinalDose(e.target.value)}
+                  style={{ ...inputStyle, textAlign: "center" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setFinalDose(stepDose(finalDose, 0.25))}
+                  style={stepBtnStyle}
+                  title="+0.25"
+                >
+                  +
+                </button>
+              </div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <label style={labelStyle}>Note for patient (optional)</label>
@@ -236,16 +256,30 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
               <button
                 disabled={busy}
                 onClick={() => setRejecting(true)}
-                style={btnStyle("#ef4444", "#fef2f2", "#b91c1c")}
+                style={{
+                  ...btnStyle("#ef4444", "#fef2f2", "#b91c1c"),
+                  opacity: busy ? 0.6 : 1,
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
               >
                 Reject
               </button>
               <button
                 disabled={busy}
                 onClick={submitApprove}
-                style={btnStyle("#10b981", "#10b981", "#fff")}
+                style={{
+                  ...btnStyle("#10b981", "#10b981", "#fff"),
+                  opacity: busy ? 0.7 : 1,
+                  cursor: busy ? "not-allowed" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
               >
-                Approve {finalDose && finalDose !== r.requested_dose ? `as ${finalDose}` : ""}
+                {busy && <Spinner color="#fff" />}
+                {busy
+                  ? "Approving…"
+                  : `Approve ${finalDose && finalDose !== r.requested_dose ? `as ${finalDose}` : ""}`}
               </button>
             </div>
           ) : (
@@ -274,16 +308,28 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
                 <button
                   disabled={busy}
                   onClick={() => setRejecting(false)}
-                  style={btnStyle("#cbd5e1", "#fff", "#475569")}
+                  style={{
+                    ...btnStyle("#cbd5e1", "#fff", "#475569"),
+                    opacity: busy ? 0.6 : 1,
+                    cursor: busy ? "not-allowed" : "pointer",
+                  }}
                 >
                   Cancel
                 </button>
                 <button
                   disabled={busy}
                   onClick={submitReject}
-                  style={btnStyle("#ef4444", "#ef4444", "#fff")}
+                  style={{
+                    ...btnStyle("#ef4444", "#ef4444", "#fff"),
+                    opacity: busy ? 0.7 : 1,
+                    cursor: busy ? "not-allowed" : "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
                 >
-                  Confirm reject
+                  {busy && <Spinner color="#fff" />}
+                  {busy ? "Rejecting…" : "Confirm reject"}
                 </button>
               </div>
             </div>
@@ -314,6 +360,49 @@ const inputStyle = {
   outline: "none",
   boxSizing: "border-box",
 };
+
+function stepDose(current, delta) {
+  const m = String(current ?? "").match(/-?\d+(?:\.\d+)?/);
+  const num = m ? parseFloat(m[0]) : 0;
+  const next = Math.max(0, Math.round((num + delta) * 100) / 100);
+  if (!m) return String(next);
+  return String(current).replace(m[0], String(next));
+}
+
+const stepBtnStyle = {
+  width: 30,
+  border: "1px solid #e2e8f0",
+  background: "#f8fafc",
+  borderRadius: 8,
+  fontSize: 16,
+  fontWeight: 700,
+  color: "#334155",
+  cursor: "pointer",
+  lineHeight: 1,
+};
+
+function Spinner({ color = "#fff", size = 12 }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        border: `2px solid ${color}`,
+        borderTopColor: "transparent",
+        borderRadius: "50%",
+        animation: "dcr-spin 0.7s linear infinite",
+      }}
+    />
+  );
+}
+
+if (typeof document !== "undefined" && !document.getElementById("dcr-spin-style")) {
+  const style = document.createElement("style");
+  style.id = "dcr-spin-style";
+  style.textContent = "@keyframes dcr-spin { to { transform: rotate(360deg); } }";
+  document.head.appendChild(style);
+}
 
 function btnStyle(borderColor, bg, color) {
   return {

@@ -66,7 +66,10 @@ export async function sendToPatient(patientId, { title, body, data = {} }) {
         sent += 1;
       } catch (e) {
         const code = e?.errorInfo?.code || e?.code || "";
-        if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
+        if (
+          code.includes("registration-token-not-registered") ||
+          code.includes("invalid-argument")
+        ) {
           await pruneToken(token).catch(() => {});
         } else {
           console.warn("[pushNotifier] send failed:", code || e.message);

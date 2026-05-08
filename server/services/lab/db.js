@@ -500,13 +500,10 @@ async function fetchStoredPdfBuffer(storagePath) {
 
 async function deleteSupabaseObject(storagePath) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return false;
-  const r = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
-    {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
-    },
-  );
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+  });
   return r.ok;
 }
 
@@ -569,10 +566,9 @@ export async function sweepBlankStoredLabPdfs({ limit = 50 } = {}) {
           `case ${row.case_no}: blank PDF cleared (bytes=${buf.length}) — retry cron will re-download`,
         );
       } else {
-        await pool.query(
-          `UPDATE lab_cases SET pdf_blank_checked_at = NOW() WHERE case_no = $1`,
-          [row.case_no],
-        );
+        await pool.query(`UPDATE lab_cases SET pdf_blank_checked_at = NOW() WHERE case_no = $1`, [
+          row.case_no,
+        ]);
         verified++;
       }
     } catch (e) {

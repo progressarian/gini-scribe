@@ -27,38 +27,16 @@ const CURRENT_BURST_MINUTES = 10;
 
 export async function markMedicationVisitStatus(patientId, db = pool) {
   if (!patientId) return;
+  // Every active med is treated as part of the current visit. We no longer
+  // demote active rows to 'previous' based on last_prescribed_date — that
+  // bucketing was silently moving manually-added meds into "Previous visits"
+  // when other rows had a newer last_prescribed_date.
   await db.query(
-    `WITH latest AS (
-       SELECT MAX(last_prescribed_date::date) AS d
-         FROM medications
-        WHERE patient_id = $1 AND is_active = true
-     ),
-     latest_touch AS (
-       SELECT MAX(updated_at) AS t
-         FROM medications
-        WHERE patient_id = $1
-          AND is_active = true
-          AND last_prescribed_date::date = (SELECT d FROM latest)
-     )
-     UPDATE medications m
-        SET visit_status = CASE
-              WHEN (SELECT d FROM latest) IS NULL THEN 'current'
-              WHEN m.last_prescribed_date IS NULL THEN 'current'
-              WHEN m.last_prescribed_date::date <> (SELECT d FROM latest) THEN 'previous'
-              WHEN (SELECT t FROM latest_touch) IS NULL THEN 'current'
-              WHEN m.updated_at >= (SELECT t FROM latest_touch) - ($2 || ' minutes')::interval THEN 'current'
-              ELSE 'previous'
-            END
-      WHERE m.patient_id = $1
-        AND m.is_active = true
-        AND m.visit_status IS DISTINCT FROM CASE
-              WHEN (SELECT d FROM latest) IS NULL THEN 'current'
-              WHEN m.last_prescribed_date IS NULL THEN 'current'
-              WHEN m.last_prescribed_date::date <> (SELECT d FROM latest) THEN 'previous'
-              WHEN (SELECT t FROM latest_touch) IS NULL THEN 'current'
-              WHEN m.updated_at >= (SELECT t FROM latest_touch) - ($2 || ' minutes')::interval THEN 'current'
-              ELSE 'previous'
-            END`,
-    [patientId, String(CURRENT_BURST_MINUTES)],
+    `UPDATE medications
+        SET visit_status = 'current'
+      WHERE patient_id = $1
+        AND is_active = true
+        AND visit_status IS DISTINCT FROM 'current'`,
+    [patientId],
   );
 }

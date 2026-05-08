@@ -1275,9 +1275,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     if (newMedId) {
       backfillCommonSideEffectsForMed(newMedId)
         .then(() => syncMedicationsToGenie(pid, pool))
-        .catch((e) =>
-          console.warn("[Visit] common side effects fill skipped:", e.message),
-        );
+        .catch((e) => console.warn("[Visit] common side effects fill skipped:", e.message));
     }
     res.json(r.rows[0]);
   } catch (e) {
@@ -1644,18 +1642,9 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
       });
     }
 
-    // Restart is clinically a re-prescription — align the restarted med with
-    // the patient's most recent active prescription date so it groups under
-    // the same visit as the rest of the active regimen. Falls back to today
-    // when there is no other active med to align with.
-    const latestActive = await client.query(
-      `SELECT MAX(COALESCE(c.visit_date, m.started_date))::date AS d
-         FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
-        WHERE m.patient_id = $1 AND m.is_active = true AND m.id != $2`,
-      [pid, mid],
-    );
-    const alignDate = latestActive.rows[0]?.d || null;
-
+    // Restart only flips status — every other field (started_date,
+    // last_prescribed_date, consultation_id, parent link, dose, etc.) is
+    // preserved exactly as it was before the med was stopped.
     // If asStandalone is set on a child row, also clear the parent link so
     // the restarted med is no longer rendered as a support medicine.
     const promote = asStandalone === true && med.rows[0].parent_medication_id != null;
@@ -1664,15 +1653,13 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
           SET is_active = true,
               stopped_date = NULL,
               stop_reason = NULL,
-              started_date = COALESCE($4::date, CURRENT_DATE),
-              last_prescribed_date = COALESCE($4::date, CURRENT_DATE),
-              consultation_id = NULL,
               parent_medication_id = CASE WHEN $3::boolean THEN NULL ELSE parent_medication_id END,
               support_condition = CASE WHEN $3::boolean THEN NULL ELSE support_condition END,
+              visit_status = 'current',
               updated_at = NOW()
         WHERE id = $1 AND patient_id = $2 AND is_active = false
         RETURNING *`,
-      [mid, pid, promote, alignDate],
+      [mid, pid, promote],
     );
     if (!r.rows[0]) {
       await client.query("ROLLBACK");
@@ -1709,12 +1696,10 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
               SET is_active = true,
                   stopped_date = NULL,
                   stop_reason = NULL,
-                  started_date = COALESCE($3::date, CURRENT_DATE),
-                  last_prescribed_date = COALESCE($3::date, CURRENT_DATE),
-                  consultation_id = NULL,
+                  visit_status = 'current',
                   updated_at = NOW()
             WHERE id = $1 AND patient_id = $2 AND is_active = false`,
-          [ch.id, pid, alignDate],
+          [ch.id, pid],
         );
         cascadeRestarted.push(ch.id);
       }
@@ -1723,9 +1708,10 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
     await client.query("COMMIT");
     client.release();
 
-    await markMedicationVisitStatus(pid).catch((e) =>
-      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
-    );
+    // Restart only stamps `visit_status='current'` on the restarted row(s)
+    // (and any cascade-restarted children). Other active meds keep their
+    // existing visit_status — a previous-visit med stays in the "Prev Visit"
+    // bucket instead of getting promoted back to current.
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );

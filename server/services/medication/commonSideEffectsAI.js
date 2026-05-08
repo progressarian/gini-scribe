@@ -84,9 +84,15 @@ function sanitizeEntries(arr) {
   const out = [];
   for (const raw of arr) {
     if (!raw || typeof raw !== "object") continue;
-    const name = String(raw.name || "").trim().slice(0, 120);
-    const desc = String(raw.desc || "").trim().slice(0, 200);
-    let severity = String(raw.severity || "").trim().toLowerCase();
+    const name = String(raw.name || "")
+      .trim()
+      .slice(0, 120);
+    const desc = String(raw.desc || "")
+      .trim()
+      .slice(0, 200);
+    let severity = String(raw.severity || "")
+      .trim()
+      .toLowerCase();
     if (!allowed.has(severity)) severity = "common";
     if (severity === "warn") {
       if (warnSeen) severity = "uncommon";
@@ -156,9 +162,7 @@ export async function backfillCommonSideEffectsForMed(medicationId) {
     );
     const row = cur.rows[0];
     if (!row) return;
-    const existing = Array.isArray(row.common_side_effects)
-      ? row.common_side_effects
-      : [];
+    const existing = Array.isArray(row.common_side_effects) ? row.common_side_effects : [];
     if (existing.length > 0) return;
 
     const effects = await generateCommonSideEffects({
