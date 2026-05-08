@@ -1,7 +1,8 @@
 // ── Lab HealthRay Sync — DB operations ──────────────────────────────────────
 
 import pool from "../../config/db.js";
-import { extractInvestigationSummary } from "./labHealthrayParser.js";
+import { inflateSync } from "zlib";
+import { extractInvestigationSummary, isLabCasePrintable } from "./labHealthrayParser.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { createLogger } from "../logger.js";
 
@@ -57,6 +58,11 @@ export async function ensureLabCasesTable() {
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_first_attempt_at TIMESTAMPTZ;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_last_attempt_at TIMESTAMPTZ;
     ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_next_attempt_at TIMESTAMPTZ;
+    -- Safety net: even with the in-flight gates (isLabCasePrintable +
+    -- looksLikeBlankLabPdf), a placeholder PDF could slip through. The blank
+    -- sweep re-validates each stored PDF once it is at least 2 hours old.
+    -- pdf_blank_checked_at = NOW() means we have confirmed the file is real.
+    ALTER TABLE lab_cases ADD COLUMN IF NOT EXISTS pdf_blank_checked_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_lab_cases_patient    ON lab_cases(patient_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_appt       ON lab_cases(appointment_id);
     CREATE INDEX IF NOT EXISTS idx_lab_cases_date       ON lab_cases(case_date);
@@ -157,6 +163,42 @@ const PDF_FIRST_BACKOFF_MIN_MS = 30 * 60 * 1000;
 const PDF_FIRST_BACKOFF_JITTER_MS = 10 * 60 * 1000; // → 30–40 min
 const PDF_LATER_BACKOFF_MS = 4 * 60 * 60 * 1000;
 
+// Detects Healthray's "In Process" placeholder lab report. The placeholder
+// is a fixed template (hospital header + technician/doctor signatures only)
+// served while a case is still pending. It is structurally a valid PDF, so
+// the existing %PDF- + %%EOF gate accepts it — but it has no rendered results.
+//
+// Discriminators (measured against historical cases on 2026-05-01):
+//   - placeholder bytes: 59,941–59,957 (template is virtually identical)
+//   - placeholder Tj/TJ ops (after stream inflate): ~30 (logo + signature glyphs)
+//   - smallest real single-test report: 63,410 bytes, 79+ Tj/TJ ops
+// Threshold (bytes < 61_000 AND Tj < 60) gives ~3 KB / 19-op safety margin.
+function looksLikeBlankLabPdf(buffer) {
+  if (buffer.length >= 61_000) return false;
+  const ascii = buffer.toString("latin1");
+  let cursor = 0;
+  let totalTj = 0;
+  while (true) {
+    const sStart = ascii.indexOf("stream\n", cursor);
+    if (sStart < 0) break;
+    const dataStart = sStart + "stream\n".length;
+    const sEnd = ascii.indexOf("\nendstream", dataStart);
+    if (sEnd < 0) break;
+    let decoded = buffer.subarray(dataStart, sEnd);
+    try {
+      decoded = inflateSync(decoded);
+    } catch {
+      // Stream is not Flate-compressed (or corrupted) — count operators in
+      // the raw bytes so we still see uncompressed content streams.
+    }
+    const text = decoded.toString("latin1");
+    totalTj += (text.match(/\bTj\b/g) || []).length + (text.match(/\bTJ\b/g) || []).length;
+    if (totalTj >= 60) return false; // early exit — clearly a real report
+    cursor = sEnd;
+  }
+  return totalTj < 60;
+}
+
 function computePdfNextAttemptDelayMs(attemptCount) {
   if (attemptCount <= 1) {
     return PDF_FIRST_BACKOFF_MIN_MS + Math.floor(Math.random() * PDF_FIRST_BACKOFF_JITTER_MS);
@@ -245,6 +287,34 @@ export async function downloadAndStoreLabPdf(
     return null;
   }
 
+  // Pre-gate: skip the (expensive, puppeteer-driven) download entirely when
+  // the case is still "In Process" / not every in-house test has reported.
+  // Healthray serves a placeholder PDF (header + signatures only) for those
+  // cases — capturing it would set pdf_storage_path and lock the case out of
+  // every retry path (they all guard on pdf_storage_path IS NULL). We fetch
+  // live detail when the caller didn't supply it so the gate works for both
+  // the auto-sync path (passes detail) and the retry-cron path (passes null).
+  let detailForGate = caseDetail;
+  if (!detailForGate) {
+    try {
+      const { fetchLabCaseDetail } = await import("./labHealthrayApi.js");
+      detailForGate = await fetchLabCaseDetail(caseUid, caseId, userId);
+    } catch (e) {
+      labLog("Error", `case ${caseNo}: detail fetch failed before PDF gate — ${e.message}`);
+      // Fall through; the post-fetch content-emptiness gate is the safety net.
+    }
+  }
+  const printable = isLabCasePrintable(pre[0]?.case_status, detailForGate);
+  if (!printable.ready) {
+    // Defer; do NOT mark pdf_unavailable — the case will be ready later. We
+    // still record the attempt + schedule the next try via the existing
+    // backoff (30–40 min, then 4 h, 3-day budget).
+    const attempt = await recordPdfAttemptStart(caseNo);
+    await schedulePdfRetry(caseNo, attempt.pdf_attempt_count, attempt.pdf_first_attempt_at);
+    labLog("Skip", `case ${caseNo}: ${printable.reason} — deferring PDF download`);
+    return null;
+  }
+
   // Record this attempt up-front so backoff scheduling has accurate counters
   // even if Healthray hangs / we crash mid-fetch.
   const attempt = await recordPdfAttemptStart(caseNo);
@@ -306,6 +376,20 @@ export async function downloadAndStoreLabPdf(
       await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
       return null;
     }
+
+    // Reject Healthray's "In Process" placeholder PDF — structurally valid
+    // (header + signatures only, no rendered results). Without this gate the
+    // first sync stores the placeholder, sets pdf_storage_path, and every
+    // subsequent retry path skips the case (they all guard on
+    // pdf_storage_path IS NULL), so the real PDF is never fetched.
+    if (looksLikeBlankLabPdf(buffer)) {
+      labLog(
+        "Reject",
+        `Blank/template PDF for case ${caseNo} (bytes=${buffer.length}) — scheduling retry`,
+      );
+      await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
+      return null;
+    }
   }
 
   const ext = contentType === "image/jpeg" ? "jpg" : contentType === "image/png" ? "png" : "pdf";
@@ -359,7 +443,8 @@ export async function downloadAndStoreLabPdf(
       `UPDATE lab_cases
           SET pdf_storage_path = $1,
               pdf_unavailable = FALSE,
-              pdf_next_attempt_at = NULL
+              pdf_next_attempt_at = NULL,
+              pdf_blank_checked_at = NULL
         WHERE case_no = $2`,
       [storagePath, caseNo],
     );
@@ -371,6 +456,135 @@ export async function downloadAndStoreLabPdf(
     await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
+}
+
+// ── Blank-PDF safety-net sweep ─────────────────────────────────────────────
+// Re-validates each stored lab PDF once it is at least BLANK_RECHECK_AGE_MS
+// old. If the file is still the "In Process" placeholder, the row is reset
+// (pdf_storage_path NULL + retry counters cleared + Supabase object deleted)
+// so the existing PDF-retry cron will re-download the real report.
+//
+// The pre-gate (isLabCasePrintable) and post-gate (looksLikeBlankLabPdf in
+// downloadAndStoreLabPdf) should prevent placeholders from being stored in
+// the first place. This sweep is a backstop for edge cases — e.g. a PDF
+// that passed both gates because Healthray briefly reported every test as
+// "complete" but the rendered file still came out empty, or historic rows
+// stored before the gates existed.
+//
+// pdf_blank_checked_at is NULL until a sweep verifies the file. After
+// verification (file looks legit) we set it to NOW() and never re-check.
+const BLANK_RECHECK_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+async function fetchStoredPdfBuffer(storagePath) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
+  const sign = await fetch(
+    `${SUPABASE_URL}/storage/v1/object/sign/${STORAGE_BUCKET}/${storagePath}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: 60 }),
+    },
+  );
+  if (!sign.ok) return null;
+  const sj = await sign.json();
+  const signed = sj.signedURL || sj.signedUrl;
+  if (!signed) return null;
+  const url = signed.startsWith("http") ? signed : `${SUPABASE_URL}/storage/v1${signed}`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  return Buffer.from(await r.arrayBuffer());
+}
+
+async function deleteSupabaseObject(storagePath) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return false;
+  const r = await fetch(
+    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+    },
+  );
+  return r.ok;
+}
+
+export async function sweepBlankStoredLabPdfs({ limit = 50 } = {}) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    return { scanned: 0, blanks: 0, verified: 0, errors: 0 };
+  }
+  // Legacy rows may have pdf_storage_path set but no pdf_first_attempt_at
+  // (the column was added later) — fall back to fetched_at so they still get
+  // swept. Both columns are TIMESTAMPTZ; fetched_at has DEFAULT NOW().
+  const { rows } = await pool.query(
+    `SELECT lc.case_no, lc.patient_id, lc.pdf_storage_path,
+            lc.pdf_attempt_count, lc.pdf_first_attempt_at
+       FROM lab_cases lc
+      WHERE lc.pdf_storage_path IS NOT NULL
+        AND lc.pdf_blank_checked_at IS NULL
+        AND COALESCE(lc.pdf_first_attempt_at, lc.fetched_at)
+              < NOW() - ($1 || ' milliseconds')::interval
+      ORDER BY COALESCE(lc.pdf_first_attempt_at, lc.fetched_at) ASC
+      LIMIT $2`,
+    [BLANK_RECHECK_AGE_MS, limit],
+  );
+  if (!rows.length) return { scanned: 0, blanks: 0, verified: 0, errors: 0 };
+
+  let blanks = 0;
+  let verified = 0;
+  let errors = 0;
+  for (const row of rows) {
+    try {
+      const buf = await fetchStoredPdfBuffer(row.pdf_storage_path);
+      if (!buf) {
+        errors++;
+        labLog("Sweep", `case ${row.case_no}: fetch failed — skipping`);
+        continue;
+      }
+      if (looksLikeBlankLabPdf(buf)) {
+        // Clear so the PDF-retry cron will re-download. Supabase object is
+        // deleted so the upsert on next download starts clean.
+        await deleteSupabaseObject(row.pdf_storage_path);
+        await pool.query(
+          `DELETE FROM documents
+             WHERE patient_id = $1 AND source = 'lab_healthray' AND notes = $2`,
+          [row.patient_id, `lab_case:${row.case_no}`],
+        );
+        await pool.query(
+          `UPDATE lab_cases
+              SET pdf_storage_path     = NULL,
+                  pdf_unavailable      = FALSE,
+                  pdf_attempt_count    = 0,
+                  pdf_first_attempt_at = NULL,
+                  pdf_last_attempt_at  = NULL,
+                  pdf_next_attempt_at  = NULL,
+                  pdf_blank_checked_at = NULL
+            WHERE case_no = $1`,
+          [row.case_no],
+        );
+        blanks++;
+        labLog(
+          "Sweep",
+          `case ${row.case_no}: blank PDF cleared (bytes=${buf.length}) — retry cron will re-download`,
+        );
+      } else {
+        await pool.query(
+          `UPDATE lab_cases SET pdf_blank_checked_at = NOW() WHERE case_no = $1`,
+          [row.case_no],
+        );
+        verified++;
+      }
+    } catch (e) {
+      errors++;
+      labLog("Sweep", `case ${row.case_no} error: ${e.message}`);
+    }
+  }
+  labLog(
+    "Sweep",
+    `Done — scanned=${rows.length} blanks=${blanks} verified=${verified} errors=${errors}`,
+  );
+  return { scanned: rows.length, blanks, verified, errors };
 }
 
 // ── Cases due for a PDF retry ──────────────────────────────────────────────

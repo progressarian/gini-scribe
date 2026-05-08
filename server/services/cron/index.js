@@ -12,6 +12,7 @@ import {
   runLabSync,
   retryPendingLabCases,
   runPdfRetryRecovery,
+  runBlankLabPdfSweep,
   getLabSyncStatus,
   backfillLabRanges,
   backfillLabPdfs,
@@ -61,6 +62,7 @@ let stuckStatusIntervalId = null;
 let docRecoveryIntervalId = null;
 let missingMedsIntervalId = null;
 let pdfRetryIntervalId = null;
+let blankSweepIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -121,6 +123,28 @@ export function startCronJobs() {
     },
     5 * 60 * 1000,
   ); // start 5 min after boot to let the regular sync settle
+
+  // ── Blank-PDF safety-net sweep ───────────────────────────────────────────
+  // Every 30 min, re-checks stored lab PDFs that are at least 2 hours old.
+  // If a stored file is still the placeholder template, clears it so the
+  // PDF-retry cron will re-download the real report. The 2-hour age is
+  // enforced inside sweepBlankStoredLabPdfs, so this interval just needs to
+  // be small enough to keep latency on the safety net low.
+  const BLANK_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+  console.log("[Cron] Starting blank lab PDF sweep (every 30 min, 2h age threshold)...");
+  setTimeout(
+    () => {
+      runBlankLabPdfSweep().catch((e) =>
+        console.error("[Cron] Blank lab PDF sweep failed:", e.message),
+      );
+      blankSweepIntervalId = setInterval(() => {
+        runBlankLabPdfSweep().catch((e) =>
+          console.error("[Cron] Blank lab PDF sweep failed:", e.message),
+        );
+      }, BLANK_SWEEP_INTERVAL_MS);
+    },
+    7 * 60 * 1000, // start 7 min after boot, offset from PDF retry (5 min)
+  );
 
   // ── Daily OPD re-parse: fixes diagnoses + medicines for today's patients ──
   // Runs 30 min after startup (lets initial sync settle), then every 24 hours.
@@ -232,6 +256,11 @@ export function stopCronJobs() {
     pdfRetryIntervalId = null;
     console.log("[Cron] Lab PDF retry recovery stopped");
   }
+  if (blankSweepIntervalId) {
+    clearInterval(blankSweepIntervalId);
+    blankSweepIntervalId = null;
+    console.log("[Cron] Blank lab PDF sweep stopped");
+  }
 }
 
 // Manual trigger exports
@@ -246,6 +275,7 @@ export {
   backfillLabRanges,
   backfillLabPdfs,
   runPdfRetryRecovery,
+  runBlankLabPdfSweep,
   runDailyOpdBackfill,
   runStuckStatusRecovery,
   runMissingMedsRecovery,

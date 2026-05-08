@@ -8,6 +8,7 @@ import useUiStore from "../stores/uiStore.js";
 import useMessagingStore from "../stores/messagingStore.js";
 import useAlertStore from "../stores/alertStore.js";
 import useRefillStore from "../stores/refillStore.js";
+import useDoseChangeStore from "../stores/doseChangeStore.js";
 import Shimmer from "../components/Shimmer.jsx";
 import "./HomePage.css";
 
@@ -36,13 +37,19 @@ export default function HomePage() {
     fetchPending: fetchRefills,
     updateStatus: updateRefillStatus,
   } = useRefillStore();
+  const {
+    requests: doseRequests,
+    loading: doseLoading,
+    fetchPending: fetchDoseRequests,
+  } = useDoseChangeStore();
 
   useEffect(() => {
     fetchTodayAppointments();
     fetchInbox();
     fetchAlerts();
     fetchRefills();
-  }, [fetchTodayAppointments, fetchInbox, fetchAlerts, fetchRefills]);
+    fetchDoseRequests();
+  }, [fetchTodayAppointments, fetchInbox, fetchAlerts, fetchRefills, fetchDoseRequests]);
 
   return (
     <div className="home">
@@ -71,6 +78,7 @@ export default function HomePage() {
             fetchInbox();
             fetchAlerts();
             fetchRefills();
+            fetchDoseRequests();
           }}
           className="home__refresh-btn"
         >
@@ -681,6 +689,114 @@ export default function HomePage() {
                         Reject
                       </button>
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Dose Change Requests */}
+        <div
+          className="home__panel"
+          style={{
+            border: `1.5px solid ${doseRequests.length > 0 ? "#fde68a" : "#e2e8f0"}`,
+            boxShadow:
+              doseRequests.length > 0 ? "0 2px 8px rgba(124,92,255,.10)" : "0 2px 8px rgba(0,0,0,.04)",
+          }}
+        >
+          <div
+            className="home__panel-header"
+            style={{
+              background:
+                doseRequests.length > 0 ? "linear-gradient(135deg,#1e293b,#7c3aed)" : "#1e293b",
+            }}
+          >
+            <div className="home__msg-header-title">
+              <span className="home__panel-title">⚕️ DOSE CHANGE REQUESTS</span>
+              {doseRequests.length > 0 && (
+                <span className="home__msg-badge" style={{ background: "#7c3aed" }}>
+                  {doseRequests.length}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => navigate("/dose-change-requests")}
+              className="home__msg-view-all-btn"
+            >
+              View all
+            </button>
+          </div>
+          {doseLoading ? (
+            <div style={{ padding: 14 }}>
+              <Shimmer type="list" count={3} />
+            </div>
+          ) : doseRequests.length === 0 ? (
+            <div className="home__panel-empty">
+              <div className="home__panel-empty-icon">✅</div>
+              <div className="home__panel-empty-text">No pending dose-change requests</div>
+              <div className="home__panel-empty-hint">
+                Patient-initiated dose adjustments appear here
+              </div>
+            </div>
+          ) : (
+            <div className="home__panel-scroll">
+              {doseRequests.slice(0, 5).map((r, i) => {
+                const ts = r.requested_at
+                  ? (() => {
+                      const d = new Date(r.requested_at);
+                      const now = new Date();
+                      const diff = (now - d) / 1000;
+                      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                      if (diff < 86400)
+                        return d.toLocaleTimeString("en-IN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        });
+                      return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+                    })()
+                  : "";
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => navigate("/dose-change-requests")}
+                    style={{
+                      padding: "10px 14px",
+                      borderBottom: i < Math.min(doseRequests.length, 5) - 1 ? "1px solid #f1f5f9" : "none",
+                      background: "white",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>
+                        {r.patient_name || `Patient #${r.patient_id}`}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{ts}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#374151" }}>
+                      <strong>{r.medication_name}</strong>: {r.current_dose} → {" "}
+                      <span style={{ color: "#7c3aed", fontWeight: 700 }}>{r.requested_dose}</span>
+                      {r.dose_unit ? ` ${r.dose_unit}` : ""}
+                    </div>
+                    {r.patient_reason && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          fontStyle: "italic",
+                          marginTop: 4,
+                        }}
+                      >
+                        “{r.patient_reason}”
+                      </div>
+                    )}
                   </div>
                 );
               })}

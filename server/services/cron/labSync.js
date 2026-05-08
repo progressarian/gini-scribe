@@ -24,6 +24,7 @@ import {
   bumpLabCaseRetry,
   abandonLabCase,
   downloadAndStoreLabPdf,
+  sweepBlankStoredLabPdfs,
 } from "../lab/db.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
@@ -129,12 +130,13 @@ async function processCase(listRow) {
   // Otherwise leave results_synced=false so the recovery loop keeps trying.
 
   // Step h: download lab report PDF (fire-and-forget — never blocks sync).
-  // No printable pre-gate: fetchLabReportPdf returns {unavailable:true} only
-  // when Healthray definitively says "No Report Found", and a transient/null
-  // outcome triggers the backoff scheduler in downloadAndStoreLabPdf
-  // (30–40 min, then 4 h for up to 3 days). Some partial cases still produce
-  // a valid PDF — gating on isLabCasePrintable was preventing those from
-  // ever being captured.
+  // Printability is enforced inside downloadAndStoreLabPdf via
+  // isLabCasePrintable(case_status, detail). When the case is still
+  // "In Process" the downloader skips the puppeteer fetch and schedules a
+  // retry, so we never capture and persist Healthray's blank placeholder PDF.
+  // A content-emptiness post-gate (looksLikeBlankLabPdf) acts as a safety net
+  // for cases where status appears printable but the rendered PDF still has
+  // no test data.
   if (patientId) {
     downloadAndStoreLabPdf(
       patientId,
@@ -477,6 +479,23 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
 // retries the PDF download. The downloader itself handles attempt counting,
 // next-window scheduling, and the 3-day budget abandonment — so this loop
 // just iterates due rows and lets downloadAndStoreLabPdf do the work.
+// ── Blank-PDF safety-net sweep ──────────────────────────────────────────────
+// Re-validates each stored lab PDF after it's been at rest for 2 hours. If
+// the file is still the "In Process" placeholder, it's cleared so the
+// existing PDF-retry cron will fetch the real report. Backs up the in-flight
+// gates (isLabCasePrintable + looksLikeBlankLabPdf) for any edge case where a
+// blank PDF still slips through.
+export async function runBlankLabPdfSweep({ limit = 50 } = {}) {
+  const releaseLock = await tryAcquireCronLock("Lab Blank Sweep", CRON_LOCK_KEYS.LAB_SYNC);
+  if (!releaseLock) return { scanned: 0, blanks: 0, verified: 0, errors: 0 };
+  try {
+    const result = await sweepBlankStoredLabPdfs({ limit });
+    return result;
+  } finally {
+    await releaseLock();
+  }
+}
+
 export async function runPdfRetryRecovery({ concurrency = 1 } = {}) {
   const releaseLock = await tryAcquireCronLock("Lab PDF Retry", CRON_LOCK_KEYS.LAB_SYNC);
   if (!releaseLock) return { total: 0, downloaded: 0, skipped: 0, errors: 0 };

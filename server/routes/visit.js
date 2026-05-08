@@ -34,6 +34,7 @@ import {
   routeForForm,
 } from "../services/medication/normalize.js";
 import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
+import { backfillCommonSideEffectsForMed } from "../services/medication/commonSideEffectsAI.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -1266,6 +1267,18 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     syncMedicationsToGenie(pid, pool).catch((e) =>
       console.warn("[Visit] Medications push skipped:", e.message),
     );
+    // Background fill of patient-facing common side effects via Claude.
+    // Fire-and-forget so the add-medicine response is not delayed; the
+    // service no-ops if the row already has side effects (extractor wrote
+    // them) or if the medicine is unrecognised.
+    const newMedId = r.rows[0]?.id;
+    if (newMedId) {
+      backfillCommonSideEffectsForMed(newMedId)
+        .then(() => syncMedicationsToGenie(pid, pool))
+        .catch((e) =>
+          console.warn("[Visit] common side effects fill skipped:", e.message),
+        );
+    }
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Add medication");
