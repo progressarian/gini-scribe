@@ -2425,12 +2425,14 @@ router.get("/visit/:patientId/patient-summary", async (req, res) => {
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
     const { rows } = await pool.query(
-      `SELECT id, patient_id, appointment_id, version, content, change_note,
-              prev_version_id, author_name, author_id, source,
-              heading_greeting, heading_accent, created_at
-         FROM patient_summaries
-        WHERE patient_id = $1
-        ORDER BY version DESC, id DESC`,
+      `SELECT ps.id, ps.patient_id, ps.appointment_id, ps.version, ps.content,
+              ps.change_note, ps.prev_version_id, ps.author_name, ps.author_id,
+              ps.source, ps.heading_greeting, ps.heading_accent, ps.created_at,
+              a.appointment_date
+         FROM patient_summaries ps
+         LEFT JOIN appointments a ON a.id = ps.appointment_id
+        WHERE ps.patient_id = $1
+        ORDER BY ps.version DESC, ps.id DESC`,
       [pid],
     );
     res.json({ versions: rows, current: rows[0] || null });
@@ -2446,9 +2448,7 @@ router.post("/visit/:patientId/patient-summary/generate", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const { body, heading_greeting, heading_accent } = await generatePatientSummary(
-      req.body || {},
-    );
+    const { body, heading_greeting, heading_accent } = await generatePatientSummary(req.body || {});
     const prev = await pool.query(
       `SELECT id, version FROM patient_summaries
         WHERE patient_id=$1 ORDER BY version DESC LIMIT 1`,

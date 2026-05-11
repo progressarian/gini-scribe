@@ -486,7 +486,7 @@ export async function backfillLabPdfs({ concurrency = 2 } = {}) {
 // gates (isLabCasePrintable + looksLikeBlankLabPdf) for any edge case where a
 // blank PDF still slips through.
 export async function runBlankLabPdfSweep({ limit = 50 } = {}) {
-  const releaseLock = await tryAcquireCronLock("Lab Blank Sweep", CRON_LOCK_KEYS.LAB_SYNC);
+  const releaseLock = await tryAcquireCronLock("Lab Blank Sweep", CRON_LOCK_KEYS.LAB_BLANK_SWEEP);
   if (!releaseLock) return { scanned: 0, blanks: 0, verified: 0, errors: 0 };
   try {
     const result = await sweepBlankStoredLabPdfs({ limit });
@@ -497,7 +497,7 @@ export async function runBlankLabPdfSweep({ limit = 50 } = {}) {
 }
 
 export async function runPdfRetryRecovery({ concurrency = 1 } = {}) {
-  const releaseLock = await tryAcquireCronLock("Lab PDF Retry", CRON_LOCK_KEYS.LAB_SYNC);
+  const releaseLock = await tryAcquireCronLock("Lab PDF Retry", CRON_LOCK_KEYS.LAB_PDF_RETRY);
   if (!releaseLock) return { total: 0, downloaded: 0, skipped: 0, errors: 0 };
   try {
     await ensureLabCasesTable();

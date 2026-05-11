@@ -37,13 +37,15 @@ Body style (English):
 - One short paragraph, 3-5 sentences, plain prose (no bullets, no headings, no markdown, no medical jargon).
 - Warm, simple, second-person ("you", "your"). Use everyday words a non-medical reader can understand.
 - Avoid Latin / abbreviations (write "blood pressure" not "BP", "blood sugar" not "FBS", "long-term sugar" or "HbA1c (3-month sugar average)" — explain abbreviations).
-- Mention what improved, what is being changed today, and what the patient should do until the next visit.
-- End with one clear next step (when to come back, what tests to bring, lifestyle reminder).
+- Keep it a GENERAL summary of the patient's current health picture and care plan — what's improving, what's being managed, and what they should focus on going forward.
+- End with one clear, general next step (a lifestyle reminder, what to keep tracking, or what tests to keep up with).
 - 60-110 words.
 
 Hard rules:
 - Do NOT invent values. Only use numbers from the input JSON.
-- Do NOT list every medicine — name only what changed today.
+- Do NOT list every medicine — name only what is being adjusted in the current plan.
+- Do NOT mention the visit number, visit count, "this visit", "today", "this time", "last visit", dates, or any time-specific reference. Write as a timeless general summary.
+- Do NOT reference the next appointment date or "next visit" — keep next steps general.
 - Output ONLY the JSON object. No preamble, no markdown fence, no commentary.`;
 
 function buildContext(data) {
@@ -107,15 +109,11 @@ function buildContext(data) {
 
   return {
     patient: { name: patient.name, age: patient.age, sex: patient.sex },
-    visit: {
-      number: summary.totalVisits,
-      monthsOnProgramme: summary.monthsWithGini,
-    },
     diagnoses: activeDx.slice(0, 4).map((d) => ({
       name: d.label || d.diagnosis_id,
       status: d.status,
     })),
-    todayChangedMedicines: newOrChanged,
+    medicineChanges: newOrChanged,
     vitals: {
       bp: latestVitals.bp_sys ? `${latestVitals.bp_sys}/${latestVitals.bp_dia}` : null,
       weight: latestVitals.weight,
@@ -141,11 +139,10 @@ function buildContext(data) {
       target: g.target_value,
       current: g.current_value,
     })),
-    nextVisit: {
-      date: followUp.date || null,
-      testsToBring: followUp.tests_to_bring || [],
-    },
-    testsOrderedToday: (tests || []).map((t) => (typeof t === "string" ? t : t.name || t.test)),
+    testsToFollow: [
+      ...(followUp.tests_to_bring || []),
+      ...(tests || []).map((t) => (typeof t === "string" ? t : t.name || t.test)),
+    ],
   };
 }
 
@@ -172,10 +169,11 @@ function tryParseJson(raw) {
 }
 
 function firstName(name) {
-  return String(name || "")
-    .trim()
-    .split(/\s+/)[0]
-    || "";
+  return (
+    String(name || "")
+      .trim()
+      .split(/\s+/)[0] || ""
+  );
 }
 
 export async function generatePatientSummary(data) {

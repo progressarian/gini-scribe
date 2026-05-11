@@ -148,6 +148,19 @@
   background: white;
 }
 
+.pdf-js-shell--rx {
+  flex-direction: column;
+}
+
+.pdf-js-pages--scroll {
+  overflow: auto;
+}
+
+.pdf-js-pages--scroll .pdf-js-page {
+  max-width: none;
+  margin: 0 auto 16px auto;
+}
+
 .pdf-js-overlay {
   position: absolute;
   inset: 0;

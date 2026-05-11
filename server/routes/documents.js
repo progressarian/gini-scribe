@@ -1699,9 +1699,7 @@ async function runPrescriptionExtraction(docId) {
           return d === "today" || d === "date today" || d === "observation today";
         };
         const todaysVitals =
-          vitalsArr.find((v) => v && (v.date === rxDate || isToday(v))) ||
-          vitalsArr[0] ||
-          null;
+          vitalsArr.find((v) => v && (v.date === rxDate || isToday(v))) || vitalsArr[0] || null;
         if (apptId && todaysVitals) {
           await syncVitals(doc.patient_id, apptId, rxDate, {
             bpSys: todaysVitals.bpSys,

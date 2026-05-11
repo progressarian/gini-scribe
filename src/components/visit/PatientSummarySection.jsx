@@ -23,6 +23,20 @@ const fmtDateTime = (iso) => {
   }
 };
 
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return String(iso);
+  }
+};
+
 export default function PatientSummarySection({ patientId, appointmentId, visitPayload }) {
   const conName = useAuthStore((s) => s.conName);
   const moName = useAuthStore((s) => s.moName);
@@ -40,7 +54,16 @@ export default function PatientSummarySection({ patientId, appointmentId, visitP
   const versions = appointmentId
     ? allVersions.filter((v) => Number(v.appointment_id) === Number(appointmentId))
     : allVersions;
-  const current = versions[0] || null;
+  const apiCurrent = q.data?.current || null;
+  const currentMatchesScope =
+    apiCurrent && (!appointmentId || Number(apiCurrent.appointment_id) === Number(appointmentId));
+  const current = currentMatchesScope ? apiCurrent : versions[0] || null;
+  // Summaries pinned to *other* appointments — surfaced via "Previous visits" toggle
+  // when the current visit has no summary yet.
+  const previousVersions = appointmentId
+    ? allVersions.filter((v) => Number(v.appointment_id) !== Number(appointmentId))
+    : [];
+  const [showPrevious, setShowPrevious] = useState(false);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -143,6 +166,24 @@ export default function PatientSummarySection({ patientId, appointmentId, visitP
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {previousVersions.length > 0 && (
+            <button
+              onClick={() => setShowPrevious((v) => !v)}
+              title="Show summaries from earlier visits"
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #cbd5e1",
+                background: showPrevious ? "#eef2ff" : "#fff",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                color: "#334155",
+              }}
+            >
+              📋 Previous visits ({previousVersions.length})
+            </button>
+          )}
           {versions.length > 1 && (
             <button
               onClick={() => setShowHistory((v) => !v)}
@@ -285,31 +326,6 @@ export default function PatientSummarySection({ patientId, appointmentId, visitP
             border: "1px solid #eef2f6",
           }}
         >
-          {(current.heading_greeting || current.heading_accent) && (
-            <div
-              style={{
-                fontFamily:
-                  '"Fraunces", "Source Serif Pro", Georgia, serif',
-                fontSize: 18,
-                lineHeight: 1.25,
-                color: "#0f172a",
-                marginBottom: 8,
-                paddingBottom: 8,
-                borderBottom: "1px dashed #e2e8f0",
-              }}
-              title="This is the heading the patient sees in the Genie app"
-            >
-              {(current.heading_greeting || "").replace(/[,\s]+$/, "")}
-              {current.heading_accent ? (
-                <>
-                  {" — "}
-                  <span style={{ fontStyle: "italic", color: "#b45309" }}>
-                    {current.heading_accent}
-                  </span>
-                </>
-              ) : null}
-            </div>
-          )}
           <div
             style={{
               whiteSpace: "pre-wrap",
@@ -335,6 +351,41 @@ export default function PatientSummarySection({ patientId, appointmentId, visitP
         >
           No patient summary yet. Click "Generate" to create one — it will print on the
           prescription.
+        </div>
+      )}
+
+      {showPrevious && previousVersions.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 12, color: "#334155", marginBottom: 8 }}>
+            Summaries from previous visits
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {previousVersions.map((v) => (
+              <div
+                key={v.id}
+                style={{
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 6,
+                  background: "#fff",
+                  padding: "8px 10px",
+                }}
+              >
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
+                  {fmtDate(v.appointment_date || v.created_at)}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#1f2937",
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {v.content}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

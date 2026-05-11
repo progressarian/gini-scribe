@@ -16,6 +16,10 @@ const ICON_MAP = {
   radiology: "🫁",
 };
 
+const PDF_ZOOM_MIN = 0.5;
+const PDF_ZOOM_MAX = 3;
+const PDF_ZOOM_STEP = 0.25;
+
 // Render a PDF with pdf.js into canvases. Chromium's built-in PDF plugin
 // refuses to render blob: URLs inside a modal's nested browsing context and
 // also gets stuck (about:blank inner frame, no bytes) on some cross-origin
@@ -23,56 +27,41 @@ const ICON_MAP = {
 // for Supabase URLs, blob URLs, and same-origin streams alike.
 function PdfFrame({ src }) {
   const containerRef = useRef(null);
+  const pdfRef = useRef(null);
+  const renderTokenRef = useRef(0);
   const [status, setStatus] = useState("loading");
   const [errorMsg, setErrorMsg] = useState("");
+  const [zoom, setZoom] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
 
   useEffect(() => {
     if (!src) return;
-    const container = containerRef.current;
-    if (!container) return;
-
-    while (container.firstChild) container.removeChild(container.firstChild);
-    setStatus("loading");
-    setErrorMsg("");
-
     let cancelled = false;
     let loadingTask = null;
+    setStatus("loading");
+    setErrorMsg("");
+    pdfRef.current = null;
 
     (async () => {
       try {
         loadingTask = pdfjsLib.getDocument(src);
         const pdf = await loadingTask.promise;
         if (cancelled) return;
+        pdfRef.current = pdf;
 
-        const dpr = window.devicePixelRatio || 1;
-        const availWidth = Math.max(320, container.clientWidth - 32);
-
-        for (let i = 1; i <= pdf.numPages; i++) {
-          if (cancelled) return;
-          const page = await pdf.getPage(i);
-          const baseViewport = page.getViewport({ scale: 1 });
-          // Fit page to container width, cap at 2x to avoid huge canvases
-          const scale = Math.min(2, Math.max(0.75, availWidth / baseViewport.width));
-          const viewport = page.getViewport({ scale });
-
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.round(viewport.width * dpr);
-          canvas.height = Math.round(viewport.height * dpr);
-          canvas.style.width = `${viewport.width}px`;
-          canvas.style.height = `${viewport.height}px`;
-          canvas.className = "pdf-js-page";
-          container.appendChild(canvas);
-
-          const ctx = canvas.getContext("2d");
-          ctx.scale(dpr, dpr);
-          await page.render({ canvasContext: ctx, viewport }).promise;
-        }
-        if (!cancelled) setStatus("ready");
+        const page = await pdf.getPage(1);
+        if (cancelled) return;
+        const baseViewport = page.getViewport({ scale: 1 });
+        const container = containerRef.current;
+        const availWidth = Math.max(320, (container?.clientWidth || 800) - 32);
+        const fit = Math.min(2, Math.max(0.75, availWidth / baseViewport.width));
+        setFitScale(fit);
+        setZoom(fit);
       } catch (e) {
         if (cancelled) return;
-        console.error("[PdfFrame] pdf.js render failed:", e);
+        console.error("[PdfFrame] pdf.js load failed:", e);
         setStatus("error");
-        setErrorMsg(e?.message || "Failed to render PDF");
+        setErrorMsg(e?.message || "Failed to load PDF");
       }
     })();
 
@@ -86,11 +75,92 @@ function PdfFrame({ src }) {
     };
   }, [src]);
 
+  useEffect(() => {
+    const pdf = pdfRef.current;
+    const container = containerRef.current;
+    if (!pdf || !container) return;
+
+    const token = ++renderTokenRef.current;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        while (container.firstChild) container.removeChild(container.firstChild);
+        const dpr = window.devicePixelRatio || 1;
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          if (cancelled || token !== renderTokenRef.current) return;
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: zoom });
+
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(viewport.width * dpr);
+          canvas.height = Math.round(viewport.height * dpr);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          canvas.className = "pdf-js-page";
+          container.appendChild(canvas);
+
+          const ctx = canvas.getContext("2d");
+          ctx.scale(dpr, dpr);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+        }
+        if (!cancelled && token === renderTokenRef.current) setStatus("ready");
+      } catch (e) {
+        if (cancelled) return;
+        console.error("[PdfFrame] pdf.js render failed:", e);
+        setStatus("error");
+        setErrorMsg(e?.message || "Failed to render PDF");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [zoom]);
+
+  const clamp = (v) => Math.min(PDF_ZOOM_MAX, Math.max(PDF_ZOOM_MIN, v));
+  const zoomIn = () => setZoom((z) => clamp(+(z + PDF_ZOOM_STEP).toFixed(2)));
+  const zoomOut = () => setZoom((z) => clamp(+(z - PDF_ZOOM_STEP).toFixed(2)));
+  const fit = () => setZoom(fitScale);
+
   return (
-    <div className="pdf-js-shell">
-      <div className="pdf-js-pages" ref={containerRef} />
+    <div className="pdf-js-shell pdf-js-shell--rx">
+      <div className="pdf-js-pages pdf-js-pages--scroll" ref={containerRef} />
       {status === "loading" && <div className="pdf-js-overlay">Rendering PDF…</div>}
       {status === "error" && <div className="pdf-js-overlay pdf-js-error">{errorMsg}</div>}
+      <div className="pdf-zoom-bar" onMouseDown={(e) => e.stopPropagation()}>
+        <button
+          className="pdf-zoom-btn"
+          onClick={zoomOut}
+          disabled={zoom <= PDF_ZOOM_MIN + 0.001}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <input
+          className="pdf-zoom-slider"
+          type="range"
+          min={PDF_ZOOM_MIN}
+          max={PDF_ZOOM_MAX}
+          step={0.05}
+          value={zoom}
+          onChange={(e) => setZoom(parseFloat(e.target.value))}
+          aria-label="Zoom"
+        />
+        <button
+          className="pdf-zoom-btn"
+          onClick={zoomIn}
+          disabled={zoom >= PDF_ZOOM_MAX - 0.001}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <span className="pdf-zoom-pct">{Math.round(zoom * 100)}%</span>
+        <button className="pdf-zoom-btn pdf-zoom-fit" onClick={fit} aria-label="Fit to width">
+          Fit
+        </button>
+      </div>
     </div>
   );
 }

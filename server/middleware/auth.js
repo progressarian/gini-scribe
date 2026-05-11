@@ -60,6 +60,9 @@ const PUBLIC_PATTERNS = [
   // by patient_id + appointment id, and the route re-checks that the
   // appointment actually belongs to that patient before writing.
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-symptoms$/,
+  // Patient-app pre-visit medication-compliance save. Same scoping/ownership
+  // pattern as pre-visit symptoms above.
+  /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-compliance$/,
 ];
 
 export const requireAuth = (req, res, next) => {

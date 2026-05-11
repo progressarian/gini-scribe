@@ -19,8 +19,7 @@ import {
 } from "./labSync.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
 
-// ── Sync interval (every 1 minute) ─────────────────────────────────────────
-const SYNC_INTERVAL_MS = 1 * 60 * 1000;
+// ── Sync intervals ─────────────────────────────────────────────────────────
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
 const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 
@@ -31,9 +30,17 @@ const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 const HEALTHRAY_LOOP_MIN_BREAK_MS = 10 * 1000;
 const HEALTHRAY_LOOP_MAX_BREAK_MS = 15 * 1000;
 
+// Lab sync runs the same continuous-loop pattern, with a slightly longer
+// 30–40s break between runs (lab cases trickle in less aggressively than
+// appointments, and each run does more I/O — fetch list + per-case detail +
+// PDF download + Supabase upload).
+const LAB_LOOP_MIN_BREAK_MS = 30 * 1000;
+const LAB_LOOP_MAX_BREAK_MS = 40 * 1000;
+
 let healthrayLoopRunning = false;
 let healthrayLoopTimeoutId = null;
-let labIntervalId = null;
+let labLoopRunning = false;
+let labLoopTimeoutId = null;
 
 function scheduleNextHealthraySync(delayMs) {
   if (!healthrayLoopRunning) return;
@@ -56,6 +63,29 @@ function scheduleNextHealthraySync(delayMs) {
     scheduleNextHealthraySync(breakMs);
   }, delayMs);
 }
+
+function scheduleNextLabSync(delayMs) {
+  if (!labLoopRunning) return;
+  labLoopTimeoutId = setTimeout(async () => {
+    labLoopTimeoutId = null;
+    if (!labLoopRunning) return;
+    const startedAt = Date.now();
+    try {
+      await runLabSync();
+    } catch (e) {
+      console.error("[Cron] Lab sync failed:", e.message);
+    }
+    const elapsed = Date.now() - startedAt;
+    const breakMs =
+      LAB_LOOP_MIN_BREAK_MS +
+      Math.floor(Math.random() * (LAB_LOOP_MAX_BREAK_MS - LAB_LOOP_MIN_BREAK_MS + 1));
+    console.log(
+      `[Cron] Lab sync finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
+    );
+    scheduleNextLabSync(breakMs);
+  }, delayMs);
+}
+
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
@@ -85,20 +115,16 @@ export function startCronJobs() {
     })();
   }
 
-  // ── Lab HealthRay sync (every 1 min, staggered) ───────────────────────────
-  // Offset by ~30s so the lab sync and healthray sync never start at the
-  // same moment — the global advisory lock would still serialize them, but
-  // staggering spreads the load across the 1-min window so users see fewer
-  // back-to-back latency spikes.
-  const LAB_SYNC_OFFSET_MS = Math.floor(SYNC_INTERVAL_MS / 2); // 30s offset
-  console.log("[Cron] Starting lab sync (every 1 min, staggered +30s)...");
+  // ── Lab HealthRay sync (continuous loop, 30–40s break between runs) ──────
+  // Same pattern as the HealthRay appointment loop: each iteration awaits
+  // the previous run, then sleeps a short randomized break before kicking
+  // off the next one. This avoids stacked runs and keeps lab cases /
+  // results / PDFs flowing in near real-time without depending on a fixed
+  // timer that can drift behind a long-running sync.
+  console.log("[Cron] Starting lab sync (continuous loop, 30–40s break between runs)...");
 
-  setTimeout(() => {
-    runLabSync().catch((e) => console.error("[Cron] Lab initial sync failed:", e.message));
-    labIntervalId = setInterval(() => {
-      runLabSync().catch((e) => console.error("[Cron] Lab sync failed:", e.message));
-    }, SYNC_INTERVAL_MS);
-  }, LAB_SYNC_OFFSET_MS);
+  labLoopRunning = true;
+  scheduleNextLabSync(0);
 
   // Recovery job every 15 min
   recoveryIntervalId = setInterval(() => {
@@ -222,14 +248,18 @@ export function stopCronJobs() {
     }
     console.log("[Cron] Walking appointment sync stopped");
   }
-  if (labIntervalId) {
-    clearInterval(labIntervalId);
-    labIntervalId = null;
+  if (labLoopRunning) {
+    labLoopRunning = false;
+    if (labLoopTimeoutId) {
+      clearTimeout(labLoopTimeoutId);
+      labLoopTimeoutId = null;
+    }
+    console.log("[Cron] Lab sync loop stopped");
   }
   if (recoveryIntervalId) {
     clearInterval(recoveryIntervalId);
     recoveryIntervalId = null;
-    console.log("[Cron] Lab sync stopped");
+    console.log("[Cron] Lab recovery stopped");
   }
   if (dailyBackfillIntervalId) {
     clearInterval(dailyBackfillIntervalId);

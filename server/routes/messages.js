@@ -465,7 +465,8 @@ router.get("/patients/:id/appointments", async (req, res) => {
       `SELECT id, patient_id, patient_name, file_no, doctor_name,
               appointment_date, time_slot, visit_type, status, notes,
               location, healthray_id, created_at,
-              pre_visit_symptoms, pre_visit_notes, pre_visit_symptoms_at
+              pre_visit_symptoms, pre_visit_notes, pre_visit_symptoms_at,
+              pre_visit_compliance, pre_visit_compliance_at
          FROM appointments
         WHERE (patient_id = $1
                OR ($2::text IS NOT NULL AND file_no = $2))
@@ -561,6 +562,75 @@ router.post("/patients/:id/appointments/:apptId/pre-visit-symptoms", async (req,
     res.json({ data: rows[0] });
   } catch (e) {
     handleError(res, e, "Pre-visit symptoms save");
+  }
+});
+
+/**
+ * Patient-app: save pre-visit medication-compliance entries onto a booked
+ * appointment. Public, ownership-checked (same pattern as pre-visit symptoms).
+ *
+ * Body: { items: Array<{ medication: string, schedule?: string,
+ *                        adherence?: 'always'|'mostly'|'sometimes'|'missed',
+ *                        notes?: string }> }
+ *
+ * Items are sanitized server-side: max 30 entries, each text field clipped
+ * to 200 chars, unknown adherence values null'd out. Resubmissions overwrite;
+ * pre_visit_compliance_at is bumped so the doctor sees how fresh it is.
+ */
+router.post("/patients/:id/appointments/:apptId/pre-visit-compliance", async (req, res) => {
+  try {
+    const scribePid = await resolveScribePatientIdFromGenieUuid(req.params.id);
+    if (scribePid == null) return res.status(404).json({ error: "Patient not found" });
+
+    const apptId = parseInt(req.params.apptId, 10);
+    if (!Number.isFinite(apptId)) return res.status(400).json({ error: "Invalid appointment id" });
+
+    const ALLOWED_ADHERENCE = new Set(["always", "mostly", "sometimes", "missed"]);
+    const clip = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = rawItems
+      .map((it) => {
+        const medication = clip(it?.medication, 200);
+        if (!medication) return null;
+        const schedule = clip(it?.schedule, 200) || null;
+        const notes = clip(it?.notes, 500) || null;
+        const adherenceRaw = clip(it?.adherence, 20).toLowerCase();
+        const adherence = ALLOWED_ADHERENCE.has(adherenceRaw) ? adherenceRaw : null;
+        return { medication, schedule, adherence, notes };
+      })
+      .filter(Boolean)
+      .slice(0, 30);
+
+    const fileNoR = await pool.query(`SELECT file_no FROM patients WHERE id = $1`, [scribePid]);
+    const fileNo = fileNoR.rows[0]?.file_no || null;
+    const ownership = await pool.query(
+      `SELECT id FROM appointments
+        WHERE id = $1
+          AND (patient_id = $2 OR ($3::text IS NOT NULL AND file_no = $3))
+        LIMIT 1`,
+      [apptId, scribePid, fileNo],
+    );
+    if (!ownership.rows[0]) {
+      return res.status(404).json({ error: "Appointment not found for this patient" });
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE appointments
+          SET pre_visit_compliance = $2::jsonb,
+              pre_visit_compliance_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, pre_visit_compliance, pre_visit_compliance_at`,
+      [apptId, JSON.stringify(items)],
+    );
+    if (genie?.syncAppointmentToGenie) {
+      genie.syncAppointmentToGenie(scribePid, pool).catch((err) => {
+        console.warn("[pre-visit-compliance] genie mirror push failed:", err?.message || err);
+      });
+    }
+    res.json({ data: rows[0] });
+  } catch (e) {
+    handleError(res, e, "Pre-visit compliance save");
   }
 });
 

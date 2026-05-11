@@ -43,6 +43,7 @@ import VisitEndModal from "../components/visit/VisitEndModal";
 import VisitSummaryPanel from "../components/visit/VisitSummaryPanel";
 import VisitBrief from "../components/visit/VisitBrief";
 import VisitPreVisitSymptoms from "../components/visit/VisitPreVisitSymptoms";
+import VisitPreVisitCompliance from "../components/visit/VisitPreVisitCompliance";
 import VisitDoseChangeRequests from "../components/visit/VisitDoseChangeRequests";
 import DoctorSummarySection from "../components/visit/DoctorSummarySection";
 import PatientSummarySection from "../components/visit/PatientSummarySection";
@@ -810,7 +811,11 @@ export default function VisitPage() {
         payload,
         { responseType: "blob" },
       );
-      const url = URL.createObjectURL(res.data);
+      const pdfBlob =
+        res.data instanceof Blob && res.data.type === "application/pdf"
+          ? res.data
+          : new Blob([res.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(pdfBlob);
       rxBlobRef.current = url;
       setRxModal({
         open: true,
@@ -1135,6 +1140,7 @@ export default function VisitPage() {
                 doctor={doctor}
               />
               <VisitPreVisitSymptoms appointmentId={effectiveApptId} />
+              <VisitPreVisitCompliance appointmentId={effectiveApptId} />
               <VisitDoseChangeRequests patientId={dbPatientId} />
               <VisitSummaryPanel patientId={dbPatientId} appointmentId={effectiveApptId} />
               <VisitBiomarkers

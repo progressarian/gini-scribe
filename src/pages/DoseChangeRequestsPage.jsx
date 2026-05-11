@@ -95,11 +95,7 @@ export default function DoseChangeRequestsPage() {
     const io = new IntersectionObserver(
       (entries) => {
         const e = entries[0];
-        if (
-          e?.isIntersecting &&
-          listQuery.hasNextPage &&
-          !listQuery.isFetchingNextPage
-        ) {
+        if (e?.isIntersecting && listQuery.hasNextPage && !listQuery.isFetchingNextPage) {
           listQuery.fetchNextPage();
         }
       },

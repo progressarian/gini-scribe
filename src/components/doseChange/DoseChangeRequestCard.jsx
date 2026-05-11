@@ -197,8 +197,8 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
             style={inputStyle}
           />
           <div style={{ fontSize: 10.5, color: "#64748b", marginTop: 6 }}>
-            Approving only acknowledges the request. Update the actual dose on the
-            patient's visit page.
+            Approving only acknowledges the request. Update the actual dose on the patient's visit
+            page.
           </div>
 
           {!rejecting ? (
