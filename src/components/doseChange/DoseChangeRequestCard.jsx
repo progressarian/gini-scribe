@@ -18,10 +18,10 @@ const STATUS_STYLE = {
   cancelled: { color: "#475569", bg: "#f1f5f9" },
 };
 
-// One request = one medication. Doctor can edit `final_dose` before approving
-// (defaults to the patient's requested value) and attach a note (warning/info).
+// Note-only flow. Doctor reads the patient's note and approves or rejects with
+// an optional note of their own. The actual medication dose change happens
+// later on the visit page — this card never edits medications.dose directly.
 export default function DoseChangeRequestCard({ request: r, onDecide, compact = false }) {
-  const [finalDose, setFinalDose] = useState(r.requested_dose || "");
   const [doctorNote, setDoctorNote] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -36,7 +36,6 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
     setBusy(true);
     await onDecide({
       status: "approved",
-      final_dose: finalDose || r.requested_dose,
       doctor_note: doctorNote.trim() || undefined,
     });
     setBusy(false);
@@ -112,68 +111,47 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
         </div>
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>
-        {r.medication_name || "Medication"}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <span style={{ fontSize: 12, color: "#64748b" }}>Current</span>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            color: "#0f172a",
-            background: "#f1f5f9",
-            padding: "3px 8px",
-            borderRadius: 6,
-          }}
-        >
-          {r.current_dose || "—"}
-          {r.dose_unit ? ` ${r.dose_unit}` : ""}
-        </span>
-        <span style={{ fontSize: 12, color: "#64748b" }}>→</span>
-        <span style={{ fontSize: 12, color: "#64748b" }}>Requested</span>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            color: "#7c3aed",
-            background: "#f5f3ff",
-            padding: "3px 8px",
-            borderRadius: 6,
-          }}
-        >
-          {r.requested_dose}
-          {r.dose_unit ? ` ${r.dose_unit}` : ""}
-        </span>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>
+        💊 {r.medication_name || "Medication"}
       </div>
 
-      {r.patient_reason && (
+      {r.patient_reason ? (
         <div
           style={{
-            fontSize: 12,
-            color: "#475569",
+            fontSize: 13,
+            color: "#0f172a",
             background: "#f8fafc",
             border: "1px solid #e2e8f0",
-            borderRadius: 6,
-            padding: "6px 10px",
+            borderRadius: 8,
+            padding: "8px 10px",
             marginBottom: 8,
+            lineHeight: 1.4,
           }}
         >
-          <strong style={{ fontWeight: 700, color: "#334155" }}>Patient note:</strong>{" "}
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "#64748b",
+              letterSpacing: 0.4,
+              marginBottom: 3,
+            }}
+          >
+            PATIENT NOTE
+          </div>
           {r.patient_reason}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: "#94a3b8", fontStyle: "italic", marginBottom: 8 }}>
+          (Patient did not include a note)
         </div>
       )}
 
-      {!isPending && r.final_dose && (
-        <div style={{ fontSize: 12, color: "#047857", marginBottom: 6 }}>
-          Final dose: <strong>{r.final_dose}</strong>
-        </div>
-      )}
       {!isPending && r.doctor_note && (
         <div
           style={{
             fontSize: 12,
-            color: "#1d4ed8",
+            color: "#1e3a8a",
             background: "#eff6ff",
             borderLeft: "3px solid #2563eb",
             borderRadius: 4,
@@ -210,45 +188,17 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
             marginTop: 8,
           }}
         >
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div style={{ flex: "0 0 200px" }}>
-              <label style={labelStyle}>Final dose{r.dose_unit ? ` (${r.dose_unit})` : ""}</label>
-              <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
-                <button
-                  type="button"
-                  onClick={() => setFinalDose(stepDose(finalDose, -0.25))}
-                  style={stepBtnStyle}
-                  title="−0.25"
-                >
-                  −
-                </button>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={finalDose}
-                  onChange={(e) => setFinalDose(e.target.value)}
-                  style={{ ...inputStyle, textAlign: "center" }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setFinalDose(stepDose(finalDose, 0.25))}
-                  style={stepBtnStyle}
-                  title="+0.25"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <label style={labelStyle}>Note for patient (optional)</label>
-              <input
-                type="text"
-                value={doctorNote}
-                onChange={(e) => setDoctorNote(e.target.value)}
-                placeholder="e.g. monitor sugars; titrate slowly"
-                style={inputStyle}
-              />
-            </div>
+          <label style={labelStyle}>Note for patient (optional)</label>
+          <input
+            type="text"
+            value={doctorNote}
+            onChange={(e) => setDoctorNote(e.target.value)}
+            placeholder="e.g. update the dose during your next visit; monitor sugars in the meantime"
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 10.5, color: "#64748b", marginTop: 6 }}>
+            Approving only acknowledges the request. Update the actual dose on the
+            patient's visit page.
           </div>
 
           {!rejecting ? (
@@ -277,9 +227,7 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
                 }}
               >
                 {busy && <Spinner color="#fff" />}
-                {busy
-                  ? "Approving…"
-                  : `Approve ${finalDose && finalDose !== r.requested_dose ? `as ${finalDose}` : ""}`}
+                {busy ? "Approving…" : "Approve"}
               </button>
             </div>
           ) : (
@@ -301,7 +249,7 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
                   if (e.key === "Enter") submitReject();
                   if (e.key === "Escape") setRejecting(false);
                 }}
-                placeholder="Reason — e.g. dose too high, see in clinic first"
+                placeholder="Reason — e.g. dose change not safe right now, see in clinic first"
                 style={{ ...inputStyle, borderColor: "#fecaca" }}
               />
               <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
@@ -359,26 +307,6 @@ const inputStyle = {
   background: "#fff",
   outline: "none",
   boxSizing: "border-box",
-};
-
-function stepDose(current, delta) {
-  const m = String(current ?? "").match(/-?\d+(?:\.\d+)?/);
-  const num = m ? parseFloat(m[0]) : 0;
-  const next = Math.max(0, Math.round((num + delta) * 100) / 100);
-  if (!m) return String(next);
-  return String(current).replace(m[0], String(next));
-}
-
-const stepBtnStyle = {
-  width: 30,
-  border: "1px solid #e2e8f0",
-  background: "#f8fafc",
-  borderRadius: 8,
-  fontSize: 16,
-  fontWeight: 700,
-  color: "#334155",
-  cursor: "pointer",
-  lineHeight: 1,
 };
 
 function Spinner({ color = "#fff", size = 12 }) {

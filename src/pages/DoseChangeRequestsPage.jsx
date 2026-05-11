@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import useAuthStore from "../stores/authStore.js";
@@ -85,6 +85,29 @@ export default function DoseChangeRequestsPage() {
   }, [listQuery.data, status]);
   const total = listQuery.data?.pages?.[0]?.total ?? 0;
   const stats = statsQuery.data || { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
+
+  // Infinite scroll: fetch the next page once a sentinel near the bottom of
+  // the list scrolls into view.
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        if (
+          e?.isIntersecting &&
+          listQuery.hasNextPage &&
+          !listQuery.isFetchingNextPage
+        ) {
+          listQuery.fetchNextPage();
+        }
+      },
+      { rootMargin: "200px 0px" },
+    );
+    io.observe(node);
+    return () => io.disconnect();
+  }, [listQuery.hasNextPage, listQuery.isFetchingNextPage, listQuery.fetchNextPage]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["doseChange"] });
 
@@ -251,6 +274,18 @@ export default function DoseChangeRequestsPage() {
             onDecide={(payload) => decide(r.id, payload)}
           />
         ))
+      )}
+
+      <div ref={sentinelRef} style={{ height: 1 }} />
+      {listQuery.isFetchingNextPage && (
+        <div style={{ textAlign: "center", padding: 14, color: "#64748b", fontSize: 12 }}>
+          Loading more…
+        </div>
+      )}
+      {!listQuery.hasNextPage && rows.length > 0 && (
+        <div style={{ textAlign: "center", padding: 10, color: "#cbd5e1", fontSize: 11 }}>
+          — End of list —
+        </div>
       )}
 
       <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, textAlign: "right" }}>

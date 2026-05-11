@@ -2408,6 +2408,16 @@ pool
        ON patient_summaries (patient_id, version DESC)`,
   )
   .catch(() => {});
+// Tone-aware Hinglish heading the AI returns alongside the body. greeting is
+// the leading phrase ("Bahut khoob, Test ji,"); accent is the italic-yellow
+// ending phrase ("kuch dekhna hai"). Both null for legacy / manual rows.
+pool
+  .query(
+    `ALTER TABLE patient_summaries
+       ADD COLUMN IF NOT EXISTS heading_greeting TEXT,
+       ADD COLUMN IF NOT EXISTS heading_accent  TEXT`,
+  )
+  .catch(() => {});
 
 // GET /visit/:patientId/patient-summary — return all versions (latest first)
 router.get("/visit/:patientId/patient-summary", async (req, res) => {
@@ -2416,7 +2426,8 @@ router.get("/visit/:patientId/patient-summary", async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, patient_id, appointment_id, version, content, change_note,
-              prev_version_id, author_name, author_id, source, created_at
+              prev_version_id, author_name, author_id, source,
+              heading_greeting, heading_accent, created_at
          FROM patient_summaries
         WHERE patient_id = $1
         ORDER BY version DESC, id DESC`,
@@ -2435,7 +2446,9 @@ router.post("/visit/:patientId/patient-summary/generate", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const text = await generatePatientSummary(req.body || {});
+    const { body, heading_greeting, heading_accent } = await generatePatientSummary(
+      req.body || {},
+    );
     const prev = await pool.query(
       `SELECT id, version FROM patient_summaries
         WHERE patient_id=$1 ORDER BY version DESC LIMIT 1`,
@@ -2446,19 +2459,23 @@ router.post("/visit/:patientId/patient-summary/generate", async (req, res) => {
     const ins = await pool.query(
       `INSERT INTO patient_summaries
          (patient_id, appointment_id, version, content, change_note,
-          prev_version_id, author_name, author_id, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ai')
+          prev_version_id, author_name, author_id, source,
+          heading_greeting, heading_accent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ai', $9, $10)
        RETURNING id, patient_id, appointment_id, version, content, change_note,
-                 prev_version_id, author_name, author_id, source, created_at`,
+                 prev_version_id, author_name, author_id, source,
+                 heading_greeting, heading_accent, created_at`,
       [
         pid,
         req.body?.appointment_id || null,
         nextVersion,
-        text,
+        body,
         prev.rows[0] ? "AI regenerated" : "AI generated",
         prevId,
         "AI",
         null,
+        heading_greeting,
+        heading_accent,
       ],
     );
     res.json({ success: true, generated: true, version: ins.rows[0] });
@@ -2483,13 +2500,26 @@ router.post("/visit/:patientId/patient-summary", async (req, res) => {
     );
     const nextVersion = (prev.rows[0]?.version || 0) + 1;
     const prevId = prev.rows[0]?.id || null;
+    // Carry the heading forward from the previous version so a manual edit of
+    // the body doesn't blank the AI-generated greeting/accent.
+    const prevHeadingRow = prev.rows[0]
+      ? await pool.query(
+          `SELECT heading_greeting, heading_accent
+             FROM patient_summaries WHERE id = $1`,
+          [prev.rows[0].id],
+        )
+      : null;
+    const carriedGreeting = prevHeadingRow?.rows[0]?.heading_greeting ?? null;
+    const carriedAccent = prevHeadingRow?.rows[0]?.heading_accent ?? null;
     const ins = await pool.query(
       `INSERT INTO patient_summaries
          (patient_id, appointment_id, version, content, change_note,
-          prev_version_id, author_name, author_id, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+          prev_version_id, author_name, author_id, source,
+          heading_greeting, heading_accent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual', $9, $10)
        RETURNING id, patient_id, appointment_id, version, content, change_note,
-                 prev_version_id, author_name, author_id, source, created_at`,
+                 prev_version_id, author_name, author_id, source,
+                 heading_greeting, heading_accent, created_at`,
       [
         pid,
         appointment_id || null,
@@ -2499,6 +2529,8 @@ router.post("/visit/:patientId/patient-summary", async (req, res) => {
         prevId,
         author_name || null,
         author_id || null,
+        carriedGreeting,
+        carriedAccent,
       ],
     );
     res.json({ success: true, version: ins.rows[0] });

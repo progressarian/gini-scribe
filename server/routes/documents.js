@@ -1690,9 +1690,18 @@ async function runPrescriptionExtraction(docId) {
         );
         await syncLabResults(doc.patient_id, apptId, rxDate, extracted.labs || []);
 
-        // Vitals — pick the dated entry matching rxDate (unified schema is an array)
+        // Vitals — pick the dated entry matching rxDate (unified schema is an array).
+        // The parser emits date: "today" for current-visit OBSERVATIONS blocks; treat
+        // that as a match for rxDate (the prescription's own visit date).
         const vitalsArr = Array.isArray(extracted.vitals) ? extracted.vitals : [];
-        const todaysVitals = vitalsArr.find((v) => v && v.date === rxDate) || vitalsArr[0] || null;
+        const isToday = (v) => {
+          const d = (v?.date || "").toString().trim().toLowerCase();
+          return d === "today" || d === "date today" || d === "observation today";
+        };
+        const todaysVitals =
+          vitalsArr.find((v) => v && (v.date === rxDate || isToday(v))) ||
+          vitalsArr[0] ||
+          null;
         if (apptId && todaysVitals) {
           await syncVitals(doc.patient_id, apptId, rxDate, {
             bpSys: todaysVitals.bpSys,

@@ -208,56 +208,40 @@ router.post("/dose-change-requests", async (req, res) => {
   }
 });
 
-// Doctor decision: approve / reject. On approve, update medications.dose
-// inside the same transaction so the row never falls out of sync.
+// Doctor decision: approve / reject. The actual medications.dose change is
+// now done by the doctor on the patient's visit page (no automatic write
+// from this endpoint), so this PATCH only stamps the request's status,
+// doctor note, and reject reason.
 router.patch("/dose-change-requests/:id", async (req, res) => {
-  const client = await pool.connect();
   try {
-    const { status, final_dose, doctor_note, reject_reason, doctor_id } = req.body || {};
+    const { status, doctor_note, reject_reason, doctor_id } = req.body || {};
     if (!["approved", "rejected"].includes(status)) {
       return res.status(400).json({ error: "status must be approved or rejected" });
     }
 
-    await client.query("BEGIN");
-
-    const existing = await client.query(
-      `SELECT id, patient_id, medication_id, medication_name, requested_dose, status
+    const existing = await pool.query(
+      `SELECT id, patient_id, medication_id, medication_name, status
          FROM medication_dose_change_requests
-        WHERE id = $1
-        FOR UPDATE`,
+        WHERE id = $1`,
       [req.params.id],
     );
-    if (!existing.rows.length) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "not found" });
-    }
+    if (!existing.rows.length) return res.status(404).json({ error: "not found" });
     const row = existing.rows[0];
     if (row.status !== "pending") {
-      await client.query("ROLLBACK");
       return res.status(409).json({ error: `request is ${row.status}, cannot decide again` });
     }
 
-    let chosenDose = null;
-    if (status === "approved") {
-      chosenDose =
-        typeof final_dose === "string" && final_dose.trim()
-          ? final_dose.trim()
-          : row.requested_dose;
-    }
-
-    const updated = await client.query(
+    const updated = await pool.query(
       `UPDATE medication_dose_change_requests
           SET status        = $1,
-              final_dose    = $2,
-              doctor_note   = $3,
-              reject_reason = CASE WHEN $1 = 'rejected' THEN $4 ELSE NULL END,
-              doctor_id     = COALESCE($5, doctor_id),
+              doctor_note   = $2,
+              reject_reason = CASE WHEN $1 = 'rejected' THEN $3 ELSE NULL END,
+              doctor_id     = COALESCE($4, doctor_id),
               decided_at    = now()
-        WHERE id = $6
+        WHERE id = $5
         RETURNING *`,
       [
         status,
-        chosenDose,
         typeof doctor_note === "string" && doctor_note.trim() ? doctor_note.trim() : null,
         typeof reject_reason === "string" && reject_reason.trim() ? reject_reason.trim() : null,
         doctor_id || null,
@@ -265,24 +249,10 @@ router.patch("/dose-change-requests/:id", async (req, res) => {
       ],
     );
 
-    if (status === "approved") {
-      // medications.id is TEXT; the request stored it as TEXT too.
-      await client.query(
-        `UPDATE medications
-            SET dose = $1,
-                updated_at = now()
-          WHERE id::text = $2`,
-        [chosenDose, row.medication_id],
-      );
-    }
-
-    await client.query("COMMIT");
-
     // Fire-and-forget push (no-op if not configured).
     sendDoseDecisionNotification(row.patient_id, {
       kind: status,
       medicationName: row.medication_name,
-      finalDose: chosenDose,
       doctorNote: updated.rows[0].doctor_note,
       rejectReason: updated.rows[0].reject_reason,
       requestId: row.id,
@@ -290,10 +260,7 @@ router.patch("/dose-change-requests/:id", async (req, res) => {
 
     res.json(updated.rows[0]);
   } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
     handleError(res, e, "Decide dose-change request");
-  } finally {
-    client.release();
   }
 });
 

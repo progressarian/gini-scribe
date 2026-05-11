@@ -487,7 +487,13 @@ async function syncAppointment(appt, localDoctorName) {
           // buildVitalsAndBiomarkers via updated_at) — we don't override them
           // with the parser's guess.
           const datedVitals = Array.isArray(parsed.vitals) ? parsed.vitals : [];
-          const todaysVitals = datedVitals.find((v) => v && v.date === apptDate);
+          const isTodayMarker = (v) => {
+            const d = (v?.date || "").toString().trim().toLowerCase();
+            return d === "today" || d === "date today" || d === "observation today";
+          };
+          const todaysVitals = datedVitals.find(
+            (v) => v && (v.date === apptDate || isTodayMarker(v)),
+          );
           if (todaysVitals) {
             const cleanNum = (val) => {
               const n = parseFloat(val);

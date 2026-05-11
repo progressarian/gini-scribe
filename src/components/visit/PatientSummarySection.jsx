@@ -279,17 +279,47 @@ export default function PatientSummarySection({ patientId, appointmentId, visitP
       ) : current ? (
         <div
           style={{
-            whiteSpace: "pre-wrap",
-            fontSize: 13,
-            color: "#1e293b",
-            lineHeight: 1.6,
             background: "#fafbfc",
             padding: 10,
             borderRadius: 6,
             border: "1px solid #eef2f6",
           }}
         >
-          {current.content}
+          {(current.heading_greeting || current.heading_accent) && (
+            <div
+              style={{
+                fontFamily:
+                  '"Fraunces", "Source Serif Pro", Georgia, serif',
+                fontSize: 18,
+                lineHeight: 1.25,
+                color: "#0f172a",
+                marginBottom: 8,
+                paddingBottom: 8,
+                borderBottom: "1px dashed #e2e8f0",
+              }}
+              title="This is the heading the patient sees in the Genie app"
+            >
+              {(current.heading_greeting || "").replace(/[,\s]+$/, "")}
+              {current.heading_accent ? (
+                <>
+                  {" — "}
+                  <span style={{ fontStyle: "italic", color: "#b45309" }}>
+                    {current.heading_accent}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          )}
+          <div
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 13,
+              color: "#1e293b",
+              lineHeight: 1.6,
+            }}
+          >
+            {current.content}
+          </div>
         </div>
       ) : (
         <div

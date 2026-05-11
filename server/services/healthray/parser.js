@@ -287,6 +287,11 @@ STRICT Rules:
     "C/O HEADACHE\nOBSERVATIONS:\nBP-130/80\nFBS-110\nDIAGNOSIS: T2DM\nTREATMENT: …"
     → BP and FBS carry date: "today" — there is no older dated header above OBSERVATIONS, so this is the current visit.
   If a lab is listed under no dated section at all (top-of-note BRIEF HISTORY with no date, free-floating values, and no judgment can attribute a date), set date: null. The downstream pipeline SKIPS undated labs entirely (it does not fall back to the appointment date) — so a null-dated value will be DROPPED. Prefer inferring a date (outer header, "today" for current-visit blocks) over emitting null.
+  DATE-CERTAINTY GATE FOR LABS — only emit a lab when the date is 100% certain. SKIP the lab entirely (do NOT emit it at all, do NOT emit with date: null, do NOT guess) when ANY of these uncertainty cues surround the value or its date:
+    • Hedged value: "MAY BE HBA1C 7", "PROBABLY FBG ~110", "AROUND 200", "APPROX 7", "~7", "?7", "NOT SURE OF VALUE", "POSSIBLY", "LIKELY", "I THINK", "PATIENT SAYS MAYBE".
+    • Hedged date: "AROUND SEPT 2025", "APPROX 6 MONTHS BACK", "MAY BE LAST YEAR", "NOT SURE OF DATE", "?DATE", "SOMETIME IN MARCH", "POSSIBLY IN <month>", "PROBABLY <month>", "MAY BE IN <month/year>".
+    • Observation/aside in another section that records a value with a hedge (e.g. "OBSERVATION: PATIENT MENTIONS HBA1C MAY BE 7 LAST YEAR", "NOTE: NOT SURE WHEN BUT FBG WAS HIGH") — skip.
+  A lab passes the gate ONLY when (a) its value is stated as a definite number AND (b) its date is either an explicit calendar date from a recognised dated header, OR the current-visit anchor "today" (per the rules above). If either side is hedged, drop the lab — we want only values we are 100% sure about.
   WITHIN A SINGLE NOTE, the same canonical test on the same date must appear ONLY ONCE. If the document repeats the same test+date (e.g. an OBSERVATIONS block and a TODAY block both list FBS for the same visit), emit just one entry — choose the one with the most specific date.
   CRITICAL — distinguish measured results vs. target goals:
   • "FOLLOW UP TODAY ON <date>" / "FOLLOW UP NOTES(<date>)" / "FOLLOW UP ON <date>" sections that contain lab values ALONGSIDE clinical notes, C/O complaints, or symptoms = REAL HISTORICAL MEASUREMENTS from that date — extract as labs with that date.
@@ -360,12 +365,19 @@ STRICT Rules:
   Dates come in DD/MM/YYYY (Indian format) — convert to YYYY-MM-DD.
   Extract HT/WT/BMI/BP(sitting)/WC(waist circumference)/BF(body fat) into the entry for that date.
   For BP: "BP SITTING: 165/97 SITTING" — the trailing word "SITTING" is a label duplication error, extract bpSys:165, bpDia:97. "BP STANDING: 152/93" is standing BP — SKIP, do not emit into vitals (we track sitting BP only).
+  For undated "OBSERVATIONS" / "OBSERVATION-:" / "VITAL SIGNS" / "TODAY" / "PATIENT VISITED TODAY" blocks (no explicit date in or above the header), apply the same carried-forward judgment used for labs above:
+    • If the OBSERVATIONS block is the FIRST or PRIMARY block in the note and there is NO older dated header above it, treat it as the CURRENT visit → emit a vitals entry with date: "today". The downstream pipeline anchors "today" to the prescription's own visit date, so HT/WT/BMI/BP etc. recorded under an undated current-visit OBSERVATIONS block are kept and dated to the prescription date.
+    • If the OBSERVATIONS block is NESTED INSIDE an older dated header (e.g. "FOLLOW UP NOTES(20-03-24): … OBSERVATIONS: BP-140/90"), it is HISTORICAL — emit the vitals entry with the outer header's date (YYYY-MM-DD).
+    • Only DROP the block (emit nothing) when there is no judgment available, no outer dated header, AND no signal that this is the current visit — in that rare case the date is genuinely unknown.
   DO NOT emit entries from:
-    • "OBSERVATIONS" / "OBSERVATION-:" sections (undated historical baseline)
-    • "VITAL SIGNS" blocks with no associated date
     • "TARGET" / "GOAL" / "YOUR NEXT FOLLOW UP IS SCHEDULED ON <date>" sections (these are future targets, not measurements)
     • Numbers inside a diagnosis parenthetical (e.g. "TYPE 2 DM (HBA1C:7)") — those are diagnosis context, not a measurement event
-  If no dated section contains vitals, return [] (empty array).
+  DATE-CERTAINTY GATE FOR VITALS — same principle as labs: only emit a vital when the date is 100% certain. SKIP the entry (do NOT emit at all) when the value or its date is hedged. Triggers include:
+    • Hedged value: "MAY BE BP 130/80", "WT AROUND 80", "APPROX 82", "~80", "?80", "PROBABLY", "POSSIBLY", "NOT SURE", "PATIENT SAYS MAYBE".
+    • Hedged date: "MAY BE LAST MONTH", "APPROX 6 MONTHS BACK", "AROUND SEPT", "NOT SURE WHEN", "?DATE", "SOMETIME IN <month>", "POSSIBLY IN <month/year>".
+    • Observation/aside in another section that records a vital with a hedge (e.g. "OBSERVATION: PATIENT MENTIONS WT MAY BE 85 LAST YEAR") — skip.
+  A vitals entry passes the gate ONLY when every numeric field in it has a definite value AND the entry's date is either an explicit calendar date from a recognised header, or the current-visit "today" anchor. If either side is hedged, drop the entry. We want only vitals we are 100% sure about.
+  If no section contains vitals that pass the gate, return [] (empty array).
 - For lifestyle: SPLIT into separate fields. Set to null if not found — do NOT put medication instructions, monitoring instructions, or follow-up advice here:
   - diet: ONLY calorie/protein/food plan (e.g. "1400 kcal with 60g protein"). Must mention kcal/calories/protein/food. Null if not found
   - exercise: ONLY physical activity like steps, walking, gym (e.g. "10,000 steps daily"). Must mention steps/walk/exercise. Null if not found
