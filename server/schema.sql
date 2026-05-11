@@ -205,11 +205,15 @@ CREATE TABLE IF NOT EXISTS documents (
   extracted_text  TEXT,                -- OCR / AI extracted text
   extracted_data  JSONB,              -- Structured data from the document
   doc_date        DATE,                -- Date on the document
-  source          TEXT,                -- 'upload','scan','gini_system','external'
+  source          TEXT,                -- 'upload','scan','gini_system','external','patient_upload'
+  uploaded_by_patient BOOLEAN NOT NULL DEFAULT FALSE, -- true when sent from the patient app (myhealthgenie)
   notes           TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_documents_patient ON documents(patient_id);
+CREATE INDEX IF NOT EXISTS idx_documents_uploaded_by_patient
+  ON documents(patient_id)
+  WHERE uploaded_by_patient = TRUE;
 
 -- ============ GOALS ============
 -- Health goals with tracking

@@ -213,7 +213,7 @@ const TABS = [
   { id: "labs", label: "🧪 Labs", badgeKey: "labs" },
   { id: "exam", label: "🩺 Exam" },
   { id: "history", label: "📅 History" },
-  { id: "messages", label: "💬 Messages", badgeKey: "messages", badgeCls: "am" },
+  // { id: "messages", label: "💬 Messages", badgeKey: "messages", badgeCls: "am" },
   { id: "docs", label: "📁 Docs", badgeKey: "docs" },
   { id: "medcard", label: "💊 Med Card" },
   { id: "logdata", label: "📊 Logged Data" },

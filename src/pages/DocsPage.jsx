@@ -341,6 +341,26 @@ export default function DocsPage() {
                             {doc.file_name && (
                               <span className="docs__doc-filename">{doc.file_name}</span>
                             )}
+                            {doc.uploaded_by_patient ? (
+                              <span
+                                title="Uploaded by patient from the myhealthgenie app"
+                                style={{
+                                  marginLeft: 8,
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  letterSpacing: 0.3,
+                                  textTransform: "uppercase",
+                                  color: "#5b21b6",
+                                  background: "#ede9fe",
+                                  border: "1px solid #ddd6fe",
+                                  borderRadius: 999,
+                                  padding: "1px 6px",
+                                  verticalAlign: "middle",
+                                }}
+                              >
+                                Patient
+                              </span>
+                            ) : null}
                             {status.label && (
                               <span style={{ marginLeft: 8, display: "inline-flex" }}>
                                 <DocStatusPill doc={doc} patientId={dbPatientId} size="sm" />

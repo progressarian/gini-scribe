@@ -1174,6 +1174,7 @@ export default function TriageView({
 }) {
   const [modalAppt, setModalAppt] = useState(null);
   const [view, setView] = useState("category"); // "category" | "assign"
+  const [query, setQuery] = useState("");
   const isMobile = useIsMobile(); // < 768
   const isSmall = useIsMobile(480);
 
@@ -1186,13 +1187,33 @@ export default function TriageView({
     return m;
   }, [appointments]);
 
+  const filteredAppointments = useMemo(() => {
+    const q = (query || "").trim().toLowerCase();
+    if (!q) return appointments;
+    const fuzzy = (text) => {
+      const t = (text || "").toLowerCase();
+      if (!t) return false;
+      if (t.includes(q)) return true;
+      let i = 0;
+      for (let j = 0; j < t.length && i < q.length; j++) {
+        if (t[j] === q[i]) i++;
+      }
+      return i === q.length;
+    };
+    return appointments.filter((a) => {
+      const name = a.patient_name || "";
+      const fileNo = a.file_no || (a.patient_id ? `P_${a.patient_id}` : "");
+      return fuzzy(name) || fuzzy(fileNo);
+    });
+  }, [appointments, query]);
+
   const { red, amber, green, assignedItems, unassignedItems, counts } = useMemo(() => {
     const r = [];
     const am = [];
     const g = [];
     const ai = [];
     const ui = [];
-    for (const a of appointments) {
+    for (const a of filteredAppointments) {
       const t = tierByApptId.get(a.id) || { tier: "amber", noReports: false, outcome: "partial" };
       const enriched = { ...a, __noReports: t.noReports, __outcome: t.outcome };
       if (t.tier === "red") r.push(enriched);
@@ -1201,9 +1222,51 @@ export default function TriageView({
       if (a.doctor_name) ai.push(enriched);
       else ui.push(enriched);
     }
-    [r, am, g, ai, ui].forEach((arr) => arr.sort(sortByTime));
-    const noReports = appointments.filter((a) => tierByApptId.get(a.id)?.noReports).length;
-    const byStatus = (s) => appointments.filter((a) => (a.status || "pending") === s).length;
+    const tierRank = (a) => {
+      const s = a.status || "pending";
+      if (s === "cancelled") return 4;
+      if (s === "no_show") return 3;
+      if (s === "seen" || s === "completed") return 2;
+      if (a.doctor_name) return 1;
+      return 0;
+    };
+    [r, am, g].forEach((arr) =>
+      arr.sort((a, b) => {
+        const ra = tierRank(a);
+        const rb = tierRank(b);
+        if (ra !== rb) return ra - rb;
+        return sortByTime(a, b);
+      }),
+    );
+    const unassignedRank = (a) => {
+      const s = a.status || "pending";
+      if (s === "no_show" || s === "cancelled") return 1;
+      return 0;
+    };
+    ui.sort((a, b) => {
+      const ra = unassignedRank(a);
+      const rb = unassignedRank(b);
+      if (ra !== rb) return ra - rb;
+      return sortByTime(a, b);
+    });
+    const assignedRank = (a) => {
+      const s = a.status || "pending";
+      if (s === "in_visit") return 0;
+      if (s === "checkedin") return 1;
+      if (s === "pending") return 2;
+      if (s === "seen" || s === "completed") return 3;
+      if (s === "no_show" || s === "cancelled") return 4;
+      return 5;
+    };
+    ai.sort((a, b) => {
+      const ra = assignedRank(a);
+      const rb = assignedRank(b);
+      if (ra !== rb) return ra - rb;
+      return sortByTime(a, b);
+    });
+    const noReports = filteredAppointments.filter((a) => tierByApptId.get(a.id)?.noReports).length;
+    const byStatus = (s) =>
+      filteredAppointments.filter((a) => (a.status || "pending") === s).length;
     const checkedIn = byStatus("checkedin");
     const inVisit = byStatus("in_visit");
     const seen = byStatus("seen") + byStatus("completed");
@@ -1215,7 +1278,7 @@ export default function TriageView({
       assignedItems: ai,
       unassignedItems: ui,
       counts: {
-        total: appointments.length,
+        total: filteredAppointments.length,
         red: r.length,
         amber: am.length,
         green: g.length,
@@ -1228,7 +1291,7 @@ export default function TriageView({
         noShow,
       },
     };
-  }, [appointments, tierByApptId]);
+  }, [filteredAppointments, appointments, tierByApptId]);
 
   const handleConfirm = (doctor_name) => {
     if (!modalAppt) return;
@@ -1341,6 +1404,47 @@ export default function TriageView({
             <DatePicker date={date} onDateChange={onDateChange} isMobile={isMobile} />
           )}
           <ViewToggle value={view} onChange={setView} />
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name or file no…"
+              style={{
+                background: WH,
+                border: `1px solid ${BD}`,
+                color: INK,
+                borderRadius: 6,
+                padding: "5px 26px 5px 9px",
+                fontSize: 11,
+                fontWeight: 500,
+                fontFamily: FB,
+                outline: "none",
+                width: isMobile ? 140 : 200,
+              }}
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                title="Clear"
+                style={{
+                  position: "absolute",
+                  right: 4,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "transparent",
+                  border: "none",
+                  color: INK3,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  lineHeight: 1,
+                  padding: "2px 5px",
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
           {onRefresh && (
             <button
               onClick={onRefresh}

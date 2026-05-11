@@ -10,10 +10,10 @@ import api from "../../services/api";
 //   adherence ∈ { 'always' | 'mostly' | 'sometimes' | 'missed' | null }
 
 const ADHERENCE_STYLE = {
-  always:    { label: "Always",    dot: "#10b981", fg: "#047857", bg: "#ecfdf5" },
-  mostly:    { label: "Mostly",    dot: "#10b981", fg: "#047857", bg: "#ecfdf5" },
+  always: { label: "Always", dot: "#10b981", fg: "#047857", bg: "#ecfdf5" },
+  mostly: { label: "Mostly", dot: "#10b981", fg: "#047857", bg: "#ecfdf5" },
   sometimes: { label: "Sometimes", dot: "#f59e0b", fg: "#b45309", bg: "#fffbeb" },
-  missed:    { label: "Missed",    dot: "#ef4444", fg: "#b91c1c", bg: "#fef2f2" },
+  missed: { label: "Missed", dot: "#ef4444", fg: "#b91c1c", bg: "#fef2f2" },
 };
 
 const NOTE_PREVIEW_CHARS = 90;
@@ -121,9 +121,7 @@ export default function VisitPreVisitCompliance({ appointmentId }) {
             </span>
           )}
           {submittedLabel && (
-            <span style={{ fontSize: 10.5, color: "var(--t3, #6c6c80)" }}>
-              · {submittedLabel}
-            </span>
+            <span style={{ fontSize: 10.5, color: "var(--t3, #6c6c80)" }}>· {submittedLabel}</span>
           )}
         </div>
       </div>
@@ -141,129 +139,127 @@ export default function VisitPreVisitCompliance({ appointmentId }) {
           const adh = ADHERENCE_STYLE[String(it?.adherence || "").toLowerCase()];
           const schedule = String(it?.schedule || "").trim();
           const notes = String(it?.notes || "").trim();
-          return (
-            (() => {
-              const key = `${i}-${med}`;
-              const isLong = notes.length > NOTE_PREVIEW_CHARS;
-              const isOpen = !!expanded[key];
-              const shownNote =
-                notes && isLong && !isOpen ? `${notes.slice(0, NOTE_PREVIEW_CHARS).trimEnd()}…` : notes;
-              return (
+          return (() => {
+            const key = `${i}-${med}`;
+            const isLong = notes.length > NOTE_PREVIEW_CHARS;
+            const isOpen = !!expanded[key];
+            const shownNote =
+              notes && isLong && !isOpen
+                ? `${notes.slice(0, NOTE_PREVIEW_CHARS).trimEnd()}…`
+                : notes;
+            return (
+              <div
+                key={key}
+                style={{
+                  background: "#fff",
+                  border: "1px solid var(--violet-border, #d9c8ff)",
+                  borderLeft: `3px solid ${adh?.dot || "#d9c8ff"}`,
+                  borderRadius: 8,
+                  padding: "6px 9px",
+                  minWidth: 0,
+                  boxShadow: "0 1px 2px rgba(20, 14, 50, 0.04)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
                 <div
-                  key={key}
                   style={{
-                    background: "#fff",
-                    border: "1px solid var(--violet-border, #d9c8ff)",
-                    borderLeft: `3px solid ${adh?.dot || "#d9c8ff"}`,
-                    borderRadius: 8,
-                    padding: "6px 9px",
-                    minWidth: 0,
-                    boxShadow: "0 1px 2px rgba(20, 14, 50, 0.04)",
                     display: "flex",
-                    flexDirection: "column",
-                    gap: 3,
+                    alignItems: "baseline",
+                    gap: 6,
+                    minWidth: 0,
                   }}
                 >
-                  <div
+                  <span
                     style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      gap: 6,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: "var(--text, #1a1a2e)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      flex: "1 1 auto",
                       minWidth: 0,
                     }}
+                    title={med}
                   >
+                    {med}
+                  </span>
+                  {adh ? (
                     <span
                       style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: "var(--text, #1a1a2e)",
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        color: adh.fg,
+                        background: adh.bg,
+                        border: `1px solid ${adh.dot}33`,
+                        borderRadius: 10,
+                        padding: "1px 6px",
                         whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        flex: "1 1 auto",
-                        minWidth: 0,
+                        flex: "0 0 auto",
+                        textTransform: "uppercase",
+                        letterSpacing: 0.3,
                       }}
-                      title={med}
                     >
-                      {med}
+                      {adh.label}
                     </span>
-                    {adh ? (
-                      <span
-                        style={{
-                          fontSize: 9.5,
-                          fontWeight: 700,
-                          color: adh.fg,
-                          background: adh.bg,
-                          border: `1px solid ${adh.dot}33`,
-                          borderRadius: 10,
-                          padding: "1px 6px",
-                          whiteSpace: "nowrap",
-                          flex: "0 0 auto",
-                          textTransform: "uppercase",
-                          letterSpacing: 0.3,
-                        }}
-                      >
-                        {adh.label}
-                      </span>
-                    ) : null}
-                  </div>
-                  {schedule ? (
-                    <div
-                      style={{
-                        fontSize: 10.5,
-                        color: "var(--t2, #44445c)",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                      title={schedule}
-                    >
-                      ⏱ {schedule}
-                    </div>
-                  ) : null}
-                  {notes ? (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text, #1a1a2e)",
-                        lineHeight: 1.4,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        background: "var(--violet-light, #f5f0ff)",
-                        border: "1px solid var(--violet-border, #d9c8ff)",
-                        borderRadius: 6,
-                        padding: "4px 6px",
-                        marginTop: "auto",
-                      }}
-                    >
-                      <span style={{ color: "var(--t3, #6c6c80)", fontSize: 10 }}>📝 </span>
-                      {shownNote}
-                      {isLong ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
-                          }
-                          style={{
-                            marginLeft: 4,
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            color: "var(--violet, #6d4ef5)",
-                            fontSize: 10.5,
-                            fontWeight: 600,
-                            cursor: "pointer",
-                          }}
-                        >
-                          {isOpen ? "view less" : "view more"}
-                        </button>
-                      ) : null}
-                    </div>
                   ) : null}
                 </div>
-              );
-            })()
-          );
+                {schedule ? (
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      color: "var(--t2, #44445c)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={schedule}
+                  >
+                    ⏱ {schedule}
+                  </div>
+                ) : null}
+                {notes ? (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text, #1a1a2e)",
+                      lineHeight: 1.4,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      background: "var(--violet-light, #f5f0ff)",
+                      border: "1px solid var(--violet-border, #d9c8ff)",
+                      borderRadius: 6,
+                      padding: "4px 6px",
+                      marginTop: "auto",
+                    }}
+                  >
+                    <span style={{ color: "var(--t3, #6c6c80)", fontSize: 10 }}>📝 </span>
+                    {shownNote}
+                    {isLong ? (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))}
+                        style={{
+                          marginLeft: 4,
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          color: "var(--violet, #6d4ef5)",
+                          fontSize: 10.5,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {isOpen ? "view less" : "view more"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })();
         })}
       </div>
     </section>

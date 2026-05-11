@@ -166,6 +166,7 @@ export const documentCreateSchema = z.object({
   extracted_data: z.any().optional().nullable(),
   doc_date: optDate,
   source: optStr,
+  uploaded_by_patient: z.boolean().optional(),
   notes: optStr,
   consultation_id: optInt,
 });

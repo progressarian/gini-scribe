@@ -202,12 +202,18 @@ router.post("/patients/:id/documents", validate(documentCreateSchema), async (re
       extracted_data,
       doc_date,
       source,
+      uploaded_by_patient,
       notes,
       consultation_id,
     } = req.body;
+    // Trust the explicit flag from the patient app, but also infer it from
+    // the legacy `source = 'patient_upload'` marker so older clients keep
+    // tagging rows correctly without a release bump.
+    const fromPatient =
+      typeof uploaded_by_patient === "boolean" ? uploaded_by_patient : source === "patient_upload";
     const result = await pool.query(
-      `INSERT INTO documents (patient_id, consultation_id, doc_type, title, file_name, file_url, extracted_text, extracted_data, doc_date, source, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      `INSERT INTO documents (patient_id, consultation_id, doc_type, title, file_name, file_url, extracted_text, extracted_data, doc_date, source, uploaded_by_patient, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [
         req.params.id,
         n(consultation_id),
@@ -219,6 +225,7 @@ router.post("/patients/:id/documents", validate(documentCreateSchema), async (re
         safeJson(extracted_data),
         n(doc_date) || null,
         n(source),
+        fromPatient,
         n(notes),
       ],
     );
@@ -320,6 +327,22 @@ function mimeFromFileName(fileName) {
       tif: "image/tiff",
     }[ext] || null
   );
+}
+
+// Map the shape of an extracted payload back to a documents.doc_type.
+// Patient uploads land as 'other' when the patient app couldn't tell from
+// the filename — once extraction returns we know much better. The order
+// matches the priority used by VisitDocsPanel/DocsPage so callers can
+// trust a single bucket per row.
+function inferDocTypeFromExtraction(ed) {
+  if (!ed || typeof ed !== "object") return null;
+  if (Array.isArray(ed.panels) && ed.panels.length > 0) return "lab_report";
+  if (Array.isArray(ed.medications) && ed.medications.length > 0) return "prescription";
+  if ((Array.isArray(ed.findings) && ed.findings.length > 0) || typeof ed.impression === "string") {
+    return "imaging";
+  }
+  if (ed.discharge_summary || ed.admission_date || ed.discharge_date) return "discharge";
+  return null;
 }
 
 // ── Resolve accessible URL for a document (HealthRay or Supabase) ────────────
@@ -1097,10 +1120,23 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
-        JSON.stringify(extracted),
-        docId,
-      ]);
+      // Auto-correct doc_type from the extracted payload when the caller
+      // (typically the patient app) tagged the upload as 'other' or left
+      // it null. The patient UI only exposes Lab/Rx/Other buckets, so the
+      // doctor-side type lives entirely on the inference here.
+      const inferredType = inferDocTypeFromExtraction(extracted);
+      const shouldRetypeRow = inferredType && (!doc.doc_type || doc.doc_type === "other");
+      if (shouldRetypeRow) {
+        await client.query(
+          `UPDATE documents SET doc_type = $1, extracted_data = $2::jsonb WHERE id = $3`,
+          [inferredType, JSON.stringify(extracted), docId],
+        );
+      } else {
+        await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+          JSON.stringify(extracted),
+          docId,
+        ]);
+      }
 
       if (extracted?.panels && doc.patient_id) {
         await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);

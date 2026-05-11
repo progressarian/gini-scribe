@@ -67,6 +67,8 @@ const CHILD_TABLES = [
   "patient_conditions_genie",
   "consultations",
   "appointments",
+  "patient_messages",
+  "conversations",
 ];
 
 // MyHealth Genie (Supabase) child tables keyed on `patient_id` (genie UUID).

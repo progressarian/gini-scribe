@@ -89,7 +89,27 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUp
           {ICON_MAP[doc.doc_type] || "📄"}
         </div>
         <div style={{ flex: 1 }}>
-          <div className="report-nm">{doc.title || doc.file_name || doc.doc_type}</div>
+          <div className="report-nm" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span>{doc.title || doc.file_name || doc.doc_type}</span>
+            {doc.uploaded_by_patient ? (
+              <span
+                title="Uploaded by patient from the myhealthgenie app"
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                  color: "#5b21b6",
+                  background: "#ede9fe",
+                  border: "1px solid #ddd6fe",
+                  borderRadius: 999,
+                  padding: "1px 6px",
+                }}
+              >
+                Patient
+              </span>
+            ) : null}
+          </div>
           <div className="report-dt">
             {fmtDate(doc.doc_date || doc.created_at)}
             {doc.source ? ` · ${doc.source}` : ""}

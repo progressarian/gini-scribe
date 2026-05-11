@@ -65,6 +65,7 @@ Return ONLY valid JSON, no backticks.
   "visit_date":"YYYY-MM-DD or null",
   "doctor_name":"string or null",
   "specialty":"string or null",
+  "patient_on_report":{"name":"","age":"","sex":""},
   "diagnoses":[{"id":"dm2","label":"Type 2 DM (since 2015)","status":"Controlled"}],
   "medications":[{"name":"MEDICINE NAME","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","status":"active"}],
   "stopped_medications":[{"name":"MEDICINE NAME","reason":"reason if mentioned"}],
@@ -73,6 +74,7 @@ Return ONLY valid JSON, no backticks.
   "follow_up":"string or null"
 }
 RULES:
+- patient_on_report.name: extract the patient/recipient name written on the prescription (English/Roman script). Used to detect a name-mismatch when patients upload someone else's prescription by mistake. Leave empty string if not visible.
 - Diagnosis IDs: dm2,dm1,htn,cad,ckd,hypo,obesity,dyslipidemia,asthma,copd,pcos,oa,ra,liver,stroke,epilepsy,depression,anxiety,gerd,ibs
 - Status: "Controlled","Uncontrolled","New" based on context
 - MEDICINE: Use EXACT brand names from prescription, capitalize properly
