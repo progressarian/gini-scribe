@@ -39,6 +39,7 @@ import {
   findEarliestStartDates,
   resolveStartedDate,
 } from "../services/medication/historicalStart.js";
+import { backfillCommonSideEffectsForMed } from "../services/medication/commonSideEffectsAI.js";
 
 const router = Router();
 
@@ -1212,6 +1213,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
         }
       }
 
+      const insertedMedIds = [];
       if (doc.patient_id && extracted?.medications) {
         await client.query(`DELETE FROM medications WHERE document_id = $1`, [doc.id]);
         const rxDate =
@@ -1224,10 +1226,13 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
           const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
           const storedName = cleanName || m.name;
           const storedRoute = m.route || routeForForm(detectedForm) || "Oral";
-          await client.query(
+          const sideEffectsJson = Array.isArray(m.common_side_effects)
+            ? JSON.stringify(m.common_side_effects.slice(0, 3))
+            : "[]";
+          const medRes = await client.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9)
+               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date, common_side_effects)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9, $10::jsonb)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET document_id = EXCLUDED.document_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1237,7 +1242,13 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
                route = COALESCE(EXCLUDED.route, medications.route),
                source = EXCLUDED.source,
                started_date = LEAST(medications.started_date, EXCLUDED.started_date),
-               updated_at = NOW()`,
+               common_side_effects = CASE
+                 WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
+                   THEN EXCLUDED.common_side_effects
+                 ELSE medications.common_side_effects
+               END,
+               updated_at = NOW()
+             RETURNING id`,
             [
               doc.patient_id,
               doc.id,
@@ -1248,8 +1259,10 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
               (m.timing || "").slice(0, 100),
               storedRoute.slice(0, 50),
               rxDate,
+              sideEffectsJson,
             ],
           );
+          if (medRes.rows[0]?.id) insertedMedIds.push(medRes.rows[0].id);
         }
         for (const m of extracted.stopped_medications || []) {
           if (!m?.name) continue;
@@ -1304,9 +1317,22 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
           );
         }
         if (extracted?.medications) {
-          syncMedicationsToGenie(doc.patient_id, pool).catch((e) =>
-            console.warn("[extract] Genie meds push skipped:", e.message),
-          );
+          // Backfill common_side_effects for any meds the extractor left empty,
+          // then push to Genie so the patient app sees them. The backfill
+          // service no-ops when the row already has side effects.
+          if (insertedMedIds.length) {
+            Promise.allSettled(
+              insertedMedIds.map((id) => backfillCommonSideEffectsForMed(id)),
+            )
+              .then(() => syncMedicationsToGenie(doc.patient_id, pool))
+              .catch((e) =>
+                console.warn("[extract] side-effects backfill skipped:", e.message),
+              );
+          } else {
+            syncMedicationsToGenie(doc.patient_id, pool).catch((e) =>
+              console.warn("[extract] Genie meds push skipped:", e.message),
+            );
+          }
         }
       }
 

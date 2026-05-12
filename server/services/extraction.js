@@ -67,7 +67,7 @@ Return ONLY valid JSON, no backticks.
   "specialty":"string or null",
   "patient_on_report":{"name":"","age":"","sex":""},
   "diagnoses":[{"id":"dm2","label":"Type 2 DM (since 2015)","status":"Controlled"}],
-  "medications":[{"name":"MEDICINE NAME","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","status":"active"}],
+  "medications":[{"name":"MEDICINE NAME","dose":"dose","frequency":"OD/BD/TDS","timing":"Morning/Night","status":"active","common_side_effects":[{"name":"<short side-effect label>","desc":"<one-line patient-friendly tip>","severity":"common|uncommon|warn"}]}],
   "stopped_medications":[{"name":"MEDICINE NAME","reason":"reason if mentioned"}],
   "vitals":{"bp_sys":null,"bp_dia":null,"weight":null,"height":null,"pulse":null},
   "advice":["string"],
@@ -82,7 +82,8 @@ RULES:
 - stopped_medications: medicines marked as stopped/omit/discontinue/band karo/tapering off
 - Parse Hindi/Punjabi terms: "sugar ki dawai"=diabetes medication, "BP ki goli"=antihypertensive, "band karo"=stop
 - visit_date: ONLY extract if an explicit specific date is clearly written (e.g. 12/03/2024, 12-Mar-2024). Do NOT infer, assume, or use today's date. If no specific date is written or only vague terms like "today" are used, set visit_date to null AND return empty arrays for medications, diagnoses, stopped_medications, advice and null for all vitals and follow_up — do not extract any data without a confirmed written date.
-- Name must be in English/Roman script`;
+- Name must be in English/Roman script
+- COMMON SIDE EFFECTS — for EVERY entry in "medications", populate the "common_side_effects" array with at MOST 3 entries describing the most clinically relevant common side effects of that drug (use general medical knowledge of the drug — these are NOT extracted from the prescription text, they are the well-known common side effects the patient should be aware of). Each entry has: name (short label, e.g. "Stomach upset / loose stools"), desc (one short patient-friendly line, e.g. "Take with food. Extended-release form helps."), severity ("common" for typical mild ones, "uncommon" for less frequent, "warn" for rare-but-serious things the patient should seek help for — at most one "warn" entry). Order by importance: most common first. If the drug is a generic supplement / multivitamin / non-pharmacological item with no notable side effects, return []. Do NOT exceed 3 entries. Keep desc under 90 characters.`;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
