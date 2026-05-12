@@ -43,6 +43,31 @@ import { backfillCommonSideEffectsForMed } from "../services/medication/commonSi
 
 const router = Router();
 
+// Weekly / fortnightly meds need an anchor day for the patient app scheduler.
+// Mirrors src/services/extraction.js:applyWeeklyDayDefaults. Returns
+// { frequency, days_of_week } — pass an rxDate (YYYY-MM-DD) so the day is
+// the prescription's own visit day; falls back to today when missing.
+const RX_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const RX_WEEKDAY_TO_INT = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+function weeklyDayDefaults(med, rxDate) {
+  const freqRaw = String(med?.frequency || "");
+  const isWeekly = /once\s*weekly|^\s*weekly/i.test(freqRaw);
+  const isBiweekly = /14\s*days|fortnight|bi-?weekly|once\s*in\s*14/i.test(freqRaw);
+  if (!isWeekly && !isBiweekly) return { frequency: freqRaw, days_of_week: null };
+  if (/·/.test(freqRaw)) return { frequency: freqRaw, days_of_week: med?.days_of_week || null };
+  if (Array.isArray(med?.days_of_week) && med.days_of_week.length) {
+    return { frequency: freqRaw, days_of_week: med.days_of_week };
+  }
+  let anchor = new Date();
+  if (typeof rxDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(rxDate)) {
+    const d = new Date(`${rxDate.slice(0, 10)}T00:00:00`);
+    if (!Number.isNaN(d.getTime())) anchor = d;
+  }
+  const token = RX_WEEKDAYS[(anchor.getDay() + 6) % 7];
+  const base = isBiweekly ? "Once in 14 days" : "Once weekly";
+  return { frequency: `${base} · ${token}`, days_of_week: [RX_WEEKDAY_TO_INT[token]] };
+}
+
 // ── DB migration: ensure document_id columns exist ──────────────────────────
 pool
   .query(
@@ -837,10 +862,11 @@ router.patch("/documents/:id", async (req, res) => {
         const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
         const storedName = cleanName || m.name;
         const storedRoute = m.route || routeForForm(detectedForm) || "Oral";
+        const { frequency: freqWithDay, days_of_week: dowDays } = weeklyDayDefaults(m, rxDate);
         await client.query(
           `INSERT INTO medications
-             (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, 'report_extract', $10)
+             (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date, days_of_week)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, true, 'report_extract', $10, $11)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET document_id = EXCLUDED.document_id,
              consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
@@ -851,6 +877,7 @@ router.patch("/documents/:id", async (req, res) => {
              route = COALESCE(EXCLUDED.route, medications.route),
              source = EXCLUDED.source,
              started_date = LEAST(medications.started_date, EXCLUDED.started_date),
+             days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
              updated_at = NOW()`,
           [
             doc.patient_id,
@@ -859,10 +886,11 @@ router.patch("/documents/:id", async (req, res) => {
             storedName.slice(0, 200),
             canonicalMedKey(storedName).slice(0, 200),
             (m.dose || "").slice(0, 100),
-            (m.frequency || "").slice(0, 100),
+            freqWithDay.slice(0, 100),
             (m.timing || "").slice(0, 100),
             storedRoute.slice(0, 50),
             rxDate,
+            dowDays,
           ],
         );
       }
@@ -1229,10 +1257,11 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
           const sideEffectsJson = Array.isArray(m.common_side_effects)
             ? JSON.stringify(m.common_side_effects.slice(0, 3))
             : "[]";
+          const { frequency: freqWithDay, days_of_week: dowDays } = weeklyDayDefaults(m, rxDate);
           const medRes = await client.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date, common_side_effects)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9, $10::jsonb)
+               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date, common_side_effects, days_of_week)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'report_extract', $9, $10::jsonb, $11)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET document_id = EXCLUDED.document_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1247,6 +1276,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
                    THEN EXCLUDED.common_side_effects
                  ELSE medications.common_side_effects
                END,
+               days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
                updated_at = NOW()
              RETURNING id`,
             [
@@ -1255,11 +1285,12 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
               storedName.slice(0, 200),
               canonicalMedKey(storedName).slice(0, 200),
               (m.dose || "").slice(0, 100),
-              (m.frequency || "").slice(0, 100),
+              freqWithDay.slice(0, 100),
               (m.timing || "").slice(0, 100),
               storedRoute.slice(0, 50),
               rxDate,
               sideEffectsJson,
+              dowDays,
             ],
           );
           if (medRes.rows[0]?.id) insertedMedIds.push(medRes.rows[0].id);
@@ -1321,13 +1352,9 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
           // then push to Genie so the patient app sees them. The backfill
           // service no-ops when the row already has side effects.
           if (insertedMedIds.length) {
-            Promise.allSettled(
-              insertedMedIds.map((id) => backfillCommonSideEffectsForMed(id)),
-            )
+            Promise.allSettled(insertedMedIds.map((id) => backfillCommonSideEffectsForMed(id)))
               .then(() => syncMedicationsToGenie(doc.patient_id, pool))
-              .catch((e) =>
-                console.warn("[extract] side-effects backfill skipped:", e.message),
-              );
+              .catch((e) => console.warn("[extract] side-effects backfill skipped:", e.message));
           } else {
             syncMedicationsToGenie(doc.patient_id, pool).catch((e) =>
               console.warn("[extract] Genie meds push skipped:", e.message),

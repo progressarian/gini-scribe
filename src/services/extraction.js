@@ -210,12 +210,20 @@ const RX_WEEKDAY_TO_INT = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat:
 
 // Weekly / fortnightly meds extracted from a prescription rarely come back
 // with a specific day. The patient app needs an anchor day to schedule from,
-// so we default to the day the prescription is being processed (today) —
-// the patient will continue from that weekday on the weekly/biweekly cadence.
+// so we anchor to the prescription's own visit_date when the AI returned
+// one, and only fall back to today's weekday when the date is missing.
 function applyWeeklyDayDefaults(extraction) {
   if (!extraction || !Array.isArray(extraction.medications)) return extraction;
-  const todayToken = RX_WEEKDAYS[(new Date().getDay() + 6) % 7];
-  const todayInt = RX_WEEKDAY_TO_INT[todayToken];
+  const anchor = (() => {
+    const v = extraction.visit_date;
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const d = new Date(`${v.slice(0, 10)}T00:00:00`);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    return new Date();
+  })();
+  const anchorToken = RX_WEEKDAYS[(anchor.getDay() + 6) % 7];
+  const anchorInt = RX_WEEKDAY_TO_INT[anchorToken];
   extraction.medications = extraction.medications.map((m) => {
     if (!m) return m;
     const freqRaw = String(m.frequency || "");
@@ -228,8 +236,8 @@ function applyWeeklyDayDefaults(extraction) {
     const baseFreq = isBiweekly ? "Once in 14 days" : "Once weekly";
     return {
       ...m,
-      frequency: `${baseFreq} · ${todayToken}`,
-      days_of_week: [todayInt],
+      frequency: `${baseFreq} · ${anchorToken}`,
+      days_of_week: [anchorInt],
     };
   });
   return extraction;

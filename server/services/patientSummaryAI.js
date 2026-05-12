@@ -6,32 +6,33 @@
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-sonnet-4-20250514";
 
-const SYSTEM_PROMPT = `You are writing a short visit recap for the PATIENT to read in their app and on their printed prescription. Your reader is the patient — not a doctor.
+const SYSTEM_PROMPT = `You are writing a short visit recap for the PATIENT to read in their app and on their printed prescription. Your reader is the patient — not a doctor. The greeting is written in the voice of THEIR DOCTOR speaking to them — warm, reassuring, professional, and respectful (the way a senior physician addresses their patient).
 
-You return TWO things, as a single JSON object with EXACTLY these keys:
+You return a single JSON object with EXACTLY these keys:
 
 {
-  "heading_greeting": "<short Hinglish greeting that ends with the patient's first name + 'ji,' — adapts to tone>",
-  "heading_accent":   "<2-4 word Hinglish phrase that captures the takeaway — adapts to tone>",
+  "heading_greeting": "<short Hinglish greeting in doctor's voice, ending with patient's first name + ' ji,' — adapts to tone>",
+  "heading_accent":   "",
   "body":             "<the visit-summary paragraph (English)>"
 }
 
-Heading tone — pick the greeting + accent so they fit the patient's actual numbers:
-- Numbers are GOOD (improved / on-target):
-    greeting examples: "Bahut khoob, <Name> ji,", "Shaabaash, <Name> ji,", "Wah <Name> ji,"
-    accent examples:   "numbers shaandar", "lage raho", "behtareen progress"
-- Numbers need WATCH (mixed, drifting):
-    greeting examples: "Aaiye milkar, <Name> ji,", "Thoda dhyaan dein, <Name> ji,"
-    accent examples:   "aage badhna hai", "thoda kaam baaki", "milkar sudhaarte hain"
-- Numbers need REVIEW (worse, off-target — be SOFT and POSITIVE, never alarming):
-    greeting examples: "Hum saath hain, <Name> ji,", "Chinta nahi, <Name> ji,", "Aaiye milkar, <Name> ji,"
-    accent examples:   "kuch dekhna hai", "nayi shuruaat", "thoda focus chahiye"
+Heading tone — pick the greeting in a doctor's caring, composed voice so it fits the patient's actual numbers:
+- Numbers are GOOD (improved / on-target) — appreciative, encouraging:
+    e.g. "Bahut achha kar rahe hain, <Name> ji,", "Aapki mehnat dikh rahi hai, <Name> ji,", "Progress badhiya hai, <Name> ji,"
+- Numbers need WATCH (mixed, drifting) — calm, guiding:
+    e.g. "Thoda dhyaan dena hoga, <Name> ji,", "Saath milkar sambhalte hain, <Name> ji,", "Routine par focus rakhein, <Name> ji,"
+- Numbers need REVIEW (worse, off-target) — reassuring, never alarming:
+    e.g. "Chinta ki baat nahi, <Name> ji,", "Hum aapke saath hain, <Name> ji,", "Milkar theek karenge, <Name> ji,"
+- Neutral / steady (stable, ongoing management):
+    e.g. "Aapki sehat dhyaan mein hai, <Name> ji,", "Hum nazar bana ke rakh rahe hain, <Name> ji,", "Sab kuch sambhal raha hai, <Name> ji,"
 
 Heading rules:
-- Use Hinglish in Latin script — warm, simple, never scary.
-- Greeting MUST end with the patient's first name (extract the first token from patient.name) plus " ji," — e.g. "Bahut khoob, Test ji,". Keep it under 5 words.
-- Accent must be 2-4 words, no punctuation, lowercase.
-- Choose tone strictly from the data — don't say "shaandar" if HbA1c just rose. Don't say "kuch dekhna hai" if everything improved.
+- Greeting is the DOCTOR talking to the patient — warm, dignified, professional. Not a generic "Namaste". Not a marketing line.
+- Use Hinglish in Latin script — simple words a layperson reads easily, but in a doctor's tone.
+- Greeting MUST end with the patient's first name followed by " ji," (e.g. "Bahut achha kar rahe hain, Rajesh ji,"). 4-7 words total.
+- The patient's first name is supplied separately in the user message — use THAT name. Do NOT use any honorific (Mr./Mrs./Ms./Dr.) as the name.
+- heading_accent MUST be an empty string "".
+- Choose tone strictly from the data — don't say "bahut achha" if HbA1c just rose; don't say "chinta nahi" if everything improved.
 
 Body style (English):
 - One short paragraph, 3-5 sentences, plain prose (no bullets, no headings, no markdown, no medical jargon).
@@ -169,11 +170,22 @@ function tryParseJson(raw) {
 }
 
 function firstName(name) {
-  return (
-    String(name || "")
-      .trim()
-      .split(/\s+/)[0] || ""
-  );
+  const HONORIFICS = new Set([
+    "mr", "mrs", "ms", "miss", "mx", "dr", "doctor", "prof", "professor",
+    "sir", "madam", "shri", "smt", "shrimati", "sri", "kumari", "km",
+    "master", "mast", "baby", "bby",
+  ]);
+  const tokens = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  for (const tok of tokens) {
+    const clean = tok.replace(/[.,]/g, "").toLowerCase();
+    if (!clean) continue;
+    if (HONORIFICS.has(clean)) continue;
+    return tok.replace(/[.,]+$/g, "");
+  }
+  return tokens[0] || "";
 }
 
 export async function generatePatientSummary(data) {
@@ -181,7 +193,8 @@ export async function generatePatientSummary(data) {
     throw new Error("ANTHROPIC_API_KEY not configured on server");
   }
   const ctx = buildContext(data);
-  const userMsg = `Here is the visit data as JSON:\n\n${JSON.stringify(ctx, null, 2)}\n\nReturn the JSON object now (heading_greeting, heading_accent, body). The patient's first name is "${firstName(ctx.patient?.name)}".`;
+  const fname = firstName(ctx.patient?.name);
+  const userMsg = `Here is the visit data as JSON:\n\n${JSON.stringify(ctx, null, 2)}\n\nReturn the JSON object now (heading_greeting, heading_accent, body).\n\nThe patient's first name is "${fname}". Use this exact name in the greeting — do NOT use "Mr.", "Mrs.", "Ms.", "Dr." or any other honorific as the name. The greeting must be in the doctor's voice (warm, professional, reassuring) and end with "${fname} ji,". The heading_accent must be an empty string.`;
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -220,9 +233,6 @@ export async function generatePatientSummary(data) {
     typeof parsed?.heading_greeting === "string" && parsed.heading_greeting.trim()
       ? parsed.heading_greeting.trim()
       : null;
-  const heading_accent =
-    typeof parsed?.heading_accent === "string" && parsed.heading_accent.trim()
-      ? parsed.heading_accent.trim()
-      : null;
+  const heading_accent = "";
   return { body, heading_greeting, heading_accent };
 }

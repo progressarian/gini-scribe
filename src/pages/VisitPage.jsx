@@ -995,11 +995,7 @@ export default function VisitPage() {
     <div className="visit-page">
       <VisitTopbar
         patient={patient}
-        doctor={
-          data.appt_doctor_name
-            ? { ...(doctor || {}), name: data.appt_doctor_name }
-            : doctor
-        }
+        doctor={data.appt_doctor_name ? { ...(doctor || {}), name: data.appt_doctor_name } : doctor}
         summary={summary}
         latestVitals={latestV}
         appointment={data.latestAppointment}

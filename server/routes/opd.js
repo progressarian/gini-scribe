@@ -464,6 +464,16 @@ router.get("/opd/appointments", async (req, res) => {
              WHERE lc.results_synced = TRUE
                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
                AND lc.raw_detail_json->>'reported_on' IS NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM lab_cases lc2
+                  WHERE (lc2.patient_id = lc.patient_id
+                         OR (lc2.patient_id IS NULL AND lc.patient_id IS NULL
+                             AND lc2.raw_list_json->'patient'->>'healthray_uid'
+                               = lc.raw_list_json->'patient'->>'healthray_uid'))
+                    AND lc2.results_synced = TRUE
+                    AND lc2.raw_detail_json->>'reported_on' IS NOT NULL
+                    AND lc2.case_date > lc.case_date
+               )
            )::int AS partial_labs
          FROM lab_cases lc
          WHERE lc.patient_id = ANY($1::int[])

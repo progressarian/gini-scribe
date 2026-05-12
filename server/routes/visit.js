@@ -521,7 +521,18 @@ router.get("/visit/:patientId", async (req, res) => {
                       )))
                 AND lc.results_synced = TRUE
                 AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
-                AND lc.raw_detail_json->>'reported_on' IS NULL) AS partial_labs,
+                AND lc.raw_detail_json->>'reported_on' IS NULL
+                AND NOT EXISTS (
+                  SELECT 1 FROM lab_cases lc2
+                   WHERE (lc2.patient_id = $1
+                          OR (lc2.patient_id IS NULL
+                              AND lc2.raw_list_json->'patient'->>'healthray_uid' = (
+                                SELECT file_no FROM patients WHERE id = $1
+                              )))
+                     AND lc2.results_synced = TRUE
+                     AND lc2.raw_detail_json->>'reported_on' IS NOT NULL
+                     AND lc2.case_date > lc.case_date
+                )) AS partial_labs,
            (SELECT MAX(lc.case_date) FROM lab_cases lc
               WHERE (lc.patient_id = $1
                   OR (lc.patient_id IS NULL
@@ -530,7 +541,18 @@ router.get("/visit/:patientId", async (req, res) => {
                       )))
                 AND lc.results_synced = TRUE
                 AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
-                AND lc.raw_detail_json->>'reported_on' IS NULL) AS partial_labs_date,
+                AND lc.raw_detail_json->>'reported_on' IS NULL
+                AND NOT EXISTS (
+                  SELECT 1 FROM lab_cases lc2
+                   WHERE (lc2.patient_id = $1
+                          OR (lc2.patient_id IS NULL
+                              AND lc2.raw_list_json->'patient'->>'healthray_uid' = (
+                                SELECT file_no FROM patients WHERE id = $1
+                              )))
+                     AND lc2.results_synced = TRUE
+                     AND lc2.raw_detail_json->>'reported_on' IS NOT NULL
+                     AND lc2.case_date > lc.case_date
+                )) AS partial_labs_date,
            GREATEST(
              (SELECT COUNT(DISTINCT lr.canonical_name)::int FROM lab_results lr
                 WHERE lr.patient_id = $1
