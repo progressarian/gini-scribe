@@ -43,11 +43,18 @@ export function mapVisitType(reason) {
   return "OPD";
 }
 
+// HealthRay status → our appointments.status
+//   Checkout / Completed → completed (prescription printed; doctor finished)
+//   Engaged              → in-progress (doctor is currently seeing the patient)
+//   Waiting              → checkedin (patient has arrived and is waiting)
+//   Cancelled / NoShow   → cancelled / no_show
+//   Anything else        → scheduled
 export function mapStatus(rayStatus) {
   if (!rayStatus) return "scheduled";
   const s = rayStatus.toLowerCase();
   if (s === "checkout" || s === "completed") return "completed";
   if (s === "engaged" || s === "in-progress") return "in-progress";
+  if (s === "waiting") return "checkedin";
   if (s === "cancelled" || s === "canceled") return "cancelled";
   if (s === "no_show" || s === "noshow") return "no_show";
   return "scheduled";

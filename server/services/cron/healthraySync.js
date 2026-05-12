@@ -223,6 +223,27 @@ async function syncAppointmentDocs(healthrayId, patientId, apptDate) {
   } catch {}
 }
 
+// Auto-mark-seen gate: we only promote an appointment to seen/completed once a
+// printable prescription PDF has actually arrived from HealthRay. "Printable"
+// means we have either persisted the file to storage or at least captured its
+// source URL — without that, the doctor cannot reprint, so the visit is not
+// truly done.
+async function hasReceivedPrescriptionPdf(healthrayId, patientId) {
+  if (!healthrayId || !patientId) return false;
+  const { rows } = await pool.query(
+    `SELECT 1
+       FROM documents
+      WHERE patient_id = $1
+        AND source = 'healthray'
+        AND doc_type = 'prescription'
+        AND notes LIKE $2
+        AND (storage_path IS NOT NULL OR file_url IS NOT NULL)
+      LIMIT 1`,
+    [patientId, `%healthray_appt:${healthrayId}%`],
+  );
+  return rows.length > 0;
+}
+
 // ── Re-extract the patient's most recent prescription by fetching it fresh
 // from HealthRay (same flow as the manual
 // scripts/reextract-last-prescription-by-date.js): walk the patient's local
@@ -375,9 +396,16 @@ async function syncAppointment(appt, localDoctorName) {
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
   if (existing && existing.healthray_clinical_notes && alreadyEnriched) {
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
-    // Auto-mark as seen — promote to 'completed' when HealthRay reports
-    // checkout/completed (prescription printed there).
-    await markAppointmentAsSeen(existing.id, isCompleted ? "completed" : "seen");
+    // Auto-mark as seen — only when HealthRay reports checkout/completed AND
+    // the prescription PDF has been received locally. Without the PDF the
+    // visit isn't really printable, so we leave the status alone for the next
+    // sync pass to pick up.
+    if (isCompleted && existing.patient_id) {
+      const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
+      if (hasRxPdf) {
+        await markAppointmentAsSeen(existing.id, "completed");
+      }
+    }
     return { skipped: true, id: existing.id };
   }
 
@@ -592,22 +620,24 @@ async function syncAppointment(appt, localDoctorName) {
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
 
   // ── Auto-mark status based on HealthRay data ──
-  if (clinical.healthrayDiagnoses?.length > 0 && clinical.healthrayMedications?.length > 0) {
-    // Prescription exists → create consultation + fill prep steps. If
-    // HealthRay reports checkout/completed (prescription printed), land on
-    // 'completed'; otherwise on 'seen'.
-    await markAppointmentAsSeen(localApptId, isCompleted ? "completed" : "seen");
-  } else if (isCompleted) {
-    // HealthRay says completed but no clinical data extracted yet — still
-    // reflect the printed-prescription state locally.
-    await pool.query(
-      `UPDATE appointments SET status = 'completed', updated_at = NOW()
-        WHERE id = $1 AND status <> 'completed'`,
-      [localApptId],
-    );
-  } else if (status !== "cancelled" && status !== "no_show") {
-    // Appointment exists in HealthRay but no prescription yet → patient checked in
-    await markAppointmentAsCheckedIn(localApptId);
+  // HealthRay status mapping (see mappers.mapStatus):
+  //   Checkout  → completed   (doctor checked out / printed Rx)
+  //   Engaged   → in-progress (doctor is currently seeing the patient)
+  //   Waiting   → checkedin   (patient has arrived; doctor not started)
+  //   Cancelled / NoShow → cancelled / no_show
+  //
+  // upsertAppointment has already written the mapped status above. The only
+  // promotion the cron performs is to seen/completed, and only when BOTH:
+  //   1. HealthRay status is 'completed' (Checkout)
+  //   2. The prescription PDF has been received locally (printable)
+  // If only the status is completed but the PDF hasn't synced yet, leave the
+  // appointment in its current state — the next sync pass will finish the job
+  // once the PDF arrives.
+  if (isCompleted) {
+    const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, patientId);
+    if (hasRxPdf) {
+      await markAppointmentAsSeen(localApptId, "completed");
+    }
   }
 
   // ── On first entry of a new appointment, re-extract the patient's last
@@ -911,14 +941,25 @@ export async function runStuckStatusRecovery(windowDays) {
 
   log("Stuck Recovery", `Scanning last ${days} days for enriched-but-unseen appointments...`);
   try {
+    // Only recover appointments that also have a printable prescription PDF
+    // (storage_path or file_url present) linked via notes → matches the gate
+    // used in the live sync path.
     const { rows } = await pool.query(
-      `SELECT id, file_no
-       FROM appointments
-      WHERE status NOT IN ('seen', 'completed', 'cancelled', 'no_show')
-        AND appointment_date >= (CURRENT_DATE - ($1 || ' days')::interval)
-        AND jsonb_array_length(COALESCE(healthray_diagnoses,'[]'::jsonb))  > 0
-        AND jsonb_array_length(COALESCE(healthray_medications,'[]'::jsonb)) > 0
-      ORDER BY appointment_date DESC`,
+      `SELECT a.id, a.file_no
+       FROM appointments a
+      WHERE a.status NOT IN ('seen', 'completed', 'cancelled', 'no_show')
+        AND a.appointment_date >= (CURRENT_DATE - ($1 || ' days')::interval)
+        AND jsonb_array_length(COALESCE(a.healthray_diagnoses,'[]'::jsonb))  > 0
+        AND jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) > 0
+        AND EXISTS (
+          SELECT 1 FROM documents d
+           WHERE d.patient_id = a.patient_id
+             AND d.source = 'healthray'
+             AND d.doc_type = 'prescription'
+             AND d.notes LIKE '%healthray_appt:' || a.healthray_id || '%'
+             AND (d.storage_path IS NOT NULL OR d.file_url IS NOT NULL)
+        )
+      ORDER BY a.appointment_date DESC`,
       [String(days)],
     );
 
