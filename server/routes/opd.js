@@ -458,7 +458,13 @@ router.get("/opd/appointments", async (req, res) => {
            COUNT(*) FILTER (
              WHERE lc.results_synced = TRUE
                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
-           )::int AS recent_labs
+               AND lc.raw_detail_json->>'reported_on' IS NOT NULL
+           )::int AS recent_labs,
+           COUNT(*) FILTER (
+             WHERE lc.results_synced = TRUE
+               AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
+               AND lc.raw_detail_json->>'reported_on' IS NULL
+           )::int AS partial_labs
          FROM lab_cases lc
          WHERE lc.patient_id = ANY($1::int[])
             OR (lc.patient_id IS NULL AND lc.raw_list_json->'patient'->>'healthray_uid' = ANY($2::text[]))
@@ -467,17 +473,24 @@ router.get("/opd/appointments", async (req, res) => {
       );
       for (const r of lc) {
         if (r.patient_id != null) {
-          const prev = labCasesByPid.get(r.patient_id) || { pending_labs: 0, recent_labs: 0 };
+          const prev = labCasesByPid.get(r.patient_id) || {
+            pending_labs: 0,
+            recent_labs: 0,
+            partial_labs: 0,
+          };
           prev.pending_labs += r.pending_labs;
           prev.recent_labs += r.recent_labs;
+          prev.partial_labs += r.partial_labs;
           labCasesByPid.set(r.patient_id, prev);
         } else if (r.healthray_uid) {
           const prev = labCasesByFile.get(r.healthray_uid) || {
             pending_labs: 0,
             recent_labs: 0,
+            partial_labs: 0,
           };
           prev.pending_labs += r.pending_labs;
           prev.recent_labs += r.recent_labs;
+          prev.partial_labs += r.partial_labs;
           labCasesByFile.set(r.healthray_uid, prev);
         }
       }
@@ -679,6 +692,7 @@ router.get("/opd/appointments", async (req, res) => {
         (row._resolved_file_no ? labCasesByFile.get(row._resolved_file_no) : null) || {
           pending_labs: 0,
           recent_labs: 0,
+          partial_labs: 0,
         };
 
       const upl = Math.max(a?.uploaded_lab_canonicals || 0, a?.uploaded_lab_docs || 0);
@@ -696,6 +710,7 @@ router.get("/opd/appointments", async (req, res) => {
       }
       row.pending_labs = lc.pending_labs;
       row.recent_labs = lc.recent_labs;
+      row.partial_labs = lc.partial_labs || 0;
       row.uploaded_labs = upl;
       row.uploaded_labs_date = uplDate;
       row.prev_hba1c = a?.prev_hba1c || null;

@@ -630,6 +630,21 @@ function ApptRow({ a, sel, onSelect }) {
               🔬 Gini Lab Processing
             </span>
           )}
+          {a.partial_labs > 0 && (
+            <span
+              style={{
+                background: AML,
+                color: AM,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: `1px solid ${AMB}`,
+              }}
+            >
+              🟡 Gini Lab Partial
+            </span>
+          )}
           {a.recent_labs > 0 && (
             <span
               style={{

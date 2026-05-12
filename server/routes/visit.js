@@ -502,7 +502,8 @@ router.get("/visit/:patientId", async (req, res) => {
                         SELECT file_no FROM patients WHERE id = $1
                       )))
                 AND lc.results_synced = TRUE
-                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days') AS recent_labs,
+                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
+                AND lc.raw_detail_json->>'reported_on' IS NOT NULL) AS recent_labs,
            (SELECT MAX(lc.case_date) FROM lab_cases lc
               WHERE (lc.patient_id = $1
                   OR (lc.patient_id IS NULL
@@ -510,7 +511,26 @@ router.get("/visit/:patientId", async (req, res) => {
                         SELECT file_no FROM patients WHERE id = $1
                       )))
                 AND lc.results_synced = TRUE
-                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days') AS recent_labs_date,
+                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
+                AND lc.raw_detail_json->>'reported_on' IS NOT NULL) AS recent_labs_date,
+           (SELECT COUNT(*)::int FROM lab_cases lc
+              WHERE (lc.patient_id = $1
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = (
+                        SELECT file_no FROM patients WHERE id = $1
+                      )))
+                AND lc.results_synced = TRUE
+                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
+                AND lc.raw_detail_json->>'reported_on' IS NULL) AS partial_labs,
+           (SELECT MAX(lc.case_date) FROM lab_cases lc
+              WHERE (lc.patient_id = $1
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = (
+                        SELECT file_no FROM patients WHERE id = $1
+                      )))
+                AND lc.results_synced = TRUE
+                AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
+                AND lc.raw_detail_json->>'reported_on' IS NULL) AS partial_labs_date,
            GREATEST(
              (SELECT COUNT(DISTINCT lr.canonical_name)::int FROM lab_results lr
                 WHERE lr.patient_id = $1
@@ -806,6 +826,8 @@ router.get("/visit/:patientId", async (req, res) => {
         pending_labs: 0,
         recent_labs: 0,
         recent_labs_date: null,
+        partial_labs: 0,
+        partial_labs_date: null,
         uploaded_labs: 0,
         uploaded_labs_date: null,
       },

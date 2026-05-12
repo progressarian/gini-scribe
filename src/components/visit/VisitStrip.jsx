@@ -23,6 +23,13 @@ const VisitStrip = memo(function VisitStrip({
     if (labStatus.pending_labs > 0) {
       chips.push({ label: "🔬 Gini Lab Processing", tone: "ss-a" });
     }
+    if (labStatus.partial_labs > 0) {
+      chips.push({
+        label: "🟡 Gini Lab Partial",
+        tone: "ss-a",
+        date: labStatus.partial_labs_date ? fmtDate(labStatus.partial_labs_date) : null,
+      });
+    }
     if (labStatus.recent_labs > 0) {
       chips.push({
         label: "✅ Gini Lab Received",
