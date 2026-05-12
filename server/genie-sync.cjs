@@ -2300,6 +2300,9 @@ async function sendMessageToConversation({
   attachmentPath = null,
   attachmentMime = null,
   attachmentName = null,
+  messageType = null,
+  sideEffectId = null,
+  teamOnly = false,
 } = {}) {
   if (!conversationId) {
     console.error('[conv sendMessage] missing conversationId');
@@ -2335,6 +2338,9 @@ async function sendMessageToConversation({
     attachment_path: attachmentPath || null,
     attachment_mime: attachmentMime || null,
     attachment_name: attachmentName || null,
+    message_type: messageType || 'chat',
+    side_effect_id: sideEffectId || null,
+    team_only: !!teamOnly,
   };
 
   // Insert with column-drop + NOT-NULL recovery loop:

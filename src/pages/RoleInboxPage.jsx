@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import { genieSupabase, hasGenieRealtime } from "../lib/genieSupabase.js";
@@ -246,6 +247,96 @@ function AttachmentBubble({ message, conversationId, onOpen, variant = "received
   );
 }
 
+// Inline resolve action rendered inside a side-effect log bubble. Calls
+// PATCH /api/side-effects/:id and on success refetches the conversation so
+// the team-posted resolution bubble appears.
+function SideEffectResolveAction({ sideEffectId, conversationId, initialStatus }) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [doneStatus, setDoneStatus] = useState(initialStatus === "resolved" ? "resolved" : null);
+  const [error, setError] = useState(null);
+
+  const onClick = async (nextStatus) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.patch(`/api/side-effects/${sideEffectId}`, { status: nextStatus });
+      setDoneStatus(nextStatus);
+      // Force refetch (not just invalidate) so the team-posted resolution
+      // bubble lands in the thread immediately rather than after polling.
+      await queryClient.refetchQueries({
+        queryKey: qk.messages.conversationMessages(conversationId),
+      });
+      queryClient.invalidateQueries({ queryKey: ["side-effects"] });
+    } catch (e) {
+      setError(e?.response?.data?.error || e?.message || "Failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (doneStatus === "resolved") {
+    return (
+      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            padding: "2px 8px",
+            borderRadius: 999,
+            background: "#d1fae5",
+            color: "#047857",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          ✓ Resolved
+        </span>
+        <button
+          onClick={() => onClick("active")}
+          disabled={busy}
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "2px 8px",
+            borderRadius: 6,
+            border: "1px solid #cbd5e1",
+            background: "#fff",
+            color: "#475569",
+            cursor: busy ? "not-allowed" : "pointer",
+          }}
+        >
+          {busy ? "…" : "Re-open"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => onClick("resolved")}
+        disabled={busy}
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          padding: "6px 12px",
+          borderRadius: 6,
+          border: "1px solid #10b981",
+          background: "#10b981",
+          color: "#fff",
+          cursor: busy ? "not-allowed" : "pointer",
+          opacity: busy ? 0.7 : 1,
+        }}
+      >
+        {busy ? "Saving…" : "✓ Mark resolved"}
+      </button>
+      {error && <div style={{ fontSize: 11, color: "#b91c1c", marginTop: 4 }}>{error}</div>}
+    </div>
+  );
+}
+
 // Shared team inbox (Lab / Reception). Unlike the doctor inbox, all scribe
 // users see the same conversations here — these are team-shared queues.
 export default function RoleInboxPage({ role, title, senderLabel, defaultSenderName }) {
@@ -253,7 +344,33 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
   const convQuery = useConversations(role);
   const conversations = convQuery.data || [];
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeId, setActiveId] = useState(null);
+
+  // Deep-link support: /reception-inbox?conversation=<id> or ?patient=<id>
+  // auto-selects the conversation once the list loads. We strip the param
+  // after applying it so reload/back doesn't keep forcing the selection.
+  useEffect(() => {
+    if (!conversations.length) return;
+    const wantConv = searchParams.get("conversation");
+    const wantPatient = searchParams.get("patient");
+    if (!wantConv && !wantPatient) return;
+    const match = wantConv
+      ? conversations.find((c) => String(c.id) === String(wantConv))
+      : conversations.find(
+          (c) =>
+            String(c.patient?.gini_patient_id || "") === String(wantPatient) ||
+            String(c.patient_id) === String(wantPatient),
+        );
+    if (match) {
+      setActiveId(match.id);
+      const next = new URLSearchParams(searchParams);
+      next.delete("conversation");
+      next.delete("patient");
+      setSearchParams(next, { replace: true });
+    }
+  }, [conversations, searchParams, setSearchParams]);
+
   const activeConv = useMemo(
     () => conversations.find((c) => c.id === activeId) || null,
     [conversations, activeId],
@@ -868,6 +985,7 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
             ) : (
               threadMessages.map((m, i) => {
                 const isTeam = m.direction === "inbound";
+                const isSideEffectLog = m.message_type === "side_effect_log";
                 return (
                   <div
                     key={m.id || `idx-${i}`}
@@ -875,7 +993,37 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                   >
                     <div
                       className={`messages__msg-bubble ${isTeam ? "messages__msg-bubble--doctor" : "messages__msg-bubble--patient"}`}
+                      style={
+                        isSideEffectLog
+                          ? isTeam
+                            ? {
+                                borderLeft: "4px solid #dc2626",
+                                background: "#fef3c7",
+                                color: "#0f172a",
+                              }
+                            : { borderLeft: "4px solid #dc2626", background: "#fffbeb" }
+                          : undefined
+                      }
                     >
+                      {isSideEffectLog && (
+                        <div
+                          style={{
+                            display: "inline-block",
+                            fontSize: 10,
+                            fontWeight: 800,
+                            color: "#b91c1c",
+                            background: "#fee2e2",
+                            border: "1px solid #fecaca",
+                            borderRadius: 999,
+                            padding: "2px 8px",
+                            marginBottom: 6,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.4,
+                          }}
+                        >
+                          🩺 Side-effect log · follow up
+                        </div>
+                      )}
                       {m.attachment_path && (
                         <div style={{ marginBottom: m.message ? 6 : 0 }}>
                           <AttachmentBubble
@@ -887,6 +1035,15 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                         </div>
                       )}
                       {m.message && <div className="messages__msg-text">{m.message}</div>}
+                      {isSideEffectLog && m.side_effect_id && !m.team_only && !isTeam && (
+                        <SideEffectResolveAction
+                          sideEffectId={m.side_effect_id}
+                          conversationId={activeId}
+                          initialStatus={
+                            /status:\s*resolved/i.test(m.message || "") ? "resolved" : "active"
+                          }
+                        />
+                      )}
                       <div className="messages__msg-meta">
                         {m.sender_name || (isTeam ? senderLabel : "Patient")} ·{" "}
                         {new Date(m.created_at).toLocaleTimeString("en-IN", {

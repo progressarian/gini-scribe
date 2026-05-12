@@ -367,6 +367,12 @@
 }
 .messages__msg-text {
   font-size: 12px;
+  /* Preserve newlines from messages composed with \n (e.g. side-effect log
+     bullets) so each bullet renders on its own line. word-wrap so long
+     URLs / unbroken strings still wrap inside the bubble. */
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 .messages__msg-meta {
   font-size: 9px;

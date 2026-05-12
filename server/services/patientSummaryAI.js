@@ -171,9 +171,27 @@ function tryParseJson(raw) {
 
 function firstName(name) {
   const HONORIFICS = new Set([
-    "mr", "mrs", "ms", "miss", "mx", "dr", "doctor", "prof", "professor",
-    "sir", "madam", "shri", "smt", "shrimati", "sri", "kumari", "km",
-    "master", "mast", "baby", "bby",
+    "mr",
+    "mrs",
+    "ms",
+    "miss",
+    "mx",
+    "dr",
+    "doctor",
+    "prof",
+    "professor",
+    "sir",
+    "madam",
+    "shri",
+    "smt",
+    "shrimati",
+    "sri",
+    "kumari",
+    "km",
+    "master",
+    "mast",
+    "baby",
+    "bby",
   ]);
   const tokens = String(name || "")
     .trim()

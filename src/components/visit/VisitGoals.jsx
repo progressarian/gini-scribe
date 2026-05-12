@@ -175,8 +175,8 @@ export default function VisitGoals({ patientId, goals = [] }) {
             border: "1px solid #e2e8f0",
             borderRadius: 6,
             padding: 10,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr 1fr auto auto",
+            display: "flex",
+            flexWrap: "wrap",
             gap: 6,
             alignItems: "center",
           }}
@@ -247,4 +247,6 @@ const inputStyle = {
   border: "1px solid #cbd5e1",
   borderRadius: 4,
   outline: "none",
+  flex: "1 1 140px",
+  minWidth: 0,
 };

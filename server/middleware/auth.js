@@ -63,6 +63,9 @@ const PUBLIC_PATTERNS = [
   // Patient-app pre-visit medication-compliance save. Same scoping/ownership
   // pattern as pre-visit symptoms above.
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-compliance$/,
+  // Patient-app reported side-effect notification → reception inbox.
+  // Same scoping pattern as the above: patient_id in the URL path.
+  /^\/api\/patients\/[^/]+\/side-effects\/notify$/,
 ];
 
 export const requireAuth = (req, res, next) => {

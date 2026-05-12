@@ -22,6 +22,54 @@ const router = Router();
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
+// Back-fill `side_effect_id` on side_effect_log bubbles whose insert dropped
+// the column (genie Supabase missing the 2026-05-12_patient_messages_side_effect_id
+// migration — see myhealthgenie/supabase/migrations/). Without it, the
+// reception inbox can't render the in-bubble "Mark resolved" action because
+// SideEffectResolveAction renders only when m.side_effect_id is set. We parse
+// the "Symptom:" line out of the message body and resolve it against
+// patient_reported_side_effects on the scribe DB. Best-effort — failures
+// leave the row untouched and the message still renders normally.
+async function hydrateSideEffectIds(conv, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const needs = rows.filter(
+    (m) => m && m.message_type === "side_effect_log" && !m.side_effect_id && m.message,
+  );
+  if (needs.length === 0) return;
+  const scribePatientId = await resolveScribePatientIdFromGenieUuid(conv?.patient_id);
+  if (scribePatientId == null) return;
+  const nameByRow = new Map();
+  const names = new Set();
+  for (const r of needs) {
+    const m = String(r.message || "").match(/Symptom:\s*([^\n]+)/i);
+    const name = m ? m[1].trim() : "";
+    if (!name) continue;
+    nameByRow.set(r, name.toLowerCase());
+    names.add(name.toLowerCase());
+  }
+  if (names.size === 0) return;
+  try {
+    const { rows: seRows } = await pool.query(
+      `SELECT id, lower(name) AS lname, reported_at
+         FROM patient_reported_side_effects
+        WHERE patient_id = $1 AND lower(name) = ANY($2::text[])
+        ORDER BY reported_at DESC`,
+      [scribePatientId, Array.from(names)],
+    );
+    const byName = new Map();
+    for (const r of seRows) {
+      if (!byName.has(r.lname)) byName.set(r.lname, r.id);
+    }
+    for (const row of needs) {
+      const lname = nameByRow.get(row);
+      const id = lname ? byName.get(lname) : null;
+      if (id) row.side_effect_id = id;
+    }
+  } catch (e) {
+    console.warn("[hydrateSideEffectIds]", e?.message || e);
+  }
+}
+
 // Load a conversation and run the standard viewer-authorization check:
 //   - doctor conversations: the caller must be the participant doctor
 //   - lab / reception: any authenticated scribe user may view (team inboxes)
@@ -120,6 +168,7 @@ router.get("/conversations/:id/messages", async (req, res) => {
     const limit = limitRaw && limitRaw > 0 ? Math.min(limitRaw, 200) : 30;
     const before = req.query.before || null;
     const result = await genie.getConversationMessages(conv.id, { limit, before });
+    await hydrateSideEffectIds(conv, result?.data);
     res.json(result);
   } catch (e) {
     handleError(res, e, "Conversation messages");

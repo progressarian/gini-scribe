@@ -68,6 +68,7 @@ const NAV_ITEMS = [
   { path: "/lab-portal", label: "🔬 Upload", show: (s) => s.isLabRole },
   { path: "/refills", label: "💊 Refills", show: () => true },
   { path: "/dose-change-requests", label: "⚕️ Dose Reviews", show: () => true },
+  { path: "/side-effects", label: "💊 Side FX", show: (s) => !s.isLabRole },
   // { path: "/messages", label: "💬 Messages", show: () => true, badge: (s) => s.unreadCount > 0 },
   { path: "/reception-inbox", label: "🏥 Reception", show: (s) => !s.isLabRole },
   { path: "/lab-inbox", label: "🔬 Lab Chat", show: () => true },
