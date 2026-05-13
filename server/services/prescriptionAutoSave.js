@@ -22,6 +22,7 @@ import { sanitizeForStorageKey } from "../utils/storageKey.js";
 import { generatePrescriptionPdf, buildPrescriptionFileName } from "./prescriptionHtmlPdf.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { computeCarePhase } from "../utils/carePhase.js";
+import { generatePatientSummary } from "./patientSummaryAI.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -95,6 +96,25 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
         skipped: true,
         reason: "empty-payload",
       };
+    }
+  }
+
+  // Generate patient summary before PDF if not already present in payload.
+  if (!data.visitSummaryText) {
+    try {
+      const summaryResult = await generatePatientSummary(data);
+      data = { ...data, visitSummaryText: summaryResult.body };
+      // Persist back to appointments so future fetches see it.
+      if (appointmentId) {
+        pool.query(
+          "UPDATE appointments SET post_visit_summary=$1 WHERE id=$2",
+          [summaryResult.body, appointmentId],
+        ).catch((e) =>
+          console.warn("[prescriptionAutoSave] post_visit_summary update skipped:", e.message),
+        );
+      }
+    } catch (summaryErr) {
+      console.warn("[prescriptionAutoSave] Summary generation skipped:", summaryErr.message);
     }
   }
 
