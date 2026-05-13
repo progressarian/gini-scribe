@@ -21,6 +21,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/st
 import { sanitizeForStorageKey } from "../utils/storageKey.js";
 import { generatePrescriptionPdf, buildPrescriptionFileName } from "./prescriptionHtmlPdf.js";
 import { getCanonical } from "../utils/labCanonical.js";
+import { computeCarePhase } from "../utils/carePhase.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -314,9 +315,12 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     const diff = Date.now() - new Date(firstVisitDate).getTime();
     monthsWithGini = Math.floor(diff / (1000 * 60 * 60 * 24 * 30));
   }
-  let carePhase = "Phase 1 · Control";
-  if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
-  else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
+  const { carePhase } = computeCarePhase({
+    labHistory,
+    vitals: vitalsR.rows,
+    totalVisits,
+    diagnoses: activeDxR.rows,
+  });
 
   const latestVitals = vitalsR.rows[0] || {};
   const prevVitals = vitalsR.rows[1] || {};

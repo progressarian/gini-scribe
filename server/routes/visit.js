@@ -6,6 +6,7 @@ import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
+import { computeCarePhase } from "../utils/carePhase.js";
 import { LAB_MAP } from "./opd.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
@@ -652,10 +653,14 @@ router.get("/visit/:patientId", async (req, res) => {
       monthsWithGini = Math.floor(diff / (1000 * 60 * 60 * 24 * 30));
     }
 
-    // Care phase based on visit count
-    let carePhase = "Phase 1 · Control";
-    if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
-    else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
+    // Care phase derived from HbA1c trajectory (falls back to visit count when
+    // no HbA1c data exists). Computed below — after labHistory is fully
+    // enriched from appointment biomarkers — so the placeholders here let the
+    // existing references resolve until the real values are filled in.
+    let carePhase = "Phase 1 · Uncontrolled";
+    let carePhaseBasis = "visits";
+    let carePhaseDrivers = [];
+    let carePhaseParameters = [];
 
     // Load doctor note + compliance + assigned doctor from active OPD appointment if present
     let apptDoctorNote = null;
@@ -754,6 +759,19 @@ router.get("/visit/:patientId", async (req, res) => {
         arr.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
       }
     }
+
+    // Now that labHistory is fully enriched (lab_results + appointment
+    // biomarkers), derive carePhase/trend from HbA1c trajectory.
+    // mergedVitals is built later, but vitalsR.rows is already available and
+    // carries every doctor-side reading (bp_sys/bp_dia/bmi). That's enough for
+    // phase scoring — patient-app-logged vitals only refine, not redefine.
+    ({ carePhase, carePhaseBasis, carePhaseDrivers, carePhaseParameters } =
+      computeCarePhase({
+        labHistory,
+        vitals: vitalsR.rows,
+        totalVisits,
+        diagnoses: diagnosesR.rows,
+      }));
 
     const prep = {
       medPct: apptCompliance.medPct ?? null,
@@ -896,6 +914,9 @@ router.get("/visit/:patientId", async (req, res) => {
         firstVisitDate,
         monthsWithGini,
         carePhase,
+        carePhaseBasis,
+        carePhaseDrivers,
+        carePhaseParameters,
       },
       latestAppointmentId: latestAnyApptR.rows[0]?.id || null,
       latestAppointment: latestAnyApptR.rows[0]

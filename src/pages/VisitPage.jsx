@@ -1,5 +1,6 @@
 import "./VisitPage.css";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { makeNavClick } from "../lib/navClick";
 import { useQueryClient } from "@tanstack/react-query";
@@ -95,6 +96,193 @@ const sySelStyle = (s) => {
   if (v === "got worse") return { color: "var(--red)", borderColor: "var(--red)" };
   return {};
 };
+
+function CarePhasePill({ summary }) {
+  const triggerRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+
+  const updateCoords = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setCoords({ top: r.bottom + 6, left: r.right });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateCoords();
+    window.addEventListener("scroll", updateCoords, true);
+    window.addEventListener("resize", updateCoords);
+    return () => {
+      window.removeEventListener("scroll", updateCoords, true);
+      window.removeEventListener("resize", updateCoords);
+    };
+  }, [open, updateCoords]);
+
+  const phaseName = String(summary.carePhase || "");
+  const phasePalette = phaseName.includes("Uncontrolled")
+    ? { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" }
+    : phaseName.includes("Maintain")
+      ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
+      : phaseName.includes("Sustain")
+        ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
+        : phaseName.includes("Controlled")
+          ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
+          : { fg: "var(--t2)", bg: "var(--bg2, #f4f4f5)", bd: "var(--bd, #e5e7eb)" };
+
+  const palette = phasePalette;
+
+  const basis = summary.carePhaseBasis;
+  const params = summary.carePhaseParameters || [];
+  const drivers = new Set(summary.carePhaseDrivers || []);
+  const category = summary.carePhaseCategory;
+  const categoryLabel =
+    category === "diabetes"
+      ? "Diabetes targets"
+      : category === "prediabetes"
+        ? "Prediabetes targets"
+        : null;
+
+  const statusStyle = (s) =>
+    s === "controlled"
+      ? { color: "var(--green)", label: "✓ Controlled" }
+      : s === "borderline"
+        ? { color: "var(--amber)", label: "● Borderline" }
+        : { color: "var(--red)", label: "✕ Uncontrolled" };
+
+  const trendIcon = (t) =>
+    t === "improving" ? "↓" : t === "worsening" ? "↑" : t === "stable" ? "→" : "—";
+
+  const phaseReason =
+    basis === "clinical"
+      ? drivers.size
+        ? `Driven by: ${[...drivers].join(", ")}`
+        : "All parameters in target"
+      : "No HbA1c, BP, lipid or BMI readings on file yet — add a lab or vitals entry to compute a phase.";
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        tabIndex={0}
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: palette.fg,
+          background: palette.bg,
+          padding: "3px 10px",
+          borderRadius: 20,
+          border: `1px solid ${palette.bd}`,
+          cursor: "help",
+        }}
+      >
+        {summary.carePhase}
+      </span>
+      {open &&
+        createPortal(
+          <div
+            onMouseEnter={() => setOpen(true)}
+            onMouseLeave={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              top: coords.top,
+              left: coords.left,
+              transform: "translateX(-100%)",
+              zIndex: 99999,
+              minWidth: 320,
+              maxWidth: 380,
+              padding: "10px 12px",
+              background: "var(--bg1, #fff)",
+              border: "1px solid var(--bd, #e5e7eb)",
+              borderRadius: 8,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: "var(--t1)",
+              textAlign: "left",
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Why {summary.carePhase}?</div>
+            <div style={{ marginBottom: 6, color: "var(--t2)" }}>{phaseReason}</div>
+
+            {params.length > 0 ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto auto",
+                  columnGap: 10,
+                  rowGap: 4,
+                  marginTop: 6,
+                  paddingTop: 6,
+                  borderTop: "1px solid var(--bd, #eee)",
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "var(--t3)" }}>Parameter</div>
+                <div style={{ fontWeight: 700, color: "var(--t3)" }}>Latest</div>
+                <div style={{ fontWeight: 700, color: "var(--t3)" }}>Target</div>
+                <div style={{ fontWeight: 700, color: "var(--t3)" }}>Status</div>
+                {params.map((p) => {
+                  const st = statusStyle(p.status);
+                  const isDriver = drivers.has(p.key);
+                  return (
+                    <Fragment key={p.key}>
+                      <div
+                        style={{
+                          fontWeight: isDriver ? 700 : 500,
+                          color: isDriver ? "var(--t1)" : "var(--t2)",
+                        }}
+                        title={
+                          p.prev != null
+                            ? `Prev: ${p.prev} ${p.unit || ""} · ${
+                                p.prevDate ? fmtDateShort(p.prevDate) : ""
+                              }`
+                            : ""
+                        }
+                      >
+                        {p.label}
+                      </div>
+                      <div style={{ color: "var(--t1)", whiteSpace: "nowrap" }}>
+                        {trendIcon(p.trend)} {p.latest}
+                        {p.unit ? ` ${p.unit}` : ""}
+                      </div>
+                      <div style={{ color: "var(--t3)", whiteSpace: "nowrap" }}>
+                        {p.target || "—"}
+                      </div>
+                      <div style={{ color: st.color, whiteSpace: "nowrap" }}>{st.label}</div>
+                    </Fragment>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ color: "var(--t3)", marginTop: 4 }}>
+                No HbA1c / BP / lipid / BMI readings yet.
+              </div>
+            )}
+
+            <div
+              style={{
+                marginTop: 8,
+                paddingTop: 6,
+                borderTop: "1px solid var(--bd, #eee)",
+                color: "var(--t3)",
+                fontSize: 10,
+              }}
+            >
+              Worst-controlled parameter sets the phase. Trend = net direction across all
+              parameters with a prior reading.
+              {categoryLabel ? ` ${categoryLabel} applied (HbA1c / LDL).` : ""}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 function VisitSymptomsSection({ symptoms = [], onAddSymptom, onStatusChange }) {
   const symptomSummary = useMemo(() => {
@@ -1090,19 +1278,7 @@ export default function VisitPage() {
               </button>
             ))}
             <div className="stabs-r">
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "var(--green)",
-                  background: "var(--grn-lt)",
-                  padding: "3px 10px",
-                  borderRadius: 20,
-                  border: "1px solid var(--grn-bd)",
-                }}
-              >
-                ↓ Improving — {summary.carePhase}
-              </span>
+              <CarePhasePill summary={summary} />
             </div>
           </div>
 

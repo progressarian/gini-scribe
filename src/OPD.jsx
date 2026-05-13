@@ -727,11 +727,10 @@ function ApptRow({ a, sel, onSelect }) {
 // ══════════════════════════════════════════════════════════════
 // DOCTOR SECTION (collapsible)
 // ══════════════════════════════════════════════════════════════
-function DocSection({ docName, appts, selAppt, onSelect }) {
+function DocSection({ docName, appts, selAppt, onSelect, filterStatus }) {
   const [open, setOpen] = useState(true);
-  const seen = appts.filter(
-    (a) => a.status === "seen" || a.status === "completed" || a.status === "in_visit",
-  ).length;
+  const seen = appts.filter((a) => a.status === "seen" || a.status === "completed").length;
+  const showSeen = filterStatus === "all" || filterStatus === "seen";
   const initials =
     docName
       .replace(/^Dr\.\s*/i, "")
@@ -781,8 +780,13 @@ function DocSection({ docName, appts, selAppt, onSelect }) {
           <div
             style={{ fontSize: 9, color: INK3, textTransform: "uppercase", letterSpacing: ".07em" }}
           >
-            {appts.length} patients ·{" "}
-            <span style={{ color: GN, fontWeight: 600 }}>{seen} seen</span>
+            {appts.length} patients
+            {showSeen && (
+              <>
+                {" · "}
+                <span style={{ color: GN, fontWeight: 600 }}>{seen} seen</span>
+              </>
+            )}
           </div>
         </div>
         <div
@@ -7404,6 +7408,7 @@ export default function OPD() {
                           appts={appts}
                           selAppt={selAppt}
                           onSelect={selectAppt}
+                          filterStatus={filterStatus}
                         />
                       ))}
                 </div>

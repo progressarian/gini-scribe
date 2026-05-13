@@ -811,6 +811,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
 }) {
   const [viewingDoc, setViewingDoc] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null); // null = "Latest"
+  const [labSearch, setLabSearch] = useState("");
   const patient = usePatientStore((s) => s.patient);
 
   // On the Labs tab we want every uploaded document to be visible except
@@ -878,6 +879,53 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   }, [selectedDate, labResults, labOrders]);
 
   const hasResults = displayRows.length > 0;
+
+  const filteredSections = useMemo(() => {
+    const q = labSearch.trim().toLowerCase();
+    if (!q) return sections;
+    return sections
+      .map((sec) => {
+        const sectionMatch = (sec.name || "").toLowerCase().includes(q);
+        const results = sectionMatch
+          ? sec.results
+          : sec.results.filter((r) => {
+              const tn = (r.test_name || "").toLowerCase();
+              const cn = (r.canonical || "").toLowerCase();
+              const val = String(r.value ?? r.result_value ?? "").toLowerCase();
+              return tn.includes(q) || cn.includes(q) || val.includes(q);
+            });
+        return { ...sec, results };
+      })
+      .filter((sec) => sec.results.length > 0);
+  }, [sections, labSearch]);
+
+  // Matches per date across all labResults — used to annotate the date-strip
+  // pills with hit counts (and to dim dates that have zero matches for the
+  // active query). Returns null when there's no active search.
+  const dateMatchCounts = useMemo(() => {
+    const q = labSearch.trim().toLowerCase();
+    if (!q || !labResults?.length) return null;
+    const counts = {};
+    for (const d of availableDates) counts[d] = 0;
+    for (const r of labResults) {
+      const d = r.test_date?.slice(0, 10);
+      if (!d || !(d in counts)) continue;
+      const tn = (r.test_name || "").toLowerCase();
+      const cn = (r.canonical_name || "").toLowerCase();
+      const val = String(r.result ?? r.result_text ?? "").toLowerCase();
+      const pn = (r.panel_name || "").toLowerCase();
+      if (tn.includes(q) || cn.includes(q) || val.includes(q) || pn.includes(q)) {
+        counts[d] = (counts[d] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [labSearch, labResults, availableDates]);
+
+  // Total matches in the currently displayed date.
+  const visibleMatchCount = useMemo(() => {
+    if (!labSearch.trim()) return null;
+    return filteredSections.reduce((n, sec) => n + sec.results.length, 0);
+  }, [filteredSections, labSearch]);
 
   return (
     <>
@@ -1058,7 +1106,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
               className="sch"
               style={{ flexDirection: "column", alignItems: "stretch", gap: 8, overflow: "hidden" }}
             >
-              <div style={{ display: "flex", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div className="sct">
                   <div className="sci ic-b">📋</div>
                   Test Results
@@ -1069,6 +1117,89 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                       {selectedDate === null ? "Latest — " : ""}
                       {fmtDate(displayDate)}
                     </span>
+                  )}
+                  {visibleMatchCount != null && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        marginLeft: 8,
+                        padding: "2px 8px",
+                        borderRadius: 20,
+                        background: visibleMatchCount > 0 ? "#e0f2fe" : "#fee2e2",
+                        color: visibleMatchCount > 0 ? "#0284c7" : "#b91c1c",
+                      }}
+                    >
+                      {visibleMatchCount} {visibleMatchCount === 1 ? "match" : "matches"}
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
+                    marginLeft: "auto",
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      color: "#94a3b8",
+                      pointerEvents: "none",
+                      fontSize: 12,
+                      lineHeight: 1,
+                    }}
+                    aria-hidden="true"
+                  >
+                    🔍
+                  </span>
+                  <input
+                    type="text"
+                    value={labSearch}
+                    onChange={(e) => setLabSearch(e.target.value)}
+                    placeholder="Search tests, panels, or values…"
+                    style={{
+                      padding: "6px 28px 6px 30px",
+                      fontSize: 12,
+                      border: `1px solid ${labSearch ? "#0284c7" : "#e2e8f0"}`,
+                      borderRadius: 8,
+                      outline: "none",
+                      width: 220,
+                      background: "white",
+                      color: "#0f172a",
+                      boxShadow: labSearch ? "0 0 0 3px rgba(2,132,199,0.12)" : "none",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                    }}
+                  />
+                  {labSearch && (
+                    <button
+                      onClick={() => setLabSearch("")}
+                      title="Clear"
+                      style={{
+                        position: "absolute",
+                        right: 6,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "#f1f5f9",
+                        border: "none",
+                        borderRadius: "50%",
+                        cursor: "pointer",
+                        color: "#475569",
+                        fontSize: 11,
+                        lineHeight: 1,
+                        width: 18,
+                        height: 18,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      ×
+                    </button>
                   )}
                 </div>
               </div>
@@ -1091,11 +1222,18 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                     const isActive = isLatest
                       ? selectedDate === null || selectedDate === d
                       : selectedDate === d;
+                    const matchCount = dateMatchCounts ? dateMatchCounts[d] || 0 : null;
+                    const hasZeroMatches = dateMatchCounts != null && matchCount === 0;
                     return (
                       <button
                         key={d}
                         onClick={() =>
                           setSelectedDate(isLatest && isActive ? null : isActive ? null : d)
+                        }
+                        title={
+                          dateMatchCounts != null
+                            ? `${matchCount} ${matchCount === 1 ? "match" : "matches"} for "${labSearch}"`
+                            : undefined
                         }
                         style={{
                           padding: "4px 10px",
@@ -1110,7 +1248,8 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                           gap: 4,
                           flexShrink: 0,
                           background: isActive ? "#0f172a" : "white",
-                          color: isActive ? "white" : "#64748b",
+                          color: isActive ? "white" : hasZeroMatches ? "#cbd5e1" : "#64748b",
+                          opacity: hasZeroMatches && !isActive ? 0.6 : 1,
                           transition: "all 0.15s",
                         }}
                       >
@@ -1131,6 +1270,30 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                             Latest
                           </span>
                         )}
+                        {dateMatchCounts != null && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "1px 5px",
+                              borderRadius: 10,
+                              minWidth: 16,
+                              textAlign: "center",
+                              background: isActive
+                                ? "rgba(255,255,255,0.25)"
+                                : matchCount > 0
+                                  ? "#dcfce7"
+                                  : "#f1f5f9",
+                              color: isActive
+                                ? "white"
+                                : matchCount > 0
+                                  ? "#15803d"
+                                  : "#94a3b8",
+                            }}
+                          >
+                            {matchCount}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -1138,8 +1301,8 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
               )}
             </div>
             <div className="scb">
-              {sections.length > 0 ? (
-                sections.map((sec, i) => (
+              {filteredSections.length > 0 ? (
+                filteredSections.map((sec, i) => (
                   <PanelBlock
                     key={`${sec.name}-${i}`}
                     name={sec.name}
@@ -1150,7 +1313,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                 ))
               ) : (
                 <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
-                  No results for this date
+                  {labSearch ? `No tests match "${labSearch}"` : "No results for this date"}
                 </div>
               )}
             </div>

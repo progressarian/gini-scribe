@@ -203,7 +203,17 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       // Dedupe by diagnosis_id — Postgres ON CONFLICT cannot touch the same row twice in one statement.
       const dxMap = new Map();
       for (const d of moData?.diagnoses || []) {
-        if (d?.id && d?.label) dxMap.set(t(d.id, 100), d);
+        // Reject diagnoses whose label has no alphabetic chars (e.g. stray numeric
+        // tokens like "24009" that the AI sometimes emits from dates/IDs/lab values).
+        if (!d?.label || !/[a-zA-Z]/.test(d.label)) continue;
+        // If d.id is missing or purely numeric, derive a slug from the label so
+        // diagnosis_id stays human-readable and dedupes across visits.
+        const slug =
+          d.id && /[a-zA-Z]/.test(String(d.id))
+            ? String(d.id)
+            : d.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+        if (!slug) continue;
+        dxMap.set(t(slug, 100), { ...d, id: slug });
       }
       const dxRows = Array.from(dxMap.values()).filter((d) => d?.id && d?.label);
       if (dxRows.length) {
@@ -585,7 +595,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     }
 
     for (const d of diagnoses || []) {
-      if (d && (d.id || d.label)) {
+      if (d && (d.id || d.label) && /[a-zA-Z]/.test(d.label || "")) {
         await client.query(
           `INSERT INTO diagnoses (patient_id, consultation_id, diagnosis_id, label, status)
            VALUES ($1,$2,$3,$4,$5)
@@ -597,7 +607,12 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
           [
             patientId,
             cid,
-            d.id || d.label.toLowerCase().replace(/\s+/g, "_"),
+            // If d.id is missing OR is purely numeric (e.g. a HealthRay condition
+            // numeric ID leaked into the payload), derive the slug from the label
+            // so the diagnosis_id is human-readable and stable across visits.
+            d.id && /[a-zA-Z]/.test(String(d.id))
+              ? d.id
+              : d.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""),
             d.label,
             n(d.status) || "New",
           ],

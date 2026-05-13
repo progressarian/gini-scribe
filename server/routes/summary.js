@@ -5,6 +5,7 @@ import { runSummaryRules } from "../services/summaryRules.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
 import { buildVisitLabContext } from "../services/visitLabContext.js";
+import { computeCarePhase } from "../utils/carePhase.js";
 
 const router = Router();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -43,6 +44,13 @@ If the supplied time-on-programme is "new patient (first visit today)", REPLACE 
 "<Full Name> is a <age>-year-old <woman|man>, here today for her/his first visit on the Gini programme; she/he is currently in <Care Phase>."
 Do NOT mention any duration, "0m", "0d", or "for 0 ..." — the patient is brand new today.
 
+FREQUENT-VISITOR INLINE RULE: The input carries a "Frequent-visitor flag" line.
+- If the flag is YES, append a short parenthetical to the FIRST sentence of the opener stating the count, immediately after the visit-number clause. Prefer the 7-day count if the 7-day threshold is met (>=3); otherwise use the 30-day count. Examples:
+  - 7-day qualifies: "...here today for his 14th visit (5 visits in the last 7 days); he has been with us..."
+  - only 30-day qualifies: "...here today for his 14th visit (6 visits in the last 30 days); he has been with us..."
+- If the flag is NO, do NOT mention recent visit frequency anywhere in the brief — not in the opener, not in any paragraph, not in alerts.
+- Never speculate on the reason for frequent visits — state the count only.
+
 After that opener, the narrative must continue as 130–180 words of flowing prose split into THREE short paragraphs separated by a blank line ("\\n\\n"):
 
 Paragraph 1 — Identity (one or two sentences, MUST start with the full name using the required opening pattern). Identify name → age → sex → visit number → time on Gini programme → care phase. Nothing clinical yet.
@@ -70,10 +78,20 @@ DIAGNOSIS FORMAT STANDARD (applies to EVERY diagnosis you mention — primary, c
 
 NUMBER FORMAT STANDARD (applies to every biomarker, vital, or lab value you cite, in narrative AND alerts):
 - Always cite a value WITH its unit (e.g. "7.7%", "124 mg/dL", "143/96 mmHg", "108 mL/min/1.73m²", "10.4 g/dL"). Never a bare number.
-- Whenever a previous value is available in the input, state the current value AND the previous value in the form "<current> <unit> from <previous> <unit>" (e.g. "HbA1c 7.7% from 5.1%", "FBS 124 mg/dL from 88 mg/dL", "haemoglobin 10.4 g/dL from 13.4 g/dL", "eGFR 108 mL/min/1.73m² from 92"). The unit may be omitted on the "from" half only when it is identical and obvious.
+- SINGLE-VALUE RULE: If the input shows only ONE value for a lab/biomarker (the lab line ends with "no prior value", or only the current reading is present with no "prev …" segment), cite ONLY that single value with its unit. DO NOT invent, fabricate, or imply a prior value. DO NOT use the "from" shape. DO NOT write "from baseline", "from previous", "stable from prior", or any phrase suggesting a comparison. Just state the single value, e.g. "TSH 5.22 µIU/mL" — and stop.
+- TWO-OR-MORE-VALUES RULE: When a previous value IS available in the input, state the current value AND the previous value in the form "<current> <unit> from <previous> <unit>" (e.g. "HbA1c 7.7% from 5.1%", "FBS 124 mg/dL from 88 mg/dL", "haemoglobin 10.4 g/dL from 13.4 g/dL", "eGFR 108 mL/min/1.73m² from 92"). The unit may be omitted on the "from" half only when it is identical and obvious.
 - Use this same "X from Y" shape for every value with a prior — do not mix "up to 7.7% from 5.1%", "down to 39 from 77", and "now 1.58, previously 1.4" within the same brief. One shape, applied uniformly across the narrative and all alert lines.
-- If no previous value exists, state the current value alone with its unit and do not invent a prior.
-- Every diagnosis mentioned in the narrative must be paired with at least one supporting number in this format.
+- STALE-VALUE RULE (data older than 1 year): Every lab line in the input carries a date in the form "(YYYY-MM-DD)". Compare the latest date against the visit date supplied in the input header. If the latest value for a lab is MORE THAN 1 YEAR OLD relative to today's visit, you MUST flag this inline by appending the source date so the doctor knows the number is dated. Use the exact shape: "<value> <unit> (as per data dated <Mon YYYY>)" — e.g. "TSH 5.22 µIU/mL (as per data dated Feb 2024)", or with a prior: "HbA1c 7.7% from 5.1% (as per data dated Mar 2024)". This applies in BOTH the narrative AND alerts. Do NOT silently cite a >1-year-old value as if it were current. For values within the last 12 months, do not add the date qualifier — cite them normally.
+- If no previous value exists, state the current value alone with its unit and do not invent a prior (see SINGLE-VALUE RULE above).
+- Every diagnosis mentioned in the narrative must be paired with at least one supporting number in this format (subject to the rules above — a single old value is still acceptable, just qualified with its date).
+- ABSENT-CORE-LAB RULE: If the patient carries a diagnosis but the corresponding CORE biomarker is NOT present in the lab panel below, state the absence explicitly in paragraph 2 — silence is not acceptable for a core biomarker tied to an active diagnosis. Use a short phrase like "His HbA1c is not on file." Map of diagnosis → required core biomarker(s):
+  - type 2 diabetes / type 1 diabetes / pre-diabetes / any glycaemic condition → HbA1c (and FBS if HbA1c also absent)
+  - CKD / diabetic nephropathy / any kidney disease → eGFR and/or Creatinine
+  - dyslipidaemia / CAD / IHD / stroke → LDL
+  - hypothyroidism / hyperthyroidism / Hashimoto's / thyroid disease → TSH
+  - MASLD / NAFLD / fatty liver / hepatitis → ALT (and/or AST)
+  - anaemia → Haemoglobin
+  If the relevant biomarker IS present in the lab panel, follow the normal number-format rules above and do NOT add an "is not on file" sentence.
 
 red_alerts, amber_alerts, green_notes are arrays of single-sentence items (max 3 each).
 
@@ -130,12 +148,26 @@ function formatLabs(labHistory) {
     return m ? Number(m[0]) : null;
   };
 
-  // Sort by recency of latest value, keep up to 25 tests to bound prompt size.
-  const ranked = entries
+  // Core chronic-care biomarkers that are ALWAYS relevant for this clinic's
+  // panel — pin them so a noisy CBC/urinalysis dump can't displace HbA1c, eGFR,
+  // LDL, TSH, etc. out of the top-25 prompt slice.
+  const CORE_TESTS = new Set([
+    "HbA1c", "FBS", "PPBS", "Random Glucose",
+    "eGFR", "Creatinine", "BUN", "Urea",
+    "LDL", "HDL", "Total Cholesterol", "Triglycerides",
+    "TSH", "Free T4", "Free T3", "T3", "T4",
+    "ALT", "AST", "Bilirubin",
+    "Haemoglobin", "Hemoglobin", "Vitamin D", "Vitamin B12",
+    "Urine ACR", "Urine Microalbumin",
+  ]);
+  const all = entries
     .map(([name, hist]) => ({ name, hist: Array.isArray(hist) ? hist : [] }))
     .filter((e) => e.hist.length > 0)
-    .sort((a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0))
-    .slice(0, 25);
+    .sort((a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0));
+  const core = all.filter((r) => CORE_TESTS.has(r.name));
+  const nonCore = all.filter((r) => !CORE_TESTS.has(r.name));
+  const ranked = [...core, ...nonCore.slice(0, Math.max(0, 25 - core.length))]
+    .sort((a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0));
 
   const lines = ranked.map(({ name, hist }) => {
     const latest = hist[0];
@@ -282,7 +314,9 @@ async function _generateAiBriefInner(
       : patient?.sex && /^f/i.test(patient.sex)
         ? "woman"
         : "patient";
+  const todayISO = new Date().toISOString().slice(0, 10);
   const userContent = [
+    `Today's visit date (use this as the reference point for the STALE-VALUE RULE — any lab dated more than 1 year before this date must be cited with "as per data dated <Mon YYYY>"): ${todayISO}`,
     `Patient full name (USE THIS VERBATIM as the very first words of the narrative): ${fullName}`,
     `Patient: ${patient?.name || "Unknown"}, ${patient?.age ?? "?"}y${patient?.sex ? ", " + patient.sex : ""}`,
     `Sex word (use in narrative opener): ${sexWord}`,
@@ -290,6 +324,8 @@ async function _generateAiBriefInner(
     `Patient ID / file: ${patient?.file_no || patient?.id || "—"}`,
     `Visit number: ${ctx.totalVisits ?? "?"}`,
     `Time on Gini programme: ${fmtDuration(ctx.monthsWithGini, ctx.daysWithGini)} (raw months: ${ctx.monthsWithGini ?? "?"}, raw days: ${ctx.daysWithGini ?? "?"})`,
+    `Recent visit frequency: ${ctx.visitsLast7d ?? 0} in last 7 days, ${ctx.visitsLast30d ?? 0} in last 30 days.`,
+    `Frequent-visitor flag: ${ctx.isFrequentVisitor ? "YES — surface this inline in paragraph 1 per the FREQUENT-VISITOR INLINE RULE." : "NO — do not mention recent visit frequency."}`,
     `Use the exact format above verbatim when stating duration in the narrative. If the value is "new patient (first visit today)", do NOT mention any time-on-programme phrase at all — instead frame the opener as a brand-new patient (e.g. "Shivani is a 43-year-old woman, here today for her first visit on the Gini programme."). Otherwise use "Xy Ym" / "Nm" / "Nd" exactly as given.`,
     `Care phase: ${ctx.carePhase ?? "?"}`,
     `Active medications count: ${ctx.activeMedsCount ?? "?"}`,
@@ -697,9 +733,23 @@ router.get("/patients/:id/summary", async (req, res) => {
       daysWithGini = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
       monthsWithGini = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30)));
     }
-    let carePhase = "Phase 1 · Control";
-    if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
-    else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
+    // Window counts for the FREQUENT-VISITOR INLINE RULE in the AI prompt.
+    // Threshold per spec: >=3 in last 7d OR >=5 in last 30d.
+    const _nowMs = Date.now();
+    const _DAY_MS = 1000 * 60 * 60 * 24;
+    const visitsLast7d = visitRows.filter(
+      (v) => v.visit_date && _nowMs - new Date(v.visit_date).getTime() <= 7 * _DAY_MS,
+    ).length;
+    const visitsLast30d = visitRows.filter(
+      (v) => v.visit_date && _nowMs - new Date(v.visit_date).getTime() <= 30 * _DAY_MS,
+    ).length;
+    const isFrequentVisitor = visitsLast7d >= 3 || visitsLast30d >= 5;
+    const { carePhase } = computeCarePhase({
+      labHistory,
+      vitals: mergedVitals,
+      totalVisits,
+      diagnoses: sortedDiagnoses,
+    });
 
     // ── 7. Generate AI brief (async, non-blocking for cache write) ──
     const ai = await generateAiBrief(patient, sortedDiagnoses, rules, labHistory, {
@@ -713,6 +763,9 @@ router.get("/patients/:id/summary", async (req, res) => {
       stoppedMeds: stoppedParents,
       vitals: mergedVitals,
       prep,
+      visitsLast7d,
+      visitsLast30d,
+      isFrequentVisitor,
     });
 
     const generatedAt = new Date().toISOString();

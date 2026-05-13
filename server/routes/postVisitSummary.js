@@ -4,6 +4,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
 import { buildVisitLabContext } from "../services/visitLabContext.js";
+import { computeCarePhase } from "../utils/carePhase.js";
 
 const router = Router();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -617,9 +618,12 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       daysWithGini = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
       monthsWithGini = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30)));
     }
-    let carePhase = "Phase 1 · Control";
-    if (totalVisits >= 10) carePhase = "Phase 3 · Sustain";
-    else if (totalVisits >= 4) carePhase = "Phase 2 · Stabilize";
+    const { carePhase } = computeCarePhase({
+      labHistory,
+      vitals: mergedVitals,
+      totalVisits,
+      diagnoses: diagnosesR.rows,
+    });
 
     // Doctor's free-text note from the saved consultation (if any)
     let doctorNote = null;

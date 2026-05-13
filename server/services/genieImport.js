@@ -96,6 +96,9 @@ function mapMedicationToScribe(m, scribePatientId) {
 }
 
 function mapConditionToDiagnosis(c, scribePatientId) {
+  // Drop entries whose name has no alphabetic chars — these are stray numeric
+  // tokens (years, IDs, lab values) the AI occasionally emits as conditions.
+  if (!c?.name || !/[a-zA-Z]/.test(c.name)) return null;
   return {
     patient_id: scribePatientId,
     diagnosis_id: (c.name || "unknown").toLowerCase().replace(/\s+/g, "_").slice(0, 64),
@@ -262,7 +265,7 @@ export async function convertGeniePatientByPhone(phone) {
   if (conditions.length > 0) {
     counts.diagnoses = await bulkInsert(
       "diagnoses",
-      conditions.map((c) => mapConditionToDiagnosis(c, scribePatientId)),
+      conditions.map((c) => mapConditionToDiagnosis(c, scribePatientId)).filter(Boolean),
       ["patient_id", "diagnosis_id", "label", "status", "since_year", "notes", "is_active"],
     );
   }

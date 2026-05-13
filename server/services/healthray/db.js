@@ -622,6 +622,10 @@ function normalizeDiagnosisId(name) {
   // Check full name (with parentheticals) first, for conditions whose qualifier may be inside parens
   const fullLower = name.toLowerCase().trim();
 
+  // Defensive: a diagnosis name with no alphabetic characters is never a real
+  // condition — signal "skip" so the caller doesn't insert it.
+  if (!/[a-z]/.test(fullLower)) return null;
+
   // MNG with retrosternal extension — qualifier sometimes in parens: "MNG(With retristernal extension...)"
   if (/\bmng\b|multinodular goiter/.test(fullLower) && /retrosternal|retristernal/.test(fullLower))
     return "mng_with_retrosternal_extension";
@@ -858,6 +862,9 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses, options =
     // Strip "+" suffix the AI may leave on condition names (e.g. "NEUROPATHY+" → "NEUROPATHY")
     const cleanName = stripPlusSuffix(dx.name);
     if (!cleanName) continue;
+    // Reject names with no alphabetic chars (e.g. stray numeric tokens like "24009"
+    // that the AI sometimes lifts out of dates/IDs/lab values in the DIAGNOSIS block).
+    if (!/[a-zA-Z]/.test(cleanName)) continue;
     const diagId = normalizeDiagnosisId(dx.id || cleanName);
     if (!diagId) continue; // null = non-medical descriptor, skip
     keptIds.push(diagId);
