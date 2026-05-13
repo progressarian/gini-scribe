@@ -120,16 +120,23 @@ function CarePhasePill({ summary }) {
     };
   }, [open, updateCoords]);
 
+  const PHASE_NAMES = ["Uncontrolled", "Controlled", "Stabilize", "Continuous"];
   const phaseName = String(summary.carePhase || "");
+  const matchedPhase = PHASE_NAMES.find((p) => phaseName.includes(p));
+  const phaseDisplay = matchedPhase || phaseName || "No Decide";
   const phasePalette = phaseName.includes("Uncontrolled")
     ? { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" }
-    : phaseName.includes("Maintain")
-      ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-      : phaseName.includes("Sustain")
+    : phaseName.includes("Stabilize")
+      ? { fg: "var(--amber)", bg: "var(--amb-lt, #fff7ed)", bd: "var(--amb-bd, #fed7aa)" }
+      : phaseName.includes("Continuous")
         ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-        : phaseName.includes("Controlled")
+        : phaseName.includes("Maintain")
           ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-          : { fg: "var(--t2)", bg: "var(--bg2, #f4f4f5)", bd: "var(--bd, #e5e7eb)" };
+          : phaseName.includes("Sustain")
+            ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
+            : phaseName.includes("Controlled")
+              ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
+              : { fg: "var(--t2)", bg: "var(--bg2, #f4f4f5)", bd: "var(--bd, #e5e7eb)" };
 
   const palette = phasePalette;
 
@@ -181,7 +188,7 @@ function CarePhasePill({ summary }) {
           cursor: "help",
         }}
       >
-        {summary.carePhase}
+        {phaseDisplay}
       </span>
       {open &&
         createPortal(
