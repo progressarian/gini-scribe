@@ -511,6 +511,12 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       follow_up: conData?.follow_up || null,
       follow_up_date: conData?.follow_up?.date || conData?.follow_up_date || null,
       follow_up_instructions: conData?.follow_up?.notes || conData?.follow_up?.instructions || null,
+      // FOLLOW UP WITH — free-text prep instructions for the next visit
+      // (fasting, tests to bring etc). Synced to the patient's Genie Care tab.
+      follow_up_with:
+        typeof conData?.follow_up_with === "string" && conData.follow_up_with.trim()
+          ? conData.follow_up_with.trim()
+          : null,
       chief_complaints: moData?.chief_complaints || [],
       summary: conData?.assessment_summary || null,
     };

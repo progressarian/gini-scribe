@@ -299,9 +299,16 @@ function computeCarePhase({ labHistory, vitals, totalVisits = 0, diagnoses } = {
 // VisitPage.jsx so the visit pill, the post-visit narrative, and any other
 // consumer all agree on "what does this patient look like right now".
 //
-// Priority: HbA1c (diabetes) → TSH (thyroid) → FBS (everyone else). Returns
-// null when no relevant value is on file so the caller can fall back to the
-// multi-parameter computeCarePhase output.
+// Priority:
+//   1. HbA1c (any patient with a reading)
+//   2. TSH — non-diabetic patient with a thyroid condition
+//   3. Blood Pressure — non-diabetic, non-thyroid patient with hypertension
+//   4. FBS — everyone else
+//   5. Blood Pressure — final fallback when nothing else is on file
+//
+// Returns one of four labels: Uncontrolled / Stabilize / Controlled /
+// Continuous. "Continuous" = latest controlled AND ≥ 2 consecutive
+// controlled readings.
 function deriveBiomarkerPriorityStatus({ labHistory, vitals, diagnoses } = {}) {
   const dxText = (diagnoses || [])
     .filter((d) => d && d.is_active !== false)
@@ -309,61 +316,115 @@ function deriveBiomarkerPriorityStatus({ labHistory, vitals, diagnoses } = {}) {
     .join(" | ");
   const hasDiabetes = /diabetes|dm1|dm2|t1dm|t2dm|\bdm\b|hyperglyc/.test(dxText);
   const hasThyroid = /thyroid|hypothyroid|hyperthyroid|hashimoto|graves|goiter/.test(dxText);
-
-  const latestFromHistory = (aliases) => {
-    const series = seriesFromLab(labHistory, aliases);
-    if (!series.length) return null;
-    return series[series.length - 1];
-  };
+  const hasHypertension = /hypertension|\bhtn\b|high.?blood.?pressure/.test(dxText);
 
   let marker = null;
   let latest = null;
-  if (hasDiabetes) {
-    latest = latestFromHistory(["HbA1c", "hba1c", "A1c", "a1c"]);
-    if (latest) marker = "HbA1c";
-  }
-  if (!marker && hasThyroid) {
-    latest = latestFromHistory(["TSH", "tsh"]);
-    if (latest) marker = "TSH";
-  }
+  let series = [];
+
+  const tryLab = (aliases, key) => {
+    const s = seriesFromLab(labHistory, aliases);
+    if (s.length) {
+      marker = key;
+      series = s;
+      latest = s[s.length - 1];
+    }
+  };
+
+  const tryBP = () => {
+    if (!Array.isArray(vitals) || !vitals.length) return;
+    const bp = vitals
+      .map((v) => ({
+        sys: toNum(v?.bp_sys),
+        dia: toNum(v?.bp_dia),
+        date: v?.recorded_at || v?.recorded_date || null,
+      }))
+      .filter((r) => Number.isFinite(r.sys) && Number.isFinite(r.dia) && r.date)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    if (bp.length) {
+      marker = "BP";
+      series = bp.map((r) => ({ val: { sys: r.sys, dia: r.dia }, date: r.date }));
+      latest = series[series.length - 1];
+    }
+  };
+
+  // 1) HbA1c
+  tryLab(["HbA1c", "hba1c", "A1c", "a1c"], "HbA1c");
+
+  // 2) TSH — only for non-diabetic thyroid patients
+  if (!marker && !hasDiabetes && hasThyroid) tryLab(["TSH", "tsh"], "TSH");
+
+  // 3) Blood Pressure — non-diabetic, non-thyroid patient with hypertension
+  if (!marker && !hasDiabetes && !hasThyroid && hasHypertension) tryBP();
+
+  // 4) FBS (also picks up patient-app fasting finger-sticks)
   if (!marker) {
-    // FBS fallback — include patient-app fasting finger-sticks too via the
-    // vitals fallback when no lab row exists.
-    latest = latestFromHistory(["FBS", "fbs", "Fasting Glucose", "FPG"]);
-    if (!latest && Array.isArray(vitals) && vitals.length) {
+    tryLab(["FBS", "fbs", "Fasting Glucose", "FPG"], "FBS");
+    if (!marker && Array.isArray(vitals) && vitals.length) {
       const fasting = vitals
         .filter((v) => v && v.rbs != null && String(v.meal_type || "").toLowerCase() === "fasting")
         .map((v) => ({ val: toNum(v.rbs), date: v.recorded_at || v.recorded_date || null }))
         .filter((r) => Number.isFinite(r.val) && r.date)
         .sort((a, b) => new Date(a.date) - new Date(b.date));
-      if (fasting.length) latest = fasting[fasting.length - 1];
+      if (fasting.length) {
+        marker = "FBS";
+        series = fasting;
+        latest = fasting[fasting.length - 1];
+      }
     }
-    if (latest) marker = "FBS";
   }
+
+  // 5) Blood Pressure fallback — when nothing else is on file
+  if (!marker) tryBP();
 
   if (!marker || !latest) return null;
-  const v = latest.val;
 
-  let status, target;
-  if (marker === "HbA1c") {
-    status = v <= 7 ? "controlled" : v <= 8 ? "borderline" : "uncontrolled";
-    target = "≤ 7%";
-  } else if (marker === "TSH") {
-    status =
-      v >= 0.5 && v <= 4.5 ? "controlled" : v < 0.5 || v <= 6 ? "borderline" : "uncontrolled";
-    target = "0.5–4.5 µIU/mL";
-  } else {
-    status = v <= 100 ? "controlled" : v <= 126 ? "borderline" : "uncontrolled";
-    target = "≤ 100 mg/dL";
+  const classify = (val) => {
+    if (marker === "HbA1c")
+      return val <= 7 ? "controlled" : val <= 8 ? "borderline" : "uncontrolled";
+    if (marker === "TSH")
+      return val >= 0.5 && val <= 4.5
+        ? "controlled"
+        : val < 0.5 || val <= 6
+          ? "borderline"
+          : "uncontrolled";
+    if (marker === "FBS")
+      return val <= 100 ? "controlled" : val <= 126 ? "borderline" : "uncontrolled";
+    const sys = val?.sys;
+    const dia = val?.dia;
+    if (sys >= 140 || dia >= 90) return "uncontrolled";
+    if (sys >= 130 || dia >= 80) return "borderline";
+    return "controlled";
+  };
+
+  const v = latest.val;
+  const status = classify(v);
+
+  let label;
+  if (status === "uncontrolled") label = "Uncontrolled";
+  else if (status === "borderline") label = "Stabilize";
+  else {
+    const last2 = series.slice(-2).map((r) => r.val);
+    const allControlled = last2.length >= 2 && last2.every((x) => classify(x) === "controlled");
+    label = allControlled ? "Continuous" : "Controlled";
   }
 
-  const label =
-    status === "controlled"
-      ? "Controlled"
-      : status === "borderline"
-        ? "Borderline"
-        : "Uncontrolled";
-  const phase = status === "controlled" ? `Phase 2 · ${label}` : `Phase 1 · ${label}`;
+  const target =
+    marker === "HbA1c"
+      ? "≤ 7%"
+      : marker === "TSH"
+        ? "0.5–4.5 µIU/mL"
+        : marker === "FBS"
+          ? "≤ 100 mg/dL"
+          : "< 130/80 mmHg";
+  const phase =
+    label === "Uncontrolled"
+      ? `Phase 1 · ${label}`
+      : label === "Stabilize"
+        ? `Phase 1 · ${label}`
+        : label === "Continuous"
+          ? `Phase 3 · ${label}`
+          : `Phase 2 · ${label}`;
   return { marker, value: v, date: latest.date, status, label, target, phase };
 }
 

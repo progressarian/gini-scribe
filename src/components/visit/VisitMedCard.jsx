@@ -2,7 +2,11 @@ import { memo, useRef, useCallback, useMemo } from "react";
 import { MED_COLORS } from "./helpers";
 import { TIME_SLOTS, printMedCard, getTimeSlots } from "./medCardPrint";
 import { cleanNote } from "../../utils/cleanNote";
-import { detectMedCategory, getCategoryLabel, getCategoryIcon } from "../../server-utils/medicationCategories";
+import {
+  detectMedCategory,
+  getCategoryLabel,
+  getCategoryIcon,
+} from "../../server-utils/medicationCategories";
 
 // Groups pre-indexed meds by time slot without overwriting _idx
 function groupBySlot(meds) {
@@ -38,7 +42,9 @@ function MedRow({ m }) {
         {m.timing ? ` · ${m.timing}` : ""}
       </div>
       <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
-      <div className="mtd">{catIcon} {catLabel}</div>
+      <div className="mtd">
+        {catIcon} {catLabel}
+      </div>
     </div>
   );
 }
@@ -51,15 +57,9 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
     [activeMeds],
   );
 
-  const indexedMeds = useMemo(
-    () => mainMeds.map((m, i) => ({ ...m, _idx: i })),
-    [mainMeds],
-  );
+  const indexedMeds = useMemo(() => mainMeds.map((m, i) => ({ ...m, _idx: i })), [mainMeds]);
 
-  const { grouped, slotsWithMeds } = useMemo(
-    () => groupBySlot(indexedMeds),
-    [indexedMeds],
-  );
+  const { grouped, slotsWithMeds } = useMemo(() => groupBySlot(indexedMeds), [indexedMeds]);
 
   const handlePrint = useCallback(() => {
     printMedCard(patient, mainMeds);
@@ -108,9 +108,8 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
             </div>
           ))}
 
-          {slotsWithMeds.length === 0 && indexedMeds.map((m) => (
-            <MedRow key={m.id || m._idx} m={m} />
-          ))}
+          {slotsWithMeds.length === 0 &&
+            indexedMeds.map((m) => <MedRow key={m.id || m._idx} m={m} />)}
 
           {mainMeds.length === 0 && (
             <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>

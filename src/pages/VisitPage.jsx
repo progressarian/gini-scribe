@@ -97,18 +97,24 @@ const sySelStyle = (s) => {
   return {};
 };
 
-// Derive the pill's visible status from the same thresholds the Biomarkers
-// graph uses (see VisitBiomarkers.jsx `sev`), prioritising the marker that
-// matches the patient's active condition: HbA1c (diabetes) → TSH (thyroid)
-// → FBS (everyone else). Returns null when no relevant value is on file so
-// the caller can fall back to the existing carePhase label.
-function deriveBiomarkerStatus({ activeDx, labResults, labHistory }) {
+// Derive the pill's visible status. Priority order:
+//   1. HbA1c (any patient with a reading)
+//   2. TSH — non-diabetic patient with a thyroid condition
+//   3. Blood Pressure — non-diabetic, non-thyroid patient with hypertension
+//   4. FBS — everyone else
+//   5. Blood Pressure — final fallback when nothing else is on file
+//
+// Returns one of four labels: Uncontrolled / Stabilize / Controlled /
+// Continuous. "Continuous" = latest reading is controlled AND at least the
+// two most recent readings were both controlled (long-term control).
+function deriveBiomarkerStatus({ activeDx, labResults, labHistory, vitals }) {
   const dxText = (activeDx || [])
     .filter((d) => d && d.is_active !== false)
     .map((d) => `${d.diagnosis_id || ""} ${d.label || ""}`.toLowerCase())
     .join(" | ");
   const hasDiabetes = /diabetes|dm1|dm2|t1dm|t2dm|\bdm\b|hyperglyc/.test(dxText);
   const hasThyroid = /thyroid|hypothyroid|hyperthyroid|hashimoto|graves|goiter/.test(dxText);
+  const hasHypertension = /hypertension|\bhtn\b|high.?blood.?pressure/.test(dxText);
 
   const num = (v) => {
     if (v == null || v === "") return NaN;
@@ -116,79 +122,148 @@ function deriveBiomarkerStatus({ activeDx, labResults, labHistory }) {
     return Number.isFinite(n) ? n : NaN;
   };
 
-  // Pick the marker (and value) to drive the pill, in priority order.
+  // Returns a chronological array of numeric values for a lab alias.
+  const labSeries = (alias) => {
+    const h = getLabHist(labHistory, alias) || [];
+    return h
+      .map((r) => ({ val: num(r?.result), date: r?.date }))
+      .filter((r) => Number.isFinite(r.val));
+  };
+
+  // Try each marker in order until one yields a value.
   let marker = null;
   let value = NaN;
-  if (hasDiabetes) {
-    const v = num(getLabVal(labResults, "HbA1c")?.result);
+  let history = []; // chronological list of classifications for streak calc
+
+  // 1) HbA1c
+  {
+    const series = labSeries("HbA1c");
+    const latestVal = num(getLabVal(labResults, "HbA1c")?.result);
+    const v = Number.isFinite(latestVal)
+      ? latestVal
+      : series.length
+        ? series[series.length - 1].val
+        : NaN;
     if (Number.isFinite(v)) {
       marker = "HbA1c";
       value = v;
+      history = series.map((s) => s.val);
+      if (!history.length || history[history.length - 1] !== v) history.push(v);
     }
   }
-  if (!marker && hasThyroid) {
-    const v = num(getLabVal(labResults, "TSH")?.result);
+
+  // 2) TSH — only when no HbA1c AND patient is non-diabetic AND has thyroid
+  if (!marker && !hasDiabetes && hasThyroid) {
+    const series = labSeries("TSH");
+    const latestVal = num(getLabVal(labResults, "TSH")?.result);
+    const v = Number.isFinite(latestVal)
+      ? latestVal
+      : series.length
+        ? series[series.length - 1].val
+        : NaN;
     if (Number.isFinite(v)) {
       marker = "TSH";
       value = v;
+      history = series.map((s) => s.val);
+      if (!history.length || history[history.length - 1] !== v) history.push(v);
     }
   }
+
+  // BP picker (used in both the hypertension slot and as a final fallback).
+  const pickBP = () => {
+    if (!Array.isArray(vitals) || !vitals.length) return false;
+    const bpRows = vitals
+      .map((v) => ({
+        sys: num(v?.bp_sys),
+        dia: num(v?.bp_dia),
+        date: v?.recorded_at || v?.recorded_date || null,
+      }))
+      .filter((r) => Number.isFinite(r.sys) && Number.isFinite(r.dia))
+      .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+    if (!bpRows.length) return false;
+    marker = "BP";
+    const last = bpRows[bpRows.length - 1];
+    value = { sys: last.sys, dia: last.dia };
+    history = bpRows.map((r) => ({ sys: r.sys, dia: r.dia }));
+    return true;
+  };
+
+  // 3) Blood Pressure — when patient is non-diabetic, non-thyroid and has
+  //    a hypertension diagnosis.
+  if (!marker && !hasDiabetes && !hasThyroid && hasHypertension) pickBP();
+
+  // 4) FBS — also picks up patient-app fasting finger-sticks via labHistory
   if (!marker) {
-    // FBS fallback — also includes patient-app fasting finger-sticks via the
-    // labHistory entry, mirroring the graph card.
-    let v = num(getLabVal(labResults, "FBS")?.result);
-    if (!Number.isFinite(v)) {
-      const h = getLabHist(labHistory, "FBS");
-      if (h.length) v = num(h[h.length - 1]?.result);
-    }
-    if (Number.isFinite(v)) {
+    const series = labSeries("FBS");
+    let latestVal = num(getLabVal(labResults, "FBS")?.result);
+    if (!Number.isFinite(latestVal) && series.length) latestVal = series[series.length - 1].val;
+    if (Number.isFinite(latestVal)) {
       marker = "FBS";
-      value = v;
+      value = latestVal;
+      history = series.map((s) => s.val);
+      if (!history.length || history[history.length - 1] !== latestVal) history.push(latestVal);
     }
   }
+
+  // 5) BP fallback — if nothing else is on file but we have vitals.
+  if (!marker) pickBP();
 
   if (!marker) return null;
 
-  // Status thresholds mirror VisitBiomarkers `sev` so the pill and the chart
-  // cards always agree.
-  let status;
-  let target;
-  let unit;
-  if (marker === "HbA1c") {
-    status = value <= 7 ? "controlled" : value <= 8 ? "borderline" : "uncontrolled";
-    target = "≤ 7";
-    unit = "%";
-  } else if (marker === "TSH") {
-    status =
-      value >= 0.5 && value <= 4.5
+  // Classify a single value into controlled/borderline/uncontrolled.
+  const classify = (val) => {
+    if (marker === "HbA1c")
+      return val <= 7 ? "controlled" : val <= 8 ? "borderline" : "uncontrolled";
+    if (marker === "TSH")
+      return val >= 0.5 && val <= 4.5
         ? "controlled"
-        : value < 0.5 || value <= 6
+        : val < 0.5 || val <= 6
           ? "borderline"
           : "uncontrolled";
-    target = "0.5–4.5";
-    unit = "µIU/mL";
-  } else {
-    status = value <= 100 ? "controlled" : value <= 126 ? "borderline" : "uncontrolled";
-    target = "≤ 100";
-    unit = "mg/dL";
+    if (marker === "FBS")
+      return val <= 100 ? "controlled" : val <= 126 ? "borderline" : "uncontrolled";
+    // BP: object { sys, dia }
+    const sys = val?.sys;
+    const dia = val?.dia;
+    if (sys >= 140 || dia >= 90) return "uncontrolled";
+    if (sys >= 130 || dia >= 80) return "borderline";
+    return "controlled";
+  };
+
+  const status = classify(value);
+
+  // Promote to "continuous" when the latest is controlled AND the previous
+  // reading was also controlled (≥ 2 consecutive controlled readings).
+  let label;
+  if (status === "uncontrolled") label = "Uncontrolled";
+  else if (status === "borderline") label = "Stabilize";
+  else {
+    const last2 = history.slice(-2);
+    const allControlled = last2.length >= 2 && last2.every((v) => classify(v) === "controlled");
+    label = allControlled ? "Continuous" : "Controlled";
   }
 
-  const label =
-    status === "controlled"
-      ? "Controlled"
-      : status === "borderline"
-        ? "Borderline"
-        : "Uncontrolled";
   const palette =
-    status === "controlled"
+    label === "Controlled" || label === "Continuous"
       ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-      : status === "borderline"
+      : label === "Stabilize"
         ? { fg: "var(--amber)", bg: "var(--amb-lt, #fff7ed)", bd: "var(--amb-bd, #fed7aa)" }
         : { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" };
+
+  const target =
+    marker === "HbA1c"
+      ? "≤ 7"
+      : marker === "TSH"
+        ? "0.5–4.5"
+        : marker === "FBS"
+          ? "≤ 100"
+          : "< 130/80";
+  const unit =
+    marker === "HbA1c" ? "%" : marker === "TSH" ? "µIU/mL" : marker === "FBS" ? "mg/dL" : "mmHg";
   return { label, palette, marker, value, status, target, unit };
 }
 
-function CarePhasePill({ summary, activeDx, labResults, labHistory }) {
+function CarePhasePill({ summary, activeDx, labResults, labHistory, vitals }) {
   const triggerRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
@@ -211,47 +286,35 @@ function CarePhasePill({ summary, activeDx, labResults, labHistory }) {
     };
   }, [open, updateCoords]);
 
-  const PHASE_NAMES = ["Uncontrolled", "Controlled", "Stabilize", "Continuous"];
+  // Only four allowed pill labels.
   const phaseName = String(summary.carePhase || "");
-  const matchedPhase = PHASE_NAMES.find((p) => phaseName.includes(p));
-  const phaseDisplay = matchedPhase || phaseName || "No value";
-  const phasePalette = phaseName.includes("Uncontrolled")
-    ? { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" }
-    : phaseName.includes("Stabilize")
-      ? { fg: "var(--amber)", bg: "var(--amb-lt, #fff7ed)", bd: "var(--amb-bd, #fed7aa)" }
-      : phaseName.includes("Continuous")
-        ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-        : phaseName.includes("Maintain")
+  // Map server phase strings (Phase 1 · Uncontrolled / Phase 2 · Controlled
+  // / Phase 3 · Sustain / Phase 4 · Maintain) onto our 4-word vocabulary.
+  const fallbackWord = /Uncontrolled/i.test(phaseName)
+    ? "Uncontrolled"
+    : /Stabilize|Borderline/i.test(phaseName)
+      ? "Stabilize"
+      : /Sustain|Maintain|Continuous/i.test(phaseName)
+        ? "Continuous"
+        : /Controlled/i.test(phaseName)
+          ? "Controlled"
+          : null;
+  const paletteFor = (word) =>
+    word === "Uncontrolled"
+      ? { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" }
+      : word === "Stabilize"
+        ? { fg: "var(--amber)", bg: "var(--amb-lt, #fff7ed)", bd: "var(--amb-bd, #fed7aa)" }
+        : word === "Controlled" || word === "Continuous"
           ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-          : phaseName.includes("Sustain")
-            ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-            : phaseName.includes("Controlled")
-              ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
-              : { fg: "var(--t2)", bg: "var(--bg2, #f4f4f5)", bd: "var(--bd, #e5e7eb)" };
+          : { fg: "var(--t2)", bg: "var(--bg2, #f4f4f5)", bd: "var(--bd, #e5e7eb)" };
 
-  // Doctors triage by the marker most relevant to the patient's condition —
-  // HbA1c for diabetics, TSH for thyroid, FBS otherwise. Override the
-  // phase-derived pill with that read so the chip matches the graph; keep
-  // the hover tooltip unchanged so the care-phase reasoning is still there.
-  const bioStatus = deriveBiomarkerStatus({ activeDx, labResults, labHistory });
-  const palette = bioStatus ? bioStatus.palette : phasePalette;
-  // When the biomarker overrides the pill, the phase number from the server's
-  // carePhase ("Phase 1 · Uncontrolled") would contradict the biomarker word
-  // ("Controlled"). Derive the phase from the biomarker instead so the pill,
-  // its phase prefix, and the tooltip chip all tell the same story:
-  //   controlled → Phase 2 · Controlled
-  //   borderline / uncontrolled → Phase 1 · {label}
-  const serverPhasePrefix = (phaseName.match(/Phase\s+\d+/i) || [])[0] || null;
-  const effectivePhasePrefix = bioStatus
-    ? bioStatus.label === "Controlled"
-      ? "Phase 2"
-      : "Phase 1"
-    : serverPhasePrefix;
-  const statusWord = bioStatus ? bioStatus.label : phaseDisplay;
-  const displayLabel = effectivePhasePrefix
-    ? `${effectivePhasePrefix} · ${statusWord}`
-    : statusWord;
-  const effectiveCarePhase = bioStatus ? displayLabel : summary.carePhase;
+  // Biomarker priority read (HbA1c → TSH → FBS → BP) overrides the
+  // server-side care-phase whenever a relevant value is on file.
+  const bioStatus = deriveBiomarkerStatus({ activeDx, labResults, labHistory, vitals });
+  const statusWord = bioStatus ? bioStatus.label : fallbackWord || "No value";
+  const palette = bioStatus ? bioStatus.palette : paletteFor(statusWord);
+  const displayLabel = statusWord;
+  const effectiveCarePhase = displayLabel;
 
   const basis = summary.carePhaseBasis;
   const params = summary.carePhaseParameters || [];
@@ -268,7 +331,7 @@ function CarePhasePill({ summary, activeDx, labResults, labHistory }) {
     s === "controlled"
       ? { color: "var(--green)", label: "✓ Controlled" }
       : s === "borderline"
-        ? { color: "var(--amber)", label: "● Borderline" }
+        ? { color: "var(--amber)", label: "● Stabilize" }
         : { color: "var(--red)", label: "✕ Uncontrolled" };
 
   const trendIcon = (t) =>
@@ -284,7 +347,7 @@ function CarePhasePill({ summary, activeDx, labResults, labHistory }) {
         : "All parameters in target"
       : bioStatus
         ? `Driven by latest ${bioStatus.marker} reading.`
-        : "No HbA1c, TSH or FBS reading on file yet — add a lab or vitals entry to compute a phase.";
+        : "No HbA1c, TSH, FBS or BP reading on file yet — add a lab or vitals entry to compute a phase.";
 
   return (
     <>
@@ -702,6 +765,21 @@ export default function VisitPage() {
       saveDoctorNote(val);
     },
     [saveDoctorNote],
+  );
+
+  const handleChangeFollowUpWith = useCallback(
+    async (text) => {
+      if (!dbPatientId) return;
+      try {
+        await api.patch(`/api/visit/${dbPatientId}/follow-up-with`, { text });
+        await visitQuery.refetch();
+      } catch (e) {
+        console.warn("[VisitPage] follow_up_with save failed:", e?.message);
+      }
+    },
+    // visitQuery is stable from react-query
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dbPatientId],
   );
 
   // ── Hydrate patient context from URL ?patient=&appt= for new-tab opens ──
@@ -1460,6 +1538,7 @@ export default function VisitPage() {
                 activeDx={activeDx}
                 labResults={labResults}
                 labHistory={labHistory}
+                vitals={data.vitals}
               />
             </div>
           </div>
@@ -1576,6 +1655,7 @@ export default function VisitPage() {
                 referrals={referrals || []}
                 onAddReferral={() => setModal({ type: "addReferral" })}
                 onChangeFollowUp={() => setModal({ type: "changeFollowUp" })}
+                onChangeFollowUpWith={handleChangeFollowUpWith}
                 onOpenTemplate={(tpl) => setModal({ type: "template", data: tpl })}
                 onMedCardTab={() => setTab("medcard")}
                 conData={conData}

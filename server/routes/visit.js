@@ -2288,6 +2288,73 @@ router.patch("/visit/:patientId/followup", async (req, res) => {
   }
 });
 
+// ── PATCH /visit/:patientId/follow-up-with — set/clear FOLLOW UP WITH text ──
+// Free-text patient instructions for the next visit (fasting / tests to bring
+// / preparations). Lives on consultations.con_data.follow_up_with so the
+// /visit page can show + edit + print it, and the patient's Genie Care tab
+// can mirror it on the upcoming appointment.
+router.patch("/visit/:patientId/follow-up-with", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const raw = req.body?.text;
+    const text = typeof raw === "string" ? raw.trim() : null;
+    // Empty / null / whitespace = delete (strip key)
+    const r = text
+      ? await pool.query(
+          `UPDATE consultations
+             SET con_data = jsonb_set(COALESCE(con_data, '{}'::jsonb), '{follow_up_with}', $1::jsonb),
+                 updated_at = NOW()
+             WHERE id = (
+               SELECT id FROM consultations WHERE patient_id = $2
+               ORDER BY visit_date DESC, created_at DESC LIMIT 1
+             ) RETURNING *`,
+          [JSON.stringify(text), pid],
+        )
+      : await pool.query(
+          `UPDATE consultations
+             SET con_data = COALESCE(con_data, '{}'::jsonb) - 'follow_up_with',
+                 updated_at = NOW()
+             WHERE id = (
+               SELECT id FROM consultations WHERE patient_id = $1
+               ORDER BY visit_date DESC, created_at DESC LIMIT 1
+             ) RETURNING *`,
+          [pid],
+        );
+    if (!r.rows[0]) return res.status(404).json({ error: "No consultation found" });
+    // Denormalise onto the patient's upcoming appointment row so the patient
+    // app (giniSupabase → vuukipgdegewpwucdgxa) can render it without a JSONB
+    // join. Falls back to the most recent past appointment if no upcoming row
+    // exists yet (doctor may not have booked the next visit at write time).
+    try {
+      await pool.query(
+        `UPDATE appointments SET follow_up_with = $1, updated_at = NOW()
+          WHERE id = (
+            SELECT id FROM appointments
+             WHERE patient_id = $2
+             ORDER BY
+               CASE WHEN appointment_date::date >= CURRENT_DATE THEN 0 ELSE 1 END,
+               appointment_date ASC,
+               id DESC
+             LIMIT 1
+          )`,
+        [text, pid],
+      );
+    } catch (propErr) {
+      // Column may not exist yet on environments that haven't applied the
+      // 2026-05-14 migration — non-fatal, the consultation copy is canonical.
+      console.warn("[Visit] follow_up_with appt propagation skipped:", propErr.message);
+    }
+    // Push to Genie too (genie-DB-routed patients) — no-op on missing column.
+    syncAppointmentToGenie(pid, pool).catch((e) =>
+      console.warn("[Visit] Appointment push skipped:", e.message),
+    );
+    res.json({ id: r.rows[0].id, follow_up_with: text });
+  } catch (e) {
+    handleError(res, e, "Update follow_up_with");
+  }
+});
+
 // ── POST /visit/:patientId/symptom — Add / upsert symptom ──
 router.post("/visit/:patientId/symptom", async (req, res) => {
   const pid = Number(req.params.patientId);

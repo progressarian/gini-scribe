@@ -97,10 +97,22 @@ async function refreshOpdConsultations(client, patientId) {
   const allDiags = [];
   const allMeds = [];
   const allStopped = [];
+  // FOLLOW UP WITH — free-text instructions for the next visit (fasting,
+  // tests-to-bring etc). Use the most recent prescription's value (rxDocs is
+  // sorted DESC). Lives on con_data.follow_up_with so /visit can show, edit,
+  // and print it.
+  let latestFollowUpWith = null;
   const transcriptParts = [];
 
   for (const doc of rxDocs) {
     const rx = doc.extracted_data || {};
+    if (
+      latestFollowUpWith === null &&
+      typeof rx.follow_up_with === "string" &&
+      rx.follow_up_with.trim()
+    ) {
+      latestFollowUpWith = rx.follow_up_with.trim();
+    }
     const parts = [];
     if (rx.diagnoses?.length) {
       parts.push(
@@ -134,6 +146,7 @@ async function refreshOpdConsultations(client, patientId) {
     }
     if (rx.advice?.length) parts.push("ADVICE:\n" + rx.advice.join("\n"));
     if (rx.follow_up) parts.push("FOLLOW UP: " + rx.follow_up);
+    if (rx.follow_up_with) parts.push("FOLLOW UP WITH:\n" + rx.follow_up_with);
     if (rx.doctor_name)
       transcriptParts.push(
         `Rx by ${rx.doctor_name}${rx.visit_date ? " on " + rx.visit_date : ""}:`,
@@ -166,6 +179,9 @@ async function refreshOpdConsultations(client, patientId) {
 
     const conData = con.con_data || {};
     conData.medications_confirmed = allMeds;
+    if (latestFollowUpWith && !conData.follow_up_with) {
+      conData.follow_up_with = latestFollowUpWith;
+    }
 
     await client.query(
       `UPDATE consultations
@@ -173,6 +189,30 @@ async function refreshOpdConsultations(client, patientId) {
        WHERE id = $1`,
       [con.id, JSON.stringify(moData), JSON.stringify(conData), conTranscript || null],
     );
+  }
+
+  // Denormalise the latest follow_up_with onto the patient's upcoming
+  // appointment row so the Genie patient app can render it directly from
+  // scribe's appointments table (giniSupabase → vuukipgdegewpwucdgxa).
+  // Skips silently if the column hasn't been applied yet.
+  if (latestFollowUpWith) {
+    try {
+      await client.query(
+        `UPDATE appointments SET follow_up_with = $1, updated_at = NOW()
+          WHERE id = (
+            SELECT id FROM appointments
+             WHERE patient_id = $2
+             ORDER BY
+               CASE WHEN appointment_date::date >= CURRENT_DATE THEN 0 ELSE 1 END,
+               appointment_date ASC,
+               id DESC
+             LIMIT 1
+          )`,
+        [latestFollowUpWith, patientId],
+      );
+    } catch (_) {
+      // pre-migration env — non-fatal
+    }
   }
 
   // Link unlinked documents to the latest consultation

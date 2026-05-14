@@ -213,6 +213,7 @@ export function repairAndParseJSON(raw) {
       "lifestyle",
       "investigations_to_order",
       "follow_up",
+      "follow_up_with",
       "advice",
     ];
     for (const key of keys) {
@@ -246,6 +247,7 @@ Return JSON with these keys:
   "lifestyle": {"diet": null, "exercise": null, "smoking": null, "alcohol": null, "stress": null},
   "investigations_to_order": [{"name": "...", "urgency": "urgent/routine/next_visit"}],
   "follow_up": {"date": null, "timing": null, "notes": null},
+  "follow_up_with": "free-text patient instructions for the next visit (e.g. fasting / tests / preparations to bring), or null",
   "advice": "..."
 }
 

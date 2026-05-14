@@ -1,0 +1,679 @@
+// Patient-facing AI agent tools. Used by POST /api/ai/agent (routes/ai.js).
+//
+// Two kinds of tools:
+//   • DB tools — executed server-side, return JSON for the model to read.
+//   • UI tools — recorded as `client_actions` for the RN app to act on
+//     (open log modal, open doctor chat). Server returns a tiny
+//     acknowledgement so the model can phrase a closing sentence.
+
+// ── Tool schemas (Anthropic Messages API `tools` parameter) ─────────────
+export const AGENT_TOOLS = [
+  {
+    name: "query_patient_data",
+    description:
+      "Read the authenticated patient's data from the DB. Use this when you need specific numbers or rows. Prefer get_progress_summary for broad 'how am I doing' questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          enum: [
+            "profile",
+            "vitals",
+            "sugar",
+            "bp",
+            "weight",
+            "labs",
+            "meds",
+            "meals",
+            "symptoms",
+            "appointments",
+            "diagnoses",
+          ],
+          description: "Which slice of patient data to read.",
+        },
+        range_days: {
+          type: "number",
+          description: "Limit rows to the last N days. Omit for all-time.",
+        },
+        since_last_visit: {
+          type: "boolean",
+          description: "If true, return rows from the most recent past appointment_date onwards.",
+        },
+        limit: { type: "number", description: "Max rows (default 50)." },
+        test_name: {
+          type: "string",
+          description:
+            "For scope='labs', filter by a single canonical test name (HbA1c, LDL, TSH, FBS, eGFR, Hb).",
+        },
+      },
+      required: ["scope"],
+    },
+  },
+  {
+    name: "get_progress_summary",
+    description:
+      "One-shot summary of trends and adherence for the patient. Prefer this over multiple query_patient_data calls when the user asks 'how am I doing'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        window: { type: "string", enum: ["days", "since_last_visit"] },
+        days: {
+          type: "number",
+          description: "If window='days', the number of past days (default 30).",
+        },
+      },
+      required: ["window"],
+    },
+  },
+  {
+    name: "get_medication_schedule",
+    description:
+      "Active medications grouped by time-of-day slot (fasting / before_breakfast / after_breakfast / ... / bedtime). Use for 'what meds do I take today/now?'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        when: { type: "string", enum: ["today", "now"] },
+      },
+      required: ["when"],
+    },
+  },
+  {
+    name: "get_appointments",
+    description:
+      "Upcoming, past, or the single next appointment for the patient. Includes follow_up_with prep instructions when present.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["upcoming", "past", "next"] },
+        limit: { type: "number" },
+      },
+      required: ["scope"],
+    },
+  },
+  {
+    name: "propose_log",
+    description:
+      "Open the in-app log card pre-filled with values the user just gave you. Always use this when the user says 'log my BP 130/80' / 'sugar 180 fasting' / 'I weigh 82 kg' — never silently log. Pick the right type from the enum.",
+    input_schema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: [
+            "BP",
+            "Sugar",
+            "Weight",
+            "HbA1c",
+            "LDL",
+            "TSH",
+            "Haemoglobin",
+            "eGFR",
+            "Food",
+            "Exercise",
+            "Sleep",
+            "Mood",
+            "Symptom",
+          ],
+        },
+        value1: { type: "string", description: "Primary value (e.g. systolic, sugar mg/dL)." },
+        value2: { type: "string", description: "Secondary value (e.g. diastolic, duration)." },
+        context: {
+          type: "string",
+          description:
+            "Context label, e.g. 'Fasting', 'After breakfast' for Sugar; 'Morning (after meds)' for BP.",
+        },
+      },
+      required: ["type", "value1"],
+    },
+  },
+  {
+    name: "respond_to_patient",
+    description:
+      "Your FINAL output for this turn. You MUST call this exactly once, and it must be the last tool you call. The `message` is shown verbatim in the chat — keep it short, friendly, no markdown headers. Put every concrete number you cite in `numbers` so the app can render badges/charts deterministically. Pick `intent` based on what this turn is doing.",
+    input_schema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description:
+            "Plain conversational text shown to the patient (2-4 sentences for most replies; longer only when the patient explicitly asked for detail).",
+        },
+        intent: {
+          type: "string",
+          enum: [
+            "chat",
+            "log_proposed",
+            "data_summary",
+            "doctor_handoff",
+            "schedule_info",
+            "refusal",
+          ],
+          description:
+            "Why you replied this way. log_proposed → you also called propose_log. doctor_handoff → you also called open_doctor_chat. refusal → you declined a diagnosis/dose request and pointed to the doctor.",
+        },
+        numbers: {
+          type: "array",
+          description:
+            "Every numeric fact mentioned in `message`. Empty array if you cited none. Always include the unit and (for time-series facts) the date.",
+          items: {
+            type: "object",
+            properties: {
+              label: {
+                type: "string",
+                description: "Short metric name, e.g. 'HbA1c', 'Avg fasting sugar', 'BP'.",
+              },
+              value: { type: "number", description: "Numeric value." },
+              value2: {
+                type: "number",
+                description: "Secondary numeric (e.g. diastolic when label='BP'); omit otherwise.",
+              },
+              unit: { type: "string", description: "e.g. '%', 'mg/dL', 'mmHg', 'kg'." },
+              date: {
+                type: "string",
+                description:
+                  "ISO date YYYY-MM-DD the value was measured/observed. Omit for derived averages where a window is the right anchor.",
+              },
+              window: {
+                type: "string",
+                description:
+                  "Plain-text window for derived averages, e.g. 'last 30 days', 'since 2026-04-12'.",
+              },
+              trend: {
+                type: "string",
+                enum: ["up", "down", "flat", "unknown"],
+                description: "Direction vs the prior reading/window, if you can tell.",
+              },
+            },
+            required: ["label", "value"],
+          },
+        },
+        log_proposal: {
+          type: "object",
+          description:
+            "Mirror of the propose_log inputs when intent='log_proposed'. Lets the client cross-check the modal prefill against the assistant's intent. Omit otherwise.",
+          properties: {
+            type: { type: "string" },
+            value1: { type: "string" },
+            value2: { type: "string" },
+            context: { type: "string" },
+          },
+        },
+        safety_flag: {
+          type: "string",
+          enum: ["none", "urgent_symptom", "out_of_range_lab", "medication_concern"],
+          description:
+            "Set when the patient mentioned something that warrants doctor attention. 'urgent_symptom' for chest pain / breathlessness / severe headache / loss of consciousness.",
+        },
+      },
+      required: ["message", "intent"],
+    },
+  },
+  {
+    name: "open_doctor_chat",
+    description:
+      "Open the in-app Care → Team chat so the patient can message their doctor / Gini clinic. Use when the patient asks to talk to the doctor or raises anything that needs medical judgement (dose changes, new chest pain, side effects, etc).",
+    input_schema: {
+      type: "object",
+      properties: {
+        seed: {
+          type: "string",
+          description: "Pre-filled message for the patient to review and send.",
+        },
+        reason: { type: "string", description: "Short tag for telemetry — not shown." },
+      },
+    },
+  },
+];
+
+// ── SQL helpers ────────────────────────────────────────────────────────
+async function findLastVisitDate(pool, patientId) {
+  const { rows } = await pool.query(
+    `SELECT MAX(appointment_date)::date AS d FROM appointments
+      WHERE patient_id = $1 AND appointment_date::date <= CURRENT_DATE`,
+    [patientId],
+  );
+  return rows[0]?.d || null;
+}
+
+function rangeClause(args, dateCol) {
+  if (args.since_last_visit && args.__lastVisit) {
+    return { sql: ` AND ${dateCol} >= $__since`, val: args.__lastVisit };
+  }
+  if (typeof args.range_days === "number" && args.range_days > 0) {
+    return {
+      sql: ` AND ${dateCol} >= (CURRENT_DATE - INTERVAL '${Math.floor(args.range_days)} days')`,
+      val: null,
+    };
+  }
+  return { sql: "", val: null };
+}
+
+async function withSinceContext(pool, patientId, args) {
+  if (args.since_last_visit) {
+    args.__lastVisit = await findLastVisitDate(pool, patientId);
+  }
+  return args;
+}
+
+function pushIfVal(params, value) {
+  if (value === null || value === undefined) return null;
+  params.push(value);
+  return params.length;
+}
+
+function buildQuery(baseSql, args, dateCol, params, patientId) {
+  let sql = baseSql + ` WHERE patient_id = $${params.push(patientId)}`;
+  const r = rangeClause(args, dateCol);
+  if (r.sql) {
+    if (r.val !== null) {
+      const idx = params.push(r.val);
+      sql += r.sql.replace("$__since", "$" + idx);
+    } else {
+      sql += r.sql;
+    }
+  }
+  return sql;
+}
+
+// ── Scope handlers ─────────────────────────────────────────────────────
+async function qProfile(pool, patientId) {
+  const { rows } = await pool.query(
+    `SELECT id, name, age, sex, file_no, dob, phone
+       FROM patients WHERE id = $1`,
+    [patientId],
+  );
+  return rows[0] || null;
+}
+
+async function qVitalsLog(pool, patientId, args, columns) {
+  const params = [];
+  const limit = Math.min(Math.max(args.limit || 50, 1), 500);
+  let sql = buildQuery(
+    `SELECT id, recorded_date, reading_time, ${columns}, meal_type, source, created_at
+       FROM patient_vitals_log`,
+    args,
+    "recorded_date",
+    params,
+    patientId,
+  );
+  sql += ` ORDER BY recorded_date DESC, id DESC LIMIT ${limit}`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+async function qSugar(pool, patientId, args) {
+  return qVitalsLog(pool, patientId, args, "rbs");
+}
+async function qBP(pool, patientId, args) {
+  return qVitalsLog(pool, patientId, args, "bp_systolic, bp_diastolic, pulse");
+}
+async function qWeight(pool, patientId, args) {
+  return qVitalsLog(pool, patientId, args, "weight_kg, bmi, waist, body_fat");
+}
+async function qVitalsAll(pool, patientId, args) {
+  return qVitalsLog(
+    pool,
+    patientId,
+    args,
+    "bp_systolic, bp_diastolic, pulse, rbs, weight_kg, spo2, bmi",
+  );
+}
+
+async function qLabs(pool, patientId, args) {
+  const params = [];
+  const limit = Math.min(Math.max(args.limit || 50, 1), 500);
+  let sql = `SELECT id, test_date, test_name, canonical_name, result, result_text, unit, flag, ref_range, panel_name
+               FROM lab_results WHERE patient_id = $${params.push(patientId)}`;
+  if (args.test_name) {
+    sql += ` AND (LOWER(canonical_name) = LOWER($${params.push(args.test_name)})
+                  OR LOWER(test_name) = LOWER($${params.length}))`;
+  }
+  const r = rangeClause(args, "test_date");
+  if (r.sql) {
+    if (r.val !== null) {
+      const idx = params.push(r.val);
+      sql += r.sql.replace("$__since", "$" + idx);
+    } else sql += r.sql;
+  }
+  sql += ` ORDER BY test_date DESC, id DESC LIMIT ${limit}`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+async function qMeds(pool, patientId, args) {
+  const limit = Math.min(Math.max(args.limit || 50, 1), 200);
+  const { rows } = await pool.query(
+    `SELECT id, name, dose, frequency, timing, route, med_group, drug_class,
+            is_active, started_date, stopped_date, stop_reason, parent_medication_id,
+            days_of_week
+       FROM medications WHERE patient_id = $1
+      ORDER BY is_active DESC, sort_order, name
+      LIMIT ${limit}`,
+    [patientId],
+  );
+  return rows;
+}
+
+async function qMeals(pool, patientId, args) {
+  const params = [];
+  const limit = Math.min(Math.max(args.limit || 50, 1), 200);
+  let sql = buildQuery(
+    `SELECT id, log_date, meal_type, description, calories, protein_g, carbs_g, fat_g
+       FROM patient_meal_log`,
+    args,
+    "log_date",
+    params,
+    patientId,
+  );
+  sql += ` ORDER BY log_date DESC, id DESC LIMIT ${limit}`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+async function qSymptoms(pool, patientId, args) {
+  const params = [];
+  const limit = Math.min(Math.max(args.limit || 50, 1), 200);
+  let sql = buildQuery(
+    `SELECT id, log_date, log_time, symptom, severity, body_area, context, notes, follow_up_needed
+       FROM patient_symptom_log`,
+    args,
+    "log_date",
+    params,
+    patientId,
+  );
+  sql += ` ORDER BY log_date DESC, id DESC LIMIT ${limit}`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+async function qAppointments(pool, patientId, args) {
+  // Tolerate missing `follow_up_with` column on environments without the
+  // 2026-05-14 migration applied.
+  const limit = Math.min(Math.max(args.limit || 20, 1), 100);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, appointment_date, time_slot, doctor_name, visit_type, status,
+              notes, follow_up_with
+         FROM appointments WHERE patient_id = $1
+        ORDER BY appointment_date DESC, id DESC
+        LIMIT ${limit}`,
+      [patientId],
+    );
+    return rows;
+  } catch (_) {
+    const { rows } = await pool.query(
+      `SELECT id, appointment_date, time_slot, doctor_name, visit_type, status, notes
+         FROM appointments WHERE patient_id = $1
+        ORDER BY appointment_date DESC, id DESC
+        LIMIT ${limit}`,
+      [patientId],
+    );
+    return rows;
+  }
+}
+
+async function qDiagnoses(pool, patientId) {
+  const { rows } = await pool.query(
+    `SELECT id, diagnosis_id, label, status, is_active, since_date
+       FROM diagnoses WHERE patient_id = $1
+      ORDER BY is_active DESC, id`,
+    [patientId],
+  );
+  return rows;
+}
+
+// ── Progress summary ───────────────────────────────────────────────────
+async function summariseProgress(pool, patientId, window) {
+  let sinceDate = null;
+  let label = "all-time";
+  if (window?.window === "since_last_visit") {
+    sinceDate = await findLastVisitDate(pool, patientId);
+    label = sinceDate ? `since ${sinceDate}` : "since first visit (no past appt found)";
+  } else {
+    const days = Math.max(1, Math.floor(window?.days || 30));
+    label = `last ${days} days`;
+  }
+
+  const dateExpr = sinceDate
+    ? `>= '${sinceDate}'::date`
+    : `>= (CURRENT_DATE - INTERVAL '${Math.max(1, Math.floor(window?.days || 30))} days')`;
+
+  // BP / sugar / weight averages from patient_vitals_log
+  const vit = await pool.query(
+    `SELECT
+        AVG(bp_systolic)::numeric(6,1) AS bp_sys_avg,
+        AVG(bp_diastolic)::numeric(6,1) AS bp_dia_avg,
+        COUNT(*) FILTER (WHERE bp_systolic IS NOT NULL) AS bp_count,
+        AVG(rbs)::numeric(6,1) AS sugar_avg,
+        AVG(rbs) FILTER (WHERE meal_type ILIKE 'fasting')::numeric(6,1) AS sugar_fbg_avg,
+        COUNT(*) FILTER (WHERE rbs IS NOT NULL) AS sugar_count,
+        MIN(weight_kg) AS weight_min, MAX(weight_kg) AS weight_max,
+        (SELECT weight_kg FROM patient_vitals_log
+          WHERE patient_id=$1 AND weight_kg IS NOT NULL
+          ORDER BY recorded_date DESC, id DESC LIMIT 1) AS weight_latest
+       FROM patient_vitals_log
+      WHERE patient_id=$1 AND recorded_date ${dateExpr}`,
+    [patientId],
+  );
+
+  // Recent key labs
+  const labs = await pool.query(
+    `SELECT DISTINCT ON (canonical_name) canonical_name, test_name, result, unit, flag, test_date
+       FROM lab_results
+      WHERE patient_id=$1
+        AND canonical_name IN ('hba1c','ldl','tsh','fbs','egfr','creatinine','hb','triglycerides')
+      ORDER BY canonical_name, test_date DESC, id DESC`,
+    [patientId],
+  );
+
+  // Med adherence — taken_logs / expected_doses approximation over window
+  const adherence = await pool.query(
+    `WITH active AS (
+        SELECT id FROM medications
+         WHERE patient_id=$1 AND is_active = TRUE AND parent_medication_id IS NULL
+      ),
+      taken AS (
+        SELECT COUNT(*) AS c FROM patient_med_log
+         WHERE patient_id=$1 AND log_date ${dateExpr} AND status='taken'
+      )
+      SELECT (SELECT COUNT(*) FROM active) AS active_meds,
+             (SELECT c FROM taken) AS taken_doses`,
+    [patientId],
+  );
+
+  // Recent symptoms (top 5)
+  const sym = await pool.query(
+    `SELECT symptom, MAX(log_date) AS last_date, COUNT(*) AS n, MAX(severity) AS worst_severity
+       FROM patient_symptom_log
+      WHERE patient_id=$1 AND log_date ${dateExpr}
+      GROUP BY symptom ORDER BY n DESC, last_date DESC LIMIT 5`,
+    [patientId],
+  );
+
+  return {
+    window: label,
+    since_date: sinceDate,
+    bp:
+      vit.rows[0]?.bp_count > 0
+        ? {
+            systolic_avg: Number(vit.rows[0].bp_sys_avg),
+            diastolic_avg: Number(vit.rows[0].bp_dia_avg),
+            readings: Number(vit.rows[0].bp_count),
+          }
+        : null,
+    sugar:
+      vit.rows[0]?.sugar_count > 0
+        ? {
+            all_avg_mgdl: Number(vit.rows[0].sugar_avg),
+            fasting_avg_mgdl: vit.rows[0].sugar_fbg_avg ? Number(vit.rows[0].sugar_fbg_avg) : null,
+            readings: Number(vit.rows[0].sugar_count),
+          }
+        : null,
+    weight: vit.rows[0]?.weight_latest
+      ? {
+          latest_kg: Number(vit.rows[0].weight_latest),
+          min_kg: vit.rows[0].weight_min ? Number(vit.rows[0].weight_min) : null,
+          max_kg: vit.rows[0].weight_max ? Number(vit.rows[0].weight_max) : null,
+        }
+      : null,
+    labs_latest: labs.rows.map((r) => ({
+      test: r.test_name,
+      canonical: r.canonical_name,
+      value: r.result,
+      unit: r.unit,
+      flag: r.flag,
+      date: r.test_date,
+    })),
+    medication_adherence: {
+      active_meds: Number(adherence.rows[0]?.active_meds || 0),
+      taken_doses_in_window: Number(adherence.rows[0]?.taken_doses || 0),
+    },
+    top_symptoms: sym.rows.map((r) => ({
+      symptom: r.symptom,
+      occurrences: Number(r.n),
+      worst_severity: r.worst_severity ? Number(r.worst_severity) : null,
+      last_date: r.last_date,
+    })),
+  };
+}
+
+// ── Medication schedule ────────────────────────────────────────────────
+const TIME_SLOT_LABELS = {
+  fasting: "Fasting / first thing",
+  before_breakfast: "Before breakfast",
+  after_breakfast: "After breakfast",
+  before_lunch: "Before lunch",
+  after_lunch: "After lunch",
+  before_dinner: "Before dinner",
+  after_dinner: "After dinner",
+  bedtime: "Bedtime",
+  anytime: "Anytime",
+};
+
+function classifyTimingSlot(timing) {
+  const t = String(timing || "").toLowerCase();
+  if (!t) return "anytime";
+  if (t.includes("fasting")) return "fasting";
+  if (t.includes("bedtime") || t.includes("night")) return "bedtime";
+  if (t.includes("before breakfast") || t.includes("empty stomach")) return "before_breakfast";
+  if (t.includes("after breakfast") || t.includes("breakfast")) return "after_breakfast";
+  if (t.includes("before lunch")) return "before_lunch";
+  if (t.includes("after lunch") || t.includes("lunch")) return "after_lunch";
+  if (t.includes("before dinner")) return "before_dinner";
+  if (t.includes("after dinner") || t.includes("dinner")) return "after_dinner";
+  return "anytime";
+}
+
+async function getMedSchedule(pool, patientId) {
+  const meds = await qMeds(pool, patientId, { limit: 200 });
+  const active = meds.filter((m) => m.is_active && !m.parent_medication_id);
+  const grouped = {};
+  for (const m of active) {
+    const slot = classifyTimingSlot(m.timing);
+    if (!grouped[slot]) grouped[slot] = [];
+    grouped[slot].push({
+      name: m.name,
+      dose: m.dose,
+      frequency: m.frequency,
+      timing: m.timing,
+    });
+  }
+  return Object.entries(grouped).map(([slot, items]) => ({
+    slot,
+    label: TIME_SLOT_LABELS[slot] || slot,
+    meds: items,
+  }));
+}
+
+// ── Dispatcher ─────────────────────────────────────────────────────────
+export async function executeTool(name, input, ctx) {
+  const { pool, scribePatientId } = ctx;
+  const args = await withSinceContext(pool, scribePatientId, input || {});
+
+  switch (name) {
+    case "query_patient_data": {
+      switch (args.scope) {
+        case "profile":
+          return qProfile(pool, scribePatientId);
+        case "vitals":
+          return qVitalsAll(pool, scribePatientId, args);
+        case "sugar":
+          return qSugar(pool, scribePatientId, args);
+        case "bp":
+          return qBP(pool, scribePatientId, args);
+        case "weight":
+          return qWeight(pool, scribePatientId, args);
+        case "labs":
+          return qLabs(pool, scribePatientId, args);
+        case "meds":
+          return qMeds(pool, scribePatientId, args);
+        case "meals":
+          return qMeals(pool, scribePatientId, args);
+        case "symptoms":
+          return qSymptoms(pool, scribePatientId, args);
+        case "appointments":
+          return qAppointments(pool, scribePatientId, args);
+        case "diagnoses":
+          return qDiagnoses(pool, scribePatientId);
+        default:
+          return { error: `Unknown scope: ${args.scope}` };
+      }
+    }
+    case "get_progress_summary":
+      return summariseProgress(pool, scribePatientId, args);
+    case "get_medication_schedule":
+      return getMedSchedule(pool, scribePatientId);
+    case "get_appointments": {
+      const all = await qAppointments(pool, scribePatientId, { limit: args.limit || 20 });
+      const today = new Date().toISOString().slice(0, 10);
+      if (args.scope === "upcoming") return all.filter((a) => String(a.appointment_date) >= today);
+      if (args.scope === "past") return all.filter((a) => String(a.appointment_date) < today);
+      if (args.scope === "next") {
+        const up = all
+          .filter((a) => String(a.appointment_date) >= today)
+          .sort((a, b) => String(a.appointment_date).localeCompare(String(b.appointment_date)));
+        return up[0] || null;
+      }
+      return all;
+    }
+    default:
+      return { error: `Unknown tool: ${name}` };
+  }
+}
+
+// ── Client-action mapping for UI tools ─────────────────────────────────
+// Returns { clientAction, ack } where ack is the JSON the model sees as the
+// tool_result so it can phrase a closing sentence to the patient.
+export function buildClientAction(name, input) {
+  if (name === "propose_log") {
+    const ca = {
+      type: "open_log_modal",
+      logType: input.type,
+      v1: input.value1 ?? "",
+      v2: input.value2 ?? "",
+      context: input.context ?? "",
+    };
+    return {
+      clientAction: ca,
+      ack: {
+        status: "queued_for_client",
+        note: "The log card will open in the patient app pre-filled with these values. The patient will tap Save or Cancel.",
+      },
+    };
+  }
+  if (name === "open_doctor_chat") {
+    const ca = {
+      type: "open_doctor_chat",
+      seed: input.seed ?? "",
+    };
+    return {
+      clientAction: ca,
+      ack: { status: "queued_for_client", note: "Care → Team chat will open." },
+    };
+  }
+  return null;
+}
+
+export const UI_TOOL_NAMES = new Set(["propose_log", "open_doctor_chat"]);
+export const FINAL_TOOL_NAME = "respond_to_patient";

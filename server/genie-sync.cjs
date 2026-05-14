@@ -323,6 +323,12 @@ async function syncVisitToGenie(visit, patient, doctor) {
         p_appointment_time: visit.follow_up_time || visit.next_appointment_time || visit.time_slot || null,
         p_purpose: visit.follow_up_purpose || visit.visit_type || visit.purpose || null,
       }, { step: 'appointment' });
+      // NOTE: FOLLOW UP WITH (visit.follow_up_with) is intentionally NOT
+      // pushed via this RPC — the canonical store is scribe's own
+      // appointments.follow_up_with (Supabase vuukipgdegewpwucdgxa) which
+      // the Genie patient app reads directly via giniSupabase. The PATCH
+      // /visit/:id/follow-up-with endpoint and refreshOpdConsultations
+      // already denormalise into that column.
     }
 
     // 8. Add timeline event
@@ -869,6 +875,7 @@ async function syncAppointmentToGenie(scribePatientId, localDb) {
     if (!rows[0]) return { synced: true, pushed: 0, total: 0, errors };
 
     const appt = rows[0];
+
     try {
       const result = await withRetry(
         () =>

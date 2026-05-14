@@ -348,6 +348,14 @@ function buildPrescriptionHtml(data = {}) {
     latestCon.follow_up ||
     {};
   const tests = latestCon.investigations_to_order || latestCon.tests_ordered || [];
+  // FOLLOW UP WITH — free-text patient instructions for the next visit
+  // (fasting / tests to bring / preparations). Captured from prescription
+  // extraction or set inline on /visit. Printed as a dedicated section so the
+  // patient leaves the clinic with these instructions on paper.
+  const followUpWith =
+    typeof latestCon.follow_up_with === "string" && latestCon.follow_up_with.trim()
+      ? latestCon.follow_up_with.trim()
+      : "";
   // Prefer the explicit visit summary the client passes in (current doctor's
   // summary or visit-level synopsis) over anything found on the consultation
   // record. Falls back to summary.summary so old callers still work.
@@ -1014,6 +1022,16 @@ function buildPrescriptionHtml(data = {}) {
         </div>`
       : "";
 
+  // ── FOLLOW UP WITH — dedicated printed section, preserves line breaks
+  const followUpWithHtml = followUpWith
+    ? `<div class="rx-test" style="margin-top:8px;background:#fff7ed;border:1px solid #fed7aa">
+          <div class="rx-test-title" style="color:#7c2d12">📋 Follow up with</div>
+          <div style="margin-top:4px;font-size:12px;color:#7c2d12;white-space:pre-line;line-height:1.5">${escape(
+            followUpWith,
+          )}</div>
+        </div>`
+    : "";
+
   // ── Pills
   const phasePill = summary.carePhase
     ? `<span class="rx-pill" style="background:var(--aml);color:var(--am)">${escape(summary.carePhase)}</span>`
@@ -1110,6 +1128,7 @@ function buildPrescriptionHtml(data = {}) {
            ${labTestsHtml}`
         : ""
     }
+    ${followUpWithHtml}
   </div>
 
   <div class="rx-footer">

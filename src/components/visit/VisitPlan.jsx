@@ -180,6 +180,7 @@ const VisitPlan = memo(function VisitPlan({
   onEndVisit,
   onAddReferral,
   onChangeFollowUp,
+  onChangeFollowUpWith,
   onOpenTemplate,
   onMedCardTab,
   referrals,
@@ -219,6 +220,16 @@ const VisitPlan = memo(function VisitPlan({
     if (!conData.follow_up) return { ...conData, follow_up: { tests_to_bring: [] } };
     return conData;
   }, [conData]);
+
+  // FOLLOW UP WITH — free-text patient instructions for the next visit
+  // (fasting / tests to bring / preparations). Inline editor with save +
+  // delete; persists via onChangeFollowUpWith → PATCH /visit/:id/follow-up-with.
+  const followUpWith = latestCon?.follow_up_with || "";
+  const [fuwEditing, setFuwEditing] = useState(false);
+  const [fuwDraft, setFuwDraft] = useState(followUpWith);
+  useEffect(() => {
+    if (!fuwEditing) setFuwDraft(followUpWith);
+  }, [followUpWith, fuwEditing]);
   // Backend PDF flow lives in VisitPage; keep a local fallback that no-ops
   // if the parent didn't wire onPrintRx.
   const handlePrintRx = useCallback(() => {
@@ -687,6 +698,83 @@ const VisitPlan = memo(function VisitPlan({
             placeholder="Add your notes for this visit..."
             style={{ marginBottom: 12 }}
           />
+
+          {/* Follow Up With — free-text instructions for the next visit */}
+          <div className="subsec" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            Follow Up With
+            {!fuwEditing && followUpWith && (
+              <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <button className="btn" onClick={() => setFuwEditing(true)} title="Edit">
+                  ✏️ Edit
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    if (!onChangeFollowUpWith) return;
+                    if (!window.confirm("Remove the Follow Up With instructions?")) return;
+                    onChangeFollowUpWith(null);
+                  }}
+                  title="Delete"
+                >
+                  🗑️ Delete
+                </button>
+              </span>
+            )}
+          </div>
+          {fuwEditing ? (
+            <div style={{ marginBottom: 12 }}>
+              <textarea
+                className="nf"
+                value={fuwDraft}
+                onChange={(e) => setFuwDraft(e.target.value)}
+                placeholder="e.g. Fasting sample at 8:30am. Bring HbA1c, FBG, Lipids. Omit antidiabetic medication for 24 hrs."
+                rows={4}
+                style={{ width: "100%" }}
+              />
+              <div style={{ display: "flex", gap: 7, marginTop: 6 }}>
+                <button
+                  className="bx bx-g"
+                  onClick={() => {
+                    const trimmed = (fuwDraft || "").trim();
+                    if (onChangeFollowUpWith) onChangeFollowUpWith(trimmed || null);
+                    setFuwEditing(false);
+                  }}
+                >
+                  Save
+                </button>
+                <button
+                  className="bx"
+                  onClick={() => {
+                    setFuwDraft(followUpWith);
+                    setFuwEditing(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : followUpWith ? (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 14px",
+                background: "#fff7ed",
+                border: "1px solid #fed7aa",
+                borderRadius: 8,
+                fontSize: 13,
+                color: "#7c2d12",
+                whiteSpace: "pre-line",
+              }}
+            >
+              {followUpWith}
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              <button className="btn" onClick={() => setFuwEditing(true)}>
+                + Add follow-up instructions
+              </button>
+            </div>
+          )}
 
           {/* Next Visit row */}
           <div className="nv-row">

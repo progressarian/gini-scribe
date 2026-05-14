@@ -1,5 +1,13 @@
 import { Router } from "express";
 import sharp from "sharp";
+import pool from "../config/db.js";
+import {
+  AGENT_TOOLS,
+  executeTool,
+  buildClientAction,
+  UI_TOOL_NAMES,
+  FINAL_TOOL_NAME,
+} from "../services/agent/tools.js";
 
 const router = Router();
 
@@ -261,6 +269,184 @@ router.post("/ai/clinical-intelligence", async (req, res) => {
     const data = await resp.json();
     res.json(data);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/ai/agent ──────────────────────────────────────────────
+// Tool-using patient-facing agent ("Dr. Gini AI"). Runs the Anthropic
+// `tools` loop server-side. DB-read tools execute here; UI tools
+// (propose_log, open_doctor_chat) are emitted as `client_actions` for the
+// RN app to act on. Body: { messages, scribePatientId, model?: 'haiku'|'sonnet' }.
+const AGENT_SYSTEM_PROMPT = `You are Dr. Gini AI, a warm, concise patient health coach for Gini Health. Hinglish is fine when the patient uses it. You can read this patient's records and open in-app cards via tools.
+
+OUTPUT CONTRACT (STRICT):
+- Every turn MUST end with exactly one call to the \`respond_to_patient\` tool. That tool call IS your reply; never put text outside of it.
+- Put every concrete number you mention into \`numbers[]\` (label, value, unit, date or window). The app uses this array to render numeric badges — if it's missing, the patient sees no badge.
+- When you propose a log, you MUST call \`propose_log\` FIRST, then \`respond_to_patient\` with \`intent:'log_proposed'\` and a matching \`log_proposal\` block.
+- When you hand off to a doctor, you MUST call \`open_doctor_chat\` FIRST, then \`respond_to_patient\` with \`intent:'doctor_handoff'\` (and \`safety_flag\` set when relevant).
+
+DATA RULES:
+- Never invent values. Any number you state must have come from a tool result this turn.
+- For "how am I doing / what's my progress / how's my sugar / how's my BP" questions, prefer \`get_progress_summary\` (one call) over multiple \`query_patient_data\` calls. Pick window='since_last_visit' if the user references "since I saw the doctor", otherwise window='days' with days inferred from the phrasing (this week=7, this month=30, last 3 months=90).
+- When the patient gives you a vitals/lab number they want recorded (BP, sugar, weight, HbA1c, LDL, TSH, Hb, eGFR) OR a food/exercise/sleep/mood/symptom entry, ALWAYS call propose_log. Never claim to have logged something — only the in-app card saves data.
+
+SAFETY:
+- You do NOT diagnose, prescribe, or change doses. If the patient asks anything like that — or mentions chest pain, breathlessness, severe symptoms, or asks to talk to the doctor — call open_doctor_chat with a short seed, then respond with intent='doctor_handoff' and the right safety_flag.
+
+STYLE:
+- 2-4 sentences in \`message\` unless the patient asked for detail. Use the patient's first name when you know it. No markdown headers, no bullet syntax inside message.
+- Time/date context: today is ${new Date().toISOString().slice(0, 10)}.`;
+
+router.post("/ai/agent", async (req, res) => {
+  if (!ANTHROPIC_KEY)
+    return res.status(503).json({ error: "Anthropic API key not configured on server" });
+
+  const { messages, scribePatientId, model } = req.body || {};
+  if (!Array.isArray(messages) || messages.length === 0)
+    return res.status(400).json({ error: "messages array is required" });
+  const pid = Number(scribePatientId);
+  if (!Number.isInteger(pid) || pid <= 0)
+    return res.status(400).json({ error: "scribePatientId is required" });
+
+  const anthropicModel =
+    model === "sonnet" ? "claude-sonnet-4-20250514" : "claude-haiku-4-5-20251001";
+
+  const ctx = { pool, scribePatientId: pid };
+  const compressed = await compressMessagesImages(messages);
+  const conversation = [...compressed];
+  const clientActions = [];
+  const toolLog = [];
+  let structured = null; // Set when the model calls respond_to_patient.
+
+  try {
+    for (let turn = 0; turn < 5; turn++) {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: anthropicModel,
+          max_tokens: 1500,
+          system: AGENT_SYSTEM_PROMPT,
+          tools: AGENT_TOOLS,
+          messages: conversation,
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        return res
+          .status(resp.status)
+          .json({ error: `Anthropic ${resp.status}: ${errText.slice(0, 300)}` });
+      }
+      const data = await resp.json();
+      if (data.error) return res.status(502).json({ error: data.error.message });
+
+      const blocks = Array.isArray(data.content) ? data.content : [];
+      // Append the assistant turn to the conversation so any subsequent
+      // tool_result references it.
+      conversation.push({ role: "assistant", content: blocks });
+
+      const toolUses = blocks.filter((b) => b.type === "tool_use");
+      const rawText = blocks
+        .filter((b) => b.type === "text")
+        .map((b) => b.text || "")
+        .join("\n")
+        .trim();
+
+      // Did the model emit the terminal structured-output tool? If so, that
+      // input IS our response — return immediately.
+      const finalCall = toolUses.find((tu) => tu.name === FINAL_TOOL_NAME);
+      if (finalCall) {
+        const input = finalCall.input || {};
+        structured = {
+          message: typeof input.message === "string" ? input.message : "",
+          intent: input.intent || "chat",
+          numbers: Array.isArray(input.numbers) ? input.numbers : [],
+          log_proposal: input.log_proposal || null,
+          safety_flag: input.safety_flag || "none",
+        };
+        toolLog.push({ tool: FINAL_TOOL_NAME, input, ok: true });
+        return res.json({
+          text: structured.message,
+          structured,
+          client_actions: clientActions,
+          tool_log: toolLog,
+        });
+      }
+
+      // No tool_use AND no terminal tool — the model went off-contract.
+      // Fall back to whatever plain text it produced so the patient still
+      // gets a reply, but flag it in tool_log for monitoring.
+      if (toolUses.length === 0) {
+        toolLog.push({
+          tool: "(no_final_tool)",
+          input: { text: rawText.slice(0, 200) },
+          ok: false,
+        });
+        return res.json({
+          text: rawText || "(no response)",
+          structured: {
+            message: rawText,
+            intent: "chat",
+            numbers: [],
+            log_proposal: null,
+            safety_flag: "none",
+          },
+          client_actions: clientActions,
+          tool_log: toolLog,
+        });
+      }
+
+      // Execute each non-terminal tool_use and build a single user-role
+      // message of tool_result blocks (Anthropic requires them grouped).
+      const toolResults = [];
+      for (const tu of toolUses) {
+        let result;
+        try {
+          if (UI_TOOL_NAMES.has(tu.name)) {
+            const built = buildClientAction(tu.name, tu.input || {});
+            if (built) {
+              clientActions.push(built.clientAction);
+              result = built.ack;
+            } else {
+              result = { error: `Unknown UI tool: ${tu.name}` };
+            }
+          } else {
+            result = await executeTool(tu.name, tu.input || {}, ctx);
+          }
+        } catch (err) {
+          result = { error: String(err?.message || err) };
+        }
+        toolLog.push({ tool: tu.name, input: tu.input, ok: !result?.error });
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify(result ?? null).slice(0, 60_000),
+        });
+      }
+      conversation.push({ role: "user", content: toolResults });
+    }
+
+    // Loop budget exhausted without a respond_to_patient — return a fallback.
+    return res.json({
+      text: "I hit my tool-use limit before finishing. Please try again or rephrase.",
+      structured: {
+        message: "I hit my tool-use limit before finishing. Please try again or rephrase.",
+        intent: "chat",
+        numbers: [],
+        log_proposal: null,
+        safety_flag: "none",
+      },
+      client_actions: clientActions,
+      tool_log: toolLog,
+    });
+  } catch (err) {
+    console.error("AI agent error:", err);
     res.status(500).json({ error: err.message });
   }
 });
