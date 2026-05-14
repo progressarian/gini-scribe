@@ -14,6 +14,7 @@ import {
   insertLabCase,
   markLabCaseSynced,
   getPendingLabCases,
+  getPartialLabCases,
   getPdfPendingCases,
   matchLabPatient,
   ensureLabPatient,
@@ -25,7 +26,10 @@ import {
   abandonLabCase,
   downloadAndStoreLabPdf,
   sweepBlankStoredLabPdfs,
+  clearLabCasePdfBackoff,
+  touchLabCaseRetryAt,
 } from "../lab/db.js";
+import { isLabCasePrintable } from "../lab/labHealthrayParser.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -388,6 +392,114 @@ export async function retryPendingLabCases() {
       }
       await yieldToApp(YIELD_BETWEEN_ITEMS_MS);
     }
+  } finally {
+    await releaseLock();
+  }
+}
+
+// ── Partial-results recovery: re-poll cases stuck at "Gini Lab Partial" ────
+// Runs every 5 min. A case enters this bucket when at least one numeric panel
+// has been written (results_synced=TRUE) but HealthRay still hasn't stamped
+// reported_on — meaning the remaining panels are still being entered by lab
+// staff. The 10-min `retryPendingLabCases` loop ignores these rows because
+// results_synced is already TRUE, so without this they only refresh on the
+// next per-case-date list-sync tick (much slower). For each due row we
+// re-fetch detail, write any newly-numeric results, and refresh
+// raw_detail_json so the UI chip flips from "Partial" to "Received" as soon
+// as reported_on lands. When the case is now complete we clear the PDF
+// backoff and fire downloadAndStoreLabPdf so the PDF appears within the same
+// 5-min window — not on the 30-40 min queue left by the earlier deferred gate.
+export async function retryPartialLabCases() {
+  const releaseLock = await tryAcquireCronLock(
+    "Lab Partial Retry",
+    CRON_LOCK_KEYS.LAB_PARTIAL_RETRY,
+  );
+  if (!releaseLock) return { total: 0, refreshed: 0, completed: 0, errors: 0 };
+
+  try {
+    const rows = await getPartialLabCases({ limit: 50 });
+    if (!rows.length) return { total: 0, refreshed: 0, completed: 0, errors: 0 };
+
+    log("Partial", `${rows.length} partial cases due for re-poll`);
+
+    let refreshed = 0;
+    let completed = 0;
+    let errors = 0;
+
+    for (const row of rows) {
+      try {
+        const caseDate = row.case_date
+          ? typeof row.case_date === "string"
+            ? row.case_date.slice(0, 10)
+            : row.case_date.toISOString().slice(0, 10)
+          : null;
+
+        // Touch-only — don't share retry_count with the slow recovery path,
+        // otherwise 30-40s polling would hit RETRY_CAP (336) in a few hours
+        // and permanently abandon the row. The 7-day case_date filter in
+        // getPartialLabCases bounds the loop instead.
+        await touchLabCaseRetryAt(row.case_no);
+
+        let detail;
+        try {
+          detail = await fetchLabCaseDetail(row.case_uid, row.lab_case_id, row.lab_user_id);
+        } catch (e) {
+          log("Partial", `${row.patient_case_no}: detail fetch failed — ${e.message}`);
+          errors++;
+          continue;
+        }
+
+        const results = parseLabCaseResults(detail);
+        const appointmentId =
+          row.appointment_id || (await linkLabAppointment(detail.healthray_order_id));
+        const written = await syncLabCaseResults(row.patient_id, appointmentId, caseDate, results);
+
+        // Always refresh raw_detail_json / investigation_summary so the UI
+        // sees the latest reported_on + any text-only updates immediately.
+        await markLabCaseSynced(row.case_no, {
+          patientId: row.patient_id,
+          appointmentId,
+          rawDetailJson: detail,
+        });
+        refreshed++;
+
+        const reportedOn = detail?.reported_on || null;
+        const printable = isLabCasePrintable(row.case_status, detail);
+
+        log(
+          "Partial",
+          `${row.patient_case_no} | written=${written} | reported_on=${reportedOn || "—"} | printable=${printable.ready} (${printable.reason})`,
+        );
+
+        // Case is now complete → drop any prior 30-40 min PDF backoff and
+        // trigger the download immediately. The downloader runs the gate
+        // again itself, so this is safe even if completeness flips back.
+        if (printable.ready || reportedOn) {
+          completed++;
+          await clearLabCasePdfBackoff(row.case_no);
+          downloadAndStoreLabPdf(
+            row.patient_id,
+            row.case_no,
+            row.case_uid,
+            row.lab_case_id,
+            row.lab_user_id,
+            row.pdf_file_name,
+            caseDate,
+            detail,
+          ).catch((e) => log("PDF", `${row.patient_case_no}: PDF failed — ${e.message}`));
+        }
+      } catch (e) {
+        errors++;
+        log("Partial", `${row.patient_case_no} error: ${e.message}`);
+      }
+      await yieldToApp(YIELD_BETWEEN_ITEMS_MS);
+    }
+
+    log(
+      "Partial",
+      `Done — ${rows.length} cases | ${refreshed} refreshed | ${completed} completed | ${errors} errors`,
+    );
+    return { total: rows.length, refreshed, completed, errors };
   } finally {
     await releaseLock();
   }

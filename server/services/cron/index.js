@@ -11,6 +11,7 @@ import {
 import {
   runLabSync,
   retryPendingLabCases,
+  retryPartialLabCases,
   runPdfRetryRecovery,
   runBlankLabPdfSweep,
   getLabSyncStatus,
@@ -37,10 +38,18 @@ const HEALTHRAY_LOOP_MAX_BREAK_MS = 15 * 1000;
 const LAB_LOOP_MIN_BREAK_MS = 30 * 1000;
 const LAB_LOOP_MAX_BREAK_MS = 40 * 1000;
 
+// Partial-results recovery: same continuous-loop pattern (30–40s break) so
+// "Gini Lab Partial" cases pick up newly-finalised panels in near real-time
+// instead of waiting for a fixed 5-min tick.
+const PARTIAL_LOOP_MIN_BREAK_MS = 30 * 1000;
+const PARTIAL_LOOP_MAX_BREAK_MS = 40 * 1000;
+
 let healthrayLoopRunning = false;
 let healthrayLoopTimeoutId = null;
 let labLoopRunning = false;
 let labLoopTimeoutId = null;
+let partialLoopRunning = false;
+let partialLoopTimeoutId = null;
 
 function scheduleNextHealthraySync(delayMs) {
   if (!healthrayLoopRunning) return;
@@ -61,6 +70,30 @@ function scheduleNextHealthraySync(delayMs) {
       `[Cron] HealthRay sync finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
     );
     scheduleNextHealthraySync(breakMs);
+  }, delayMs);
+}
+
+function scheduleNextPartialRetry(delayMs) {
+  if (!partialLoopRunning) return;
+  partialLoopTimeoutId = setTimeout(async () => {
+    partialLoopTimeoutId = null;
+    if (!partialLoopRunning) return;
+    const startedAt = Date.now();
+    try {
+      await retryPartialLabCases();
+    } catch (e) {
+      console.error("[Cron] Lab partial retry failed:", e.message);
+    }
+    const elapsed = Date.now() - startedAt;
+    const breakMs =
+      PARTIAL_LOOP_MIN_BREAK_MS +
+      Math.floor(
+        Math.random() * (PARTIAL_LOOP_MAX_BREAK_MS - PARTIAL_LOOP_MIN_BREAK_MS + 1),
+      );
+    console.log(
+      `[Cron] Lab partial retry finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
+    );
+    scheduleNextPartialRetry(breakMs);
   }, delayMs);
 }
 
@@ -130,6 +163,19 @@ export function startCronJobs() {
   recoveryIntervalId = setInterval(() => {
     retryPendingLabCases().catch((e) => console.error("[Cron] Lab recovery failed:", e.message));
   }, RECOVERY_INTERVAL_MS);
+
+  // ── Partial-results recovery (continuous loop, 30–40s break) ─────────────
+  // Picks up lab cases stuck at "Gini Lab Partial" (results_synced=TRUE but
+  // HealthRay hasn't stamped reported_on yet) and re-polls detail in a
+  // continuous loop with a 30–40s break between runs — same pattern as
+  // runLabSync / HealthRay sync. Per-row throttle inside getPartialLabCases
+  // (30s on last_retry_at) keeps each case to ~one fetch per loop tick.
+  // Distinct from retryPendingLabCases (which only handles results_synced=FALSE).
+  console.log(
+    "[Cron] Starting lab partial-results recovery (continuous loop, 30–40s break)...",
+  );
+  partialLoopRunning = true;
+  scheduleNextPartialRetry(0);
 
   // ── Lab PDF retry recovery ────────────────────────────────────────────────
   // Picks up lab cases whose PDF backoff window (pdf_next_attempt_at) has
@@ -291,6 +337,14 @@ export function stopCronJobs() {
     blankSweepIntervalId = null;
     console.log("[Cron] Blank lab PDF sweep stopped");
   }
+  if (partialLoopRunning) {
+    partialLoopRunning = false;
+    if (partialLoopTimeoutId) {
+      clearTimeout(partialLoopTimeoutId);
+      partialLoopTimeoutId = null;
+    }
+    console.log("[Cron] Lab partial-results recovery stopped");
+  }
 }
 
 // Manual trigger exports
@@ -306,6 +360,7 @@ export {
   backfillLabPdfs,
   runPdfRetryRecovery,
   runBlankLabPdfSweep,
+  retryPartialLabCases,
   runDailyOpdBackfill,
   runStuckStatusRecovery,
   runMissingMedsRecovery,

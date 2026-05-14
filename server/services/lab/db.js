@@ -605,6 +605,55 @@ export async function getPdfPendingCases({ limit = 50 } = {}) {
   return rows;
 }
 
+// ── Cases that are partially reported (chip = "Gini Lab Partial") ──────────
+// Results have started landing (results_synced=TRUE) but HealthRay hasn't
+// stamped reported_on yet, meaning more panels are still trickling in. These
+// rows need a faster cadence than the normal 10-min retry: every 5 min we
+// re-pull detail so newly-finalised numeric panels appear in lab_results, and
+// the moment HealthRay marks reported_on the chip flips from "Partial" to
+// "Received". Mirrors the partial-chip definition in routes/opd.js so the
+// retry set matches exactly what the UI is showing as partial.
+export async function getPartialLabCases({ limit = 50 } = {}) {
+  const { rows } = await pool.query(
+    `SELECT * FROM lab_cases
+      WHERE results_synced = TRUE
+        AND COALESCE(retry_abandoned, FALSE) = FALSE
+        AND (case_source IS NULL OR case_source IN ('inhouse', 'mixed', 'unknown'))
+        AND pdf_storage_path IS NULL
+        AND COALESCE(pdf_unavailable, FALSE) = FALSE
+        AND raw_detail_json->>'reported_on' IS NULL
+        AND case_date >= CURRENT_DATE - INTERVAL '7 days'
+        AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '30 seconds')
+      ORDER BY last_retry_at ASC NULLS FIRST, case_date DESC
+      LIMIT $1`,
+    [limit],
+  );
+  return rows;
+}
+
+// Clear the PDF-retry backoff so a follow-up downloadAndStoreLabPdf isn't
+// skipped by the "next retry in X min" guard. Used when the partial-results
+// recovery cron has just observed the case become complete — we want the PDF
+// fetched now, not on the stale 30-40 min schedule queued earlier.
+export async function clearLabCasePdfBackoff(caseNo) {
+  await pool.query(
+    `UPDATE lab_cases SET pdf_next_attempt_at = NULL WHERE case_no = $1`,
+    [caseNo],
+  );
+}
+
+// Touch last_retry_at without bumping retry_count. The partial-results loop
+// re-polls every ~30s, which would burn through the shared RETRY_CAP (used by
+// the slow recovery path) in a few hours and falsely mark the row abandoned.
+// Partial cases self-bound by the 7-day case_date filter in getPartialLabCases,
+// so we don't need a separate counter — just record when we last touched it.
+export async function touchLabCaseRetryAt(caseNo) {
+  await pool.query(
+    `UPDATE lab_cases SET last_retry_at = NOW() WHERE case_no = $1`,
+    [caseNo],
+  );
+}
+
 // ── Get cases pending retry ─────────────────────────────────────────────────
 // Skip outsource-only cases (results never come through this API) and rows
 // already abandoned after the retry cap. Throttle each row to one attempt per
