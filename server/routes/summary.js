@@ -152,13 +152,32 @@ function formatLabs(labHistory) {
   // panel — pin them so a noisy CBC/urinalysis dump can't displace HbA1c, eGFR,
   // LDL, TSH, etc. out of the top-25 prompt slice.
   const CORE_TESTS = new Set([
-    "HbA1c", "FBS", "PPBS", "Random Glucose",
-    "eGFR", "Creatinine", "BUN", "Urea",
-    "LDL", "HDL", "Total Cholesterol", "Triglycerides",
-    "TSH", "Free T4", "Free T3", "T3", "T4",
-    "ALT", "AST", "Bilirubin",
-    "Haemoglobin", "Hemoglobin", "Vitamin D", "Vitamin B12",
-    "Urine ACR", "Urine Microalbumin",
+    "HbA1c",
+    "FBS",
+    "PPBS",
+    "Random Glucose",
+    "eGFR",
+    "Creatinine",
+    "BUN",
+    "Urea",
+    "LDL",
+    "HDL",
+    "Total Cholesterol",
+    "Triglycerides",
+    "TSH",
+    "Free T4",
+    "Free T3",
+    "T3",
+    "T4",
+    "ALT",
+    "AST",
+    "Bilirubin",
+    "Haemoglobin",
+    "Hemoglobin",
+    "Vitamin D",
+    "Vitamin B12",
+    "Urine ACR",
+    "Urine Microalbumin",
   ]);
   const all = entries
     .map(([name, hist]) => ({ name, hist: Array.isArray(hist) ? hist : [] }))
@@ -166,8 +185,9 @@ function formatLabs(labHistory) {
     .sort((a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0));
   const core = all.filter((r) => CORE_TESTS.has(r.name));
   const nonCore = all.filter((r) => !CORE_TESTS.has(r.name));
-  const ranked = [...core, ...nonCore.slice(0, Math.max(0, 25 - core.length))]
-    .sort((a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0));
+  const ranked = [...core, ...nonCore.slice(0, Math.max(0, 25 - core.length))].sort(
+    (a, b) => new Date(b.hist[0].date || 0) - new Date(a.hist[0].date || 0),
+  );
 
   const lines = ranked.map(({ name, hist }) => {
     const latest = hist[0];

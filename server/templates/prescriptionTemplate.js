@@ -2,6 +2,13 @@
 // Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS in
 // sync with gini-examples.html (lines 9-115) when the design changes.
 
+import {
+  MED_CATEGORIES,
+  groupMedicationsByCategory,
+  getCategoryLabel,
+  getCategoryIcon,
+} from "../config/medicationCategories.js";
+
 // Strip "healthray:<id>" markers (and any trailing dash separator) from notes
 // so the printed Rx doesn't leak the upstream healthray reference. Mirrors
 // the displayNote() helper used by VisitDiagnoses.jsx.
@@ -236,6 +243,8 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-summary-block p+p{margin-top:6px}
 
 .rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd)}
+.rx-med-cat{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
+.rx-med-cat-count{font-size:9px;font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
 .rx-dx{display:flex;gap:10px;align-items:flex-start;margin-bottom:7px}
 .rx-dx-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:18px;padding-top:1px}
 .rx-dx-body{flex:1}
@@ -875,7 +884,7 @@ function buildPrescriptionHtml(data = {}) {
         </div>`;
   };
 
-  // ── Own medicines
+  // ── Own medicines (grouped by clinical category)
   const ownChildrenByParent = buildChildrenMap(ownMeds);
   const ownIds = new Set(ownMeds.map((m) => m.id).filter((x) => x != null));
   // Top-level: rows without a parent + children whose parent is not in this
@@ -883,28 +892,30 @@ function buildPrescriptionHtml(data = {}) {
   const ownParents = ownMeds.filter(
     (m) => !m.parent_medication_id || !ownIds.has(m.parent_medication_id),
   );
-  const ownMedsHtml = ownParents
-    .map((m, i) => {
-      const primary = m.composition || m.name;
-      const secondary = m.composition && m.name && m.name !== m.composition ? m.name : null;
-      const isNew = !!m.is_new;
-      const rowStyle = isNew
-        ? `style="background:var(--gnl);padding:8px 10px;border-radius:6px;margin-bottom:2px;border-bottom:none"`
+
+  // Renders one numbered medicine row; counter is passed in so numbering stays
+  // continuous across category sections.
+  const renderOwnMedRow = (m, num) => {
+    const primary = m.composition || m.name;
+    const secondary = m.composition && m.name && m.name !== m.composition ? m.name : null;
+    const isNew = !!m.is_new;
+    const rowStyle = isNew
+      ? `style="background:var(--gnl);padding:8px 10px;border-radius:6px;margin-bottom:2px;border-bottom:none"`
+      : "";
+    const tag = isNew
+      ? `<span style="font-weight:400;font-size:11px;color:var(--gn)">🆕 New this visit</span>`
+      : secondary
+        ? `<span style="font-weight:400;font-size:11px;color:var(--ink3)">(${escape(secondary)})</span>`
         : "";
-      const tag = isNew
-        ? `<span style="font-weight:400;font-size:11px;color:var(--gn)">🆕 New this visit</span>`
-        : secondary
-          ? `<span style="font-weight:400;font-size:11px;color:var(--ink3)">(${escape(secondary)})</span>`
-          : "";
-      const indication = Array.isArray(m.for_diagnosis)
-        ? m.for_diagnosis.join(", ")
-        : m.for_diagnosis || m.indication || m.purpose || "";
-      const childrenHtml = (ownChildrenByParent[m.id] || [])
-        .map((c) => renderChildMed(c, primary || ""))
-        .join("");
-      return `
+    const indication = Array.isArray(m.for_diagnosis)
+      ? m.for_diagnosis.join(", ")
+      : m.for_diagnosis || m.indication || m.purpose || "";
+    const childrenHtml = (ownChildrenByParent[m.id] || [])
+      .map((c) => renderChildMed(c, primary || ""))
+      .join("");
+    return `
         <div class="rx-med" ${rowStyle}>
-          <div class="rx-med-num">${i + 1}.</div>
+          <div class="rx-med-num">${num}.</div>
           <div class="rx-med-body">
             <div class="rx-med-name">${escape(primary || "")} ${tag}</div>
             ${indication ? `<div class="rx-med-brand">${escape(indication)}</div>` : ""}
@@ -914,6 +925,32 @@ function buildPrescriptionHtml(data = {}) {
             <div class="rx-med-timing">${escape(m.timing || "")}</div>
           </div>
         </div>${childrenHtml}`;
+  };
+
+  // Bucket parents by clinical category and render one section per non-empty
+  // category. Category metadata (label, order, icon) is read from
+  // server/config/medicationCategories.js — that file is the single place to
+  // edit if you want to rename or reorder categories on the printed Rx.
+  const ownByCategory = groupMedicationsByCategory(ownParents);
+  let medCounter = 0;
+  const ownMedsHtml = MED_CATEGORIES.filter(
+    (c) => c.id !== "external" && (ownByCategory[c.id] || []).length > 0,
+  )
+    .map((cat) => {
+      const rows = ownByCategory[cat.id]
+        .map((m) => {
+          medCounter += 1;
+          return renderOwnMedRow(m, medCounter);
+        })
+        .join("");
+      const count = ownByCategory[cat.id].length;
+      return `
+        <div class="rx-med-cat">
+          <span>${getCategoryIcon(cat.id)}</span>
+          <span>${escape(getCategoryLabel(cat.id))}</span>
+          <span class="rx-med-cat-count">(${count})</span>
+        </div>
+        ${rows}`;
     })
     .join("");
 

@@ -4,7 +4,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
 import { buildVisitLabContext } from "../services/visitLabContext.js";
-import { computeCarePhase } from "../utils/carePhase.js";
+import { computeCarePhase, deriveBiomarkerPriorityStatus } from "../utils/carePhase.js";
 
 const router = Router();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -618,12 +618,22 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       daysWithGini = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
       monthsWithGini = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30)));
     }
-    const { carePhase } = computeCarePhase({
+    const carePhaseResult = computeCarePhase({
       labHistory,
       vitals: mergedVitals,
       totalVisits,
       diagnoses: diagnosesR.rows,
     });
+    // Mirror the visit-page pill: a single biomarker — HbA1c (diabetes) → TSH
+    // (thyroid) → FBS (fallback) — drives the headline phase so the API,
+    // pill, and AI narrative cannot disagree about whether the patient is
+    // controlled or not.
+    const bioPriority = deriveBiomarkerPriorityStatus({
+      labHistory,
+      vitals: mergedVitals,
+      diagnoses: diagnosesR.rows,
+    });
+    const carePhase = bioPriority?.phase || carePhaseResult.carePhase;
 
     // Doctor's free-text note from the saved consultation (if any)
     let doctorNote = null;
@@ -665,6 +675,20 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       narrative,
       aiError,
       carePhase,
+      carePhaseBasis: carePhaseResult.carePhaseBasis,
+      carePhaseCategory: carePhaseResult.carePhaseCategory,
+      carePhaseDrivers: bioPriority ? [bioPriority.marker] : carePhaseResult.carePhaseDrivers,
+      carePhaseParameters: carePhaseResult.carePhaseParameters,
+      carePhasePriority: bioPriority
+        ? {
+            marker: bioPriority.marker,
+            value: bioPriority.value,
+            target: bioPriority.target,
+            status: bioPriority.status,
+            label: bioPriority.label,
+            date: bioPriority.date,
+          }
+        : null,
       visitDate: checkDate,
       totalVisits,
       monthsWithGini,

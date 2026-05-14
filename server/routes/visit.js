@@ -6,7 +6,7 @@ import { n, num, t } from "../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
-import { computeCarePhase } from "../utils/carePhase.js";
+import { computeCarePhase, deriveBiomarkerPriorityStatus } from "../utils/carePhase.js";
 import { LAB_MAP } from "./opd.js";
 import { parseClinicalWithAI } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
@@ -661,6 +661,7 @@ router.get("/visit/:patientId", async (req, res) => {
     let carePhaseBasis = "visits";
     let carePhaseDrivers = [];
     let carePhaseParameters = [];
+    let carePhasePriority = null;
 
     // Load doctor note + compliance + assigned doctor from active OPD appointment if present
     let apptDoctorNote = null;
@@ -765,13 +766,26 @@ router.get("/visit/:patientId", async (req, res) => {
     // mergedVitals is built later, but vitalsR.rows is already available and
     // carries every doctor-side reading (bp_sys/bp_dia/bmi). That's enough for
     // phase scoring — patient-app-logged vitals only refine, not redefine.
-    ({ carePhase, carePhaseBasis, carePhaseDrivers, carePhaseParameters } =
-      computeCarePhase({
-        labHistory,
-        vitals: vitalsR.rows,
-        totalVisits,
-        diagnoses: diagnosesR.rows,
-      }));
+    ({ carePhase, carePhaseBasis, carePhaseDrivers, carePhaseParameters } = computeCarePhase({
+      labHistory,
+      vitals: vitalsR.rows,
+      totalVisits,
+      diagnoses: diagnosesR.rows,
+    }));
+    // Override `carePhase` with the single-marker priority read used by the
+    // visit pill, the post-visit narrative and every other downstream
+    // consumer so they can't disagree about Controlled vs. Uncontrolled.
+    // Keep the multi-parameter `carePhaseParameters` list intact — the pill
+    // tooltip still surfaces every tracked parameter for context.
+    carePhasePriority = deriveBiomarkerPriorityStatus({
+      labHistory,
+      vitals: vitalsR.rows,
+      diagnoses: diagnosesR.rows,
+    });
+    if (carePhasePriority) {
+      carePhase = carePhasePriority.phase;
+      carePhaseDrivers = [carePhasePriority.marker];
+    }
 
     const prep = {
       medPct: apptCompliance.medPct ?? null,
@@ -917,6 +931,16 @@ router.get("/visit/:patientId", async (req, res) => {
         carePhaseBasis,
         carePhaseDrivers,
         carePhaseParameters,
+        carePhasePriority: carePhasePriority
+          ? {
+              marker: carePhasePriority.marker,
+              value: carePhasePriority.value,
+              target: carePhasePriority.target,
+              status: carePhasePriority.status,
+              label: carePhasePriority.label,
+              date: carePhasePriority.date,
+            }
+          : null,
       },
       latestAppointmentId: latestAnyApptR.rows[0]?.id || null,
       latestAppointment: latestAnyApptR.rows[0]

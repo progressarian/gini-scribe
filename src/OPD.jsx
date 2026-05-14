@@ -727,10 +727,12 @@ function ApptRow({ a, sel, onSelect }) {
 // ══════════════════════════════════════════════════════════════
 // DOCTOR SECTION (collapsible)
 // ══════════════════════════════════════════════════════════════
-function DocSection({ docName, appts, selAppt, onSelect, filterStatus }) {
+function DocSection({ docName, appts, selAppt, onSelect, filterStatus, isSearching = false }) {
   const [open, setOpen] = useState(true);
   const seen = appts.filter((a) => a.status === "seen" || a.status === "completed").length;
-  const showSeen = filterStatus === "all" || filterStatus === "seen";
+  // Hide the "N seen" count while the user is searching — the filtered list
+  // no longer represents the full doctor roster, so the count is misleading.
+  const showSeen = !isSearching && (filterStatus === "all" || filterStatus === "seen");
   const initials =
     docName
       .replace(/^Dr\.\s*/i, "")
@@ -7409,6 +7411,7 @@ export default function OPD() {
                           selAppt={selAppt}
                           onSelect={selectAppt}
                           filterStatus={filterStatus}
+                          isSearching={!!searchQ.trim()}
                         />
                       ))}
                 </div>

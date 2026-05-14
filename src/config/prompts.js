@@ -130,7 +130,7 @@ RULES:
 - Extract ALL medicines even if partially readable
 - stopped_medications: medicines marked as stopped/omit/discontinue/band karo/tapering off
 - Parse Hindi/Punjabi terms: "sugar ki dawai"=diabetes medication, "BP ki goli"=antihypertensive, "band karo"=stop
-- If date not found, return null
+- If date not found, return null AND leave medications/diagnoses/stopped_medications/advice empty and vitals.bp_sys/vitals.bp_dia/vitals.pulse null. EXCEPTION: vitals.height and vitals.weight may STILL be extracted when no date is written, IF they appear in a clearly labelled vital-signs header/footer block at the top or bottom of the prescription (e.g. "VITAL SIGNS: H:- 161 CM, W:- 87.15 KG", "Ht: 161cm Wt: 87.15kg"). These standing measurements are treated as current. Do NOT apply this exception to height/weight values that are only mentioned inline in clinical notes.
 - Name must be in English/Roman script`;
 
 export const REPORT_EXTRACT_PROMPT = `Extract ALL test results from this medical report. Return ONLY valid JSON, no backticks.

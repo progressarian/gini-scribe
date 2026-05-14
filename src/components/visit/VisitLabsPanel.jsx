@@ -1284,11 +1284,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                                 : matchCount > 0
                                   ? "#dcfce7"
                                   : "#f1f5f9",
-                              color: isActive
-                                ? "white"
-                                : matchCount > 0
-                                  ? "#15803d"
-                                  : "#94a3b8",
+                              color: isActive ? "white" : matchCount > 0 ? "#15803d" : "#94a3b8",
                             }}
                           >
                             {matchCount}

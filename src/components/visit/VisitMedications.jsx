@@ -1,190 +1,26 @@
 import { memo, useState, useMemo } from "react";
 import { MED_COLORS, fmtDate, fmtDateShort, isSameDate } from "./helpers";
-import { MED_GROUPS, findDrug } from "../../config/drugDatabase";
+import { findDrug } from "../../config/drugDatabase";
+import {
+  detectMedCategory,
+  getCategoryLabel,
+  groupMedicationsByCategory as sharedGroupByCategory,
+} from "../../server-utils/medicationCategories";
 import ChangesPopover from "./ChangesPopover";
 import { displayMedName, displayFormBadge } from "../../lib/medName";
 
-// Auto-detect med group from name when med_group is not set
+// Auto-detect med group from a medicine name. Delegates to the shared
+// detection logic in src/server-utils/medicationCategories.js so the medcard
+// view and the printed prescription always agree on which group a medicine
+// belongs to. Edit category metadata/patterns there, not here.
 export function autoDetectGroup(name) {
+  // Prefer the local drug database first (it carries doctor-curated mappings
+  // not present in the pattern lists), then fall back to shared detection.
   const n = (name || "").toLowerCase();
-  // Strip parenthetical composition: "Ryzodeg (Insulin degludec/aspart)" → "ryzodeg"
   const baseName = n.replace(/\s*\(.*\)/, "").trim();
-
-  // Try the drug database first
   const drug = findDrug(baseName) || findDrug(n);
   if (drug?.group) return drug.group;
-
-  // Keyword-based fallback for common drugs not in the database
-  // Insulin
-  if (
-    n.includes("insulin") ||
-    [
-      "ryzodeg",
-      "lantus",
-      "novorapid",
-      "novomix",
-      "humalog",
-      "humulin",
-      "tresiba",
-      "toujeo",
-      "glargine",
-      "aspart",
-      "lispro",
-      "degludec",
-    ].some((k) => baseName.includes(k))
-  )
-    return "diabetes";
-  // Metformin combos
-  if (
-    n.includes("metformin") ||
-    ["glycomet", "glucophage", "istamet", "obimet"].some((k) => baseName.includes(k))
-  )
-    return "diabetes";
-  // SGLT2
-  if (
-    ["forxiga", "jardiance", "dapagliflozin", "empagliflozin", "canagliflozin", "sglt2"].some((k) =>
-      baseName.includes(k),
-    )
-  )
-    return "diabetes";
-  // DPP4 + combos
-  if (
-    [
-      "trajenta",
-      "januvia",
-      "galvus",
-      "sitagliptin",
-      "vildagliptin",
-      "linagliptin",
-      "teneligliptin",
-      "gliptin",
-      "janumet",
-      "istavel",
-      "zita",
-      "jalra",
-    ].some((k) => baseName.includes(k))
-  )
-    return "diabetes";
-  // GLP1
-  if (
-    [
-      "ozempic",
-      "rybelsus",
-      "mounjaro",
-      "semaglutide",
-      "tirzepatide",
-      "liraglutide",
-      "dulaglutide",
-    ].some((k) => baseName.includes(k))
-  )
-    return "diabetes";
-  // Sulphonylureas
-  if (
-    ["glimepiride", "gliclazide", "glipizide", "amaryl", "diamicron", "glizid", "glimpid"].some(
-      (k) => baseName.includes(k),
-    )
-  )
-    return "diabetes";
-  // Other diabetes
-  if (["glucobay", "acarbose", "voglibose", "pioglitazone"].some((k) => baseName.includes(k)))
-    return "diabetes";
-  // ACE/ARB (kidney/BP)
-  if (
-    [
-      "ramipril",
-      "enalapril",
-      "lisinopril",
-      "telmisartan",
-      "losartan",
-      "olmesartan",
-      "valsartan",
-      "telisatan",
-      "telma",
-      "cardace",
-    ].some((k) => baseName.includes(k))
-  )
-    return "kidney";
-  // BP
-  if (
-    [
-      "amlodipine",
-      "metoprolol",
-      "atenolol",
-      "cilacar",
-      "cilnidipine",
-      "chlorthalidone",
-      "hydrochlorothiazide",
-      "bisoprolol",
-      "carvedilol",
-      "prazosin",
-    ].some((k) => baseName.includes(k))
-  )
-    return "bp";
-  // Lipids
-  if (
-    [
-      "rosuvastatin",
-      "atorvastatin",
-      "rosulip",
-      "atorva",
-      "lipitas",
-      "crestor",
-      "fenofibrate",
-      "ezetimibe",
-      "statin",
-    ].some((k) => baseName.includes(k))
-  )
-    return "lipids";
-  // Antiplatelet (under BP/cardiac)
-  if (
-    ["aspirin", "ecospirin", "clopidogrel", "prasugrel", "ticagrelor"].some((k) =>
-      baseName.includes(k),
-    )
-  )
-    return "bp";
-  // Thyroid
-  if (["levothyroxine", "thyronorm", "eltroxin", "thyroxine"].some((k) => baseName.includes(k)))
-    return "thyroid";
-  // Prostate / Urology (don't lump with supplements)
-  if (
-    [
-      "tamsulosin",
-      "urimax",
-      "silodosin",
-      "dutasteride",
-      "finasteride",
-      "alfuzosin",
-      "flotral",
-    ].some((k) => baseName.includes(k))
-  )
-    return "external";
-  // Supplements
-  if (
-    [
-      "vitamin",
-      "aktiv",
-      "calci",
-      "calcium",
-      "shelcal",
-      "iron",
-      "folic",
-      "omega",
-      "maxepa",
-      "methylcobal",
-      "b12",
-      "d3",
-      "cospiaq",
-      "probiot",
-      "enzyme",
-      "pantop",
-      "panto",
-      "rabep",
-      "omeprazole",
-    ].some((k) => baseName.includes(k))
-  )
-    return "supplement";
-
-  return "supplement"; // fallback
+  return detectMedCategory({ name });
 }
 
 // Strip leading source tag (e.g. "report_extract:32059 — ", "healthray:233038167 - ")
@@ -316,25 +152,26 @@ function diabetesClassOrder(name) {
   return 8;
 }
 
-// Group medications by med_group (auto-detect from name if not set)
+// Group medications by med_group. Uses the shared category resolver from
+// medicationCategories.js so medcard groupings stay consistent with the
+// printed prescription; the local diabetes sub-class sort is preserved
+// because it's tuned for the medcard UI specifically.
 export function groupMedsByCategory(meds) {
-  const groups = {};
-  meds.forEach((m) => {
-    const group = m.med_group || autoDetectGroup(m.name);
-    if (!groups[group]) groups[group] = [];
-    groups[group].push(m);
-  });
-  // Sort within diabetes group by drug class order
-  if (groups.diabetes) {
-    groups.diabetes.sort((a, b) => diabetesClassOrder(a.name) - diabetesClassOrder(b.name));
+  const groups = sharedGroupByCategory(
+    meds.map((m) => ({ ...m, med_group: m.med_group || autoDetectGroup(m.name) })),
+  );
+  if (groups.diabetes && groups.diabetes.length > 1) {
+    groups.diabetes = [...groups.diabetes].sort(
+      (a, b) => diabetesClassOrder(a.name) - diabetesClassOrder(b.name),
+    );
   }
   return groups;
 }
 
-// Get group label
+// Get group label. Delegates to the shared module so renaming a category
+// updates both medcard and the printed prescription.
 export function getGroupLabel(group) {
-  const found = MED_GROUPS.find((g) => g.id === group);
-  return found ? found.label : group.charAt(0).toUpperCase() + group.slice(1);
+  return getCategoryLabel(group);
 }
 
 // Build a concise summary line for a single history entry.

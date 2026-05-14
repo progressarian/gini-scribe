@@ -97,7 +97,98 @@ const sySelStyle = (s) => {
   return {};
 };
 
-function CarePhasePill({ summary }) {
+// Derive the pill's visible status from the same thresholds the Biomarkers
+// graph uses (see VisitBiomarkers.jsx `sev`), prioritising the marker that
+// matches the patient's active condition: HbA1c (diabetes) → TSH (thyroid)
+// → FBS (everyone else). Returns null when no relevant value is on file so
+// the caller can fall back to the existing carePhase label.
+function deriveBiomarkerStatus({ activeDx, labResults, labHistory }) {
+  const dxText = (activeDx || [])
+    .filter((d) => d && d.is_active !== false)
+    .map((d) => `${d.diagnosis_id || ""} ${d.label || ""}`.toLowerCase())
+    .join(" | ");
+  const hasDiabetes = /diabetes|dm1|dm2|t1dm|t2dm|\bdm\b|hyperglyc/.test(dxText);
+  const hasThyroid = /thyroid|hypothyroid|hyperthyroid|hashimoto|graves|goiter/.test(dxText);
+
+  const num = (v) => {
+    if (v == null || v === "") return NaN;
+    const n = typeof v === "number" ? v : parseFloat(String(v).match(/-?\d+(\.\d+)?/)?.[0]);
+    return Number.isFinite(n) ? n : NaN;
+  };
+
+  // Pick the marker (and value) to drive the pill, in priority order.
+  let marker = null;
+  let value = NaN;
+  if (hasDiabetes) {
+    const v = num(getLabVal(labResults, "HbA1c")?.result);
+    if (Number.isFinite(v)) {
+      marker = "HbA1c";
+      value = v;
+    }
+  }
+  if (!marker && hasThyroid) {
+    const v = num(getLabVal(labResults, "TSH")?.result);
+    if (Number.isFinite(v)) {
+      marker = "TSH";
+      value = v;
+    }
+  }
+  if (!marker) {
+    // FBS fallback — also includes patient-app fasting finger-sticks via the
+    // labHistory entry, mirroring the graph card.
+    let v = num(getLabVal(labResults, "FBS")?.result);
+    if (!Number.isFinite(v)) {
+      const h = getLabHist(labHistory, "FBS");
+      if (h.length) v = num(h[h.length - 1]?.result);
+    }
+    if (Number.isFinite(v)) {
+      marker = "FBS";
+      value = v;
+    }
+  }
+
+  if (!marker) return null;
+
+  // Status thresholds mirror VisitBiomarkers `sev` so the pill and the chart
+  // cards always agree.
+  let status;
+  let target;
+  let unit;
+  if (marker === "HbA1c") {
+    status = value <= 7 ? "controlled" : value <= 8 ? "borderline" : "uncontrolled";
+    target = "≤ 7";
+    unit = "%";
+  } else if (marker === "TSH") {
+    status =
+      value >= 0.5 && value <= 4.5
+        ? "controlled"
+        : value < 0.5 || value <= 6
+          ? "borderline"
+          : "uncontrolled";
+    target = "0.5–4.5";
+    unit = "µIU/mL";
+  } else {
+    status = value <= 100 ? "controlled" : value <= 126 ? "borderline" : "uncontrolled";
+    target = "≤ 100";
+    unit = "mg/dL";
+  }
+
+  const label =
+    status === "controlled"
+      ? "Controlled"
+      : status === "borderline"
+        ? "Borderline"
+        : "Uncontrolled";
+  const palette =
+    status === "controlled"
+      ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
+      : status === "borderline"
+        ? { fg: "var(--amber)", bg: "var(--amb-lt, #fff7ed)", bd: "var(--amb-bd, #fed7aa)" }
+        : { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" };
+  return { label, palette, marker, value, status, target, unit };
+}
+
+function CarePhasePill({ summary, activeDx, labResults, labHistory }) {
   const triggerRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
@@ -123,7 +214,7 @@ function CarePhasePill({ summary }) {
   const PHASE_NAMES = ["Uncontrolled", "Controlled", "Stabilize", "Continuous"];
   const phaseName = String(summary.carePhase || "");
   const matchedPhase = PHASE_NAMES.find((p) => phaseName.includes(p));
-  const phaseDisplay = matchedPhase || phaseName || "No Decide";
+  const phaseDisplay = matchedPhase || phaseName || "No value";
   const phasePalette = phaseName.includes("Uncontrolled")
     ? { fg: "var(--red)", bg: "var(--red-lt, #fdecec)", bd: "var(--red-bd, #f5c6cb)" }
     : phaseName.includes("Stabilize")
@@ -138,7 +229,29 @@ function CarePhasePill({ summary }) {
               ? { fg: "var(--green)", bg: "var(--grn-lt)", bd: "var(--grn-bd)" }
               : { fg: "var(--t2)", bg: "var(--bg2, #f4f4f5)", bd: "var(--bd, #e5e7eb)" };
 
-  const palette = phasePalette;
+  // Doctors triage by the marker most relevant to the patient's condition —
+  // HbA1c for diabetics, TSH for thyroid, FBS otherwise. Override the
+  // phase-derived pill with that read so the chip matches the graph; keep
+  // the hover tooltip unchanged so the care-phase reasoning is still there.
+  const bioStatus = deriveBiomarkerStatus({ activeDx, labResults, labHistory });
+  const palette = bioStatus ? bioStatus.palette : phasePalette;
+  // When the biomarker overrides the pill, the phase number from the server's
+  // carePhase ("Phase 1 · Uncontrolled") would contradict the biomarker word
+  // ("Controlled"). Derive the phase from the biomarker instead so the pill,
+  // its phase prefix, and the tooltip chip all tell the same story:
+  //   controlled → Phase 2 · Controlled
+  //   borderline / uncontrolled → Phase 1 · {label}
+  const serverPhasePrefix = (phaseName.match(/Phase\s+\d+/i) || [])[0] || null;
+  const effectivePhasePrefix = bioStatus
+    ? bioStatus.label === "Controlled"
+      ? "Phase 2"
+      : "Phase 1"
+    : serverPhasePrefix;
+  const statusWord = bioStatus ? bioStatus.label : phaseDisplay;
+  const displayLabel = effectivePhasePrefix
+    ? `${effectivePhasePrefix} · ${statusWord}`
+    : statusWord;
+  const effectiveCarePhase = bioStatus ? displayLabel : summary.carePhase;
 
   const basis = summary.carePhaseBasis;
   const params = summary.carePhaseParameters || [];
@@ -161,12 +274,17 @@ function CarePhasePill({ summary }) {
   const trendIcon = (t) =>
     t === "improving" ? "↓" : t === "worsening" ? "↑" : t === "stable" ? "→" : "—";
 
+  // With a single reading we still classify and show a phase — only fall back
+  // to the "no readings" copy when truly nothing is on file (no bioStatus
+  // priority marker AND no parameters from the multi-parameter compute).
   const phaseReason =
     basis === "clinical"
       ? drivers.size
         ? `Driven by: ${[...drivers].join(", ")}`
         : "All parameters in target"
-      : "No HbA1c, BP, lipid or BMI readings on file yet — add a lab or vitals entry to compute a phase.";
+      : bioStatus
+        ? `Driven by latest ${bioStatus.marker} reading.`
+        : "No HbA1c, TSH or FBS reading on file yet — add a lab or vitals entry to compute a phase.";
 
   return (
     <>
@@ -188,7 +306,7 @@ function CarePhasePill({ summary }) {
           cursor: "help",
         }}
       >
-        {phaseDisplay}
+        {displayLabel}
       </span>
       {open &&
         createPortal(
@@ -214,7 +332,59 @@ function CarePhasePill({ summary }) {
               textAlign: "left",
             }}
           >
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Why {summary.carePhase}?</div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+              Why {effectiveCarePhase || displayLabel}?
+            </div>
+            {(effectiveCarePhase || displayLabel) && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: 6,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: palette.fg,
+                    background: palette.bg,
+                    padding: "2px 8px",
+                    borderRadius: 20,
+                    border: `1px solid ${palette.bd}`,
+                  }}
+                >
+                  {effectiveCarePhase || displayLabel}
+                </span>
+              </div>
+            )}
+            {bioStatus && (
+              <div
+                style={{
+                  marginBottom: 6,
+                  padding: "6px 8px",
+                  background: "var(--bg2, #f4f4f5)",
+                  borderRadius: 6,
+                  fontSize: 10,
+                  color: "var(--t2)",
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "var(--t1)", marginBottom: 2 }}>
+                  Considered for phase
+                </div>
+                <div>
+                  <strong>{bioStatus.marker}</strong> = {bioStatus.value}
+                  {bioStatus.unit ? ` ${bioStatus.unit}` : ""} (target {bioStatus.target}
+                  {bioStatus.unit ? ` ${bioStatus.unit}` : ""}) →{" "}
+                  <span style={{ color: palette.fg, fontWeight: 700 }}>{bioStatus.label}</span>
+                </div>
+                <div style={{ color: "var(--t3)", marginTop: 2 }}>
+                  Priority: HbA1c (diabetes) → TSH (thyroid) → FBS (otherwise).
+                </div>
+              </div>
+            )}
             <div style={{ marginBottom: 6, color: "var(--t2)" }}>{phaseReason}</div>
 
             {params.length > 0 ? (
@@ -265,9 +435,9 @@ function CarePhasePill({ summary }) {
                   );
                 })}
               </div>
-            ) : (
+            ) : bioStatus ? null : (
               <div style={{ color: "var(--t3)", marginTop: 4 }}>
-                No HbA1c / BP / lipid / BMI readings yet.
+                No HbA1c / TSH / FBS / BP / lipid / BMI readings yet.
               </div>
             )}
 
@@ -280,8 +450,8 @@ function CarePhasePill({ summary }) {
                 fontSize: 10,
               }}
             >
-              Worst-controlled parameter sets the phase. Trend = net direction across all
-              parameters with a prior reading.
+              Worst-controlled parameter sets the phase. Trend = net direction across all parameters
+              with a prior reading.
               {categoryLabel ? ` ${categoryLabel} applied (HbA1c / LDL).` : ""}
             </div>
           </div>,
@@ -1285,7 +1455,12 @@ export default function VisitPage() {
               </button>
             ))}
             <div className="stabs-r">
-              <CarePhasePill summary={summary} />
+              <CarePhasePill
+                summary={summary}
+                activeDx={activeDx}
+                labResults={labResults}
+                labHistory={labHistory}
+              />
             </div>
           </div>
 

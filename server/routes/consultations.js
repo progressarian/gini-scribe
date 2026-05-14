@@ -211,7 +211,10 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
         const slug =
           d.id && /[a-zA-Z]/.test(String(d.id))
             ? String(d.id)
-            : d.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+            : d.label
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "_")
+                .replace(/^_+|_+$/g, "");
         if (!slug) continue;
         dxMap.set(t(slug, 100), { ...d, id: slug });
       }
@@ -612,7 +615,10 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
             // so the diagnosis_id is human-readable and stable across visits.
             d.id && /[a-zA-Z]/.test(String(d.id))
               ? d.id
-              : d.label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""),
+              : d.label
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, "_")
+                  .replace(/^_+|_+$/g, ""),
             d.label,
             n(d.status) || "New",
           ],

@@ -295,4 +295,75 @@ function computeCarePhase({ labHistory, vitals, totalVisits = 0, diagnoses } = {
   };
 }
 
-export { computeCarePhase };
+// Biomarker-priority status — mirrors the client-side pill logic in
+// VisitPage.jsx so the visit pill, the post-visit narrative, and any other
+// consumer all agree on "what does this patient look like right now".
+//
+// Priority: HbA1c (diabetes) → TSH (thyroid) → FBS (everyone else). Returns
+// null when no relevant value is on file so the caller can fall back to the
+// multi-parameter computeCarePhase output.
+function deriveBiomarkerPriorityStatus({ labHistory, vitals, diagnoses } = {}) {
+  const dxText = (diagnoses || [])
+    .filter((d) => d && d.is_active !== false)
+    .map((d) => `${d?.diagnosis_id || ""} ${d?.label || ""}`.toLowerCase())
+    .join(" | ");
+  const hasDiabetes = /diabetes|dm1|dm2|t1dm|t2dm|\bdm\b|hyperglyc/.test(dxText);
+  const hasThyroid = /thyroid|hypothyroid|hyperthyroid|hashimoto|graves|goiter/.test(dxText);
+
+  const latestFromHistory = (aliases) => {
+    const series = seriesFromLab(labHistory, aliases);
+    if (!series.length) return null;
+    return series[series.length - 1];
+  };
+
+  let marker = null;
+  let latest = null;
+  if (hasDiabetes) {
+    latest = latestFromHistory(["HbA1c", "hba1c", "A1c", "a1c"]);
+    if (latest) marker = "HbA1c";
+  }
+  if (!marker && hasThyroid) {
+    latest = latestFromHistory(["TSH", "tsh"]);
+    if (latest) marker = "TSH";
+  }
+  if (!marker) {
+    // FBS fallback — include patient-app fasting finger-sticks too via the
+    // vitals fallback when no lab row exists.
+    latest = latestFromHistory(["FBS", "fbs", "Fasting Glucose", "FPG"]);
+    if (!latest && Array.isArray(vitals) && vitals.length) {
+      const fasting = vitals
+        .filter(
+          (v) => v && v.rbs != null && String(v.meal_type || "").toLowerCase() === "fasting",
+        )
+        .map((v) => ({ val: toNum(v.rbs), date: v.recorded_at || v.recorded_date || null }))
+        .filter((r) => Number.isFinite(r.val) && r.date)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+      if (fasting.length) latest = fasting[fasting.length - 1];
+    }
+    if (latest) marker = "FBS";
+  }
+
+  if (!marker || !latest) return null;
+  const v = latest.val;
+
+  let status, target;
+  if (marker === "HbA1c") {
+    status = v <= 7 ? "controlled" : v <= 8 ? "borderline" : "uncontrolled";
+    target = "≤ 7%";
+  } else if (marker === "TSH") {
+    status =
+      v >= 0.5 && v <= 4.5 ? "controlled" : v < 0.5 || v <= 6 ? "borderline" : "uncontrolled";
+    target = "0.5–4.5 µIU/mL";
+  } else {
+    status = v <= 100 ? "controlled" : v <= 126 ? "borderline" : "uncontrolled";
+    target = "≤ 100 mg/dL";
+  }
+
+  const label =
+    status === "controlled" ? "Controlled" : status === "borderline" ? "Borderline" : "Uncontrolled";
+  const phase =
+    status === "controlled" ? `Phase 2 · ${label}` : `Phase 1 · ${label}`;
+  return { marker, value: v, date: latest.date, status, label, target, phase };
+}
+
+export { computeCarePhase, deriveBiomarkerPriorityStatus };
