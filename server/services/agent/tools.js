@@ -210,6 +210,89 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "classify_and_extract_attachment",
+    description:
+      "Call ONLY when the patient sent a photo or PDF this turn and wants it logged (food photo, lab report, or prescription). You can SEE the attachment in this turn's content — classify it and extract every distinct item you see. The app will open a bulk-log sheet pre-filled with these rows for the patient to confirm. Then still call respond_to_patient with a short summary.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["food", "lab_report", "prescription"],
+          description: "Which kind of attachment this is.",
+        },
+        food_items: {
+          type: "array",
+          description:
+            "When kind='food': one row per distinct dish on the plate. Estimate per-serving macros.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Short dish name, e.g. 'Roti', 'Dal'." },
+              kcal: { type: "number" },
+              protein_g: { type: "number" },
+              carbs_g: { type: "number" },
+              fat_g: { type: "number" },
+              fiber_g: { type: "number" },
+              sugar_g: { type: "number" },
+              sodium_mg: { type: "number" },
+            },
+            required: ["name"],
+          },
+        },
+        lab_items: {
+          type: "array",
+          description:
+            "When kind='lab_report': one row per test result. Use canonical names where possible (HbA1c, FBS, PPBS, LDL, HDL, TG, TSH, T3, T4, Hb, eGFR, Creatinine, VitD, B12).",
+          items: {
+            type: "object",
+            properties: {
+              test_name: { type: "string", description: "Exact name as printed on the report." },
+              canonical_name: {
+                type: "string",
+                description: "Canonical lowercase key (hba1c, ldl, tsh, fbs, ppbs, egfr, hb, …).",
+              },
+              result: { type: "string", description: "Numeric or string result as printed." },
+              unit: { type: "string" },
+              ref_range: { type: "string" },
+              flag: {
+                type: "string",
+                enum: ["H", "L", "N", "Critical", ""],
+                description: "Optional flag if printed.",
+              },
+              panel_name: { type: "string" },
+              test_date: { type: "string", description: "ISO YYYY-MM-DD if printed on the report." },
+            },
+            required: ["test_name", "result"],
+          },
+        },
+        rx_items: {
+          type: "array",
+          description:
+            "When kind='prescription': one row per medication on the slip.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              dose: { type: "string", description: "e.g. '500 mg'." },
+              frequency: { type: "string", description: "OD / BD / TDS / SOS." },
+              timing: { type: "string", description: "e.g. 'After breakfast', 'Bedtime'." },
+              route: { type: "string" },
+              for_diagnosis: { type: "string" },
+            },
+            required: ["name"],
+          },
+        },
+        summary: {
+          type: "string",
+          description:
+            "One-line plain summary you'll repeat to the patient (e.g. 'I see 5 labs — HbA1c 7.2, LDL 142, …').",
+        },
+      },
+      required: ["kind"],
+    },
+  },
+  {
     name: "open_doctor_chat",
     description:
       "Open the in-app Care → Team chat so the patient can message their doctor / Gini clinic. Use when the patient asks to talk to the doctor or raises anything that needs medical judgement (dose changes, new chest pain, side effects, etc).",
@@ -662,6 +745,26 @@ export function buildClientAction(name, input) {
       },
     };
   }
+  if (name === "classify_and_extract_attachment") {
+    const kind = input.kind;
+    let items = [];
+    if (kind === "food") items = input.food_items || [];
+    else if (kind === "lab_report") items = input.lab_items || [];
+    else if (kind === "prescription") items = input.rx_items || [];
+    const ca = {
+      type: "open_multi_log_sheet",
+      kind,
+      items,
+      summary: input.summary || "",
+    };
+    return {
+      clientAction: ca,
+      ack: {
+        status: "queued_for_client",
+        note: `Bulk-log sheet will open with ${items.length} ${kind} item(s). The patient will pick which rows to save.`,
+      },
+    };
+  }
   if (name === "open_doctor_chat") {
     const ca = {
       type: "open_doctor_chat",
@@ -675,5 +778,9 @@ export function buildClientAction(name, input) {
   return null;
 }
 
-export const UI_TOOL_NAMES = new Set(["propose_log", "open_doctor_chat"]);
+export const UI_TOOL_NAMES = new Set([
+  "propose_log",
+  "open_doctor_chat",
+  "classify_and_extract_attachment",
+]);
 export const FINAL_TOOL_NAME = "respond_to_patient";

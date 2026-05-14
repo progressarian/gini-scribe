@@ -295,6 +295,7 @@ DATA RULES:
 - Never invent values. Any number you state must have come from a tool result this turn.
 - For "how am I doing / what's my progress / how's my sugar / how's my BP" questions, prefer \`get_progress_summary\` (one call) over multiple \`query_patient_data\` calls. Pick window='since_last_visit' if the user references "since I saw the doctor", otherwise window='days' with days inferred from the phrasing (this week=7, this month=30, last 3 months=90).
 - When the patient gives you a vitals/lab number they want recorded (BP, sugar, weight, HbA1c, LDL, TSH, Hb, eGFR) OR a food/exercise/sleep/mood/symptom entry, ALWAYS call propose_log. Never claim to have logged something — only the in-app card saves data.
+- When the patient attaches a photo or PDF this turn (food plate, lab report, prescription) AND wants it logged, call \`classify_and_extract_attachment\` FIRST with kind + every distinct item you can see, THEN \`respond_to_patient\` with intent='log_proposed' and a one-line summary. The patient will tick which rows to actually save in a bulk-log sheet.
 
 SAFETY:
 - You do NOT diagnose, prescribe, or change doses. If the patient asks anything like that — or mentions chest pain, breathlessness, severe symptoms, or asks to talk to the doctor — call open_doctor_chat with a short seed, then respond with intent='doctor_handoff' and the right safety_flag.
@@ -367,13 +368,20 @@ router.post("/ai/agent", async (req, res) => {
 
   try {
     for (let turn = 0; turn < 5; turn++) {
+      const hasPdf = conversation.some((m) =>
+        (Array.isArray(m.content) ? m.content : []).some(
+          (c) => c?.type === "document" && c?.source?.media_type === "application/pdf",
+        ),
+      );
+      const agentHeaders = {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+      };
+      if (hasPdf) agentHeaders["anthropic-beta"] = "pdfs-2024-09-25";
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-        },
+        headers: agentHeaders,
         body: JSON.stringify({
           model: anthropicModel,
           max_tokens: 1500,
@@ -519,6 +527,134 @@ router.post("/ai/agent", async (req, res) => {
   } catch (err) {
     console.error("AI agent error:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/ai/bulk-log ───────────────────────────────────────────
+// Persists the rows the patient ticked in the multi-log sheet. Optionally
+// links them to a previously-uploaded `documents` row via `document_id` so
+// the file appears under Records.
+//
+// Body: {
+//   scribePatientId: number,
+//   document_id?: number,
+//   kind: 'food' | 'lab_report' | 'prescription',
+//   items: Array<row>     // row shape varies by kind — see below
+// }
+router.post("/ai/bulk-log", async (req, res) => {
+  const { scribePatientId, document_id, kind, items } = req.body || {};
+  const pid = Number(scribePatientId);
+  if (!Number.isInteger(pid) || pid <= 0)
+    return res.status(400).json({ error: "scribePatientId is required" });
+  if (!Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ error: "items[] is required" });
+  if (!["food", "lab_report", "prescription"].includes(kind))
+    return res.status(400).json({ error: "kind must be food | lab_report | prescription" });
+
+  const docId = Number.isInteger(document_id) && document_id > 0 ? document_id : null;
+  const today = new Date().toISOString().slice(0, 10);
+  let written = 0;
+  const errors = [];
+
+  try {
+    if (kind === "lab_report") {
+      // items: { test_name, canonical_name?, result, unit?, ref_range?, flag?, panel_name?, test_date? }
+      for (const r of items) {
+        if (!r?.test_name || r.result === undefined || r.result === null || r.result === "")
+          continue;
+        const numeric = Number(String(r.result).replace(/[^\d.\-]/g, ""));
+        const numericVal = Number.isFinite(numeric) ? numeric : null;
+        const canonical = (r.canonical_name || r.test_name || "")
+          .toString()
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_");
+        const testDate = r.test_date || today;
+        try {
+          await pool.query(
+            `INSERT INTO lab_results
+               (patient_id, test_date, test_name, canonical_name, result, result_text, unit, ref_range, flag, panel_name, source, document_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'manual', $11)`,
+            [
+              pid,
+              testDate,
+              String(r.test_name).slice(0, 200),
+              canonical.slice(0, 100),
+              numericVal,
+              String(r.result).slice(0, 200),
+              r.unit ? String(r.unit).slice(0, 50) : null,
+              r.ref_range ? String(r.ref_range).slice(0, 100) : null,
+              r.flag ? String(r.flag).slice(0, 20) : null,
+              r.panel_name ? String(r.panel_name).slice(0, 100) : null,
+              docId,
+            ],
+          );
+          written++;
+        } catch (e) {
+          errors.push({ row: r.test_name, error: e.message });
+        }
+      }
+    } else if (kind === "prescription") {
+      // items: { name, dose?, frequency?, timing?, route?, for_diagnosis? }
+      for (const r of items) {
+        if (!r?.name) continue;
+        try {
+          await pool.query(
+            `INSERT INTO medications
+               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'patient_upload', $9)
+             ON CONFLICT DO NOTHING`,
+            [
+              pid,
+              docId,
+              String(r.name).slice(0, 200),
+              String(r.name).toUpperCase().slice(0, 200),
+              r.dose ? String(r.dose).slice(0, 100) : null,
+              r.frequency ? String(r.frequency).slice(0, 100) : null,
+              r.timing ? String(r.timing).slice(0, 100) : null,
+              r.route ? String(r.route).slice(0, 50) : "Oral",
+              today,
+            ],
+          );
+          written++;
+        } catch (e) {
+          errors.push({ row: r.name, error: e.message });
+        }
+      }
+    } else {
+      // food: { name (description), kcal?, protein_g?, carbs_g?, fat_g?, meal_type? }
+      for (const r of items) {
+        if (!r?.name) continue;
+        const hour = new Date().getHours();
+        const defaultMeal =
+          hour < 11 ? "breakfast" : hour < 15 ? "lunch" : hour < 18 ? "snack" : "dinner";
+        try {
+          await pool.query(
+            `INSERT INTO patient_meal_log
+               (patient_id, meal_type, description, calories, protein_g, carbs_g, fat_g, log_date)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+              pid,
+              String(r.meal_type || defaultMeal).slice(0, 30),
+              String(r.name).slice(0, 200),
+              r.kcal != null ? Number(r.kcal) : null,
+              r.protein_g != null ? Number(r.protein_g) : null,
+              r.carbs_g != null ? Number(r.carbs_g) : null,
+              r.fat_g != null ? Number(r.fat_g) : null,
+              today,
+            ],
+          );
+          written++;
+        } catch (e) {
+          errors.push({ row: r.name, error: e.message });
+        }
+      }
+    }
+
+    return res.json({ ok: true, written, errors });
+  } catch (err) {
+    console.error("AI bulk-log error:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
