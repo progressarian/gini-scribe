@@ -87,9 +87,7 @@ function scheduleNextPartialRetry(delayMs) {
     const elapsed = Date.now() - startedAt;
     const breakMs =
       PARTIAL_LOOP_MIN_BREAK_MS +
-      Math.floor(
-        Math.random() * (PARTIAL_LOOP_MAX_BREAK_MS - PARTIAL_LOOP_MIN_BREAK_MS + 1),
-      );
+      Math.floor(Math.random() * (PARTIAL_LOOP_MAX_BREAK_MS - PARTIAL_LOOP_MIN_BREAK_MS + 1));
     console.log(
       `[Cron] Lab partial retry finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
     );
@@ -171,9 +169,7 @@ export function startCronJobs() {
   // runLabSync / HealthRay sync. Per-row throttle inside getPartialLabCases
   // (30s on last_retry_at) keeps each case to ~one fetch per loop tick.
   // Distinct from retryPendingLabCases (which only handles results_synced=FALSE).
-  console.log(
-    "[Cron] Starting lab partial-results recovery (continuous loop, 30–40s break)...",
-  );
+  console.log("[Cron] Starting lab partial-results recovery (continuous loop, 30–40s break)...");
   partialLoopRunning = true;
   scheduleNextPartialRetry(0);
 

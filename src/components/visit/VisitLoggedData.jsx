@@ -352,7 +352,12 @@ function PatientMedicationsTable({ medications, limit }) {
         >
           <span style={{ fontWeight: 600 }}>{m.name || "—"}</span>
           <span style={{ color: "var(--t2)" }}>{m.dose || "—"}</span>
-          <span style={{ color: "var(--t2)" }}>{m.frequency || m.timing || "—"}</span>
+          <span style={{ color: "var(--t2)" }}>
+            {m.frequency ||
+              (Array.isArray(m.when_to_take) ? m.when_to_take.join(", ") : m.when_to_take) ||
+              m.timing ||
+              "—"}
+          </span>
           <span style={{ color: "var(--t3)", fontSize: 12 }}>{m.instructions || "—"}</span>
           <span
             style={{

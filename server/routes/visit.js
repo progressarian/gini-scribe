@@ -3,6 +3,7 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { n, num, t } from "../utils/helpers.js";
+import { normalizeWhenToTake } from "../schemas/index.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
@@ -36,6 +37,7 @@ import {
 } from "../services/medication/normalize.js";
 import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
 import { backfillCommonSideEffectsForMed } from "../services/medication/commonSideEffectsAI.js";
+import { enrichMedWithDays } from "../services/medication/daysOfWeek.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -1224,6 +1226,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       dose,
       frequency,
       timing,
+      when_to_take,
       route,
       for_diagnosis,
       started_date,
@@ -1304,8 +1307,8 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const visitAnchor = anchorRes.rows[0]?.anchor || null;
 
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],NOW())
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],NOW())
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1313,6 +1316,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          dose = COALESCE(EXCLUDED.dose, medications.dose),
          frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
          timing = COALESCE(EXCLUDED.timing, medications.timing),
+         when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
          route = COALESCE(EXCLUDED.route, medications.route),
          for_diagnosis = COALESCE(EXCLUDED.for_diagnosis, medications.for_diagnosis),
          appointment_id = COALESCE(EXCLUDED.appointment_id, medications.appointment_id),
@@ -1348,6 +1352,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         parentId ? t(support_condition, 200) : null,
         visitAnchor,
         finalDays,
+        normalizeWhenToTake(when_to_take),
       ],
     );
     await markMedicationVisitStatus(pid).catch((e) =>
@@ -1385,6 +1390,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       dose,
       frequency,
       timing,
+      when_to_take,
       reason,
       last_prescribed_date,
       parent_medication_id,
@@ -1405,7 +1411,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
 
     // Load existing row so we can snapshot the pre-edit state into history
     const existing = await pool.query(
-      "SELECT dose, frequency, timing FROM medications WHERE id=$1 AND patient_id=$2 AND is_active=true",
+      "SELECT dose, frequency, timing, when_to_take FROM medications WHERE id=$1 AND patient_id=$2 AND is_active=true",
       [mid, pid],
     );
     if (!existing.rows[0]) return res.status(404).json({ error: "Medication not found" });
@@ -1414,19 +1420,37 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const nextDose = dose !== undefined ? t(dose, 100) : prev.dose;
     const nextFreq = frequency !== undefined ? t(frequency, 100) : prev.frequency;
     const nextTiming = timing !== undefined ? t(timing, 200) : prev.timing;
+    const nextWhenToTake =
+      when_to_take !== undefined ? normalizeWhenToTake(when_to_take) : prev.when_to_take;
 
+    const sameArr = (a, b) => {
+      const A = Array.isArray(a) ? a : [];
+      const B = Array.isArray(b) ? b : [];
+      return A.length === B.length && A.every((v, i) => v === B[i]);
+    };
     const changed =
       (prev.dose || "") !== (nextDose || "") ||
       (prev.frequency || "") !== (nextFreq || "") ||
-      (prev.timing || "") !== (nextTiming || "");
+      (prev.timing || "") !== (nextTiming || "") ||
+      !sameArr(prev.when_to_take, nextWhenToTake);
 
     const historyEntry = changed
       ? JSON.stringify([
           {
             at: new Date().toISOString(),
             reason: t(reason, 500) || null,
-            from: { dose: prev.dose, frequency: prev.frequency, timing: prev.timing },
-            to: { dose: nextDose, frequency: nextFreq, timing: nextTiming },
+            from: {
+              dose: prev.dose,
+              frequency: prev.frequency,
+              timing: prev.timing,
+              when_to_take: prev.when_to_take,
+            },
+            to: {
+              dose: nextDose,
+              frequency: nextFreq,
+              timing: nextTiming,
+              when_to_take: nextWhenToTake,
+            },
           },
         ])
       : null;
@@ -1500,7 +1524,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
 
     const r = await pool.query(
       `UPDATE medications SET
-         dose = $1, frequency = $2, timing = $3,
+         dose = $1, frequency = $2, timing = $3, when_to_take = $34::when_to_take_pill[],
          notes = CASE WHEN $20::boolean THEN $21 ELSE COALESCE($4, notes) END,
          history = CASE WHEN $5::jsonb IS NULL THEN COALESCE(history, '[]'::jsonb)
                         ELSE COALESCE(history, '[]'::jsonb) || $5::jsonb END,
@@ -1552,6 +1576,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
         t(side_effects, 500),
         setDaysOfWeek,
         nextDaysOfWeek,
+        nextWhenToTake,
       ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
@@ -2741,6 +2766,429 @@ router.post("/visit/:patientId/parse-text", async (req, res) => {
   } catch (e) {
     handleError(res, e, "Parse clinical text");
   }
+});
+
+// ── POST /visit/:patientId/clinical-bulk — One-shot save of reviewed extract ──
+// Used by the paste-notes review modal after the doctor confirms which items to
+// apply. Saves symptoms, diagnoses, medications, stopped meds, labs, vitals,
+// investigations, and follow_up_with in a single round-trip — best-effort per
+// item, so a single bad row doesn't abort the batch. Returns counts + failed
+// list so the client can show a precise toast.
+//
+// Each section mirrors the SQL of the per-item routes above; the side effects
+// (Genie pushes / markMedicationVisitStatus / scribe-prescription PDF /
+// summary cache invalidation) fire once at the end rather than per row, which
+// is the whole point of the bulk endpoint.
+router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+
+  const {
+    symptoms = [],
+    diagnoses = [],
+    medications = [],
+    stopMeds = [],
+    labs = [],
+    vitals = [],
+    investigations = [],
+    follow_up_with = null,
+    doc_date = null,
+    raw_text = "",
+    patient = null,
+    doctor = null,
+  } = req.body || {};
+
+  const counts = { sx: 0, dx: 0, meds: 0, stop: 0, labs: 0, vit: 0, inv: 0, fuw: 0 };
+  const failed = [];
+
+  // Symptoms
+  for (const s of symptoms) {
+    try {
+      if (!s?.name) continue;
+      const symptomId = String(s.name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .slice(0, 100);
+      await pool.query(
+        `INSERT INTO visit_symptoms (patient_id, symptom_id, label, since_date, severity, related_to)
+         VALUES ($1,$2,$3,$4::date,$5,$6)
+         ON CONFLICT (patient_id, symptom_id) DO UPDATE SET
+           label = EXCLUDED.label,
+           since_date = COALESCE(EXCLUDED.since_date, visit_symptoms.since_date),
+           severity = COALESCE(EXCLUDED.severity, visit_symptoms.severity),
+           related_to = COALESCE(EXCLUDED.related_to, visit_symptoms.related_to),
+           status = 'Active', is_active = true, updated_at = NOW()`,
+        [
+          pid,
+          symptomId,
+          t(s.name, 500),
+          n(s.since),
+          t(s.severity, 50) || "Mild",
+          t(s.related_to, 200),
+        ],
+      );
+      counts.sx++;
+    } catch (e) {
+      failed.push(`symptom "${s?.name}"`);
+    }
+  }
+
+  // Diagnoses
+  for (const d of diagnoses) {
+    try {
+      if (!d?.name) continue;
+      const diagId = String(d.name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .slice(0, 100);
+      await pool.query(
+        `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, category, notes)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
+           label = EXCLUDED.label,
+           status = COALESCE(EXCLUDED.status, diagnoses.status),
+           category = COALESCE(EXCLUDED.category, diagnoses.category),
+           notes = COALESCE(EXCLUDED.notes, diagnoses.notes),
+           updated_at = NOW()`,
+        [
+          pid,
+          diagId,
+          t(d.name, 500),
+          t(d.status, 100) || "Newly Diagnosed",
+          t(d.category, 50) || "primary",
+          t(d.notes, 1000),
+        ],
+      );
+      counts.dx++;
+    } catch (e) {
+      failed.push(`diagnosis "${d?.name}"`);
+    }
+  }
+
+  // Medications — pinned to the same visit anchor used by the per-row route
+  let visitAnchor = null;
+  if (medications.length > 0) {
+    try {
+      const a = await pool.query(
+        `SELECT MAX(last_prescribed_date)::text AS anchor
+           FROM medications
+          WHERE patient_id = $1 AND is_active = true AND last_prescribed_date IS NOT NULL`,
+        [pid],
+      );
+      visitAnchor = a.rows[0]?.anchor || null;
+    } catch {}
+  }
+  for (const m of medications) {
+    try {
+      if (!m?.name) continue;
+      const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+      const storedName = cleanName || m.name;
+      const storedRoute = t(m.route, 50) || routeForForm(detectedForm) || "Oral";
+      // For weekly meds, default days_of_week to the prescription weekday so
+      // the patient app and printed schedule pick the right day automatically.
+      const enriched = enrichMedWithDays(m, n(m.started_date) || n(doc_date));
+      await pool.query(
+        `INSERT INTO medications
+           (patient_id, name, dose, frequency, timing, when_to_take, route, is_active, started_date, source, last_prescribed_date, days_of_week, created_at)
+         VALUES ($1,$2,$3,$4,$5,$9::when_to_take_pill[],$6,true,COALESCE($7::date, CURRENT_DATE),'visit',COALESCE($8::date, CURRENT_DATE),$10::int[],NOW())
+         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+         DO UPDATE SET
+           dose = COALESCE(EXCLUDED.dose, medications.dose),
+           frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+           timing = COALESCE(EXCLUDED.timing, medications.timing),
+           when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
+           route = COALESCE(EXCLUDED.route, medications.route),
+           last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
+           days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
+           updated_at = NOW()`,
+        [
+          pid,
+          t(storedName, 200),
+          t(m.dose, 100),
+          t(enriched.frequency, 100),
+          t(m.timing, 200),
+          storedRoute,
+          n(m.started_date) || n(doc_date),
+          visitAnchor,
+          normalizeWhenToTake(m.when_to_take),
+          Array.isArray(enriched.days_of_week) && enriched.days_of_week.length
+            ? enriched.days_of_week
+            : null,
+        ],
+      );
+      counts.meds++;
+    } catch (e) {
+      failed.push(`medication "${m?.name}"`);
+    }
+  }
+
+  // Stop meds — simplified (cascade cleanup runs lazily elsewhere)
+  for (const sm of stopMeds) {
+    try {
+      const mid = Number(sm?.id);
+      if (!mid) continue;
+      const r = await pool.query(
+        `UPDATE medications
+            SET is_active = false,
+                stopped_date = CURRENT_DATE,
+                stop_reason = $1,
+                updated_at = NOW()
+          WHERE id = $2 AND patient_id = $3 AND is_active = true`,
+        [t(sm.reason, 200) || "Previous visit", mid, pid],
+      );
+      if (r.rowCount > 0) counts.stop++;
+    } catch (e) {
+      failed.push(`stop "${sm?.name}"`);
+    }
+  }
+
+  // Labs
+  function parseIndianDate(d) {
+    if (!d) return null;
+    if (String(d).includes("-")) return d;
+    const parts = String(d).split("/");
+    if (parts.length === 3) {
+      let [day, month, year] = parts;
+      if (year.length === 2) year = "20" + year;
+      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+    return d;
+  }
+  for (const lab of labs) {
+    try {
+      const testName = lab?.test_name || lab?.test;
+      if (!testName) continue;
+      const numericResult = num(lab.result ?? lab.result_text);
+      const resultText =
+        numericResult === null && (lab.result_text || lab.result)
+          ? String(lab.result_text || lab.result)
+          : null;
+      const canonical = getCanonical(testName);
+      const finalDate =
+        parseIndianDate(lab.test_date) ||
+        parseIndianDate(doc_date) ||
+        new Date().toISOString().split("T")[0];
+
+      if (numericResult !== null) {
+        const dup = await pool.query(
+          `SELECT id FROM lab_results
+            WHERE patient_id = $1 AND canonical_name = $2
+              AND result::numeric = $3::numeric AND test_date::date = $4::date
+            LIMIT 1`,
+          [pid, canonical, numericResult, finalDate],
+        );
+        if (dup.rows[0]) {
+          counts.labs++;
+          continue;
+        }
+      }
+      await pool.query(
+        `INSERT INTO lab_results (patient_id, test_name, canonical_name, result, result_text, unit, flag, ref_range, test_date, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          pid,
+          testName,
+          canonical,
+          numericResult,
+          resultText,
+          t(lab.unit, 50),
+          t(lab.flag, 10) || "N",
+          t(lab.ref_range, 100),
+          finalDate,
+          (lab.source || "report_extract").slice(0, 50),
+        ],
+      );
+      counts.labs++;
+    } catch (e) {
+      failed.push(`lab "${lab?.test_name || lab?.test}"`);
+    }
+  }
+
+  // Vitals
+  for (const v of vitals) {
+    try {
+      const hasAny =
+        v?.bpSys != null ||
+        v?.bpDia != null ||
+        v?.weight != null ||
+        v?.height != null ||
+        v?.bmi != null ||
+        v?.waist != null ||
+        v?.bodyFat != null;
+      if (!hasAny) continue;
+      const recordedAt = n(v.date) || n(doc_date) || null;
+      const existing = await pool.query(
+        `SELECT id FROM vitals
+          WHERE patient_id = $1
+            AND recorded_at::date = COALESCE($2::date, CURRENT_DATE)
+            AND COALESCE(bp_sys, -1) = COALESCE($3::real, -1)
+            AND COALESCE(weight, -1) = COALESCE($4::real, -1)
+            AND COALESCE(bmi, -1) = COALESCE($5::real, -1)
+          LIMIT 1`,
+        [pid, recordedAt, num(v.bpSys), num(v.weight), num(v.bmi)],
+      );
+      if (existing.rows.length > 0) {
+        counts.vit++;
+        continue;
+      }
+      await pool.query(
+        `INSERT INTO vitals (patient_id, recorded_at, bp_sys, bp_dia, weight, height, bmi, body_fat, waist)
+         VALUES ($1, COALESCE($2::timestamptz, NOW()), $3,$4,$5,$6,$7,$8,$9)`,
+        [
+          pid,
+          recordedAt,
+          num(v.bpSys),
+          num(v.bpDia),
+          num(v.weight),
+          num(v.height),
+          num(v.bmi),
+          num(v.bodyFat),
+          num(v.waist),
+        ],
+      );
+      counts.vit++;
+    } catch (e) {
+      failed.push("vitals");
+    }
+  }
+
+  // Investigations — merged into the latest consultation's con_data
+  if (investigations.length > 0) {
+    try {
+      const clean = investigations
+        .map((it) => ({ name: t(it?.name, 200), urgency: t(it?.urgency, 50) || "routine" }))
+        .filter((it) => it.name);
+      if (clean.length > 0) {
+        const con = await pool.query(
+          `SELECT id, con_data FROM consultations
+            WHERE patient_id = $1
+            ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
+          [pid],
+        );
+        if (con.rows[0]) {
+          const existing = Array.isArray(con.rows[0].con_data?.investigations_to_order)
+            ? con.rows[0].con_data.investigations_to_order
+            : [];
+          const seen = new Set(
+            existing.map((e) =>
+              String(e?.name || "")
+                .toLowerCase()
+                .trim(),
+            ),
+          );
+          const merged = [...existing];
+          for (const it of clean) {
+            const k = it.name.toLowerCase().trim();
+            if (!seen.has(k)) {
+              merged.push(it);
+              seen.add(k);
+            }
+          }
+          await pool.query(
+            `UPDATE consultations
+                SET con_data = jsonb_set(COALESCE(con_data, '{}'::jsonb), '{investigations_to_order}', $1::jsonb),
+                    updated_at = NOW()
+              WHERE id = $2`,
+            [JSON.stringify(merged), con.rows[0].id],
+          );
+          counts.inv = merged.length - existing.length;
+        }
+      }
+    } catch (e) {
+      failed.push("investigations");
+    }
+  }
+
+  // Follow Up With
+  const fuwText = typeof follow_up_with === "string" ? follow_up_with.trim() : "";
+  if (fuwText) {
+    try {
+      await pool.query(
+        `UPDATE consultations
+            SET con_data = jsonb_set(COALESCE(con_data, '{}'::jsonb), '{follow_up_with}', $1::jsonb),
+                updated_at = NOW()
+          WHERE id = (
+            SELECT id FROM consultations WHERE patient_id = $2
+            ORDER BY visit_date DESC, created_at DESC LIMIT 1
+          )`,
+        [JSON.stringify(fuwText), pid],
+      );
+      try {
+        await pool.query(
+          `UPDATE appointments SET follow_up_with = $1, updated_at = NOW()
+            WHERE id = (
+              SELECT id FROM appointments
+              WHERE patient_id = $2
+              ORDER BY
+                CASE WHEN appointment_date::date >= CURRENT_DATE THEN 0 ELSE 1 END,
+                appointment_date ASC, id DESC
+              LIMIT 1
+            )`,
+          [fuwText, pid],
+        );
+      } catch (propErr) {
+        console.warn("[Visit] follow_up_with appt propagation skipped:", propErr.message);
+      }
+      counts.fuw = 1;
+    } catch (e) {
+      failed.push("follow-up-with");
+    }
+  }
+
+  // ── Post-save side effects (run once, not per-row) ─────────────────────────
+  if (counts.meds > 0) {
+    markMedicationVisitStatus(pid).catch((e) =>
+      console.warn("[Visit] markMedicationVisitStatus failed:", e.message),
+    );
+  }
+
+  // Scribe-tagged prescription PDF — fire-and-forget. Only fires when the
+  // doctor confirmed at least one item.
+  const totalSaved =
+    counts.sx +
+    counts.dx +
+    counts.meds +
+    counts.stop +
+    counts.labs +
+    counts.vit +
+    counts.inv +
+    counts.fuw;
+  if (totalSaved > 0 && (patient || doctor || raw_text)) {
+    const confirmedParsed = {
+      symptoms,
+      diagnoses,
+      medications,
+      previous_medications: stopMeds.map((sm) => ({
+        name: sm.name,
+        status: "stopped",
+        reason: sm.reason,
+      })),
+      labs: labs.map((l) => ({
+        test: l.test_name || l.test,
+        value: l.result_text || l.result,
+        unit: l.unit,
+        date: l.test_date,
+      })),
+      vitals,
+      investigations_to_order: investigations,
+      follow_up_with: fuwText || null,
+    };
+    try {
+      const baseUrl =
+        process.env.INTERNAL_API_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`;
+      // Reuse the existing scribe-prescription endpoint by calling it locally
+      // so any future changes there flow through automatically.
+      fetch(`${baseUrl}/api/visit/${pid}/scribe-prescription`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patient, doctor, parsed: confirmedParsed, raw_text, doc_date }),
+      }).catch((e) =>
+        console.warn("[Visit] scribe-prescription background save failed:", e.message),
+      );
+    } catch {}
+  }
+
+  res.json({ counts, failed, total: totalSaved });
 });
 
 // ── PATCH /visit/:patientId/medications/reconcile — Stop meds from older visits ──

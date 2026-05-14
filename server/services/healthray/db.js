@@ -7,9 +7,11 @@ import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
 import { parseLabDate } from "../../utils/labDate.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
+import { enrichMedWithDays } from "../medication/daysOfWeek.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
+import { normalizeWhenToTake } from "../../schemas/index.js";
 
 // Build the visit payload from current DB state and persist a prescription
 // PDF document for an appointment that has just been marked as seen. Always
@@ -1075,8 +1077,14 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     .filter(Boolean);
   const earliestByKey = await findEarliestStartDates(pool, patientId, canonicalKeys, null);
 
-  for (const med of meds) {
-    if (!med.name) continue;
+  for (const rawMed of meds) {
+    if (!rawMed.name) continue;
+    // Default weekly meds' day-of-week to the prescription weekday when the
+    // source text doesn't pin a specific day. Also normalises the frequency
+    // string to include the canonical "· Mon, Wed" suffix.
+    const med = enrichMedWithDays(rawMed, apptDate);
+    const daysOfWeek =
+      Array.isArray(med.days_of_week) && med.days_of_week.length ? med.days_of_week : null;
     // Strip dosage-form prefix so the stored `name` is the clean brand — the
     // prefix becomes the route (Oral/SC/Topical/...) and never survives in
     // `name`, which is what the stop-medicine matcher reads.
@@ -1103,6 +1111,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       `healthray:${healthrayId}`,
       apptDate || null,
       sideEffectsJson,
+      normalizeWhenToTake(med.when_to_take),
+      daysOfWeek,
     ];
 
     // Step 1: reactivate any existing inactive row with the same name first.
@@ -1125,6 +1135,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       startedDate, // $7 — earliest known start, falls back to apptDate
       `healthray:${healthrayId}`, // $8
       apptDate || null, // $9 — date this prescription was issued
+      normalizeWhenToTake(med.when_to_take), // $10
+      daysOfWeek, // $11 — int[] (0..6) weekday(s) for weekly meds, or null
     ];
     await pool
       .query(
@@ -1134,10 +1146,12 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
              dose = COALESCE($3, dose),
              frequency = COALESCE($4, frequency),
              timing = COALESCE($5, timing),
+             when_to_take = COALESCE($10::when_to_take_pill[], when_to_take),
              route = COALESCE($6, route),
              started_date = LEAST(started_date, $7),
              last_prescribed_date = GREATEST(COALESCE(last_prescribed_date, $9::date), $9::date),
              notes = $8,
+             days_of_week = COALESCE($11::int[], days_of_week),
              stopped_date = NULL,
              stop_reason = NULL,
              consultation_id = NULL,
@@ -1165,18 +1179,20 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     await pool
       .query(
         `INSERT INTO medications
-         (patient_id, name, pharmacy_match, dose, frequency, timing, route, is_active, started_date, notes, last_prescribed_date, source, common_side_effects)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, 'healthray', COALESCE($11::jsonb, '[]'::jsonb))
+         (patient_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, is_active, started_date, notes, last_prescribed_date, source, common_side_effects, days_of_week)
+         VALUES ($1, $2, $3, $4, $5, $6, $12::when_to_take_pill[], $7, true, $8, $9, $10, 'healthray', COALESCE($11::jsonb, '[]'::jsonb), $13::int[])
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
            timing = COALESCE(EXCLUDED.timing, medications.timing),
+           when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
            route = COALESCE(EXCLUDED.route, medications.route),
            started_date = LEAST(medications.started_date, EXCLUDED.started_date),
            last_prescribed_date = GREATEST(COALESCE(medications.last_prescribed_date, EXCLUDED.last_prescribed_date), EXCLUDED.last_prescribed_date),
            notes = EXCLUDED.notes,
            pharmacy_match = EXCLUDED.pharmacy_match,
+           days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
            common_side_effects = CASE
              WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
                THEN EXCLUDED.common_side_effects
@@ -1978,9 +1994,11 @@ export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen")
         parts.push(
           "TREATMENT:\n" +
             rx.medications
-              .map(
-                (m) =>
-                  `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+              .map((m) =>
+                (() => {
+                  const wt = (normalizeWhenToTake(m.when_to_take) || []).join(", ");
+                  return `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${wt ? " · " + wt : ""}${m.timing && m.timing !== wt ? " (" + m.timing + ")" : ""}`;
+                })(),
               )
               .join("\n"),
         );

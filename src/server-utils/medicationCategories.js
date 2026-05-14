@@ -42,7 +42,7 @@ export const DRUG_PATTERNS = {
   metformin: /\b(metformin|glycomet|glucophage|diamet|obimet|metafor|istamet)\b/i,
   sglt2:
     /\b(empagliflozin|dapagliflozin|canagliflozin|jardiance|forxiga|invokana|synjardy|daplo|xigduo|dapanorm)\b/i,
-  glp1: /\b(tirzepatide|semaglutide|liraglutide|exenatide|dulaglutide|mounjaro|ozempic|rybelsus|trulicity|victoza|bydureon|byetta)\b/i,
+  glp1: /\b(tirzepatide|semaglutide|liraglutide|exenatide|dulaglutide|mounjaro|ozempic|rybelsus|wegovy|trulicity|victoza|saxenda|bydureon|byetta)\b/i,
   dpp4: /\b(sitagliptin|vildagliptin|linagliptin|saxagliptin|alogliptin|teneligliptin|januvia|galvus|trajenta|onglyza|zomelis|istavel|jalra|zita)\b/i,
   su: /\b(glimepiride|gliclazide|glipizide|glibenclamide|amaryl|diamicron|glimpid|glycinorm|glizid)\b/i,
   pioglitazone: /\b(pioglitazone|actos|pioglit)\b/i,
@@ -52,10 +52,10 @@ export const DRUG_PATTERNS = {
 // Category-level detection patterns for everything that isn't diabetes-specific.
 export const CATEGORY_PATTERNS = {
   kidney:
-    /\b(ramipril|enalapril|lisinopril|captopril|perindopril|cardace|hopace|encardil|coversyl|telmisartan|losartan|irbesartan|valsartan|candesartan|olmesartan|telma|telmikind|losacar|arbista|telisatan)\b/i,
+    /\b(ramipril|enalapril|lisinopril|captopril|perindopril|cardace|hopace|encardil|coversyl|telmisartan|losartan|irbesartan|valsartan|candesartan|olmesartan|telma|telmikind|losacar|arbista|telisatan|finerenone|kerendia|spironolactone|eplerenone|aldactone)\b/i,
   bp: /\b(amlodipine|nifedipine|felodipine|norvasc|amlokind|amlong|amlopres|cilacar|cilnidipine|chlorthalidone|hydrochlorothiazide|metoprolol|bisoprolol|atenolol|carvedilol|nebivolol|betaloc|concor|aten|nebistar|carvedil|prazosin|aspirin|ecospirin|ecosprin|clopidogrel|prasugrel|ticagrelor|plavix)\b/i,
   lipids:
-    /\b(rosuvastatin|atorvastatin|simvastatin|pravastatin|crestor|rozavel|lipitor|storvas|rosuvas|rosulip|atorva|lipitas|fenofibrate|gemfibrozil|fenolip|tricor|lipicard|ezetimibe|statin)\b/i,
+    /\b(rosuvastatin|atorvastatin|simvastatin|pravastatin|crestor|rozavel|lipitor|storvas|rosuvas|rosulip|rosuless|rosulast|rosutor|atorva|lipitas|fenofibrate|gemfibrozil|fenolip|tricor|lipicard|ezetimibe|bempedoic|nexlizet|statin)\b/i,
   thyroid: /\b(levothyroxine|thyronorm|eltroxin|thyrox|lethroxin|thyroxine)\b/i,
   external: /\b(tamsulosin|urimax|silodosin|dutasteride|finasteride|alfuzosin|flotral)\b/i,
   supplement:
@@ -77,25 +77,44 @@ export function detectDrugClass(med) {
 // we fall back to name/composition pattern matching.
 export function detectMedCategory(med) {
   if (med?.external_doctor) return "external";
-  if (med?.med_group && MED_CATEGORIES.some((c) => c.id === med.med_group)) {
-    return med.med_group;
-  }
+
   const name = (med?.name || "").toLowerCase();
   const composition = (med?.composition || "").toLowerCase();
   const combined = `${name} ${composition}`;
 
-  // Diabetes wins first (covers all sub-classes via DRUG_PATTERNS)
+  // Run pattern detection first. If a more-specific category matches, prefer
+  // it over a stored `med_group` of "supplement" — historically meds saved
+  // without explicit categorisation defaulted to "supplement", which buried
+  // things like Wegovy (GLP-1) and Kerendia (kidney) in the supplements bucket.
+  let patternMatch = null;
   for (const pattern of Object.values(DRUG_PATTERNS)) {
-    if (pattern.test(combined)) return "diabetes";
+    if (pattern.test(combined)) {
+      patternMatch = "diabetes";
+      break;
+    }
   }
-  // Then check each non-diabetes category in rank order
-  for (const cat of MED_CATEGORIES) {
-    if (cat.id === "diabetes" || cat.id === "external") continue;
-    const pat = CATEGORY_PATTERNS[cat.id];
-    if (pat && pat.test(combined)) return cat.id;
+  if (!patternMatch) {
+    for (const cat of MED_CATEGORIES) {
+      if (cat.id === "diabetes" || cat.id === "external") continue;
+      const pat = CATEGORY_PATTERNS[cat.id];
+      if (pat && pat.test(combined)) {
+        patternMatch = cat.id;
+        break;
+      }
+    }
   }
-  // Urology / prostate goes under "external" via CATEGORY_PATTERNS
-  if (CATEGORY_PATTERNS.external.test(combined)) return "external";
+  if (!patternMatch && CATEGORY_PATTERNS.external.test(combined)) {
+    patternMatch = "external";
+  }
+
+  const stored =
+    med?.med_group && MED_CATEGORIES.some((c) => c.id === med.med_group) ? med.med_group : null;
+
+  // If the stored group is the generic fallback "supplement", let a stronger
+  // pattern match win. Otherwise trust the doctor-curated stored value.
+  if (stored && stored !== DEFAULT_CATEGORY) return stored;
+  if (patternMatch) return patternMatch;
+  if (stored) return stored;
   return DEFAULT_CATEGORY;
 }
 

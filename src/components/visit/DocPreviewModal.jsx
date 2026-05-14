@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { formatWhenToTake } from "../../config/medicationTimings";
 
 const DocPreviewModal = memo(function DocPreviewModal({ preview, onClose }) {
   if (!preview) return null;
@@ -148,7 +149,8 @@ function ExtractedDataView({ data }) {
               <strong>{m.name}</strong>
               {m.dose ? ` ${m.dose}` : ""}
               {m.frequency ? ` — ${m.frequency}` : ""}
-              {m.timing ? ` (${m.timing})` : ""}
+              {formatWhenToTake(m.when_to_take) ? ` · ${formatWhenToTake(m.when_to_take)}` : ""}
+              {m.timing && m.timing !== formatWhenToTake(m.when_to_take) ? ` (${m.timing})` : ""}
             </div>
           ))}
         </div>

@@ -1,18 +1,8 @@
 import { memo, useState } from "react";
 import { MED_GROUPS, DIABETES_CLASSES } from "../../../config/drugDatabase";
+import { WHEN_TO_TAKE_PILLS, toWhenToTakeArray } from "../../../config/medicationTimings";
 
-const TIMINGS = [
-  "Fasting",
-  "Before breakfast",
-  "After breakfast",
-  "Before lunch",
-  "After lunch",
-  "Before dinner",
-  "After dinner",
-  "At bedtime",
-  "With milk",
-  "SOS only",
-];
+const TIMINGS = WHEN_TO_TAKE_PILLS;
 
 // Day-of-week tokens for weekly / fortnightly medicines. AddMedicationModal
 // stores the selected days as a suffix on `frequency` (e.g.
@@ -53,17 +43,20 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const initialDose = medication.dose || "";
   const initialFrequencyRaw = medication.frequency || "OD";
   const { base: initialFrequency, days: initialWeekdays } = parseFrequency(initialFrequencyRaw);
-  const initialTimingRaw = medication.timing || "";
-  const initialTimingTokens = initialTimingRaw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  // Legacy/freeform tokens (e.g. "Morning", "Before meals") that aren't in
-  // the canonical TIMINGS list. We render them as extra pills so the user
-  // can see what's currently set and toggle them off.
-  const initialExtraTimings = initialTimingTokens.filter(
-    (e) => !TIMINGS.some((t) => t.toLowerCase() === e.toLowerCase()),
-  );
+  // Pill row reads ONLY from when_to_take (text[] enum). Normalise through
+  // toWhenToTakeArray so we accept JS arrays, the Postgres literal
+  // `{"Any time","After breakfast"}` (when node-pg leaves enum arrays
+  // unparsed), or a comma-separated string — all collapse to the canonical
+  // pill array. The legacy free-text `timing` is now an independent
+  // "Doctor's timing note" field below the pills.
+  const initialWhenToTakeArr = toWhenToTakeArray(medication.when_to_take);
+  const initialTimingTokens = initialWhenToTakeArr;
+  const initialTimingNote = medication.timing || "";
+  // After toWhenToTakeArray, every token is already canonical — anything
+  // unrecognised was dropped — so there should never be "extra" legacy
+  // pills. We keep the slot empty for forward compatibility (someone could
+  // pass through pre-normalised data again) but it stays unused now.
+  const initialExtraTimings = [];
   const initialMedGroup = medication.med_group || "";
   const initialDrugClass = medication.drug_class || "";
   const initialExternalDoctor = medication.external_doctor || "";
@@ -100,6 +93,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const [forDx, setForDx] = useState(initialForDx);
   const [startedDate, setStartedDate] = useState(initialStartedDate);
   const [sideEffects, setSideEffects] = useState(initialSideEffects);
+  const [timingNote, setTimingNote] = useState(initialTimingNote);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -129,7 +123,9 @@ const EditMedicationModal = memo(function EditMedicationModal({
     if (loading) return;
     setLoading(true);
     try {
-      const nextTiming = [...timings, ...extraTimings].join(", ");
+      // Server expects an array of canonical pills for the text[] enum column.
+      const nextWhenToTakeArr = [...timings, ...extraTimings];
+      const nextTimingNote = timingNote.trim();
       // Recombine the weekday selection into the frequency string. Applies
       // to weekly / fortnightly schedules; other frequencies clear any
       // stale day suffix.
@@ -142,7 +138,11 @@ const EditMedicationModal = memo(function EditMedicationModal({
       // null).
       if (dose !== initialDose) payload.dose = dose;
       if (nextFrequency !== initialFrequencyRaw) payload.frequency = nextFrequency;
-      if (nextTiming !== initialTimingRaw) payload.timing = nextTiming;
+      const sameArr =
+        nextWhenToTakeArr.length === initialWhenToTakeArr.length &&
+        nextWhenToTakeArr.every((v, i) => v === initialWhenToTakeArr[i]);
+      if (!sameArr) payload.when_to_take = nextWhenToTakeArr;
+      if (nextTimingNote !== initialTimingNote) payload.timing = nextTimingNote;
 
       // Mirror the weekday selection into the structured `days_of_week`
       // column so the patient app can filter "Things to do today" without
@@ -391,6 +391,21 @@ const EditMedicationModal = memo(function EditMedicationModal({
               </label>
             ))}
           </div>
+        </div>
+
+        <div className="mf">
+          <label className="ml">
+            Doctor's timing note{" "}
+            <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 11 }}>(optional)</span>
+          </label>
+          <input
+            className="mi"
+            placeholder="e.g. 30 min before food, avoid grapefruit"
+            value={timingNote}
+            onChange={(e) => setTimingNote(e.target.value)}
+            disabled={loading}
+            maxLength={200}
+          />
         </div>
 
         <div className="g2">

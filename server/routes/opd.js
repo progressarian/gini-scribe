@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { normalizeWhenToTake } from "../schemas/index.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { invalidateAppointmentSummaries } from "../services/summaryCache.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
@@ -145,9 +146,11 @@ async function backfillOpdConsultations() {
           parts.push(
             "TREATMENT:\n" +
               rx.medications
-                .map(
-                  (m) =>
-                    `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+                .map((m) =>
+                  (() => {
+                    const wt = (normalizeWhenToTake(m.when_to_take) || []).join(", ");
+                    return `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${wt ? " · " + wt : ""}${m.timing && m.timing !== wt ? " (" + m.timing + ")" : ""}`;
+                  })(),
                 )
                 .join("\n"),
           );
@@ -1137,9 +1140,11 @@ router.patch("/appointments/:id", async (req, res) => {
           parts.push(
             "TREATMENT:\n" +
               rx.medications
-                .map(
-                  (m) =>
-                    `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " " + m.timing : ""}`,
+                .map((m) =>
+                  (() => {
+                    const wt = (normalizeWhenToTake(m.when_to_take) || []).join(", ");
+                    return `-${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${wt ? " · " + wt : ""}${m.timing && m.timing !== wt ? " (" + m.timing + ")" : ""}`;
+                  })(),
                 )
                 .join("\n"),
           );
@@ -1471,10 +1476,15 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         if (rows.length) {
           await client.query(
             `INSERT INTO medications
-               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active, source, common_side_effects)
-             SELECT $1, $2, name, pharm, composition, dose, freq, timing, route, false, true, 'opd', COALESCE(side_fx::jsonb, '[]'::jsonb)
-               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[])
-                    AS t(name, pharm, composition, dose, freq, timing, route, side_fx)
+               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, is_new, is_active, source, common_side_effects)
+             SELECT $1, $2, name, pharm, composition, dose, freq, timing,
+                    CASE WHEN when_to_take IS NULL OR when_to_take = ''
+                         THEN NULL
+                         ELSE string_to_array(when_to_take, ',')::when_to_take_pill[]
+                    END,
+                    route, false, true, 'opd', COALESCE(side_fx::jsonb, '[]'::jsonb)
+               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[])
+                    AS t(name, pharm, composition, dose, freq, timing, route, side_fx, when_to_take)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1482,6 +1492,7 @@ router.post("/appointments/:id/compliance", async (req, res) => {
                dose = COALESCE(EXCLUDED.dose, medications.dose),
                frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
                timing = COALESCE(EXCLUDED.timing, medications.timing),
+               when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                route = COALESCE(EXCLUDED.route, medications.route),
                common_side_effects = CASE
                  WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
@@ -1505,6 +1516,10 @@ router.post("/appointments/:id/compliance", async (req, res) => {
                   ? JSON.stringify(m.common_side_effects.slice(0, 3))
                   : null,
               ),
+              rows.map((m) => {
+                const arr = normalizeWhenToTake(m.when_to_take);
+                return arr ? arr.join(",") : "";
+              }),
             ],
           );
         }

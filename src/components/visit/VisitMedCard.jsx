@@ -1,6 +1,7 @@
 import { memo, useRef, useCallback, useMemo } from "react";
 import { MED_COLORS } from "./helpers";
 import { TIME_SLOTS, printMedCard, getTimeSlots } from "./medCardPrint";
+import { formatWhenToTake } from "../../config/medicationTimings";
 import { cleanNote } from "../../utils/cleanNote";
 import {
   detectMedCategory,
@@ -39,7 +40,14 @@ function MedRow({ m }) {
       <div className="mtd">{m.dose || "1 tablet"}</div>
       <div className="mtd">
         {m.frequency || "OD"}
-        {m.timing ? ` · ${m.timing}` : ""}
+        {(() => {
+          const wt = formatWhenToTake(m.when_to_take);
+          // Patient-facing pills take precedence; fall back to the doctor's
+          // free-text timing note so meds with no canonical pills still
+          // show *something* useful on the card.
+          const display = wt || m.timing || "";
+          return display ? ` · ${display}` : "";
+        })()}
       </div>
       <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
       <div className="mtd">
@@ -53,7 +61,8 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
   const cardRef = useRef(null);
 
   const mainMeds = useMemo(
-    () => (activeMeds || []).filter((m) => !m.parent_medication_id),
+    () =>
+      (activeMeds || []).filter((m) => !m.parent_medication_id && m.visit_status !== "previous"),
     [activeMeds],
   );
 

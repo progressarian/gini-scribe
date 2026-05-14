@@ -1,5 +1,6 @@
 import { memo, useState } from "react";
 import { fmtDate } from "./helpers";
+import { formatWhenToTake } from "../../config/medicationTimings";
 
 function DiagnosisPills({ diagnoses }) {
   if (!diagnoses?.length) return null;
@@ -46,7 +47,8 @@ function MedList({ medications }) {
           💊 <strong>{m.name}</strong>
           {m.dose ? ` ${m.dose}` : ""}
           {m.frequency ? ` · ${m.frequency}` : ""}
-          {m.timing ? ` ${m.timing}` : ""}
+          {formatWhenToTake(m.when_to_take) ? ` · ${formatWhenToTake(m.when_to_take)}` : ""}
+          {m.timing && m.timing !== formatWhenToTake(m.when_to_take) ? ` (${m.timing})` : ""}
           {m.is_new ? (
             <span style={{ color: "var(--primary)", marginLeft: 4, fontSize: 9, fontWeight: 700 }}>
               NEW

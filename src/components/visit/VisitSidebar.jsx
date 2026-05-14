@@ -8,6 +8,7 @@ import {
   getLatestFbsMerged,
 } from "./helpers";
 import { autoDetectGroup, getGroupLabel } from "./VisitMedications";
+import { formatWhenToTake } from "../../config/medicationTimings";
 import { cleanNote } from "../../utils/cleanNote";
 
 const SIDEBAR_GROUP_ORDER = [
@@ -558,7 +559,12 @@ const VisitSidebar = memo(function VisitSidebar({
                               <div className="smed-nm">{m.name}</div>
                               <div className="smed-dose">
                                 {m.dose} · {m.frequency || "OD"}
-                                {m.timing ? ` · ${m.timing}` : ""}
+                                {formatWhenToTake(m.when_to_take)
+                                  ? ` · ${formatWhenToTake(m.when_to_take)}`
+                                  : ""}
+                                {m.timing && m.timing !== formatWhenToTake(m.when_to_take)
+                                  ? ` (${m.timing})`
+                                  : ""}
                               </div>
                               {m.for_diagnosis?.length > 0 && (
                                 <div className="smed-for">{m.for_diagnosis.join(", ")}</div>

@@ -1,158 +1,17 @@
 import { MED_COLORS } from "./helpers";
+import {
+  detectMedCategory,
+  getCategoryLabel,
+  getCategoryIcon,
+} from "../../server-utils/medicationCategories";
+import {
+  TIME_SLOTS,
+  getTimeSlots,
+  getTimeSlot,
+  formatWhenToTake,
+} from "../../config/medicationTimings";
 
-export const TIME_SLOTS = [
-  {
-    key: "fasting",
-    label: "Khaali pet (Fasting)",
-    emoji: "🌅",
-    colorVar: "--teal",
-    bgCls: "teal-lt",
-  },
-  {
-    key: "before_breakfast",
-    label: "Naashte se pehle (Before Breakfast)",
-    emoji: "🌄",
-    colorVar: "--primary",
-    bgCls: "pri-lt",
-  },
-  {
-    key: "after_breakfast",
-    label: "Naashte ke baad (After Breakfast)",
-    emoji: "☕",
-    colorVar: "--amber",
-    bgCls: "amb-lt",
-  },
-  {
-    key: "before_lunch",
-    label: "Khaane se pehle (Before Lunch)",
-    emoji: "🍽️",
-    colorVar: "--t3",
-    bgCls: "bg",
-    border: true,
-  },
-  {
-    key: "after_lunch",
-    label: "Khaane ke baad (After Lunch)",
-    emoji: "🍛",
-    colorVar: "--green",
-    bgCls: "grn-lt",
-  },
-  {
-    key: "before_dinner",
-    label: "Dinner se pehle (Before Dinner)",
-    emoji: "🌙",
-    colorVar: "--t3",
-    bgCls: "bg",
-    border: true,
-  },
-  {
-    key: "after_dinner",
-    label: "Dinner ke baad (After Dinner)",
-    emoji: "🌆",
-    colorVar: "--t3",
-    bgCls: "bg",
-    border: true,
-  },
-  {
-    key: "bedtime",
-    label: "Sone se pehle (Bedtime)",
-    emoji: "💤",
-    colorVar: "--purple",
-    bgCls: "pur-lt",
-  },
-  { key: "weekly", label: "Weekly", emoji: "📅", colorVar: "--purple", bgCls: "pur-lt" },
-  {
-    key: "anytime",
-    label: "Anytime",
-    emoji: "🕒",
-    colorVar: "--t3",
-    bgCls: "bg",
-    border: true,
-  },
-];
-
-// Returns an ARRAY of slot keys — a medicine can appear in multiple slots.
-//
-// Detection order:
-//   1. Explicit phrase match in `timing` ("after dinner", "bedtime", …).
-//   2. Numeric clock parse in `timing` ("8 PM", "10pm", "20:00") — bucketed
-//      by hour-of-day. Without this step, doctor-typed times like "8 PM"
-//      silently fell through to the frequency fallback and OD meds landed
-//      in after_breakfast even when the doctor explicitly said "8 PM".
-//   3. Soft phrase match ("morning", "evening").
-//   4. Frequency fallback (TDS/BD/OD).
-export function getTimeSlots(med) {
-  // Mirror myhealthgenie GiniCareV9.getTimeSlots so the printed card matches
-  // the patient-app care tab. Key differences vs the older scribe logic:
-  //   • notes joined into the phrase haystack so doctor-typed timing in the
-  //     notes column ("after dinner", "8 PM") is honored
-  //   • word-boundary regex on morning/evening/night/am to stop substring
-  //     false-positives ("tomorrow" → morning, "code" → od, etc.)
-  //   • unmatched meds land in a dedicated "anytime" slot rather than being
-  //     silently dumped into after_breakfast
-  const t = `${med.timing || ""} ${med.notes || ""}`.toLowerCase();
-  const f = (med.frequency || "").toLowerCase();
-  const slots = new Set();
-
-  if (t.includes("fasting")) slots.add("fasting");
-  if (t.includes("before breakfast") || (t.includes("before food") && t.includes("morning")))
-    slots.add("before_breakfast");
-  if (t.includes("after breakfast") || t.includes("with breakfast")) slots.add("after_breakfast");
-  if (t.includes("before lunch")) slots.add("before_lunch");
-  if (t.includes("after lunch") || t.includes("with lunch")) slots.add("after_lunch");
-  if (t.includes("before dinner") || (t.includes("before food") && t.includes("evening")))
-    slots.add("before_dinner");
-  if (t.includes("after dinner") || t.includes("with dinner")) slots.add("after_dinner");
-  if (
-    t.includes("bedtime") ||
-    t.includes("at bedtime") ||
-    t.includes("before bed") ||
-    /\bnight\b/.test(t)
-  )
-    slots.add("bedtime");
-
-  if (slots.size === 0) {
-    const m = t.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-    if (m) {
-      let h = parseInt(m[1], 10);
-      const ap = m[3];
-      if (ap === "pm" && h < 12) h += 12;
-      if (ap === "am" && h === 12) h = 0;
-      if (!Number.isNaN(h) && h >= 0 && h < 24) {
-        if (h >= 5 && h < 11) slots.add("after_breakfast");
-        else if (h >= 11 && h < 15) slots.add("after_lunch");
-        else if (h >= 15 && h < 21) slots.add("after_dinner");
-        else slots.add("bedtime");
-      }
-    }
-  }
-
-  if (/\bmorning\b/.test(t) || /\bam\b/.test(t)) slots.add("after_breakfast");
-  if (/\bevening\b/.test(t)) slots.add("after_dinner");
-  if (/weekly|once in 7|every week/.test(t) || /weekly|week/.test(f)) slots.add("weekly");
-  if (/15 days|fortnight|once in \d+ days/.test(t) || /15 days|fortnight/.test(f))
-    slots.add("weekly");
-
-  if (slots.size === 0) {
-    if (/tds|tid|three/.test(f)) {
-      slots.add("after_breakfast");
-      slots.add("after_lunch");
-      slots.add("after_dinner");
-    } else if (/bd|twice/.test(f)) {
-      slots.add("after_breakfast");
-      slots.add("after_dinner");
-    } else if (/od|once|hs/.test(f)) {
-      slots.add("after_breakfast");
-    }
-  }
-
-  if (slots.size === 0) slots.add("anytime");
-  return [...slots];
-}
-
-export function getTimeSlot(med) {
-  return getTimeSlots(med)[0];
-}
+export { TIME_SLOTS, getTimeSlots, getTimeSlot };
 
 // Build the grouping used by the printable HTML and by the in-tab renderer.
 // Child/support meds (those with a parent_medication_id) are excluded — the
@@ -204,18 +63,24 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
         <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Medicine</th>
         <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Dose</th>
         <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Frequency / Timing</th>
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">For</th>
+        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Category</th>
       </tr></thead><tbody>`;
       for (const m of grouped[slot.key]) {
         const dotColor = MED_COLORS[m._idx % MED_COLORS.length];
+        const catId = detectMedCategory(m);
+        const catLabel = getCategoryLabel(catId);
+        const catIcon = getCategoryIcon(catId);
         medsHTML += `<tr style="border-bottom:1px solid #eef1f5">
           <td style="padding:7px 10px;font-size:12px">
             <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};margin-right:6px;vertical-align:middle"></span>
             <strong>${m.name}</strong>${m.composition ? `<br><span style="font-size:10px;color:#6b7d90;margin-left:14px">${m.composition}</span>` : ""}
           </td>
           <td style="padding:7px 10px;font-size:12px">${m.dose || "1 tablet"}</td>
-          <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${m.timing ? ` · ${m.timing}` : ""}</td>
-          <td style="padding:7px 10px;font-size:11px;color:#6b7d90">${m.indication || ""}</td>
+          <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${(() => {
+            const d = formatWhenToTake(m.when_to_take) || m.timing || "";
+            return d ? ` · ${d}` : "";
+          })()}</td>
+          <td style="padding:7px 10px;font-size:11px;color:#3d4f63;white-space:nowrap">${catIcon} ${catLabel}</td>
         </tr>`;
       }
       medsHTML += `</tbody></table></div>`;
@@ -226,16 +91,24 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
       <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Medicine</th>
       <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Dose</th>
       <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Frequency / Timing</th>
+      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Category</th>
     </tr></thead><tbody>`;
     activeMeds.forEach((m, i) => {
       const dotColor = MED_COLORS[i % MED_COLORS.length];
+      const catId = detectMedCategory(m);
+      const catLabel = getCategoryLabel(catId);
+      const catIcon = getCategoryIcon(catId);
       medsHTML += `<tr style="border-bottom:1px solid #eef1f5">
         <td style="padding:7px 10px;font-size:12px">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};margin-right:6px;vertical-align:middle"></span>
           <strong>${m.name}</strong>${m.composition ? `<br><span style="font-size:10px;color:#6b7d90;margin-left:14px">${m.composition}</span>` : ""}
         </td>
         <td style="padding:7px 10px;font-size:12px">${m.dose || ""}</td>
-        <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${m.timing ? ` · ${m.timing}` : ""}</td>
+        <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${(() => {
+          const d = formatWhenToTake(m.when_to_take) || m.timing || "";
+          return d ? ` · ${d}` : "";
+        })()}</td>
+        <td style="padding:7px 10px;font-size:11px;color:#3d4f63;white-space:nowrap">${catIcon} ${catLabel}</td>
       </tr>`;
     });
     medsHTML += `</tbody></table>`;

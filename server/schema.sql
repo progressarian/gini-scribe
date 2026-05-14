@@ -1,6 +1,26 @@
 -- Gini Clinical Scribe — Database Schema
 -- Designed for: outcomes tracking, historical data, MyHealth Genie, PatientLoop
 
+-- ============ ENUM TYPES ============
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'when_to_take_pill') THEN
+    CREATE TYPE when_to_take_pill AS ENUM (
+      'Fasting',
+      'Before breakfast',
+      'After breakfast',
+      'Before lunch',
+      'After lunch',
+      'Before dinner',
+      'After dinner',
+      'At bedtime',
+      'With milk',
+      'SOS only',
+      'Any time'
+    );
+  END IF;
+END$$;
+
 -- ============ PATIENTS ============
 CREATE TABLE IF NOT EXISTS patients (
   id            SERIAL PRIMARY KEY,
@@ -132,7 +152,8 @@ CREATE TABLE IF NOT EXISTS medications (
   composition     TEXT,                -- Generic name / composition
   dose            TEXT,
   frequency       TEXT,                -- 'OD','BD','TDS','QID','SOS'
-  timing          TEXT,                -- 'Before breakfast','After meals','At bedtime'
+  timing          TEXT,                -- 'Before breakfast','After meals','At bedtime' (consultant-facing free-text)
+  when_to_take    when_to_take_pill[], -- Patient-friendly pill values as native array (one or more)
   route           TEXT DEFAULT 'Oral', -- 'Oral','IV','IM','SC','Topical','Inhaled'
   for_diagnosis   TEXT[],              -- ['dm2','htn']
   med_group       TEXT,                -- 'diabetes','kidney','bp','lipids','thyroid','supplement','external'

@@ -636,10 +636,7 @@ export async function getPartialLabCases({ limit = 50 } = {}) {
 // recovery cron has just observed the case become complete — we want the PDF
 // fetched now, not on the stale 30-40 min schedule queued earlier.
 export async function clearLabCasePdfBackoff(caseNo) {
-  await pool.query(
-    `UPDATE lab_cases SET pdf_next_attempt_at = NULL WHERE case_no = $1`,
-    [caseNo],
-  );
+  await pool.query(`UPDATE lab_cases SET pdf_next_attempt_at = NULL WHERE case_no = $1`, [caseNo]);
 }
 
 // Touch last_retry_at without bumping retry_count. The partial-results loop
@@ -648,10 +645,7 @@ export async function clearLabCasePdfBackoff(caseNo) {
 // Partial cases self-bound by the 7-day case_date filter in getPartialLabCases,
 // so we don't need a separate counter — just record when we last touched it.
 export async function touchLabCaseRetryAt(caseNo) {
-  await pool.query(
-    `UPDATE lab_cases SET last_retry_at = NOW() WHERE case_no = $1`,
-    [caseNo],
-  );
+  await pool.query(`UPDATE lab_cases SET last_retry_at = NOW() WHERE case_no = $1`, [caseNo]);
 }
 
 // ── Get cases pending retry ─────────────────────────────────────────────────

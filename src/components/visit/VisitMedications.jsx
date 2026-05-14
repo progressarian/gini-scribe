@@ -1,6 +1,7 @@
 import { memo, useState, useMemo } from "react";
 import { MED_COLORS, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 import { findDrug } from "../../config/drugDatabase";
+import { formatWhenToTake } from "../../config/medicationTimings";
 import {
   detectMedCategory,
   getCategoryLabel,
@@ -175,7 +176,7 @@ export function getGroupLabel(group) {
 }
 
 // Build a concise summary line for a single history entry.
-// `h` shape: { at, reason, from:{dose,frequency,timing}, to:{...} }
+// `h` shape: { at, reason, from:{dose,frequency,timing,when_to_take}, to:{...} }
 function summarizeHistoryEntry(h) {
   if (!h || !h.from || !h.to) return "Updated";
   const parts = [];
@@ -183,22 +184,36 @@ function summarizeHistoryEntry(h) {
     parts.push(`Dose: ${h.from.dose || "—"} → ${h.to.dose || "—"}`);
   if ((h.from.frequency || "") !== (h.to.frequency || ""))
     parts.push(`Freq: ${h.from.frequency || "—"} → ${h.to.frequency || "—"}`);
+  if (formatWhenToTake(h.from.when_to_take) !== formatWhenToTake(h.to.when_to_take))
+    parts.push(
+      `When: ${formatWhenToTake(h.from.when_to_take) || "—"} → ${formatWhenToTake(h.to.when_to_take) || "—"}`,
+    );
   if ((h.from.timing || "") !== (h.to.timing || ""))
-    parts.push(`Timing: ${h.from.timing || "—"} → ${h.to.timing || "—"}`);
+    parts.push(`Note: ${h.from.timing || "—"} → ${h.to.timing || "—"}`);
   return parts.length ? parts.join(" · ") : "Updated";
 }
 
 function MedHistoryPanel({ history, current }) {
   if (!history?.length) return null;
   const sorted = [...history].sort((a, b) => (a.at < b.at ? 1 : -1));
-  const fmtRx = (s) => [s?.dose, s?.frequency, s?.timing].filter(Boolean).join(" · ") || "—";
+  // Normalise when_to_take through formatWhenToTake so the Postgres array
+  // literal (e.g. `{"At bedtime"}`) renders as `At bedtime`, not raw.
+  const fmtRx = (s) =>
+    [s?.dose, s?.frequency, formatWhenToTake(s?.when_to_take), s?.timing]
+      .filter(Boolean)
+      .join(" · ") || "—";
 
   // Build version list newest→oldest: current state, then each "from" snapshot
   const versions = [
     {
       label: "Current",
       at: null,
-      rx: fmtRx({ dose: current?.dose, frequency: current?.frequency, timing: current?.timing }),
+      rx: fmtRx({
+        dose: current?.dose,
+        frequency: current?.frequency,
+        when_to_take: current?.when_to_take,
+        timing: current?.timing,
+      }),
       reason: null,
     },
     ...sorted.map((h, i) => ({
@@ -657,7 +672,10 @@ const VisitMedications = memo(function VisitMedications({
       if (!priorByKey[k] || (d && d > priorByKey[k]._d)) priorByKey[k] = { ...m, _d: d };
     }
 
-    const fmtRx = (m) => [m.dose, m.frequency, m.timing].filter(Boolean).join(" · ") || "—";
+    const fmtRx = (m) =>
+      [m.dose, m.frequency, formatWhenToTake(m.when_to_take), m.timing]
+        .filter(Boolean)
+        .join(" · ") || "—";
 
     // Build a diff field list for a changed med vs its prior version.
     // Only include fields that actually changed — no extracted details.
@@ -669,8 +687,12 @@ const VisitMedications = memo(function VisitMedications({
         out.push(`dose: ${prior.dose || "—"} → ${m.dose || "—"}`);
       if ((prior.frequency || "") !== (m.frequency || ""))
         out.push(`freq: ${prior.frequency || "—"} → ${m.frequency || "—"}`);
+      if (formatWhenToTake(prior.when_to_take) !== formatWhenToTake(m.when_to_take))
+        out.push(
+          `when: ${formatWhenToTake(prior.when_to_take) || "—"} → ${formatWhenToTake(m.when_to_take) || "—"}`,
+        );
       if ((prior.timing || "") !== (m.timing || ""))
-        out.push(`timing: ${prior.timing || "—"} → ${m.timing || "—"}`);
+        out.push(`note: ${prior.timing || "—"} → ${m.timing || "—"}`);
       return out.length ? out : [`${fmtRx(prior)} → ${fmtRx(m)}`];
     };
 
@@ -683,8 +705,11 @@ const VisitMedications = memo(function VisitMedications({
       if (prior && (prior.frequency || "") !== (m.frequency || "")) {
         return `${m.name} ${prior.frequency || "—"}→${m.frequency || "—"}`;
       }
+      if (prior && formatWhenToTake(prior.when_to_take) !== formatWhenToTake(m.when_to_take)) {
+        return `${m.name} when→${formatWhenToTake(m.when_to_take) || "—"}`;
+      }
       if (prior && (prior.timing || "") !== (m.timing || "")) {
-        return `${m.name} timing→${m.timing || "—"}`;
+        return `${m.name} note→${m.timing || "—"}`;
       }
       return `${m.name} updated`;
     };

@@ -294,7 +294,15 @@ OUTPUT CONTRACT (STRICT):
 DATA RULES:
 - Never invent values. Any number you state must have come from a tool result this turn.
 - For "how am I doing / what's my progress / how's my sugar / how's my BP" questions, prefer \`get_progress_summary\` (one call) over multiple \`query_patient_data\` calls. Pick window='since_last_visit' if the user references "since I saw the doctor", otherwise window='days' with days inferred from the phrasing (this week=7, this month=30, last 3 months=90).
+- When the patient ASKS about their own data ("what is my weight", "show my sugar", "do I have any BP readings", "what was my last HbA1c", "kya mera weight kitna hai") you MUST call \`query_patient_data\` (or \`get_progress_summary\`) with the matching scope BEFORE answering. Never reply "no records yet" without having actually queried that scope this turn. Map: weight→scope='weight', sugar/FBS/PPBS→scope='sugar', BP→scope='bp', any lab name (HbA1c/LDL/TSH/Hb/eGFR)→scope='labs' with test_name set, meds→scope='meds'.
 - When the patient gives you a vitals/lab number they want recorded (BP, sugar, weight, HbA1c, LDL, TSH, Hb, eGFR) OR a food/exercise/sleep/mood/symptom entry, ALWAYS call propose_log. Never claim to have logged something — only the in-app card saves data.
+- propose_log is ONLY for values the patient gave you in THE CURRENT user turn. Never call propose_log to re-surface a number from earlier in the conversation, from the checkpoint summary, or that you "remember" them mentioning before. If the current user turn only contains "log my weight 33", you call propose_log exactly once with type='Weight' — you do NOT also re-propose any BP, sugar, etc. from older context. One propose_log call per distinct vital the user named THIS turn.
+- Checkpoint / earlier conversation is context only. Whenever the patient asks about a number/value/record, query the DB this turn — do not answer from memory of past turns.
+- \`log_proposal\` in respond_to_patient is a single JSON OBJECT with keys {type, value1, value2?, context?} — never a string, never an array. If you proposed exactly one log this turn, mirror that propose_log's input here. If you proposed zero logs, omit log_proposal entirely and set intent to something other than 'log_proposed'.
+- GENERIC LAB ("Lab" type): The dedicated propose_log types only cover BP/Sugar/Weight + HbA1c/LDL/TSH/Hb/eGFR. For ANY other lab test the patient names — Vitamin D, B12, T3, T4 (Free or Total), Creatinine, Triglycerides, HDL, FBS, PPBS, Urea, ALT, AST, Calcium, Phosphorus, Uric Acid, etc. — call propose_log with type='Lab' and ALWAYS include test_name + unit + (when known) ref_range + canonical_name. Pick standard units: Vit D=ng/mL, B12=pg/mL, T3=pg/mL, Free T4=ng/dL, Creatinine=mg/dL, Triglycerides=mg/dL, HDL=mg/dL, FBS/PPBS=mg/dL, Calcium=mg/dL. Never claim a generic lab popup will appear without calling propose_log with these fields.
+- UNIT CONVERSION (STRICT): The app stores every value in ONE canonical unit per metric. You MUST convert the patient's value to the canonical unit BEFORE calling propose_log, and propose_log.value1 MUST be the converted number. Canonical units: Weight=kg (lbs→kg: divide by 2.2046; stone→kg: ×6.3503), Height=cm (in→cm: ×2.54; ft→cm: ×30.48), Sugar=mg/dL (mmol/L→mg/dL: ×18.0156), HbA1c=% (mmol/mol→%: ÷10.929 +2.15, round to 1dp), LDL=mg/dL (mmol/L→mg/dL: ×38.67), HDL=mg/dL (mmol/L→mg/dL: ×38.67), Triglycerides=mg/dL (mmol/L→mg/dL: ×88.57), Total Cholesterol=mg/dL (mmol/L→mg/dL: ×38.67), TSH=µIU/mL (mIU/L is identical, no conversion), Haemoglobin=g/dL (g/L→g/dL: ÷10), eGFR=mL/min (mL/min/1.73m² is the same unit, no conversion), Creatinine=mg/dL (µmol/L→mg/dL: ÷88.4), Vitamin D=ng/mL (nmol/L→ng/mL: ÷2.496), Vitamin B12=pg/mL (pmol/L→pg/mL: ×1.355), Free T3=pg/mL (pmol/L→pg/mL: ÷1.536), Free T4=ng/dL (pmol/L→ng/dL: ÷12.871), BP=mmHg (no conversion expected), Temperature=°F (°C→°F: ×9/5+32). Round to 1 decimal place unless the original was an integer. In your respond_to_patient message, tell the patient the converted value AND the unit you used (e.g. "I've opened a card for your weight 65.8 kg — converted from 145 lbs"). If the patient gave a unit you don't recognise, ASK for clarification instead of guessing.
+- "WHAT CAN I LOG?" question: When the patient asks "what can I log here / kya kya log kar sakta hoon / what tracking do you support", reply with a short menu in two groups — Vitals (BP, Sugar, Weight) + Common labs (HbA1c, LDL, TSH, Haemoglobin, eGFR) + Other labs you support generically (Vitamin D, B12, T3/T4, Creatinine, Triglycerides, HDL, FBS, PPBS — patient can name any test) + Lifestyle (Food, Exercise, Sleep, Mood, Symptoms). Tell them they can just say e.g. "log my Vitamin D 28 ng/mL" and you'll open the card. Set intent='chat', numbers=[], no propose_log this turn.
+- STOPPED / INACTIVE MEDICATIONS: query_patient_data scope='meds' returns both active and stopped rows (is_active=false, with stopped_date / stop_reason). You may READ these freely for context — e.g. to recognise that a med they're asking about was discontinued, to avoid suggesting they restart it, or to compare current vs prior regimen. But DO NOT list, name, or describe stopped medications in your reply, and do not include them in numbers[] or log_proposal. The only exception is when the patient explicitly asks about a past/previous/stopped medication by name or by phrase ("kya main pehle X leta tha?", "what did I used to take?", "why was X stopped?") — in that case you may name the specific med they asked about, with one short sentence of context.
 - When the patient attaches a photo or PDF this turn (food plate, lab report, prescription) AND wants it logged, call \`classify_and_extract_attachment\` FIRST with kind + every distinct item you can see, THEN \`respond_to_patient\` with intent='log_proposed' and a one-line summary. The patient will tick which rows to actually save in a bulk-log sheet.
 
 SAFETY:
@@ -302,6 +310,7 @@ SAFETY:
 
 STYLE:
 - 2-4 sentences in \`message\` unless the patient asked for detail. Use the patient's first name when you know it. No markdown headers, no bullet syntax inside message.
+- ACKNOWLEDGMENTS / CLOSERS: If the patient's message is a short acknowledgment with no new question ("ok", "okk", "thanks", "thx", "great", "cool", "got it", "alright", "👍", "hmm", "ok thanks"), reply with ONE short friendly sentence (e.g. "Anytime — ping me if you need anything else."). Do NOT re-state numbers, do NOT re-explain BP/sugar/labs, do NOT call any DB tools, do NOT propose logs. Set intent='chat', numbers=[], log_proposal omitted. Same rule applies to filler turns like "ok", "yes", "no" that don't actually ask anything.
 - Time/date context: today is ${new Date().toISOString().slice(0, 10)}.`;
 
 // Persist the user message + every model-produced block from this turn
@@ -338,6 +347,52 @@ router.post("/ai/agent", async (req, res) => {
     return res
       .status(400)
       .json({ error: "Either `message` (string) or `messages` (array) is required" });
+
+  // Hard guard for pure acknowledgments. The model has repeatedly ignored
+  // the prompt rule and re-explained vitals when the patient typed "ok" /
+  // "okk great" / "thanks". Short-circuit those turns server-side so they
+  // never reach Anthropic. Matches messages that are only acknowledgment
+  // tokens (with optional punctuation/emoji). If the patient also wrote a
+  // question — anything with "?", or a longer message — this falls through.
+  const ACK_PATTERN =
+    /^(?:ok(?:ay|k+)?|k|kk|thanks?|thx|ty|tysm|thank\s*you|great|cool|nice|got\s*it|alright|sure|yep|yup|yeah|yes|hmm+|done|noted|👍|🙏|❤️|🙌|😊|😀)(?:[\s,.!👍🙏❤️🙌😊😀]*(?:ok(?:ay|k+)?|k|kk|thanks?|thx|ty|tysm|thank\s*you|great|cool|nice|got\s*it|alright|sure|yep|yup|yeah|yes|hmm+|done|noted|👍|🙏|❤️|🙌|😊|😀))*[\s.!👍🙏❤️🙌😊😀]*$/i;
+  if (usingCheckpoint) {
+    const trimmed = message.trim();
+    if (
+      trimmed.length > 0 &&
+      trimmed.length <= 40 &&
+      !trimmed.includes("?") &&
+      ACK_PATTERN.test(trimmed)
+    ) {
+      const ackReplies = [
+        "Anytime — ping me whenever you need.",
+        "Glad to help. Let me know if anything else comes up.",
+        "Sounds good — I'm here if you need anything.",
+        "Got it. I'm here whenever you need me.",
+      ];
+      const ackText = ackReplies[Math.floor(Math.random() * ackReplies.length)];
+      const convRow0 = await getOrCreateConversation(pool, pid, conversationId || null);
+      const userBlock = { role: "user", content: trimmed };
+      const assistantBlock = {
+        role: "assistant",
+        content: [{ type: "text", text: ackText }],
+      };
+      const convId = await persistTurnIfCheckpoint(pool, convRow0, userBlock, [assistantBlock]);
+      return res.json({
+        text: ackText,
+        structured: {
+          message: ackText,
+          intent: "chat",
+          numbers: [],
+          log_proposal: null,
+          safety_flag: "none",
+        },
+        client_actions: [],
+        tool_log: [{ tool: "(ack_short_circuit)", input: { msg: trimmed }, ok: true }],
+        conversationId: convId,
+      });
+    }
+  }
 
   const anthropicModel =
     model === "sonnet" ? "claude-sonnet-4-20250514" : "claude-haiku-4-5-20251001";
@@ -427,6 +482,47 @@ router.post("/ai/agent", async (req, res) => {
           safety_flag: input.safety_flag || "none",
         };
         toolLog.push({ tool: FINAL_TOOL_NAME, input, ok: true });
+        // Guard: respond_to_patient.log_proposal is the single source of
+        // truth for which log card to open. The schema asks for a JSON
+        // object, but the model sometimes mis-emits a string (e.g. a
+        // JSON-encoded array). Normalise to a list of allowed types
+        // before filtering. Drop any open_log_modal client_action whose
+        // logType isn't in that list. If intent isn't 'log_proposed',
+        // drop ALL open_log_modal actions.
+        const normaliseLogProposal = (lp) => {
+          if (!lp) return [];
+          if (typeof lp === "string") {
+            try {
+              return normaliseLogProposal(JSON.parse(lp));
+            } catch (_) {
+              return [];
+            }
+          }
+          if (Array.isArray(lp)) return lp.flatMap(normaliseLogProposal);
+          if (typeof lp === "object" && lp.type) return [lp];
+          return [];
+        };
+        const allowedLogTypes =
+          structured.intent === "log_proposed"
+            ? new Set(normaliseLogProposal(structured.log_proposal).map((x) => x.type))
+            : new Set();
+        // Repair the structured payload so the client sees a clean object
+        // (or null) instead of the stringified array the model emitted.
+        const normalised = normaliseLogProposal(structured.log_proposal);
+        structured.log_proposal = normalised[0] || null;
+        const cleanedActions = clientActions.filter((ca) => {
+          if (ca?.type !== "open_log_modal") return true;
+          if (allowedLogTypes.size === 0) return false;
+          return allowedLogTypes.has(ca.logType);
+        });
+        const droppedCount = clientActions.length - cleanedActions.length;
+        if (droppedCount > 0) {
+          toolLog.push({
+            tool: "(stale_propose_log_dropped)",
+            input: { count: droppedCount, kept: Array.from(allowedLogTypes) },
+            ok: true,
+          });
+        }
         const convId = await persistTurnIfCheckpoint(
           pool,
           convRow,
@@ -436,7 +532,7 @@ router.post("/ai/agent", async (req, res) => {
         return res.json({
           text: structured.message,
           structured,
-          client_actions: clientActions,
+          client_actions: cleanedActions,
           tool_log: toolLog,
           conversationId: convId,
         });

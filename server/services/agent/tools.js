@@ -94,7 +94,7 @@ export const AGENT_TOOLS = [
   {
     name: "propose_log",
     description:
-      "Open the in-app log card pre-filled with values the user just gave you. Always use this when the user says 'log my BP 130/80' / 'sugar 180 fasting' / 'I weigh 82 kg' — never silently log. Pick the right type from the enum.",
+      "Open the in-app log card pre-filled with values the user just gave you. Always use this when the user says 'log my BP 130/80' / 'sugar 180 fasting' / 'I weigh 82 kg' / 'my Vit D is 28' — never silently log. Pick the most specific type from the enum. Use 'Lab' (with test_name+unit) for any lab not in the dedicated enum (Vitamin D, B12, T3, T4, Creatinine, Triglycerides, HDL, FBS, PPBS, …).",
     input_schema: {
       type: "object",
       properties: {
@@ -109,6 +109,7 @@ export const AGENT_TOOLS = [
             "TSH",
             "Haemoglobin",
             "eGFR",
+            "Lab",
             "Food",
             "Exercise",
             "Sleep",
@@ -122,6 +123,26 @@ export const AGENT_TOOLS = [
           type: "string",
           description:
             "Context label, e.g. 'Fasting', 'After breakfast' for Sugar; 'Morning (after meds)' for BP.",
+        },
+        test_name: {
+          type: "string",
+          description:
+            "For type='Lab' only: the human-readable test name (e.g. 'Vitamin D', 'Vitamin B12', 'Free T3', 'Creatinine', 'Triglycerides', 'HDL', 'FBS', 'PPBS'). Required when type='Lab'.",
+        },
+        unit: {
+          type: "string",
+          description:
+            "For type='Lab' only: the standard unit for the test (e.g. 'ng/mL' for Vit D, 'pg/mL' for B12, 'mg/dL' for lipids, 'mg/dL' for creatinine, 'pg/mL' for T3, 'ng/dL' for T4). Required when type='Lab'.",
+        },
+        ref_range: {
+          type: "string",
+          description:
+            "For type='Lab' only: the normal reference range as a plain string (e.g. '30-100 ng/mL' for Vit D). Optional but helpful for display.",
+        },
+        canonical_name: {
+          type: "string",
+          description:
+            "For type='Lab' only: a lowercase canonical key (e.g. 'vitd', 'b12', 't3', 't4', 'creatinine', 'triglycerides', 'hdl', 'fbs', 'ppbs'). Optional.",
         },
       },
       required: ["type", "value1"],
@@ -261,22 +282,33 @@ export const AGENT_TOOLS = [
                 description: "Optional flag if printed.",
               },
               panel_name: { type: "string" },
-              test_date: { type: "string", description: "ISO YYYY-MM-DD if printed on the report." },
+              test_date: {
+                type: "string",
+                description: "ISO YYYY-MM-DD if printed on the report.",
+              },
             },
             required: ["test_name", "result"],
           },
         },
         rx_items: {
           type: "array",
-          description:
-            "When kind='prescription': one row per medication on the slip.",
+          description: "When kind='prescription': one row per medication on the slip.",
           items: {
             type: "object",
             properties: {
               name: { type: "string" },
               dose: { type: "string", description: "e.g. '500 mg'." },
               frequency: { type: "string", description: "OD / BD / TDS / SOS." },
-              timing: { type: "string", description: "e.g. 'After breakfast', 'Bedtime'." },
+              timing: {
+                type: "string",
+                description:
+                  "Consultant free-text note (e.g. '30 min before food'). The canonical patient-facing field is `when_to_take` which uses the fixed vocabulary: Fasting, Before breakfast, After breakfast, Before lunch, After lunch, Before dinner, After dinner, At bedtime, With milk, SOS only, Any time.",
+              },
+              when_to_take: {
+                type: "string",
+                description:
+                  "One or more comma-separated values from: Fasting, Before breakfast, After breakfast, Before lunch, After lunch, Before dinner, After dinner, At bedtime, With milk, SOS only, Any time.",
+              },
               route: { type: "string" },
               for_diagnosis: { type: "string" },
             },
@@ -369,38 +401,130 @@ async function qProfile(pool, patientId) {
   return rows[0] || null;
 }
 
-async function qVitalsLog(pool, patientId, args, columns) {
-  const params = [];
+// Patient vitals live in TWO tables in the scribe DB:
+//   • `vitals`               — written by the doctor on /visit (per-consultation row)
+//   • `patient_vitals_log`   — written by the companion app (patient self-logs)
+// Both must be merged when answering "what's my weight / BP / sugar" or the
+// patient sees "no records" even when their doctor recorded values during
+// the visit. Column names differ between the two tables; this helper
+// normalises them to a common shape: { source_table, recorded_date,
+// bp_systolic, bp_diastolic, pulse, rbs, meal_type, weight_kg, bmi, waist,
+// body_fat, spo2 }.
+async function qVitalsMerged(pool, patientId, args, fields /* Set */) {
   const limit = Math.min(Math.max(args.limit || 50, 1), 500);
-  let sql = buildQuery(
-    `SELECT id, recorded_date, reading_time, ${columns}, meal_type, source, created_at
-       FROM patient_vitals_log`,
-    args,
-    "recorded_date",
-    params,
-    patientId,
+  const wantBp = fields.has("bp");
+  const wantSugar = fields.has("sugar");
+  const wantWeight = fields.has("weight");
+  const wantVitalsAll = fields.has("all");
+
+  // Date range params for each subquery.
+  const sinceVal = args.since_last_visit && args.__lastVisit ? args.__lastVisit : null;
+  const days =
+    typeof args.range_days === "number" && args.range_days > 0 ? Math.floor(args.range_days) : null;
+
+  // patient_vitals_log uses `recorded_date`; vitals uses `recorded_at`
+  // (timestamp). Normalise both to a date in the output.
+  const params = [];
+  const pvlParts = [];
+  const vitParts = [];
+
+  const pvlSelectCols = [
+    "'patient_vitals_log' AS source_table",
+    "recorded_date::date AS recorded_date",
+    wantBp || wantVitalsAll ? "bp_systolic" : "NULL::int AS bp_systolic",
+    wantBp || wantVitalsAll ? "bp_diastolic" : "NULL::int AS bp_diastolic",
+    wantBp || wantVitalsAll ? "pulse" : "NULL::int AS pulse",
+    wantSugar || wantVitalsAll ? "rbs" : "NULL::numeric AS rbs",
+    wantSugar || wantVitalsAll ? "meal_type" : "NULL::text AS meal_type",
+    wantWeight || wantVitalsAll ? "weight_kg" : "NULL::numeric AS weight_kg",
+    wantWeight || wantVitalsAll ? "bmi" : "NULL::numeric AS bmi",
+    wantWeight ? "waist" : "NULL::numeric AS waist",
+    wantWeight ? "body_fat" : "NULL::numeric AS body_fat",
+    wantVitalsAll ? "spo2" : "NULL::numeric AS spo2",
+  ];
+  const vitSelectCols = [
+    "'vitals' AS source_table",
+    "recorded_at::date AS recorded_date",
+    wantBp || wantVitalsAll ? "bp_sys AS bp_systolic" : "NULL::int AS bp_systolic",
+    wantBp || wantVitalsAll ? "bp_dia AS bp_diastolic" : "NULL::int AS bp_diastolic",
+    wantBp || wantVitalsAll ? "pulse" : "NULL::int AS pulse",
+    wantSugar || wantVitalsAll ? "rbs" : "NULL::numeric AS rbs",
+    wantSugar || wantVitalsAll ? "meal_type" : "NULL::text AS meal_type",
+    wantWeight || wantVitalsAll ? "weight" : "NULL::numeric AS weight_kg",
+    wantWeight || wantVitalsAll ? "bmi" : "NULL::numeric AS bmi",
+    wantWeight ? "waist" : "NULL::numeric AS waist",
+    wantWeight ? "body_fat" : "NULL::numeric AS body_fat",
+    wantVitalsAll ? "spo2" : "NULL::numeric AS spo2",
+  ];
+
+  const pidIdx = params.push(patientId);
+  pvlParts.push(
+    `SELECT ${pvlSelectCols.join(", ")} FROM patient_vitals_log WHERE patient_id = $${pidIdx}`,
   );
-  sql += ` ORDER BY recorded_date DESC, id DESC LIMIT ${limit}`;
-  const { rows } = await pool.query(sql, params);
-  return rows;
+  vitParts.push(`SELECT ${vitSelectCols.join(", ")} FROM vitals WHERE patient_id = $${pidIdx}`);
+
+  if (sinceVal) {
+    const idx = params.push(sinceVal);
+    pvlParts.push(`AND recorded_date >= $${idx}`);
+    vitParts.push(`AND recorded_at >= $${idx}`);
+  } else if (days) {
+    pvlParts.push(`AND recorded_date >= (CURRENT_DATE - INTERVAL '${days} days')`);
+    vitParts.push(`AND recorded_at >= (CURRENT_DATE - INTERVAL '${days} days')`);
+  }
+
+  // Only include a "match" filter per requested field so the merged result
+  // doesn't drag in empty rows from the wrong table.
+  const matchClauses = [];
+  if (wantBp) matchClauses.push("bp_systolic IS NOT NULL");
+  if (wantSugar) matchClauses.push("rbs IS NOT NULL");
+  if (wantWeight) matchClauses.push("weight_kg IS NOT NULL");
+  // No filter when wantVitalsAll — caller wants the broad picture.
+
+  const pvlSql = pvlParts.join(" ");
+  const vitSql = vitParts.join(" ");
+
+  let sql = `WITH merged AS ( ${pvlSql} UNION ALL ${vitSql} ) SELECT * FROM merged`;
+  if (matchClauses.length > 0) {
+    sql += ` WHERE (${matchClauses.join(" OR ")})`;
+  }
+  sql += ` ORDER BY recorded_date DESC LIMIT ${limit}`;
+
+  try {
+    const { rows } = await pool.query(sql, params);
+    return rows;
+  } catch (e) {
+    // Fall back to patient_vitals_log only if the `vitals` table is
+    // missing on this env (legacy/test deploys).
+    if (
+      String(e?.message || "")
+        .toLowerCase()
+        .includes('relation "vitals"')
+    ) {
+      const fallback = await pool.query(
+        `SELECT 'patient_vitals_log' AS source_table, recorded_date,
+                bp_systolic, bp_diastolic, pulse, rbs, meal_type,
+                weight_kg, bmi, NULL::numeric AS waist, NULL::numeric AS body_fat, spo2
+           FROM patient_vitals_log WHERE patient_id = $1
+          ORDER BY recorded_date DESC LIMIT ${limit}`,
+        [patientId],
+      );
+      return fallback.rows;
+    }
+    throw e;
+  }
 }
 
 async function qSugar(pool, patientId, args) {
-  return qVitalsLog(pool, patientId, args, "rbs");
+  return qVitalsMerged(pool, patientId, args, new Set(["sugar"]));
 }
 async function qBP(pool, patientId, args) {
-  return qVitalsLog(pool, patientId, args, "bp_systolic, bp_diastolic, pulse");
+  return qVitalsMerged(pool, patientId, args, new Set(["bp"]));
 }
 async function qWeight(pool, patientId, args) {
-  return qVitalsLog(pool, patientId, args, "weight_kg, bmi, waist, body_fat");
+  return qVitalsMerged(pool, patientId, args, new Set(["weight"]));
 }
 async function qVitalsAll(pool, patientId, args) {
-  return qVitalsLog(
-    pool,
-    patientId,
-    args,
-    "bp_systolic, bp_diastolic, pulse, rbs, weight_kg, spo2, bmi",
-  );
+  return qVitalsMerged(pool, patientId, args, new Set(["all"]));
 }
 
 async function qLabs(pool, patientId, args) {
@@ -427,7 +551,7 @@ async function qLabs(pool, patientId, args) {
 async function qMeds(pool, patientId, args) {
   const limit = Math.min(Math.max(args.limit || 50, 1), 200);
   const { rows } = await pool.query(
-    `SELECT id, name, dose, frequency, timing, route, med_group, drug_class,
+    `SELECT id, name, dose, frequency, timing, when_to_take, route, med_group, drug_class,
             is_active, started_date, stopped_date, stop_reason, parent_medication_id,
             days_of_week
        FROM medications WHERE patient_id = $1
@@ -522,23 +646,54 @@ async function summariseProgress(pool, patientId, window) {
     ? `>= '${sinceDate}'::date`
     : `>= (CURRENT_DATE - INTERVAL '${Math.max(1, Math.floor(window?.days || 30))} days')`;
 
-  // BP / sugar / weight averages from patient_vitals_log
-  const vit = await pool.query(
-    `SELECT
-        AVG(bp_systolic)::numeric(6,1) AS bp_sys_avg,
-        AVG(bp_diastolic)::numeric(6,1) AS bp_dia_avg,
-        COUNT(*) FILTER (WHERE bp_systolic IS NOT NULL) AS bp_count,
-        AVG(rbs)::numeric(6,1) AS sugar_avg,
-        AVG(rbs) FILTER (WHERE meal_type ILIKE 'fasting')::numeric(6,1) AS sugar_fbg_avg,
-        COUNT(*) FILTER (WHERE rbs IS NOT NULL) AS sugar_count,
-        MIN(weight_kg) AS weight_min, MAX(weight_kg) AS weight_max,
-        (SELECT weight_kg FROM patient_vitals_log
-          WHERE patient_id=$1 AND weight_kg IS NOT NULL
-          ORDER BY recorded_date DESC, id DESC LIMIT 1) AS weight_latest
-       FROM patient_vitals_log
-      WHERE patient_id=$1 AND recorded_date ${dateExpr}`,
-    [patientId],
-  );
+  // BP / sugar / weight averages — merged across patient_vitals_log (companion
+  // self-logs) and vitals (doctor entries on /visit). Without the union,
+  // "how am I doing?" silently misses any doctor-recorded readings.
+  let vit;
+  try {
+    vit = await pool.query(
+      `WITH merged AS (
+         SELECT recorded_date::date AS d, bp_systolic, bp_diastolic, rbs, meal_type, weight_kg
+           FROM patient_vitals_log WHERE patient_id=$1
+         UNION ALL
+         SELECT recorded_at::date AS d, bp_sys AS bp_systolic, bp_dia AS bp_diastolic,
+                rbs, meal_type, weight AS weight_kg
+           FROM vitals WHERE patient_id=$1
+       )
+       SELECT
+          AVG(bp_systolic)::numeric(6,1) AS bp_sys_avg,
+          AVG(bp_diastolic)::numeric(6,1) AS bp_dia_avg,
+          COUNT(*) FILTER (WHERE bp_systolic IS NOT NULL) AS bp_count,
+          AVG(rbs)::numeric(6,1) AS sugar_avg,
+          AVG(rbs) FILTER (WHERE meal_type ILIKE 'fasting')::numeric(6,1) AS sugar_fbg_avg,
+          COUNT(*) FILTER (WHERE rbs IS NOT NULL) AS sugar_count,
+          MIN(weight_kg) AS weight_min, MAX(weight_kg) AS weight_max,
+          (SELECT weight_kg FROM (
+              SELECT weight_kg, d FROM merged WHERE weight_kg IS NOT NULL
+           ) w ORDER BY d DESC LIMIT 1) AS weight_latest
+         FROM merged
+        WHERE d ${dateExpr}`,
+      [patientId],
+    );
+  } catch (e) {
+    // Fallback if `vitals` table missing on this env.
+    vit = await pool.query(
+      `SELECT
+          AVG(bp_systolic)::numeric(6,1) AS bp_sys_avg,
+          AVG(bp_diastolic)::numeric(6,1) AS bp_dia_avg,
+          COUNT(*) FILTER (WHERE bp_systolic IS NOT NULL) AS bp_count,
+          AVG(rbs)::numeric(6,1) AS sugar_avg,
+          AVG(rbs) FILTER (WHERE meal_type ILIKE 'fasting')::numeric(6,1) AS sugar_fbg_avg,
+          COUNT(*) FILTER (WHERE rbs IS NOT NULL) AS sugar_count,
+          MIN(weight_kg) AS weight_min, MAX(weight_kg) AS weight_max,
+          (SELECT weight_kg FROM patient_vitals_log
+            WHERE patient_id=$1 AND weight_kg IS NOT NULL
+            ORDER BY recorded_date DESC, id DESC LIMIT 1) AS weight_latest
+         FROM patient_vitals_log
+        WHERE patient_id=$1 AND recorded_date ${dateExpr}`,
+      [patientId],
+    );
+  }
 
   // Recent key labs
   const labs = await pool.query(
@@ -635,7 +790,10 @@ const TIME_SLOT_LABELS = {
 };
 
 function classifyTimingSlot(timing) {
-  const t = String(timing || "").toLowerCase();
+  // Accept the canonical text[] enum value, a comma-separated string, or null.
+  const t = Array.isArray(timing)
+    ? timing.join(",").toLowerCase()
+    : String(timing || "").toLowerCase();
   if (!t) return "anytime";
   if (t.includes("fasting")) return "fasting";
   if (t.includes("bedtime") || t.includes("night")) return "bedtime";
@@ -653,12 +811,13 @@ async function getMedSchedule(pool, patientId) {
   const active = meds.filter((m) => m.is_active && !m.parent_medication_id);
   const grouped = {};
   for (const m of active) {
-    const slot = classifyTimingSlot(m.timing);
+    const slot = classifyTimingSlot(m.when_to_take || m.timing);
     if (!grouped[slot]) grouped[slot] = [];
     grouped[slot].push({
       name: m.name,
       dose: m.dose,
       frequency: m.frequency,
+      when_to_take: m.when_to_take,
       timing: m.timing,
     });
   }
@@ -737,6 +896,15 @@ export function buildClientAction(name, input) {
       v2: input.value2 ?? "",
       context: input.context ?? "",
     };
+    // Generic-lab card: forward AI-supplied metadata so the app can render
+    // the right label, unit, and (optional) ref-range for tests that aren't
+    // in the dedicated enum (Vit D, B12, T3, T4, Creatinine, …).
+    if (input.type === "Lab") {
+      if (input.test_name) ca.test_name = String(input.test_name);
+      if (input.unit) ca.unit = String(input.unit);
+      if (input.ref_range) ca.ref_range = String(input.ref_range);
+      if (input.canonical_name) ca.canonical_name = String(input.canonical_name);
+    }
     return {
       clientAction: ca,
       ack: {

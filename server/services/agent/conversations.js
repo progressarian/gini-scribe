@@ -43,7 +43,9 @@ export async function getOrCreateConversation(pool, patientId, conversationId) {
 //                    blocks produced during the loop. Persist them all so
 //                    the next turn can reference tool_use/tool_result ids.
 export async function appendTurn(pool, conversation, userMessage, assistantTurns) {
-  const existing = Array.isArray(conversation.messages) ? conversation.messages : [];
+  const rawExisting = Array.isArray(conversation.messages) ? conversation.messages : [];
+  // Heal any dangling tool_use from a prior failed turn before appending.
+  const existing = sanitizeForAnthropic(rawExisting);
   const next = [...existing, userMessage, ...assistantTurns];
 
   // Trim to LIVE_WINDOW, but be careful not to break a tool_use ↔
@@ -92,13 +94,7 @@ export async function appendTurn(pool, conversation, userMessage, assistantTurns
             total_turns        = $5,
             last_message_at    = NOW()
       WHERE id = $1`,
-    [
-      conversation.id,
-      JSON.stringify(live),
-      nextSummary,
-      nextSummaryCovers,
-      newTotal,
-    ],
+    [conversation.id, JSON.stringify(live), nextSummary, nextSummaryCovers, newTotal],
   );
 
   return { messages: live, checkpoint_summary: nextSummary };
@@ -168,8 +164,41 @@ async function refreshSummary(previousSummary, rotatedBlocks) {
 // Returns the array to pass to Anthropic. The checkpoint_summary is
 // prepended as a single synthetic user→assistant pair so the model treats
 // it as established context rather than a new instruction.
+// Drop trailing assistant tool_use blocks (and their orphan tool_result
+// predecessors) from a persisted message list. Anthropic rejects any
+// history where a tool_use isn't immediately followed by its matching
+// tool_result in the next user message. If a prior turn crashed mid-loop
+// or a deploy rotated buggy state into the row, the live tail can end in
+// a dangling tool_use — we'd surface "tool_use ids without tool_result
+// blocks" to the patient. This heals such rows in place.
+function sanitizeForAnthropic(messages) {
+  let out = messages.slice();
+  // Walk from the end, dropping any trailing assistant message that
+  // contains a tool_use block — those would need a tool_result we don't
+  // have. If we drop one, the message before it may now be an orphan
+  // tool_result, so drop that too. Repeat until the tail is clean.
+  while (out.length > 0) {
+    const last = out[out.length - 1];
+    const lastBlocks = Array.isArray(last?.content) ? last.content : [];
+    const hasToolUse = last?.role === "assistant" && lastBlocks.some((c) => c?.type === "tool_use");
+    if (hasToolUse) {
+      out.pop();
+      // Drop the matching tool_result user message if it ended up at
+      // the tail (i.e. nothing else is going to consume it).
+      while (out.length > 0 && isOrphanToolResult(out[out.length - 1])) out.pop();
+      continue;
+    }
+    break;
+  }
+  // Also drop any leading orphan tool_result (rotation can leave one
+  // at the head when the matching tool_use just rolled out).
+  while (out.length > 0 && isOrphanToolResult(out[0])) out.shift();
+  return out;
+}
+
 export function buildOutgoingMessages(conversation, latestUserBlock) {
-  const live = Array.isArray(conversation.messages) ? conversation.messages : [];
+  const rawLive = Array.isArray(conversation.messages) ? conversation.messages : [];
+  const live = sanitizeForAnthropic(rawLive);
   const prefix = [];
   if (conversation.checkpoint_summary) {
     prefix.push(

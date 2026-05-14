@@ -132,7 +132,7 @@ router.get("/patients/:id/outcomes", async (req, res) => {
     // For HealthRay-synced meds (consultation_id IS NULL) prefer started_date over created_at
     // so the timeline lines up with the actual prescription/appointment date, not sync time.
     const medTimeline = await pool.query(
-      `SELECT m.name, m.dose, m.frequency, m.timing, m.is_active, m.is_new, m.started_date,
+      `SELECT m.name, m.dose, m.frequency, m.timing, m.when_to_take, m.is_active, m.is_new, m.started_date,
               COALESCE(c.visit_date, m.started_date, m.created_at::date) AS visit_date,
               m.pharmacy_match, m.source
        FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
@@ -156,7 +156,7 @@ router.get("/patients/:id/outcomes", async (req, res) => {
                 c.con_data->'self_monitoring'  AS monitoring,
                 c.con_data->'assessment_summary' AS summary,
                 (SELECT json_agg(json_build_object('name', m.name, 'dose', m.dose, 'frequency', m.frequency,
-                   'timing', m.timing, 'pharmacy_match', m.pharmacy_match, 'is_active', m.is_active))
+                   'timing', m.timing, 'when_to_take', m.when_to_take, 'pharmacy_match', m.pharmacy_match, 'is_active', m.is_active))
                  FROM medications m WHERE m.consultation_id = c.id)::jsonb AS medications_confirmed,
                 c.con_transcript
          FROM consultations c WHERE c.patient_id=$1

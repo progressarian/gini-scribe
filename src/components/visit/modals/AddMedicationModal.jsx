@@ -1,11 +1,7 @@
 import { memo, useState } from "react";
 import { getWarning } from "../../../utils/drugWarnings";
-import {
-  MED_GROUPS,
-  DIABETES_CLASSES,
-  TIMING_OPTIONS,
-  findDrug,
-} from "../../../config/drugDatabase";
+import { MED_GROUPS, DIABETES_CLASSES, findDrug } from "../../../config/drugDatabase";
+import { WHEN_TO_TAKE_PILLS } from "../../../config/medicationTimings";
 
 const DRUG_LIST = [
   "Metformin 500mg",
@@ -85,6 +81,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
   });
   const isSubMed = !!form.parent_medication_id;
   const [timings, setTimings] = useState([]);
+  const [timingNote, setTimingNote] = useState("");
   const [weekdays, setWeekdays] = useState([]); // only used when frequency = "Once weekly"
   const [warning, setWarning] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -112,9 +109,22 @@ const AddMedicationModal = memo(function AddMedicationModal({
         set("dose", drug.defaultDose);
       }
 
-      // Auto-set default timing
+      // Auto-set default timing — map drug-database freeform values onto a
+      // canonical pill where possible, fall back to "Any time".
       if (drug.defaultTiming) {
-        setTimings([drug.defaultTiming]);
+        const dt = String(drug.defaultTiming).toLowerCase();
+        let pill = null;
+        if (/empty stomach|fast/.test(dt)) pill = "Fasting";
+        else if (/bedtime|at night/.test(dt)) pill = "At bedtime";
+        else if (/before breakfast/.test(dt)) pill = "Before breakfast";
+        else if (/after breakfast|with breakfast/.test(dt)) pill = "After breakfast";
+        else if (/before lunch/.test(dt)) pill = "Before lunch";
+        else if (/after lunch|with lunch/.test(dt)) pill = "After lunch";
+        else if (/before dinner/.test(dt)) pill = "Before dinner";
+        else if (/after dinner|with dinner/.test(dt)) pill = "After dinner";
+        else if (/with milk/.test(dt)) pill = "With milk";
+        else if (/sos|prn|as needed/.test(dt)) pill = "SOS only";
+        if (pill && WHEN_TO_TAKE_PILLS.includes(pill)) setTimings([pill]);
       }
 
       // Auto-set frequency
@@ -130,10 +140,10 @@ const AddMedicationModal = memo(function AddMedicationModal({
 
     // Special handling for specific drugs
     if (/levothyroxine|thyroxine|eltroxin/i.test(name)) {
-      setTimings(["Empty stomach — 30 min before breakfast"]);
+      setTimings(["Fasting"]);
       set("notes", "30 min before breakfast");
     } else if (/atorvastatin|rosuvastatin/i.test(name)) {
-      setTimings(["At night (after dinner)"]);
+      setTimings(["At bedtime"]);
     }
   };
 
@@ -163,7 +173,10 @@ const AddMedicationModal = memo(function AddMedicationModal({
     const submitData = {
       ...form,
       frequency: finalFrequency,
-      timing: timings.join(", "),
+      // Free-text consultant note (independent of the pill row)
+      timing: timingNote.trim() || null,
+      // Canonical patient-facing pills — array for the text[] enum column.
+      when_to_take: timings,
       days_of_week: daysOfWeek,
       // Only include relevant fields
       drug_class: showDrugClass ? form.drug_class : null,
@@ -352,17 +365,31 @@ const AddMedicationModal = memo(function AddMedicationModal({
         <div className="mf">
           <label className="ml">When to take</label>
           <div className="time-pills">
-            {TIMING_OPTIONS.slice(0, 8).map((t) => (
-              <label key={t.value}>
+            {WHEN_TO_TAKE_PILLS.map((p) => (
+              <label key={p}>
                 <input
                   type="checkbox"
-                  checked={timings.includes(t.value)}
-                  onChange={() => toggleTiming(t.value)}
+                  checked={timings.includes(p)}
+                  onChange={() => toggleTiming(p)}
                 />
-                <span>{t.label}</span>
+                <span>{p}</span>
               </label>
             ))}
           </div>
+        </div>
+
+        <div className="mf">
+          <label className="ml">
+            Doctor's timing note{" "}
+            <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 11 }}>(optional)</span>
+          </label>
+          <input
+            className="mi"
+            placeholder="e.g. 30 min before food, avoid grapefruit"
+            value={timingNote}
+            onChange={(e) => setTimingNote(e.target.value)}
+            maxLength={200}
+          />
         </div>
 
         {/* Route + Started date */}

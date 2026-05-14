@@ -173,7 +173,7 @@ const VisitStrip = memo(function VisitStrip({
       {(() => {
         if (tab === "medcard") return null;
         const currentMeds = (activeMeds || []).filter(
-          (m) => m.is_active !== false && !m.parent_medication_id,
+          (m) => m.is_active !== false && !m.parent_medication_id && m.visit_status !== "previous",
         );
         if (currentMeds.length === 0) return null;
         return (

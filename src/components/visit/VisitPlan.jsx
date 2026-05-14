@@ -2,6 +2,7 @@ import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import { fmtDate, fmtDateLong, fmtDateShort, getLabVal, MED_COLORS } from "./helpers";
 import ChangesPopover from "./ChangesPopover";
 import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard";
+import { formatWhenToTake } from "../../config/medicationTimings";
 import { LAB_ORDER_CHIPS } from "../../config/chips";
 import VisitGoals from "./VisitGoals";
 
@@ -44,7 +45,10 @@ function buildRxHTML(
           <strong>${m.name}</strong>${m.composition ? `<br><span style="font-size:10px;color:#6b7d90;margin-left:14px">${m.composition}</span>` : ""}
         </td>
         <td style="padding:7px 10px;font-size:12px">${m.dose || ""}</td>
-        <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${m.timing ? ` \u00b7 ${m.timing}` : ""}</td>
+        <td style="padding:7px 10px;font-size:12px">${(() => {
+          const wt = formatWhenToTake(m.when_to_take);
+          return `${m.frequency || "OD"}${wt ? ` \u00b7 ${wt}` : ""}${m.timing && m.timing !== wt ? ` (${m.timing})` : ""}`;
+        })()}</td>
         <td style="padding:7px 10px;font-size:12px">${m.duration || ""}</td>
       </tr>`;
     });
@@ -227,6 +231,7 @@ const VisitPlan = memo(function VisitPlan({
   const followUpWith = latestCon?.follow_up_with || "";
   const [fuwEditing, setFuwEditing] = useState(false);
   const [fuwDraft, setFuwDraft] = useState(followUpWith);
+  const [fuwSaving, setFuwSaving] = useState(false);
   useEffect(() => {
     if (!fuwEditing) setFuwDraft(followUpWith);
   }, [followUpWith, fuwEditing]);
@@ -260,7 +265,10 @@ const VisitPlan = memo(function VisitPlan({
       lines.push(`\nMedications:`);
       activeMeds.forEach((m, i) => {
         lines.push(
-          `${i + 1}. ${m.name}${m.dose ? " — " + m.dose : ""}${m.frequency ? " · " + m.frequency : ""}${m.timing ? " · " + m.timing : ""}`,
+          (() => {
+            const wt = formatWhenToTake(m.when_to_take);
+            return `${i + 1}. ${m.name}${m.dose ? " — " + m.dose : ""}${m.frequency ? " · " + m.frequency : ""}${wt ? " · " + wt : ""}${m.timing && m.timing !== wt ? " (" + m.timing + ")" : ""}`;
+          })(),
         );
       });
     }
@@ -730,20 +738,36 @@ const VisitPlan = memo(function VisitPlan({
                 placeholder="e.g. Fasting sample at 8:30am. Bring HbA1c, FBG, Lipids. Omit antidiabetic medication for 24 hrs."
                 rows={4}
                 style={{ width: "100%" }}
+                disabled={fuwSaving}
               />
               <div style={{ display: "flex", gap: 7, marginTop: 6 }}>
                 <button
                   className="bx bx-g"
-                  onClick={() => {
+                  disabled={fuwSaving}
+                  onClick={async () => {
                     const trimmed = (fuwDraft || "").trim();
-                    if (onChangeFollowUpWith) onChangeFollowUpWith(trimmed || null);
-                    setFuwEditing(false);
+                    if (!onChangeFollowUpWith) {
+                      setFuwEditing(false);
+                      return;
+                    }
+                    setFuwSaving(true);
+                    try {
+                      // onChangeFollowUpWith is async (PATCH + refetch). Await
+                      // so the spinner stays visible until the parent's cache
+                      // reflects the new value — otherwise the editor closes
+                      // before the new text appears on screen.
+                      await onChangeFollowUpWith(trimmed || null);
+                      setFuwEditing(false);
+                    } finally {
+                      setFuwSaving(false);
+                    }
                   }}
                 >
-                  Save
+                  {fuwSaving ? "Saving…" : "Save"}
                 </button>
                 <button
                   className="bx"
+                  disabled={fuwSaving}
                   onClick={() => {
                     setFuwDraft(followUpWith);
                     setFuwEditing(false);
@@ -808,7 +832,9 @@ const VisitPlan = memo(function VisitPlan({
 
       {/* CHANGES MADE THIS VISIT */}
       {(() => {
-        const parentActiveMeds = activeMeds.filter((m) => !m.parent_medication_id);
+        const parentActiveMeds = activeMeds.filter(
+          (m) => !m.parent_medication_id && m.visit_status !== "previous",
+        );
         const newMeds = parentActiveMeds.filter(
           (m) => m.prescribed_date && m.prescribed_date.startsWith(today),
         );
@@ -1050,24 +1076,10 @@ const VisitPlan = memo(function VisitPlan({
             <div className="sum-row">
               <span className="sum-k">Medications</span>
               <span className="sum-v">
-                {(() => {
-                  const dayKey = (d) => (d ? String(d).slice(0, 10) : null);
-                  const lpDates = activeMeds
-                    .map((m) => dayKey(m.last_prescribed_date))
-                    .filter(Boolean);
-                  const latest = lpDates.length ? lpDates.reduce((a, b) => (a > b ? a : b)) : null;
-                  const currentVisitMeds = latest
-                    ? activeMeds.filter(
-                        (m) => !m.last_prescribed_date || dayKey(m.last_prescribed_date) === latest,
-                      )
-                    : activeMeds;
-                  return (
-                    currentVisitMeds
-                      .filter((m) => !m.parent_medication_id)
-                      .map((m) => m.name)
-                      .join(" · ") || "None"
-                  );
-                })()}
+                {activeMeds
+                  .filter((m) => !m.parent_medication_id && m.visit_status !== "previous")
+                  .map((m) => m.name)
+                  .join(" · ") || "None"}
               </span>
             </div>
             <div className="sum-acts">

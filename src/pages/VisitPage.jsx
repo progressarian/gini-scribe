@@ -738,6 +738,12 @@ export default function VisitPage() {
   const [modal, setModal] = useState(null); // { type, data? }
   const [labExtractSaving, setLabExtractSaving] = useState(false);
   const [clinicalExtractSaving, setClinicalExtractSaving] = useState(false);
+  // Non-blocking save-status chip shown after the doctor hits Save in the
+  // paste-text review modal. The modal closes immediately so the doctor can
+  // keep working; this chip is the only persistent UI signal that the bulk
+  // save is still running / has finished / has errored.
+  // shape: { phase: 'saving'|'saved'|'failed', label: string }
+  const [bulkSaveStatus, setBulkSaveStatus] = useState(null);
   const [extracting, setExtracting] = useState(false);
   const scrollRef = useRef(null);
   const noteTimerRef = useRef(null);
@@ -1462,6 +1468,87 @@ export default function VisitPage() {
         labStatus={data.labStatus}
         tab={tab}
       />
+
+      {/* Bulk-save status chip — fixed bottom-right, non-blocking. Shows
+          while the paste-text review save runs in the background so the
+          doctor knows their click is still persisting data. */}
+      {bulkSaveStatus && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            zIndex: 9000,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 14px",
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+            border: "1px solid",
+            background:
+              bulkSaveStatus.phase === "failed"
+                ? "#fee2e2"
+                : bulkSaveStatus.phase === "saved"
+                  ? "#dcfce7"
+                  : "#fff7ed",
+            borderColor:
+              bulkSaveStatus.phase === "failed"
+                ? "#fca5a5"
+                : bulkSaveStatus.phase === "saved"
+                  ? "#86efac"
+                  : "#fed7aa",
+            color:
+              bulkSaveStatus.phase === "failed"
+                ? "#7f1d1d"
+                : bulkSaveStatus.phase === "saved"
+                  ? "#14532d"
+                  : "#7c2d12",
+            maxWidth: 420,
+          }}
+        >
+          {bulkSaveStatus.phase === "saving" && (
+            <span
+              aria-hidden
+              style={{
+                display: "inline-block",
+                width: 14,
+                height: 14,
+                border: "2px solid #fb923c",
+                borderTopColor: "transparent",
+                borderRadius: "50%",
+                animation: "visit-save-spin 0.8s linear infinite",
+              }}
+            />
+          )}
+          {bulkSaveStatus.phase === "saved" && <span aria-hidden>✅</span>}
+          {bulkSaveStatus.phase === "failed" && <span aria-hidden>⚠️</span>}
+          <span style={{ flex: 1, lineHeight: 1.35 }}>{bulkSaveStatus.label}</span>
+          {bulkSaveStatus.phase !== "saving" && (
+            <button
+              type="button"
+              onClick={() => setBulkSaveStatus(null)}
+              aria-label="Dismiss"
+              style={{
+                background: "transparent",
+                border: "none",
+                fontSize: 16,
+                cursor: "pointer",
+                color: "inherit",
+                padding: "0 2px",
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          )}
+          <style>{`@keyframes visit-save-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
 
       {/* Extraction in progress modal overlay */}
       {extracting && (
@@ -2278,204 +2365,142 @@ export default function VisitPage() {
           currentMedications={uniqueActiveMeds}
           saving={clinicalExtractSaving}
           onClose={closeModal}
-          onSave={async (picked) => {
-            setClinicalExtractSaving(true);
+          onSave={(picked) => {
+            // Close immediately + run the save in the background via the
+            // single /clinical-bulk endpoint (one HTTP request instead of
+            // ~7 per-section calls). Toast reports counts/failures from the
+            // server, then refreshData() + cache invalidation paint the
+            // new state.
             const docDate = modal.data.doc_date;
-            const counts = { sx: 0, dx: 0, meds: 0, stop: 0, labs: 0, vit: 0, inv: 0 };
-            const silent = { silent: true, skipRefresh: true };
-            const failed = [];
-
-            // Symptoms
-            for (const s of picked.symptoms) {
-              const r = await mutations.addSymptom(
-                {
-                  name: s.name,
-                  since: s.since_date || null,
-                  severity: s.severity || "Mild",
-                  related_to: s.related_to || "",
-                },
-                silent,
-              );
-              if (r.success) counts.sx++;
-              else failed.push(`symptom "${s.name}"`);
+            const rawText = modal.data.raw_text || "";
+            closeModal();
+            const followUpWithText =
+              typeof picked.follow_up_with === "string" ? picked.follow_up_with.trim() : "";
+            const totalPickedItems =
+              picked.symptoms.length +
+              picked.diagnoses.length +
+              picked.medications.length +
+              picked.stopMeds.length +
+              picked.labs.length +
+              picked.vitals.length +
+              picked.investigations.length +
+              (followUpWithText ? 1 : 0);
+            if (totalPickedItems > 0) {
+              toast(`Saving ${totalPickedItems} item${totalPickedItems !== 1 ? "s" : ""}…`, "info");
+              setBulkSaveStatus({
+                phase: "saving",
+                label: `Saving ${totalPickedItems} item${totalPickedItems !== 1 ? "s" : ""}…`,
+              });
             }
 
-            // Diagnoses
-            for (const d of picked.diagnoses) {
-              const notes = [d.details, d.since ? `Since ${d.since}` : null]
-                .filter(Boolean)
-                .join(" · ");
-              const r = await mutations.addDiagnosis(
-                {
-                  name: d.name,
-                  status: d.status === "Absent" ? "Resolved" : "Newly Diagnosed",
-                  category: "primary",
-                  notes,
-                  key_value: "",
-                },
-                silent,
-              );
-              if (r.success) counts.dx++;
-              else failed.push(`diagnosis "${d.name}"`);
-            }
-
-            // Medications
-            for (const m of picked.medications) {
-              const r = await mutations.addMedication(
-                {
-                  name: m.name,
-                  dose: m.dose || "",
-                  frequency: m.frequency || "OD",
-                  timing: m.timing || "",
-                  route: m.route || "Oral",
-                  started_date: docDate || null,
-                },
-                silent,
-              );
-              if (r.success) counts.meds++;
-              else failed.push(`medication "${m.name}"`);
-            }
-
-            // Stop previous meds
-            for (const sm of picked.stopMeds) {
-              const r = await mutations.stopMedication(
-                sm.id,
-                { reason: sm.reason || "Previous visit" },
-                silent,
-              );
-              if (r.success) counts.stop++;
-              else failed.push(`stop "${sm.name}"`);
-            }
-
-            // Labs
-            for (const lab of picked.labs) {
+            const runSave = async () => {
+              setClinicalExtractSaving(true);
+              let counts = { sx: 0, dx: 0, meds: 0, stop: 0, labs: 0, vit: 0, inv: 0, fuw: 0 };
+              let failed = [];
               try {
-                await api.post(`/api/patients/${dbPatientId}/labs`, {
-                  test_name: normalizeTestName(lab.test_name),
-                  result: String(lab.result_text || lab.result),
-                  unit: lab.unit || "",
-                  flag: lab.flag || "N",
-                  ref_range: lab.ref_range || "",
-                  test_date: lab.test_date || docDate || null,
-                  source: "report_extract",
-                });
-                counts.labs++;
-              } catch (e) {
-                console.error("Failed to save lab:", e.message);
-                failed.push(`lab "${lab.test_name}"`);
-              }
-            }
-
-            // Vitals
-            for (const v of picked.vitals) {
-              try {
-                await api.post(`/api/visit/${dbPatientId}/vitals`, {
-                  bp_sys: v.bpSys ?? null,
-                  bp_dia: v.bpDia ?? null,
-                  weight: v.weight ?? null,
-                  height: v.height ?? null,
-                  bmi: v.bmi ?? null,
-                  waist: v.waist ?? null,
-                  body_fat: v.bodyFat ?? null,
-                  recorded_at: v.date || docDate || null,
-                });
-                counts.vit++;
-              } catch (e) {
-                console.error("Failed to save vitals:", e.message);
-                failed.push("vitals");
-              }
-            }
-
-            // Investigations (single batched call)
-            if (picked.investigations.length > 0) {
-              const r = await mutations.addInvestigations(
-                picked.investigations.map((x) => ({
-                  name: x.name,
-                  urgency: x.urgency || "routine",
-                })),
-                silent,
-              );
-              if (r.success) counts.inv = r.added || picked.investigations.length;
-              else failed.push("investigations");
-            }
-
-            if (counts.labs > 0) {
-              try {
-                await api.post(`/api/visit/${dbPatientId}/biomarkers/refresh`);
-              } catch (e) {
-                console.error("Biomarker refresh failed:", e.message);
-              }
-            }
-
-            // Build a "confirmed" payload reflecting only what the doctor
-            // accepted in the review modal, then save it as a Scribe-tagged
-            // prescription PDF in the patient's documents. Anything the doctor
-            // unchecked is excluded from the printable record.
-            const totalPicked =
-              counts.sx +
-              counts.dx +
-              counts.meds +
-              counts.stop +
-              counts.labs +
-              counts.vit +
-              counts.inv;
-            if (totalPicked > 0) {
-              const srcExtracted = modal.data.extracted || {};
-              const confirmedParsed = {
-                symptoms: picked.symptoms,
-                diagnoses: picked.diagnoses,
-                medications: picked.medications,
-                previous_medications: picked.stopMeds.map((sm) => ({
-                  name: sm.name,
-                  status: "stopped",
-                  reason: sm.reason,
-                })),
-                labs: picked.labs.map((l) => ({
-                  test: l.test_name,
-                  value: l.result_text || l.result,
-                  unit: l.unit,
-                  date: l.test_date,
-                })),
-                vitals: picked.vitals,
-                investigations_to_order: picked.investigations,
-                lifestyle: srcExtracted.lifestyle || {},
-                follow_up: srcExtracted.follow_up || {},
-                advice: srcExtracted.advice || "",
-              };
-              api
-                .post(`/api/visit/${dbPatientId}/scribe-prescription`, {
+                const { data } = await api.post(`/api/visit/${dbPatientId}/clinical-bulk`, {
+                  symptoms: picked.symptoms,
+                  diagnoses: picked.diagnoses.map((d) => ({
+                    name: d.name,
+                    status: d.status === "Absent" ? "Resolved" : "Newly Diagnosed",
+                    category: "primary",
+                    notes: [d.details, d.since ? `Since ${d.since}` : null]
+                      .filter(Boolean)
+                      .join(" · "),
+                  })),
+                  medications: picked.medications.map((m) => ({
+                    name: m.name,
+                    dose: m.dose || "",
+                    frequency: m.frequency || "OD",
+                    timing: m.timing || "",
+                    when_to_take: Array.isArray(m.when_to_take)
+                      ? m.when_to_take
+                      : m.when_to_take
+                        ? String(m.when_to_take)
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean)
+                        : null,
+                    route: m.route || "Oral",
+                    days_of_week:
+                      Array.isArray(m.days_of_week) && m.days_of_week.length
+                        ? m.days_of_week
+                        : null,
+                    started_date: docDate || null,
+                  })),
+                  stopMeds: picked.stopMeds,
+                  labs: picked.labs.map((l) => ({
+                    test_name: normalizeTestName(l.test_name),
+                    result: String(l.result_text || l.result),
+                    unit: l.unit || "",
+                    flag: l.flag || "N",
+                    ref_range: l.ref_range || "",
+                    test_date: l.test_date || docDate || null,
+                    source: "report_extract",
+                  })),
+                  vitals: picked.vitals,
+                  investigations: picked.investigations,
+                  follow_up_with: followUpWithText || null,
+                  doc_date: docDate || null,
+                  raw_text: rawText,
                   patient,
                   doctor,
-                  parsed: confirmedParsed,
-                  raw_text: modal.data.raw_text || "",
-                  doc_date: docDate || null,
-                })
-                .catch((e) => console.error("Scribe prescription PDF save failed:", e.message));
-            }
+                });
+                counts = data?.counts || counts;
+                failed = Array.isArray(data?.failed) ? data.failed : [];
+              } catch (e) {
+                console.error("Bulk clinical save failed:", e?.message);
+                failed = ["entire batch — network error"];
+              }
 
-            await refreshData();
-            qc.invalidateQueries({ queryKey: qk.opd.all });
-            setClinicalExtractSaving(false);
-            closeModal();
+              if (counts.labs > 0) {
+                try {
+                  await api.post(`/api/visit/${dbPatientId}/biomarkers/refresh`);
+                } catch (e) {
+                  console.error("Biomarker refresh failed:", e.message);
+                }
+              }
 
-            const parts = [];
-            if (counts.sx) parts.push(`${counts.sx} symptom${counts.sx !== 1 ? "s" : ""}`);
-            if (counts.dx) parts.push(`${counts.dx} diagnos${counts.dx !== 1 ? "es" : "is"}`);
-            if (counts.meds) parts.push(`${counts.meds} med${counts.meds !== 1 ? "s" : ""}`);
-            if (counts.stop) parts.push(`${counts.stop} stopped`);
-            if (counts.labs) parts.push(`${counts.labs} lab${counts.labs !== 1 ? "s" : ""}`);
-            if (counts.vit) parts.push(`${counts.vit} vitals`);
-            if (counts.inv) parts.push(`${counts.inv} test${counts.inv !== 1 ? "s" : ""}`);
-            // PDF generation disabled — parsed payload + raw text are still
-            // saved server-side. Re-add "Rx PDF" line when prescription output returns.
-            // if (totalPicked > 0) parts.push("Rx PDF");
-            if (failed.length > 0) {
-              const savedMsg = parts.length ? `Saved ${parts.join(", ")}. ` : "";
-              toast(`${savedMsg}Failed: ${failed.join(", ")}`, "error");
-            } else {
-              toast(parts.length ? `Saved: ${parts.join(", ")}` : "Nothing saved", "success");
-            }
-            setTimeout(() => refreshData(), 3000);
+              await refreshData();
+              qc.invalidateQueries({ queryKey: qk.opd.all });
+              setClinicalExtractSaving(false);
+
+              const parts = [];
+              if (counts.sx) parts.push(`${counts.sx} symptom${counts.sx !== 1 ? "s" : ""}`);
+              if (counts.dx) parts.push(`${counts.dx} diagnos${counts.dx !== 1 ? "es" : "is"}`);
+              if (counts.meds) parts.push(`${counts.meds} med${counts.meds !== 1 ? "s" : ""}`);
+              if (counts.stop) parts.push(`${counts.stop} stopped`);
+              if (counts.labs) parts.push(`${counts.labs} lab${counts.labs !== 1 ? "s" : ""}`);
+              if (counts.vit) parts.push(`${counts.vit} vitals`);
+              if (counts.inv) parts.push(`${counts.inv} test${counts.inv !== 1 ? "s" : ""}`);
+              if (counts.fuw) parts.push("follow-up prep");
+              if (failed.length > 0) {
+                const savedMsg = parts.length ? `Saved ${parts.join(", ")}. ` : "";
+                toast(`${savedMsg}Failed: ${failed.join(", ")}`, "error");
+                setBulkSaveStatus({
+                  phase: "failed",
+                  label: `${savedMsg}Failed: ${failed.join(", ")}`,
+                });
+              } else {
+                toast(parts.length ? `Saved: ${parts.join(", ")}` : "Nothing saved", "success");
+                setBulkSaveStatus({
+                  phase: "saved",
+                  label: parts.length ? `Saved ${parts.join(", ")}` : "Nothing saved",
+                });
+                // Auto-dismiss the success chip after a few seconds; failure
+                // stays sticky until the doctor acknowledges it (clicks ✕).
+                setTimeout(() => setBulkSaveStatus(null), 5000);
+              }
+              setTimeout(() => refreshData(), 3000);
+            };
+            // Fire-and-forget — the modal is already closed; any error inside
+            // runSave is surfaced via toast / console / chip from within.
+            runSave().catch((e) => {
+              console.error("Background clinical save failed:", e.message);
+              setClinicalExtractSaving(false);
+              toast(`Save failed: ${e.message}`, "error");
+              setBulkSaveStatus({ phase: "failed", label: `Save failed: ${e.message}` });
+            });
           }}
         />
       )}

@@ -238,7 +238,18 @@ export async function buildPrescriptionPdf({ patient = {}, doctor = {}, parsed =
     });
     for (const m of meds) {
       ensureSpace(doc, 24);
-      row(doc, [m.name, m.dose, m.frequency, m.timing, m.route || "Oral"], widths);
+      const wt = Array.isArray(m.when_to_take) ? m.when_to_take.join(", ") : m.when_to_take || "";
+      row(
+        doc,
+        [
+          m.name,
+          m.dose,
+          m.frequency,
+          wt && m.timing && m.timing !== wt ? `${wt} (${m.timing})` : wt || m.timing,
+          m.route || "Oral",
+        ],
+        widths,
+      );
     }
   }
 

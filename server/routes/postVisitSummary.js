@@ -101,7 +101,10 @@ function fmtMeds(active, stopped = [], recentChanges = []) {
   const parents = active.filter((m) => !m.parent_medication_id);
   for (const m of parents) {
     lines.push(
-      `  - ${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${m.timing ? " (" + m.timing + ")" : ""}`,
+      (() => {
+        const wt = Array.isArray(m.when_to_take) ? m.when_to_take.join(", ") : m.when_to_take || "";
+        return `  - ${m.name}${m.dose ? " " + m.dose : ""}${m.frequency ? " " + m.frequency : ""}${wt ? " · " + wt : ""}${m.timing && m.timing !== wt ? " (" + m.timing + ")" : ""}`;
+      })(),
     );
   }
   if (stopped.length) {
@@ -547,9 +550,10 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       ),
       pool.query(
         `SELECT id, name, dose, frequency, timing, started_date,
-                parent_medication_id, support_condition
+                parent_medication_id, support_condition, visit_status
            FROM medications
-           WHERE patient_id=$1 AND is_active=true`,
+           WHERE patient_id=$1 AND is_active=true
+             AND (visit_status IS NULL OR visit_status <> 'previous')`,
         [pid],
       ),
       pool.query(

@@ -1,5 +1,71 @@
 import { z } from "zod";
 
+// Canonical patient-facing "when to take" vocabulary. Must stay in sync
+// with src/config/medicationTimings.js and the Postgres when_to_take_pill
+// ENUM. The Zod transform below accepts arrays, comma-separated strings
+// (legacy AI output), or null and normalises everything to a string array
+// of validated pill labels.
+const WHEN_TO_TAKE_PILLS = [
+  "Fasting",
+  "Before breakfast",
+  "After breakfast",
+  "Before lunch",
+  "After lunch",
+  "Before dinner",
+  "After dinner",
+  "At bedtime",
+  "With milk",
+  "SOS only",
+  "Any time",
+];
+const PILL_BY_LOWER = new Map(WHEN_TO_TAKE_PILLS.map((p) => [p.toLowerCase(), p]));
+
+// Normalise whatever an insert path receives (AI raw string, legacy
+// comma-separated string, JS array, or null) into a deduped array of valid
+// pill labels — or null when nothing recognisable is left. Returning null
+// for empty input lets COALESCE in upserts keep any existing value.
+export function normalizeWhenToTake(v) {
+  if (v == null) return null;
+  const tokens = Array.isArray(v) ? v : String(v).split(",");
+  const out = [];
+  const seen = new Set();
+  for (const raw of tokens) {
+    const canonical = PILL_BY_LOWER.get(
+      String(raw || "")
+        .trim()
+        .toLowerCase(),
+    );
+    if (canonical && !seen.has(canonical)) {
+      seen.add(canonical);
+      out.push(canonical);
+    }
+  }
+  return out.length ? out : null;
+}
+
+const whenToTakeArr = z
+  .union([z.array(z.string()), z.string()])
+  .optional()
+  .nullable()
+  .transform((v) => {
+    if (v == null) return null;
+    const tokens = Array.isArray(v) ? v : String(v).split(",");
+    const out = [];
+    const seen = new Set();
+    for (const raw of tokens) {
+      const canonical = PILL_BY_LOWER.get(
+        String(raw || "")
+          .trim()
+          .toLowerCase(),
+      );
+      if (canonical && !seen.has(canonical)) {
+        seen.add(canonical);
+        out.push(canonical);
+      }
+    }
+    return out.length ? out : null;
+  });
+
 // ---- Reusable primitives ----
 const optStr = z.string().optional().nullable();
 const optNum = z
@@ -132,6 +198,7 @@ export const historyCreateSchema = z
             dose: optStr,
             frequency: optStr,
             timing: optStr,
+            when_to_take: whenToTakeArr,
             is_active: optBool,
             started_date: optDate,
           })
