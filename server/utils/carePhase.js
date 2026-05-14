@@ -332,9 +332,7 @@ function deriveBiomarkerPriorityStatus({ labHistory, vitals, diagnoses } = {}) {
     latest = latestFromHistory(["FBS", "fbs", "Fasting Glucose", "FPG"]);
     if (!latest && Array.isArray(vitals) && vitals.length) {
       const fasting = vitals
-        .filter(
-          (v) => v && v.rbs != null && String(v.meal_type || "").toLowerCase() === "fasting",
-        )
+        .filter((v) => v && v.rbs != null && String(v.meal_type || "").toLowerCase() === "fasting")
         .map((v) => ({ val: toNum(v.rbs), date: v.recorded_at || v.recorded_date || null }))
         .filter((r) => Number.isFinite(r.val) && r.date)
         .sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -360,9 +358,12 @@ function deriveBiomarkerPriorityStatus({ labHistory, vitals, diagnoses } = {}) {
   }
 
   const label =
-    status === "controlled" ? "Controlled" : status === "borderline" ? "Borderline" : "Uncontrolled";
-  const phase =
-    status === "controlled" ? `Phase 2 · ${label}` : `Phase 1 · ${label}`;
+    status === "controlled"
+      ? "Controlled"
+      : status === "borderline"
+        ? "Borderline"
+        : "Uncontrolled";
+  const phase = status === "controlled" ? `Phase 2 · ${label}` : `Phase 1 · ${label}`;
   return { marker, value: v, date: latest.date, status, label, target, phase };
 }
 

@@ -106,12 +106,14 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       data = { ...data, visitSummaryText: summaryResult.body };
       // Persist back to appointments so future fetches see it.
       if (appointmentId) {
-        pool.query(
-          "UPDATE appointments SET post_visit_summary=$1 WHERE id=$2",
-          [summaryResult.body, appointmentId],
-        ).catch((e) =>
-          console.warn("[prescriptionAutoSave] post_visit_summary update skipped:", e.message),
-        );
+        pool
+          .query("UPDATE appointments SET post_visit_summary=$1 WHERE id=$2", [
+            summaryResult.body,
+            appointmentId,
+          ])
+          .catch((e) =>
+            console.warn("[prescriptionAutoSave] post_visit_summary update skipped:", e.message),
+          );
       }
     } catch (summaryErr) {
       console.warn("[prescriptionAutoSave] Summary generation skipped:", summaryErr.message);

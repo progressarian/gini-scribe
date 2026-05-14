@@ -1,7 +1,47 @@
 import { memo, useRef, useCallback, useMemo } from "react";
 import { MED_COLORS } from "./helpers";
-import { TIME_SLOTS, groupMedsBySlot, printMedCard } from "./medCardPrint";
+import { TIME_SLOTS, printMedCard, getTimeSlots } from "./medCardPrint";
 import { cleanNote } from "../../utils/cleanNote";
+import { detectMedCategory, getCategoryLabel, getCategoryIcon } from "../../server-utils/medicationCategories";
+
+// Groups pre-indexed meds by time slot without overwriting _idx
+function groupBySlot(meds) {
+  const g = {};
+  meds.forEach((m) => {
+    getTimeSlots(m).forEach((slot) => {
+      (g[slot] ||= []).push(m);
+    });
+  });
+  return {
+    grouped: g,
+    slotsWithMeds: TIME_SLOTS.filter((s) => g[s.key]?.length > 0),
+  };
+}
+
+function MedRow({ m }) {
+  const catId = detectMedCategory(m);
+  const catLabel = getCategoryLabel(catId);
+  const catIcon = getCategoryIcon(catId);
+
+  return (
+    <div className="mtr" style={{ marginTop: 5 }}>
+      <div className="mmain">
+        <div className="mdot" style={{ background: MED_COLORS[m._idx % MED_COLORS.length] }} />
+        <div>
+          <div className="mbrand">{m.name}</div>
+          <div className="mgen">{m.composition || cleanNote(m.notes) || ""}</div>
+        </div>
+      </div>
+      <div className="mtd">{m.dose || "1 tablet"}</div>
+      <div className="mtd">
+        {m.frequency || "OD"}
+        {m.timing ? ` · ${m.timing}` : ""}
+      </div>
+      <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
+      <div className="mtd">{catIcon} {catLabel}</div>
+    </div>
+  );
+}
 
 const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
   const cardRef = useRef(null);
@@ -11,7 +51,15 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
     [activeMeds],
   );
 
-  const { grouped, slotsWithMeds } = groupMedsBySlot(mainMeds);
+  const indexedMeds = useMemo(
+    () => mainMeds.map((m, i) => ({ ...m, _idx: i })),
+    [mainMeds],
+  );
+
+  const { grouped, slotsWithMeds } = useMemo(
+    () => groupBySlot(indexedMeds),
+    [indexedMeds],
+  );
 
   const handlePrint = useCallback(() => {
     printMedCard(patient, mainMeds);
@@ -55,49 +103,14 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
                 {slot.emoji} {slot.label}
               </div>
               {grouped[slot.key].map((m) => (
-                <div key={m.id || m._idx} className="mtr" style={{ marginTop: 5 }}>
-                  <div className="mmain">
-                    <div
-                      className="mdot"
-                      style={{ background: MED_COLORS[m._idx % MED_COLORS.length] }}
-                    />
-                    <div>
-                      <div className="mbrand">{m.name}</div>
-                      <div className="mgen">{m.composition || cleanNote(m.notes) || ""}</div>
-                    </div>
-                  </div>
-                  <div className="mtd">{m.dose || "1 tablet"}</div>
-                  <div className="mtd">
-                    {m.frequency || "OD"}
-                    {m.timing ? ` · ${m.timing}` : ""}
-                  </div>
-                  <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
-                  <div />
-                </div>
+                <MedRow key={m.id || m._idx} m={m} />
               ))}
             </div>
           ))}
 
-          {slotsWithMeds.length === 0 &&
-            mainMeds.length > 0 &&
-            mainMeds.map((m, i) => (
-              <div key={m.id || i} className="mtr" style={{ marginBottom: 5 }}>
-                <div className="mmain">
-                  <div className="mdot" style={{ background: MED_COLORS[i % MED_COLORS.length] }} />
-                  <div>
-                    <div className="mbrand">{m.name}</div>
-                    <div className="mgen">{m.composition || ""}</div>
-                  </div>
-                </div>
-                <div className="mtd">{m.dose || ""}</div>
-                <div className="mtd">
-                  {m.frequency || "OD"}
-                  {m.timing ? ` · ${m.timing}` : ""}
-                </div>
-                <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
-                <div />
-              </div>
-            ))}
+          {slotsWithMeds.length === 0 && indexedMeds.map((m) => (
+            <MedRow key={m.id || m._idx} m={m} />
+          ))}
 
           {mainMeds.length === 0 && (
             <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
