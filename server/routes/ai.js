@@ -8,6 +8,11 @@ import {
   UI_TOOL_NAMES,
   FINAL_TOOL_NAME,
 } from "../services/agent/tools.js";
+import {
+  getOrCreateConversation,
+  appendTurn,
+  buildOutgoingMessages,
+} from "../services/agent/conversations.js";
 
 const router = Router();
 
@@ -298,26 +303,67 @@ STYLE:
 - 2-4 sentences in \`message\` unless the patient asked for detail. Use the patient's first name when you know it. No markdown headers, no bullet syntax inside message.
 - Time/date context: today is ${new Date().toISOString().slice(0, 10)}.`;
 
+// Persist the user message + every model-produced block from this turn
+// back to agent_conversations. No-ops on the legacy path (when convRow is
+// null because the client sent `messages[]` instead of `message`+id).
+// Returns the conversation id so the client can stash it.
+async function persistTurnIfCheckpoint(poolRef, convRow, userBlock, turnBlocks) {
+  if (!convRow || !userBlock) return null;
+  try {
+    await appendTurn(poolRef, convRow, userBlock, turnBlocks);
+  } catch (e) {
+    console.warn("[agent] persist turn failed:", e?.message || e);
+  }
+  return convRow.id;
+}
+
 router.post("/ai/agent", async (req, res) => {
   if (!ANTHROPIC_KEY)
     return res.status(503).json({ error: "Anthropic API key not configured on server" });
 
-  const { messages, scribePatientId, model } = req.body || {};
-  if (!Array.isArray(messages) || messages.length === 0)
-    return res.status(400).json({ error: "messages array is required" });
+  // Two accepted body shapes:
+  //   • New (preferred): { message, scribePatientId, conversationId?, model? }
+  //     — server hydrates the persisted thread; client doesn't re-send history.
+  //   • Legacy: { messages: [...], scribePatientId, model? } — full history
+  //     from the client, no server-side persistence. Kept so older app
+  //     builds keep working during rollout.
+  const { messages, message, scribePatientId, conversationId, model } = req.body || {};
   const pid = Number(scribePatientId);
   if (!Number.isInteger(pid) || pid <= 0)
     return res.status(400).json({ error: "scribePatientId is required" });
 
+  const usingCheckpoint = typeof message === "string" && message.trim().length > 0;
+  if (!usingCheckpoint && (!Array.isArray(messages) || messages.length === 0))
+    return res
+      .status(400)
+      .json({ error: "Either `message` (string) or `messages` (array) is required" });
+
   const anthropicModel =
     model === "sonnet" ? "claude-sonnet-4-20250514" : "claude-haiku-4-5-20251001";
 
+  // Hydrate the thread (or create one) when using the checkpoint path.
+  let convRow = null;
+  let conversation;
+  let latestUserBlock = null;
+  if (usingCheckpoint) {
+    convRow = await getOrCreateConversation(pool, pid, conversationId || null);
+    latestUserBlock = { role: "user", content: message.trim() };
+    const compressedTail = await compressMessagesImages([latestUserBlock]);
+    latestUserBlock = compressedTail[0];
+    conversation = buildOutgoingMessages(convRow, latestUserBlock);
+  } else {
+    const compressed = await compressMessagesImages(messages);
+    conversation = [...compressed];
+  }
+
   const ctx = { pool, scribePatientId: pid };
-  const compressed = await compressMessagesImages(messages);
-  const conversation = [...compressed];
   const clientActions = [];
   const toolLog = [];
   let structured = null; // Set when the model calls respond_to_patient.
+
+  // Track the blocks the model produced this turn (assistant + interleaved
+  // tool_result user blocks) so we can persist them in one go at the end.
+  const turnBlocksToPersist = [];
 
   try {
     for (let turn = 0; turn < 5; turn++) {
@@ -349,7 +395,9 @@ router.post("/ai/agent", async (req, res) => {
       const blocks = Array.isArray(data.content) ? data.content : [];
       // Append the assistant turn to the conversation so any subsequent
       // tool_result references it.
-      conversation.push({ role: "assistant", content: blocks });
+      const assistantBlock = { role: "assistant", content: blocks };
+      conversation.push(assistantBlock);
+      turnBlocksToPersist.push(assistantBlock);
 
       const toolUses = blocks.filter((b) => b.type === "tool_use");
       const rawText = blocks
@@ -371,11 +419,18 @@ router.post("/ai/agent", async (req, res) => {
           safety_flag: input.safety_flag || "none",
         };
         toolLog.push({ tool: FINAL_TOOL_NAME, input, ok: true });
+        const convId = await persistTurnIfCheckpoint(
+          pool,
+          convRow,
+          latestUserBlock,
+          turnBlocksToPersist,
+        );
         return res.json({
           text: structured.message,
           structured,
           client_actions: clientActions,
           tool_log: toolLog,
+          conversationId: convId,
         });
       }
 
@@ -388,6 +443,12 @@ router.post("/ai/agent", async (req, res) => {
           input: { text: rawText.slice(0, 200) },
           ok: false,
         });
+        const convId = await persistTurnIfCheckpoint(
+          pool,
+          convRow,
+          latestUserBlock,
+          turnBlocksToPersist,
+        );
         return res.json({
           text: rawText || "(no response)",
           structured: {
@@ -399,6 +460,7 @@ router.post("/ai/agent", async (req, res) => {
           },
           client_actions: clientActions,
           tool_log: toolLog,
+          conversationId: convId,
         });
       }
 
@@ -429,10 +491,18 @@ router.post("/ai/agent", async (req, res) => {
           content: JSON.stringify(result ?? null).slice(0, 60_000),
         });
       }
-      conversation.push({ role: "user", content: toolResults });
+      const toolResultBlock = { role: "user", content: toolResults };
+      conversation.push(toolResultBlock);
+      turnBlocksToPersist.push(toolResultBlock);
     }
 
     // Loop budget exhausted without a respond_to_patient — return a fallback.
+    const convId = await persistTurnIfCheckpoint(
+      pool,
+      convRow,
+      latestUserBlock,
+      turnBlocksToPersist,
+    );
     return res.json({
       text: "I hit my tool-use limit before finishing. Please try again or rephrase.",
       structured: {
@@ -444,6 +514,7 @@ router.post("/ai/agent", async (req, res) => {
       },
       client_actions: clientActions,
       tool_log: toolLog,
+      conversationId: convId,
     });
   } catch (err) {
     console.error("AI agent error:", err);
