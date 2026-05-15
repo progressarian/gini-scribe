@@ -6,6 +6,8 @@ import {
   syncWalkingAppointments,
   syncTodayWalkingAppointments,
   syncWalkingAppointmentsByDate,
+  forceResyncDate,
+  syncAppointmentStatuses,
   syncDateRange,
   getRangeSyncStatus,
   runLabSync,
@@ -173,6 +175,34 @@ router.post("/sync/healthray/today", async (req, res) => {
     res.json({ success: true, ...result });
   } catch (e) {
     handleError(res, e, "HealthRay today sync");
+  }
+});
+
+// Hard resync: re-fetch every appointment for a date from HealthRay,
+// bypassing the fast-path skip. Runs in background; UI polls /appointments
+// to see updated rows.
+// POST /api/sync/healthray/force?date=YYYY-MM-DD  (defaults to today)
+router.post("/sync/healthray/force", async (req, res) => {
+  try {
+    const date = req.query.date || req.body.date || new Date().toISOString().split("T")[0];
+    res.json({ success: true, started: true, date });
+    forceResyncDate(date).catch((e) => error("Force Resync", e.message));
+  } catch (e) {
+    handleError(res, e, "HealthRay force resync");
+  }
+});
+
+// Lightweight status-only sync: pulls HealthRay appointment list for a date
+// and updates ONLY status on matching local rows. Cheap enough for the UI
+// to call on a tight cadence while checked-in / in-visit rows are visible.
+// POST /api/sync/healthray/statuses?date=YYYY-MM-DD  (defaults to today)
+router.post("/sync/healthray/statuses", async (req, res) => {
+  try {
+    const date = req.query.date || req.body.date || new Date().toISOString().split("T")[0];
+    const result = await syncAppointmentStatuses(date);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    handleError(res, e, "HealthRay status sync");
   }
 });
 

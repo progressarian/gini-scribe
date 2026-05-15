@@ -6633,6 +6633,40 @@ export default function OPD() {
       })
       .catch(() => showToast("✗ Failed to save vitals — please retry", "err"));
 
+  // ── HealthRay live status sync ────────────────────────────────────────────
+  // The server runs a dedicated ~10s status-sync loop (see
+  // server/services/cron/index.js → scheduleNextStatusSync). Here we just
+  // refetch the appointment list faster (every ~12s) while a checkedin /
+  // in_visit row is on screen so the UI reflects the new status quickly. No
+  // need to ping the sync API — that's the cron's job now.
+  const hasLiveAppt = appointments.some((a) => a.status === "checkedin" || a.status === "in_visit");
+  useEffect(() => {
+    if (!hasLiveAppt) return;
+    const id = setInterval(() => apptsQuery.refetch(), 12_000);
+    return () => clearInterval(id);
+  }, [hasLiveAppt, apptsQuery]);
+
+  const [resyncing, setResyncing] = useState(false);
+  const forceResync = async () => {
+    if (resyncing) return;
+    setResyncing(true);
+    showToast("⟳ Hard resync started — pulling fresh data from HealthRay…");
+    try {
+      const r = await apiFetch(`/api/sync/healthray/force?date=${encodeURIComponent(date)}`, {
+        method: "POST",
+      });
+      if (!r.ok) throw new Error("resync failed");
+      // Force runs in background — refetch a few times to surface progress.
+      const refetchAt = [4_000, 12_000, 30_000, 60_000];
+      refetchAt.forEach((ms) => setTimeout(() => apptsQuery.refetch(), ms));
+      showToast("✓ Hard resync running — list will refresh as data lands");
+    } catch {
+      showToast("✗ Hard resync failed — please retry", "err");
+    } finally {
+      setTimeout(() => setResyncing(false), 60_000);
+    }
+  };
+
   // Unique doctors from appointments for filter
   const apptDoctors = [...new Set(appointments.map((a) => a.doctor_name).filter(Boolean))];
 
@@ -7215,13 +7249,84 @@ export default function OPD() {
                 >
                   <div
                     className="opd-schedule-title"
-                    style={{ fontFamily: FD, fontSize: 17, color: INK, marginBottom: 9 }}
+                    style={{
+                      fontFamily: FD,
+                      fontSize: 17,
+                      color: INK,
+                      marginBottom: 9,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
                   >
-                    {new Date(date + "T00:00").toLocaleDateString("en-IN", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                    })}
+                    <span style={{ flex: 1 }}>
+                      {new Date(date + "T00:00").toLocaleDateString("en-IN", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                      })}
+                    </span>
+                    {hasLiveAppt && (
+                      <span
+                        title="Live status sync — polling HealthRay every 20s"
+                        style={{
+                          fontFamily: FM,
+                          fontSize: 9,
+                          letterSpacing: 0.4,
+                          textTransform: "uppercase",
+                          color: SK,
+                          background: SKL,
+                          border: `1px solid ${SK}`,
+                          padding: "2px 6px",
+                          borderRadius: 999,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 999,
+                            background: SK,
+                            display: "inline-block",
+                          }}
+                        />
+                        Live
+                      </span>
+                    )}
+                    <button
+                      onClick={forceResync}
+                      disabled={resyncing}
+                      title="Hard resync — re-fetch every appointment, status & clinical data from HealthRay"
+                      style={{
+                        fontFamily: FM,
+                        fontSize: 10,
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                        color: resyncing ? INK3 : INK,
+                        background: resyncing ? BG : "transparent",
+                        border: `1px solid ${BD}`,
+                        borderRadius: 6,
+                        padding: "3px 8px",
+                        cursor: resyncing ? "default" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: "inline-block",
+                          transform: resyncing ? "rotate(360deg)" : "none",
+                          transition: "transform 1s linear",
+                        }}
+                      >
+                        ⟳
+                      </span>
+                      {resyncing ? "Syncing…" : "Resync"}
+                    </button>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                     <button

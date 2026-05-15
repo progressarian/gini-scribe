@@ -7,6 +7,8 @@ import {
   runDailyOpdBackfill,
   runStuckStatusRecovery,
   runMissingMedsRecovery,
+  forceResyncDate,
+  syncAppointmentStatuses,
 } from "./healthraySync.js";
 import {
   runLabSync,
@@ -31,6 +33,14 @@ const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 const HEALTHRAY_LOOP_MIN_BREAK_MS = 10 * 1000;
 const HEALTHRAY_LOOP_MAX_BREAK_MS = 15 * 1000;
 
+// Status-only loop runs much tighter (~10s) so checkout / engaged / waiting
+// transitions surface in near real-time and the prescription PDF gets pulled
+// the moment HealthRay flips an appointment to checkout. Status sync only
+// hits the appointment-list endpoint per doctor (no clinical fetch / no AI),
+// so the cost is small.
+const STATUS_LOOP_MIN_BREAK_MS = 10 * 1000;
+const STATUS_LOOP_MAX_BREAK_MS = 12 * 1000;
+
 // Lab sync runs the same continuous-loop pattern, with a slightly longer
 // 30–40s break between runs (lab cases trickle in less aggressively than
 // appointments, and each run does more I/O — fetch list + per-case detail +
@@ -46,10 +56,42 @@ const PARTIAL_LOOP_MAX_BREAK_MS = 40 * 1000;
 
 let healthrayLoopRunning = false;
 let healthrayLoopTimeoutId = null;
+let statusLoopRunning = false;
+let statusLoopTimeoutId = null;
 let labLoopRunning = false;
 let labLoopTimeoutId = null;
 let partialLoopRunning = false;
 let partialLoopTimeoutId = null;
+
+function todayISTDate() {
+  const now = new Date();
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  return ist.toISOString().split("T")[0];
+}
+
+function scheduleNextStatusSync(delayMs) {
+  if (!statusLoopRunning) return;
+  statusLoopTimeoutId = setTimeout(async () => {
+    statusLoopTimeoutId = null;
+    if (!statusLoopRunning) return;
+    const startedAt = Date.now();
+    try {
+      await syncAppointmentStatuses(todayISTDate());
+    } catch (e) {
+      console.error("[Cron] Status sync failed:", e.message);
+    }
+    const elapsed = Date.now() - startedAt;
+    const breakMs =
+      STATUS_LOOP_MIN_BREAK_MS +
+      Math.floor(Math.random() * (STATUS_LOOP_MAX_BREAK_MS - STATUS_LOOP_MIN_BREAK_MS + 1));
+    if (elapsed > 5000) {
+      console.log(
+        `[Cron] Status sync finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
+      );
+    }
+    scheduleNextStatusSync(breakMs);
+  }, delayMs);
+}
 
 function scheduleNextHealthraySync(delayMs) {
   if (!healthrayLoopRunning) return;
@@ -144,6 +186,18 @@ export function startCronJobs() {
       }
       scheduleNextHealthraySync(0);
     })();
+  }
+
+  // ── Real-time status sync (continuous loop, 10–12s break) ────────────────
+  // Cheap loop that pulls only the appointment list per doctor for today and
+  // mirrors HealthRay's status onto our rows. When status flips to checkout
+  // we proactively pull the prescription PDF in the same tick so the row can
+  // promote to `seen` immediately. Independent of the heavy enrichment loop
+  // above, so a slow AI parse never blocks status updates.
+  if (process.env.HEALTHRAY_MOBILE || process.env.HEALTHRAY_SESSION) {
+    console.log("[Cron] Starting HealthRay status sync (continuous loop, 10–12s break)...");
+    statusLoopRunning = true;
+    scheduleNextStatusSync(5_000); // 5s after boot — let initial full sync start first
   }
 
   // ── Lab HealthRay sync (continuous loop, 30–40s break between runs) ──────
@@ -290,6 +344,14 @@ export function stopCronJobs() {
     }
     console.log("[Cron] Walking appointment sync stopped");
   }
+  if (statusLoopRunning || statusLoopTimeoutId) {
+    statusLoopRunning = false;
+    if (statusLoopTimeoutId) {
+      clearTimeout(statusLoopTimeoutId);
+      statusLoopTimeoutId = null;
+    }
+    console.log("[Cron] Status sync stopped");
+  }
   if (labLoopRunning) {
     labLoopRunning = false;
     if (labLoopTimeoutId) {
@@ -361,4 +423,6 @@ export {
   runStuckStatusRecovery,
   runMissingMedsRecovery,
   runDocumentRecovery,
+  forceResyncDate,
+  syncAppointmentStatuses,
 };

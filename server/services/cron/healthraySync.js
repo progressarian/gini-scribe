@@ -379,7 +379,8 @@ async function reextractLastPrescription(patientId, ctx) {
 }
 
 // ── Sync a single appointment ───────────────────────────────────────────────
-async function syncAppointment(appt, localDoctorName) {
+async function syncAppointment(appt, localDoctorName, opts = {}) {
+  const force = !!opts.force;
   const healthrayId = String(appt.id);
   const doctorId = appt.doctor_id || appt.doctor?.id;
   const apptDate = toISTDate(appt.app_date_time);
@@ -392,15 +393,27 @@ async function syncAppointment(appt, localDoctorName) {
   // ── FAST PATH: completed appointment with notes — only sync new docs ──
   // Skip re-enrichment ONLY if diagnoses AND medications were already extracted.
   // If either JSONB is empty despite having notes, fall through to re-parse.
+  // `force` bypasses fast-path entirely for hard resyncs from the UI.
   const alreadyEnriched =
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
-  if (existing && existing.healthray_clinical_notes && alreadyEnriched) {
+  if (!force && existing && existing.healthray_clinical_notes && alreadyEnriched) {
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
-    // Auto-mark as seen — only when HealthRay reports checkout/completed AND
-    // the prescription PDF has been received locally. Without the PDF the
-    // visit isn't really printable, so we leave the status alone for the next
-    // sync pass to pick up.
-    if (isCompleted && existing.patient_id) {
+    // Propagate live status transitions even on fast-path so checked-in /
+    // in_visit moves picked up by HealthRay reach the UI without waiting for
+    // a full re-enrichment.
+    if (status && status !== existing.status) {
+      if (isCompleted && existing.patient_id) {
+        const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
+        if (hasRxPdf) {
+          await markAppointmentAsSeen(existing.id, "completed");
+        }
+      } else {
+        await pool.query(`UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`, [
+          existing.id,
+          status,
+        ]);
+      }
+    } else if (isCompleted && existing.patient_id) {
       const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
       if (hasRxPdf) {
         await markAppointmentAsSeen(existing.id, "completed");
@@ -461,9 +474,28 @@ async function syncAppointment(appt, localDoctorName) {
       }
 
       if (rawText && rawText.trim().length > 20) {
-        // Skip AI if text unchanged
-        if (rawText === (existing?.healthray_clinical_notes || "")) {
+        // Skip AI if text unchanged — but still propagate live status changes.
+        // Without this branch, an appt that was once enriched (or has stable
+        // clinical text) never reflects HealthRay status transitions until
+        // the text itself changes (e.g. P_175172: text stayed at 382 chars
+        // after checkout, so cron kept short-circuiting and the row stayed
+        // `in_visit` even after Rx PDF landed).
+        if (!force && rawText === (existing?.healthray_clinical_notes || "")) {
           await syncAppointmentDocs(healthrayId, patientId, apptDate);
+          if (status && status !== existing.status) {
+            if (status === "completed" && existing.patient_id) {
+              const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
+              if (hasRxPdf) await markAppointmentAsSeen(existing.id, "completed");
+            } else {
+              await pool.query(
+                `UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`,
+                [existing.id, status],
+              );
+            }
+          } else if (status === "completed" && existing.patient_id) {
+            const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
+            if (hasRxPdf) await markAppointmentAsSeen(existing.id, "completed");
+          }
           return { skipped: true, id: existing.id };
         }
 
@@ -668,8 +700,9 @@ let syncInFlight = false;
 
 // ── Run sync for a given date ───────────────────────────────────────────────
 // Accepts optional pre-fetched doctors to avoid redundant API calls in range sync
-async function runSync(date, prefetched = null) {
-  if (!prefetched && syncInFlight) {
+async function runSync(date, prefetched = null, opts = {}) {
+  const force = !!opts.force;
+  if (!prefetched && !force && syncInFlight) {
     log("Sync", `Skipping ${date} — previous run still in progress`);
     return { date, skippedRun: true };
   }
@@ -725,7 +758,7 @@ async function runSync(date, prefetched = null) {
       // while this background sync drains its work.
       for (const appt of appointments) {
         try {
-          const value = await syncAppointment(appt, localName);
+          const value = await syncAppointment(appt, localName, { force });
           if (value?.skipped) {
             totalSkipped++;
           } else {
@@ -1098,3 +1131,96 @@ export function syncWalkingAppointments() {
 }
 
 export const syncTodayWalkingAppointments = syncWalkingAppointments;
+
+// Hard resync — bypasses fast-path skip so every appointment is re-fetched +
+// re-enriched + status-updated from HealthRay. Triggered by the OPD UI.
+export function forceResyncDate(date) {
+  return runSync(date, null, { force: true });
+}
+
+// ── Lightweight status-only sync ────────────────────────────────────────────
+// Pulls the appointment list for a date from HealthRay and writes ONLY the
+// mapped status back to local appointments. Skips clinical-text fetch / AI
+// parse / lab sync — much cheaper than runSync — so it's safe to run on a
+// ~10s loop. When status flips to `completed` we also kick a documents fetch
+// so the prescription PDF lands in the same tick (and the row promotes to
+// `seen` once the PDF is on disk).
+let statusSyncInFlight = false;
+export async function syncAppointmentStatuses(date) {
+  if (statusSyncInFlight) return { date, skippedRun: true };
+  statusSyncInFlight = true;
+  const startTime = Date.now();
+  try {
+    const rayDoctors = await fetchDoctors();
+    const activeDoctors = rayDoctors.filter((doc) => !doc.is_deactivated);
+    const apptFetches = await Promise.allSettled(
+      activeDoctors.map((doc) => fetchAppointments(doc.id, date)),
+    );
+
+    let scanned = 0;
+    let updated = 0;
+    let rxFetched = 0;
+    for (const settled of apptFetches) {
+      if (settled.status === "rejected") continue;
+      const appts = settled.value || [];
+      for (const appt of appts) {
+        scanned++;
+        const healthrayId = String(appt.id);
+        const apptDate = toISTDate(appt.app_date_time);
+        const fileNo = appt.patient_case_id || null;
+        const newStatus = mapStatus(appt.status);
+        if (!newStatus) continue;
+        const existing = await findAppointment(healthrayId, fileNo, apptDate);
+        if (!existing) continue;
+
+        if (newStatus === "completed" && existing.patient_id) {
+          // First make sure the Rx PDF is present locally — pull it now if
+          // HealthRay has it but we don't, so we don't have to wait for the
+          // 5-min full sync to discover the prescription.
+          let hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
+          if (!hasRxPdf) {
+            await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+            rxFetched++;
+            hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
+          }
+          if (hasRxPdf) {
+            if (existing.status !== "seen" && existing.status !== "completed") {
+              await markAppointmentAsSeen(existing.id, "completed");
+              updated++;
+            }
+            continue;
+          }
+          // PDF still not here — keep the row at in_visit so the UI shows
+          // "checkout pending PDF" rather than prematurely flipping to seen.
+          if (existing.status !== "in_visit") {
+            await pool.query(
+              `UPDATE appointments SET status = 'in_visit', updated_at = NOW() WHERE id = $1`,
+              [existing.id],
+            );
+            updated++;
+          }
+          continue;
+        }
+
+        if (existing.status === newStatus) continue;
+        await pool.query(`UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`, [
+          existing.id,
+          newStatus,
+        ]);
+        updated++;
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    log(
+      "Status Sync",
+      `${date} in ${elapsed}s — scanned ${scanned}, updated ${updated}, rx-fetched ${rxFetched}`,
+    );
+    return { date, scanned, updated, rxFetched };
+  } catch (e) {
+    error("Status Sync", `Fatal: ${e.message}`);
+    throw e;
+  } finally {
+    statusSyncInFlight = false;
+  }
+}
