@@ -10,15 +10,6 @@ const { error } = createLogger("HealthRay Sync");
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const anthropic = ANTHROPIC_KEY ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : null;
 
-// ── Extract all filled text from clinical notes API response ────────────────
-// Handles both formats:
-//   1. medical_clinical_notes: categories → topics.selected[]
-//   2. get_previous_appt_data: menus[] → categories → topics[] (flat array)
-// For visits with no structured prescription, the doctor often writes the
-// full plan (diagnoses + TREATMENT + PREVIOUS MEDICATION + labs) as free
-// text on a single topic. That text may live under dynamic_answers[].answer
-// OR on sibling fields like details / description / note / value, and
-// sometimes on nested diagnoses[]/items[] arrays. Capture all of them.
 const TEXT_FIELDS = [
   "answer",
   "details",
@@ -79,11 +70,6 @@ export function extractClinicalText(clinicalData) {
   return sections;
 }
 
-// ── Extract vitals from Healthray `answers[]` (structured vital_sign rows) ──
-// The medical_clinical_notes payload carries a deterministic `answers[]` array
-// with form_type:"vital_sign" entries — no AI needed. Walks arbitrarily nested
-// shapes (answers at the top, inside categories, topics, or selected entries)
-// and pulls every vital sign it finds. Returns null if nothing extracted.
 export function extractVitalsFromAnswers(clinicalData) {
   const out = {};
   const safeParse = (s) => {
@@ -236,9 +222,6 @@ export function repairAndParseJSON(raw) {
   return null;
 }
 
-// ── Shared clinical-extraction prompt ───────────────────────────────────────
-// Used by BOTH the HealthRay clinical-text parser AND the OPD prescription
-// image/PDF extractor so both flows produce the same unified schema.
 export const CLINICAL_EXTRACTION_PROMPT = `Parse this clinical note into structured JSON. Extract ONLY data present in the text.
 
 Return JSON with these keys:
@@ -420,12 +403,7 @@ STRICT Rules:
 - CRITICAL — all dates in these notes are in DD/MM/YYYY format (Indian standard). "06/04/2026" means April 6 2026 → output as 2026-04-06. NEVER interpret as MM/DD/YYYY.
 - Return ONLY valid JSON, no markdown`;
 
-// ── Use Claude to parse clinical text into structured data ──────────────────
-// Reuses the full CLINICAL_EXTRACTION_PROMPT ruleset as the single source of
-// truth, then layers on:
-//   1. Strict structured-output overrides — the schema does not allow null,
-//      so swap the "set to null" instructions to "" / [] / 0.
-//   2. A required `conclusion` field with rules for how to write it.
+
 export const PRESCRIPTION_EXTRACTION_PROMPT = `
 STRUCTURED-OUTPUT OVERRIDES (these supersede any "set to null" instruction above — the response schema is strict and does not allow null):
 STRICT Rules:
@@ -670,61 +648,22 @@ export const PrescriptionSchema = z.object({
 });
 
 export async function parsePrescriptionWithAi(rawText) {
-  if (!anthropic) throw new Error("ANTHROPIC_API_KEY not configured");
-  if (!rawText || rawText.trim().length < 1) throw new Error("rawText is empty");
+  if (!anthropic) return null;
+  if (!rawText || rawText.trim().length < 10) return null;
 
   try {
     const response = await anthropic.messages.parse({
       model: "claude-haiku-4-5",
-      max_tokens: 8000,
+      max_tokens: 12000,
       temperature: 0,
       system: PRESCRIPTION_EXTRACTION_PROMPT,
       messages: [{ role: "user", content: rawText }],
       output_config: { format: zodOutputFormat(PrescriptionSchema) },
     });
 
-    const raw = (response.content || []).map((c) => (c.type === "text" ? c.text : "")).join("");
-    return { raw, parsed: response.parsed_output ?? null };
+    return response.parsed_output ?? null;
   } catch (e) {
     error("Parser", "messages.parse failed:", e?.message || e);
-    throw e;
-  }
-}
-
-export async function parseClinicalWithAI(rawText) {
-  if (!ANTHROPIC_KEY || !rawText || rawText.trim().length < 10) return null;
-
-  const prompt = CLINICAL_EXTRACTION_PROMPT;
-
-  try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 24000,
-        temperature: 0,
-        messages: [{ role: "user", content: rawText }],
-        system: prompt,
-      }),
-    });
-
-    if (!resp.ok) {
-      error("Parser", `Claude API error: ${resp.status}`);
-      return null;
-    }
-
-    const data = await resp.json();
-    const text = (data.content || []).map((c) => c.text || "").join("");
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    return repairAndParseJSON(jsonMatch[0]);
-  } catch (e) {
-    error("Parser", "Parse error:", e.message);
     return null;
   }
 }

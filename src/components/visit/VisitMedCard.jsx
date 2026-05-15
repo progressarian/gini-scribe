@@ -3,11 +3,6 @@ import { MED_COLORS } from "./helpers";
 import { TIME_SLOTS, printMedCard, getTimeSlots } from "./medCardPrint";
 import { formatWhenToTake } from "../../config/medicationTimings";
 import { cleanNote } from "../../utils/cleanNote";
-import {
-  detectMedCategory,
-  getCategoryLabel,
-  getCategoryIcon,
-} from "../../server-utils/medicationCategories";
 
 // Groups pre-indexed meds by time slot without overwriting _idx
 function groupBySlot(meds) {
@@ -24,10 +19,6 @@ function groupBySlot(meds) {
 }
 
 function MedRow({ m }) {
-  const catId = detectMedCategory(m);
-  const catLabel = getCategoryLabel(catId);
-  const catIcon = getCategoryIcon(catId);
-
   return (
     <div className="mtr" style={{ marginTop: 5 }}>
       <div className="mmain">
@@ -50,9 +41,6 @@ function MedRow({ m }) {
         })()}
       </div>
       <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
-      <div className="mtd">
-        {catIcon} {catLabel}
-      </div>
     </div>
   );
 }

@@ -1,15 +1,26 @@
 import { MED_COLORS } from "./helpers";
 import {
-  detectMedCategory,
-  getCategoryLabel,
-  getCategoryIcon,
-} from "../../server-utils/medicationCategories";
-import {
   TIME_SLOTS,
   getTimeSlots,
   getTimeSlot,
   formatWhenToTake,
 } from "../../config/medicationTimings";
+
+// Mirror of the slot color tokens used by VisitMedCard's CSS variables so the
+// printed window (which doesn't inherit the app's CSS) shows the same chips.
+const SLOT_COLORS = {
+  fasting: { fg: "#0ea5e9", bg: "#f0f9ff", border: false },
+  before_breakfast: { fg: "#4466f5", bg: "#eef1fe", border: false },
+  after_breakfast: { fg: "#f59e0b", bg: "#fffbeb", border: false },
+  before_lunch: { fg: "#6b7280", bg: "#eef0f6", border: true },
+  after_lunch: { fg: "#12b981", bg: "#edfaf5", border: false },
+  before_dinner: { fg: "#6b7280", bg: "#eef0f6", border: true },
+  after_dinner: { fg: "#6b7280", bg: "#eef0f6", border: true },
+  at_bedtime: { fg: "#8b5cf6", bg: "#f5f3ff", border: false },
+  with_milk: { fg: "#4466f5", bg: "#eef1fe", border: false },
+  sos_only: { fg: "#f59e0b", bg: "#fffbeb", border: false },
+  any_time: { fg: "#6b7280", bg: "#eef0f6", border: true },
+};
 
 export { TIME_SLOTS, getTimeSlots, getTimeSlot };
 
@@ -31,6 +42,7 @@ export function groupMedsBySlot(activeMeds) {
 }
 
 export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMeds) {
+  // Strip child/support meds so the printed card matches the in-app view.
   activeMeds = (activeMeds || []).filter((m) => !m?.parent_medication_id);
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
@@ -38,82 +50,53 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
     year: "numeric",
   });
 
-  const slotColors = {
-    fasting: { color: "#0e7490", bg: "#ecfeff" },
-    before_breakfast: { color: "#009e8c", bg: "#e6f6f4" },
-    after_breakfast: { color: "#d97a0a", bg: "#fef6e6" },
-    before_lunch: { color: "#6b7d90", bg: "#f0f4f7" },
-    after_lunch: { color: "#16a34a", bg: "#f0fdf4" },
-    before_dinner: { color: "#6b7d90", bg: "#f0f4f7" },
-    after_dinner: { color: "#6b7d90", bg: "#f0f4f7" },
-    bedtime: { color: "#7c3aed", bg: "#f5f3ff" },
-    weekly: { color: "#7c3aed", bg: "#f5f3ff" },
-    anytime: { color: "#6b7d90", bg: "#f0f4f7" },
+  // Re-derive groupings from activeMeds so callers that pass `null` for the
+  // slot args (or stale ones) still get the correct layout. Index assignment
+  // mirrors VisitMedCard's `indexedMeds` so the colored dot per medicine
+  // matches between the screen and the print.
+  const indexed = activeMeds.map((m, i) => ({ ...m, _idx: i }));
+  const reGrouped = {};
+  indexed.forEach((m) => {
+    getTimeSlots(m).forEach((slotKey) => {
+      (reGrouped[slotKey] ||= []).push(m);
+    });
+  });
+  const orderedSlots = TIME_SLOTS.filter((s) => reGrouped[s.key]?.length > 0);
+
+  const renderMedRow = (m) => {
+    const dotColor = MED_COLORS[m._idx % MED_COLORS.length];
+    const wt = formatWhenToTake(m.when_to_take);
+    const timingTail = wt || m.timing || "";
+    const composition = m.composition || (m.notes ? String(m.notes).trim() : "");
+    return `
+      <div style="display:grid;grid-template-columns:1.6fr .7fr 1.1fr 1fr;gap:10px;align-items:center;padding:6px 4px;border-bottom:1px solid #eef1f5">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          <span style="flex:0 0 auto;display:inline-block;width:10px;height:10px;border-radius:50%;background:${dotColor}"></span>
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:600;color:#1a2332;line-height:1.3">${m.name || ""}</div>
+            ${composition ? `<div style="font-size:10px;color:#6b7280;line-height:1.3">${composition}</div>` : ""}
+          </div>
+        </div>
+        <div style="font-size:12px;color:#1a2332">${m.dose || "1 tablet"}</div>
+        <div style="font-size:12px;color:#1a2332">${m.frequency || "OD"}${timingTail ? ` · ${timingTail}` : ""}</div>
+        <div style="font-size:11px;color:#374151">${m.indication ? `<span style="display:inline-block;background:#eef1fe;color:#4466f5;font-weight:600;padding:2px 8px;border-radius:999px">${m.indication}</span>` : ""}</div>
+      </div>`;
   };
 
   let medsHTML = "";
 
-  if (slotsWithMeds.length > 0) {
-    for (const slot of slotsWithMeds) {
-      const sc = slotColors[slot.key] || slotColors.anytime;
-      medsHTML += `<div style="margin-bottom:16px">`;
-      medsHTML += `<div style="font-size:11px;font-weight:700;color:${sc.color};text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:${sc.bg};border-radius:6px;display:inline-block">${slot.emoji} ${slot.label}</div>`;
-      medsHTML += `<table style="width:100%;border-collapse:collapse;margin-top:4px">`;
-      medsHTML += `<thead><tr style="background:#f8fafc">
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Medicine</th>
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Dose</th>
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Frequency / Timing</th>
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Category</th>
-      </tr></thead><tbody>`;
-      for (const m of grouped[slot.key]) {
-        const dotColor = MED_COLORS[m._idx % MED_COLORS.length];
-        const catId = detectMedCategory(m);
-        const catLabel = getCategoryLabel(catId);
-        const catIcon = getCategoryIcon(catId);
-        medsHTML += `<tr style="border-bottom:1px solid #eef1f5">
-          <td style="padding:7px 10px;font-size:12px">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};margin-right:6px;vertical-align:middle"></span>
-            <strong>${m.name}</strong>${m.composition ? `<br><span style="font-size:10px;color:#6b7d90;margin-left:14px">${m.composition}</span>` : ""}
-          </td>
-          <td style="padding:7px 10px;font-size:12px">${m.dose || "1 tablet"}</td>
-          <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${(() => {
-            const d = formatWhenToTake(m.when_to_take) || m.timing || "";
-            return d ? ` · ${d}` : "";
-          })()}</td>
-          <td style="padding:7px 10px;font-size:11px;color:#3d4f63;white-space:nowrap">${catIcon} ${catLabel}</td>
-        </tr>`;
-      }
-      medsHTML += `</tbody></table></div>`;
-    }
-  } else if (activeMeds.length > 0) {
-    medsHTML += `<table style="width:100%;border-collapse:collapse">`;
-    medsHTML += `<thead><tr style="background:#f8fafc">
-      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Medicine</th>
-      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Dose</th>
-      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Frequency / Timing</th>
-      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:700;color:#6b7d90;border-bottom:1px solid #dde3ea">Category</th>
-    </tr></thead><tbody>`;
-    activeMeds.forEach((m, i) => {
-      const dotColor = MED_COLORS[i % MED_COLORS.length];
-      const catId = detectMedCategory(m);
-      const catLabel = getCategoryLabel(catId);
-      const catIcon = getCategoryIcon(catId);
-      medsHTML += `<tr style="border-bottom:1px solid #eef1f5">
-        <td style="padding:7px 10px;font-size:12px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};margin-right:6px;vertical-align:middle"></span>
-          <strong>${m.name}</strong>${m.composition ? `<br><span style="font-size:10px;color:#6b7d90;margin-left:14px">${m.composition}</span>` : ""}
-        </td>
-        <td style="padding:7px 10px;font-size:12px">${m.dose || ""}</td>
-        <td style="padding:7px 10px;font-size:12px">${m.frequency || "OD"}${(() => {
-          const d = formatWhenToTake(m.when_to_take) || m.timing || "";
-          return d ? ` · ${d}` : "";
-        })()}</td>
-        <td style="padding:7px 10px;font-size:11px;color:#3d4f63;white-space:nowrap">${catIcon} ${catLabel}</td>
-      </tr>`;
+  if (orderedSlots.length > 0) {
+    orderedSlots.forEach((slot) => {
+      const sc = SLOT_COLORS[slot.key] || { fg: "#6b7280", bg: "#eef0f6", border: true };
+      medsHTML += `<div style="margin-bottom:12px">
+        <div style="display:inline-block;font-size:10px;font-weight:700;color:${sc.fg};background:${sc.bg};text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;border-radius:6px${sc.border ? ";border:1px solid #e4e9f2" : ""}">${slot.emoji} ${slot.label}</div>
+        ${reGrouped[slot.key].map(renderMedRow).join("")}
+      </div>`;
     });
-    medsHTML += `</tbody></table>`;
+  } else if (indexed.length > 0) {
+    medsHTML = indexed.map(renderMedRow).join("");
   } else {
-    medsHTML = `<p style="text-align:center;color:#6b7d90;padding:20px">No active medications</p>`;
+    medsHTML = `<div style="text-align:center;color:#6b7280;padding:20px;font-size:13px">No active medications</div>`;
   }
 
   return `<!DOCTYPE html>

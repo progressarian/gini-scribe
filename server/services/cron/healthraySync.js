@@ -9,7 +9,7 @@ import {
 } from "../healthray/client.js";
 import {
   extractClinicalText,
-  parseClinicalWithAI,
+  parsePrescriptionWithAi,
   extractVitalsFromAnswers,
 } from "../healthray/parser.js";
 import {
@@ -439,6 +439,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     healthrayAdvice: null,
     healthrayInvestigations: [],
     healthrayFollowUp: null,
+    healthrayFollowUpWith: null,
   };
 
   if (doctorId) {
@@ -500,11 +501,11 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         }
 
         // Parse with AI
-        const parsed = await parseClinicalWithAI(rawText);
+        const parsed = await parsePrescriptionWithAi(rawText);
         clinical.clinicalRaw = rawText;
 
         // Guard against a flaky re-parse silently wiping prior good data.
-        // parseClinicalWithAI returns null on any hard failure (API error,
+        // parsePrescriptionWithAi returns null on any hard failure (API error,
         // missing JSON in response, repair failure). We also treat a non-null
         // parse that yields zero diagnoses + zero medications + zero
         // previous-medications for a substantive clinical text as a parse
@@ -540,6 +541,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           clinical.healthrayAdvice = parsed.advice || null;
           clinical.healthrayInvestigations = parsed.investigations_to_order || [];
           clinical.healthrayFollowUp = parsed.follow_up || null;
+          clinical.healthrayFollowUpWith = parsed.follow_up_with || null;
 
           // Merge prescription-parsed BP / waist / bodyFat, but ONLY from the
           // vitals entry whose date matches apptDate. Weight / height / BMI
@@ -632,6 +634,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     healthrayAdvice: clinical.healthrayAdvice,
     healthrayInvestigations: clinical.healthrayInvestigations,
     healthrayFollowUp: clinical.healthrayFollowUp,
+    healthrayFollowUpWith: clinical.healthrayFollowUpWith,
   });
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
@@ -899,7 +902,7 @@ export async function runDailyOpdBackfill(dateStr) {
         }
         const appt = rows[0];
 
-        const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+        const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
         if (!parsed) {
           errors++;
           done++;

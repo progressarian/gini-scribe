@@ -9,7 +9,7 @@ import { sanitizeForStorageKey } from "./documents.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { computeCarePhase, deriveBiomarkerPriorityStatus } from "../utils/carePhase.js";
 import { LAB_MAP } from "./opd.js";
-import { parseClinicalWithAI } from "../services/healthray/parser.js";
+import { parsePrescriptionWithAi } from "../services/healthray/parser.js";
 import { buildPrescriptionPdf } from "../services/prescriptionPdf.js";
 import {
   generatePrescriptionPdf,
@@ -2774,7 +2774,7 @@ router.post("/visit/:patientId/parse-text", async (req, res) => {
   if (!text?.trim() || text.trim().length < 20)
     return res.status(400).json({ error: "Text is too short to parse" });
   try {
-    const parsed = await parseClinicalWithAI(text);
+    const parsed = await parsePrescriptionWithAi(text);
     res.json(parsed || {});
   } catch (e) {
     handleError(res, e, "Parse clinical text");

@@ -436,6 +436,7 @@ export async function upsertAppointment(existingId, data) {
     healthrayInvestigations,
     healthrayFollowUp,
     healthrayPreviousMedications,
+    healthrayFollowUpWith,
   } = data;
 
   if (existingId) {
@@ -459,6 +460,7 @@ export async function upsertAppointment(existingId, data) {
         healthray_advice = $8, status = COALESCE($9, status),
         healthray_investigations = $22::jsonb, healthray_follow_up = $23::jsonb,
         healthray_previous_medications = $24::jsonb,
+        follow_up_with = COALESCE($25, follow_up_with),
         updated_at = NOW()
        WHERE id = $1 RETURNING id`,
       [
@@ -486,6 +488,7 @@ export async function upsertAppointment(existingId, data) {
         JSON.stringify(healthrayInvestigations || []),
         healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
         JSON.stringify(healthrayPreviousMedications || []),
+        healthrayFollowUpWith || null,
       ],
     );
     return rows[0].id;
@@ -498,8 +501,8 @@ export async function upsertAppointment(existingId, data) {
         age, sex, notes, healthray_id, opd_vitals, biomarkers, compliance,
         healthray_clinical_notes, healthray_diagnoses, healthray_medications,
         healthray_labs, healthray_advice, healthray_investigations, healthray_follow_up,
-        healthray_previous_medications)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb)
+        healthray_previous_medications, follow_up_with)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26)
      RETURNING id`,
     [
       patientId,
@@ -527,6 +530,7 @@ export async function upsertAppointment(existingId, data) {
       JSON.stringify(healthrayInvestigations || []),
       healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
       JSON.stringify(healthrayPreviousMedications || []),
+      healthrayFollowUpWith || null,
     ],
   );
   return rows[0].id;

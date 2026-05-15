@@ -22,7 +22,7 @@ import { labLogin } from "../services/lab/labHealthrayApi.js";
 import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reader.js";
 import { syncFromSheets } from "../services/cron/sheetsSync.js";
 import pool from "../config/db.js";
-import { parseClinicalWithAI } from "../services/healthray/parser.js";
+import { parsePrescriptionWithAi } from "../services/healthray/parser.js";
 import {
   syncDiagnoses,
   syncLabResults,
@@ -80,7 +80,7 @@ router.post("/sync/patient/:fileNo/resync", async (req, res) => {
       errors = 0;
     for (const appt of appts) {
       try {
-        const result = await parseClinicalWithAI(appt.healthray_clinical_notes);
+        const result = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
         if (!result) {
           errors++;
           continue;
@@ -459,7 +459,7 @@ router.post("/sync/backfill/labs/:appointmentId", async (req, res) => {
     // Force re-parse if ?force=true or labs JSONB is empty
     const forceReparse = req.query.force === "true" || req.body?.force === true;
     if ((labs.length === 0 || forceReparse) && appt.healthray_clinical_notes) {
-      const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+      const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
       if (parsed?.labs?.length) {
         labs = parsed.labs;
         await pool.query(
@@ -609,7 +609,7 @@ router.post("/sync/patient/:fileNo/note", async (req, res) => {
     );
 
     // Parse
-    const parsed = await parseClinicalWithAI(notes.trim());
+    const parsed = await parsePrescriptionWithAi(notes.trim());
     if (!parsed) return res.status(422).json({ error: "AI parsing failed" });
 
     const medications = parsed.medications || [];
@@ -1216,7 +1216,7 @@ router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => 
       });
     }
 
-    const parsed = await parseClinicalWithAI(notes);
+    const parsed = await parsePrescriptionWithAi(notes);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
 
     const investigations = (parsed.investigations_to_order || []).map((t) =>
@@ -1273,7 +1273,7 @@ router.post("/sync/backfill/diagnoses/:appointmentId", async (req, res) => {
       });
     }
 
-    const parsed = await parseClinicalWithAI(notes);
+    const parsed = await parsePrescriptionWithAi(notes);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
 
     const diagnoses = parsed.diagnoses || [];
@@ -1334,7 +1334,7 @@ router.post("/sync/backfill/medicines/:appointmentId", async (req, res) => {
       });
     }
 
-    const parsed = await parseClinicalWithAI(notes);
+    const parsed = await parsePrescriptionWithAi(notes);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
 
     const medications = parsed.medications || [];
@@ -1457,7 +1457,7 @@ router.post("/sync/backfill/medicines/opd/:date?", async (req, res) => {
           }
 
           const appt = rows[0];
-          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
 
           if (!parsed) {
             opdBackfillStatus.results.push({
@@ -1605,7 +1605,7 @@ router.post("/sync/backfill/diagnoses/opd/:date?", async (req, res) => {
           }
 
           const appt = rows[0];
-          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
 
           if (!parsed) {
             opdDxBackfillStatus.results.push({
@@ -1699,7 +1699,7 @@ router.post("/sync/backfill/medicines/date/:date?", async (req, res) => {
         totalMeds = 0;
       for (const appt of rows) {
         try {
-          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
 
           if (!parsed) {
             errors++;
@@ -1844,7 +1844,7 @@ router.post("/sync/resync-opd/:date?", async (req, res) => {
       }
 
       const appt = rows[0];
-      const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+      const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
 
       if (!parsed) {
         done++;
@@ -3654,7 +3654,7 @@ router.post("/sync/audit/fix-empty-jsonb", async (req, res) => {
     (async () => {
       for (const appt of appts) {
         try {
-          const parsed = await parseClinicalWithAI(appt.healthray_clinical_notes);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
           if (!parsed) {
             fixEmptyJsonbStatus.errors++;
             fixEmptyJsonbStatus.done++;

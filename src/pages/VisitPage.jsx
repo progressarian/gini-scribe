@@ -1135,6 +1135,7 @@ export default function VisitPage() {
     // collided on name dedup.
     const activeOnly = (data.activeMeds || []).filter((m) => {
       if (m.is_active === false) return false;
+      if (m.visit_status === "previous") return false;
       if (typeof m.id === "string" && m.id.startsWith("genie:")) return false;
       if (m.source === "manual" && !m.consultation_id) return false;
       return true;
@@ -1290,13 +1291,17 @@ export default function VisitPage() {
   }, [visitPayload, dbPatientId, data, resolveVisitSummaryText, printingRx]);
   const handlePrintMedCard = useCallback(() => {
     const patient = data?.patient;
-    const activeMeds = derived?.uniqueActiveMeds || [];
+    const activeMeds = (derived?.uniqueActiveMeds || []).filter(
+      (m) => m.visit_status !== "previous",
+    );
     if (!patient) return;
     printMedCard(patient, activeMeds);
   }, [data, derived]);
   const handlePrintBoth = useCallback(() => {
     const patient = data?.patient;
-    const activeMeds = derived?.uniqueActiveMeds || [];
+    const activeMeds = (derived?.uniqueActiveMeds || []).filter(
+      (m) => m.visit_status !== "previous",
+    );
     if (patient) printMedCard(patient, activeMeds, 700);
     handlePrint();
   }, [data, derived, handlePrint]);

@@ -302,6 +302,9 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-med-sub .rx-med-arrow{color:var(--ink3);margin-right:6px;font-size:13px}
 .rx-sub-badge{font-size:9px;background:#eef2ff;color:#4338ca;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
 .rx-cat-badge{font-size:9px;background:#f1f5f9;color:#475569;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:10px;border:1px solid #e2e8f0}
+.rx-med-group-header{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8fafc;border-bottom:1px solid var(--bd)}
+.rx-med-group-label{font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em}
+.rx-med-group-count{font-size:10px;color:var(--ink3)}
 .rx-sub-cond{font-size:10px;color:var(--ink3);margin-top:1px;font-style:italic}
 
 .rx-ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -920,8 +923,6 @@ function buildPrescriptionHtml(data = {}) {
     const indication = Array.isArray(m.for_diagnosis)
       ? m.for_diagnosis.join(", ")
       : m.for_diagnosis || m.indication || m.purpose || "";
-    const catId = detectMedCategory(m);
-    const catBadge = `<span class="rx-cat-badge">${getCategoryIcon(catId)} ${escape(getCategoryLabel(catId))}</span>`;
     const childrenHtml = (ownChildrenByParent[m.id] || [])
       .map((c) => renderChildMed(c, primary || ""))
       .join("");
@@ -929,7 +930,7 @@ function buildPrescriptionHtml(data = {}) {
         <div class="rx-med" ${rowStyle}>
           <div class="rx-med-num">${num}.</div>
           <div class="rx-med-body">
-            <div class="rx-med-name">${escape(primary || "")} ${tag}${catBadge}</div>
+            <div class="rx-med-name">${escape(primary || "")} ${tag}</div>
             ${indication ? `<div class="rx-med-brand">${escape(indication)}</div>` : ""}
           </div>
           <div class="rx-med-right">
@@ -939,17 +940,28 @@ function buildPrescriptionHtml(data = {}) {
         </div>${childrenHtml}`;
   };
 
-  // Meds sorted by category rank order, rendered as a flat numbered list.
-  // Category is shown as an inline badge on each row instead of a section header.
+  // Meds sorted by category rank, rendered under one section header per
+  // non-empty category — mirrors the in-app medications view so the printed
+  // Rx visually groups the same way the doctor saw it on screen.
   const ownByCategory = groupMedicationsByCategory(ownParents);
   let medCounter = 0;
   const ownMedsHtml = MED_CATEGORIES.filter(
     (c) => c.id !== "external" && (ownByCategory[c.id] || []).length > 0,
   )
-    .flatMap((cat) => ownByCategory[cat.id])
-    .map((m) => {
-      medCounter += 1;
-      return renderOwnMedRow(m, medCounter);
+    .map((cat, idx) => {
+      const meds = ownByCategory[cat.id];
+      const header = `
+        <div class="rx-med-group-header" style="margin-top:${idx === 0 ? 0 : 8}px">
+          <span class="rx-med-group-label">${cat.icon} ${escape(cat.label)}</span>
+          <span class="rx-med-group-count">(${meds.length})</span>
+        </div>`;
+      const rows = meds
+        .map((m) => {
+          medCounter += 1;
+          return renderOwnMedRow(m, medCounter);
+        })
+        .join("");
+      return header + rows;
     })
     .join("");
 

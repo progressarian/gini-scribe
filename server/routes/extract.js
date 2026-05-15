@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { parseClinicalWithAI, parsePrescriptionWithAi } from "../services/healthray/parser.js";
+import { parsePrescriptionWithAi } from "../services/healthray/parser.js";
 
 const router = Router();
 
@@ -13,7 +13,6 @@ router.post("/extract", async (req, res) => {
     }
 
     const result = await parsePrescriptionWithAi(text);
-    // const res2 = await parseClinicalWithAI(text);
     if (!result) {
       return res.status(502).json({ ok: false, error: "parsePrescriptionWithAi returned null" });
     }
