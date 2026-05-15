@@ -932,6 +932,19 @@ const VisitMedications = memo(function VisitMedications({
                                 {m.clinical_note}
                               </span>
                             )}
+                            {m.instructions && (
+                              <span
+                                style={{
+                                  display: "block",
+                                  marginTop: 2,
+                                  color: "#9A3412",
+                                  fontWeight: 500,
+                                }}
+                                title="Administration instructions"
+                              >
+                                ⓘ {m.instructions}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

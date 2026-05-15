@@ -1619,12 +1619,6 @@ export default function TriageView({
               label="Assigned"
               valColor={counts.assigned ? GN : INK3}
             />
-            <Stat
-              compact={isMobile}
-              val={counts.unassigned}
-              label="Unassigned"
-              valColor={counts.unassigned ? AM : INK3}
-            />
           </div>
 
           {/* Workflow row — live appointment status counts (mirrors /opd top bar). */}

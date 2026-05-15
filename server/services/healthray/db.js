@@ -1099,6 +1099,10 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     const sideEffectsJson = Array.isArray(med.common_side_effects)
       ? JSON.stringify(med.common_side_effects.slice(0, 3))
       : null;
+    const instructions =
+      typeof med.instructions === "string" && med.instructions.trim()
+        ? med.instructions.trim()
+        : null;
     const params = [
       patientId,
       storedName,
@@ -1113,6 +1117,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       sideEffectsJson,
       normalizeWhenToTake(med.when_to_take),
       daysOfWeek,
+      instructions,
     ];
 
     // Step 1: reactivate any existing inactive row with the same name first.
@@ -1137,6 +1142,9 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       apptDate || null, // $9 — date this prescription was issued
       normalizeWhenToTake(med.when_to_take), // $10
       daysOfWeek, // $11 — int[] (0..6) weekday(s) for weekly meds, or null
+      typeof med.instructions === "string" && med.instructions.trim()
+        ? med.instructions.trim()
+        : null, // $12 — extra administration directive
     ];
     await pool
       .query(
@@ -1152,6 +1160,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
              last_prescribed_date = GREATEST(COALESCE(last_prescribed_date, $9::date), $9::date),
              notes = $8,
              days_of_week = COALESCE($11::int[], days_of_week),
+             instructions = COALESCE($12::text, instructions),
              stopped_date = NULL,
              stop_reason = NULL,
              consultation_id = NULL,
@@ -1179,8 +1188,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     await pool
       .query(
         `INSERT INTO medications
-         (patient_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, is_active, started_date, notes, last_prescribed_date, source, common_side_effects, days_of_week)
-         VALUES ($1, $2, $3, $4, $5, $6, $12::when_to_take_pill[], $7, true, $8, $9, $10, 'healthray', COALESCE($11::jsonb, '[]'::jsonb), $13::int[])
+         (patient_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, is_active, started_date, notes, last_prescribed_date, source, common_side_effects, days_of_week, instructions)
+         VALUES ($1, $2, $3, $4, $5, $6, $12::when_to_take_pill[], $7, true, $8, $9, $10, 'healthray', COALESCE($11::jsonb, '[]'::jsonb), $13::int[], $14::text)
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
@@ -1193,6 +1202,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            notes = EXCLUDED.notes,
            pharmacy_match = EXCLUDED.pharmacy_match,
            days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
+           instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
            common_side_effects = CASE
              WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
                THEN EXCLUDED.common_side_effects

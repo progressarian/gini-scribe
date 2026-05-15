@@ -1240,6 +1240,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       parent_medication_id,
       support_condition,
       days_of_week,
+      instructions,
     } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
 
@@ -1307,8 +1308,8 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const visitAnchor = anchorRes.rows[0]?.anchor || null;
 
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],NOW())
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, instructions, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],$22::text,NOW())
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1329,6 +1330,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          support_condition = COALESCE(EXCLUDED.support_condition, medications.support_condition),
          last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
          days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
+         instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
          updated_at = NOW()
        RETURNING *`,
       [
@@ -1353,6 +1355,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         visitAnchor,
         finalDays,
         normalizeWhenToTake(when_to_take),
+        typeof instructions === "string" && instructions.trim() ? instructions.trim() : null,
       ],
     );
     await markMedicationVisitStatus(pid).catch((e) =>
@@ -1407,6 +1410,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       started_date,
       side_effects,
       days_of_week,
+      instructions,
     } = req.body;
 
     // Load existing row so we can snapshot the pre-edit state into history
@@ -1498,6 +1502,12 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const setStartedDate = started_date !== undefined;
     const setSideEffects = side_effects !== undefined;
     const setDaysOfWeek = days_of_week !== undefined;
+    const setInstructions = instructions !== undefined;
+    const nextInstructions = setInstructions
+      ? typeof instructions === "string" && instructions.trim()
+        ? instructions.trim()
+        : null
+      : null;
     // Normalise to int[] (0=Sun … 6=Sat) or null. Anything outside that
     // range is dropped so we don't poison the column with bad values.
     const nextDaysOfWeek = setDaysOfWeek
@@ -1540,6 +1550,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
          started_date    = CASE WHEN $28::boolean THEN $29::date ELSE started_date END,
          side_effects    = CASE WHEN $30::boolean THEN $31 ELSE side_effects END,
          days_of_week    = CASE WHEN $32::boolean THEN $33::int[] ELSE days_of_week END,
+         instructions    = CASE WHEN $35::boolean THEN $36::text ELSE instructions END,
          updated_at = NOW()
        WHERE id = $6 AND patient_id = $7 AND is_active = true RETURNING *`,
       [
@@ -1577,6 +1588,8 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
         setDaysOfWeek,
         nextDaysOfWeek,
         nextWhenToTake,
+        setInstructions,
+        nextInstructions,
       ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
@@ -2889,8 +2902,8 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
       const enriched = enrichMedWithDays(m, n(m.started_date) || n(doc_date));
       await pool.query(
         `INSERT INTO medications
-           (patient_id, name, dose, frequency, timing, when_to_take, route, is_active, started_date, source, last_prescribed_date, days_of_week, created_at)
-         VALUES ($1,$2,$3,$4,$5,$9::when_to_take_pill[],$6,true,COALESCE($7::date, CURRENT_DATE),'visit',COALESCE($8::date, CURRENT_DATE),$10::int[],NOW())
+           (patient_id, name, dose, frequency, timing, when_to_take, route, is_active, started_date, source, last_prescribed_date, days_of_week, instructions, created_at)
+         VALUES ($1,$2,$3,$4,$5,$9::when_to_take_pill[],$6,true,COALESCE($7::date, CURRENT_DATE),'visit',COALESCE($8::date, CURRENT_DATE),$10::int[],$11::text,NOW())
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
@@ -2900,6 +2913,7 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
            route = COALESCE(EXCLUDED.route, medications.route),
            last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
            days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
+           instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
            updated_at = NOW()`,
         [
           pid,
@@ -2913,6 +2927,9 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
           normalizeWhenToTake(m.when_to_take),
           Array.isArray(enriched.days_of_week) && enriched.days_of_week.length
             ? enriched.days_of_week
+            : null,
+          typeof m.instructions === "string" && m.instructions.trim()
+            ? m.instructions.trim()
             : null,
         ],
       );

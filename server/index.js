@@ -28,6 +28,7 @@ import pushTokenRoutes from "./routes/pushTokens.js";
 import healthLogRoutes from "./routes/health-logs.js";
 import visitRoutes from "./routes/visit.js";
 import syncRoutes from "./routes/sync.js";
+import extractRoutes from "./routes/extract.js";
 import summaryRoutes from "./routes/summary.js";
 import postVisitSummaryRoutes from "./routes/postVisitSummary.js";
 import dashboardRoutes from "./routes/dashboard.js";
@@ -86,6 +87,9 @@ app.use((req, res, next) => {
 
 // Sync routes (no auth — internal/admin)
 app.use("/api", syncRoutes);
+
+// Extraction route (no auth — internal/testing)
+app.use("/api", extractRoutes);
 
 // Auth middleware (attaches req.doctor if valid token, blocks unauthenticated on protected routes)
 app.use(authMiddleware);
