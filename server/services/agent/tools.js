@@ -302,12 +302,12 @@ export const AGENT_TOOLS = [
               timing: {
                 type: "string",
                 description:
-                  "Consultant free-text note (e.g. '30 min before food'). The canonical patient-facing field is `when_to_take` which uses the fixed vocabulary: Fasting, Before breakfast, After breakfast, Before lunch, After lunch, Before dinner, After dinner, At bedtime, With milk, SOS only, Any time.",
+                  "Consultant free-text note (e.g. '30 min before food'). The canonical patient-facing field is `when_to_take` which uses the fixed vocabulary: Fasting, Before breakfast, After breakfast, Before lunch, After lunch, Before dinner, After dinner, At bedtime, SOS only, Any time.",
               },
               when_to_take: {
                 type: "string",
                 description:
-                  "One or more comma-separated values from: Fasting, Before breakfast, After breakfast, Before lunch, After lunch, Before dinner, After dinner, At bedtime, With milk, SOS only, Any time.",
+                  "One or more comma-separated values from: Fasting, Before breakfast, After breakfast, Before lunch, After lunch, Before dinner, After dinner, At bedtime, SOS only, Any time.",
               },
               route: { type: "string" },
               for_diagnosis: { type: "string" },

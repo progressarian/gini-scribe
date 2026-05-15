@@ -14,7 +14,6 @@ const WHEN_TO_TAKE_PILLS = [
   "Before dinner",
   "After dinner",
   "At bedtime",
-  "With milk",
   "SOS only",
   "Any time",
 ];

@@ -76,6 +76,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
     ? String(medication.started_date).slice(0, 10)
     : "";
   const initialSideEffects = medication.side_effects || "";
+  const initialInstructions = medication.instructions || "";
 
   const [dose, setDose] = useState(initialDose);
   const [frequency, setFrequency] = useState(initialFrequency);
@@ -93,6 +94,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const [forDx, setForDx] = useState(initialForDx);
   const [startedDate, setStartedDate] = useState(initialStartedDate);
   const [sideEffects, setSideEffects] = useState(initialSideEffects);
+  const [instructions, setInstructions] = useState(initialInstructions);
   const [timingNote, setTimingNote] = useState(initialTimingNote);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
@@ -115,7 +117,10 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const toggleWeekday = (d) =>
     setWeekdays((ws) => (ws.includes(d) ? ws.filter((x) => x !== d) : [...ws, d]));
 
-  const supportsWeekday = frequency === "Once weekly" || frequency === "Once in 14 days";
+  const supportsWeekday =
+    frequency === "Once weekly" ||
+    frequency === "Once in 14 days" ||
+    frequency === "Once in 15 days";
   const showDrugClass = medGroup === "diabetes";
   const showExternalDoctor = medGroup === "external";
 
@@ -184,6 +189,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
         payload.started_date = startedDate || null;
       }
       if (sideEffects !== initialSideEffects) payload.side_effects = sideEffects || null;
+      if (instructions !== initialInstructions) payload.instructions = instructions || null;
 
       const initialParent = medication.parent_medication_id
         ? String(medication.parent_medication_id)
@@ -338,6 +344,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
               <option value="QID">Four times (QID)</option>
               <option value="Once weekly">Once weekly</option>
               <option value="Once in 14 days">Once in 14 days</option>
+              <option value="Once in 15 days">Once in 15 days</option>
               <option value="SOS">As needed (SOS)</option>
             </select>
           </div>
@@ -457,6 +464,18 @@ const EditMedicationModal = memo(function EditMedicationModal({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             disabled={loading}
+          />
+        </div>
+
+        <div className="mf">
+          <label className="ml">Instructions / Duration</label>
+          <input
+            className="mi"
+            placeholder="e.g. For 3 months, Until next visit"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            disabled={loading}
+            maxLength={500}
           />
         </div>
 

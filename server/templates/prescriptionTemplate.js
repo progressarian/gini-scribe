@@ -893,6 +893,7 @@ function buildPrescriptionHtml(data = {}) {
           <div class="rx-med-right">
             <div class="rx-med-dose">${escape(child.dose || child.dosage || child.frequency || "—")}</div>
             <div class="rx-med-timing">${escape(child.timing || "")}</div>
+            ${child.instructions ? `<div class="rx-med-timing">${escape(child.instructions)}</div>` : ""}
           </div>
         </div>`;
   };
@@ -936,6 +937,7 @@ function buildPrescriptionHtml(data = {}) {
           <div class="rx-med-right">
             <div class="rx-med-dose">${escape(m.dose || m.dosage || m.frequency || "—")}</div>
             <div class="rx-med-timing">${escape(m.timing || "")}</div>
+            ${m.instructions ? `<div class="rx-med-timing">${escape(m.instructions)}</div>` : ""}
           </div>
         </div>${childrenHtml}`;
   };
@@ -990,6 +992,7 @@ function buildPrescriptionHtml(data = {}) {
           <div class="rx-med-right">
             <div class="rx-med-dose">${escape(m.dose || m.dosage || m.frequency || "—")}</div>
             <div class="rx-med-timing">${escape(m.timing || "")}</div>
+            ${m.instructions ? `<div class="rx-med-timing">${escape(m.instructions)}</div>` : ""}
           </div>
         </div>${childrenHtml}`;
     })

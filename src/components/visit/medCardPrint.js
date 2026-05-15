@@ -17,7 +17,6 @@ const SLOT_COLORS = {
   before_dinner: { fg: "#6b7280", bg: "#eef0f6", border: true },
   after_dinner: { fg: "#6b7280", bg: "#eef0f6", border: true },
   at_bedtime: { fg: "#8b5cf6", bg: "#f5f3ff", border: false },
-  with_milk: { fg: "#4466f5", bg: "#eef1fe", border: false },
   sos_only: { fg: "#f59e0b", bg: "#fffbeb", border: false },
   any_time: { fg: "#6b7280", bg: "#eef0f6", border: true },
 };
@@ -78,7 +77,7 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
           </div>
         </div>
         <div style="font-size:12px;color:#1a2332">${m.dose || "1 tablet"}</div>
-        <div style="font-size:12px;color:#1a2332">${m.frequency || "OD"}${timingTail ? ` · ${timingTail}` : ""}</div>
+        <div style="font-size:12px;color:#1a2332">${m.frequency || "OD"}${timingTail ? ` · ${timingTail}` : ""}${m.instructions ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${m.instructions}</div>` : ""}</div>
         <div style="font-size:11px;color:#374151">${m.indication ? `<span style="display:inline-block;background:#eef1fe;color:#4466f5;font-weight:600;padding:2px 8px;border-radius:999px">${m.indication}</span>` : ""}</div>
       </div>`;
   };

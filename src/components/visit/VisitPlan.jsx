@@ -49,7 +49,7 @@ function buildRxHTML(
           const wt = formatWhenToTake(m.when_to_take);
           return `${m.frequency || "OD"}${wt ? ` \u00b7 ${wt}` : ""}${m.timing && m.timing !== wt ? ` (${m.timing})` : ""}`;
         })()}</td>
-        <td style="padding:7px 10px;font-size:12px">${m.duration || ""}</td>
+        <td style="padding:7px 10px;font-size:12px">${m.instructions || m.duration || ""}</td>
       </tr>`;
     });
     medsHTML += `</tbody></table>`;
@@ -228,7 +228,7 @@ const VisitPlan = memo(function VisitPlan({
   // FOLLOW UP WITH — free-text patient instructions for the next visit
   // (fasting / tests to bring / preparations). Inline editor with save +
   // delete; persists via onChangeFollowUpWith → PATCH /visit/:id/follow-up-with.
-  const followUpWith = latestCon?.follow_up_with || "";
+  const followUpWith = latestCon?.follow_up_with || apptPlan?.follow_up_with || "";
   const [fuwEditing, setFuwEditing] = useState(false);
   const [fuwDraft, setFuwDraft] = useState(followUpWith);
   const [fuwSaving, setFuwSaving] = useState(false);
@@ -797,6 +797,39 @@ const VisitPlan = memo(function VisitPlan({
               <button className="btn" onClick={() => setFuwEditing(true)}>
                 + Add follow-up instructions
               </button>
+            </div>
+          )}
+
+          <div className="subsec">Advice</div>
+          {apptPlan?.advice ? (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 14px",
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                borderRadius: 8,
+                fontSize: 13,
+                color: "#1e3a8a",
+                whiteSpace: "pre-line",
+              }}
+            >
+              {apptPlan.advice}
+            </div>
+          ) : (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 14px",
+                background: "#f9fafb",
+                border: "1px dashed #e5e7eb",
+                borderRadius: 8,
+                fontSize: 12,
+                color: "#9ca3af",
+                fontStyle: "italic",
+              }}
+            >
+              No advice from prescription
             </div>
           )}
 

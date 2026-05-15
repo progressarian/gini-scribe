@@ -76,6 +76,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
     external_doctor: "",
     clinical_note: "",
     notes: "",
+    instructions: "",
     parent_medication_id: parentMed?.id ? String(parentMed.id) : "",
     support_condition: "",
   });
@@ -122,7 +123,6 @@ const AddMedicationModal = memo(function AddMedicationModal({
         else if (/after lunch|with lunch/.test(dt)) pill = "After lunch";
         else if (/before dinner/.test(dt)) pill = "Before dinner";
         else if (/after dinner|with dinner/.test(dt)) pill = "After dinner";
-        else if (/with milk/.test(dt)) pill = "With milk";
         else if (/sos|prn|as needed/.test(dt)) pill = "SOS only";
         if (pill && WHEN_TO_TAKE_PILLS.includes(pill)) setTimings([pill]);
       }
@@ -152,7 +152,10 @@ const AddMedicationModal = memo(function AddMedicationModal({
   // Check if showing external doctor field
   const showExternalDoctor = form.med_group === "external";
 
-  const supportsWeekday = form.frequency === "Once weekly" || form.frequency === "Once in 14 days";
+  const supportsWeekday =
+    form.frequency === "Once weekly" ||
+    form.frequency === "Once in 14 days" ||
+    form.frequency === "Once in 15 days";
 
   const handleSubmit = async () => {
     if (loading) return;
@@ -336,6 +339,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
               <option value="TDS">Three times (TDS)</option>
               <option value="Once weekly">Once weekly</option>
               <option value="Once in 14 days">Once in 14 days</option>
+              <option value="Once in 15 days">Once in 15 days</option>
               <option value="SOS">As needed (SOS)</option>
             </select>
           </div>
@@ -442,6 +446,17 @@ const AddMedicationModal = memo(function AddMedicationModal({
             placeholder="e.g. 30 min before breakfast, with food"
             value={form.notes}
             onChange={(e) => set("notes", e.target.value)}
+          />
+        </div>
+
+        <div className="mf">
+          <label className="ml">Instructions / Duration</label>
+          <input
+            className="mi"
+            placeholder="e.g. For 3 months, Until next visit"
+            value={form.instructions}
+            onChange={(e) => set("instructions", e.target.value)}
+            maxLength={500}
           />
         </div>
 

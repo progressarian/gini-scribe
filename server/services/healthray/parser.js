@@ -314,14 +314,14 @@ STRICT Rules:
     Roko carries support_for: "Wegovy", support_condition: "SOS for diarrhoea".
   When the trigger text references multiple parent drugs, attach to the most recently listed parent above the trigger line. When unclear, set support_for to null and keep the entry as a top-level medication.
 - For medications: parse CURRENT/TREATMENT medications with name, dose, frequency (OD/BD/TDS/SOS/alternate day etc). "PLAN FOR [drug]" or "PLANNED [drug]" in the ADVICE section = future treatment plan — do NOT extract as a current medication. For twice-daily insulin with different morning and evening doses (e.g. "12 units before breakfast / 8 units before dinner"), extract as ONE medication with dose "12 units (morning) + 8 units (evening)", frequency "BD", route "SC"., timing (before/after food etc), route (Oral/SC/IV/IM etc). Set is_new=true if it's a new addition. Also look for medications where dose has CHANGED (e.g. "NMZ 10 to NMZ 20") — the OLD dose should be in previous_medications. Also capture if note says "DOSE WAS REDUCED/INCREASED" for a medication — record it in previous_medications with reason "dose changed". For sliding scale insulin (different doses per meal), extract as ONE entry with dose as the range (e.g. "5-9 units") and frequency as "Thrice daily". Do NOT create separate entries per meal. Do NOT extract diagnoses, lab findings, clinical events (GMI, hypoglycemia, SGLT2 inhibitor-related events) or monitoring instructions as medications — only actual drugs/injections/ointments/supplements. IMPORTANT: A "-" or "–" at the START of a line in a medication list is a BULLET POINT, not an absent marker — extract it as a medication (e.g. "-PET SAFFA POWDER 1/2 TSP DAILY" → medication: "Pet Saffa Powder", dose: "1/2 tsp", frequency: "OD"). For injections: use route "SC" for subcutaneous (S/C), "IM" for intramuscular, "IV" for intravenous. Nutritional supplements (whey protein, protein powder, meal replacement) — extract as medications with route "Oral" and category implied by name. Powders like "Pet Saffa Powder" are laxative supplements — include as medications.
-- WHEN_TO_TAKE — for EVERY entry in "medications", ALWAYS populate "when_to_take" as a JSON ARRAY (never a string, never null, never an empty array) using ONLY values from this exact vocabulary: ["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "With milk", "SOS only", "Any time"]. Do not invent or paraphrase values. Map from the timing / frequency text:
+- WHEN_TO_TAKE — for EVERY entry in "medications", ALWAYS populate "when_to_take" as a JSON ARRAY (never a string, never null, never an empty array) using ONLY values from this exact vocabulary: ["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "SOS only", "Any time"]. Do not invent or paraphrase values. Map from the timing / frequency text:
   • "Empty stomach" / "30 min before food/breakfast" / "fasting" → ["Fasting"]
   • "Before breakfast" / "morning before food" → ["Before breakfast"]
   • "After breakfast" / "morning after food" → ["After breakfast"]
   • "Before lunch" → ["Before lunch"]; "After lunch" → ["After lunch"]
   • "Before dinner" / "night before food" → ["Before dinner"]; "After dinner" / "night after food" → ["After dinner"]
   • "Bedtime" / "HS" / "at night before sleep" → ["At bedtime"]
-  • "With milk" → ["With milk"]
+  • "With milk" → put the phrase "with milk" in the medication's instructions field; map when_to_take from the meal context (e.g. morning with milk → ["After breakfast"]) or fall back to ["Any time"]
   • "SOS" / "PRN" / "as needed" → ["SOS only"]
   • Generic "After meals" / "After food" without a specific meal → expand by frequency: OD → ["After breakfast"], BD → ["After breakfast","After dinner"], TDS → ["After breakfast","After lunch","After dinner"], QID → ["After breakfast","After lunch","After dinner","At bedtime"]
   • Generic "Before meals" / "Before food" without a specific meal → same expansion with "Before …" variants
@@ -597,12 +597,12 @@ export const PrescriptionSchema = z.object({
   medications: z.array(
     z.object({
       name: z.string(),
-      form: z.string(),
+      form: z.enum(["Tablet", "Capsule", "Injection", "Syrup", "Drops", "Ointmen", "Cream", "Gel", "Lotion", "Spray", "Inhaler", "Sachet", "Powder", "Patch", "Suppository", "null"]),
       dose: z.string(),
-      frequency: z.string(),
+      frequency: z.enum(["OD", "BD", "TDS", "QID", "SOS", "Once weekly", "Once in 14 days", "Once in 15 days"]),
       timing: z.string(),
-      when_to_take: z.array(z.string()),
-      route: z.string(),
+      when_to_take: z.array(z.enum(["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "SOS only", "Any time"])),
+      route: z.enum(["Oral","SC", "IM", "IV", "Topical", "Inhaled","Sublingual", "Nasal", "Rectal", "Vaginal"]),
       days_of_week: z.array(z.number().int()),
       is_new: z.boolean(),
       support_for: z.string(),

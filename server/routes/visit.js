@@ -392,7 +392,8 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 17. Latest appointment plan data (from HealthRay sync)
       pool.query(
-        `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers
+        `SELECT healthray_investigations, healthray_follow_up, healthray_advice,
+                follow_up_with, compliance, biomarkers
          FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
          ORDER BY appointment_date DESC LIMIT 1`,
         [pid],
@@ -909,6 +910,8 @@ router.get("/visit/:patientId", async (req, res) => {
                 typeof t === "string" ? { name: t, urgency: "routine" } : t,
               ),
               follow_up: followUpDate,
+              follow_up_with: apptPlan?.follow_up_with || null,
+              advice: apptPlan?.healthray_advice || null,
               diet_lifestyle: [
                 apptCompliance.diet,
                 apptCompliance.exercise,

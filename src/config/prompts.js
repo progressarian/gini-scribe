@@ -36,7 +36,7 @@ CRITICAL MEDICATION RULES:
    - Insulin: "Before meals" or "At bedtime" (specify which)
    - Aspirin: "After lunch"
 1b. "when_to_take" MUST be a JSON ARRAY containing one or more values, each EXACTLY from this list (do not invent new values, do not paraphrase, do not return a string):
-    ["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "With milk", "SOS only", "Any time"].
+    ["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "SOS only", "Any time"].
     Always emit at least one element. If unsure, use ["Any time"]. Mapping guidance:
     - "After meals" / "After food" → match the frequency: OD → ["After breakfast"], BD → ["After breakfast","After dinner"], TDS → ["After breakfast","After lunch","After dinner"]
     - "Empty stomach" / "30 min before breakfast" → ["Fasting"]

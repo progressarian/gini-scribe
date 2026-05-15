@@ -39,6 +39,9 @@ function MedRow({ m }) {
           const display = wt || m.timing || "";
           return display ? ` · ${display}` : "";
         })()}
+        {m.instructions ? (
+          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{m.instructions}</div>
+        ) : null}
       </div>
       <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
     </div>

@@ -12,7 +12,6 @@ export const WHEN_TO_TAKE_PILLS = [
   "Before dinner",
   "After dinner",
   "At bedtime",
-  "With milk",
   "SOS only",
   "Any time",
 ];
@@ -86,14 +85,6 @@ export const TIME_SLOTS = [
     emoji: "💤",
     colorVar: "--purple",
     bgCls: "pur-lt",
-  },
-  {
-    key: "with_milk",
-    pill: "With milk",
-    label: "Doodh ke saath (With Milk)",
-    emoji: "🥛",
-    colorVar: "--primary",
-    bgCls: "pri-lt",
   },
   {
     key: "sos_only",
@@ -188,7 +179,6 @@ export function getTimeSlots(med) {
     else if (/before dinner/.test(t)) slots.add("before_dinner");
     else if (/after dinner|after meal|with dinner|evening/.test(t)) slots.add("after_dinner");
     else if (/bedtime|at night|hs\b/.test(t)) slots.add("at_bedtime");
-    else if (/with milk/.test(t)) slots.add("with_milk");
     else if (/sos|prn|as needed/.test(t)) slots.add("sos_only");
   }
   if (slots.size === 0) slots.add("any_time");
