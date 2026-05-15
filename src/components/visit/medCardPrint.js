@@ -55,7 +55,7 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
 
   if (slotsWithMeds.length > 0) {
     for (const slot of slotsWithMeds) {
-      const sc = slotColors[slot.key] || slotColors.morning;
+      const sc = slotColors[slot.key] || slotColors.anytime;
       medsHTML += `<div style="margin-bottom:16px">`;
       medsHTML += `<div style="font-size:11px;font-weight:700;color:${sc.color};text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 10px;background:${sc.bg};border-radius:6px;display:inline-block">${slot.emoji} ${slot.label}</div>`;
       medsHTML += `<table style="width:100%;border-collapse:collapse;margin-top:4px">`;
