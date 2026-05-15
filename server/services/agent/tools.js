@@ -1,3 +1,8 @@
+import { LAB_MAP } from "../../routes/opd.js";
+import { getCanonical } from "../../utils/labCanonical.js";
+import { sortDiagnoses } from "../../utils/diagnosisSort.js";
+import { sortMedications } from "../../utils/medicationSort.js";
+
 // Patient-facing AI agent tools. Used by POST /api/ai/agent (routes/ai.js).
 //
 // Two kinds of tools:
@@ -29,6 +34,19 @@ export const AGENT_TOOLS = [
             "symptoms",
             "appointments",
             "diagnoses",
+            // Self-logged lifestyle entries from the Genie companion app —
+            // backed by `patient_activity_log` on scribe (activity_type ∈
+            // Exercise / Sleep / Mood / Body). `activity` returns all four;
+            // the per-type scopes filter for "show my workouts / how have
+            // I slept / mood last week".
+            "activity",
+            "exercise",
+            "sleep",
+            "mood",
+            // Medication adherence — rows from `patient_med_log` (which
+            // dose, when, status=taken). Use this for "did I take my
+            // morning dose?" / "how is my adherence?".
+            "med_adherence",
           ],
           description: "Which slice of patient data to read.",
         },
@@ -143,6 +161,11 @@ export const AGENT_TOOLS = [
           type: "string",
           description:
             "For type='Lab' only: a lowercase canonical key (e.g. 'vitd', 'b12', 't3', 't4', 'creatinine', 'triglycerides', 'hdl', 'fbs', 'ppbs'). Optional.",
+        },
+        date: {
+          type: "string",
+          description:
+            "Optional ISO date YYYY-MM-DD the reading was taken on. Set this when the patient says things like 'yesterday', 'two days ago', 'on Monday', 'on 12 May'. Default behaviour (omit the field) prefills today. Always resolve relative dates against the system-provided 'today' — never against an older value from the conversation history.",
         },
       },
       required: ["type", "value1"],
@@ -398,7 +421,23 @@ async function qProfile(pool, patientId) {
        FROM patients WHERE id = $1`,
     [patientId],
   );
-  return rows[0] || null;
+  const row = rows[0];
+  if (!row) return null;
+  // `patients.age` is captured at the time the patient is imported and is
+  // never re-derived as the patient gets older. Prefer dob → today
+  // computation so the agent doesn't quote a stale "40M" when the patient is
+  // actually 42.
+  if (row.dob) {
+    const d = new Date(row.dob);
+    if (!isNaN(d.getTime())) {
+      const now = new Date();
+      let years = now.getUTCFullYear() - d.getUTCFullYear();
+      const m = now.getUTCMonth() - d.getUTCMonth();
+      if (m < 0 || (m === 0 && now.getUTCDate() < d.getUTCDate())) years -= 1;
+      if (years >= 0 && years < 130) row.age = years;
+    }
+  }
+  return row;
 }
 
 // Patient vitals live in TWO tables in the scribe DB:
@@ -527,25 +566,159 @@ async function qVitalsAll(pool, patientId, args) {
   return qVitalsMerged(pool, patientId, args, new Set(["all"]));
 }
 
+// Build a {canonical → row[]} history map by merging `lab_results` rows with
+// the `appointments.biomarkers` JSONB blobs that HealthRay syncs onto each
+// clinical note. Direct port of the merge logic in
+// `gini-scribe/server/routes/visit.js:603-764` — needed because some labs
+// (e.g. HbA1c read off a clinical note) only exist in the appointment
+// biomarkers, never in `lab_results`. Without the merge the agent reports a
+// stale value from `lab_results` that disagrees with what /visit shows.
+async function fetchMergedLabHistory(pool, patientId) {
+  const labHistory = {}; // canonical_name → row[] (newest first)
+
+  // 1. Authoritative lab_results rows.
+  const { rows: labRows } = await pool.query(
+    `SELECT lr.id, COALESCE(lr.test_date, a.appointment_date) AS test_date,
+            lr.test_name, lr.canonical_name, lr.result, lr.result_text, lr.unit,
+            lr.flag, lr.ref_range, lr.panel_name, lr.created_at,
+            lr.lab_test_date
+       FROM lab_results lr
+       LEFT JOIN appointments a ON a.id = lr.appointment_id
+      WHERE lr.patient_id = $1`,
+    [patientId],
+  );
+  // Track the raw lab draw date per (canonical, day) so the biomarkers pass
+  // can decide whether it's already covered. Mirrors visit.js' `latestRaw`
+  // tiebreak but simplified to "have we seen this exact day".
+  for (const r of labRows) {
+    const key = r.canonical_name || getCanonical(r.test_name) || r.test_name;
+    if (!key) continue;
+    if (!labHistory[key]) labHistory[key] = [];
+    labHistory[key].push({
+      result: r.result,
+      result_text: r.result_text,
+      unit: r.unit,
+      flag: r.flag,
+      date: r.test_date,
+      ref_range: r.ref_range,
+      panel_name: r.panel_name,
+      source: "lab_results",
+    });
+  }
+
+  // 2. Fold in appointments.biomarkers, applying the same oldest→newest
+  // carry-forward dedup /visit uses (HealthRay duplicates the latest value
+  // into every subsequent appointment).
+  const { rows: bioRows } = await pool.query(
+    `SELECT appointment_date, biomarkers FROM appointments
+      WHERE patient_id = $1 AND biomarkers IS NOT NULL
+        AND appointment_date IS NOT NULL
+      ORDER BY appointment_date ASC, created_at ASC`,
+    [patientId],
+  );
+  const dayOf = (d) => (d ? String(d).slice(0, 10) : null);
+  const firstSeenCarry = new Map();
+  for (const row of bioRows) {
+    const bio = row.biomarkers || {};
+    const bioLabDates = bio._lab_dates || {};
+    for (const [bioKey, meta] of Object.entries(LAB_MAP)) {
+      const raw = bio[bioKey];
+      if (raw == null) continue;
+      const v = parseFloat(raw);
+      if (!isFinite(v)) continue;
+      const canonical = meta.canonical;
+      const labDate = bioLabDates[bioKey];
+      let date;
+      if (labDate) {
+        date = labDate;
+      } else {
+        const dedupKey = `${canonical}|${v}`;
+        if (firstSeenCarry.has(dedupKey)) continue;
+        firstSeenCarry.set(dedupKey, true);
+        date = row.appointment_date;
+      }
+      const dayKey = dayOf(date);
+      if (!labHistory[canonical]) labHistory[canonical] = [];
+      const dup = labHistory[canonical].some((h) => dayOf(h.date) === dayKey);
+      if (dup) continue;
+      labHistory[canonical].push({
+        result: v,
+        result_text: null,
+        unit: meta.unit || null,
+        flag: null,
+        date,
+        ref_range: null,
+        panel_name: meta.panel || null,
+        source: "biomarkers",
+      });
+    }
+  }
+
+  for (const arr of Object.values(labHistory)) {
+    arr.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+  return labHistory;
+}
+
+async function latestLabsMerged(pool, patientId) {
+  const hist = await fetchMergedLabHistory(pool, patientId);
+  const out = {};
+  for (const [canonical, arr] of Object.entries(hist)) {
+    if (arr.length > 0) out[canonical] = arr[0];
+  }
+  return out;
+}
+
 async function qLabs(pool, patientId, args) {
-  const params = [];
   const limit = Math.min(Math.max(args.limit || 50, 1), 500);
-  let sql = `SELECT id, test_date, test_name, canonical_name, result, result_text, unit, flag, ref_range, panel_name
-               FROM lab_results WHERE patient_id = $${params.push(patientId)}`;
-  if (args.test_name) {
-    sql += ` AND (LOWER(canonical_name) = LOWER($${params.push(args.test_name)})
-                  OR LOWER(test_name) = LOWER($${params.length}))`;
+  const hist = await fetchMergedLabHistory(pool, patientId);
+
+  // Apply optional date-range filter on the merged set so since_last_visit /
+  // range_days still work.
+  let sinceDate = null;
+  if (args.since_last_visit && args.__lastVisit) {
+    sinceDate = String(args.__lastVisit);
+  } else if (typeof args.range_days === "number" && args.range_days > 0) {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - Math.floor(args.range_days));
+    sinceDate = d.toISOString().slice(0, 10);
   }
-  const r = rangeClause(args, "test_date");
-  if (r.sql) {
-    if (r.val !== null) {
-      const idx = params.push(r.val);
-      sql += r.sql.replace("$__since", "$" + idx);
-    } else sql += r.sql;
+
+  // Optional canonical_name / test_name filter (e.g. "HbA1c").
+  const wantName = args.test_name
+    ? String(args.test_name).toLowerCase()
+    : null;
+
+  const flat = [];
+  for (const [canonical, arr] of Object.entries(hist)) {
+    if (wantName) {
+      const meta = Object.values(LAB_MAP).find(
+        (m) => m.canonical.toLowerCase() === canonical.toLowerCase(),
+      );
+      const aliases = [canonical, meta?.test_name].filter(Boolean).map((s) =>
+        String(s).toLowerCase(),
+      );
+      if (!aliases.includes(wantName)) continue;
+    }
+    for (const r of arr) {
+      if (sinceDate && String(r.date || "").slice(0, 10) < sinceDate) continue;
+      const meta = Object.values(LAB_MAP).find((m) => m.canonical === canonical);
+      flat.push({
+        test_date: r.date,
+        test_name: meta?.test_name || canonical,
+        canonical_name: canonical,
+        result: r.result,
+        result_text: r.result_text,
+        unit: r.unit,
+        flag: r.flag,
+        ref_range: r.ref_range,
+        panel_name: r.panel_name,
+        source: r.source,
+      });
+    }
   }
-  sql += ` ORDER BY test_date DESC, id DESC LIMIT ${limit}`;
-  const { rows } = await pool.query(sql, params);
-  return rows;
+  flat.sort((a, b) => String(b.test_date || "").localeCompare(String(a.test_date || "")));
+  return flat.slice(0, limit);
 }
 
 async function qMeds(pool, patientId, args) {
@@ -553,13 +726,17 @@ async function qMeds(pool, patientId, args) {
   const { rows } = await pool.query(
     `SELECT id, name, dose, frequency, timing, when_to_take, route, med_group, drug_class,
             is_active, started_date, stopped_date, stop_reason, parent_medication_id,
-            days_of_week
+            days_of_week, sort_order
        FROM medications WHERE patient_id = $1
-      ORDER BY is_active DESC, sort_order, name
       LIMIT ${limit}`,
     [patientId],
   );
-  return rows;
+  // Order active meds with the same class-aware ranking /visit applies, so
+  // the model's "first N meds" framing matches what the doctor sees. Stopped
+  // meds fall behind active in the original SQL ordering — preserve that.
+  const active = rows.filter((r) => r.is_active);
+  const stopped = rows.filter((r) => !r.is_active);
+  return [...sortMedications(active), ...stopped];
 }
 
 async function qMeals(pool, patientId, args) {
@@ -594,6 +771,47 @@ async function qSymptoms(pool, patientId, args) {
   return rows;
 }
 
+// Self-logged Exercise / Sleep / Mood / Body rows from the companion app.
+// `activityType` is one of those four (or null for "give me everything").
+async function qActivity(pool, patientId, args, activityType) {
+  const params = [];
+  const limit = Math.min(Math.max(args.limit || 50, 1), 200);
+  let sql = buildQuery(
+    `SELECT id, activity_type, value, value2, context, duration_minutes,
+            mood_score, log_date, log_time, source
+       FROM patient_activity_log`,
+    args,
+    "log_date",
+    params,
+    patientId,
+  );
+  if (activityType) {
+    sql += ` AND LOWER(activity_type) = LOWER($${params.push(activityType)})`;
+  }
+  sql += ` ORDER BY log_date DESC, id DESC LIMIT ${limit}`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+// Medication adherence — which doses were taken, when. Joins to medications
+// for the canonical name/dose when patient_med_log carries an id reference.
+async function qMedAdherence(pool, patientId, args) {
+  const params = [];
+  const limit = Math.min(Math.max(args.limit || 100, 1), 500);
+  let sql = buildQuery(
+    `SELECT id, medication_name, medication_dose, genie_medication_id,
+            log_date, dose_time, status, source
+       FROM patient_med_log`,
+    args,
+    "log_date",
+    params,
+    patientId,
+  );
+  sql += ` ORDER BY log_date DESC, dose_time DESC NULLS LAST, id DESC LIMIT ${limit}`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
 async function qAppointments(pool, patientId, args) {
   // Tolerate missing `follow_up_with` column on environments without the
   // 2026-05-14 migration applied.
@@ -621,13 +839,17 @@ async function qAppointments(pool, patientId, args) {
 }
 
 async function qDiagnoses(pool, patientId) {
+  // Mirror /visit's diagnoses query (visit.js:227-232): DISTINCT ON
+  // diagnosis_id, prefer active rows, then most recently updated. Pipe
+  // through sortDiagnoses so Primary → Complication → Comorbidity ordering
+  // matches what the doctor sees.
   const { rows } = await pool.query(
-    `SELECT id, diagnosis_id, label, status, is_active, since_date
+    `SELECT DISTINCT ON (diagnosis_id) *
        FROM diagnoses WHERE patient_id = $1
-      ORDER BY is_active DESC, id`,
+      ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
     [patientId],
   );
-  return rows;
+  return sortDiagnoses(rows);
 }
 
 // ── Progress summary ───────────────────────────────────────────────────
@@ -695,15 +917,25 @@ async function summariseProgress(pool, patientId, window) {
     );
   }
 
-  // Recent key labs
-  const labs = await pool.query(
-    `SELECT DISTINCT ON (canonical_name) canonical_name, test_name, result, unit, flag, test_date
-       FROM lab_results
-      WHERE patient_id=$1
-        AND canonical_name IN ('hba1c','ldl','tsh','fbs','egfr','creatinine','hb','triglycerides')
-      ORDER BY canonical_name, test_date DESC, id DESC`,
-    [patientId],
-  );
+  // Recent key labs — merged across lab_results + appointments.biomarkers so
+  // values that only live on a clinical note (HealthRay sync) still surface.
+  // Mirrors /visit's labLatest construction.
+  const latestLabs = await latestLabsMerged(pool, patientId);
+  const KEY_CANONICAL = ["HbA1c", "LDL", "TSH", "FBS", "eGFR", "Creatinine", "Haemoglobin", "Triglycerides"];
+  const labs = {
+    rows: KEY_CANONICAL.filter((c) => latestLabs[c]).map((c) => {
+      const r = latestLabs[c];
+      const meta = Object.values(LAB_MAP).find((m) => m.canonical === c);
+      return {
+        canonical_name: c,
+        test_name: meta?.test_name || c,
+        result: r.result,
+        unit: r.unit,
+        flag: r.flag,
+        test_date: r.date,
+      };
+    }),
+  };
 
   // Med adherence — taken_logs / expected_doses approximation over window
   const adherence = await pool.query(
@@ -858,6 +1090,16 @@ export async function executeTool(name, input, ctx) {
           return qAppointments(pool, scribePatientId, args);
         case "diagnoses":
           return qDiagnoses(pool, scribePatientId);
+        case "activity":
+          return qActivity(pool, scribePatientId, args, null);
+        case "exercise":
+          return qActivity(pool, scribePatientId, args, "Exercise");
+        case "sleep":
+          return qActivity(pool, scribePatientId, args, "Sleep");
+        case "mood":
+          return qActivity(pool, scribePatientId, args, "Mood");
+        case "med_adherence":
+          return qMedAdherence(pool, scribePatientId, args);
         default:
           return { error: `Unknown scope: ${args.scope}` };
       }
@@ -896,6 +1138,12 @@ export function buildClientAction(name, input) {
       v2: input.value2 ?? "",
       context: input.context ?? "",
     };
+    // Optional ISO date forwarded to the modal so the patient can backdate
+    // a log (e.g. "log yesterday's BP 140/90"). Only accept YYYY-MM-DD; the
+    // modal will fall back to today when missing or malformed.
+    if (typeof input.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+      ca.date = input.date;
+    }
     // Generic-lab card: forward AI-supplied metadata so the app can render
     // the right label, unit, and (optional) ref-range for tests that aren't
     // in the dedicated enum (Vit D, B12, T3, T4, Creatinine, …).
