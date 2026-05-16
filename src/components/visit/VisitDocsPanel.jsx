@@ -1,6 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import { fmtDate } from "./helpers";
 import { toast } from "../../stores/uiStore";
+import api from "../../services/api";
 import PdfViewerModal from "./PdfViewerModal";
 import { getDocStatus } from "../../utils/docStatus";
 import { cleanNote } from "../../utils/cleanNote";
@@ -38,9 +39,26 @@ const parseExt = (raw) => {
 const isMismatchReview = (doc) =>
   parseExt(doc.extracted_data)?.extraction_status === "mismatch_review";
 
-const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUploadReport }) {
+const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUploadReport, onRefresh }) {
   const [viewingDoc, setViewingDoc] = useState(null);
+  const [regenerating, setRegenerating] = useState(null);
   const patient = usePatientStore((s) => s.patient);
+
+  const handleRegenerate = useCallback(async (e, doc) => {
+    e.stopPropagation();
+    setRegenerating(doc.id);
+    try {
+      await api.post(`/api/visit/${patientId}/prescription/regenerate`, {
+        appointmentId: doc.appointment_id || null,
+      });
+      toast("Prescription regenerated", "success");
+      onRefresh?.();
+    } catch (err) {
+      toast(err?.response?.data?.error || "Failed to regenerate", "error");
+    } finally {
+      setRegenerating(null);
+    }
+  }, [patientId, onRefresh]);
 
   const visibleDocuments = documents.filter(
     (d) => d.storage_path || d.file_url || d.source === "healthray",
@@ -143,7 +161,19 @@ const VisitDocsPanel = memo(function VisitDocsPanel({ documents, patientId, onUp
         {status.label ? (
           <DocStatusPill doc={doc} patientId={patientId} size="sm" />
         ) : doc.doc_type === "prescription" ? (
-          <button className="bx bx-p">View PDF</button>
+          <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+            {doc.notes === "Auto-generated on appointment completion" && (
+              <button
+                className="bx bx-s"
+                disabled={regenerating === doc.id}
+                onClick={(e) => handleRegenerate(e, doc)}
+                title="Regenerate prescription from current medicines"
+              >
+                {regenerating === doc.id ? "…" : "↻ Regen"}
+              </button>
+            )}
+            <button className="bx bx-p" onClick={() => openDoc(doc)}>View PDF</button>
+          </div>
         ) : (
           <span className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}>
             {doc.has_abnormal ? "Finding" : "Reviewed"}

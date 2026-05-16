@@ -32,6 +32,9 @@ function cleanStopReason(s) {
   return String(s).replace(/^[a-z_]+:[A-Za-z0-9_-]+\s*[—–-]\s*/i, "");
 }
 
+// Returns null for JS null/undefined, empty string, or the literal string "null".
+const nv = (v) => (!v || v === "null" ? null : v);
+
 // Deduplicate meds by name (same logic as Outcomes page)
 function dedup(meds) {
   const grouped = {};
@@ -932,7 +935,7 @@ const VisitMedications = memo(function VisitMedications({
                                 {m.clinical_note}
                               </span>
                             )}
-                            {m.instructions && (
+                            {nv(m.instructions) && (
                               <span
                                 style={{
                                   display: "block",
@@ -942,19 +945,19 @@ const VisitMedications = memo(function VisitMedications({
                                 }}
                                 title="Administration instructions"
                               >
-                                ⓘ {m.instructions}
+                                ⓘ {nv(m.instructions)}
                               </span>
                             )}
                           </div>
                         </div>
                       </div>
-                      <div className="mtd">{m.dose || "—"}</div>
+                      <div className="mtd">{nv(m.dose) || "—"}</div>
                       <div className="mtd">
                         {m.frequency || "OD"}
-                        {m.timing && (
+                        {nv(m.timing) && (
                           <>
                             <br />
-                            <span style={{ fontSize: 10, color: "var(--t3)" }}>{m.timing}</span>
+                            <span style={{ fontSize: 10, color: "var(--t3)" }}>{nv(m.timing)}</span>
                           </>
                         )}
                       </div>
@@ -1058,7 +1061,7 @@ const VisitMedications = memo(function VisitMedications({
                       <div className="mgen">{m.composition || ""}</div>
                     </div>
                   </div>
-                  <div className="mtd">{m.dose || "—"}</div>
+                  <div className="mtd">{nv(m.dose) || "—"}</div>
                   <div className="mtd">Was {m.frequency || "OD"}</div>
                   <div>
                     <span className="stoptag">Prev Visit</span>
@@ -1143,7 +1146,7 @@ const VisitMedications = memo(function VisitMedications({
                       <div className="mgen">{m.composition || ""}</div>
                     </div>
                   </div>
-                  <div className="mtd">{m.dose || "—"}</div>
+                  <div className="mtd">{nv(m.dose) || "—"}</div>
                   <div className="mtd">Was {m.frequency || "OD"}</div>
                   <div>
                     <span className="stoptag">Stopped</span>

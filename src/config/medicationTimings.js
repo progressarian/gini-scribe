@@ -103,10 +103,34 @@ export const TIME_SLOTS = [
     bgCls: "bg",
     border: true,
   },
+  {
+    key: "once_weekly",
+    pill: null,
+    label: "Hafte mein ek baar (Once Weekly)",
+    emoji: "📅",
+    colorVar: "--amber",
+    bgCls: "amb-lt",
+  },
+  {
+    key: "fortnightly",
+    pill: null,
+    label: "Do hafte mein ek baar (Once in 14 Days)",
+    emoji: "🗓️",
+    colorVar: "--teal",
+    bgCls: "teal-lt",
+  },
+  {
+    key: "once_in_15_days",
+    pill: null,
+    label: "15 din mein ek baar (Once in 15 Days)",
+    emoji: "🗓️",
+    colorVar: "--purple",
+    bgCls: "pur-lt",
+  },
 ];
 
 const PILL_TO_KEY = TIME_SLOTS.reduce((acc, s) => {
-  acc[s.pill.toLowerCase()] = s.key;
+  if (s.pill) acc[s.pill.toLowerCase()] = s.key;
   return acc;
 }, {});
 
@@ -162,6 +186,13 @@ export function formatWhenToTake(value) {
 // (e.g. "Empty stomach 30 min before breakfast" → Fasting) so the patient
 // still sees the med in a meaningful section instead of "Any time".
 export function getTimeSlots(med) {
+  // Non-daily frequencies get their own dedicated section so patients can
+  // clearly distinguish "take every day" meds from weekly/fortnightly ones.
+  const freq = (med?.frequency || "").toLowerCase().replace(/\s*·.*/,"").trim();
+  if (/^once weekly$|^once.in.7.days$/i.test(freq)) return ["once_weekly"];
+  if (/^once.in.14.days$/i.test(freq)) return ["fortnightly"];
+  if (/^once.in.15.days$/i.test(freq)) return ["once_in_15_days"];
+
   const raw = med && med.when_to_take != null ? med.when_to_take : med;
   const arr = toWhenToTakeArray(raw);
   const slots = new Set();

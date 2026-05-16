@@ -4,6 +4,13 @@ import { TIME_SLOTS, printMedCard, getTimeSlots } from "./medCardPrint";
 import { formatWhenToTake } from "../../config/medicationTimings";
 import { cleanNote } from "../../utils/cleanNote";
 
+// Strips "null" strings, undefined, empty — and healthray:id markers via cleanNote.
+const s = (v) => {
+  if (!v || v === "null") return "";
+  const cleaned = cleanNote(String(v).trim());
+  return cleaned || "";
+};
+
 // Groups pre-indexed meds by time slot without overwriting _idx
 function groupBySlot(meds) {
   const g = {};
@@ -24,26 +31,29 @@ function MedRow({ m }) {
       <div className="mmain">
         <div className="mdot" style={{ background: MED_COLORS[m._idx % MED_COLORS.length] }} />
         <div>
-          <div className="mbrand">{m.name}</div>
-          <div className="mgen">{m.composition || cleanNote(m.notes) || ""}</div>
+          <div className="mbrand">{s(m.name)}</div>
+          <div className="mgen">{s(m.composition) || s(m.patient_notes)}</div>
         </div>
       </div>
-      <div className="mtd">{m.dose || "1 tablet"}</div>
+      <div className="mtd">{s(m.dose) || "1 tablet"}</div>
       <div className="mtd">
-        {m.frequency || "OD"}
+        {s(m.frequency) || "OD"}
         {(() => {
           const wt = formatWhenToTake(m.when_to_take);
-          // Patient-facing pills take precedence; fall back to the doctor's
-          // free-text timing note so meds with no canonical pills still
-          // show *something* useful on the card.
-          const display = wt || m.timing || "";
+          const display = wt || s(m.timing);
           return display ? ` · ${display}` : "";
         })()}
-        {m.instructions ? (
-          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{m.instructions}</div>
-        ) : null}
+        {s(m.instructions) ? (
+          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{s(m.instructions)}</div>
+        ) : ""}
       </div>
-      <div>{m.indication && <span className="mfor">{m.indication}</span>}</div>
+      <div>{s(m.indication) && <span className="mfor">{s(m.indication)}</span>}</div>
+      {s(m.timing) && (
+        <>
+          <br />
+          <span style={{ fontSize: 10, color: "var(--t3)" }}>{s(m.timing)}</span>
+        </>
+      )}
     </div>
   );
 }
@@ -79,7 +89,7 @@ const VisitMedCard = memo(function VisitMedCard({ patient, activeMeds }) {
         <div className="scb" ref={cardRef}>
           {mainMeds.length > 1 && (
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t2)", marginBottom: 14 }}>
-              {patient.name} ji, apni dawaiyan roz iss tarah leni hain:
+              {s(patient.name) || "Aap"} ji, apni dawaiyan roz iss tarah leni hain:
             </div>
           )}
 

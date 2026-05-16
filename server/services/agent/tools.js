@@ -685,9 +685,7 @@ async function qLabs(pool, patientId, args) {
   }
 
   // Optional canonical_name / test_name filter (e.g. "HbA1c").
-  const wantName = args.test_name
-    ? String(args.test_name).toLowerCase()
-    : null;
+  const wantName = args.test_name ? String(args.test_name).toLowerCase() : null;
 
   const flat = [];
   for (const [canonical, arr] of Object.entries(hist)) {
@@ -695,9 +693,9 @@ async function qLabs(pool, patientId, args) {
       const meta = Object.values(LAB_MAP).find(
         (m) => m.canonical.toLowerCase() === canonical.toLowerCase(),
       );
-      const aliases = [canonical, meta?.test_name].filter(Boolean).map((s) =>
-        String(s).toLowerCase(),
-      );
+      const aliases = [canonical, meta?.test_name]
+        .filter(Boolean)
+        .map((s) => String(s).toLowerCase());
       if (!aliases.includes(wantName)) continue;
     }
     for (const r of arr) {
@@ -921,7 +919,16 @@ async function summariseProgress(pool, patientId, window) {
   // values that only live on a clinical note (HealthRay sync) still surface.
   // Mirrors /visit's labLatest construction.
   const latestLabs = await latestLabsMerged(pool, patientId);
-  const KEY_CANONICAL = ["HbA1c", "LDL", "TSH", "FBS", "eGFR", "Creatinine", "Haemoglobin", "Triglycerides"];
+  const KEY_CANONICAL = [
+    "HbA1c",
+    "LDL",
+    "TSH",
+    "FBS",
+    "eGFR",
+    "Creatinine",
+    "Haemoglobin",
+    "Triglycerides",
+  ];
   const labs = {
     rows: KEY_CANONICAL.filter((c) => latestLabs[c]).map((c) => {
       const r = latestLabs[c];

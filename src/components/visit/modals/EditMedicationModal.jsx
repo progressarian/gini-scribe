@@ -62,7 +62,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const initialExternalDoctor = medication.external_doctor || "";
   const initialRoute = medication.route || "Oral";
   const initialClinicalNote = medication.clinical_note || "";
-  const initialNotes = medication.notes || "";
+  const initialNotes = medication.patient_notes || "";
   // for_diagnosis is text[] in the DB; the form picker is single-select so
   // we surface the first entry. Other entries are preserved on submit.
   const initialForDxArray = Array.isArray(medication.for_diagnosis)
@@ -177,7 +177,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
       }
       if (route !== initialRoute) payload.route = route || null;
       if (clinicalNote !== initialClinicalNote) payload.clinical_note = clinicalNote || null;
-      if (notes !== initialNotes) payload.notes = notes || null;
+      if (notes !== initialNotes) payload.patient_notes = notes || null;
       if (forDx !== initialForDx) {
         payload.for_diagnosis = forDx
           ? [forDx, ...extraForDx]

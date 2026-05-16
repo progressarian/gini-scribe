@@ -5,6 +5,14 @@ import {
   getTimeSlot,
   formatWhenToTake,
 } from "../../config/medicationTimings";
+import { cleanNote } from "../../utils/cleanNote";
+
+// Strips "null" strings, undefined, empty — and healthray:id markers.
+const clean = (v) => {
+  if (!v || v === "null") return "";
+  const c = cleanNote(String(v).trim());
+  return c || "";
+};
 
 // Mirror of the slot color tokens used by VisitMedCard's CSS variables so the
 // printed window (which doesn't inherit the app's CSS) shows the same chips.
@@ -19,6 +27,9 @@ const SLOT_COLORS = {
   at_bedtime: { fg: "#8b5cf6", bg: "#f5f3ff", border: false },
   sos_only: { fg: "#f59e0b", bg: "#fffbeb", border: false },
   any_time: { fg: "#6b7280", bg: "#eef0f6", border: true },
+  once_weekly: { fg: "#d97706", bg: "#fffbeb", border: false },
+  fortnightly: { fg: "#0ea5e9", bg: "#f0f9ff", border: false },
+  once_in_15_days: { fg: "#8b5cf6", bg: "#f5f3ff", border: false },
 };
 
 export { TIME_SLOTS, getTimeSlots, getTimeSlot };
@@ -65,20 +76,25 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
   const renderMedRow = (m) => {
     const dotColor = MED_COLORS[m._idx % MED_COLORS.length];
     const wt = formatWhenToTake(m.when_to_take);
-    const timingTail = wt || m.timing || "";
-    const composition = m.composition || (m.notes ? String(m.notes).trim() : "");
+    const timingNote = clean(m.timing);
+    const timingTail = wt || timingNote;
+    const composition = clean(m.composition) || clean(m.patient_notes);
+    const dose = clean(m.dose) || "1 tablet";
+    const frequency = clean(m.frequency) || "OD";
+    const instructions = clean(m.instructions);
+    const indication = clean(m.indication);
     return `
       <div style="display:grid;grid-template-columns:1.6fr .7fr 1.1fr 1fr;gap:10px;align-items:center;padding:6px 4px;border-bottom:1px solid #eef1f5">
         <div style="display:flex;align-items:center;gap:8px;min-width:0">
           <span style="flex:0 0 auto;display:inline-block;width:10px;height:10px;border-radius:50%;background:${dotColor}"></span>
           <div style="min-width:0">
-            <div style="font-size:12px;font-weight:600;color:#1a2332;line-height:1.3">${m.name || ""}</div>
+            <div style="font-size:12px;font-weight:600;color:#1a2332;line-height:1.3">${clean(m.name)}</div>
             ${composition ? `<div style="font-size:10px;color:#6b7280;line-height:1.3">${composition}</div>` : ""}
           </div>
         </div>
-        <div style="font-size:12px;color:#1a2332">${m.dose || "1 tablet"}</div>
-        <div style="font-size:12px;color:#1a2332">${m.frequency || "OD"}${timingTail ? ` · ${timingTail}` : ""}${m.instructions ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${m.instructions}</div>` : ""}</div>
-        <div style="font-size:11px;color:#374151">${m.indication ? `<span style="display:inline-block;background:#eef1fe;color:#4466f5;font-weight:600;padding:2px 8px;border-radius:999px">${m.indication}</span>` : ""}</div>
+        <div style="font-size:12px;color:#1a2332">${dose}</div>
+        <div style="font-size:12px;color:#1a2332">${frequency}${timingTail ? ` · ${timingTail}` : ""}${instructions ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${instructions}</div>` : ""}${timingNote && timingNote !== timingTail ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${timingNote}</div>` : ""}</div>
+        <div style="font-size:11px;color:#374151">${indication ? `<span style="display:inline-block;background:#eef1fe;color:#4466f5;font-weight:600;padding:2px 8px;border-radius:999px">${indication}</span>` : ""}</div>
       </div>`;
   };
 
@@ -116,8 +132,8 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
       <div style="font-size:10px;color:#6b7d90">Medicine Card</div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:13px;font-weight:600">${patient.name}</div>
-      <div style="font-size:11px;color:#6b7d90">${patient.age ? patient.age + "Y" : ""}${patient.sex ? " · " + patient.sex : ""}${patient.file_no ? " · ID #" + patient.file_no : ""}</div>
+      <div style="font-size:13px;font-weight:600">${clean(patient.name)}</div>
+      <div style="font-size:11px;color:#6b7d90">${clean(patient.age) ? clean(patient.age) + "Y" : ""}${clean(patient.sex) ? " · " + clean(patient.sex) : ""}${clean(patient.file_no) ? " · ID #" + clean(patient.file_no) : ""}</div>
       <div style="font-size:10px;color:#6b7d90">Printed: ${today}</div>
     </div>
   </div>
@@ -125,7 +141,7 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
   ${
     activeMeds.length > 1
       ? `<div style="font-size:13px;font-weight:600;color:#3d4f63;margin-bottom:14px">
-    ${patient.name} ji, apni dawaiyan roz iss tarah leni hain:
+    ${clean(patient.name) || "Aap"} ji, apni dawaiyan roz iss tarah leni hain:
   </div>`
       : ""
   }

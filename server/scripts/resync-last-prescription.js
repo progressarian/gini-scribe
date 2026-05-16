@@ -32,10 +32,14 @@ const {
   syncBiomarkersFromLatestLabs,
   stopStaleHealthrayMeds,
 } = await import("../services/healthray/db.js");
+const { savePrescriptionForVisit, buildVisitPayloadFromDb } = await import(
+  "../services/prescriptionAutoSave.js"
+);
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
-const fileArg = args.find((a) => a.startsWith("--file="))?.split("=")[1] || args.find((a) => /^P_/i.test(a));
+const fileArg =
+  args.find((a) => a.startsWith("--file="))?.split("=")[1] || args.find((a) => /^P_/i.test(a));
 
 if (!fileArg) {
   console.error("Usage: node server/scripts/resync-last-prescription.js --file=P_176664 [--apply]");
@@ -81,9 +85,7 @@ async function main() {
     process.exit(2);
   }
   const appt = appts[0];
-  console.log(
-    `\nPatient: ${appt.patient_name} (${appt.file_no})  patient_id=${appt.patient_id}`,
-  );
+  console.log(`\nPatient: ${appt.patient_name} (${appt.file_no})  patient_id=${appt.patient_id}`);
   console.log(
     `Appt:    id=${appt.id}  healthray_id=${appt.healthray_id}  date=${appt.appointment_date}`,
   );
@@ -140,8 +142,7 @@ async function main() {
 
   if (parsed.diagnoses?.length)
     await syncDiagnoses(appt.patient_id, appt.healthray_id, parsed.diagnoses);
-  if (parsed.symptoms?.length)
-    await syncSymptoms(appt.patient_id, appt.id, parsed.symptoms);
+  if (parsed.symptoms?.length) await syncSymptoms(appt.patient_id, appt.id, parsed.symptoms);
   if (parsed.medications?.length) {
     await syncMedications(
       appt.patient_id,
@@ -203,6 +204,31 @@ async function main() {
       `  follow_up_with:      parsed=${parsed.follow_up_with ? "yes" : "no"}            stored=${stored[0].follow_up_with ? "yes" : "no"}\n` +
       `  advice:              parsed=${parsed.advice ? "yes" : "no"}            stored=${stored[0].healthray_advice ? "yes" : "no"}\n`,
   );
+  // 5. Regenerate prescription PDF from current DB state
+  console.log("\nRegenerating prescription PDF…");
+  const { rows: cons } = await pool.query(
+    `SELECT id FROM consultations WHERE patient_id=$1 ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
+    [appt.patient_id],
+  );
+  const consultationId = cons[0]?.id || null;
+  const visitPayload = await buildVisitPayloadFromDb(appt.patient_id, { appointmentId: appt.id });
+  if (visitPayload) {
+    const rxResult = await savePrescriptionForVisit(appt.patient_id, visitPayload, {
+      appointmentId: appt.id,
+      consultationId,
+      source: "visit",
+      overwrite: true,
+    });
+    if (rxResult.skipped) {
+      console.log(`  → skipped (${rxResult.reason})`);
+    } else {
+      console.log(`  → saved: ${rxResult.file_name}`);
+      console.log(`  → storage: ${rxResult.storage_path || "none"}`);
+    }
+  } else {
+    console.log("  → skipped: could not build visit payload");
+  }
+
   console.log("Done.\n");
 }
 

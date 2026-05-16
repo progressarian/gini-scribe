@@ -15,7 +15,7 @@ import {
   generatePrescriptionPdf,
   buildPrescriptionFileName,
 } from "../services/prescriptionHtmlPdf.js";
-import { savePrescriptionForVisit } from "../services/prescriptionAutoSave.js";
+import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../services/prescriptionAutoSave.js";
 import { generateVisitSummary } from "../services/visitSummaryAI.js";
 import { generatePatientSummary } from "../services/patientSummaryAI.js";
 import {
@@ -1240,6 +1240,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       external_doctor,
       clinical_note,
       notes,
+      patient_notes,
       parent_medication_id,
       support_condition,
       days_of_week,
@@ -1311,8 +1312,8 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const visitAnchor = anchorRes.rows[0]?.anchor || null;
 
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, instructions, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],$22::text,NOW())
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, patient_notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, instructions, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$23,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],$22::text,NOW())
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1329,6 +1330,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          external_doctor = COALESCE(EXCLUDED.external_doctor, medications.external_doctor),
          clinical_note = COALESCE(EXCLUDED.clinical_note, medications.clinical_note),
          notes = COALESCE(EXCLUDED.notes, medications.notes),
+         patient_notes = COALESCE(EXCLUDED.patient_notes, medications.patient_notes),
          parent_medication_id = COALESCE(EXCLUDED.parent_medication_id, medications.parent_medication_id),
          support_condition = COALESCE(EXCLUDED.support_condition, medications.support_condition),
          last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
@@ -1359,6 +1361,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         finalDays,
         normalizeWhenToTake(when_to_take),
         typeof instructions === "string" && instructions.trim() ? instructions.trim() : null,
+        t(patient_notes, 1000),
       ],
     );
     await markMedicationVisitStatus(pid).catch((e) =>
@@ -1409,6 +1412,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       route,
       clinical_note,
       notes,
+      patient_notes,
       for_diagnosis,
       started_date,
       side_effects,
@@ -1501,6 +1505,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const setRoute = route !== undefined;
     const setClinicalNote = clinical_note !== undefined;
     const setNotesField = notes !== undefined;
+    const setPatientNotes = patient_notes !== undefined;
     const setForDx = for_diagnosis !== undefined;
     const setStartedDate = started_date !== undefined;
     const setSideEffects = side_effects !== undefined;
@@ -1538,7 +1543,8 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const r = await pool.query(
       `UPDATE medications SET
          dose = $1, frequency = $2, timing = $3, when_to_take = $34::when_to_take_pill[],
-         notes = CASE WHEN $20::boolean THEN $21 ELSE COALESCE($4, notes) END,
+         notes = CASE WHEN $20::boolean THEN $21 ELSE notes END,
+         patient_notes = CASE WHEN $37::boolean THEN $38 ELSE patient_notes END,
          history = CASE WHEN $5::jsonb IS NULL THEN COALESCE(history, '[]'::jsonb)
                         ELSE COALESCE(history, '[]'::jsonb) || $5::jsonb END,
          last_prescribed_date = CASE WHEN $8::boolean THEN $9::date ELSE last_prescribed_date END,
@@ -1593,6 +1599,8 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
         nextWhenToTake,
         setInstructions,
         nextInstructions,
+        setPatientNotes,
+        t(patient_notes, 1000),
       ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
@@ -3568,6 +3576,25 @@ router.post("/visit/:patientId/complete", async (req, res) => {
     });
   } catch (e) {
     handleError(res, e, "Complete visit");
+  }
+});
+
+// ── POST /visit/:patientId/prescription/regenerate — rebuild auto-generated Rx ──
+router.post("/visit/:patientId/prescription/regenerate", async (req, res) => {
+  const pid = Number(req.params.patientId);
+  if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
+  try {
+    const { appointmentId } = req.body || {};
+    const payload = await buildVisitPayloadFromDb(pid, { appointmentId: appointmentId || undefined });
+    if (!payload) return res.status(404).json({ error: "Patient not found" });
+    const result = await savePrescriptionForVisit(pid, payload, {
+      appointmentId: appointmentId || null,
+      source: "visit",
+      overwrite: true,
+    });
+    res.json({ document: result.document, file_name: result.file_name, storage_path: result.storage_path });
+  } catch (e) {
+    handleError(res, e, "Regenerate prescription");
   }
 });
 

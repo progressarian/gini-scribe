@@ -75,7 +75,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
     drug_class: "",
     external_doctor: "",
     clinical_note: "",
-    notes: "",
+    patient_notes: "",
     instructions: "",
     parent_medication_id: parentMed?.id ? String(parentMed.id) : "",
     support_condition: "",
@@ -444,8 +444,8 @@ const AddMedicationModal = memo(function AddMedicationModal({
           <input
             className="mi"
             placeholder="e.g. 30 min before breakfast, with food"
-            value={form.notes}
-            onChange={(e) => set("notes", e.target.value)}
+            value={form.patient_notes}
+            onChange={(e) => set("patient_notes", e.target.value)}
           />
         </div>
 

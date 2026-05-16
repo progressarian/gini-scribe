@@ -91,7 +91,7 @@ function mapMedicationToScribe(m, scribePatientId) {
     pharmacy_match: m.brand ?? null,
     for_diagnosis: Array.isArray(m.for_conditions) ? m.for_conditions : null,
     started_date: m.start_date ?? null,
-    notes: m.notes ?? null,
+    patient_notes: m.notes ?? null,
   };
 }
 

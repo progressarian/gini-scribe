@@ -2077,6 +2077,7 @@ export default function VisitPage() {
               documents={documents}
               patientId={patient?.id}
               onUploadReport={() => setModal({ type: "uploadReport" })}
+              onRefresh={refreshData}
             />
           </div>
           <div className={`panel ${tab === "medcard" ? "on" : ""}`}>

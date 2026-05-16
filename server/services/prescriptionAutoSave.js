@@ -51,10 +51,11 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     appointmentId = null,
     consultationId: consultationIdOverride = null,
     clientInitiated = false,
+    overwrite = false,
   } = opts;
 
   if (!pid) throw new Error("savePrescriptionForVisit: missing patient id");
-  const data = payload || {};
+  let data = payload || {};
 
   // Resolve consultation id: explicit override → latest consultation for patient.
   let consultationId = consultationIdOverride;
@@ -67,16 +68,24 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     consultationId = latestCon.rows[0]?.id || null;
   }
 
-  // Idempotency — never write a second prescription for the same consultation+source.
+  // Idempotency — skip if a prescription already exists for this consultation+source,
+  // unless overwrite is requested (e.g. auto-save after HealthRay sync completes).
   const existing = await findExistingPrescription(pool, pid, consultationId, source);
   if (existing) {
-    return {
-      document: existing,
-      file_name: existing.file_name,
-      storage_path: existing.storage_path || null,
-      skipped: true,
-      reason: "already-saved",
-    };
+    if (!overwrite) {
+      return {
+        document: existing,
+        file_name: existing.file_name,
+        storage_path: existing.storage_path || null,
+        skipped: true,
+        reason: "already-saved",
+      };
+    }
+    // Overwrite: delete the stale document row so we generate a fresh one below.
+    await pool.query("DELETE FROM documents WHERE id=$1", [existing.id]);
+    console.log(
+      `[prescriptionAutoSave] Overwriting stale prescription id=${existing.id} for pid=${pid} consultationId=${consultationId}`,
+    );
   }
 
   // Empty-data guard for non-client-initiated saves: skip if there are no meds
@@ -373,6 +382,12 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     consultations: consultationsR.rows,
     goals: goalsR.rows,
     appt_plan: followUpDate ? { follow_up: followUpDate } : null,
-    visitSummaryText: appt?.post_visit_summary || undefined,
+    visitSummaryText: (() => {
+      const raw = appt?.post_visit_summary;
+      if (!raw) return undefined;
+      // Guard against legacy rows where the full summary object was stored instead of just the body string.
+      if (typeof raw === "object") return raw.body || undefined;
+      return raw;
+    })(),
   };
 }

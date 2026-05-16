@@ -251,7 +251,7 @@ router.get("/sync/debug/patient/:fileNo", async (req, res) => {
          FROM consultations WHERE patient_id=$1
          ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
        )
-       SELECT m.id, m.name, m.dose, m.is_active, m.consultation_id, m.source, m.notes
+       SELECT m.id, m.name, m.dose, m.is_active, m.consultation_id, m.source, m.notes, m.patient_notes
        FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
        WHERE m.patient_id=$1 AND m.is_active = true
          AND (m.consultation_id IN (SELECT id FROM latest_cons) OR m.consultation_id IS NULL)

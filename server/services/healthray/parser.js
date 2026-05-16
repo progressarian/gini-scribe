@@ -403,7 +403,6 @@ STRICT Rules:
 - CRITICAL — all dates in these notes are in DD/MM/YYYY format (Indian standard). "06/04/2026" means April 6 2026 → output as 2026-04-06. NEVER interpret as MM/DD/YYYY.
 - Return ONLY valid JSON, no markdown`;
 
-
 export const PRESCRIPTION_EXTRACTION_PROMPT = `
 STRUCTURED-OUTPUT OVERRIDES (these supersede any "set to null" instruction above — the response schema is strict and does not allow null):
 STRICT Rules:
@@ -601,8 +600,32 @@ export const PrescriptionSchema = z.object({
       dose: z.string(),
       frequency: z.string(),
       timing: z.string(),
-      when_to_take: z.array(z.enum(["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "SOS only", "Any time"])),
-      route: z.enum(["Oral","SC", "IM", "IV", "Topical", "Inhaled","Sublingual", "Nasal", "Rectal", "Vaginal"]),
+      when_to_take: z.array(
+        z.enum([
+          "Fasting",
+          "Before breakfast",
+          "After breakfast",
+          "Before lunch",
+          "After lunch",
+          "Before dinner",
+          "After dinner",
+          "At bedtime",
+          "SOS only",
+          "Any time",
+        ]),
+      ),
+      route: z.enum([
+        "Oral",
+        "SC",
+        "IM",
+        "IV",
+        "Topical",
+        "Inhaled",
+        "Sublingual",
+        "Nasal",
+        "Rectal",
+        "Vaginal",
+      ]),
       days_of_week: z.array(z.number().int()),
       is_new: z.boolean(),
       support_for: z.string(),

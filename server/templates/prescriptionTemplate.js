@@ -2,13 +2,7 @@
 // Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS in
 // sync with gini-examples.html (lines 9-115) when the design changes.
 
-import {
-  MED_CATEGORIES,
-  groupMedicationsByCategory,
-  getCategoryLabel,
-  getCategoryIcon,
-  detectMedCategory,
-} from "../config/medicationCategories.js";
+import { detectMedCategory } from "../config/medicationCategories.js";
 
 // Strip "healthray:<id>" markers (and any trailing dash separator) from notes
 // so the printed Rx doesn't leak the upstream healthray reference. Mirrors
@@ -36,8 +30,17 @@ const stripHealthrayId = (s) => {
     .replace(/^[\s—–-]+|[\s—–-]+$/g, "");
 };
 
+// Returns null for values that should not be rendered: JS null, undefined, empty string,
+// or the literal string "null" that some DB columns contain when never set.
+const val = (v) => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === "" || s === "null" ? null : s;
+};
+
 const escape = (s) => {
   if (s == null) return "";
+  if (String(s).trim() === "null") return "";
   return stripHealthrayId(String(s))
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -172,8 +175,11 @@ const fmtDateLong = (d) => {
 const splitMeds = (activeMeds = []) => {
   // Belt-and-braces: drop any stopped meds even if the client forgot to filter
   const live = activeMeds.filter((m) => m.is_active !== false);
-  const ownMeds = live.filter((m) => m.med_group !== "external" && !m.external_doctor);
-  const externalMeds = live.filter((m) => m.med_group === "external" || !!m.external_doctor);
+  // Use detectMedCategory (same logic as the UI) so meds that are auto-detected
+  // as "external" by name pattern (e.g. Urimax/tamsulosin synced from HealthRay
+  // without explicit med_group/external_doctor fields) are not silently dropped.
+  const ownMeds = live.filter((m) => detectMedCategory(m) !== "external");
+  const externalMeds = live.filter((m) => detectMedCategory(m) === "external");
   return { ownMeds, externalMeds };
 };
 
@@ -266,7 +272,8 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-goal-current{font-size:10px;color:var(--ink3);margin-top:2px}
 
 .rx-bio-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:4px}
-.rx-bio{background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bd)}
+.rx-bio-section{}
+.rx-bio{background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bd);break-inside:avoid}
 .rx-bio-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
 .rx-bio-name{font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
 .rx-bio-goal{font-size:9px;color:var(--ink3);font-weight:600}
@@ -290,11 +297,12 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-med{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg)}
 .rx-med:last-child{border:none}
 .rx-med-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:20px;padding-top:2px}
-.rx-med-body{flex:1}
+.rx-med-body{flex:1;min-width:0;word-break:break-word;overflow-wrap:break-word}
 .rx-med-name{font-size:13px;font-weight:700;color:var(--ink)}
 .rx-med-brand{font-size:11px;color:var(--ink3)}
-.rx-med-right{text-align:right;flex-shrink:0}
-.rx-med-dose{font-family:var(--fm);font-size:12px;font-weight:500}
+.rx-med-instr{font-size:11px;color:var(--ink2);margin-top:2px;word-break:break-word;overflow-wrap:break-word}
+.rx-med-right{text-align:right;flex-shrink:0;max-width:40%;min-width:0;word-break:break-word;overflow-wrap:break-word}
+.rx-med-dose{font-family:var(--fm);font-size:12px;font-weight:500;word-break:break-word;overflow-wrap:break-word}
 .rx-med-timing{font-size:11px;color:var(--ink3)}
 .rx-ext-badge{font-size:9px;background:var(--skl);color:var(--sk);font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
 .rx-med-sub{padding-left:38px;background:#fafbfc;border-bottom:none;border-left:3px solid var(--tl);margin-left:14px}
@@ -319,7 +327,7 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-sig{font-size:11px;color:var(--ink3)}
 .rx-next{font-size:11px;font-weight:700;color:var(--nv)}
 
-@page{size:A4;margin:0}
+@page{size:A4;margin:14mm 18mm}
 `;
 
 function buildPrescriptionHtml(data = {}) {
@@ -880,7 +888,13 @@ function buildPrescriptionHtml(data = {}) {
     })
     .join("");
 
-  // ── Render a child support medicine row (no number, indented, badge + condition)
+  // ── Own medicines (flat list — no category headers)
+  const ownChildrenByParent = buildChildrenMap(ownMeds);
+  const ownIds = new Set(ownMeds.map((m) => m.id).filter((x) => x != null));
+  const ownParents = ownMeds.filter(
+    (m) => !m.parent_medication_id || !ownIds.has(m.parent_medication_id),
+  );
+
   const renderChildMed = (child, parentName) => {
     const childPrimary = child.composition || child.name;
     return `
@@ -889,26 +903,15 @@ function buildPrescriptionHtml(data = {}) {
           <div class="rx-med-body">
             <div class="rx-med-name"><span class="rx-med-arrow">↳</span>${escape(childPrimary || "")}<span class="rx-sub-badge">SUPPORT</span></div>
             <div class="rx-sub-cond">${escape(child.support_condition || `for ${parentName}`)}</div>
+            ${val(child.instructions) ? `<div class="rx-med-instr">${escape(child.instructions)}</div>` : ""}
           </div>
           <div class="rx-med-right">
-            <div class="rx-med-dose">${escape(child.dose || child.dosage || child.frequency || "—")}</div>
-            <div class="rx-med-timing">${escape(child.timing || "")}</div>
-            ${child.instructions ? `<div class="rx-med-timing">${escape(child.instructions)}</div>` : ""}
+            <div class="rx-med-dose">${escape(val(child.dose) || val(child.dosage) || val(child.frequency) || "—")}</div>
+            <div class="rx-med-timing">${escape(val(child.timing) || "")}</div>
           </div>
         </div>`;
   };
 
-  // ── Own medicines (grouped by clinical category)
-  const ownChildrenByParent = buildChildrenMap(ownMeds);
-  const ownIds = new Set(ownMeds.map((m) => m.id).filter((x) => x != null));
-  // Top-level: rows without a parent + children whose parent is not in this
-  // group (orphans must still print, not vanish).
-  const ownParents = ownMeds.filter(
-    (m) => !m.parent_medication_id || !ownIds.has(m.parent_medication_id),
-  );
-
-  // Renders one numbered medicine row; counter is passed in so numbering stays
-  // continuous across category sections.
   const renderOwnMedRow = (m, num) => {
     const primary = m.composition || m.name;
     const secondary = m.composition && m.name && m.name !== m.composition ? m.name : null;
@@ -927,44 +930,25 @@ function buildPrescriptionHtml(data = {}) {
     const childrenHtml = (ownChildrenByParent[m.id] || [])
       .map((c) => renderChildMed(c, primary || ""))
       .join("");
+    const formLabel = val(m.form) || null;
     return `
         <div class="rx-med" ${rowStyle}>
           <div class="rx-med-num">${num}.</div>
           <div class="rx-med-body">
-            <div class="rx-med-name">${escape(primary || "")} ${tag}</div>
+            <div class="rx-med-name">${escape(primary || "")} ${tag}${formLabel ? ` <span style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em">${escape(formLabel)}</span>` : ""}</div>
             ${indication ? `<div class="rx-med-brand">${escape(indication)}</div>` : ""}
+            ${val(m.instructions) ? `<div class="rx-med-instr">${escape(m.instructions)}</div>` : ""}
           </div>
           <div class="rx-med-right">
-            <div class="rx-med-dose">${escape(m.dose || m.dosage || m.frequency || "—")}</div>
-            <div class="rx-med-timing">${escape(m.timing || "")}</div>
-            ${m.instructions ? `<div class="rx-med-timing">${escape(m.instructions)}</div>` : ""}
+            <div class="rx-med-dose">${escape(val(m.dose) || val(m.dosage) || val(m.frequency) || "—")}</div>
+            <div class="rx-med-timing">${escape(val(m.timing) || "")}</div>
           </div>
         </div>${childrenHtml}`;
   };
 
-  // Meds sorted by category rank, rendered under one section header per
-  // non-empty category — mirrors the in-app medications view so the printed
-  // Rx visually groups the same way the doctor saw it on screen.
-  const ownByCategory = groupMedicationsByCategory(ownParents);
   let medCounter = 0;
-  const ownMedsHtml = MED_CATEGORIES.filter(
-    (c) => c.id !== "external" && (ownByCategory[c.id] || []).length > 0,
-  )
-    .map((cat, idx) => {
-      const meds = ownByCategory[cat.id];
-      const header = `
-        <div class="rx-med-group-header" style="margin-top:${idx === 0 ? 0 : 8}px">
-          <span class="rx-med-group-label">${cat.icon} ${escape(cat.label)}</span>
-          <span class="rx-med-group-count">(${meds.length})</span>
-        </div>`;
-      const rows = meds
-        .map((m) => {
-          medCounter += 1;
-          return renderOwnMedRow(m, medCounter);
-        })
-        .join("");
-      return header + rows;
-    })
+  const ownMedsHtml = ownParents
+    .map((m) => { medCounter += 1; return renderOwnMedRow(m, medCounter); })
     .join("");
 
   // ── External medicines
@@ -990,9 +974,9 @@ function buildPrescriptionHtml(data = {}) {
             <div class="rx-med-brand">${by} · Do not modify</div>
           </div>
           <div class="rx-med-right">
-            <div class="rx-med-dose">${escape(m.dose || m.dosage || m.frequency || "—")}</div>
-            <div class="rx-med-timing">${escape(m.timing || "")}</div>
-            ${m.instructions ? `<div class="rx-med-timing">${escape(m.instructions)}</div>` : ""}
+            <div class="rx-med-dose">${escape(val(m.dose) || val(m.dosage) || val(m.frequency) || "—")}</div>
+            <div class="rx-med-timing">${escape(val(m.timing) || "")}</div>
+            ${val(m.instructions) ? `<div class="rx-med-timing">${escape(m.instructions)}</div>` : ""}
           </div>
         </div>${childrenHtml}`;
     })
@@ -1119,8 +1103,8 @@ function buildPrescriptionHtml(data = {}) {
 
     ${
       biomarkerCards.length > 0
-        ? `<div class="rx-section-title">Biomarker trends — last 4 visits</div>
-           <div class="rx-bio-grid">${bioHtml}</div>`
+        ? `<div class="rx-bio-section"><div class="rx-section-title">Biomarker trends — last 4 visits</div>
+           <div class="rx-bio-grid">${bioHtml}</div></div>`
         : ""
     }
 
