@@ -574,7 +574,7 @@ export const PrescriptionSchema = z.object({
       name: z.string(),
       duration: z.string(),
       since_date: z.string().describe("YYYY-MM-DD"),
-      severity: z.enum(["mild", "moderate", "severe"]),
+      severity: z.string(),
       related_to: z.string(),
     }),
   ),
@@ -597,9 +597,9 @@ export const PrescriptionSchema = z.object({
   medications: z.array(
     z.object({
       name: z.string(),
-      form: z.enum(["Tablet", "Capsule", "Injection", "Syrup", "Drops", "Ointmen", "Cream", "Gel", "Lotion", "Spray", "Inhaler", "Sachet", "Powder", "Patch", "Suppository", "null"]),
+      form: z.string(),
       dose: z.string(),
-      frequency: z.enum(["OD", "BD", "TDS", "QID", "SOS", "Once weekly", "Once in 14 days", "Once in 15 days"]),
+      frequency: z.string(),
       timing: z.string(),
       when_to_take: z.array(z.enum(["Fasting", "Before breakfast", "After breakfast", "Before lunch", "After lunch", "Before dinner", "After dinner", "At bedtime", "SOS only", "Any time"])),
       route: z.enum(["Oral","SC", "IM", "IV", "Topical", "Inhaled","Sublingual", "Nasal", "Rectal", "Vaginal"]),
