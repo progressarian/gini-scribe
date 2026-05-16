@@ -1289,6 +1289,16 @@ export default function VisitPage() {
       setPrintingRx(false);
     }
   }, [visitPayload, dbPatientId, data, resolveVisitSummaryText, printingRx]);
+
+  const handleSaveRx = useCallback(async () => {
+    const pid = dbPatientId || data?.patient?.id;
+    if (!pid) throw new Error("No patient ID");
+    await api.post(`/api/visit/${pid}/prescription/regenerate`, {
+      appointmentId: opdApptId || undefined,
+    });
+    await refreshData();
+  }, [dbPatientId, data, opdApptId, refreshData]);
+
   const handlePrintMedCard = useCallback(() => {
     const patient = data?.patient;
     const activeMeds = (derived?.uniqueActiveMeds || []).filter(
@@ -2106,6 +2116,7 @@ export default function VisitPage() {
         error={rxModal.error}
         onClose={closeRxModal}
         onRetry={handlePrint}
+        onSave={handleSaveRx}
       />
 
       {/* ── End Visit Modal ── */}

@@ -164,7 +164,14 @@ const RxPdfModal = memo(function RxPdfModal({
   error,
   onClose,
   onRetry,
+  onSave,
 }) {
+  const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
+
+  useEffect(() => {
+    if (!open) setSaveState("idle");
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
@@ -173,6 +180,17 @@ const RxPdfModal = memo(function RxPdfModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  const handleSave = async () => {
+    if (!onSave || saveState === "saving") return;
+    setSaveState("saving");
+    try {
+      await onSave();
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    }
+  };
 
   if (!open) return null;
 
@@ -242,6 +260,22 @@ const RxPdfModal = memo(function RxPdfModal({
                 >
                   ↗ Open in tab
                 </button>
+                {onSave && (
+                  <button
+                    className="btn"
+                    onClick={handleSave}
+                    disabled={saveState === "saving" || saveState === "saved"}
+                    style={{
+                      fontSize: 11,
+                      padding: "6px 12px",
+                      background: saveState === "saved" ? "#15803d" : saveState === "error" ? "#dc2626" : undefined,
+                      color: saveState === "saved" || saveState === "error" ? "#fff" : undefined,
+                      opacity: saveState === "saving" ? 0.7 : 1,
+                    }}
+                  >
+                    {saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved" : saveState === "error" ? "Save failed" : "💾 Save to record"}
+                  </button>
+                )}
               </>
             )}
             <button
