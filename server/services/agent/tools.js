@@ -172,6 +172,62 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "create_health_log",
+    description:
+      "Directly write a health entry to the database WITHOUT opening a modal. Use ONLY when: (a) the patient explicitly confirms ('yes', 'log it', 'save it', 'haan log karo') after a propose_log called IN THE SAME TURN, OR (b) the patient states a value AND explicitly asks to save directly in a single message. NEVER use to re-log values from memory, prior turns, or checkpoint. NEVER call both propose_log and create_health_log in the same turn. After this call, still call respond_to_patient confirming what was saved.",
+    input_schema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: [
+            "BP", "Sugar", "Weight",
+            "HbA1c", "LDL", "TSH", "Haemoglobin", "eGFR", "Lab",
+            "Exercise", "Sleep", "Mood", "Symptom", "Food",
+          ],
+          description: "Health data type to log.",
+        },
+        value1: {
+          type: "string",
+          description:
+            "Primary value in the canonical unit — pre-converted per the same rules as propose_log (e.g. kg for Weight, mg/dL for Sugar, % for HbA1c, mmHg for BP systolic).",
+        },
+        value2: {
+          type: "string",
+          description:
+            "Secondary value where applicable: diastolic for BP, exercise type for Exercise, quality score (1-10) for Sleep, notes for Mood.",
+        },
+        context: {
+          type: "string",
+          description:
+            "Context label: meal timing for Sugar (Fasting/After breakfast/etc.), session for Exercise (Morning/Evening), meal type for Food (breakfast/lunch/snack/dinner).",
+        },
+        date: {
+          type: "string",
+          description:
+            "Optional ISO YYYY-MM-DD the reading was taken on. Omit for today. Resolve relative dates against the server-provided today.",
+        },
+        test_name: {
+          type: "string",
+          description: "For type='Lab' only: human-readable test name (e.g. 'Vitamin D', 'Creatinine'). Required when type='Lab'.",
+        },
+        unit: {
+          type: "string",
+          description: "For type='Lab' only: standard unit (e.g. 'ng/mL', 'mg/dL'). Required when type='Lab'.",
+        },
+        ref_range: {
+          type: "string",
+          description: "For type='Lab' only: normal reference range string (e.g. '30-100 ng/mL'). Optional.",
+        },
+        canonical_name: {
+          type: "string",
+          description: "For type='Lab' only: lowercase canonical key (e.g. 'vitd', 'creatinine', 'b12'). Optional.",
+        },
+      },
+      required: ["type", "value1"],
+    },
+  },
+  {
     name: "respond_to_patient",
     description:
       "Your FINAL output for this turn. You MUST call this exactly once, and it must be the last tool you call. The `message` is shown verbatim in the chat — keep it short, friendly, no markdown headers. Put every concrete number you cite in `numbers` so the app can render badges/charts deterministically. Pick `intent` based on what this turn is doing.",
@@ -1067,6 +1123,197 @@ async function getMedSchedule(pool, patientId) {
   }));
 }
 
+// ── create_health_log executor ──────────────────────────────────────────
+// Direct DB write used when the patient explicitly confirms a save (or
+// phrases the request as a direct "log X now"). Returns { ok, saved } or
+// { ok: false, error } which the model reads as the tool_result to phrase
+// a confirmation message in respond_to_patient.
+async function executeCreateHealthLog(pool, patientId, input) {
+  const today = new Date().toISOString().slice(0, 10);
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const logDate =
+    typeof input.date === "string" && ISO_DATE_RE.test(input.date) ? input.date : today;
+
+  const type = String(input.type || "").trim();
+  const v1 = String(input.value1 ?? "").trim();
+  const v2 = String(input.value2 ?? "").trim();
+  const context = String(input.context ?? "").trim();
+
+  // ── Vitals ──────────────────────────────────────────────────────────
+  if (type === "BP") {
+    const systolic = Number(v1);
+    const diastolic = Number(v2);
+    if (!Number.isFinite(systolic) || systolic <= 0)
+      return { ok: false, error: "value1 (systolic mmHg) must be a positive number." };
+    if (!Number.isFinite(diastolic) || diastolic <= 0)
+      return { ok: false, error: "value2 (diastolic mmHg) must be a positive number." };
+    await pool.query(
+      `INSERT INTO patient_vitals_log (patient_id, recorded_date, bp_systolic, bp_diastolic)
+       VALUES ($1, $2, $3, $4)`,
+      [patientId, logDate, systolic, diastolic],
+    );
+    return { ok: true, saved: { type, systolic, diastolic, date: logDate } };
+  }
+
+  if (type === "Sugar") {
+    const rbs = Number(v1);
+    if (!Number.isFinite(rbs) || rbs <= 0)
+      return { ok: false, error: "value1 (sugar mg/dL) must be a positive number." };
+    const mealType = (context || "Random").slice(0, 50);
+    await pool.query(
+      `INSERT INTO patient_vitals_log (patient_id, recorded_date, rbs, meal_type)
+       VALUES ($1, $2, $3, $4)`,
+      [patientId, logDate, rbs, mealType],
+    );
+    return { ok: true, saved: { type, rbs, meal_type: mealType, date: logDate } };
+  }
+
+  if (type === "Weight") {
+    const weightKg = Number(v1);
+    if (!Number.isFinite(weightKg) || weightKg <= 0)
+      return { ok: false, error: "value1 (weight kg) must be a positive number." };
+    await pool.query(
+      `INSERT INTO patient_vitals_log (patient_id, recorded_date, weight_kg)
+       VALUES ($1, $2, $3)`,
+      [patientId, logDate, weightKg],
+    );
+    return { ok: true, saved: { type, weight_kg: weightKg, date: logDate } };
+  }
+
+  // ── Named lab types ──────────────────────────────────────────────────
+  const NAMED_LAB_META = {
+    HbA1c:       { testName: "HbA1c",           canonicalName: "hba1c",       unit: "%" },
+    LDL:         { testName: "LDL Cholesterol", canonicalName: "ldl",         unit: "mg/dL" },
+    TSH:         { testName: "TSH",             canonicalName: "tsh",         unit: "µIU/mL" },
+    Haemoglobin: { testName: "Haemoglobin",     canonicalName: "haemoglobin", unit: "g/dL" },
+    eGFR:        { testName: "eGFR",            canonicalName: "egfr",        unit: "mL/min" },
+  };
+  if (NAMED_LAB_META[type]) {
+    const meta = NAMED_LAB_META[type];
+    const numeric = Number(v1);
+    if (!Number.isFinite(numeric) || numeric <= 0)
+      return { ok: false, error: `value1 must be a positive number for ${type}.` };
+    await pool.query(
+      `INSERT INTO lab_results
+         (patient_id, test_date, test_name, canonical_name, result, result_text, unit, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent')`,
+      [patientId, logDate, meta.testName, meta.canonicalName, numeric, v1, meta.unit],
+    );
+    return {
+      ok: true,
+      saved: { type, test_name: meta.testName, result: numeric, unit: meta.unit, date: logDate },
+    };
+  }
+
+  // ── Generic Lab (Vitamin D, B12, T3, T4, Creatinine, HDL, FBS, etc.) ──
+  if (type === "Lab") {
+    const testName = String(input.test_name || "").trim();
+    if (!testName)
+      return { ok: false, error: "test_name is required for type='Lab'." };
+    const numeric = Number(v1);
+    if (!Number.isFinite(numeric) || numeric <= 0)
+      return { ok: false, error: "value1 must be a positive number." };
+    const unit = String(input.unit || "").trim();
+    const refRange = String(input.ref_range || "").trim();
+    const canonicalName = String(input.canonical_name || testName)
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .slice(0, 100);
+    await pool.query(
+      `INSERT INTO lab_results
+         (patient_id, test_date, test_name, canonical_name, result, result_text, unit, ref_range, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'agent')`,
+      [
+        patientId, logDate,
+        testName.slice(0, 200), canonicalName,
+        numeric, v1,
+        unit.slice(0, 50) || null,
+        refRange.slice(0, 100) || null,
+      ],
+    );
+    return {
+      ok: true,
+      saved: { type: "Lab", test_name: testName, result: numeric, unit, date: logDate },
+    };
+  }
+
+  // ── Lifestyle: Exercise, Sleep, Mood ────────────────────────────────
+  if (type === "Exercise") {
+    const duration = Number(v1);
+    if (!Number.isFinite(duration) || duration <= 0)
+      return { ok: false, error: "value1 (duration minutes) must be a positive number." };
+    const exerciseType = (v2 || "Exercise").slice(0, 100);
+    const session = (context || "General").slice(0, 100);
+    await pool.query(
+      `INSERT INTO patient_activity_log
+         (patient_id, activity_type, value, value2, context, log_date, source)
+       VALUES ($1, 'Exercise', $2, $3, $4, $5, 'agent')`,
+      [patientId, String(duration), exerciseType, session, logDate],
+    );
+    return {
+      ok: true,
+      saved: { type, duration_min: duration, exercise_type: exerciseType, date: logDate },
+    };
+  }
+
+  if (type === "Sleep") {
+    const hours = Number(v1);
+    if (!Number.isFinite(hours) || hours <= 0)
+      return { ok: false, error: "value1 (hours) must be a positive number." };
+    const quality = v2 ? Number(v2) : null;
+    await pool.query(
+      `INSERT INTO patient_activity_log
+         (patient_id, activity_type, value, value2, log_date, source)
+       VALUES ($1, 'Sleep', $2, $3, $4, 'agent')`,
+      [patientId, String(hours), quality != null ? String(quality) : null, logDate],
+    );
+    return { ok: true, saved: { type, hours, quality, date: logDate } };
+  }
+
+  if (type === "Mood") {
+    const score = Number(v1);
+    if (!Number.isFinite(score) || score < 1 || score > 10)
+      return { ok: false, error: "value1 (mood score) must be between 1 and 10." };
+    const notes = v2.slice(0, 200) || null;
+    await pool.query(
+      `INSERT INTO patient_activity_log
+         (patient_id, activity_type, value, value2, log_date, source)
+       VALUES ($1, 'Mood', $2, $3, $4, 'agent')`,
+      [patientId, String(score), notes, logDate],
+    );
+    return { ok: true, saved: { type, mood_score: score, notes, date: logDate } };
+  }
+
+  // ── Symptom ─────────────────────────────────────────────────────────
+  if (type === "Symptom") {
+    if (!v1) return { ok: false, error: "value1 (symptom name) is required." };
+    const severity = v2 && Number.isFinite(Number(v2)) ? Number(v2) : null;
+    const bodyArea = (context || "General").slice(0, 100);
+    await pool.query(
+      `INSERT INTO patient_symptom_log
+         (patient_id, log_date, symptom, severity, body_area, context, source)
+       VALUES ($1, $2, $3, $4, $5, $6, 'agent')`,
+      [patientId, logDate, v1.slice(0, 200), severity, bodyArea, "Tracked via Genie"],
+    );
+    return { ok: true, saved: { type, symptom: v1, severity, date: logDate } };
+  }
+
+  // ── Food ─────────────────────────────────────────────────────────────
+  if (type === "Food") {
+    if (!v1) return { ok: false, error: "value1 (food description) is required." };
+    const mealType = (context || "snack").toLowerCase().slice(0, 30);
+    await pool.query(
+      `INSERT INTO patient_meal_log
+         (patient_id, meal_type, description, log_date)
+       VALUES ($1, $2, $3, $4)`,
+      [patientId, mealType, v1.slice(0, 200), logDate],
+    );
+    return { ok: true, saved: { type, description: v1, meal_type: mealType, date: logDate } };
+  }
+
+  return { ok: false, error: `Unknown type: ${type}` };
+}
+
 // ── Dispatcher ─────────────────────────────────────────────────────────
 export async function executeTool(name, input, ctx) {
   const { pool, scribePatientId } = ctx;
@@ -1128,6 +1375,8 @@ export async function executeTool(name, input, ctx) {
       }
       return all;
     }
+    case "create_health_log":
+      return executeCreateHealthLog(pool, scribePatientId, input);
     default:
       return { error: `Unknown tool: ${name}` };
   }

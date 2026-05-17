@@ -296,8 +296,9 @@ DATA RULES:
 - Never invent values. Any number you state must have come from a tool result this turn.
 - For "how am I doing / what's my progress / how's my sugar / how's my BP" questions, prefer \`get_progress_summary\` (one call) over multiple \`query_patient_data\` calls. Pick window='since_last_visit' if the user references "since I saw the doctor", otherwise window='days' with days inferred from the phrasing (this week=7, this month=30, last 3 months=90).
 - When the patient ASKS about their own data ("what is my weight", "show my sugar", "do I have any BP readings", "what was my last HbA1c", "kya mera weight kitna hai") you MUST call \`query_patient_data\` (or \`get_progress_summary\`) with the matching scope BEFORE answering. Never reply "no records yet" without having actually queried that scope this turn. Map: weight→scope='weight', sugar/FBS/PPBS→scope='sugar', BP→scope='bp', any lab name (HbA1c/LDL/TSH/Hb/eGFR)→scope='labs' with test_name set, meds→scope='meds', food/meals/eaten→scope='meals', symptoms→scope='symptoms', exercise/workout/steps→scope='exercise', sleep→scope='sleep', mood→scope='mood', any lifestyle log→scope='activity', "did I take my X medicine / adherence / missed doses"→scope='med_adherence', appointments→scope='appointments', diagnoses/conditions→scope='diagnoses'.
-- When the patient gives you a vitals/lab number they want recorded (BP, sugar, weight, HbA1c, LDL, TSH, Hb, eGFR) OR a food/exercise/sleep/mood/symptom entry, ALWAYS call propose_log. Never claim to have logged something — only the in-app card saves data.
-- BACKDATING: propose_log accepts an optional \`date\` (YYYY-MM-DD). Set it whenever the patient anchors the reading to a past day — "yesterday", "2 days ago", "on Monday", "last Saturday", "on 12 May", "on the 10th". Resolve relative phrases against the system-provided today's date in this prompt (NOT against any date you remember from earlier in the conversation). Omit the field when the patient implies "now / today / just took". The modal opens with a date picker pre-selected to whatever date you pass, and the patient can still tweak it before saving.
+- When the patient gives you a vitals/lab number they want recorded (BP, sugar, weight, HbA1c, LDL, TSH, Hb, eGFR) OR a food/exercise/sleep/mood/symptom entry, the DEFAULT action is to call propose_log (opens a pre-filled modal for the patient to confirm). EXCEPTION: use create_health_log instead when the patient is clearly confirming a direct save — see the create_health_log rule below.
+- BACKDATING: both propose_log and create_health_log accept an optional \`date\` (YYYY-MM-DD). Set it whenever the patient anchors the reading to a past day — "yesterday", "2 days ago", "on Monday", "last Saturday", "on 12 May", "on the 10th". Resolve relative phrases against the system-provided today's date in this prompt (NOT against any date you remember from earlier in the conversation). Omit the field when the patient implies "now / today / just took". For propose_log the modal opens with a date picker pre-selected to whatever date you pass; for create_health_log the date is written directly to the DB.
+- create_health_log (DIRECT DB WRITE — no modal): Use this ONLY in two situations: (1) The patient explicitly says "yes", "log it", "save it", "haan log karo", or a clear equivalent AFTER a propose_log you called IN THE SAME TURN — treat this as confirmation of that exact proposal and call create_health_log with the same type/value/date; (2) The patient states a specific value AND explicitly asks to save/log it directly in one message (e.g. "log my sugar 180 fasting right now", "seedha save kar do mera weight 82 kg"). After calling create_health_log, ALWAYS call respond_to_patient confirming what was saved (include value + unit + date, set intent='chat'). NEVER call both propose_log and create_health_log in the same turn — pick one path. NEVER use create_health_log to re-log values from memory, from prior turns, from the checkpoint summary, or from a propose_log called in a PREVIOUS conversation turn. The same unit conversion table that applies to propose_log applies here — pre-convert value1 to canonical units before calling.
 - propose_log is ONLY for values the patient gave you in THE CURRENT user turn. Never call propose_log to re-surface a number from earlier in the conversation, from the checkpoint summary, or that you "remember" them mentioning before. If the current user turn only contains "log my weight 33", you call propose_log exactly once with type='Weight' — you do NOT also re-propose any BP, sugar, etc. from older context. One propose_log call per distinct vital the user named THIS turn.
 - Checkpoint / earlier conversation is context only. Whenever the patient asks about a number/value/record, query the DB this turn — do not answer from memory of past turns.
 - \`log_proposal\` in respond_to_patient is a single JSON OBJECT with keys {type, value1, value2?, context?} — never a string, never an array. If you proposed exactly one log this turn, mirror that propose_log's input here. If you proposed zero logs, omit log_proposal entirely and set intent to something other than 'log_proposed'.
@@ -587,6 +588,16 @@ router.post("/ai/agent", async (req, res) => {
             }
           } else {
             result = await executeTool(tu.name, tu.input || {}, ctx);
+            // create_health_log writes directly to the DB; emit a side-channel
+            // log_saved client action so the RN app refreshes its local data
+            // store without the patient needing a modal save flow.
+            if (tu.name === "create_health_log" && result?.ok === true) {
+              clientActions.push({
+                type: "log_saved",
+                logType: tu.input?.type || "unknown",
+                date: tu.input?.date || null,
+              });
+            }
           }
         } catch (err) {
           result = { error: String(err?.message || err) };
@@ -641,7 +652,7 @@ router.post("/ai/agent", async (req, res) => {
 //   items: Array<row>     // row shape varies by kind — see below
 // }
 router.post("/ai/bulk-log", async (req, res) => {
-  const { scribePatientId, document_id, kind, items } = req.body || {};
+  const { scribePatientId, document_id, kind, items, log_date } = req.body || {};
   const pid = Number(scribePatientId);
   if (!Number.isInteger(pid) || pid <= 0)
     return res.status(400).json({ error: "scribePatientId is required" });
@@ -652,6 +663,10 @@ router.post("/ai/bulk-log", async (req, res) => {
 
   const docId = Number.isInteger(document_id) && document_id > 0 ? document_id : null;
   const today = new Date().toISOString().slice(0, 10);
+  // log_date is an optional ISO YYYY-MM-DD from the MultiLogSheet date strip.
+  // Validated strictly so arbitrary strings never reach SQL date params.
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const logDate = typeof log_date === "string" && ISO_DATE_RE.test(log_date) ? log_date : today;
   let written = 0;
   const errors = [];
 
@@ -668,7 +683,7 @@ router.post("/ai/bulk-log", async (req, res) => {
           .trim()
           .toLowerCase()
           .replace(/\s+/g, "_");
-        const testDate = r.test_date || today;
+        const testDate = r.test_date || logDate || today;
         try {
           await pool.query(
             `INSERT INTO lab_results
@@ -712,7 +727,7 @@ router.post("/ai/bulk-log", async (req, res) => {
               r.frequency ? String(r.frequency).slice(0, 100) : null,
               r.timing ? String(r.timing).slice(0, 100) : null,
               r.route ? String(r.route).slice(0, 50) : "Oral",
-              today,
+              logDate,
             ],
           );
           written++;
@@ -740,7 +755,7 @@ router.post("/ai/bulk-log", async (req, res) => {
               r.protein_g != null ? Number(r.protein_g) : null,
               r.carbs_g != null ? Number(r.carbs_g) : null,
               r.fat_g != null ? Number(r.fat_g) : null,
-              today,
+              logDate,
             ],
           );
           written++;
