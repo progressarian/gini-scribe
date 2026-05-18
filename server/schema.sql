@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS patients (
   notes         TEXT,              -- Any general notes about patient
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(phone),                   -- Phone is primary lookup
+  -- phone is NOT unique: family members may share a contact number
   UNIQUE(file_no),                 -- File number is unique
   UNIQUE(abha_id)
 );

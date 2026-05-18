@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.12.1",
   "scripts": {
     "dev": "prettier --write \"src/**/*.{js,jsx,css}\" \"server/**/*.js\" \"*.{js,json}\" && concurrently -n client,server -c blue,green \"vite\" \"npm run dev --prefix server\"",
     "dev:client": "vite",

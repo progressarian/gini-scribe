@@ -4,22 +4,46 @@ import pool from "../config/db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 
+// Verifies the scribe-issued JWT (doctor OR patient). The `kind` claim
+// in the payload distinguishes them; both flavours have a `jti` that lives
+// in auth_sessions until logout/expiry.
 export const authMiddleware = async (req, res, next) => {
-  const token = req.headers["x-auth-token"];
+  // Accept the JWT from any of:
+  //   • x-auth-token header (default for app/web client `post()` calls)
+  //   • Authorization: Bearer <token> (used by fetch() for binary endpoints
+  //     like /api/documents/:id/stream where setting custom headers is fine)
+  //   • ?token=<token> query string (so the URL handed to <Image> or an
+  //     in-app browser is self-authenticating without needing headers)
+  const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+  const bearerMatch =
+    typeof authHeader === "string" && /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+  const token =
+    req.headers["x-auth-token"] ||
+    (bearerMatch && bearerMatch[1]) ||
+    (typeof req.query?.token === "string" ? req.query.token : null);
   if (!token) return next();
   try {
-    // Verify JWT signature + expiry
     const decoded = jwt.verify(token, JWT_SECRET);
-
-    // Check jti hasn't been revoked (logout)
     const session = await pool.query(
       "SELECT 1 FROM auth_sessions WHERE token=$1 AND expires_at > NOW()",
       [decoded.jti],
     );
-    if (session.rows.length > 0) {
+    if (session.rows.length === 0) return next();
+
+    if (decoded.kind === "patient") {
+      req.patient = {
+        id: decoded.patient_id, // integer (hospital) or uuid string (app)
+        db: decoded.db || "hospital", // 'hospital' | 'app' — legacy tokens default
+        phone: decoded.phone,
+        name: decoded.name,
+        jti: decoded.jti,
+      };
+    } else {
       req.doctor = decoded;
     }
-  } catch {}
+  } catch {
+    // invalid or expired token — leave req.{doctor,patient} unset
+  }
   next();
 };
 
@@ -32,46 +56,65 @@ const PUBLIC_PATHS = [
   "/api/convert-heic",
   "/api/sync/healthray/full",
   "/api/sync/healthray/today",
+  // Patient auth — all of these are pre-auth by design.
+  "/api/patient/auth/check",
+  "/api/patient/auth/send-otp",
+  "/api/patient/auth/verify-otp",
+  "/api/patient/auth/set-password",
+  "/api/patient/auth/login",
 ];
 
-const PUBLIC_PREFIXES = [
-  "/api/sync/debug/",
-  "/api/sync/backfill/",
-  "/api/admin/",
-  // Patient app (no scribe JWT): care-team bootstrap + conversation ensure.
-  // Requests are scoped to the patient_id in the URL path.
-];
+const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/", "/api/admin/"];
 
-// Patterns that always bypass auth (tested with a regex match on req.path).
-// Separate from PUBLIC_PREFIXES so we can match nested segments.
 const PUBLIC_PATTERNS = [
   /^\/api\/patients\/[^/]+\/care-team$/,
   /^\/api\/patients\/[^/]+\/conversations\/ensure$/,
-  // Patient-app chat attachment upload + sign-url. Scoped by patient_id
-  // in the URL path, validated against conversation ownership server-side.
   /^\/api\/patients\/[^/]+\/conversations\/[^/]+\/chat-attachment$/,
   /^\/api\/patients\/[^/]+\/chat-attachments\/sign-url$/,
-  // Patient app — list a patient's own appointments (past + upcoming) so
-  // Genie's Care/Visit tab and home post-visit pill can render even when
-  // the gini→supabase sync hasn't replicated the row yet. Scoped by
-  // patient_id in the URL path.
   /^\/api\/patients\/[^/]+\/appointments$/,
-  // Patient-app pre-visit symptom save. Public (no scribe JWT); scoped
-  // by patient_id + appointment id, and the route re-checks that the
-  // appointment actually belongs to that patient before writing.
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-symptoms$/,
-  // Patient-app pre-visit medication-compliance save. Same scoping/ownership
-  // pattern as pre-visit symptoms above.
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-compliance$/,
-  // Patient-app reported side-effect notification → reception inbox.
-  // Same scoping pattern as the above: patient_id in the URL path.
   /^\/api\/patients\/[^/]+\/side-effects\/notify$/,
 ];
 
+// Paths under these prefixes must be a doctor — patients are rejected even
+// with a valid session. Audit list: clinical workflows, doctor admin,
+// sync/import paths that touch other patients' data.
+const DOCTOR_ONLY_PREFIXES = [
+  "/api/active-visits",
+  "/api/consultations",
+  "/api/clinical",
+  "/api/extract",
+  "/api/sync",
+  "/api/opd",
+  "/api/dashboard",
+  "/api/alerts",
+  "/api/reasoning",
+  "/api/dose-change-requests",
+  "/api/refills",
+];
+
+// Accept either a doctor or patient session for any protected route, unless
+// the path falls under DOCTOR_ONLY_PREFIXES.
 export const requireAuth = (req, res, next) => {
   if (!req.path.startsWith("/api/") || PUBLIC_PATHS.includes(req.path)) return next();
   if (PUBLIC_PREFIXES.some((p) => req.path.startsWith(p))) return next();
   if (PUBLIC_PATTERNS.some((r) => r.test(req.path))) return next();
-  if (!req.doctor) return res.status(401).json({ error: "Authentication required" });
+
+  const isDoctorOnly = DOCTOR_ONLY_PREFIXES.some((p) => req.path.startsWith(p));
+  if (isDoctorOnly) {
+    if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
+    return next();
+  }
+
+  if (req.doctor || req.patient) return next();
+  return res.status(401).json({ error: "Authentication required" });
+};
+
+// Per-route guard for endpoints that must NOT accept a patient JWT
+// (clinical workflows, doctor admin, sync). Use as middleware on a router:
+//   router.post("/active-visits", requireDoctor, handler)
+export const requireDoctor = (req, res, next) => {
+  if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
   next();
 };

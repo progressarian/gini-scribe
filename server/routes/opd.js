@@ -445,6 +445,93 @@ router.get("/opd/appointments", async (req, res) => {
       for (const r of agg) aggMap.set(r.patient_id, r);
     }
 
+    // 2b) Patient-app activity aggregates (symptoms, med logs, self-uploaded
+    //     reports). Each in its own try/catch — these tables aren't present
+    //     on every deployment, and a missing table shouldn't break /opd.
+    //     Window: since the patient's prior visit (per aggMap), else 30 days.
+    const activitySince = (pid) => {
+      const prev = aggMap.get(pid)?.last_visit_date;
+      if (prev) return new Date(prev).toISOString().slice(0, 10);
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      return d.toISOString().slice(0, 10);
+    };
+    const patientActivity = new Map(); // pid -> { sym_n, sym_at, med_n, med_at, rep_n, rep_at }
+    const getAct = (pid) => {
+      let a = patientActivity.get(pid);
+      if (!a) {
+        a = { sym_n: 0, sym_at: null, med_n: 0, med_at: null, rep_n: 0, rep_at: null };
+        patientActivity.set(pid, a);
+      }
+      return a;
+    };
+    if (patientIds.length) {
+      // Build (pid, since) parallel arrays — one query handles all patients,
+      // each with their own per-patient window.
+      const sinceByPid = patientIds.map((pid) => activitySince(pid));
+      try {
+        const { rows: sym } = await pool.query(
+          `SELECT psl.patient_id,
+                  COUNT(*)::int AS n,
+                  MAX(psl.log_date) AS last_at
+             FROM patient_symptom_log psl
+             JOIN UNNEST($1::int[], $2::date[]) AS w(pid, since)
+               ON w.pid = psl.patient_id
+            WHERE psl.log_date > w.since
+            GROUP BY psl.patient_id`,
+          [patientIds, sinceByPid],
+        );
+        for (const r of sym) {
+          const a = getAct(r.patient_id);
+          a.sym_n = r.n;
+          a.sym_at = r.last_at;
+        }
+      } catch {
+        // patient_symptom_log may not exist on legacy deployments.
+      }
+      try {
+        const { rows: med } = await pool.query(
+          `SELECT pml.patient_id,
+                  COUNT(*)::int AS n,
+                  MAX(pml.log_date) AS last_at
+             FROM patient_med_log pml
+             JOIN UNNEST($1::int[], $2::date[]) AS w(pid, since)
+               ON w.pid = pml.patient_id
+            WHERE pml.log_date > w.since
+            GROUP BY pml.patient_id`,
+          [patientIds, sinceByPid],
+        );
+        for (const r of med) {
+          const a = getAct(r.patient_id);
+          a.med_n = r.n;
+          a.med_at = r.last_at;
+        }
+      } catch {
+        // patient_med_log may not exist on legacy deployments.
+      }
+      try {
+        const { rows: rep } = await pool.query(
+          `SELECT d.patient_id,
+                  COUNT(*)::int AS n,
+                  MAX(COALESCE(d.doc_date, d.created_at::date)) AS last_at
+             FROM documents d
+             JOIN UNNEST($1::int[], $2::date[]) AS w(pid, since)
+               ON w.pid = d.patient_id
+            WHERE d.uploaded_by_patient = TRUE
+              AND COALESCE(d.doc_date, d.created_at::date) > w.since
+            GROUP BY d.patient_id`,
+          [patientIds, sinceByPid],
+        );
+        for (const r of rep) {
+          const a = getAct(r.patient_id);
+          a.rep_n = r.n;
+          a.rep_at = r.last_at;
+        }
+      } catch {
+        // documents.uploaded_by_patient may not exist on legacy deployments.
+      }
+    }
+
     // 3) lab_cases counts. These need both patient_id AND file_no (for
     //    unlinked cases), so aggregate separately and merge.
     const labCasesByPid = new Map();
@@ -727,6 +814,18 @@ router.get("/opd/appointments", async (req, res) => {
       row.uploaded_labs = upl;
       row.uploaded_labs_date = uplDate;
       row.prev_hba1c = a?.prev_hba1c || null;
+
+      // Patient-app activity (mobile note + symptom/med/report logs).
+      const compExtra =
+        row.compliance && typeof row.compliance === "object" ? row.compliance.extra : null;
+      row.mobile_note = typeof compExtra === "string" && compExtra.trim() ? compExtra.trim() : null;
+      const act = patientActivity.get(row.patient_id) || null;
+      row.patient_symptom_count = act?.sym_n || 0;
+      row.patient_symptom_last_at = act?.sym_at || null;
+      row.patient_med_log_count = act?.med_n || 0;
+      row.patient_med_log_last_at = act?.med_at || null;
+      row.patient_report_count = act?.rep_n || 0;
+      row.patient_report_last_at = act?.rep_at || null;
 
       // Apply clinical sort to HealthRay diagnoses.
       if (Array.isArray(row.healthray_diagnoses) && row.healthray_diagnoses.length > 0) {

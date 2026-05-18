@@ -678,6 +678,83 @@ function ApptRow({ a, sel, onSelect }) {
                 : ""}
             </span>
           )}
+          {a.mobile_note && (
+            <span
+              title={a.mobile_note}
+              style={{
+                background: "#f5f3ff",
+                color: "#7c3aed",
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: "1px solid #ddd6fe",
+                maxWidth: 160,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              📝 Patient Note
+            </span>
+          )}
+          {a.patient_symptom_count > 0 && (
+            <span
+              title={`${a.patient_symptom_count} symptom log(s) since last visit`}
+              style={{
+                background: AML,
+                color: AM,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: `1px solid ${AMB}`,
+              }}
+            >
+              🩺 Logged Symptoms
+              {a.patient_symptom_last_at
+                ? ` · ${new Date(a.patient_symptom_last_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
+          {a.patient_med_log_count > 0 && (
+            <span
+              title={`${a.patient_med_log_count} medicine log(s) since last visit`}
+              style={{
+                background: GNL,
+                color: GN,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: `1px solid ${GNB}`,
+              }}
+            >
+              💊 Med Log
+              {a.patient_med_log_last_at
+                ? ` · ${new Date(a.patient_med_log_last_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
+          {a.uploaded_labs === 0 && a.patient_report_count > 0 && (
+            <span
+              title={`${a.patient_report_count} patient-uploaded report(s) since last visit`}
+              style={{
+                background: "#f5f3ff",
+                color: "#7c3aed",
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: "1px solid #ddd6fe",
+              }}
+            >
+              📄 Report Uploaded
+              {a.patient_report_last_at
+                ? ` · ${new Date(a.patient_report_last_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
         </div>
       </div>
 
@@ -2838,6 +2915,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
 
   // Prescriptions: [{id, doctorName, date, fileName, uploading, docId?}]
   const [prescriptions, setPrescriptions] = useState([]);
+  const [collapsedRx, setCollapsedRx] = useState({});
   const [loadingRx, setLoadingRx] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const [addingRx, setAddingRx] = useState(false);
@@ -3409,30 +3487,6 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                         View
                       </button>
                     )}
-                    {!p.uploading && !p.extracting && (
-                      <button
-                        onClick={() =>
-                          setRxToDelete({
-                            id: p.id,
-                            docId: p.docId,
-                            fileName: p.fileName,
-                            doctorName: p.doctorName,
-                            extractedData: p.extractedData,
-                          })
-                        }
-                        style={{
-                          fontSize: 12,
-                          color: INK3,
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                        }}
-                      >
-                        ✕
-                      </button>
-                    )}
                   </div>
                   {/* Extracted prescription data */}
                   {p.extractedData &&
@@ -3441,6 +3495,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                       const meds = rx.medications || [];
                       const diags = rx.diagnoses || [];
                       if (!meds.length && !diags.length) return null;
+                      const isCollapsed = collapsedRx[p.id] !== false;
                       return (
                         <div
                           style={{
@@ -3453,17 +3508,49 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                         >
                           <div
                             style={{
-                              fontSize: 9,
-                              fontWeight: 700,
-                              color: SK,
-                              textTransform: "uppercase",
-                              letterSpacing: ".08em",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
                               marginBottom: 6,
+                              gap: 8,
                             }}
                           >
-                            AI Extracted{rx.doctor_name ? ` — ${rx.doctor_name}` : ""}
-                            {rx.visit_date ? ` · ${rx.visit_date}` : ""}
+                            <div
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                color: SK,
+                                textTransform: "uppercase",
+                                letterSpacing: ".08em",
+                              }}
+                            >
+                              AI Extracted{rx.doctor_name ? ` — ${rx.doctor_name}` : ""}
+                              {rx.visit_date ? ` · ${rx.visit_date}` : ""}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCollapsedRx((s) => ({ ...s, [p.id]: !s[p.id] }))
+                              }
+                              title={isCollapsed ? "Show details" : "Hide details"}
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: SK,
+                                background: WH,
+                                border: `1px solid ${SKB}`,
+                                cursor: "pointer",
+                                padding: "2px 8px",
+                                borderRadius: 10,
+                                fontFamily: FB,
+                              }}
+                            >
+                              {isCollapsed ? `▾ Show (${meds.length})` : "▴ Hide"}
+                            </button>
                           </div>
+                          {isCollapsed ? null : (
+                          <>
+
                           {diags.length > 0 && (
                             <div
                               style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}
@@ -3598,6 +3685,8 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                               </div>
                             ) : null;
                           })()}
+                          </>
+                          )}
                         </div>
                       );
                     })()}
@@ -5214,6 +5303,8 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
   const [results, setResults] = useState([]);
   const [selPt, setSelPt] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [genieCandidates, setGenieCandidates] = useState([]);
+  const [importingId, setImportingId] = useState(null);
   const [form, setForm] = useState({
     appointment_date: new Date().toISOString().split("T")[0],
     time_slot: "",
@@ -5226,6 +5317,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
   useEffect(() => {
     if (search.length < 2) {
       setResults([]);
+      setGenieCandidates([]);
       return;
     }
     const t = setTimeout(() => {
@@ -5236,6 +5328,60 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  // If the search looks like a phone and the hospital DB has no match,
+  // check the app-only DB for self-onboarded patients with this number
+  // so the doctor can import them on the spot.
+  useEffect(() => {
+    const digits = search.replace(/\D/g, "");
+    const looksLikePhone = digits.length === 10 || digits.length === 12;
+    if (!looksLikePhone || results.length > 0) {
+      setGenieCandidates([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      apiFetch(`/api/patients/genie-lookup?phone=${encodeURIComponent(digits)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return;
+          setGenieCandidates(Array.isArray(d?.candidates) ? d.candidates : []);
+        })
+        .catch(() => {
+          if (!cancelled) setGenieCandidates([]);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [search, results.length]);
+
+  const handleImportFromApp = async (geniePatient) => {
+    setImportingId(geniePatient.id);
+    try {
+      const res = await apiFetch("/api/patients/convert-from-genie", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ genie_id: geniePatient.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.ok) {
+        showToast(body?.reason || body?.error || "Import failed", "err");
+        return;
+      }
+      showToast("Imported. Searching hospital DB…", "ok");
+      // Re-fire the search so the just-imported patient shows up as a regular hit.
+      const r = await apiFetch(`/api/patients?q=${encodeURIComponent(search)}`);
+      const d = await r.json().catch(() => ({}));
+      setResults(Array.isArray(d?.data) ? d.data.slice(0, 8) : []);
+      setGenieCandidates([]);
+    } catch (e) {
+      showToast(e?.message || "Import failed", "err");
+    } finally {
+      setImportingId(null);
+    }
+  };
 
   const handleSave = async () => {
     if (!selPt) {
@@ -5436,7 +5582,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
             ))}
           </div>
 
-          {search.length >= 2 && results.length === 0 && (
+          {search.length >= 2 && results.length === 0 && genieCandidates.length === 0 && (
             <div
               style={{
                 textAlign: "center",
@@ -5450,6 +5596,100 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
               }}
             >
               No patients found for "{search}"
+            </div>
+          )}
+
+          {results.length === 0 && genieCandidates.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 11,
+                  color: INK3,
+                  marginBottom: 6,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.4,
+                }}
+              >
+                Found in app DB — import to hospital?
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {genieCandidates.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      background: WH,
+                      border: `1px dashed ${T}`,
+                      borderRadius: 9,
+                      padding: "12px 14px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: "50%",
+                        background: TL,
+                        color: T,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {(p.name || "?").substring(0, 2).toUpperCase() || "📱"}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: FD, fontSize: 14, color: INK, marginBottom: 3 }}>
+                        {p.name || "(no name yet)"}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {p.phone && (
+                          <span style={{ fontFamily: FM, fontSize: 10, color: INK3 }}>
+                            {p.phone}
+                          </span>
+                        )}
+                        {p.dob && (
+                          <span style={{ fontSize: 10, color: INK3 }}>{fmtDate(p.dob)}</span>
+                        )}
+                        <span
+                          style={{
+                            fontSize: 10,
+                            background: TL,
+                            color: T,
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          App-only
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleImportFromApp(p)}
+                      disabled={importingId === p.id}
+                      style={{
+                        background: T,
+                        color: WH,
+                        border: "none",
+                        borderRadius: 7,
+                        padding: "8px 14px",
+                        fontFamily: FM,
+                        fontSize: 12,
+                        cursor: importingId === p.id ? "wait" : "pointer",
+                        opacity: importingId === p.id ? 0.7 : 1,
+                      }}
+                    >
+                      {importingId === p.id ? "Importing…" : "Import"}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

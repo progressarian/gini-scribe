@@ -1,4 +1,6 @@
 import { Router } from "express";
+import crypto from "crypto";
+import bcrypt from "bcrypt";
 import pool from "../config/db.js";
 import { n, int } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
@@ -6,7 +8,14 @@ import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
-import { lookupGeniePatientByPhone, convertGeniePatientByPhone } from "../services/genieImport.js";
+import { requireDoctor } from "../middleware/auth.js";
+import { getGenieDb } from "../services/genieImport.js";
+import {
+  lookupGeniePatientsByPhone,
+  convertGeniePatientByPhone,
+  convertGeniePatientById,
+} from "../services/genieImport.js";
+import { propagatePasswordToAllRows } from "./patientAuth.js";
 
 // Outbound Genie sync removed (2026-05-01): patients live in exactly one DB
 // (this scribe Postgres OR the Genie Supabase), and the patient app picks the
@@ -494,46 +503,154 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
   }
 });
 
-// Lookup a Genie-only patient by phone (for IntakePage "import from app").
+// Lookup app-DB patients by phone (for IntakePage "import from app").
+// Returns ALL non-migrated rows — a phone may host several family-member
+// accounts. The doctor picks which one(s) to import.
 router.get("/patients/genie-lookup", async (req, res) => {
   try {
     const phone = String(req.query.phone || "").trim();
     if (!phone) return res.status(400).json({ error: "phone required" });
-    const found = await lookupGeniePatientByPhone(phone);
-    if (!found) return res.json({ found: false });
+    const rows = await lookupGeniePatientsByPhone(phone);
     res.json({
-      found: true,
-      already_migrated: !!found.migrated_to_gini,
-      patient: {
-        id: found.id,
-        name: found.name,
-        phone: found.phone,
-        dob: found.dob,
-        sex: found.sex,
-        blood_group: found.blood_group,
-        email: found.email,
-      },
+      found: rows.length > 0,
+      candidates: rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        phone: p.phone,
+        dob: p.dob,
+        sex: p.sex,
+        blood_group: p.blood_group,
+        email: p.email,
+        created_at: p.created_at,
+      })),
     });
   } catch (e) {
     handleError(res, e, "Genie lookup");
   }
 });
 
-// Convert a Genie patient into scribe (one-shot import). Idempotent on the
-// patient row; safe to retry if it failed mid-import. The Genie row is
-// flagged migrated_to_gini=true so the patient app stops writing to it.
+// Convert a Genie patient into scribe (one-shot import). Pass `genie_id`
+// (preferred — disambiguates when multiple app rows share a phone) or
+// `phone` (legacy, picks the first non-migrated match). Idempotent on the
+// patient row; safe to retry if it failed mid-import.
 router.post("/patients/convert-from-genie", async (req, res) => {
   try {
-    const phone = String(req.body?.phone || "").trim();
-    if (!phone) return res.status(400).json({ error: "phone required" });
-    const result = await convertGeniePatientByPhone(phone);
+    const genieId = req.body?.genie_id ? String(req.body.genie_id).trim() : null;
+    const phone = req.body?.phone ? String(req.body.phone).trim() : null;
+    if (!genieId && !phone) {
+      return res.status(400).json({ error: "genie_id or phone required" });
+    }
+    const result = genieId
+      ? await convertGeniePatientById(genieId)
+      : await convertGeniePatientByPhone(phone);
     if (!result.ok) {
-      const status = result.reason === "no_genie_patient_for_phone" ? 404 : 409;
+      const status =
+        result.reason === "no_genie_patient_for_id" ||
+        result.reason === "no_genie_patient_for_phone"
+          ? 404
+          : 409;
       return res.status(status).json(result);
     }
     res.json(result);
   } catch (e) {
     handleError(res, e, "Convert from genie");
+  }
+});
+
+// ── POST /patients/:id/reset-app-password ──────────────────────────────────
+// Doctor-only. Generates a random temp password for the patient's app login,
+// stores its bcrypt hash, flips `force_password_reset` so the app forces a
+// password change on next login, and returns the temp password ONCE.
+// Staff reads it to the patient verbally.
+router.post("/patients/:id/reset-app-password", requireDoctor, async (req, res) => {
+  try {
+    const scribeId = Number(req.params.id);
+    if (!Number.isInteger(scribeId) || scribeId <= 0) {
+      return res.status(400).json({ error: "Invalid patient id" });
+    }
+    const { rows } = await pool.query("SELECT id, phone FROM patients WHERE id=$1", [scribeId]);
+    const hospitalPatient = rows[0];
+    if (!hospitalPatient) return res.status(404).json({ error: "Patient not found" });
+    if (!hospitalPatient.phone) {
+      return res.status(400).json({ error: "Patient has no phone — cannot manage app password." });
+    }
+
+    // The patient may have signed up on the app DB first, before the doctor
+    // intake. Reset the password on whichever DB owns their auth row.
+    let db = "hospital";
+    let appRow = null;
+    const sb = getGenieDb();
+    if (sb) {
+      const variants = [
+        hospitalPatient.phone,
+        hospitalPatient.phone.replace(/\D/g, ""),
+        hospitalPatient.phone.replace(/^\+/, ""),
+      ];
+      const r = await sb
+        .from("patients")
+        .select("*")
+        .in("phone", Array.from(new Set(variants)))
+        .eq("migrated_to_gini", false)
+        .limit(1);
+      appRow = r.data?.[0] || null;
+    }
+    if (appRow) db = "app";
+
+    // 8-char URL-safe random temp password — enough entropy, easy to read out.
+    const tempPassword = crypto.randomBytes(6).toString("base64").replace(/[+/=]/g, "").slice(0, 8);
+    const hash = await bcrypt.hash(tempPassword, 10);
+
+    if (db === "hospital") {
+      await pool.query(
+        `UPDATE patients
+            SET password_hash=$1,
+                force_password_reset=TRUE,
+                verification_token=NULL,
+                verification_token_expires_at=NULL,
+                otp_code=NULL,
+                otp_expires_at=NULL
+          WHERE id=$2`,
+        [hash, hospitalPatient.id],
+      );
+    } else {
+      const { error } = await sb
+        .from("patients")
+        .update({
+          password_hash: hash,
+          force_password_reset: true,
+          verification_token: null,
+          verification_token_expires_at: null,
+          otp_code: null,
+          otp_expires_at: null,
+        })
+        .eq("id", appRow.id);
+      if (error) throw new Error(`App DB update failed: ${error.message}`);
+    }
+
+    // Mirror the temp password + force-reset flag to every other row
+    // sharing this phone (across both DBs) so the patient can sign in
+    // regardless of which record auth resolves to next time.
+    await propagatePasswordToAllRows(hospitalPatient.phone, {
+      password_hash: hash,
+      force_password_reset: true,
+    });
+
+    // Revoke all existing patient sessions for this account so the old
+    // password / old token stop working immediately.
+    const ref = db === "hospital" ? String(hospitalPatient.id) : String(appRow.id);
+    await pool
+      .query("DELETE FROM auth_sessions WHERE patient_db=$1 AND patient_ref=$2", [db, ref])
+      .catch(() => {});
+
+    res.json({
+      ok: true,
+      db,
+      temp_password: tempPassword,
+      message:
+        "Read this password to the patient. They will be required to set a new password on next login. This password will not be shown again.",
+    });
+  } catch (e) {
+    handleError(res, e, "Reset app password");
   }
 });
 

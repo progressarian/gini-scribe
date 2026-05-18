@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { authMiddleware, requireAuth } from "./middleware/auth.js";
 import { ipLimiter, userLimiter } from "./middleware/rateLimit.js";
 import authRoutes from "./routes/auth.js";
+import patientAuthRoutes from "./routes/patientAuth.js";
 import patientRoutes from "./routes/patients.js";
 import consultationRoutes from "./routes/consultations.js";
 import clinicalRoutes from "./routes/clinical.js";
@@ -101,6 +102,7 @@ app.use("/api", userLimiter);
 
 // Routes
 app.use("/api", authRoutes);
+app.use("/api", patientAuthRoutes);
 app.use("/api", patientRoutes);
 app.use("/api", consultationRoutes);
 app.use("/api", clinicalRoutes);

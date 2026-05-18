@@ -961,6 +961,110 @@ function PatientRow({ appt, tier, noReports, onAssign, onOpen }) {
         </div>
       )}
 
+      {(appt.mobile_note ||
+        appt.patient_symptom_count > 0 ||
+        appt.patient_med_log_count > 0 ||
+        appt.uploaded_labs > 0 ||
+        appt.patient_report_count > 0) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {appt.mobile_note && (
+            <span
+              title={appt.mobile_note}
+              style={{
+                background: LVL,
+                color: LV,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: `1px solid ${LV}33`,
+                maxWidth: 180,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              📝 Patient Note
+            </span>
+          )}
+          {appt.patient_symptom_count > 0 && (
+            <span
+              title={`${appt.patient_symptom_count} symptom log(s) since last visit`}
+              style={{
+                background: AML,
+                color: AM,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: `1px solid ${AM}33`,
+              }}
+            >
+              🩺 Logged Symptoms
+              {appt.patient_symptom_last_at
+                ? ` · ${new Date(appt.patient_symptom_last_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
+          {appt.patient_med_log_count > 0 && (
+            <span
+              title={`${appt.patient_med_log_count} medicine log(s) since last visit`}
+              style={{
+                background: GNL,
+                color: GN,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: `1px solid ${GN}33`,
+              }}
+            >
+              💊 Med Log
+              {appt.patient_med_log_last_at
+                ? ` · ${new Date(appt.patient_med_log_last_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
+          {appt.uploaded_labs > 0 && (
+            <span
+              style={{
+                background: LVL,
+                color: LV,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: `1px solid ${LV}33`,
+              }}
+            >
+              📄 Lab Uploaded
+              {appt.uploaded_labs_date
+                ? ` · ${new Date(appt.uploaded_labs_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
+          {appt.uploaded_labs === 0 && appt.patient_report_count > 0 && (
+            <span
+              title={`${appt.patient_report_count} patient-uploaded report(s) since last visit`}
+              style={{
+                background: LVL,
+                color: LV,
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: `1px solid ${LV}33`,
+              }}
+            >
+              📄 Report Uploaded
+              {appt.patient_report_last_at
+                ? ` · ${new Date(appt.patient_report_last_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                : ""}
+            </span>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span
           style={{

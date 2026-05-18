@@ -5,6 +5,7 @@ import usePatientStore from "../stores/patientStore.js";
 import useUiStore from "../stores/uiStore.js";
 import AudioInput from "../components/AudioInput.jsx";
 import Err from "../components/Err.jsx";
+import api from "../services/api.js";
 import "./PatientPage.css";
 
 export default function PatientPage() {
@@ -24,6 +25,31 @@ export default function PatientPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
+  const [resettingPw, setResettingPw] = useState(false);
+  const [tempPassword, setTempPassword] = useState(null);
+  const [resetError, setResetError] = useState(null);
+
+  const handleResetAppPassword = async () => {
+    if (!dbPatientId) return;
+    if (
+      !window.confirm(
+        "Generate a temporary app password for this patient?\n\n" +
+          "Their old password will stop working immediately. They'll be forced to set a new password on next sign-in.",
+      )
+    )
+      return;
+    setResettingPw(true);
+    setResetError(null);
+    setTempPassword(null);
+    try {
+      const res = await api.post(`/api/patients/${dbPatientId}/reset-app-password`);
+      setTempPassword(res.data.temp_password);
+    } catch (e) {
+      setResetError(e?.response?.data?.error || e.message || "Reset failed");
+    } finally {
+      setResettingPw(false);
+    }
+  };
 
   const handleSave = async () => {
     const errs = {};
@@ -218,6 +244,99 @@ export default function PatientPage() {
           }}
         >
           {saveMsg.text}
+        </div>
+      )}
+
+      {dbPatientId && (
+        <div
+          style={{
+            marginTop: 16,
+            marginBottom: 12,
+            padding: 12,
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            background: "#f8fafc",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: "#475569",
+              marginBottom: 6,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+            }}
+          >
+            App access
+          </div>
+          {tempPassword ? (
+            <div
+              style={{
+                padding: 12,
+                background: "#fffbeb",
+                border: "1px solid #fde68a",
+                borderRadius: 6,
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#92400e", marginBottom: 6 }}>
+                Read this temporary password to the patient. It won't be shown again.
+              </div>
+              <div
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 20,
+                  fontWeight: 700,
+                  letterSpacing: 2,
+                  color: "#1f2937",
+                  textAlign: "center",
+                  padding: "8px 0",
+                  background: "#fff",
+                  border: "1px solid #fde68a",
+                  borderRadius: 4,
+                  userSelect: "all",
+                }}
+              >
+                {tempPassword}
+              </div>
+              <button
+                onClick={() => setTempPassword(null)}
+                style={{
+                  marginTop: 8,
+                  background: "transparent",
+                  border: "none",
+                  color: "#92400e",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                I've shared it — hide
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleResetAppPassword}
+              disabled={resettingPw}
+              style={{
+                padding: "8px 14px",
+                borderRadius: 6,
+                background: "#0f172a",
+                color: "#fff",
+                border: "none",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: resettingPw ? "wait" : "pointer",
+                opacity: resettingPw ? 0.7 : 1,
+              }}
+            >
+              {resettingPw ? "Generating…" : "Reset app password"}
+            </button>
+          )}
+          {resetError && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#dc2626" }}>{resetError}</div>
+          )}
         </div>
       )}
 
