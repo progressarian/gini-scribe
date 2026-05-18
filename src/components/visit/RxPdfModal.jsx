@@ -268,12 +268,23 @@ const RxPdfModal = memo(function RxPdfModal({
                     style={{
                       fontSize: 11,
                       padding: "6px 12px",
-                      background: saveState === "saved" ? "#15803d" : saveState === "error" ? "#dc2626" : undefined,
+                      background:
+                        saveState === "saved"
+                          ? "#15803d"
+                          : saveState === "error"
+                            ? "#dc2626"
+                            : undefined,
                       color: saveState === "saved" || saveState === "error" ? "#fff" : undefined,
                       opacity: saveState === "saving" ? 0.7 : 1,
                     }}
                   >
-                    {saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved" : saveState === "error" ? "Save failed" : "💾 Save to record"}
+                    {saveState === "saving"
+                      ? "Saving…"
+                      : saveState === "saved"
+                        ? "✓ Saved"
+                        : saveState === "error"
+                          ? "Save failed"
+                          : "💾 Save to record"}
                   </button>
                 )}
               </>

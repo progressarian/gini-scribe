@@ -188,7 +188,10 @@ export function formatWhenToTake(value) {
 export function getTimeSlots(med) {
   // Non-daily frequencies get their own dedicated section so patients can
   // clearly distinguish "take every day" meds from weekly/fortnightly ones.
-  const freq = (med?.frequency || "").toLowerCase().replace(/\s*·.*/,"").trim();
+  const freq = (med?.frequency || "")
+    .toLowerCase()
+    .replace(/\s*·.*/, "")
+    .trim();
   if (/^once weekly$|^once.in.7.days$/i.test(freq)) return ["once_weekly"];
   if (/^once.in.14.days$/i.test(freq)) return ["fortnightly"];
   if (/^once.in.15.days$/i.test(freq)) return ["once_in_15_days"];

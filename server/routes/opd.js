@@ -1422,9 +1422,13 @@ router.post("/appointments/:id/compliance", async (req, res) => {
 
     const { medications, diagnoses, stopped_medications, ...complianceData } = req.body;
 
+    // `compliance || $2::jsonb` MERGES the coordinator's payload into the
+    // existing JSONB rather than replacing it. That way patient-only fields
+    // (currently `extra` from the mobile "anything else for doctor" box)
+    // survive when the coordinator saves without explicitly carrying them.
     const { rows } = await client.query(
       `UPDATE appointments
-          SET compliance = $2::jsonb,
+          SET compliance = COALESCE(compliance, '{}'::jsonb) || $2::jsonb,
               opd_medications = $3::jsonb,
               opd_diagnoses = $4::jsonb,
               opd_stopped_medications = $5::jsonb,

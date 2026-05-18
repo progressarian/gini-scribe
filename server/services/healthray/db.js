@@ -1123,7 +1123,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       normalizeWhenToTake(med.when_to_take),
       daysOfWeek,
       instructions,
-      detectedForm || null,   // $15
+      detectedForm || null, // $15
     ];
 
     // Step 1: reactivate any existing inactive row with the same name first.

@@ -2810,9 +2810,24 @@ function VitalsTab({ appt, onSave }) {
 // MEDICINE & COMPLIANCE TAB
 // ══════════════════════════════════════════════════════════════
 function ComplianceTab({ appt, onSave, onContinue, showToast }) {
+  // ONE shared box — `appointments.compliance` is read & written by both
+  // the patient (mobile) and the coordinator (here). Whatever's in medPct /
+  // missed is the latest agreed value. Last write wins.
   const ex = appt.compliance || {};
   const [medPct, setMedPct] = useState(ex.medPct ?? 80);
   const [missed, setMissed] = useState(ex.missed || "");
+
+  // Keep state in sync if the appointment refreshes (e.g. patient saves
+  // from mobile after the tab is already open).
+  const sharedKey = JSON.stringify({ p: ex.medPct, m: ex.missed });
+  const lastSharedRef = useRef(sharedKey);
+  useEffect(() => {
+    if (lastSharedRef.current === sharedKey) return;
+    lastSharedRef.current = sharedKey;
+    if (ex.medPct != null) setMedPct(ex.medPct);
+    if (typeof ex.missed === "string") setMissed(ex.missed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedKey]);
   const [diet, setDiet] = useState(ex.diet || "Moderate — watching carbs");
   const [exercise, setExercise] = useState(ex.exercise || "Moderate (30 min, 3–4×/week)");
   const [stress, setStress] = useState(ex.stress || "Moderate");
@@ -3639,6 +3654,46 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
           <span>100% — Always</span>
         </div>
       </div>
+
+      {/* Patient-submitted free text from the mobile app. Read-only here —
+          coordinator sees what the patient wanted to flag. Lives on
+          `compliance.extra`. */}
+      {typeof ex.extra === "string" && ex.extra.trim().length > 0 ? (
+        <div
+          style={{
+            background: "#f5f0ff",
+            border: "1px solid #d9c8ff",
+            borderRadius: 10,
+            padding: "10px 12px",
+            marginBottom: 12,
+            boxShadow: SH,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: "#6d4ef5",
+              textTransform: "uppercase",
+              letterSpacing: ".07em",
+              marginBottom: 4,
+            }}
+          >
+            💬 Patient added (from mobile)
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: INK,
+              lineHeight: 1.45,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {ex.extra.trim()}
+          </div>
+        </div>
+      ) : null}
 
       <div
         style={{

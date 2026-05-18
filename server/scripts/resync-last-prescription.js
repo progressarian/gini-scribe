@@ -32,9 +32,8 @@ const {
   syncBiomarkersFromLatestLabs,
   stopStaleHealthrayMeds,
 } = await import("../services/healthray/db.js");
-const { savePrescriptionForVisit, buildVisitPayloadFromDb } = await import(
-  "../services/prescriptionAutoSave.js"
-);
+const { savePrescriptionForVisit, buildVisitPayloadFromDb } =
+  await import("../services/prescriptionAutoSave.js");
 
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");

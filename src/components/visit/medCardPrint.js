@@ -79,7 +79,7 @@ export function buildMedCardPrintHTML(patient, grouped, slotsWithMeds, activeMed
     const timingNote = clean(m.timing);
     const timingTail = wt || timingNote;
     const composition = clean(m.composition) || clean(m.patient_notes);
-    const dose = clean(m.dose) || "1 tablet";
+    const dose = clean(m.dose);
     const frequency = clean(m.frequency) || "OD";
     const instructions = clean(m.instructions);
     const indication = clean(m.indication);

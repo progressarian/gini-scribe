@@ -615,16 +615,19 @@ router.post("/patients/:id/appointments/:apptId/pre-visit-symptoms", async (req,
 });
 
 /**
- * Patient-app: save pre-visit medication-compliance entries onto a booked
- * appointment. Public, ownership-checked (same pattern as pre-visit symptoms).
+ * Patient-app: save medication-compliance onto a booked appointment. Writes
+ * to the shared `appointments.compliance` JSONB — same column the coordinator
+ * edits from OPD — using a JSONB `||` merge so coordinator-only fields
+ * (diet, exercise, stress, symptoms, …) survive the patient's save.
  *
- * Body: { items: Array<{ medication: string, schedule?: string,
- *                        adherence?: 'always'|'mostly'|'sometimes'|'missed',
- *                        notes?: string }> }
+ * Body: { pct: number 0-100, notes?: string }
+ *   → merged in as { medPct, missed } on the compliance JSONB.
  *
- * Items are sanitized server-side: max 30 entries, each text field clipped
- * to 200 chars, unknown adherence values null'd out. Resubmissions overwrite;
- * pre_visit_compliance_at is bumped so the doctor sees how fresh it is.
+ * pre_visit_compliance_at is bumped to mark the patient submission time so
+ * the doctor can tell how fresh the patient's self-report is. Coordinator
+ * OPD saves do NOT touch that timestamp.
+ *
+ * Public, ownership-checked (same pattern as pre-visit symptoms).
  */
 router.post("/patients/:id/appointments/:apptId/pre-visit-compliance", async (req, res) => {
   try {
@@ -634,21 +637,15 @@ router.post("/patients/:id/appointments/:apptId/pre-visit-compliance", async (re
     const apptId = parseInt(req.params.apptId, 10);
     if (!Number.isFinite(apptId)) return res.status(400).json({ error: "Invalid appointment id" });
 
-    const ALLOWED_ADHERENCE = new Set(["always", "mostly", "sometimes", "missed"]);
-    const clip = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
-    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
-    const items = rawItems
-      .map((it) => {
-        const medication = clip(it?.medication, 200);
-        if (!medication) return null;
-        const schedule = clip(it?.schedule, 200) || null;
-        const notes = clip(it?.notes, 500) || null;
-        const adherenceRaw = clip(it?.adherence, 20).toLowerCase();
-        const adherence = ALLOWED_ADHERENCE.has(adherenceRaw) ? adherenceRaw : null;
-        return { medication, schedule, adherence, notes };
-      })
-      .filter(Boolean)
-      .slice(0, 30);
+    const body = req.body || {};
+    const pctRaw = Number(body.pct);
+    if (!Number.isFinite(pctRaw)) {
+      return res.status(400).json({ error: "Body must include numeric pct" });
+    }
+    const medPct = Math.max(0, Math.min(100, Math.round(pctRaw)));
+    const notesRaw = typeof body.notes === "string" ? body.notes.trim().slice(0, 500) : "";
+    const missed = notesRaw;
+    const patch = { medPct, missed };
 
     const fileNoR = await pool.query(`SELECT file_no FROM patients WHERE id = $1`, [scribePid]);
     const fileNo = fileNoR.rows[0]?.file_no || null;
@@ -663,14 +660,17 @@ router.post("/patients/:id/appointments/:apptId/pre-visit-compliance", async (re
       return res.status(404).json({ error: "Appointment not found for this patient" });
     }
 
+    // JSONB || merges keys — keeps coordinator's diet/exercise/stress while
+    // overwriting medPct + missed with the patient's latest values. The
+    // column has a `{}` default so COALESCE is just belt-and-suspenders.
     const { rows } = await pool.query(
       `UPDATE appointments
-          SET pre_visit_compliance = $2::jsonb,
+          SET compliance = COALESCE(compliance, '{}'::jsonb) || $2::jsonb,
               pre_visit_compliance_at = NOW(),
               updated_at = NOW()
         WHERE id = $1
-        RETURNING id, pre_visit_compliance, pre_visit_compliance_at`,
-      [apptId, JSON.stringify(items)],
+        RETURNING id, compliance, pre_visit_compliance_at`,
+      [apptId, JSON.stringify(patch)],
     );
     if (genie?.syncAppointmentToGenie) {
       genie.syncAppointmentToGenie(scribePid, pool).catch((err) => {

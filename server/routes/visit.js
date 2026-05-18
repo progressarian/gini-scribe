@@ -15,7 +15,10 @@ import {
   generatePrescriptionPdf,
   buildPrescriptionFileName,
 } from "../services/prescriptionHtmlPdf.js";
-import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../services/prescriptionAutoSave.js";
+import {
+  savePrescriptionForVisit,
+  buildVisitPayloadFromDb,
+} from "../services/prescriptionAutoSave.js";
 import { generateVisitSummary } from "../services/visitSummaryAI.js";
 import { generatePatientSummary } from "../services/patientSummaryAI.js";
 import {
@@ -3585,14 +3588,20 @@ router.post("/visit/:patientId/prescription/regenerate", async (req, res) => {
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
     const { appointmentId } = req.body || {};
-    const payload = await buildVisitPayloadFromDb(pid, { appointmentId: appointmentId || undefined });
+    const payload = await buildVisitPayloadFromDb(pid, {
+      appointmentId: appointmentId || undefined,
+    });
     if (!payload) return res.status(404).json({ error: "Patient not found" });
     const result = await savePrescriptionForVisit(pid, payload, {
       appointmentId: appointmentId || null,
       source: "visit",
       overwrite: true,
     });
-    res.json({ document: result.document, file_name: result.file_name, storage_path: result.storage_path });
+    res.json({
+      document: result.document,
+      file_name: result.file_name,
+      storage_path: result.storage_path,
+    });
   } catch (e) {
     handleError(res, e, "Regenerate prescription");
   }

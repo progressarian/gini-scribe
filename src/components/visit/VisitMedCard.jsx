@@ -35,7 +35,7 @@ function MedRow({ m }) {
           <div className="mgen">{s(m.composition) || s(m.patient_notes)}</div>
         </div>
       </div>
-      <div className="mtd">{s(m.dose) || "1 tablet"}</div>
+      <div className="mtd">{s(m.dose)}</div>
       <div className="mtd">
         {s(m.frequency) || "OD"}
         {(() => {
@@ -45,7 +45,9 @@ function MedRow({ m }) {
         })()}
         {s(m.instructions) ? (
           <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{s(m.instructions)}</div>
-        ) : ""}
+        ) : (
+          ""
+        )}
       </div>
       <div>{s(m.indication) && <span className="mfor">{s(m.indication)}</span>}</div>
       {s(m.timing) && (

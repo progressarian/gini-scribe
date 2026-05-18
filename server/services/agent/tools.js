@@ -181,9 +181,20 @@ export const AGENT_TOOLS = [
         type: {
           type: "string",
           enum: [
-            "BP", "Sugar", "Weight",
-            "HbA1c", "LDL", "TSH", "Haemoglobin", "eGFR", "Lab",
-            "Exercise", "Sleep", "Mood", "Symptom", "Food",
+            "BP",
+            "Sugar",
+            "Weight",
+            "HbA1c",
+            "LDL",
+            "TSH",
+            "Haemoglobin",
+            "eGFR",
+            "Lab",
+            "Exercise",
+            "Sleep",
+            "Mood",
+            "Symptom",
+            "Food",
           ],
           description: "Health data type to log.",
         },
@@ -209,19 +220,23 @@ export const AGENT_TOOLS = [
         },
         test_name: {
           type: "string",
-          description: "For type='Lab' only: human-readable test name (e.g. 'Vitamin D', 'Creatinine'). Required when type='Lab'.",
+          description:
+            "For type='Lab' only: human-readable test name (e.g. 'Vitamin D', 'Creatinine'). Required when type='Lab'.",
         },
         unit: {
           type: "string",
-          description: "For type='Lab' only: standard unit (e.g. 'ng/mL', 'mg/dL'). Required when type='Lab'.",
+          description:
+            "For type='Lab' only: standard unit (e.g. 'ng/mL', 'mg/dL'). Required when type='Lab'.",
         },
         ref_range: {
           type: "string",
-          description: "For type='Lab' only: normal reference range string (e.g. '30-100 ng/mL'). Optional.",
+          description:
+            "For type='Lab' only: normal reference range string (e.g. '30-100 ng/mL'). Optional.",
         },
         canonical_name: {
           type: "string",
-          description: "For type='Lab' only: lowercase canonical key (e.g. 'vitd', 'creatinine', 'b12'). Optional.",
+          description:
+            "For type='Lab' only: lowercase canonical key (e.g. 'vitd', 'creatinine', 'b12'). Optional.",
         },
       },
       required: ["type", "value1"],
@@ -1182,11 +1197,11 @@ async function executeCreateHealthLog(pool, patientId, input) {
 
   // ── Named lab types ──────────────────────────────────────────────────
   const NAMED_LAB_META = {
-    HbA1c:       { testName: "HbA1c",           canonicalName: "hba1c",       unit: "%" },
-    LDL:         { testName: "LDL Cholesterol", canonicalName: "ldl",         unit: "mg/dL" },
-    TSH:         { testName: "TSH",             canonicalName: "tsh",         unit: "µIU/mL" },
-    Haemoglobin: { testName: "Haemoglobin",     canonicalName: "haemoglobin", unit: "g/dL" },
-    eGFR:        { testName: "eGFR",            canonicalName: "egfr",        unit: "mL/min" },
+    HbA1c: { testName: "HbA1c", canonicalName: "hba1c", unit: "%" },
+    LDL: { testName: "LDL Cholesterol", canonicalName: "ldl", unit: "mg/dL" },
+    TSH: { testName: "TSH", canonicalName: "tsh", unit: "µIU/mL" },
+    Haemoglobin: { testName: "Haemoglobin", canonicalName: "haemoglobin", unit: "g/dL" },
+    eGFR: { testName: "eGFR", canonicalName: "egfr", unit: "mL/min" },
   };
   if (NAMED_LAB_META[type]) {
     const meta = NAMED_LAB_META[type];
@@ -1208,8 +1223,7 @@ async function executeCreateHealthLog(pool, patientId, input) {
   // ── Generic Lab (Vitamin D, B12, T3, T4, Creatinine, HDL, FBS, etc.) ──
   if (type === "Lab") {
     const testName = String(input.test_name || "").trim();
-    if (!testName)
-      return { ok: false, error: "test_name is required for type='Lab'." };
+    if (!testName) return { ok: false, error: "test_name is required for type='Lab'." };
     const numeric = Number(v1);
     if (!Number.isFinite(numeric) || numeric <= 0)
       return { ok: false, error: "value1 must be a positive number." };
@@ -1224,9 +1238,12 @@ async function executeCreateHealthLog(pool, patientId, input) {
          (patient_id, test_date, test_name, canonical_name, result, result_text, unit, ref_range, source)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'agent')`,
       [
-        patientId, logDate,
-        testName.slice(0, 200), canonicalName,
-        numeric, v1,
+        patientId,
+        logDate,
+        testName.slice(0, 200),
+        canonicalName,
+        numeric,
+        v1,
         unit.slice(0, 50) || null,
         refRange.slice(0, 100) || null,
       ],

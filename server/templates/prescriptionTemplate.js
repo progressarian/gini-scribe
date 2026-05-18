@@ -948,7 +948,10 @@ function buildPrescriptionHtml(data = {}) {
 
   let medCounter = 0;
   const ownMedsHtml = ownParents
-    .map((m) => { medCounter += 1; return renderOwnMedRow(m, medCounter); })
+    .map((m) => {
+      medCounter += 1;
+      return renderOwnMedRow(m, medCounter);
+    })
     .join("");
 
   // ── External medicines
