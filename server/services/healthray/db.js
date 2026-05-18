@@ -19,6 +19,33 @@ import { normalizeWhenToTake } from "../../schemas/index.js";
 // render or storage upload doesn't hold DB locks.
 async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultationId) {
   if (!patientId) return;
+
+  // Defer auto-save until the HealthRay (or local OPD) clinical extraction
+  // has actually populated medications/diagnoses on the appointment. If we
+  // generate now with empty/stale meds, the PDF gets written with last
+  // visit's data and never refreshes. A later sync pass (after clinical
+  // extraction) re-invokes this function via maybeAutoSavePrescription().
+  if (appointmentId) {
+    const { rows } = await pool.query(
+      `SELECT
+         COALESCE(jsonb_array_length(healthray_medications), 0) AS hr_meds,
+         COALESCE(jsonb_array_length(healthray_diagnoses), 0)   AS hr_dx,
+         COALESCE(jsonb_array_length(opd_medications), 0)       AS opd_meds,
+         COALESCE(jsonb_array_length(opd_diagnoses), 0)         AS opd_dx
+       FROM appointments WHERE id = $1`,
+      [appointmentId],
+    );
+    const r = rows[0] || {};
+    const hasClinical = (r.hr_meds || 0) + (r.hr_dx || 0) + (r.opd_meds || 0) + (r.opd_dx || 0) > 0;
+    if (!hasClinical) {
+      log(
+        "autoSavePrescription",
+        `appt=${appointmentId} pid=${patientId}: defer — clinical data not yet extracted`,
+      );
+      return;
+    }
+  }
+
   const payload = await buildVisitPayloadFromDb(patientId, { appointmentId });
   if (!payload) return;
   await savePrescriptionForVisit(patientId, payload, {
@@ -28,6 +55,23 @@ async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultat
     titlePrefix: "Prescription — Visit",
     overwrite: true,
   });
+}
+
+// Re-invokable form: call after a later sync pass populates clinical data.
+// Looks up the consultation id and only writes/overwrites the prescription
+// when the gating data is present.
+export async function maybeAutoSavePrescription(appointmentId) {
+  if (!appointmentId) return;
+  const { rows } = await pool.query(
+    `SELECT patient_id, consultation_id, status FROM appointments WHERE id = $1`,
+    [appointmentId],
+  );
+  const a = rows[0];
+  if (!a || !a.patient_id || !a.consultation_id) return;
+  if (!["seen", "completed"].includes(a.status)) return;
+  await autoSavePrescriptionAfterSeen(a.patient_id, appointmentId, a.consultation_id).catch((e) =>
+    console.warn("[maybeAutoSavePrescription] failed:", e.message),
+  );
 }
 const { log, error } = createLogger("HealthRay Sync");
 
@@ -1437,8 +1481,49 @@ async function linkSupportMedications(patientId, meds) {
 // After syncing current meds (which sets notes = 'healthray:ID'), deactivate
 // any other HealthRay-sourced active meds that weren't updated by this sync.
 // This handles meds that were prescribed before but dropped from the current note.
-export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
+export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate, currentMeds) {
   if (!patientId || !healthrayId) return;
+
+  // Build the survival set from the current prescription's medication list.
+  // Anything active that isn't in this set will be deactivated. We match on
+  // pharmacy_match (canonical name) when available, else uppercase name.
+  // Without this list, note-based criteria miss rows whose notes were re-
+  // stamped to the current healthrayId by an earlier sync pass.
+  const keepKeys = new Set();
+  if (Array.isArray(currentMeds)) {
+    for (const m of currentMeds) {
+      const key = String(m?.pharmacy_match || m?.name || "")
+        .trim()
+        .toUpperCase();
+      if (key) keepKeys.add(key);
+    }
+  }
+
+  // Guard: only sweep when this prescription IS the patient's latest one with
+  // medications. If a newer appointment exists, deactivating "everything not
+  // tagged $healthrayId" would wipe the newer prescription's meds — exactly
+  // the bug that left stale meds active when the cron processed appointments
+  // out of order, or when a re-sync of an older appointment ran after the
+  // newer one had already been written.
+  if (apptDate) {
+    const { rows: newer } = await pool.query(
+      `SELECT 1 FROM appointments
+        WHERE patient_id = $1
+          AND healthray_id IS NOT NULL
+          AND healthray_id::text <> $2::text
+          AND appointment_date > $3::date
+          AND jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb)) > 0
+        LIMIT 1`,
+      [patientId, String(healthrayId), apptDate],
+    );
+    if (newer.length) {
+      log(
+        "stopStaleHealthrayMeds",
+        `${patientId}/${healthrayId}: skip — a newer prescription exists; cleanup will run for that one`,
+      );
+      return;
+    }
+  }
 
   // Skip when nothing got tagged with this healthrayId — that means the current
   // prescription was empty. Running the "stale" sweep in that state matches
@@ -1480,20 +1565,17 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
               FROM medications
               WHERE patient_id = $1
                 AND is_active = true
-                AND source = 'healthray'
                 AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
             ))
            OR
            -- (B) duplicate active rows per canonical — keep only the lowest id
            (is_active = true
-            AND source = 'healthray'
             AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
             AND id NOT IN (
               SELECT MIN(id)
               FROM medications
               WHERE patient_id = $1
                 AND is_active = true
-                AND source = 'healthray'
                 AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
               GROUP BY UPPER(COALESCE(pharmacy_match, name))
             ))
@@ -1512,13 +1594,20 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate) {
       `UPDATE medications
        SET is_active = false,
            stopped_date = $3,
-           stop_reason = $2 || 'stopped',
+           stop_reason = 'Not in latest prescription',
            updated_at = NOW()
        WHERE patient_id = $1
          AND is_active = true
-         AND source = 'healthray'
-         AND (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')`,
-      [patientId, String(healthrayId), apptDate],
+         AND (
+           -- not tagged with this prescription's healthray id …
+           (notes IS NULL OR notes NOT LIKE 'healthray:' || $2 || '%')
+           -- … or tagged but not actually present in this prescription's
+           -- medication list (handles rows that were spuriously re-tagged
+           -- with this healthrayId by a previous run).
+           OR ($4::text[] IS NOT NULL
+               AND UPPER(COALESCE(pharmacy_match, name)) <> ALL ($4::text[]))
+         )`,
+      [patientId, String(healthrayId), apptDate, keepKeys.size ? [...keepKeys] : null],
     )
     .catch((e) =>
       error(

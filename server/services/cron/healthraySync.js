@@ -41,6 +41,7 @@ import {
   syncBiomarkersFromLatestLabs,
   markAppointmentAsSeen,
   markAppointmentAsCheckedIn,
+  maybeAutoSavePrescription,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
@@ -648,7 +649,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     clinical.healthrayMedications,
   );
   if (clinical.healthrayMedications.length > 0) {
-    await stopStaleHealthrayMeds(patientId, healthrayId, apptDate);
+    await stopStaleHealthrayMeds(patientId, healthrayId, apptDate, clinical.healthrayMedications);
   }
   await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
   await syncSymptoms(patientId, localApptId, clinical.parsedClinical?.symptoms);
@@ -673,6 +674,16 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     if (hasRxPdf) {
       await markAppointmentAsSeen(localApptId, "completed");
     }
+  }
+
+  // If this appointment is already marked seen/completed and the clinical
+  // extraction we just ran has produced medications/diagnoses, (re)generate
+  // the prescription PDF so it reflects the latest HealthRay data instead of
+  // an earlier auto-save written when meds were still empty.
+  if (clinical.healthrayMedications.length > 0 || clinical.healthrayDiagnoses.length > 0) {
+    maybeAutoSavePrescription(localApptId).catch((e) =>
+      error("autoSavePrescription", `appt=${localApptId}: ${e.message}`),
+    );
   }
 
   // ── On first entry of a new appointment, re-extract the patient's last
@@ -929,7 +940,12 @@ export async function runDailyOpdBackfill(dateStr) {
         }
         if (medications.length > 0) {
           await syncMedications(patient_id, appt.healthray_id, appt.appointment_date, medications);
-          await stopStaleHealthrayMeds(patient_id, appt.healthray_id, appt.appointment_date);
+          await stopStaleHealthrayMeds(
+            patient_id,
+            appt.healthray_id,
+            appt.appointment_date,
+            medications,
+          );
         }
         if (previousMeds.length > 0) {
           await syncStoppedMedications(patient_id, appt.healthray_id, previousMeds, medications);
@@ -1105,7 +1121,12 @@ export async function runMissingMedsRecovery() {
             a.appointment_date,
             a.healthray_medications,
           );
-          await stopStaleHealthrayMeds(patient_id, a.healthray_id, a.appointment_date);
+          await stopStaleHealthrayMeds(
+            patient_id,
+            a.healthray_id,
+            a.appointment_date,
+            a.healthray_medications,
+          );
         }
         fixed++;
       } catch (e) {

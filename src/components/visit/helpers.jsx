@@ -392,21 +392,27 @@ export const fmtLabVal = (resultText, result) => {
   return parseFloat(n.toFixed(2)); // round to 2dp, strip trailing zeros
 };
 
+const isBadDateInput = (d) =>
+  d == null || d === "" || (typeof d === "string" && /^(null|undefined|nan)$/i.test(d.trim()));
+
 export const fmtDate = (d) => {
-  if (!d) return "";
+  if (isBadDateInput(d)) return "";
   const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
   return `${dt.getDate()} ${MONTHS_S[dt.getMonth()]} ${dt.getFullYear()}`;
 };
 
 export const fmtDateLong = (d) => {
-  if (!d) return "";
+  if (isBadDateInput(d)) return "";
   const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
   return `${DAYS_L[dt.getDay()]}, ${dt.getDate()} ${MONTHS_L[dt.getMonth()]} ${dt.getFullYear()}`;
 };
 
 export const fmtDateShort = (d) => {
-  if (!d) return "";
+  if (isBadDateInput(d)) return "";
   const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
   const now = new Date();
   const month = MONTHS_S[dt.getMonth()];
   return dt.getFullYear() === now.getFullYear()

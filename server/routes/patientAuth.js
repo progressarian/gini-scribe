@@ -57,21 +57,49 @@ function generateOtp() {
 // ── DB-routing helpers ──────────────────────────────────────────────────────
 
 async function findHospitalPatient(phone) {
-  const { rows } = await pool.query("SELECT * FROM patients WHERE phone=$1 LIMIT 1", [phone]);
+  // Scribe DB stores phones inconsistently — sometimes `+91…`, sometimes raw
+  // 10 digits, sometimes `91…`, sometimes with spaces/dashes. Try an exact
+  // match against the common variants first; if nothing hits, fall back to a
+  // digit-only comparison so anything-with-the-same-digits still resolves.
+  const variants = phoneVariants(phone);
+  const last10 = phone.replace(/\D/g, "").slice(-10);
+
+  const { rows } = await pool.query(
+    `SELECT * FROM patients
+       WHERE phone = ANY($1)
+          OR regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $2
+          OR right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2
+       LIMIT 1`,
+    [variants, last10],
+  );
   return rows[0] || null;
 }
 
 async function findAppPatient(phone) {
   const db = getGenieDb();
   if (!db) return null;
+
+  // First try exact-variant match (the common case).
   const { data, error } = await db
     .from("patients")
     .select("*")
     .in("phone", phoneVariants(phone))
     .eq("migrated_to_gini", false)
     .limit(1);
-  if (error || !data || data.length === 0) return null;
-  return data[0];
+  if (!error && data && data.length > 0) return data[0];
+
+  // Fallback: any row whose digits end with the same last-10. Supabase has no
+  // regex_replace helper, so we widen with `ilike` patterns covering the
+  // common storage shapes.
+  const last10 = phone.replace(/\D/g, "").slice(-10);
+  if (!last10) return null;
+  const { data: data2 } = await db
+    .from("patients")
+    .select("*")
+    .or([`phone.ilike.%${last10}`, `phone.ilike.%${last10}%`].join(","))
+    .eq("migrated_to_gini", false)
+    .limit(1);
+  return data2?.[0] || null;
 }
 
 /** Resolve the canonical patient for an incoming phone.
@@ -107,9 +135,14 @@ async function markAppRowMigrated(appId, scribePatientId) {
 
 async function listLinkedPatients(db, phone) {
   if (db === "hospital") {
+    const last10 = phone.replace(/\D/g, "").slice(-10);
     const { rows } = await pool.query(
-      "SELECT id, name, dob, sex, file_no, phone FROM patients WHERE phone=$1 ORDER BY id",
-      [phone],
+      `SELECT id, name, dob, sex, file_no, phone FROM patients
+         WHERE phone = ANY($1)
+            OR regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $2
+            OR right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2
+         ORDER BY id`,
+      [phoneVariants(phone), last10],
     );
     return rows;
   }
@@ -173,10 +206,10 @@ export async function propagatePasswordToAllRows(phone, fields) {
     const keys = Object.keys(fields);
     const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(", ");
     const values = keys.map((k) => fields[k]);
-    await pool.query(
-      `UPDATE patients SET ${sets} WHERE phone = ANY($1::text[])`,
-      [variants, ...values],
-    );
+    await pool.query(`UPDATE patients SET ${sets} WHERE phone = ANY($1::text[])`, [
+      variants,
+      ...values,
+    ]);
   } catch (e) {
     console.error("[propagatePassword] hospital update failed", e);
   }
@@ -275,7 +308,15 @@ router.post("/patient/auth/send-otp", loginLimiter, async (req, res) => {
     }
 
     // New signup with neither DB matching → create in app DB.
+    // If the app DB isn't configured on this deployment, surface a clearer
+    // "not registered" message instead of leaking the internal config error.
     if (!patient) {
+      if (!getGenieDb()) {
+        return res.status(404).json({
+          error: "This phone number is not registered.",
+          code: "NOT_REGISTERED",
+        });
+      }
       patient = await insertAppPatient(phone);
       db = "app";
     }

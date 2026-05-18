@@ -165,9 +165,7 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       t(title, 200),
       t(fileName, 200),
       source,
-      clientInitiated
-        ? "Generated on visit completion"
-        : "Auto-generated on appointment completion",
+      clientInitiated ? "Generated on visit completion" : null,
       JSON.stringify(data),
     ],
   );

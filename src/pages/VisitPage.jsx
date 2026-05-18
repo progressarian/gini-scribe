@@ -715,7 +715,27 @@ export default function VisitPage() {
   const [visitStart, setVisitStart] = useState(
     () => sessionStorage.getItem("gini_visit_start") || null,
   );
-  const hasActiveVisit = !!opdApptId;
+  const [apptStatus, setApptStatus] = useState(null);
+  useEffect(() => {
+    if (!opdApptId) {
+      setApptStatus(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get(`/api/appointments/${opdApptId}`)
+      .then((r) => {
+        if (!cancelled) setApptStatus(r?.data?.status || null);
+      })
+      .catch(() => {
+        if (!cancelled) setApptStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [opdApptId]);
+  // Hide End Visit once the appointment has been wrapped up (seen/completed).
+  const hasActiveVisit = !!opdApptId && !["seen", "completed"].includes(apptStatus || "");
 
   // ── UI state ──
   const [data, setData] = useState(null);
@@ -1360,6 +1380,7 @@ export default function VisitPage() {
     if (apptId) {
       try {
         await api.patch(`/api/appointments/${apptId}`, { status: "seen" });
+        setApptStatus("seen");
       } catch {
         // non-critical — OPD will still show correct state on refresh
       }

@@ -59,12 +59,20 @@ export default function VisitPreVisitCompliance({ appointmentId }) {
   const raw = appt.compliance;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
 
+  const cleanStr = (v) => {
+    if (typeof v !== "string") return "";
+    const t = v.trim();
+    if (!t) return "";
+    const lower = t.toLowerCase();
+    if (lower === "null" || lower === "undefined" || lower === "nan") return "";
+    return t;
+  };
   const pct = Number.isFinite(Number(raw.medPct)) ? Math.round(Number(raw.medPct)) : null;
-  const notes = typeof raw.missed === "string" ? raw.missed.trim() : "";
-  const diet = typeof raw.diet === "string" ? raw.diet.trim() : "";
-  const exercise = typeof raw.exercise === "string" ? raw.exercise.trim() : "";
-  const stress = typeof raw.stress === "string" ? raw.stress.trim() : "";
-  const extra = typeof raw.extra === "string" ? raw.extra.trim() : "";
+  const notes = cleanStr(raw.missed);
+  const diet = cleanStr(raw.diet);
+  const exercise = cleanStr(raw.exercise);
+  const stress = cleanStr(raw.stress);
+  const extra = cleanStr(raw.extra);
   if (pct == null && !notes && !diet && !exercise && !stress && !extra) return null;
 
   const tone = pct != null ? pctTone(pct) : null;

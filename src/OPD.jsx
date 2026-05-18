@@ -1637,6 +1637,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
   const [reports, setReports] = useState({});
   const [activeType, setActiveType] = useState("blood");
   const [expandedReports, setExpandedReports] = useState({});
+  const [collapsedReportPanels, setCollapsedReportPanels] = useState({});
   const [loadingDocs, setLoadingDocs] = useState(false);
   // null | { typeId, name, docId, extractedData } — shows ConfirmModal
   // so we don't silently delete a doc + its synced lab values on a stray
@@ -2295,29 +2296,6 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                 View
                               </button>
                             )}
-                            {!r.uploading && !r.extracting && (
-                              <button
-                                onClick={() =>
-                                  setReportToDelete({
-                                    typeId: activeType,
-                                    name: r.name,
-                                    docId: r.docId,
-                                    extractedData: r.extractedData,
-                                  })
-                                }
-                                style={{
-                                  fontSize: 12,
-                                  color: INK3,
-                                  background: "none",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  padding: "2px 6px",
-                                  borderRadius: 4,
-                                }}
-                              >
-                                ✕
-                              </button>
-                            )}
                           </div>
                           {/* Extracted data preview */}
                           {r.extractedData &&
@@ -2329,6 +2307,8 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                   .flatMap((p) => p.tests)
                                   .filter((t) => t.result != null);
                                 if (!tests.length) return null;
+                                const panelKey = r.id || r.name;
+                                const panelCollapsed = collapsedReportPanels[panelKey] !== false;
                                 return (
                                   <div
                                     style={{
@@ -2341,18 +2321,52 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                   >
                                     <div
                                       style={{
-                                        fontSize: 9,
-                                        fontWeight: 700,
-                                        color: SK,
-                                        textTransform: "uppercase",
-                                        letterSpacing: ".08em",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        gap: 8,
                                         marginBottom: 5,
                                       }}
                                     >
-                                      AI Extracted Results{d.lab_name ? ` — ${d.lab_name}` : ""}
-                                      {d.report_date ? ` · ${d.report_date}` : ""}
+                                      <div
+                                        style={{
+                                          fontSize: 9,
+                                          fontWeight: 700,
+                                          color: SK,
+                                          textTransform: "uppercase",
+                                          letterSpacing: ".08em",
+                                        }}
+                                      >
+                                        AI Extracted Results{d.lab_name ? ` — ${d.lab_name}` : ""}
+                                        {d.report_date ? ` · ${d.report_date}` : ""}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setCollapsedReportPanels((s) => ({
+                                            ...s,
+                                            [panelKey]: !panelCollapsed,
+                                          }))
+                                        }
+                                        title={panelCollapsed ? "Show details" : "Hide details"}
+                                        style={{
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          color: SK,
+                                          background: WH,
+                                          border: `1px solid ${SKB}`,
+                                          cursor: "pointer",
+                                          padding: "2px 8px",
+                                          borderRadius: 10,
+                                          fontFamily: FB,
+                                        }}
+                                      >
+                                        {panelCollapsed
+                                          ? `▾ Show (${tests.length})`
+                                          : "▴ Hide"}
+                                      </button>
                                     </div>
-                                    {(() => {
+                                    {panelCollapsed ? null : (() => {
                                       const rKey = r.id || r.name;
                                       const isExpanded = expandedReports[rKey];
                                       const shown = isExpanded ? tests : tests.slice(0, 25);
@@ -2419,6 +2433,9 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                               }
                               // Imaging report: show findings
                               if (d.report_type || d.findings) {
+                                const imgKey = (r.id || r.name) + ":img";
+                                const imgCollapsed = collapsedReportPanels[imgKey] !== false;
+                                const findingsCount = (d.findings || []).length;
                                 return (
                                   <div
                                     style={{
@@ -2431,18 +2448,52 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                   >
                                     <div
                                       style={{
-                                        fontSize: 9,
-                                        fontWeight: 700,
-                                        color: SK,
-                                        textTransform: "uppercase",
-                                        letterSpacing: ".08em",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        gap: 8,
                                         marginBottom: 5,
                                       }}
                                     >
-                                      AI Extracted — {d.report_type || "Imaging"}
-                                      {d.date ? ` · ${d.date}` : ""}
+                                      <div
+                                        style={{
+                                          fontSize: 9,
+                                          fontWeight: 700,
+                                          color: SK,
+                                          textTransform: "uppercase",
+                                          letterSpacing: ".08em",
+                                        }}
+                                      >
+                                        AI Extracted — {d.report_type || "Imaging"}
+                                        {d.date ? ` · ${d.date}` : ""}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setCollapsedReportPanels((s) => ({
+                                            ...s,
+                                            [imgKey]: !imgCollapsed,
+                                          }))
+                                        }
+                                        title={imgCollapsed ? "Show details" : "Hide details"}
+                                        style={{
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          color: SK,
+                                          background: WH,
+                                          border: `1px solid ${SKB}`,
+                                          cursor: "pointer",
+                                          padding: "2px 8px",
+                                          borderRadius: 10,
+                                          fontFamily: FB,
+                                        }}
+                                      >
+                                        {imgCollapsed
+                                          ? `▾ Show${findingsCount ? ` (${findingsCount})` : ""}`
+                                          : "▴ Hide"}
+                                      </button>
                                     </div>
-                                    {d.findings && d.findings.length > 0 && (
+                                    {!imgCollapsed && d.findings && d.findings.length > 0 && (
                                       <div
                                         style={{
                                           display: "flex",
@@ -2480,7 +2531,7 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                         ))}
                                       </div>
                                     )}
-                                    {d.impression && (
+                                    {!imgCollapsed && d.impression && (
                                       <div
                                         style={{ fontSize: 10, color: INK2, fontStyle: "italic" }}
                                       >
@@ -3529,9 +3580,7 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                             </div>
                             <button
                               type="button"
-                              onClick={() =>
-                                setCollapsedRx((s) => ({ ...s, [p.id]: !s[p.id] }))
-                              }
+                              onClick={() => setCollapsedRx((s) => ({ ...s, [p.id]: !s[p.id] }))}
                               title={isCollapsed ? "Show details" : "Hide details"}
                               style={{
                                 fontSize: 10,
@@ -3549,143 +3598,151 @@ function ComplianceTab({ appt, onSave, onContinue, showToast }) {
                             </button>
                           </div>
                           {isCollapsed ? null : (
-                          <>
-
-                          {diags.length > 0 && (
-                            <div
-                              style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}
-                            >
-                              {diags.map((d, di) => (
-                                <span
-                                  key={di}
-                                  style={{
-                                    fontSize: 10,
-                                    padding: "2px 7px",
-                                    borderRadius: 5,
-                                    fontWeight: 600,
-                                    background:
-                                      d.status === "Uncontrolled"
-                                        ? REL
-                                        : d.status === "New"
-                                          ? AML
-                                          : GNL,
-                                    color:
-                                      d.status === "Uncontrolled"
-                                        ? RE
-                                        : d.status === "New"
-                                          ? AM
-                                          : GN,
-                                    border: `1px solid ${d.status === "Uncontrolled" ? REB : d.status === "New" ? AMB : GNB}`,
-                                  }}
-                                >
-                                  {d.label || d.id}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {meds.length > 0 && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                              {meds.map((m, mi) => (
+                            <>
+                              {diags.length > 0 && (
                                 <div
-                                  key={mi}
                                   style={{
                                     display: "flex",
-                                    alignItems: "center",
-                                    gap: 8,
-                                    background: WH,
-                                    border: `1px solid ${BD}`,
-                                    borderRadius: 5,
-                                    padding: "5px 9px",
+                                    flexWrap: "wrap",
+                                    gap: 4,
+                                    marginBottom: 6,
                                   }}
                                 >
-                                  <span style={{ fontSize: 12 }}>💊</span>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 600, color: INK }}>
-                                      {m.name}
-                                    </span>
-                                    <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
-                                      {[m.dose, m.frequency, m.timing].filter(Boolean).join(" · ")}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {(rx.stopped_medications || []).length > 0 && (
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 3,
-                                marginTop: 4,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: 9,
-                                  fontWeight: 700,
-                                  color: RE,
-                                  textTransform: "uppercase",
-                                  letterSpacing: ".06em",
-                                }}
-                              >
-                                Stopped / Omitted
-                              </div>
-                              {rx.stopped_medications.map((m, mi) => (
-                                <div
-                                  key={mi}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 8,
-                                    background: REL,
-                                    border: `1px solid ${REB}`,
-                                    borderRadius: 5,
-                                    padding: "5px 9px",
-                                  }}
-                                >
-                                  <span style={{ fontSize: 12 }}>🚫</span>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                  {diags.map((d, di) => (
                                     <span
+                                      key={di}
                                       style={{
-                                        fontSize: 11,
+                                        fontSize: 10,
+                                        padding: "2px 7px",
+                                        borderRadius: 5,
                                         fontWeight: 600,
-                                        color: RE,
-                                        textDecoration: "line-through",
+                                        background:
+                                          d.status === "Uncontrolled"
+                                            ? REL
+                                            : d.status === "New"
+                                              ? AML
+                                              : GNL,
+                                        color:
+                                          d.status === "Uncontrolled"
+                                            ? RE
+                                            : d.status === "New"
+                                              ? AM
+                                              : GN,
+                                        border: `1px solid ${d.status === "Uncontrolled" ? REB : d.status === "New" ? AMB : GNB}`,
                                       }}
                                     >
-                                      {m.name}
+                                      {d.label || d.id}
                                     </span>
-                                    {m.reason && (
-                                      <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
-                                        — {m.reason}
-                                      </span>
-                                    )}
-                                  </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
-                          )}
-                          {(() => {
-                            const adviceText = Array.isArray(rx.advice)
-                              ? rx.advice.join("; ")
-                              : typeof rx.advice === "string"
-                                ? rx.advice
-                                : "";
-                            return adviceText ? (
-                              <div
-                                style={{
-                                  fontSize: 10,
-                                  color: INK2,
-                                  marginTop: 5,
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                {adviceText}
-                              </div>
-                            ) : null;
-                          })()}
-                          </>
+                              )}
+                              {meds.length > 0 && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                  {meds.map((m, mi) => (
+                                    <div
+                                      key={mi}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        background: WH,
+                                        border: `1px solid ${BD}`,
+                                        borderRadius: 5,
+                                        padding: "5px 9px",
+                                      }}
+                                    >
+                                      <span style={{ fontSize: 12 }}>💊</span>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <span style={{ fontSize: 11, fontWeight: 600, color: INK }}>
+                                          {m.name}
+                                        </span>
+                                        <span style={{ fontSize: 10, color: INK3, marginLeft: 6 }}>
+                                          {[m.dose, m.frequency, m.timing]
+                                            .filter(Boolean)
+                                            .join(" · ")}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {(rx.stopped_medications || []).length > 0 && (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 3,
+                                    marginTop: 4,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: 700,
+                                      color: RE,
+                                      textTransform: "uppercase",
+                                      letterSpacing: ".06em",
+                                    }}
+                                  >
+                                    Stopped / Omitted
+                                  </div>
+                                  {rx.stopped_medications.map((m, mi) => (
+                                    <div
+                                      key={mi}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        background: REL,
+                                        border: `1px solid ${REB}`,
+                                        borderRadius: 5,
+                                        padding: "5px 9px",
+                                      }}
+                                    >
+                                      <span style={{ fontSize: 12 }}>🚫</span>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            color: RE,
+                                            textDecoration: "line-through",
+                                          }}
+                                        >
+                                          {m.name}
+                                        </span>
+                                        {m.reason && (
+                                          <span
+                                            style={{ fontSize: 10, color: INK3, marginLeft: 6 }}
+                                          >
+                                            — {m.reason}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {(() => {
+                                const adviceText = Array.isArray(rx.advice)
+                                  ? rx.advice.join("; ")
+                                  : typeof rx.advice === "string"
+                                    ? rx.advice
+                                    : "";
+                                return adviceText ? (
+                                  <div
+                                    style={{
+                                      fontSize: 10,
+                                      color: INK2,
+                                      marginTop: 5,
+                                      fontStyle: "italic",
+                                    }}
+                                  >
+                                    {adviceText}
+                                  </div>
+                                ) : null;
+                              })()}
+                            </>
                           )}
                         </div>
                       );

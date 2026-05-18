@@ -170,7 +170,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
           <DocStatusPill doc={doc} patientId={patientId} size="sm" />
         ) : doc.doc_type === "prescription" ? (
           <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-            {doc.notes === "Auto-generated on appointment completion" && (
+            {doc.source === "visit" && (
               <button
                 className="bx bx-s"
                 disabled={regenerating === doc.id}

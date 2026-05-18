@@ -15,8 +15,7 @@ export const authMiddleware = async (req, res, next) => {
   //   • ?token=<token> query string (so the URL handed to <Image> or an
   //     in-app browser is self-authenticating without needing headers)
   const authHeader = req.headers["authorization"] || req.headers["Authorization"];
-  const bearerMatch =
-    typeof authHeader === "string" && /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+  const bearerMatch = typeof authHeader === "string" && /^Bearer\s+(.+)$/i.exec(authHeader.trim());
   const token =
     req.headers["x-auth-token"] ||
     (bearerMatch && bearerMatch[1]) ||

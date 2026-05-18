@@ -675,7 +675,7 @@ const VisitPlan = memo(function VisitPlan({
                 <div style={{ marginTop: 10 }}>
                   <div className="plct">Follow-up</div>
                   <div style={{ fontSize: 12, color: "var(--t2)" }}>
-                    {followUp.date ? fmtDateLong(followUp.date) : followUp.notes || "Scheduled"}
+                    {fmtDateLong(followUp.date) || followUp.notes || "Scheduled"}
                   </div>
                 </div>
               )} */}
@@ -777,7 +777,11 @@ const VisitPlan = memo(function VisitPlan({
                 </button>
               </div>
             </div>
-          ) : followUpWith ? (
+          ) : (() => {
+              const v = typeof followUpWith === "string" ? followUpWith.trim() : "";
+              const clean = v && !/^(null|undefined|nan)$/i.test(v) ? v : "";
+              return clean;
+            })() ? (
             <div
               style={{
                 marginBottom: 12,
@@ -801,7 +805,10 @@ const VisitPlan = memo(function VisitPlan({
           )}
 
           <div className="subsec">Advice</div>
-          {apptPlan?.advice ? (
+          {(() => {
+            const v = typeof apptPlan?.advice === "string" ? apptPlan.advice.trim() : "";
+            return v && !/^(null|undefined|nan)$/i.test(v) ? v : "";
+          })() ? (
             <div
               style={{
                 marginBottom: 12,
@@ -847,9 +854,7 @@ const VisitPlan = memo(function VisitPlan({
               >
                 Next Visit Scheduled
               </div>
-              <div className="nv-date">
-                {followUp?.date ? fmtDateLong(followUp.date) : "Not yet scheduled"}
-              </div>
+              <div className="nv-date">{fmtDateLong(followUp?.date) || "No follow-up date"}</div>
             </div>
             <div style={{ display: "flex", gap: 7 }}>
               <button className="bx bx-g" onClick={onChangeFollowUp}>
