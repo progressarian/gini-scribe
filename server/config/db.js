@@ -78,14 +78,28 @@ const TRANSIENT_MESSAGES = [
   "Connection terminated",
   "Client has encountered a connection error",
   "ECONNRESET",
+  "ECONNREFUSED",
   "ETIMEDOUT",
   "EPIPE",
+  "EAI_AGAIN",
   "read ECONNRESET",
   "server closed the connection unexpectedly",
 ];
+// Node socket errno codes that should be treated as transient. pg surfaces
+// these as `err.code` (not a SQLSTATE), so they bypass TRANSIENT_CODES.
+const TRANSIENT_ERRNOS = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+]);
 function isTransient(err) {
   if (!err) return false;
   if (err.code && TRANSIENT_CODES.has(err.code)) return true;
+  if (err.code && TRANSIENT_ERRNOS.has(err.code)) return true;
   const msg = err.message || "";
   return TRANSIENT_MESSAGES.some((m) => msg.includes(m));
 }

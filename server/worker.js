@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./loadEnv.js";
 import { startCronJobs, stopCronJobs } from "./services/cron/index.js";
 import { startSheetsCron, stopSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron, stopTodaysShowCron } from "./services/cron/todaysShowSync.js";
