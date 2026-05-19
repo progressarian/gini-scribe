@@ -80,7 +80,11 @@ router.post("/sync/patient/:fileNo/resync", async (req, res) => {
       errors = 0;
     for (const appt of appts) {
       try {
-        const result = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+        const apptDateStr =
+          appt.appointment_date instanceof Date
+            ? appt.appointment_date.toISOString().slice(0, 10)
+            : String(appt.appointment_date).slice(0, 10);
+        const result = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
         if (!result) {
           errors++;
           continue;
@@ -459,7 +463,11 @@ router.post("/sync/backfill/labs/:appointmentId", async (req, res) => {
     // Force re-parse if ?force=true or labs JSONB is empty
     const forceReparse = req.query.force === "true" || req.body?.force === true;
     if ((labs.length === 0 || forceReparse) && appt.healthray_clinical_notes) {
-      const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+      const apptDateStr =
+        appt.appointment_date instanceof Date
+          ? appt.appointment_date.toISOString().slice(0, 10)
+          : String(appt.appointment_date).slice(0, 10);
+      const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
       if (parsed?.labs?.length) {
         labs = parsed.labs;
         await pool.query(
@@ -609,7 +617,7 @@ router.post("/sync/patient/:fileNo/note", async (req, res) => {
     );
 
     // Parse
-    const parsed = await parsePrescriptionWithAi(notes.trim());
+    const parsed = await parsePrescriptionWithAi(notes.trim(), apptDate);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed" });
 
     const medications = parsed.medications || [];
@@ -1192,7 +1200,7 @@ router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => 
 
   try {
     const { rows } = await pool.query(
-      `SELECT id, healthray_clinical_notes FROM appointments WHERE id = $1`,
+      `SELECT id, appointment_date, healthray_clinical_notes FROM appointments WHERE id = $1`,
       [apptId],
     );
 
@@ -1216,7 +1224,11 @@ router.post("/sync/backfill/investigations/:appointmentId", async (req, res) => 
       });
     }
 
-    const parsed = await parsePrescriptionWithAi(notes);
+    const apptDateStr =
+      rows[0].appointment_date instanceof Date
+        ? rows[0].appointment_date.toISOString().slice(0, 10)
+        : String(rows[0].appointment_date).slice(0, 10);
+    const parsed = await parsePrescriptionWithAi(notes, apptDateStr);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
 
     const investigations = (parsed.investigations_to_order || []).map((t) =>
@@ -1248,7 +1260,7 @@ router.post("/sync/backfill/diagnoses/:appointmentId", async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT id, patient_id, healthray_id, healthray_clinical_notes FROM appointments WHERE id = $1`,
+      `SELECT id, patient_id, healthray_id, appointment_date, healthray_clinical_notes FROM appointments WHERE id = $1`,
       [apptId],
     );
 
@@ -1273,7 +1285,11 @@ router.post("/sync/backfill/diagnoses/:appointmentId", async (req, res) => {
       });
     }
 
-    const parsed = await parsePrescriptionWithAi(notes);
+    const apptDateStr =
+      appt.appointment_date instanceof Date
+        ? appt.appointment_date.toISOString().slice(0, 10)
+        : String(appt.appointment_date).slice(0, 10);
+    const parsed = await parsePrescriptionWithAi(notes, apptDateStr);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
 
     const diagnoses = parsed.diagnoses || [];
@@ -1334,7 +1350,11 @@ router.post("/sync/backfill/medicines/:appointmentId", async (req, res) => {
       });
     }
 
-    const parsed = await parsePrescriptionWithAi(notes);
+    const apptDateStr =
+      appt.appointment_date instanceof Date
+        ? appt.appointment_date.toISOString().slice(0, 10)
+        : String(appt.appointment_date).slice(0, 10);
+    const parsed = await parsePrescriptionWithAi(notes, apptDateStr);
     if (!parsed) return res.status(422).json({ error: "AI parsing failed or returned no data" });
 
     const medications = parsed.medications || [];
@@ -1457,7 +1477,11 @@ router.post("/sync/backfill/medicines/opd/:date?", async (req, res) => {
           }
 
           const appt = rows[0];
-          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+          const apptDateStr =
+            appt.appointment_date instanceof Date
+              ? appt.appointment_date.toISOString().slice(0, 10)
+              : String(appt.appointment_date).slice(0, 10);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
 
           if (!parsed) {
             opdBackfillStatus.results.push({
@@ -1605,7 +1629,11 @@ router.post("/sync/backfill/diagnoses/opd/:date?", async (req, res) => {
           }
 
           const appt = rows[0];
-          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+          const apptDateStr =
+            appt.appointment_date instanceof Date
+              ? appt.appointment_date.toISOString().slice(0, 10)
+              : String(appt.appointment_date).slice(0, 10);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
 
           if (!parsed) {
             opdDxBackfillStatus.results.push({
@@ -1699,7 +1727,11 @@ router.post("/sync/backfill/medicines/date/:date?", async (req, res) => {
         totalMeds = 0;
       for (const appt of rows) {
         try {
-          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+          const apptDateStr =
+            appt.appointment_date instanceof Date
+              ? appt.appointment_date.toISOString().slice(0, 10)
+              : String(appt.appointment_date).slice(0, 10);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
 
           if (!parsed) {
             errors++;
@@ -1844,7 +1876,11 @@ router.post("/sync/resync-opd/:date?", async (req, res) => {
       }
 
       const appt = rows[0];
-      const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+      const apptDateStr =
+        appt.appointment_date instanceof Date
+          ? appt.appointment_date.toISOString().slice(0, 10)
+          : String(appt.appointment_date).slice(0, 10);
+      const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
 
       if (!parsed) {
         done++;
@@ -3654,7 +3690,11 @@ router.post("/sync/audit/fix-empty-jsonb", async (req, res) => {
     (async () => {
       for (const appt of appts) {
         try {
-          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+          const apptDateStr =
+            appt.appointment_date instanceof Date
+              ? appt.appointment_date.toISOString().slice(0, 10)
+              : String(appt.appointment_date).slice(0, 10);
+          const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
           if (!parsed) {
             fixEmptyJsonbStatus.errors++;
             fixEmptyJsonbStatus.done++;

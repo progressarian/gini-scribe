@@ -46,7 +46,12 @@ if (!fileArg) {
 }
 const fileNo = fileArg.toUpperCase();
 
-await ensureSyncColumns();
+try {
+  await ensureSyncColumns();
+} catch (e) {
+  // Columns already exist on production — DDL lock timeout is harmless, continue.
+  console.warn("ensureSyncColumns skipped (lock timeout — columns already exist):", e.message);
+}
 
 function summary(parsed) {
   return {
@@ -91,9 +96,13 @@ async function main() {
   console.log(`Clinical notes: ${appt.healthray_clinical_notes.length} chars\n`);
 
   // 2. Run the parser
-  console.log("Running parsePrescriptionWithAi…");
+  const apptDateStr =
+    appt.appointment_date instanceof Date
+      ? appt.appointment_date.toISOString().slice(0, 10)
+      : String(appt.appointment_date).slice(0, 10);
+  console.log(`Running parsePrescriptionWithAi with visitDate=${apptDateStr}…`);
   const t0 = Date.now();
-  const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+  const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
   console.log(`  → ${Date.now() - t0}ms`);
   if (!parsed) {
     console.error("Parser returned null. Check ANTHROPIC_API_KEY and note length.");

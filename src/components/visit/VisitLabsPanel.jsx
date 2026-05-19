@@ -668,7 +668,9 @@ function ResultRow({ r, labResults }) {
           {formatTestName(r.test_name)}
         </span>
         <span style={{ fontWeight: 700, color: isAbnormal ? "var(--red)" : "var(--text)" }}>
-          {r.result ?? r.result_text ?? "—"}
+          {r.result_text && /^[<>≤≥]/.test(r.result_text)
+            ? r.result_text
+            : (r.result ?? r.result_text ?? "—")}
           {r.flag && <span style={{ fontSize: 9, marginLeft: 3 }}>({r.flag})</span>}
         </span>
         <span style={{ color: "var(--t3)" }}>{r.unit || ""}</span>

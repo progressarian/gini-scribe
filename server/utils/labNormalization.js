@@ -555,7 +555,17 @@ add(
 add("Calcitonin", "calcitonin");
 
 // ── Urine Tests ──────────────────────────────────────────────────────────────
-add("Urine Creatinine", "urine creatinine", "creatinine (urine spot test)");
+add(
+  "Urine Creatinine",
+  "urine creatinine",
+  "urine creatinine (spot)",
+  "urine creatinine spot",
+  "creatinine, urine",
+  "creatinine (urine)",
+  "creatinine- urine",
+  "creatinine urine",
+  "creatinine (urine spot test)",
+);
 add("Urine Protein", "urine protein", "24 hr urine protein");
 add(
   "Estimated Average Glucose",

@@ -121,6 +121,8 @@ export function mapLabsToBiomarkers(labs, biomarkers) {
         return testLower.includes(a);
       });
       if (matched && lab.value) {
+        // Urine creatinine is a separate test (used for ACR) — not serum creatinine
+        if (bioKey === "creatinine" && testLower.includes("urine")) break;
         const val = parseFloat(lab.value);
         if (!isNaN(val)) biomarkers[bioKey] = val;
         break;

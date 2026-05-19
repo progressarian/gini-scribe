@@ -23,7 +23,7 @@ CRITICAL RULES:
 - test_name: Use SHORT STANDARD names. Map to these canonical names when applicable:
   HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Mean Plasma Glucose, RBS, Fructosamine,
   Total Cholesterol, LDL, HDL, Triglycerides, VLDL, Non-HDL,
-  Creatinine, BUN, Uric Acid, eGFR, UACR, Sodium, Potassium, Calcium, Phosphorus,
+  Creatinine, Urine Creatinine, BUN, Uric Acid, eGFR, UACR, Sodium, Potassium, Calcium, Phosphorus,
   TSH, T3, T4, Free T3, Free T4,
   SGPT (ALT), SGOT (AST), ALP, GGT, Total Bilirubin, Direct Bilirubin, Indirect Bilirubin, Albumin, Total Protein,
   Hemoglobin, WBC, RBC, Platelets, MCV, MCH, MCHC, PCV, ESR, CRP, hs-CRP,
@@ -31,7 +31,7 @@ CRITICAL RULES:
   Total Testosterone, Free Testosterone, Cortisol, LH, FSH, Prolactin, AMH, Estradiol, Progesterone, DHEAS, IGF-1,
   Homocysteine, Lipoprotein(a), D-Dimer, Procalcitonin,
   PSA, Urine Routine, Microalbumin
-  Example: "Glycated Hemoglobin" → "HbA1c", "Fasting Blood Sugar" → "FBS", "Fasting Plasma Glucose" → "FBS", "Post Prandial Blood Sugar" → "PPBS"
+  Example: "Glycated Hemoglobin" → "HbA1c", "Fasting Blood Sugar" → "FBS", "Fasting Plasma Glucose" → "FBS", "Post Prandial Blood Sugar" → "PPBS", "Urine Creatinine (Spot)" / "Creatinine, Urine" / "Creatinine (Urine)" → "Urine Creatinine" (IMPORTANT: urine creatinine is a separate test from serum creatinine — do NOT map it to "Creatinine")
 - flag: "H" high, "L" low, null normal.
 - ref_range: extract reference range as shown (e.g. "4.0-6.5").
 - result: numeric value. result_text: only if result is non-numeric (e.g. "Positive", "Reactive").`;

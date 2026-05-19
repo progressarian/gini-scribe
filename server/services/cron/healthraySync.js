@@ -502,7 +502,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         }
 
         // Parse with AI
-        const parsed = await parsePrescriptionWithAi(rawText);
+        const parsed = await parsePrescriptionWithAi(rawText, apptDate);
         clinical.clinicalRaw = rawText;
 
         // Guard against a flaky re-parse silently wiping prior good data.
@@ -913,7 +913,11 @@ export async function runDailyOpdBackfill(dateStr) {
         }
         const appt = rows[0];
 
-        const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes);
+        const apptDateStr =
+          appt.appointment_date instanceof Date
+            ? appt.appointment_date.toISOString().slice(0, 10)
+            : String(appt.appointment_date).slice(0, 10);
+        const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
         if (!parsed) {
           errors++;
           done++;
