@@ -17,7 +17,7 @@ No LLM is involved — the script imports the tool registry directly. This makes
 
 ```powershell
 # Run every case for patient 178506. Writes are skipped by default.
-node server/scripts/test-agent-tools.mjs 178506
+node server/scripts/test-agent-tools.mjs 16911
 
 # Limit to a single tool / case (substring match against case name OR tool name)
 node server/scripts/test-agent-tools.mjs 178506 query_patient_data
@@ -28,9 +28,8 @@ node server/scripts/test-agent-tools.mjs 178506 "VitaminD"
 # Show the FULL JSON for every case (no preview truncation)
 node server/scripts/test-agent-tools.mjs 178506 --full
 
-# Dumps are written by default to server/scripts/test-runs/.
-# Pass --no-save to skip writing files.
-node server/scripts/test-agent-tools.mjs 178506 --no-save
+# Save every case + result to a JSON file under server/scripts/test-runs/
+node server/scripts/test-agent-tools.mjs 178506 --save
 
 # Run the create_health_log cases (these WRITE rows to the patient's DB)
 node server/scripts/test-agent-tools.mjs 178506 --write
@@ -47,7 +46,7 @@ node server/scripts/test-agent-tools.mjs 178506 propose_log --full --save
 | `[filter]` (optional, positional) | Substring match against the case name or tool name. Only matching cases run. |
 | `--write` | Also runs `create_health_log` cases (they INSERT real rows). Off by default. |
 | `--full` | Print the full JSON result for each case instead of a truncated preview. |
-| `--no-save` | Skip writing dump files. By default the script always writes a `.json` + `.md` pair under `server/scripts/test-runs/`. |
+| `--save` | Write every case + input + full result to `server/scripts/test-runs/agent-tools-<patientId>-<timestamp>.json`. |
 
 ---
 
@@ -173,71 +172,15 @@ Exit code is `0` when nothing failed, `1` otherwise — easy to wire into CI.
 
 ---
 
-## Dump files (always written)
+## Saving runs for the record
 
-Every run automatically writes two files into `server/scripts/test-runs/`:
-
-```
-agent-tools-<patientId>-<iso-timestamp>.json
-agent-tools-<patientId>-<iso-timestamp>.md
+```powershell
+node server/scripts/test-agent-tools.mjs 178506 --save
 ```
 
-Pass `--no-save` if you don't want them.
+Drops a single JSON under `server/scripts/test-runs/` containing every case + input + full result + timing. Useful when you want to diff two runs (e.g. before/after a schema change) or attach the output to a PR.
 
-### `.json` — machine-readable
-
-Full record of every case: `name`, `tool`, `input`, `status`, `ms`, `shape`, `result`, and a `verify` block with the DB query and the /visit panel for cross-checking.
-
-```json
-{
-  "patient_id": 178506,
-  "started_at": "2026-05-20T08:34:12.000Z",
-  "summary": { "passed": 41, "failed": 0, "skipped": 2 },
-  "cases": [
-    {
-      "name": "query_patient_data · labs (HbA1c)",
-      "tool": "query_patient_data",
-      "input": { "scope": "labs", "test_name": "HbA1c" },
-      "status": "passed",
-      "ms": 34,
-      "shape": "array[6]",
-      "result": [ { "test_name": "HbA1c", "result": 7.2, "unit": "%", "test_date": "2026-04-12" }, … ],
-      "verify": {
-        "db": "SELECT test_name, result, unit, test_date FROM lab_results WHERE patient_id = $1 ORDER BY test_date DESC",
-        "visit_page": "Profile/Vitals/Labs/Medications/Diagnoses panels on /visit"
-      }
-    }
-  ]
-}
-```
-
-Use this for diffing two runs (e.g. before/after a schema change) or attaching to a PR.
-
-### `.md` — human-readable verification report
-
-Cases are grouped by tool. For every case the report includes:
-
-- **Input** — exact arguments passed to the tool.
-- **Took / Shape** — timing and the shape of the returned value.
-- **Verify in DB** — the SQL query (with `$1` = patient ID) you can run against your database to confirm the agent's data matches the source of truth.
-- **Verify on /visit** — the panel/tab on the doctor's `/visit` page that should show the same values.
-- **Output** — the full JSON the agent receives (or the RN app's `client_action` payload for UI tools).
-
-Open this file side-by-side with your DB client and `/visit?patientId=…` to walk through each tool and confirm parity. Pattern:
-
-1. Run the script: `node server/scripts/test-agent-tools.mjs <patientId>`.
-2. Open the newest `.md` in `server/scripts/test-runs/`.
-3. For each section, copy the **Verify in DB** SQL into psql/Supabase Studio and confirm the result row count / values match the **Output** block.
-4. Open `/visit?patientId=<patientId>` and confirm the same values appear in the listed panel.
-5. If anything diverges, that tool needs a fix — the SQL hint tells you which table/columns to look at first.
-
-### .gitignore
-
-If you don't want `test-runs/` tracked, add this:
-
-```
-server/scripts/test-runs/
-```
+The `test-runs/` directory is created on first save. If you don't want it tracked, add `server/scripts/test-runs/` to `.gitignore`.
 
 ---
 
