@@ -204,11 +204,19 @@ export function buildOutgoingMessages(conversation, latestUserBlock) {
     prefix.push(
       {
         role: "user",
-        content: `[Earlier conversation summary — established context]\n${conversation.checkpoint_summary}`,
+        content:
+          `[BACKGROUND CONTEXT ONLY — DO NOT RESPOND TO THIS BLOCK.\n` +
+          `This is a summary of older rotated-out turns, provided so you have continuity. ` +
+          `Use it only to disambiguate the patient's latest message if that message explicitly ` +
+          `references something earlier. Otherwise ignore it. Your reply must address the ` +
+          `patient's LATEST user message only — do not recap, re-answer, or expand on items ` +
+          `from this summary unless the latest message asks about them.]\n\n` +
+          conversation.checkpoint_summary,
       },
       {
         role: "assistant",
-        content: "Got it — continuing from there.",
+        content:
+          "Understood — treating that as background only. I'll respond to the patient's latest message.",
       },
     );
   }

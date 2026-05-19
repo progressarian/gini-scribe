@@ -84,6 +84,8 @@ const TRANSIENT_MESSAGES = [
   "EAI_AGAIN",
   "read ECONNRESET",
   "server closed the connection unexpectedly",
+  "DbHandler exited", // Supabase pooler killed the backend handler mid-query
+  "EDBHANDLEREXITED",
 ];
 // Node socket errno codes that should be treated as transient. pg surfaces
 // these as `err.code` (not a SQLSTATE), so they bypass TRANSIENT_CODES.

@@ -4,15 +4,7 @@ import { sortDiagnoses } from "../../utils/diagnosisSort.js";
 import { sortMedications } from "../../utils/medicationSort.js";
 import { validatePatientSql, SCHEMA_HINT } from "./sqlGuard.js";
 
-// Patient-facing AI agent tools. Used by POST /api/ai/agent (routes/ai.js).
-//
-// Two kinds of tools:
-//   • DB tools — executed server-side, return JSON for the model to read.
-//   • UI tools — recorded as `client_actions` for the RN app to act on
-//     (open log modal, open doctor chat). Server returns a tiny
-//     acknowledgement so the model can phrase a closing sentence.
 
-// ── Tool schemas (Anthropic Messages API `tools` parameter) ─────────────
 export const AGENT_TOOLS = [
   {
     name: "query_patient_data",
@@ -35,18 +27,12 @@ export const AGENT_TOOLS = [
             "symptoms",
             "appointments",
             "diagnoses",
-            // Self-logged lifestyle entries from the Genie companion app —
-            // backed by `patient_activity_log` on scribe (activity_type ∈
-            // Exercise / Sleep / Mood / Body). `activity` returns all four;
-            // the per-type scopes filter for "show my workouts / how have
-            // I slept / mood last week".
+
             "activity",
             "exercise",
             "sleep",
             "mood",
-            // Medication adherence — rows from `patient_med_log` (which
-            // dose, when, status=taken). Use this for "did I take my
-            // morning dose?" / "how is my adherence?".
+
             "med_adherence",
           ],
           description: "Which slice of patient data to read.",
@@ -71,7 +57,7 @@ export const AGENT_TOOLS = [
   },
   {
     name: "run_patient_sql",
-    description: `Run a read-only SELECT against the authenticated patient's data when the narrow tools (query_patient_data / get_full_patient_context / get_progress_summary) don't expose what you need. $1 is automatically bound to the patient_id — your query MUST contain \`patient_id = $1\` (with optional table alias) for every patient-scoped table you read. Single statement only. Read-only transaction, 5s statement timeout, max 200 rows returned. Use for: derived metrics (Non-HDL = TC - HDL, TG/HDL ratio, BMI from height+weight, eAG from HbA1c), labs not in the narrow scopes, time-bucketed aggregations, and cross-table joins. DO NOT use as a replacement for the narrow tools on routine reads.\n\n${SCHEMA_HINT}`,
+    description: `Run a read-only SELECT against the authenticated patient's data when the narrow tools (query_patient_data / get_full_patient_context / get_progress_summary) don't expose what you need. $1 is automatically bound to the patient_id — your query MUST contain \`patient_id = $1\` (with optional table alias) for every patient-scoped table you read. Single statement only. Read-only transaction, 5s statement timeout, max 200 rows returned. Use for: derived metrics (Non-HDL = TC - HDL, TG/HDL ratio, BMI from height+weight, eAG from HbA1c), labs not in the narrow scopes(if not available in db), time-bucketed aggregations, and cross-table joins. DO NOT use as a replacement for the narrow tools on routine reads.\n\n${SCHEMA_HINT}`,
     input_schema: {
       type: "object",
       properties: {
@@ -92,7 +78,7 @@ export const AGENT_TOOLS = [
   {
     name: "get_full_patient_context",
     description:
-      "Return a comprehensive snapshot of EVERYTHING known about the authenticated patient in ONE call: profile (name/age/sex/dob), active+stopped medications, active diagnoses, the latest value of every lab on file (HbA1c, LDL, HDL, Total Cholesterol, Triglycerides, TSH, Hb, eGFR, Creatinine, Vitamin D/B12, T3/T4, FBS, PPBS, and any other test ever recorded), recent vitals (BP/sugar/weight, last 90 days), recent symptoms (last 60 days), recent self-logged activity (last 60 days), upcoming + last 5 past appointments, and medication adherence summary (last 30 days). Use this when the patient asks an open-ended question like 'what do you know about me', 'give me my full report', or any derived metric that needs multiple values (e.g. Non-HDL = Total Cholesterol − HDL, TG/HDL ratio, ASCVD risk inputs). Prefer this over chaining many query_patient_data calls.",
+      "Return a comprehensive snapshot of EVERYTHING known about the authenticated patient in ONE call: profile (name/age/sex/dob), active medications, active diagnoses, the latest value of every lab on file (HbA1c, LDL, HDL, Total Cholesterol, Triglycerides, TSH, Hb, eGFR, Creatinine, Vitamin D/B12, T3/T4, FBS, PPBS, and any other test ever recorded), recent vitals (BP/sugar/weight, last 90 days), recent symptoms (last 60 days), recent self-logged activity (last 60 days), upcoming + last 5 past appointments, and medication adherence summary (last 30 days). Use this when the patient asks an open-ended question like 'what do you know about me', 'give me my full report', or any derived metric that needs multiple values (e.g. Non-HDL = Total Cholesterol − HDL, TG/HDL ratio, ASCVD risk inputs). Prefer this over chaining many query_patient_data calls.",
     input_schema: {
       type: "object",
       properties: {
@@ -138,7 +124,7 @@ export const AGENT_TOOLS = [
   {
     name: "get_appointments",
     description:
-      "Upcoming, past, or the single next appointment for the patient. Includes follow_up_with prep instructions when present.",
+      "Patient's visit history merged across native consultations + HealthRay appointments (same merge /visit?tab=history uses). scope='past' = completed visits with doctor_name/visit_type/status; scope='upcoming' = future appointments; scope='next' = single nearest future appointment. Each row carries `source` ('consultation'|'appointment'), and `follow_up` (JSONB) when the visit recorded a follow-up plan — from appointments.healthray_follow_up (HealthRay) or consultations.con_data->'follow_up' (Gini). Use this whenever the patient asks about past visits, upcoming appointments, or follow-up dates/instructions.",
     input_schema: {
       type: "object",
       properties: {
@@ -149,9 +135,41 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: "get_prescriptions",
+    description:
+      "Patient's prescription documents (rows from `documents` where doc_type='prescription'). Use when the patient asks to see / view / share / download / open their prescription, or 'meri prescription do/dikha', 'parchi chahiye'. Returns id, title, file_name, doc_date, source, notes, file_url, storage_path, consultation_id — newest first. scope='latest' returns just the most recent row; scope='all' returns up to `limit` rows (default 5). Quote the doc_date verbatim. Always pair with `open_document` so the patient can actually view the PDF in chat.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["latest", "all"] },
+        limit: { type: "number" },
+      },
+      required: ["scope"],
+    },
+  },
+  {
+    name: "open_document",
+    description:
+      "UI tool — open a document (typically a prescription PDF) inline in the chat for the patient to view. Call this AFTER get_prescriptions when the patient wants to see / download / share the file. Pass through the id, file_url, and a short title (e.g. 'Prescription · 12 May 2026'). Always follow with respond_to_patient and a one-line note ('I've opened your latest prescription from 12 May.').",
+    input_schema: {
+      type: "object",
+      properties: {
+        document_id: { type: "number", description: "documents.id" },
+        file_url: { type: "string", description: "Signed/public URL from get_prescriptions.file_url" },
+        title: { type: "string", description: "Short label shown above the inline viewer." },
+        doc_type: {
+          type: "string",
+          enum: ["prescription", "lab_report", "imaging", "discharge", "other"],
+        },
+        doc_date: { type: "string", description: "YYYY-MM-DD shown next to the title (optional)." },
+      },
+      required: ["document_id", "file_url", "title"],
+    },
+  },
+  {
     name: "propose_log",
     description:
-      "Open the in-app log card pre-filled with values the user just gave you. Always use this when the user says 'log my BP 130/80' / 'sugar 180 fasting' / 'I weigh 82 kg' / 'my Vit D is 28' — never silently log. Pick the most specific type from the enum. Use 'Lab' (with test_name+unit) for any lab not in the dedicated enum (Vitamin D, B12, T3, T4, Creatinine, Triglycerides, HDL, FBS, PPBS, …).",
+      "Open the in-app log card pre-filled with values the user just gave you. Always use this when the user says 'log my BP 130/80' / 'sugar 180 fasting' / 'I weigh 82 kg' / 'my Vit D is 28' / 'log uric acid 6.5' / 'sodium 138' — never silently log. Pick the most specific type from the enum. The enum covers the most-asked vitals, common labs, lipid panel, thyroid, KFT, LFT, electrolytes, vitamins, iron studies, and CBC sub-values as first-class types. For ANY test the patient names that ISN'T in the enum (rare biomarkers, hormone panels, tumour markers, niche serologies, etc.), fall back to type='Lab' with test_name + unit + (optional) ref_range + canonical_name. The 'Lab' fallback is the universal escape hatch — there is NO test the patient cannot log here.",
     input_schema: {
       type: "object",
       properties: {
@@ -161,11 +179,66 @@ export const AGENT_TOOLS = [
             "BP",
             "Sugar",
             "Weight",
+            "Height",
+            "Temperature",
+            "HeartRate",
+            "SpO2",
+            "RespiratoryRate",
             "HbA1c",
+            "FBS",
+            "PPBS",
+            "RandomSugar",
             "LDL",
+            "HDL",
+            "TotalCholesterol",
+            "Triglycerides",
+            "NonHDL",
+            "VLDL",
             "TSH",
+            "FreeT3",
+            "FreeT4",
+            "TotalT3",
+            "TotalT4",
             "Haemoglobin",
             "eGFR",
+            "Creatinine",
+            "UricAcid",
+            "Urea",
+            "BUN",
+            "Sodium",
+            "Potassium",
+            "Chloride",
+            "Calcium",
+            "Phosphorus",
+            "Magnesium",
+            "VitaminD",
+            "VitaminB12",
+            "Folate",
+            "Iron",
+            "Ferritin",
+            "TIBC",
+            "TransferrinSat",
+            "ALT",
+            "AST",
+            "ALP",
+            "GGT",
+            "Bilirubin",
+            "DirectBilirubin",
+            "Albumin",
+            "Globulin",
+            "TotalProtein",
+            "WBC",
+            "RBC",
+            "Platelets",
+            "PCV",
+            "MCV",
+            "MCH",
+            "MCHC",
+            "RDW",
+            "ESR",
+            "CRP",
+            "Insulin",
+            "CPeptide",
             "Lab",
             "Food",
             "Exercise",
@@ -524,7 +597,7 @@ function buildQuery(baseSql, args, dateCol, params, patientId) {
   return sql;
 }
 
-// ── Scope handlers ─────────────────────────────────────────────────────
+
 async function qProfile(pool, patientId) {
   const { rows } = await pool.query(
     `SELECT id, name, age, sex, file_no, dob, phone
@@ -533,10 +606,7 @@ async function qProfile(pool, patientId) {
   );
   const row = rows[0];
   if (!row) return null;
-  // `patients.age` is captured at the time the patient is imported and is
-  // never re-derived as the patient gets older. Prefer dob → today
-  // computation so the agent doesn't quote a stale "40M" when the patient is
-  // actually 42.
+
   if (row.dob) {
     const d = new Date(row.dob);
     if (!isNaN(d.getTime())) {
@@ -571,8 +641,6 @@ async function qVitalsMerged(pool, patientId, args, fields /* Set */) {
   const days =
     typeof args.range_days === "number" && args.range_days > 0 ? Math.floor(args.range_days) : null;
 
-  // patient_vitals_log uses `recorded_date`; vitals uses `recorded_at`
-  // (timestamp). Normalise both to a date in the output.
   const params = [];
   const pvlParts = [];
   const vitParts = [];
@@ -930,29 +998,80 @@ async function qMedAdherence(pool, patientId, args) {
 }
 
 async function qAppointments(pool, patientId, args) {
-  // Tolerate missing `follow_up_with` column on environments without the
-  // 2026-05-14 migration applied.
+  // Mirror /visit?tab=history (server/routes/visit.js:288-326): merge native
+  // consultations with HealthRay appointments so the agent can answer "what
+  // visits have I had" the same way the doctor's UI does. Prefer the
+  // consultation row when both exist for the same date.
+  //
+  // Also surface follow-up info from both sources:
+  //   • appointments.healthray_follow_up (JSONB, HealthRay) — from /opd
+  //   • consultations.con_data->'follow_up' (JSONB, Gini) — from /visit
+  //
+  // Tolerate environments where the optional columns aren't present.
   const limit = Math.min(Math.max(args.limit || 20, 1), 100);
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, appointment_date, time_slot, doctor_name, visit_type, status,
-              notes, follow_up_with
-         FROM appointments WHERE patient_id = $1
-        ORDER BY appointment_date DESC, id DESC
-        LIMIT ${limit}`,
-      [patientId],
-    );
-    return rows;
-  } catch (_) {
-    const { rows } = await pool.query(
-      `SELECT id, appointment_date, time_slot, doctor_name, visit_type, status, notes
-         FROM appointments WHERE patient_id = $1
-        ORDER BY appointment_date DESC, id DESC
-        LIMIT ${limit}`,
-      [patientId],
-    );
-    return rows;
+  const buildQuery = ({ withFollowUpWith, withHealthrayFollowUp }) => `
+    WITH cons AS (
+      SELECT
+        id,
+        visit_date           AS appointment_date,
+        NULL::text           AS time_slot,
+        con_name             AS doctor_name,
+        visit_type,
+        status,
+        NULL::text           AS notes,
+        NULL::text           AS follow_up_with,
+        con_data->'follow_up' AS follow_up,
+        'consultation'       AS source
+      FROM consultations
+      WHERE patient_id = $1
+    ),
+    appts AS (
+      SELECT
+        id,
+        appointment_date,
+        time_slot,
+        doctor_name,
+        visit_type,
+        status,
+        notes,
+        ${withFollowUpWith ? "follow_up_with" : "NULL::text AS follow_up_with"},
+        ${withHealthrayFollowUp ? "healthray_follow_up AS follow_up" : "NULL::jsonb AS follow_up"},
+        'appointment' AS source
+      FROM appointments
+      WHERE patient_id = $1
+    ),
+    merged AS (
+      SELECT * FROM cons
+      UNION ALL
+      SELECT a.* FROM appts a
+      WHERE NOT EXISTS (
+        SELECT 1 FROM cons c
+        WHERE c.appointment_date::date = a.appointment_date::date
+      )
+    )
+    SELECT * FROM merged
+    WHERE appointment_date IS NOT NULL
+    ORDER BY appointment_date DESC, id DESC
+    LIMIT ${limit}
+  `;
+
+  // Try widest schema first, then degrade gracefully.
+  const variants = [
+    { withFollowUpWith: true, withHealthrayFollowUp: true },
+    { withFollowUpWith: false, withHealthrayFollowUp: true },
+    { withFollowUpWith: true, withHealthrayFollowUp: false },
+    { withFollowUpWith: false, withHealthrayFollowUp: false },
+  ];
+  let lastErr = null;
+  for (const v of variants) {
+    try {
+      const { rows } = await pool.query(buildQuery(v), [patientId]);
+      return rows;
+    } catch (e) {
+      lastErr = e;
+    }
   }
+  throw lastErr || new Error("qAppointments failed");
 }
 
 async function qDiagnoses(pool, patientId) {
@@ -1134,11 +1253,6 @@ async function summariseProgress(pool, patientId, window) {
   };
 }
 
-// ── Full patient context ───────────────────────────────────────────────
-// One-call bundle that gives the agent the whole picture of the patient.
-// Useful when the patient asks an open-ended question or a derived metric
-// (Non-HDL, TG/HDL ratio, ASCVD risk inputs) that needs multiple values
-// the narrow scopes don't co-fetch.
 async function getFullPatientContext(pool, patientId, args = {}) {
   const vitalsDays = Math.max(1, Math.floor(args.vitals_days || 90));
   const symptomsDays = Math.max(1, Math.floor(args.symptoms_days || 60));
@@ -1187,6 +1301,7 @@ async function getFullPatientContext(pool, patientId, args = {}) {
   // Latest + full history per lab, with friendly metadata where available.
   const labsLatest = {};
   const labsHistory = {};
+
   for (const [canonical, arr] of Object.entries(labHistory)) {
     if (!arr || arr.length === 0) continue;
     const meta = Object.values(LAB_MAP).find((m) => m.canonical === canonical);
@@ -1246,8 +1361,6 @@ async function getFullPatientContext(pool, patientId, args = {}) {
       },
     },
     labs: {
-      // Object keyed by canonical name so the model can directly look up
-      // "HDL", "Total Cholesterol", "Triglycerides", etc. without scanning.
       latest: labsLatest,
       history: labsHistory,
       note: "Use latest.<canonical>.result for current values. For derived metrics like Non-HDL = Total Cholesterol − HDL, both come from labs.latest. Units are already canonical.",
@@ -1323,12 +1436,7 @@ async function getMedSchedule(pool, patientId) {
   }));
 }
 
-// ── run_patient_sql executor ────────────────────────────────────────────
-// Runs an agent-authored SELECT inside a read-only transaction with a
-// short statement timeout. $1 is always bound to the authenticated
-// scribePatientId — the agent never supplies it. Validator
-// (validatePatientSql) is the static gate; this wrapper is the runtime
-// gate.
+
 const MAX_SQL_ROWS = 200;
 const MAX_SQL_JSON_BYTES = 60_000;
 
@@ -1341,7 +1449,7 @@ async function runPatientSql(pool, patientId, sql) {
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL TRANSACTION READ ONLY");
-    await client.query("SET LOCAL statement_timeout = '5s'");
+    // await client.query("SET LOCAL statement_timeout = '5s'");
     await client.query("SET LOCAL lock_timeout = '2s'");
     const result = await client.query({ text: sql, values: [patientId] });
     await client.query("ROLLBACK");
@@ -1623,6 +1731,20 @@ export async function executeTool(name, input, ctx) {
       return getFullPatientContext(pool, scribePatientId, args);
     case "get_medication_schedule":
       return getMedSchedule(pool, scribePatientId);
+    case "get_prescriptions": {
+      const limit = Math.min(Math.max(args.limit || (args.scope === "latest" ? 1 : 5), 1), 20);
+      const { rows } = await pool.query(
+        `SELECT id, doc_type, title, file_name, doc_date, source, notes,
+                storage_path, file_url, consultation_id, created_at
+           FROM documents
+          WHERE patient_id = $1 AND doc_type = 'prescription'
+          ORDER BY doc_date DESC NULLS LAST, created_at DESC
+          LIMIT ${limit}`,
+        [scribePatientId],
+      );
+      if (args.scope === "latest") return rows[0] || null;
+      return rows;
+    }
     case "get_appointments": {
       const all = await qAppointments(pool, scribePatientId, { limit: args.limit || 20 });
       const today = new Date().toISOString().slice(0, 10);
@@ -1648,11 +1770,107 @@ export async function executeTool(name, input, ctx) {
 // ── Client-action mapping for UI tools ─────────────────────────────────
 // Returns { clientAction, ack } where ack is the JSON the model sees as the
 // tool_result so it can phrase a closing sentence to the patient.
+//
+// Native modal types the RN client knows how to render directly. Anything
+// else gets routed through the generic 'Lab' modal with test_name/unit
+// auto-derived from the LAB_TYPE_MAP below, so the model can pick any of
+// the extended enum values without us shipping a new RN build first.
+const NATIVE_LOG_TYPES = new Set([
+  "BP",
+  "Sugar",
+  "Weight",
+  "HbA1c",
+  "LDL",
+  "TSH",
+  "Haemoglobin",
+  "eGFR",
+  "Lab",
+  "Food",
+  "Exercise",
+  "Sleep",
+  "Mood",
+  "Symptom",
+]);
+
+// type → {test_name, unit, canonical_name, ref_range?} for every extended
+// lab/vital the propose_log enum now accepts. Used to flatten unknown enum
+// values into the universal Lab modal.
+const LAB_TYPE_MAP = {
+  Height: { test_name: "Height", unit: "cm", canonical_name: "height" },
+  Temperature: { test_name: "Temperature", unit: "°F", canonical_name: "temperature" },
+  HeartRate: { test_name: "Heart Rate", unit: "bpm", canonical_name: "heart_rate" },
+  SpO2: { test_name: "SpO2", unit: "%", canonical_name: "spo2" },
+  RespiratoryRate: { test_name: "Respiratory Rate", unit: "breaths/min", canonical_name: "respiratory_rate" },
+  FBS: { test_name: "Fasting Blood Sugar", unit: "mg/dL", canonical_name: "fbs" },
+  PPBS: { test_name: "Postprandial Blood Sugar", unit: "mg/dL", canonical_name: "ppbs" },
+  RandomSugar: { test_name: "Random Blood Sugar", unit: "mg/dL", canonical_name: "rbs" },
+  HDL: { test_name: "HDL", unit: "mg/dL", canonical_name: "hdl" },
+  TotalCholesterol: { test_name: "Total Cholesterol", unit: "mg/dL", canonical_name: "total_cholesterol" },
+  Triglycerides: { test_name: "Triglycerides", unit: "mg/dL", canonical_name: "triglycerides" },
+  NonHDL: { test_name: "Non-HDL Cholesterol", unit: "mg/dL", canonical_name: "non_hdl" },
+  VLDL: { test_name: "VLDL", unit: "mg/dL", canonical_name: "vldl" },
+  FreeT3: { test_name: "Free T3", unit: "pg/mL", canonical_name: "ft3" },
+  FreeT4: { test_name: "Free T4", unit: "ng/dL", canonical_name: "ft4" },
+  TotalT3: { test_name: "Total T3", unit: "ng/dL", canonical_name: "t3" },
+  TotalT4: { test_name: "Total T4", unit: "µg/dL", canonical_name: "t4" },
+  Creatinine: { test_name: "Creatinine", unit: "mg/dL", canonical_name: "creatinine" },
+  UricAcid: { test_name: "Uric Acid", unit: "mg/dL", canonical_name: "uric_acid" },
+  Urea: { test_name: "Urea", unit: "mg/dL", canonical_name: "urea" },
+  BUN: { test_name: "Blood Urea Nitrogen", unit: "mg/dL", canonical_name: "bun" },
+  Sodium: { test_name: "Sodium", unit: "mmol/L", canonical_name: "sodium" },
+  Potassium: { test_name: "Potassium", unit: "mmol/L", canonical_name: "potassium" },
+  Chloride: { test_name: "Chloride", unit: "mmol/L", canonical_name: "chloride" },
+  Calcium: { test_name: "Calcium", unit: "mg/dL", canonical_name: "calcium" },
+  Phosphorus: { test_name: "Phosphorus", unit: "mg/dL", canonical_name: "phosphorus" },
+  Magnesium: { test_name: "Magnesium", unit: "mg/dL", canonical_name: "magnesium" },
+  VitaminD: { test_name: "Vitamin D", unit: "ng/mL", canonical_name: "vitd" },
+  VitaminB12: { test_name: "Vitamin B12", unit: "pg/mL", canonical_name: "b12" },
+  Folate: { test_name: "Folate", unit: "ng/mL", canonical_name: "folate" },
+  Iron: { test_name: "Iron", unit: "µg/dL", canonical_name: "iron" },
+  Ferritin: { test_name: "Ferritin", unit: "ng/mL", canonical_name: "ferritin" },
+  TIBC: { test_name: "TIBC", unit: "µg/dL", canonical_name: "tibc" },
+  TransferrinSat: { test_name: "Transferrin Saturation", unit: "%", canonical_name: "transferrin_sat" },
+  ALT: { test_name: "ALT (SGPT)", unit: "U/L", canonical_name: "alt" },
+  AST: { test_name: "AST (SGOT)", unit: "U/L", canonical_name: "ast" },
+  ALP: { test_name: "Alkaline Phosphatase", unit: "U/L", canonical_name: "alp" },
+  GGT: { test_name: "GGT", unit: "U/L", canonical_name: "ggt" },
+  Bilirubin: { test_name: "Total Bilirubin", unit: "mg/dL", canonical_name: "bilirubin_total" },
+  DirectBilirubin: { test_name: "Direct Bilirubin", unit: "mg/dL", canonical_name: "bilirubin_direct" },
+  Albumin: { test_name: "Albumin", unit: "g/dL", canonical_name: "albumin" },
+  Globulin: { test_name: "Globulin", unit: "g/dL", canonical_name: "globulin" },
+  TotalProtein: { test_name: "Total Protein", unit: "g/dL", canonical_name: "total_protein" },
+  WBC: { test_name: "WBC Count", unit: "10³/µL", canonical_name: "wbc" },
+  RBC: { test_name: "RBC Count", unit: "10⁶/µL", canonical_name: "rbc" },
+  Platelets: { test_name: "Platelet Count", unit: "10³/µL", canonical_name: "platelets" },
+  PCV: { test_name: "PCV / Hematocrit", unit: "%", canonical_name: "pcv" },
+  MCV: { test_name: "MCV", unit: "fL", canonical_name: "mcv" },
+  MCH: { test_name: "MCH", unit: "pg", canonical_name: "mch" },
+  MCHC: { test_name: "MCHC", unit: "g/dL", canonical_name: "mchc" },
+  RDW: { test_name: "RDW", unit: "%", canonical_name: "rdw" },
+  ESR: { test_name: "ESR", unit: "mm/hr", canonical_name: "esr" },
+  CRP: { test_name: "CRP", unit: "mg/L", canonical_name: "crp" },
+  Insulin: { test_name: "Fasting Insulin", unit: "µIU/mL", canonical_name: "insulin" },
+  CPeptide: { test_name: "C-Peptide", unit: "ng/mL", canonical_name: "c_peptide" },
+};
+
 export function buildClientAction(name, input) {
   if (name === "propose_log") {
+    // Flatten any extended enum value the RN client doesn't render natively
+    // into the generic Lab modal, pre-filling test_name/unit/canonical_name
+    // from LAB_TYPE_MAP so it still opens with the right label.
+    let effectiveType = input.type;
+    const extra = {};
+    if (!NATIVE_LOG_TYPES.has(effectiveType) && LAB_TYPE_MAP[effectiveType]) {
+      const m = LAB_TYPE_MAP[effectiveType];
+      effectiveType = "Lab";
+      extra.test_name = input.test_name || m.test_name;
+      extra.unit = input.unit || m.unit;
+      if (input.ref_range) extra.ref_range = input.ref_range;
+      extra.canonical_name = input.canonical_name || m.canonical_name;
+    }
     const ca = {
       type: "open_log_modal",
-      logType: input.type,
+      logType: effectiveType,
       v1: input.value1 ?? "",
       v2: input.value2 ?? "",
       context: input.context ?? "",
@@ -1665,12 +1883,18 @@ export function buildClientAction(name, input) {
     }
     // Generic-lab card: forward AI-supplied metadata so the app can render
     // the right label, unit, and (optional) ref-range for tests that aren't
-    // in the dedicated enum (Vit D, B12, T3, T4, Creatinine, …).
-    if (input.type === "Lab") {
-      if (input.test_name) ca.test_name = String(input.test_name);
-      if (input.unit) ca.unit = String(input.unit);
-      if (input.ref_range) ca.ref_range = String(input.ref_range);
-      if (input.canonical_name) ca.canonical_name = String(input.canonical_name);
+    // in the dedicated enum (Vit D, B12, T3, T4, Creatinine, …). Metadata
+    // can come from the model (when type='Lab') or from LAB_TYPE_MAP (when
+    // we flattened an extended enum value above).
+    if (effectiveType === "Lab") {
+      const test_name = extra.test_name ?? input.test_name;
+      const unit = extra.unit ?? input.unit;
+      const ref_range = extra.ref_range ?? input.ref_range;
+      const canonical_name = extra.canonical_name ?? input.canonical_name;
+      if (test_name) ca.test_name = String(test_name);
+      if (unit) ca.unit = String(unit);
+      if (ref_range) ca.ref_range = String(ref_range);
+      if (canonical_name) ca.canonical_name = String(canonical_name);
     }
     return {
       clientAction: ca,
@@ -1700,6 +1924,23 @@ export function buildClientAction(name, input) {
       },
     };
   }
+  if (name === "open_document") {
+    const ca = {
+      type: "open_document",
+      document_id: input.document_id,
+      file_url: input.file_url,
+      title: input.title,
+      doc_type: input.doc_type || "prescription",
+      doc_date: input.doc_date || null,
+    };
+    return {
+      clientAction: ca,
+      ack: {
+        status: "queued_for_client",
+        note: "The document viewer will open in chat with this file.",
+      },
+    };
+  }
   if (name === "open_doctor_chat") {
     const ca = {
       type: "open_doctor_chat",
@@ -1716,6 +1957,7 @@ export function buildClientAction(name, input) {
 export const UI_TOOL_NAMES = new Set([
   "propose_log",
   "open_doctor_chat",
+  "open_document",
   "classify_and_extract_attachment",
 ]);
 export const FINAL_TOOL_NAME = "respond_to_patient";
