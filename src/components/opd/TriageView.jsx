@@ -177,7 +177,7 @@ function computeOutcome(appt) {
 //
 // `outcome` is also returned so the card can render a Worse/Mixed/Better
 // chip that explains *why* the patient is in this bucket.
-function triageTier(appt) {
+export function triageTier(appt) {
   const bio = readBio(appt);
   const present = TIER_KEYS.filter((k) => bio[k] != null);
   if (present.length === 0) return { tier: "amber", noReports: true, outcome: "partial" };

@@ -2,6 +2,7 @@ import { LAB_MAP } from "../../routes/opd.js";
 import { getCanonical } from "../../utils/labCanonical.js";
 import { sortDiagnoses } from "../../utils/diagnosisSort.js";
 import { sortMedications } from "../../utils/medicationSort.js";
+import { validatePatientSql, SCHEMA_HINT } from "./sqlGuard.js";
 
 // Patient-facing AI agent tools. Used by POST /api/ai/agent (routes/ai.js).
 //
@@ -66,6 +67,44 @@ export const AGENT_TOOLS = [
         },
       },
       required: ["scope"],
+    },
+  },
+  {
+    name: "run_patient_sql",
+    description: `Run a read-only SELECT against the authenticated patient's data when the narrow tools (query_patient_data / get_full_patient_context / get_progress_summary) don't expose what you need. $1 is automatically bound to the patient_id — your query MUST contain \`patient_id = $1\` (with optional table alias) for every patient-scoped table you read. Single statement only. Read-only transaction, 5s statement timeout, max 200 rows returned. Use for: derived metrics (Non-HDL = TC - HDL, TG/HDL ratio, BMI from height+weight, eAG from HbA1c), labs not in the narrow scopes, time-bucketed aggregations, and cross-table joins. DO NOT use as a replacement for the narrow tools on routine reads.\n\n${SCHEMA_HINT}`,
+    input_schema: {
+      type: "object",
+      properties: {
+        sql: {
+          type: "string",
+          description:
+            "A single SELECT or WITH ... SELECT statement. Use $1 wherever you need the patient_id. No semicolons, no comments, no DML.",
+        },
+        reason: {
+          type: "string",
+          description:
+            "One-line note on why narrow tools were insufficient (telemetry only; the user never sees it).",
+        },
+      },
+      required: ["sql"],
+    },
+  },
+  {
+    name: "get_full_patient_context",
+    description:
+      "Return a comprehensive snapshot of EVERYTHING known about the authenticated patient in ONE call: profile (name/age/sex/dob), active+stopped medications, active diagnoses, the latest value of every lab on file (HbA1c, LDL, HDL, Total Cholesterol, Triglycerides, TSH, Hb, eGFR, Creatinine, Vitamin D/B12, T3/T4, FBS, PPBS, and any other test ever recorded), recent vitals (BP/sugar/weight, last 90 days), recent symptoms (last 60 days), recent self-logged activity (last 60 days), upcoming + last 5 past appointments, and medication adherence summary (last 30 days). Use this when the patient asks an open-ended question like 'what do you know about me', 'give me my full report', or any derived metric that needs multiple values (e.g. Non-HDL = Total Cholesterol − HDL, TG/HDL ratio, ASCVD risk inputs). Prefer this over chaining many query_patient_data calls.",
+    input_schema: {
+      type: "object",
+      properties: {
+        vitals_days: {
+          type: "number",
+          description: "Window (days) for recent BP/sugar/weight rows. Default 90.",
+        },
+        symptoms_days: {
+          type: "number",
+          description: "Window (days) for recent symptoms / activity rows. Default 60.",
+        },
+      },
     },
   },
   {
@@ -767,7 +806,16 @@ async function qLabs(pool, patientId, args) {
       const aliases = [canonical, meta?.test_name]
         .filter(Boolean)
         .map((s) => String(s).toLowerCase());
-      if (!aliases.includes(wantName)) continue;
+      // Match LAB_MAP aliases first; otherwise fall back to a substring
+      // match against the raw canonical name so tests not in LAB_MAP
+      // (HDL, Total Cholesterol, Vitamin D, B12, T3/T4, etc.) still
+      // surface when the agent passes their name.
+      const aliasHit = aliases.includes(wantName);
+      const substrHit =
+        !aliasHit &&
+        (String(canonical).toLowerCase().includes(wantName) ||
+          wantName.includes(String(canonical).toLowerCase()));
+      if (!aliasHit && !substrHit) continue;
     }
     for (const r of arr) {
       if (sinceDate && String(r.date || "").slice(0, 10) < sinceDate) continue;
@@ -1086,6 +1134,143 @@ async function summariseProgress(pool, patientId, window) {
   };
 }
 
+// ── Full patient context ───────────────────────────────────────────────
+// One-call bundle that gives the agent the whole picture of the patient.
+// Useful when the patient asks an open-ended question or a derived metric
+// (Non-HDL, TG/HDL ratio, ASCVD risk inputs) that needs multiple values
+// the narrow scopes don't co-fetch.
+async function getFullPatientContext(pool, patientId, args = {}) {
+  const vitalsDays = Math.max(1, Math.floor(args.vitals_days || 90));
+  const symptomsDays = Math.max(1, Math.floor(args.symptoms_days || 60));
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const [
+    profile,
+    diagnoses,
+    meds,
+    labHistory,
+    recentVitals,
+    recentSymptoms,
+    recentActivity,
+    allAppointments,
+    adherenceRow,
+  ] = await Promise.all([
+    qProfile(pool, patientId),
+    qDiagnoses(pool, patientId),
+    qMeds(pool, patientId, { limit: 200 }),
+    fetchMergedLabHistory(pool, patientId),
+    qVitalsAll(pool, patientId, { range_days: vitalsDays, limit: 200 }),
+    qSymptoms(pool, patientId, { range_days: symptomsDays, limit: 50 }),
+    qActivity(pool, patientId, { range_days: symptomsDays, limit: 50 }, null),
+    qAppointments(pool, patientId, { limit: 20 }),
+    pool
+      .query(
+        `WITH active AS (
+            SELECT id FROM medications
+             WHERE patient_id=$1 AND is_active = TRUE AND parent_medication_id IS NULL
+          ),
+          taken AS (
+            SELECT COUNT(*) AS c FROM patient_med_log
+             WHERE patient_id=$1
+               AND log_date >= (CURRENT_DATE - INTERVAL '30 days')
+               AND status='taken'
+          )
+          SELECT (SELECT COUNT(*) FROM active) AS active_meds,
+                 (SELECT c FROM taken) AS taken_doses`,
+        [patientId],
+      )
+      .then((r) => r.rows[0] || {})
+      .catch(() => ({})),
+  ]);
+
+  // Latest + full history per lab, with friendly metadata where available.
+  const labsLatest = {};
+  const labsHistory = {};
+  for (const [canonical, arr] of Object.entries(labHistory)) {
+    if (!arr || arr.length === 0) continue;
+    const meta = Object.values(LAB_MAP).find((m) => m.canonical === canonical);
+    const display = meta?.test_name || canonical;
+    const latest = arr[0];
+    labsLatest[canonical] = {
+      test_name: display,
+      canonical_name: canonical,
+      result: latest.result,
+      result_text: latest.result_text,
+      unit: latest.unit || meta?.unit || null,
+      flag: latest.flag,
+      date: latest.date,
+      ref_range: latest.ref_range,
+      panel_name: latest.panel_name || meta?.panel || null,
+      source: latest.source,
+    };
+    labsHistory[canonical] = arr.slice(0, 10).map((r) => ({
+      result: r.result,
+      unit: r.unit || meta?.unit || null,
+      flag: r.flag,
+      date: r.date,
+      source: r.source,
+    }));
+  }
+
+  // Slim the meds payload: keep what the model needs for advice, drop noise.
+  const medList = meds.map((m) => ({
+    id: m.id,
+    name: m.name,
+    dose: m.dose,
+    frequency: m.frequency,
+    timing: m.timing,
+    when_to_take: m.when_to_take,
+    route: m.route,
+    med_group: m.med_group,
+    drug_class: m.drug_class,
+    is_active: m.is_active,
+    started_date: m.started_date,
+    stopped_date: m.stopped_date,
+    stop_reason: m.stop_reason,
+  }));
+
+  const upcomingAppts = allAppointments.filter((a) => String(a.appointment_date) >= today);
+  const pastAppts = allAppointments.filter((a) => String(a.appointment_date) < today).slice(0, 5);
+
+  return {
+    as_of: today,
+    profile,
+    diagnoses,
+    medications: {
+      active: medList.filter((m) => m.is_active),
+      stopped: medList.filter((m) => !m.is_active),
+      adherence_last_30d: {
+        active_meds: Number(adherenceRow.active_meds || 0),
+        taken_doses: Number(adherenceRow.taken_doses || 0),
+      },
+    },
+    labs: {
+      // Object keyed by canonical name so the model can directly look up
+      // "HDL", "Total Cholesterol", "Triglycerides", etc. without scanning.
+      latest: labsLatest,
+      history: labsHistory,
+      note: "Use latest.<canonical>.result for current values. For derived metrics like Non-HDL = Total Cholesterol − HDL, both come from labs.latest. Units are already canonical.",
+    },
+    vitals_recent: {
+      window_days: vitalsDays,
+      rows: recentVitals,
+    },
+    symptoms_recent: {
+      window_days: symptomsDays,
+      rows: recentSymptoms,
+    },
+    activity_recent: {
+      window_days: symptomsDays,
+      rows: recentActivity,
+    },
+    appointments: {
+      upcoming: upcomingAppts,
+      recent_past: pastAppts,
+    },
+  };
+}
+
 // ── Medication schedule ────────────────────────────────────────────────
 const TIME_SLOT_LABELS = {
   fasting: "Fasting / first thing",
@@ -1136,6 +1321,63 @@ async function getMedSchedule(pool, patientId) {
     label: TIME_SLOT_LABELS[slot] || slot,
     meds: items,
   }));
+}
+
+// ── run_patient_sql executor ────────────────────────────────────────────
+// Runs an agent-authored SELECT inside a read-only transaction with a
+// short statement timeout. $1 is always bound to the authenticated
+// scribePatientId — the agent never supplies it. Validator
+// (validatePatientSql) is the static gate; this wrapper is the runtime
+// gate.
+const MAX_SQL_ROWS = 200;
+const MAX_SQL_JSON_BYTES = 60_000;
+
+async function runPatientSql(pool, patientId, sql) {
+  const check = validatePatientSql(sql);
+  if (!check.ok)
+    return { error: check.error, hint: "Fix the query and call run_patient_sql again." };
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL TRANSACTION READ ONLY");
+    await client.query("SET LOCAL statement_timeout = '5s'");
+    await client.query("SET LOCAL lock_timeout = '2s'");
+    const result = await client.query({ text: sql, values: [patientId] });
+    await client.query("ROLLBACK");
+
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    const truncated = rows.length > MAX_SQL_ROWS;
+    let payloadRows = truncated ? rows.slice(0, MAX_SQL_ROWS) : rows;
+
+    // Hard byte cap so a wide-column row set can't blow the tool_result
+    // budget. Drop rows from the tail until we fit.
+    let json = JSON.stringify(payloadRows);
+    let byteTruncated = false;
+    while (json.length > MAX_SQL_JSON_BYTES && payloadRows.length > 1) {
+      payloadRows = payloadRows.slice(0, Math.max(1, Math.floor(payloadRows.length / 2)));
+      json = JSON.stringify(payloadRows);
+      byteTruncated = true;
+    }
+
+    return {
+      ok: true,
+      row_count: rows.length,
+      returned: payloadRows.length,
+      truncated: truncated || byteTruncated,
+      rows: payloadRows,
+    };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {}
+    return {
+      error: String(err?.message || err).slice(0, 500),
+      hint: "Check column names against the schema in the tool description, then retry.",
+    };
+  } finally {
+    client.release();
+  }
 }
 
 // ── create_health_log executor ──────────────────────────────────────────
@@ -1377,6 +1619,8 @@ export async function executeTool(name, input, ctx) {
     }
     case "get_progress_summary":
       return summariseProgress(pool, scribePatientId, args);
+    case "get_full_patient_context":
+      return getFullPatientContext(pool, scribePatientId, args);
     case "get_medication_schedule":
       return getMedSchedule(pool, scribePatientId);
     case "get_appointments": {
@@ -1394,6 +1638,8 @@ export async function executeTool(name, input, ctx) {
     }
     case "create_health_log":
       return executeCreateHealthLog(pool, scribePatientId, input);
+    case "run_patient_sql":
+      return runPatientSql(pool, scribePatientId, input?.sql);
     default:
       return { error: `Unknown tool: ${name}` };
   }

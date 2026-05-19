@@ -9,6 +9,7 @@ import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
 import OpdRangeReport from "./components/opd/OpdRangeReport.jsx";
 import TriageView from "./components/opd/TriageView.jsx";
+import TriageViewV3 from "./components/opd/TriageViewV3.jsx";
 import DocStatusPill from "./components/ui/DocStatusPill.jsx";
 import ConfirmModal from "./components/ui/ConfirmModal.jsx";
 import { useOpdAppointments } from "./queries/hooks/useOpdAppointments.js";
@@ -2361,73 +2362,85 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                           fontFamily: FB,
                                         }}
                                       >
-                                        {panelCollapsed
-                                          ? `▾ Show (${tests.length})`
-                                          : "▴ Hide"}
+                                        {panelCollapsed ? `▾ Show (${tests.length})` : "▴ Hide"}
                                       </button>
                                     </div>
-                                    {panelCollapsed ? null : (() => {
-                                      const rKey = r.id || r.name;
-                                      const isExpanded = expandedReports[rKey];
-                                      const shown = isExpanded ? tests : tests.slice(0, 25);
-                                      return (
-                                        <>
-                                          <div
-                                            style={{ display: "flex", flexWrap: "wrap", gap: 4 }}
-                                          >
-                                            {shown.map((t, ti) => (
-                                              <span
-                                                key={ti}
+                                    {panelCollapsed
+                                      ? null
+                                      : (() => {
+                                          const rKey = r.id || r.name;
+                                          const isExpanded = expandedReports[rKey];
+                                          const shown = isExpanded ? tests : tests.slice(0, 25);
+                                          return (
+                                            <>
+                                              <div
                                                 style={{
-                                                  fontSize: 10,
-                                                  padding: "2px 7px",
-                                                  borderRadius: 5,
-                                                  fontWeight: 600,
-                                                  fontFamily: FM,
-                                                  background:
-                                                    t.flag === "H"
-                                                      ? REL
-                                                      : t.flag === "L"
-                                                        ? AML
-                                                        : GNL,
-                                                  color:
-                                                    t.flag === "H" ? RE : t.flag === "L" ? AM : GN,
-                                                  border: `1px solid ${t.flag === "H" ? REB : t.flag === "L" ? AMB : GNB}`,
+                                                  display: "flex",
+                                                  flexWrap: "wrap",
+                                                  gap: 4,
                                                 }}
                                               >
-                                                {t.test_name}: {t.result}
-                                                {t.unit ? ` ${t.unit}` : ""}
-                                                {t.flag === "H" ? " ↑" : t.flag === "L" ? " ↓" : ""}
-                                              </span>
-                                            ))}
-                                          </div>
-                                          {tests.length > 25 && (
-                                            <button
-                                              onClick={() =>
-                                                setExpandedReports((p) => ({
-                                                  ...p,
-                                                  [rKey]: !isExpanded,
-                                                }))
-                                              }
-                                              style={{
-                                                fontSize: 10,
-                                                fontWeight: 600,
-                                                color: SK,
-                                                background: "none",
-                                                border: "none",
-                                                cursor: "pointer",
-                                                padding: "4px 0 0",
-                                                fontFamily: FB,
-                                              }}
-                                            >
-                                              {isExpanded
-                                                ? "Show less ↑"
-                                                : `+${tests.length - 25} more — Show all ↓`}
-                                            </button>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
+                                                {shown.map((t, ti) => (
+                                                  <span
+                                                    key={ti}
+                                                    style={{
+                                                      fontSize: 10,
+                                                      padding: "2px 7px",
+                                                      borderRadius: 5,
+                                                      fontWeight: 600,
+                                                      fontFamily: FM,
+                                                      background:
+                                                        t.flag === "H"
+                                                          ? REL
+                                                          : t.flag === "L"
+                                                            ? AML
+                                                            : GNL,
+                                                      color:
+                                                        t.flag === "H"
+                                                          ? RE
+                                                          : t.flag === "L"
+                                                            ? AM
+                                                            : GN,
+                                                      border: `1px solid ${t.flag === "H" ? REB : t.flag === "L" ? AMB : GNB}`,
+                                                    }}
+                                                  >
+                                                    {t.test_name}: {t.result}
+                                                    {t.unit ? ` ${t.unit}` : ""}
+                                                    {t.flag === "H"
+                                                      ? " ↑"
+                                                      : t.flag === "L"
+                                                        ? " ↓"
+                                                        : ""}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                              {tests.length > 25 && (
+                                                <button
+                                                  onClick={() =>
+                                                    setExpandedReports((p) => ({
+                                                      ...p,
+                                                      [rKey]: !isExpanded,
+                                                    }))
+                                                  }
+                                                  style={{
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                    color: SK,
+                                                    background: "none",
+                                                    border: "none",
+                                                    cursor: "pointer",
+                                                    padding: "4px 0 0",
+                                                    fontFamily: FB,
+                                                  }}
+                                                >
+                                                  {isExpanded
+                                                    ? "Show less ↑"
+                                                    : `+${tests.length - 25} more — Show all ↓`}
+                                                </button>
+                                              )}
+                                            </>
+                                          );
+                                        })()}
                                   </div>
                                 );
                               }
@@ -6792,6 +6805,7 @@ export default function OPD() {
     schedule: "list",
     dashboard: "dashboard",
     triage: "triage",
+    "triage-v3": "triage-v3",
     "new-appt": "new-appt",
     excel: "excel",
   };
@@ -6799,6 +6813,7 @@ export default function OPD() {
     list: "schedule",
     dashboard: "dashboard",
     triage: "triage",
+    "triage-v3": "triage-v3",
     "new-appt": "new-appt",
     excel: "excel",
   };
@@ -7158,6 +7173,7 @@ export default function OPD() {
             ["list", "📋 Schedule"],
             ["dashboard", "📊 Live Dashboard"],
             ["triage", "🔴🟡✅ Triage"],
+            ["triage-v3", "🧪 Triage v3"],
             ["new-appt", "➕ New Appointment"],
             ["excel", "📊 Import Excel"],
           ].map(([v, l]) => (
@@ -7553,6 +7569,39 @@ export default function OPD() {
             }}
           >
             <TriageView
+              appointments={appointments}
+              doctors={doctors}
+              date={date}
+              onDateChange={setDate}
+              onRefresh={() => apptsQuery.refetch()}
+              isFetching={apptsQuery.isFetching}
+              isPending={apptsQuery.isPending}
+              updatedAt={apptsQuery.dataUpdatedAt}
+              onUpdateAppt={(id, patch) =>
+                patchCategoryDoc(id, patch.category ?? null, patch.doctor_name)
+              }
+              onSelectAppt={(a) => {
+                setSearchQ("");
+                setFilterStatus("all");
+                setFilterDoc("all");
+                setFilterCat("all");
+                setSelAppt(a);
+                setActiveTab("overview");
+                setView("list");
+              }}
+            />
+          </div>
+        ) : view === "triage-v3" ? (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              background: BG,
+              overflow: "auto",
+            }}
+          >
+            <TriageViewV3
               appointments={appointments}
               doctors={doctors}
               date={date}
