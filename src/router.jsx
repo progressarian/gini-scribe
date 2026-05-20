@@ -75,6 +75,7 @@ const CIPage = lazyWithRetry(() => import("./pages/CIPage"));
 const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
 const RefillsPage = lazyWithRetry(() => import("./pages/RefillsPage"));
 const DoseChangeRequestsPage = lazyWithRetry(() => import("./pages/DoseChangeRequestsPage"));
+const LabRequestsPage = lazyWithRetry(() => import("./pages/LabRequestsPage"));
 const SideEffectsPage = lazyWithRetry(() => import("./pages/SideEffectsPage"));
 const OPD = lazyWithRetry(() => import("./OPD"));
 const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
@@ -129,6 +130,7 @@ const router = createBrowserRouter([
           { path: "/find", element: lazyEl(FindPage) },
           { path: "/refills", element: lazyEl(RefillsPage) },
           { path: "/dose-change-requests", element: lazyEl(DoseChangeRequestsPage) },
+          { path: "/lab-requests", element: lazyEl(LabRequestsPage) },
           { path: "/side-effects", element: lazyEl(SideEffectsPage) },
           { path: "/dashboard", element: lazyEl(DashboardPage) },
           { path: "/quick", element: lazyEl(QuickPage) },

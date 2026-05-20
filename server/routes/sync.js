@@ -1795,7 +1795,7 @@ router.post("/sync/healthray/backfill-meds", async (req, res) => {
   try {
     const r = await pool.query(
       `INSERT INTO medications
-         (patient_id, name, dose, frequency, timing, route, is_active, started_date, notes)
+         (patient_id, name, dose, frequency, timing, route, form, is_active, started_date, notes)
        SELECT
          a.patient_id,
          med->>'name',
@@ -1803,6 +1803,7 @@ router.post("/sync/healthray/backfill-meds", async (req, res) => {
          NULLIF(med->>'frequency', ''),
          NULLIF(med->>'timing', ''),
          COALESCE(NULLIF(med->>'route', ''), 'Oral'),
+         NULLIF(med->>'form', ''),
          true,
          a.appointment_date,
          'healthray:' || a.healthray_id
@@ -2751,26 +2752,30 @@ router.post("/sync/healthray/extract-prescriptions", async (req, res) => {
             await pool.query(`DELETE FROM medications WHERE document_id = $1`, [doc.id]);
             for (const m of meds) {
               if (!m?.name) continue;
+              const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
+              const storedName = cleanName || m.name;
               await pool
                 .query(
                   `INSERT INTO medications
-                   (patient_id, document_id, name, dose, frequency, timing, route, is_new, is_active, source, started_date)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, 'report_extract', $8)
+                   (patient_id, document_id, name, dose, frequency, timing, route, form, is_new, is_active, source, started_date)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $9, false, true, 'report_extract', $8)
                  ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
                  DO UPDATE SET document_id = EXCLUDED.document_id,
                    dose = COALESCE(EXCLUDED.dose, medications.dose),
                    frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
                    timing = COALESCE(EXCLUDED.timing, medications.timing),
+                   form = COALESCE(EXCLUDED.form, medications.form),
                    updated_at = NOW()`,
                   [
                     doc.patient_id,
                     doc.id,
-                    (m.name || "").slice(0, 200),
+                    storedName.slice(0, 200),
                     (m.dose || "").slice(0, 100),
                     (m.frequency || "").slice(0, 100),
                     (m.timing || "").slice(0, 100),
                     (m.route || "Oral").slice(0, 50),
                     rxDate,
+                    detectedForm || null,
                   ],
                 )
                 .catch(() => {});

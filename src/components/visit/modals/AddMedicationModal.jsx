@@ -51,6 +51,53 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 // structured `days_of_week` column lines up with what the patient app reads.
 const WEEKDAY_TO_INT = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
+// Dosage form picker — controls what the patient sees on the printed
+// prescription ("OINTMENT", "TAB", "INJ" etc.) so laymen know whether to
+// swallow / inject / apply. Order matches what doctors prescribe most often.
+const MED_FORMS = [
+  "Tablet",
+  "Capsule",
+  "Injection",
+  "Syrup",
+  "Suspension",
+  "Sachet",
+  "Powder",
+  "Drops",
+  "Ointment",
+  "Cream",
+  "Gel",
+  "Lotion",
+  "Spray",
+  "Inhaler",
+  "Nebulizer",
+  "Patch",
+  "Suppository",
+  "Pessary",
+];
+
+// Default route for each form so picking "Ointment" auto-selects Topical, etc.
+// Mirrors the FORM_RULES table in src/lib/medName.js.
+const FORM_TO_ROUTE = {
+  Tablet: "Oral",
+  Capsule: "Oral",
+  Injection: "Subcutaneous",
+  Syrup: "Oral",
+  Suspension: "Oral",
+  Sachet: "Oral",
+  Powder: "Oral",
+  Drops: "Topical",
+  Ointment: "Topical",
+  Cream: "Topical",
+  Gel: "Topical",
+  Lotion: "Topical",
+  Spray: "Topical",
+  Inhaler: "Inhaled",
+  Nebulizer: "Inhaled",
+  Patch: "Topical",
+  Suppository: "Oral",
+  Pessary: "Oral",
+};
+
 const AddMedicationModal = memo(function AddMedicationModal({
   onClose,
   onSubmit,
@@ -69,6 +116,7 @@ const AddMedicationModal = memo(function AddMedicationModal({
     dose: "",
     frequency: "OD",
     route: "Oral",
+    form: "Tablet",
     for_diagnosis: "",
     started_date: "",
     med_group: "",
@@ -396,8 +444,30 @@ const AddMedicationModal = memo(function AddMedicationModal({
           />
         </div>
 
-        {/* Route + Started date */}
+        {/* Form + Route */}
         <div className="g2">
+          <div className="mf">
+            <label className="ml">Form</label>
+            <select
+              className="ms"
+              value={form.form}
+              onChange={(e) => {
+                const nextForm = e.target.value;
+                const inferredRoute = FORM_TO_ROUTE[nextForm];
+                setForm((f) => ({
+                  ...f,
+                  form: nextForm,
+                  route: inferredRoute || f.route,
+                }));
+              }}
+            >
+              {MED_FORMS.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="mf">
             <label className="ml">Route</label>
             <select
@@ -414,18 +484,20 @@ const AddMedicationModal = memo(function AddMedicationModal({
               <option value="Sublingual">Sublingual</option>
             </select>
           </div>
-          <div className="mf">
-            <label className="ml">
-              Started on{" "}
-              <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 11 }}>(optional)</span>
-            </label>
-            <input
-              type="date"
-              className="mi"
-              value={form.started_date}
-              onChange={(e) => set("started_date", e.target.value)}
-            />
-          </div>
+        </div>
+
+        {/* Started date */}
+        <div className="mf">
+          <label className="ml">
+            Started on{" "}
+            <span style={{ color: "var(--t3)", fontWeight: 400, fontSize: 11 }}>(optional)</span>
+          </label>
+          <input
+            type="date"
+            className="mi"
+            value={form.started_date}
+            onChange={(e) => set("started_date", e.target.value)}
+          />
         </div>
 
         {/* Clinical note */}

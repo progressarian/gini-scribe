@@ -251,10 +251,10 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       const prevMap = new Map();
       for (const m of moData?.previous_medications || []) {
         if (!m?.name) continue;
-        const { name: cleanName } = stripFormPrefix(m.name);
+        const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
         const storedName = cleanName || m.name;
         const key = (m._matched || canonicalMedKey(storedName) || storedName).toUpperCase();
-        if (key) prevMap.set(key, { ...m, _clean_name: storedName });
+        if (key) prevMap.set(key, { ...m, _clean_name: storedName, _detected_form: detectedForm });
       }
       const prevMedsRows = Array.from(prevMap.values());
       if (prevMedsRows.length) {
@@ -267,6 +267,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
         const freqs = prevMedsRows.map((m) => t(m.frequency, 100));
         const timings = prevMedsRows.map((m) => t(m.timing, 100));
         const stopReasons = prevMedsRows.map((m) => t(m.reason || m.status, 200));
+        const forms = prevMedsRows.map((m) => m._detected_form || null);
 
         // 1) Flip any matching active rows to inactive in one pass.
         await client.query(
@@ -284,10 +285,10 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
 
         // 2) Upsert the historical/inactive rows in one pass.
         await client.query(
-          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, stopped_date, is_new, is_active)
-           SELECT $1, $2, name, pharm, composition, dose, freq, timing, stop_reason, CURRENT_DATE, false, false
-             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[])
-                  AS t(name, pharm, composition, dose, freq, timing, stop_reason)
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, stop_reason, stopped_date, is_new, is_active, form)
+           SELECT $1, $2, name, pharm, composition, dose, freq, timing, stop_reason, CURRENT_DATE, false, false, form
+             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[])
+                  AS t(name, pharm, composition, dose, freq, timing, stop_reason, form)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
            DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
              composition = COALESCE(EXCLUDED.composition, medications.composition),
@@ -296,6 +297,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
              timing = COALESCE(EXCLUDED.timing, medications.timing),
              stop_reason = COALESCE(EXCLUDED.stop_reason, medications.stop_reason),
              stopped_date = COALESCE(medications.stopped_date, CURRENT_DATE),
+             form = COALESCE(EXCLUDED.form, medications.form),
              updated_at = NOW()`,
           [
             patientId,
@@ -307,6 +309,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
             freqs,
             timings,
             stopReasons,
+            forms,
           ],
         );
       }
@@ -324,10 +327,10 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
       const confRows = Array.from(confMap.values());
       if (confRows.length) {
         await client.query(
-          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active)
-           SELECT $1, $2, name, pharm, comp, dose, freq, timing, route, is_new, true
-             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::boolean[])
-                  AS t(name, pharm, comp, dose, freq, timing, route, is_new)
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, route, is_new, is_active, form)
+           SELECT $1, $2, name, pharm, comp, dose, freq, timing, route, is_new, true, form
+             FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::boolean[], $11::text[])
+                  AS t(name, pharm, comp, dose, freq, timing, route, is_new, form)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
              pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -336,6 +339,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
              frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
              timing = COALESCE(EXCLUDED.timing, medications.timing),
              route = COALESCE(EXCLUDED.route, medications.route),
+             form = COALESCE(EXCLUDED.form, medications.form),
              is_new = EXCLUDED.is_new,
              updated_at = NOW()`,
           [
@@ -349,6 +353,7 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
             confRows.map((m) => t(m.timing, 100)),
             confRows.map((m) => t(m.route, 50) || routeForForm(m._detected_form) || "Oral"),
             confRows.map((m) => m.isNew === true),
+            confRows.map((m) => m._detected_form || null),
           ],
         );
       }
@@ -634,11 +639,11 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
     for (const m of medications || []) {
       if (m?.name) {
         const isActive = m.is_active !== false;
-        const { name: cleanName } = stripFormPrefix(m.name);
+        const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
         const storedName = cleanName || m.name;
         await client.query(
-          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_active, started_date)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          `INSERT INTO medications (patient_id, consultation_id, name, pharmacy_match, composition, dose, frequency, timing, is_active, started_date, form)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
              pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -647,6 +652,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
              frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
              timing = COALESCE(EXCLUDED.timing, medications.timing),
              is_active = EXCLUDED.is_active,
+             form = COALESCE(EXCLUDED.form, medications.form),
              started_date = LEAST(medications.started_date, EXCLUDED.started_date),
              updated_at = NOW()`,
           [
@@ -660,6 +666,7 @@ router.post("/patients/:id/history", validate(historyCreateSchema), async (req, 
             n(m.timing),
             isActive,
             n(m.started_date) || visit_date,
+            detectedForm || null,
           ],
         );
       }

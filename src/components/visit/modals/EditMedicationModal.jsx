@@ -4,6 +4,30 @@ import { WHEN_TO_TAKE_PILLS, toWhenToTakeArray } from "../../../config/medicatio
 
 const TIMINGS = WHEN_TO_TAKE_PILLS;
 
+// Dosage form picker — controls the "OINTMENT/TAB/INJ" badge that appears
+// next to the medicine name on the printed prescription. Keep in sync with
+// AddMedicationModal.jsx and src/lib/medName.js.
+const MED_FORMS = [
+  "Tablet",
+  "Capsule",
+  "Injection",
+  "Syrup",
+  "Suspension",
+  "Sachet",
+  "Powder",
+  "Drops",
+  "Ointment",
+  "Cream",
+  "Gel",
+  "Lotion",
+  "Spray",
+  "Inhaler",
+  "Nebulizer",
+  "Patch",
+  "Suppository",
+  "Pessary",
+];
+
 // Day-of-week tokens for weekly / fortnightly medicines. AddMedicationModal
 // stores the selected days as a suffix on `frequency` (e.g.
 // "Once weekly · Mon, Wed"); this list lets us parse them back out and
@@ -61,6 +85,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const initialDrugClass = medication.drug_class || "";
   const initialExternalDoctor = medication.external_doctor || "";
   const initialRoute = medication.route || "Oral";
+  const initialForm = medication.form || "";
   const initialClinicalNote = medication.clinical_note || "";
   const initialNotes = medication.patient_notes || "";
   // for_diagnosis is text[] in the DB; the form picker is single-select so
@@ -89,6 +114,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
   const [drugClass, setDrugClass] = useState(initialDrugClass);
   const [externalDoctor, setExternalDoctor] = useState(initialExternalDoctor);
   const [route, setRoute] = useState(initialRoute);
+  const [form, setForm] = useState(initialForm);
   const [clinicalNote, setClinicalNote] = useState(initialClinicalNote);
   const [notes, setNotes] = useState(initialNotes);
   const [forDx, setForDx] = useState(initialForDx);
@@ -176,6 +202,7 @@ const EditMedicationModal = memo(function EditMedicationModal({
         payload.external_doctor = effectiveExternalDoctor || null;
       }
       if (route !== initialRoute) payload.route = route || null;
+      if (form !== initialForm) payload.form = form || null;
       if (clinicalNote !== initialClinicalNote) payload.clinical_note = clinicalNote || null;
       if (notes !== initialNotes) payload.patient_notes = notes || null;
       if (forDx !== initialForDx) {
@@ -417,6 +444,22 @@ const EditMedicationModal = memo(function EditMedicationModal({
 
         <div className="g2">
           <div className="mf">
+            <label className="ml">Form</label>
+            <select
+              className="ms"
+              value={form}
+              onChange={(e) => setForm(e.target.value)}
+              disabled={loading}
+            >
+              <option value="">— None —</option>
+              {MED_FORMS.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mf">
             <label className="ml">Route</label>
             <select
               className="ms"
@@ -433,16 +476,17 @@ const EditMedicationModal = memo(function EditMedicationModal({
               <option value="Sublingual">Sublingual</option>
             </select>
           </div>
-          <div className="mf">
-            <label className="ml">Started on</label>
-            <input
-              type="date"
-              className="mi"
-              value={startedDate}
-              onChange={(e) => setStartedDate(e.target.value)}
-              disabled={loading}
-            />
-          </div>
+        </div>
+
+        <div className="mf">
+          <label className="ml">Started on</label>
+          <input
+            type="date"
+            className="mi"
+            value={startedDate}
+            onChange={(e) => setStartedDate(e.target.value)}
+            disabled={loading}
+          />
         </div>
 
         <div className="mf">

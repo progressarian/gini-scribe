@@ -13,6 +13,7 @@ import {
   appendTurn,
   buildOutgoingMessages,
 } from "../services/agent/conversations.js";
+import { stripFormPrefix } from "../services/medication/normalize.js";
 
 const router = Router();
 
@@ -794,21 +795,24 @@ router.post("/ai/bulk-log", async (req, res) => {
       for (const r of items) {
         if (!r?.name) continue;
         try {
+          const { name: cleanName, form: detectedForm } = stripFormPrefix(r.name);
+          const storedName = cleanName || r.name;
           await pool.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, is_new, is_active, source, started_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true, 'patient_upload', $9)
+               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, form, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, false, true, 'patient_upload', $9)
              ON CONFLICT DO NOTHING`,
             [
               pid,
               docId,
-              String(r.name).slice(0, 200),
-              String(r.name).toUpperCase().slice(0, 200),
+              storedName.slice(0, 200),
+              storedName.toUpperCase().slice(0, 200),
               r.dose ? String(r.dose).slice(0, 100) : null,
               r.frequency ? String(r.frequency).slice(0, 100) : null,
               r.timing ? String(r.timing).slice(0, 100) : null,
               r.route ? String(r.route).slice(0, 50) : "Oral",
               logDate,
+              detectedForm || null,
             ],
           );
           written++;

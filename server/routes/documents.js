@@ -907,8 +907,8 @@ router.patch("/documents/:id", async (req, res) => {
         const { frequency: freqWithDay, days_of_week: dowDays } = weeklyDayDefaults(m, rxDate);
         await client.query(
           `INSERT INTO medications
-             (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, is_new, is_active, source, started_date, days_of_week)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $12::when_to_take_pill[], $9, false, true, 'report_extract', $10, $11)
+             (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, form, is_new, is_active, source, started_date, days_of_week)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $12::when_to_take_pill[], $9, $13, false, true, 'report_extract', $10, $11)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
            DO UPDATE SET document_id = EXCLUDED.document_id,
              consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
@@ -918,6 +918,7 @@ router.patch("/documents/:id", async (req, res) => {
              timing = COALESCE(EXCLUDED.timing, medications.timing),
              when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
              route = COALESCE(EXCLUDED.route, medications.route),
+             form = COALESCE(EXCLUDED.form, medications.form),
              source = EXCLUDED.source,
              started_date = LEAST(medications.started_date, EXCLUDED.started_date),
              days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
@@ -935,6 +936,7 @@ router.patch("/documents/:id", async (req, res) => {
             rxDate,
             dowDays,
             normalizeWhenToTake(m.when_to_take),
+            detectedForm || null,
           ],
         );
       }
@@ -942,16 +944,17 @@ router.patch("/documents/:id", async (req, res) => {
       // Sync stopped medications as inactive
       for (const m of extracted_data.stopped_medications || []) {
         if (!m?.name) continue;
-        const { name: cleanName } = stripFormPrefix(m.name);
+        const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
         const storedName = cleanName || m.name;
         await client.query(
           `INSERT INTO medications
-             (patient_id, document_id, consultation_id, name, pharmacy_match, is_new, is_active, source, started_date)
-           VALUES ($1, $2, $3, $4, $5, false, false, 'report_extract', $6)
+             (patient_id, document_id, consultation_id, name, pharmacy_match, form, is_new, is_active, source, started_date)
+           VALUES ($1, $2, $3, $4, $5, $7, false, false, 'report_extract', $6)
            ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
            DO UPDATE SET document_id = EXCLUDED.document_id,
              consultation_id = COALESCE(EXCLUDED.consultation_id, medications.consultation_id),
              pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
+             form = COALESCE(EXCLUDED.form, medications.form),
              source = EXCLUDED.source,
              updated_at = NOW()`,
           [
@@ -961,6 +964,7 @@ router.patch("/documents/:id", async (req, res) => {
             storedName.slice(0, 200),
             canonicalMedKey(storedName).slice(0, 200),
             rxDate,
+            detectedForm || null,
           ],
         );
       }
@@ -1304,8 +1308,8 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
           const { frequency: freqWithDay, days_of_week: dowDays } = weeklyDayDefaults(m, rxDate);
           const medRes = await client.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, is_new, is_active, source, started_date, common_side_effects, days_of_week)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $12::when_to_take_pill[], $8, false, true, 'report_extract', $9, $10::jsonb, $11)
+               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, form, is_new, is_active, source, started_date, common_side_effects, days_of_week)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $12::when_to_take_pill[], $8, $13, false, true, 'report_extract', $9, $10::jsonb, $11)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET document_id = EXCLUDED.document_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1314,6 +1318,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
                timing = COALESCE(EXCLUDED.timing, medications.timing),
                when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                route = COALESCE(EXCLUDED.route, medications.route),
+               form = COALESCE(EXCLUDED.form, medications.form),
                source = EXCLUDED.source,
                started_date = LEAST(medications.started_date, EXCLUDED.started_date),
                common_side_effects = CASE
@@ -1337,21 +1342,23 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
               sideEffectsJson,
               dowDays,
               normalizeWhenToTake(m.when_to_take),
+              detectedForm || null,
             ],
           );
           if (medRes.rows[0]?.id) insertedMedIds.push(medRes.rows[0].id);
         }
         for (const m of extracted.stopped_medications || []) {
           if (!m?.name) continue;
-          const { name: cleanName } = stripFormPrefix(m.name);
+          const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
           const storedName = cleanName || m.name;
           await client.query(
             `INSERT INTO medications
-               (patient_id, document_id, name, pharmacy_match, is_new, is_active, source, started_date)
-             VALUES ($1, $2, $3, $4, false, false, 'report_extract', $5)
+               (patient_id, document_id, name, pharmacy_match, form, is_new, is_active, source, started_date)
+             VALUES ($1, $2, $3, $4, $6, false, false, 'report_extract', $5)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
              DO UPDATE SET document_id = EXCLUDED.document_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
+               form = COALESCE(EXCLUDED.form, medications.form),
                source = EXCLUDED.source,
                updated_at = NOW()`,
             [
@@ -1360,6 +1367,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
               storedName.slice(0, 200),
               canonicalMedKey(storedName).slice(0, 200),
               rxDate,
+              detectedForm || null,
             ],
           );
         }
@@ -1600,6 +1608,7 @@ async function runPrescriptionExtraction(docId) {
               timing: m.timing || "",
               when_to_take: normalizeWhenToTake(m.when_to_take) || [],
               route,
+              form: detectedForm || null,
               status: m.status || null,
               reason: m.reason || null,
               support_for: m.support_for || null,
@@ -1614,6 +1623,7 @@ async function runPrescriptionExtraction(docId) {
               if (!existing.when_to_take.includes(p)) existing.when_to_take.push(p);
             }
             if (!existing.route || existing.route === "Oral") existing.route = route;
+            existing.form = existing.form || detectedForm || null;
             existing.status = existing.status || m.status || null;
             existing.reason = existing.reason || m.reason || null;
             existing.support_for = existing.support_for || m.support_for || null;
@@ -1644,8 +1654,8 @@ async function runPrescriptionExtraction(docId) {
         try {
           await client.query(
             `INSERT INTO medications
-                 (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, is_new, is_active, source, started_date)
-               VALUES ($1, $2, $10, $3, $4, $5, $6, $7, $11::when_to_take_pill[], $8, false, true, 'report_extract', $9)
+                 (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, form, is_new, is_active, source, started_date)
+               VALUES ($1, $2, $10, $3, $4, $5, $6, $7, $11::when_to_take_pill[], $8, $12, false, true, 'report_extract', $9)
                ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
                DO UPDATE SET document_id = EXCLUDED.document_id,
                  consultation_id = EXCLUDED.consultation_id,
@@ -1655,6 +1665,7 @@ async function runPrescriptionExtraction(docId) {
                  timing = COALESCE(NULLIF(EXCLUDED.timing, ''), medications.timing),
                  when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                  route = COALESCE(NULLIF(EXCLUDED.route, ''), medications.route),
+                 form = COALESCE(EXCLUDED.form, medications.form),
                  name = EXCLUDED.name,
                  source = EXCLUDED.source,
                  started_date = LEAST(medications.started_date, EXCLUDED.started_date),
@@ -1671,6 +1682,7 @@ async function runPrescriptionExtraction(docId) {
               resolveStarted(m.canonical),
               latestConsId,
               normalizeWhenToTake(m.when_to_take),
+              m.form || null,
             ],
           );
           okCur += 1;
@@ -1762,9 +1774,9 @@ async function runPrescriptionExtraction(docId) {
           );
           await client.query(
             `INSERT INTO medications
-                 (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route,
+                 (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, form,
                   is_new, is_active, source, started_date, stopped_date, stop_reason)
-               VALUES ($1, $2, $11, $3, $4, $5, $6, $7, $12, $8,
+               VALUES ($1, $2, $11, $3, $4, $5, $6, $7, $12, $8, $13,
                        false, false, 'report_extract', $9, CURRENT_DATE, $10)
                ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
                DO UPDATE SET document_id = EXCLUDED.document_id,
@@ -1774,6 +1786,7 @@ async function runPrescriptionExtraction(docId) {
                  timing = COALESCE(NULLIF(EXCLUDED.timing, ''), medications.timing),
                  when_to_take = COALESCE(NULLIF(EXCLUDED.when_to_take, ''), medications.when_to_take),
                  route = COALESCE(NULLIF(EXCLUDED.route, ''), medications.route),
+                 form = COALESCE(EXCLUDED.form, medications.form),
                  name = EXCLUDED.name,
                  source = EXCLUDED.source,
                  stop_reason = EXCLUDED.stop_reason,
@@ -1792,6 +1805,7 @@ async function runPrescriptionExtraction(docId) {
               stopReason,
               latestConsId,
               normalizeWhenToTake(m.when_to_take),
+              m.form || null,
             ],
           );
           okPrev += 1;

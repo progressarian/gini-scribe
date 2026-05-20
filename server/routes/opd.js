@@ -1579,15 +1579,15 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         if (rows.length) {
           await client.query(
             `INSERT INTO medications
-               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, is_new, is_active, source, common_side_effects)
+               (patient_id, appointment_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, form, is_new, is_active, source, common_side_effects)
              SELECT $1, $2, name, pharm, composition, dose, freq, timing,
                     CASE WHEN when_to_take IS NULL OR when_to_take = ''
                          THEN NULL
                          ELSE string_to_array(when_to_take, ',')::when_to_take_pill[]
                     END,
-                    route, false, true, 'opd', COALESCE(side_fx::jsonb, '[]'::jsonb)
-               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[])
-                    AS t(name, pharm, composition, dose, freq, timing, route, side_fx, when_to_take)
+                    route, form, false, true, 'opd', COALESCE(side_fx::jsonb, '[]'::jsonb)
+               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[])
+                    AS t(name, pharm, composition, dose, freq, timing, route, side_fx, when_to_take, form)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
              DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1597,6 +1597,7 @@ router.post("/appointments/:id/compliance", async (req, res) => {
                timing = COALESCE(EXCLUDED.timing, medications.timing),
                when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                route = COALESCE(EXCLUDED.route, medications.route),
+               form = COALESCE(EXCLUDED.form, medications.form),
                common_side_effects = CASE
                  WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0
                    THEN EXCLUDED.common_side_effects
@@ -1623,6 +1624,7 @@ router.post("/appointments/:id/compliance", async (req, res) => {
                 const arr = normalizeWhenToTake(m.when_to_take);
                 return arr ? arr.join(",") : "";
               }),
+              rows.map((m) => m._detected_form || null),
             ],
           );
         }
@@ -1633,22 +1635,24 @@ router.post("/appointments/:id/compliance", async (req, res) => {
         const stopped = new Map();
         for (const m of stopped_medications || []) {
           if (!m?.name) continue;
-          const { name: cleanName } = stripFormPrefix(m.name);
+          const { name: cleanName, form: detectedForm } = stripFormPrefix(m.name);
           const storedName = cleanName || m.name;
           const key = canonicalMedKey(storedName);
-          if (key) stopped.set(key, { ...m, _clean_name: storedName, _canonical: key });
+          if (key)
+            stopped.set(key, { ...m, _clean_name: storedName, _canonical: key, _detected_form: detectedForm });
         }
         const rows = Array.from(stopped.values());
         if (rows.length) {
           await client.query(
             `INSERT INTO medications
-               (patient_id, appointment_id, name, pharmacy_match, dose, is_new, is_active, source)
-             SELECT $1, $2, name, pharm, dose, false, false, 'opd'
-               FROM UNNEST($3::text[], $4::text[], $5::text[]) AS t(name, pharm, dose)
+               (patient_id, appointment_id, name, pharmacy_match, dose, form, is_new, is_active, source)
+             SELECT $1, $2, name, pharm, dose, form, false, false, 'opd'
+               FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[]) AS t(name, pharm, dose, form)
              ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = false
              DO UPDATE SET appointment_id = EXCLUDED.appointment_id,
                pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
                dose = COALESCE(EXCLUDED.dose, medications.dose),
+               form = COALESCE(EXCLUDED.form, medications.form),
                source = EXCLUDED.source,
                updated_at = NOW()`,
             [
@@ -1657,6 +1661,7 @@ router.post("/appointments/:id/compliance", async (req, res) => {
               rows.map((m) => m._clean_name.slice(0, 200)),
               rows.map((m) => m._canonical.slice(0, 200)),
               rows.map((m) => (m.reason || "").slice(0, 100)),
+              rows.map((m) => m._detected_form || null),
             ],
           );
         }

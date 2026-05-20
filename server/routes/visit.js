@@ -225,9 +225,10 @@ router.get("/visit/:patientId", async (req, res) => {
       // id DESC is a tiebreak only — it kicks in when two rows share the
       // exact same recorded_at (e.g. bulk imports). The primary order is
       // still newest-first by timestamp.
-      pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC, id DESC LIMIT 500", [
-        pid,
-      ]),
+      pool.query(
+        "SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC, id DESC LIMIT 500",
+        [pid],
+      ),
 
       // 3. Diagnoses (deduplicated — one per diagnosis_id, active rows preferred, then latest)
       pool.query(
@@ -1237,6 +1238,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
       timing,
       when_to_take,
       route,
+      form,
       for_diagnosis,
       started_date,
       appointment_id,
@@ -1298,6 +1300,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const { name: cleanName, form: detectedForm } = stripFormPrefix(name);
     const storedName = cleanName || name;
     const storedRoute = t(route, 50) || routeForForm(detectedForm) || "Oral";
+    const storedForm = t(form, 50) || detectedForm || null;
     const pharmacyMatch = canonicalMedKey(storedName);
 
     // Auto-detect group and class if not provided
@@ -1318,8 +1321,8 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     const visitAnchor = anchorRes.rows[0]?.anchor || null;
 
     const r = await pool.query(
-      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, patient_notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, instructions, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$23,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],$22::text,NOW())
+      `INSERT INTO medications (patient_id, name, pharmacy_match, composition, dose, frequency, timing, when_to_take, route, form, for_diagnosis, is_active, started_date, appointment_id, source, med_group, drug_class, external_doctor, clinical_note, notes, patient_notes, parent_medication_id, support_condition, last_prescribed_date, days_of_week, instructions, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$21::when_to_take_pill[],$8,$24,$9,true,COALESCE($10::date, CURRENT_DATE),$11,'visit',$12,$13,$14,$15,$16,$23,$17,$18,COALESCE($19::date, CURRENT_DATE),$20::int[],$22::text,NOW())
        ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
        DO UPDATE SET
          pharmacy_match = COALESCE(EXCLUDED.pharmacy_match, medications.pharmacy_match),
@@ -1329,6 +1332,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
          timing = COALESCE(EXCLUDED.timing, medications.timing),
          when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
          route = COALESCE(EXCLUDED.route, medications.route),
+         form = COALESCE(EXCLUDED.form, medications.form),
          for_diagnosis = COALESCE(EXCLUDED.for_diagnosis, medications.for_diagnosis),
          appointment_id = COALESCE(EXCLUDED.appointment_id, medications.appointment_id),
          med_group = COALESCE(EXCLUDED.med_group, medications.med_group),
@@ -1368,6 +1372,7 @@ router.post("/visit/:patientId/medication", async (req, res) => {
         normalizeWhenToTake(when_to_take),
         typeof instructions === "string" && instructions.trim() ? instructions.trim() : null,
         t(patient_notes, 1000),
+        storedForm,
       ],
     );
     await markMedicationVisitStatus(pid).catch((e) =>
@@ -1416,6 +1421,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
       drug_class,
       external_doctor,
       route,
+      form,
       clinical_note,
       notes,
       patient_notes,
@@ -1509,6 +1515,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const setDrugClass = drug_class !== undefined;
     const setExternalDoctor = external_doctor !== undefined;
     const setRoute = route !== undefined;
+    const setForm = form !== undefined;
     const setClinicalNote = clinical_note !== undefined;
     const setNotesField = notes !== undefined;
     const setPatientNotes = patient_notes !== undefined;
@@ -1560,6 +1567,7 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
          drug_class      = CASE WHEN $16::boolean THEN $17 ELSE drug_class END,
          external_doctor = CASE WHEN $18::boolean THEN $19 ELSE external_doctor END,
          route           = CASE WHEN $22::boolean THEN $23 ELSE route END,
+         form            = CASE WHEN $39::boolean THEN $40 ELSE form END,
          clinical_note   = CASE WHEN $24::boolean THEN $25 ELSE clinical_note END,
          for_diagnosis   = CASE WHEN $26::boolean THEN $27::text[] ELSE for_diagnosis END,
          started_date    = CASE WHEN $28::boolean THEN $29::date ELSE started_date END,
@@ -1567,7 +1575,8 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
          days_of_week    = CASE WHEN $32::boolean THEN $33::int[] ELSE days_of_week END,
          instructions    = CASE WHEN $35::boolean THEN $36::text ELSE instructions END,
          updated_at = NOW()
-       WHERE id = $6 AND patient_id = $7 AND is_active = true RETURNING *`,
+       WHERE id = $6 AND patient_id = $7 AND is_active = true
+         AND ($4::text IS NULL OR $4::text IS NOT NULL) RETURNING *`,
       [
         nextDose,
         nextFreq,
@@ -1607,6 +1616,8 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
         nextInstructions,
         setPatientNotes,
         t(patient_notes, 1000),
+        setForm,
+        t(form, 50),
       ],
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Medication not found" });
@@ -2919,8 +2930,8 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
       const enriched = enrichMedWithDays(m, n(m.started_date) || n(doc_date));
       await pool.query(
         `INSERT INTO medications
-           (patient_id, name, dose, frequency, timing, when_to_take, route, is_active, started_date, source, last_prescribed_date, days_of_week, instructions, created_at)
-         VALUES ($1,$2,$3,$4,$5,$9::when_to_take_pill[],$6,true,COALESCE($7::date, CURRENT_DATE),'visit',COALESCE($8::date, CURRENT_DATE),$10::int[],$11::text,NOW())
+           (patient_id, name, dose, frequency, timing, when_to_take, route, form, is_active, started_date, source, last_prescribed_date, days_of_week, instructions, created_at)
+         VALUES ($1,$2,$3,$4,$5,$9::when_to_take_pill[],$6,$12,true,COALESCE($7::date, CURRENT_DATE),'visit',COALESCE($8::date, CURRENT_DATE),$10::int[],$11::text,NOW())
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET
            dose = COALESCE(EXCLUDED.dose, medications.dose),
@@ -2928,6 +2939,7 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
            timing = COALESCE(EXCLUDED.timing, medications.timing),
            when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
            route = COALESCE(EXCLUDED.route, medications.route),
+           form = COALESCE(EXCLUDED.form, medications.form),
            last_prescribed_date = GREATEST(medications.last_prescribed_date, EXCLUDED.last_prescribed_date),
            days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
            instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
@@ -2948,6 +2960,7 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
           typeof m.instructions === "string" && m.instructions.trim()
             ? m.instructions.trim()
             : null,
+          detectedForm || null,
         ],
       );
       counts.meds++;

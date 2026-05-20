@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS medications (
   timing          TEXT,                -- 'Before breakfast','After meals','At bedtime' (consultant-facing free-text)
   when_to_take    when_to_take_pill[], -- Patient-friendly pill values as native array (one or more)
   route           TEXT DEFAULT 'Oral', -- 'Oral','IV','IM','SC','Topical','Inhaled'
+  form            TEXT,                -- 'Tablet','Capsule','Injection','Syrup','Ointment','Cream','Drops','Inhaler', etc.
   for_diagnosis   TEXT[],              -- ['dm2','htn']
   med_group       TEXT,                -- 'diabetes','kidney','bp','lipids','thyroid','supplement','external'
   drug_class      TEXT,                -- 'insulin','metformin','sglt2','glp1','dpp4','su','other'
@@ -210,6 +211,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_lab_results_per_date
   ON lab_results (patient_id, canonical_name, test_date)
   WHERE canonical_name IS NOT NULL
     AND source IN ('report_extract','manual','opd','healthray','prescription_parsed','lab_healthray','vitals_sheet','scribe','import');
+
+-- ============ LAB TEST REQUESTS ============
+-- Patient-initiated lab test bookings (from the myhealthgenie app). Doctor
+-- reviews on the LabRequests page and approves or rejects. Home-collection
+-- requests must carry a 4-part address; the CHECK constraint enforces this
+-- even if the API layer is bypassed.
+CREATE TABLE IF NOT EXISTS lab_test_requests (
+  id                SERIAL PRIMARY KEY,
+  patient_id        INTEGER NOT NULL REFERENCES patients(id),
+  test_names        TEXT[] NOT NULL,                       -- one or more requested tests
+  collection_type   TEXT NOT NULL CHECK (collection_type IN ('hospital','home')),
+  address_house     TEXT,                                  -- required when collection_type='home'
+  address_street    TEXT,
+  address_landmark  TEXT,
+  address_pincode   TEXT,                                  -- text preserves leading zeros
+  status            TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','approved','rejected')),
+  reviewed_by       TEXT,                                  -- doctor name on decision
+  reviewed_at       TIMESTAMPTZ,
+  review_note       TEXT,                                  -- doctor's scheduling/reject reason
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT lab_request_home_needs_address CHECK (
+    collection_type <> 'home'
+    OR (
+      address_house    IS NOT NULL AND length(trim(address_house))    > 0
+      AND address_street  IS NOT NULL AND length(trim(address_street))   > 0
+      AND address_landmark IS NOT NULL AND length(trim(address_landmark)) > 0
+      AND address_pincode ~ '^[0-9]{6}$'
+    )
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_labreq_patient
+  ON lab_test_requests(patient_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_labreq_status
+  ON lab_test_requests(status, created_at DESC);
 
 -- ============ DOCUMENTS / REPORTS ============
 -- Uploaded PDFs, images, previous prescriptions
