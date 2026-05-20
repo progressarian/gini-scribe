@@ -466,15 +466,19 @@ function BiomarkerSparkline({ data, color, unit, target }) {
 
   const W = 260,
     H = 52;
-  // Deduplicate — for lab rows (date-only timestamps) keep the latest value
-  // per day; for vitals (full ISO timestamps) keep every intra-day reading
-  // so app-logged points don't get swallowed by a same-day clinic entry.
+  // Dedup key = timestamp + value. Same-timestamp rows with DIFFERENT
+  // values both survive (so two readings logged at the same instant render
+  // as two separate dots, matching what the doctor sees in the raw data).
+  // Same-timestamp + same-value rows still collapse so identical duplicate
+  // inserts don't stack visually.
   const seen = new Set();
   const dedupedData = [];
   for (let i = data.length - 1; i >= 0; i--) {
     const raw = String(data[i].date || data[i].test_date || "");
     const hasTime = raw.includes("T") || /\d{2}:\d{2}/.test(raw);
-    const key = hasTime ? raw : raw.slice(0, 10);
+    const tsKey = hasTime ? raw : raw.slice(0, 10);
+    const valKey = String(data[i].result ?? data[i].value ?? "");
+    const key = `${tsKey}|${valKey}`;
     if (!seen.has(key)) {
       seen.add(key);
       dedupedData.unshift(data[i]);

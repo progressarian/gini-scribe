@@ -78,9 +78,7 @@ if (typeof document !== "undefined" && !document.getElementById("triage-shim-kf"
 }
 
 function Shim({ w = "100%", h = 12, r = 6, style }) {
-  return (
-    <div className="tri-shim" style={{ width: w, height: h, borderRadius: r, ...style }} />
-  );
+  return <div className="tri-shim" style={{ width: w, height: h, borderRadius: r, ...style }} />;
 }
 
 function SkeletonCard() {
@@ -1967,60 +1965,62 @@ export default function TriageViewV3({
                 tone="dim"
                 onClick={() => setPipelineFilter(null)}
               />
-          <PipelinePill
-            label="Lab received"
-            sub="From Gini Lab or uploaded"
-            count={pipeline.labReceived.length}
-            active={pipelineFilter === "labReceived"}
-            tone="warn"
-            onClick={() =>
-              setPipelineFilter(pipelineFilter === "labReceived" ? null : "labReceived")
-            }
-          />
-          <PipelinePill
-            label="Uploaded"
-            sub="Reports uploaded"
-            count={pipeline.uploaded.length}
-            active={pipelineFilter === "uploaded"}
-            tone="dim"
-            onClick={() => setPipelineFilter(pipelineFilter === "uploaded" ? null : "uploaded")}
-          />
-          <PipelinePill
-            label="Data complete"
-            sub="Can be categorised"
-            count={pipeline.dataComplete.length}
-            active={pipelineFilter === "dataComplete"}
-            tone="ok"
-            onClick={() =>
-              setPipelineFilter(pipelineFilter === "dataComplete" ? null : "dataComplete")
-            }
-          />
-          <PipelinePill
-            label="Categorised"
-            sub="Triaged"
-            count={pipeline.categorised.length}
-            active={pipelineFilter === "categorised"}
-            tone="ok"
-            onClick={() =>
-              setPipelineFilter(pipelineFilter === "categorised" ? null : "categorised")
-            }
-          />
-          <PipelinePill
-            label="Assigned"
-            sub="To a doctor"
-            count={pipeline.assigned.length}
-            active={pipelineFilter === "assigned"}
-            tone="ok"
-            onClick={() => setPipelineFilter(pipelineFilter === "assigned" ? null : "assigned")}
-          />
-          <PipelinePill
-            label="Checked in"
-            sub="In clinic"
-            count={pipeline.checkedIn.length}
-            active={pipelineFilter === "checkedIn"}
-            tone="lv"
-            onClick={() => setPipelineFilter(pipelineFilter === "checkedIn" ? null : "checkedIn")}
-          />
+              <PipelinePill
+                label="Lab received"
+                sub="From Gini Lab or uploaded"
+                count={pipeline.labReceived.length}
+                active={pipelineFilter === "labReceived"}
+                tone="warn"
+                onClick={() =>
+                  setPipelineFilter(pipelineFilter === "labReceived" ? null : "labReceived")
+                }
+              />
+              <PipelinePill
+                label="Uploaded"
+                sub="Reports uploaded"
+                count={pipeline.uploaded.length}
+                active={pipelineFilter === "uploaded"}
+                tone="dim"
+                onClick={() => setPipelineFilter(pipelineFilter === "uploaded" ? null : "uploaded")}
+              />
+              <PipelinePill
+                label="Data complete"
+                sub="Can be categorised"
+                count={pipeline.dataComplete.length}
+                active={pipelineFilter === "dataComplete"}
+                tone="ok"
+                onClick={() =>
+                  setPipelineFilter(pipelineFilter === "dataComplete" ? null : "dataComplete")
+                }
+              />
+              <PipelinePill
+                label="Categorised"
+                sub="Triaged"
+                count={pipeline.categorised.length}
+                active={pipelineFilter === "categorised"}
+                tone="ok"
+                onClick={() =>
+                  setPipelineFilter(pipelineFilter === "categorised" ? null : "categorised")
+                }
+              />
+              <PipelinePill
+                label="Assigned"
+                sub="To a doctor"
+                count={pipeline.assigned.length}
+                active={pipelineFilter === "assigned"}
+                tone="ok"
+                onClick={() => setPipelineFilter(pipelineFilter === "assigned" ? null : "assigned")}
+              />
+              <PipelinePill
+                label="Checked in"
+                sub="In clinic"
+                count={pipeline.checkedIn.length}
+                active={pipelineFilter === "checkedIn"}
+                tone="lv"
+                onClick={() =>
+                  setPipelineFilter(pipelineFilter === "checkedIn" ? null : "checkedIn")
+                }
+              />
               <PipelinePill
                 label="No-show / Cancel"
                 sub="Did not attend"

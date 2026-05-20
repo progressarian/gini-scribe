@@ -22,6 +22,7 @@ import { sanitizeForStorageKey } from "../utils/storageKey.js";
 import { generatePrescriptionPdf, buildPrescriptionFileName } from "./prescriptionHtmlPdf.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { computeCarePhase } from "../utils/carePhase.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { generatePatientSummary } from "./patientSummaryAI.js";
 
 const require = createRequire(import.meta.url);
@@ -371,7 +372,11 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     patient,
     doctor,
     summary: { totalVisits, firstVisitDate, monthsWithGini, carePhase },
-    activeDx: activeDxR.rows,
+    // Apply the same clinical ordering the manual Print Prescription path
+    // uses (visit.js -> sortDiagnoses). Without this, auto-saved PDFs list
+    // diagnoses alphabetically by diagnosis_id instead of Primary →
+    // Complication → Comorbidity → External → Monitoring.
+    activeDx: sortDiagnoses(activeDxR.rows),
     activeMeds: activeMedsR.rows,
     latestVitals,
     prevVitals,
