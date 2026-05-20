@@ -19,7 +19,6 @@ export const PATIENT_SCOPED_TABLES = new Set([
   "goals",
   "complications",
   "patient_vitals_log",
-  "patient_activity_log",
   "patient_symptom_log",
   "patient_med_log",
   "patient_meal_log",
@@ -258,14 +257,13 @@ Whitelisted tables (use $1 for patient_id wherever a table below has patient_id)
  - vitals(id, patient_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, rbs, meal_type, notes)
  - diagnoses(id, patient_id, diagnosis_id, label, status, category, key_value, trend, since_year, notes, is_active, updated_at)
  - medications(id, patient_id, consultation_id, name, dose, frequency, timing, when_to_take, route, composition, for_diagnosis, med_group, drug_class, is_active, started_date, stopped_date, stop_reason, common_side_effects, parent_medication_id, pharmacy_match, last_prescribed_date)
- - lab_results(id, patient_id, appointment_id, test_date, test_name, canonical_name, result, result_text, unit, flag, is_critical, ref_range, panel_name, lab_test_date, source, created_at)
+ - lab_results(id, patient_id, appointment_id, test_date, test_name, canonical_name, result, result_text, unit, flag, is_critical, ref_range, panel_name, source, created_at)
      · source dedup priority (highest → lowest): lab_healthray > opd > report_extract > healthray > prescription_parsed
  - lab_cases(id, patient_id, case_no, patient_case_no, case_date, results_synced, reported_on, retry_abandoned, investigation_summary jsonb {reports[], tests[]})
  - documents(id, patient_id, doc_type, title, doc_date, source, extracted_text, notes, created_at)
  - goals(id, patient_id, marker, current_value, target_value, timeline, status, achieved_date)
  - complications(id, patient_id, name, status, detail, severity)
  - patient_vitals_log(id, patient_id, recorded_date, bp_systolic, bp_diastolic, pulse, rbs, meal_type, weight_kg, bmi, waist, body_fat, spo2)
- - patient_activity_log(id, patient_id, activity_type, value, value2, context, duration_minutes, mood_score, log_date, log_time, source)
  - patient_symptom_log(id, patient_id, log_date, log_time, symptom, severity, body_area, context, notes, follow_up_needed, source)
  - patient_med_log(id, patient_id, medication_name, medication_dose, genie_medication_id, log_date, dose_time, status, source)
  - patient_meal_log(id, patient_id, log_date, meal_type, description, calories, protein_g, carbs_g, fat_g)
@@ -298,26 +296,26 @@ Query recipes (clone these shapes so your answers match /visit value-for-value):
      UNION ALL
      SELECT a.* FROM appts a
        WHERE NOT EXISTS (SELECT 1 FROM cons c WHERE c.visit_date::date = a.visit_date::date)
-     ORDER BY visit_date DESC, created_at DESC LIMIT 200;
+     ORDER BY visit_date DESC, created_at DESC, id DESC LIMIT 200;
  - Last visit assessment summary:
      SELECT visit_date, con_name, con_data->>'assessment_summary' AS summary
-     FROM consultations WHERE patient_id = $1 ORDER BY visit_date DESC LIMIT 1;
+     FROM consultations WHERE patient_id = $1 ORDER BY visit_date DESC, id DESC LIMIT 1;
  - Latest HealthRay diagnoses / advice (the doctor's most recent diagnosis list shown on /visit):
      SELECT healthray_diagnoses, healthray_advice, appointment_date FROM appointments
      WHERE patient_id = $1 AND healthray_diagnoses IS NOT NULL AND jsonb_array_length(healthray_diagnoses) > 0
-     ORDER BY appointment_date DESC LIMIT 1;
+     ORDER BY appointment_date DESC, id DESC LIMIT 1;
  - Pending lab cases (?tab=labs "Gini Lab Processing" badge):
      SELECT case_no, patient_case_no, case_date FROM lab_cases
      WHERE patient_id = $1 AND results_synced = FALSE AND retry_abandoned = FALSE
-     ORDER BY case_date DESC;
+     ORDER BY case_date DESC, id DESC;
  - Investigation summary per lab case (?tab=labs section grouping):
      SELECT case_no, case_date, investigation_summary FROM lab_cases
      WHERE patient_id = $1 AND results_synced = TRUE AND investigation_summary IS NOT NULL
-     ORDER BY case_date DESC LIMIT 20;
+     ORDER BY case_date DESC, id DESC LIMIT 20;
  - Latest value per lab (mirrors visit.js labLatest):
      SELECT DISTINCT ON (canonical_name) canonical_name, test_name, result, unit, flag, test_date
      FROM lab_results WHERE patient_id = $1 AND test_date IS NOT NULL
-     ORDER BY canonical_name, test_date DESC, created_at DESC;
+     ORDER BY canonical_name, test_date DESC, created_at DESC, id DESC;
  - Merged FBS history (lab FBS + patient_vitals_log fasting RBS, mirrors getMergedFbsHist):
      SELECT test_date AS d, result AS fbs FROM lab_results
        WHERE patient_id = $1 AND canonical_name = 'FBS' AND result IS NOT NULL
@@ -330,7 +328,8 @@ Query recipes (clone these shapes so your answers match /visit value-for-value):
             c.con_name AS prescriber, COALESCE(c.visit_date, m.started_date) AS prescribed_date
      FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
      WHERE m.patient_id = $1 AND m.is_active = true
-     ORDER BY prescribed_date DESC NULLS LAST, m.created_at DESC;
+     ORDER BY prescribed_date DESC NULLS LAST, m.created_at DESC, m.id DESC;
+ - GENERAL ORDERING RULE (apply to any custom run_patient_sql you write): primary sort by the most relevant time column DESC (created_at / recorded_date / test_date / appointment_date / log_date / visit_date / doc_date), with \`id DESC\` as the final tiebreaker so same-timestamp rows are deterministic and the newest insert wins.
  - HOMA-IR fallback (when not stored as a lab row): (fasting_insulin × fbs) / 405. Pull both from lab_results.
  - eGFR fallback (CKD-EPI) requires creatinine + age + sex — for accuracy prefer get_full_patient_context (it carries the canonical eGFR via fetchMergedLabHistory).
 

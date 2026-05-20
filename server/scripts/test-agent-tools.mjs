@@ -65,10 +65,6 @@ const CASES = [
   { name: "query_patient_data · meds", tool: "query_patient_data", input: { scope: "meds" } },
   { name: "query_patient_data · meals", tool: "query_patient_data", input: { scope: "meals", limit: 10 } },
   { name: "query_patient_data · symptoms", tool: "query_patient_data", input: { scope: "symptoms", limit: 10 } },
-  { name: "query_patient_data · activity", tool: "query_patient_data", input: { scope: "activity", limit: 10 } },
-  { name: "query_patient_data · exercise", tool: "query_patient_data", input: { scope: "exercise", limit: 10 } },
-  { name: "query_patient_data · sleep", tool: "query_patient_data", input: { scope: "sleep", limit: 10 } },
-  { name: "query_patient_data · mood", tool: "query_patient_data", input: { scope: "mood", limit: 10 } },
   { name: "query_patient_data · med_adherence (1d)", tool: "query_patient_data", input: { scope: "med_adherence", range_days: 1 } },
   { name: "query_patient_data · med_adherence (30d)", tool: "query_patient_data", input: { scope: "med_adherence", range_days: 30 } },
   { name: "query_patient_data · appointments", tool: "query_patient_data", input: { scope: "appointments" } },
@@ -344,7 +340,6 @@ const VERIFY_HINTS = {
       meds: "SELECT * FROM medications WHERE patient_id = $1",
       meals: "SELECT * FROM patient_meal_log WHERE patient_id = $1 ORDER BY log_date DESC",
       symptoms: "SELECT * FROM patient_symptom_log WHERE patient_id = $1 ORDER BY log_date DESC",
-      activity: "SELECT * FROM patient_activity_log WHERE patient_id = $1 ORDER BY log_date DESC",
       med_adherence: "SELECT * FROM patient_med_log WHERE patient_id = $1 ORDER BY log_date DESC, dose_time DESC",
       appointments: "SELECT * FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC",
       diagnoses: "SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses WHERE patient_id = $1 ORDER BY diagnosis_id, is_active DESC, updated_at DESC",
@@ -356,11 +351,11 @@ const VERIFY_HINTS = {
     visit_page: "Any data the doctor sees on /visit (use the SCHEMA_HINT recipes for parity)",
   },
   get_full_patient_context: {
-    db: "Bundled read across patients + diagnoses + medications + lab_results + vitals + symptoms + activity + appointments tables.",
+    db: "Bundled read across patients + diagnoses + medications + lab_results + vitals + symptoms + appointments tables.",
     visit_page: "Match against ALL panels on /visit — Profile, Diagnoses, Medications, Labs, Vitals, Visit history.",
   },
   get_progress_summary: {
-    db: "Aggregates across vitals + lab_results + medications + patient_activity_log over the requested window.",
+    db: "Aggregates across vitals + lab_results + medications over the requested window.",
     visit_page: "Trend chips on /visit and the dashboard.",
   },
   get_medication_schedule: {
@@ -380,7 +375,7 @@ const VERIFY_HINTS = {
     visit_page: "(UI tool — opens the log modal in the RN app.)",
   },
   create_health_log: {
-    db: "Writes a row to vitals / lab_results / patient_meal_log / patient_activity_log / patient_symptom_log depending on type.",
+    db: "Writes a row to vitals / lab_results / patient_meal_log / patient_symptom_log depending on type.",
     visit_page: "New entry should appear on /visit and the relevant patient companion screen.",
   },
   open_document: { db: "(UI tool)", visit_page: "(UI tool)" },

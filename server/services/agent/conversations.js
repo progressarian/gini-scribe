@@ -222,5 +222,42 @@ export function buildOutgoingMessages(conversation, latestUserBlock) {
   }
   // The latest user block was already wrapped by the caller in Messages-API
   // shape ({role:'user', content:string|blocks}).
-  return [...prefix, ...live, latestUserBlock];
+  //
+  // Wrap the latest user message with a hard topic-isolation reminder. The
+  // model has repeatedly stitched prior topics (weight / snacks / progress)
+  // into responses about unrelated questions, even with strong system-prompt
+  // rules — putting the rule right next to the message it must obey is far
+  // more effective. The original content (string or blocks) is preserved and
+  // only the prefix changes; tool-use blocks (image / document) are kept
+  // intact by appending the guard as a leading text block.
+  const guardText =
+    `[ANSWER ONLY THIS MESSAGE. The prior turns above are CONTEXT, not topics to revisit. ` +
+    `Do NOT prepend "Your current weight…" / "Your BP…" / any status line that wasn't asked for. ` +
+    `Do NOT append "For snack ideas…" / "let me know…" / any upsell for topics not in this message. ` +
+    `If the question is about meds, answer only meds. If it's about progress, answer only progress. ` +
+    `If it's a greeting, just greet. No stitching. No recaps. The reply addresses THIS message and stops.]\n\n`;
+  const guardedLatest = (() => {
+    const c = latestUserBlock?.content;
+    if (typeof c === "string") {
+      return { ...latestUserBlock, content: guardText + c };
+    }
+    if (Array.isArray(c)) {
+      // Prepend a text block before any image/document blocks.
+      const firstTextIdx = c.findIndex((b) => b && b.type === "text");
+      if (firstTextIdx >= 0) {
+        const updated = c.slice();
+        updated[firstTextIdx] = {
+          ...updated[firstTextIdx],
+          text: guardText + (updated[firstTextIdx].text || ""),
+        };
+        return { ...latestUserBlock, content: updated };
+      }
+      return {
+        ...latestUserBlock,
+        content: [{ type: "text", text: guardText.trim() }, ...c],
+      };
+    }
+    return latestUserBlock;
+  })();
+  return [...prefix, ...live, guardedLatest];
 }

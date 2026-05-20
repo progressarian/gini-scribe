@@ -4,7 +4,6 @@ import { sortDiagnoses } from "../../utils/diagnosisSort.js";
 import { sortMedications } from "../../utils/medicationSort.js";
 import { validatePatientSql, SCHEMA_HINT } from "./sqlGuard.js";
 
-
 export const AGENT_TOOLS = [
   {
     name: "query_patient_data",
@@ -27,12 +26,6 @@ export const AGENT_TOOLS = [
             "symptoms",
             "appointments",
             "diagnoses",
-
-            "activity",
-            "exercise",
-            "sleep",
-            "mood",
-
             "med_adherence",
           ],
           description: "Which slice of patient data to read.",
@@ -78,7 +71,7 @@ export const AGENT_TOOLS = [
   {
     name: "get_full_patient_context",
     description:
-      "Return a comprehensive snapshot of EVERYTHING known about the authenticated patient in ONE call: profile (name/age/sex/dob), active medications, active diagnoses, the latest value of every lab on file (HbA1c, LDL, HDL, Total Cholesterol, Triglycerides, TSH, Hb, eGFR, Creatinine, Vitamin D/B12, T3/T4, FBS, PPBS, and any other test ever recorded), recent vitals (BP/sugar/weight, last 90 days), recent symptoms (last 60 days), recent self-logged activity (last 60 days), upcoming + last 5 past appointments, and medication adherence summary (last 30 days). Use this when the patient asks an open-ended question like 'what do you know about me', 'give me my full report', or any derived metric that needs multiple values (e.g. Non-HDL = Total Cholesterol − HDL, TG/HDL ratio, ASCVD risk inputs). Prefer this over chaining many query_patient_data calls.",
+      "Return a comprehensive snapshot of EVERYTHING known about the authenticated patient in ONE call: profile (name/age/sex/dob), active medications, active diagnoses, the latest value of every lab on file (HbA1c, LDL, HDL, Total Cholesterol, Triglycerides, TSH, Hb, eGFR, Creatinine, Vitamin D/B12, T3/T4, FBS, PPBS, and any other test ever recorded), recent vitals (BP/sugar/weight, last 90 days), recent symptoms (last 60 days), upcoming + last 5 past appointments, and medication adherence summary (last 30 days). Use this when the patient asks an open-ended question like 'what do you know about me', 'give me my full report', or any derived metric that needs multiple values (e.g. Non-HDL = Total Cholesterol − HDL, TG/HDL ratio, ASCVD risk inputs). Prefer this over chaining many query_patient_data calls.",
     input_schema: {
       type: "object",
       properties: {
@@ -88,7 +81,7 @@ export const AGENT_TOOLS = [
         },
         symptoms_days: {
           type: "number",
-          description: "Window (days) for recent symptoms / activity rows. Default 60.",
+          description: "Window (days) for recent symptoms rows. Default 60.",
         },
       },
     },
@@ -124,7 +117,7 @@ export const AGENT_TOOLS = [
   {
     name: "get_appointments",
     description:
-      "Patient's visit history merged across native consultations + HealthRay appointments (same merge /visit?tab=history uses). scope='past' = completed visits with doctor_name/visit_type/status; scope='upcoming' = future appointments; scope='next' = single nearest future appointment. Each row carries `source` ('consultation'|'appointment'), and `follow_up` (JSONB) when the visit recorded a follow-up plan — from appointments.healthray_follow_up (HealthRay) or consultations.con_data->'follow_up' (Gini). Use this whenever the patient asks about past visits, upcoming appointments, or follow-up dates/instructions.",
+      "Patient's visit history merged across native consultations + HealthRay appointments (same merge /visit?tab=history uses). scope='past' = completed visits with full details: doctor_name, visit_type, status, diagnoses (JSONB), medications (JSONB — confirmed prescribed list), assessment_summary (text), advice (text from HealthRay), and follow_up. scope='upcoming' = future scheduled appointments (slim — only doctor_name/visit_type/status/follow_up; rich history fields stripped since they don't apply); scope='next' = single nearest future appointment (same slim shape). Each row carries `source` ('consultation'|'appointment'). `follow_up` (JSONB) comes from appointments.healthray_follow_up (HealthRay) or consultations.con_data->'follow_up' (Gini). Use this whenever the patient asks about past visits, what was discussed/prescribed in a prior visit, upcoming appointments, or follow-up dates/instructions.",
     input_schema: {
       type: "object",
       properties: {
@@ -155,7 +148,10 @@ export const AGENT_TOOLS = [
       type: "object",
       properties: {
         document_id: { type: "number", description: "documents.id" },
-        file_url: { type: "string", description: "Signed/public URL from get_prescriptions.file_url" },
+        file_url: {
+          type: "string",
+          description: "Signed/public URL from get_prescriptions.file_url",
+        },
         title: { type: "string", description: "Short label shown above the inline viewer." },
         doc_type: {
           type: "string",
@@ -241,14 +237,11 @@ export const AGENT_TOOLS = [
             "CPeptide",
             "Lab",
             "Food",
-            "Exercise",
-            "Sleep",
-            "Mood",
             "Symptom",
           ],
         },
         value1: { type: "string", description: "Primary value (e.g. systolic, sugar mg/dL)." },
-        value2: { type: "string", description: "Secondary value (e.g. diastolic, duration)." },
+        value2: { type: "string", description: "Secondary value (e.g. diastolic)." },
         context: {
           type: "string",
           description:
@@ -302,9 +295,6 @@ export const AGENT_TOOLS = [
             "Haemoglobin",
             "eGFR",
             "Lab",
-            "Exercise",
-            "Sleep",
-            "Mood",
             "Symptom",
             "Food",
           ],
@@ -317,13 +307,12 @@ export const AGENT_TOOLS = [
         },
         value2: {
           type: "string",
-          description:
-            "Secondary value where applicable: diastolic for BP, exercise type for Exercise, quality score (1-10) for Sleep, notes for Mood.",
+          description: "Secondary value where applicable: diastolic for BP.",
         },
         context: {
           type: "string",
           description:
-            "Context label: meal timing for Sugar (Fasting/After breakfast/etc.), session for Exercise (Morning/Evening), meal type for Food (breakfast/lunch/snack/dinner).",
+            "Context label: meal timing for Sugar (Fasting/After breakfast/etc.), meal type for Food (breakfast/lunch/snack/dinner).",
         },
         date: {
           type: "string",
@@ -373,11 +362,12 @@ export const AGENT_TOOLS = [
             "log_proposed",
             "data_summary",
             "doctor_handoff",
+            "reception_handoff",
             "schedule_info",
             "refusal",
           ],
           description:
-            "Why you replied this way. log_proposed → you also called propose_log. doctor_handoff → you also called open_doctor_chat. refusal → you declined a diagnosis/dose request and pointed to the doctor.",
+            "Why you replied this way. log_proposed → you also called propose_log. doctor_handoff → you also called open_doctor_chat. reception_handoff → you also called open_reception_chat (admin/scheduling/lab booking). refusal → you declined a diagnosis/dose request and pointed to the doctor.",
         },
         numbers: {
           type: "array",
@@ -431,6 +421,39 @@ export const AGENT_TOOLS = [
           enum: ["none", "urgent_symptom", "out_of_range_lab", "medication_concern"],
           description:
             "Set when the patient mentioned something that warrants doctor attention. 'urgent_symptom' for chest pain / breathlessness / severe headache / loss of consciousness.",
+        },
+        disclaimer: {
+          type: "string",
+          description:
+            "Short safety disclaimer rendered as a styled note BELOW the main reply (not part of `message`). Set this WHENEVER the turn touches anything clinical/sensitive: symptom interpretation, lab-value meaning, dose timing or changes, side-effect commentary, medicine interactions, dietary restrictions for a chronic condition, exercise intensity for someone with cardiac/CKD history. Keep to ONE sentence, Hinglish-friendly, ending with 'consult your doctor' / 'doctor se confirm karein'. Examples: 'This is general info — please confirm with your doctor before making any changes.' / 'Yeh general guidance hai — apne doctor se confirm karein before adjusting.' Skip the field entirely (omit, don't pass empty string) for pure greetings, log confirmations, schedule lookups, and admin handoffs.",
+        },
+        suggested_chips: {
+          type: "array",
+          description:
+            "2-3 short quick-reply chips rendered under your reply for the patient to tap. Tailor them to the CURRENT topic — if you suggested a meal, chips might offer to log it, ask for alternatives, or show macros; if you answered a BP question, chips might offer to log a new reading or show the trend. Plain conversational follow-ups, NOT random tiles. Skip the array entirely for tiny acknowledgments or when no obvious next step exists.",
+          maxItems: 4,
+          items: {
+            type: "object",
+            properties: {
+              label: {
+                type: "string",
+                description:
+                  "Short chip text (≤ 28 chars). Lead with a single emoji + space when natural, e.g. '📝 Log this meal', '📈 Show my BP trend', '🍵 Snack ideas'.",
+              },
+              type: {
+                type: "string",
+                enum: ["ask", "log", "photo", "symptom"],
+                description:
+                  "How the app should handle a tap. 'ask' = send the label back as a new user message (use for follow-up questions). 'log' = open the Log modal (set logType). 'photo' = open the camera/photo picker. 'symptom' = open the symptom-tracking modal.",
+              },
+              logType: {
+                type: "string",
+                enum: ["BP", "Sugar", "Weight", "Food", "Exercise", "Symptom", "Lab"],
+                description: "Required when type='log'. Which LogModal to open.",
+              },
+            },
+            required: ["label", "type"],
+          },
         },
       },
       required: ["message", "intent"],
@@ -545,6 +568,157 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    name: "propose_med_dose",
+    description:
+      "Open a confirmation bottom sheet so the patient can record a medicine dose as 'taken' or 'missed'. Use this — NOT propose_log — when the patient says 'I took my Metformin', 'log my Glizid as taken', 'I missed my morning insulin'. Resolve the med name from medications they're actually on (run get_medication_schedule first if you're unsure of the exact name or slot). One call per medicine.",
+    input_schema: {
+      type: "object",
+      properties: {
+        medication_name: {
+          type: "string",
+          description: "Exact medicine name as stored in their schedule (e.g. 'Metformin 500mg').",
+        },
+        dose: { type: "string", description: "Dose string the patient confirms, e.g. '500 mg', '10 units'." },
+        slot: {
+          type: "string",
+          enum: [
+            "fasting",
+            "before_breakfast",
+            "after_breakfast",
+            "before_lunch",
+            "after_lunch",
+            "before_dinner",
+            "after_dinner",
+            "bedtime",
+            "anytime",
+          ],
+          description: "Which scheduled slot this dose belongs to.",
+        },
+        status: {
+          type: "string",
+          enum: ["taken", "missed"],
+          description: "What the patient says happened — taken (default) or missed.",
+        },
+        date: {
+          type: "string",
+          description: "ISO YYYY-MM-DD. Omit for 'today/now', set explicitly for 'yesterday', 'on Monday', etc.",
+        },
+      },
+      required: ["medication_name", "status"],
+    },
+  },
+  {
+    name: "propose_med_reminder",
+    description:
+      "Open a bottom sheet to set / update reminder times on a specific medicine. Use when the patient asks 'remind me to take Telvas at 8 pm', 'set reminder for my insulin at 9 and 21', 'mera Glizid 9 baje yaad dilana'. One call per medicine.",
+    input_schema: {
+      type: "object",
+      properties: {
+        medication_name: {
+          type: "string",
+          description: "Exact medicine name as stored in their schedule.",
+        },
+        times: {
+          type: "array",
+          description: "Reminder times in 24-hour HH:MM format. Convert '8 pm' → '20:00'.",
+          items: { type: "string" },
+        },
+        enable: {
+          type: "boolean",
+          description: "True to enable the reminders; false only when the patient explicitly asks to turn them off.",
+        },
+      },
+      required: ["medication_name", "times", "enable"],
+    },
+  },
+  {
+    name: "propose_refill",
+    description:
+      "Open the refill-request modal pre-selected with the medicines the patient wants to reorder. Use when patient says 'I'm running low on Metformin', 'order refill for my diabetes meds', 'reorder all my BP medicines'. If they said 'all my X meds', resolve names via query_patient_data scope='meds' filtered by med_group first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Items to pre-select. Each row identifies one medicine.",
+          items: {
+            type: "object",
+            properties: {
+              medication_name: { type: "string" },
+              dose: { type: "string" },
+              quantity: { type: "string", description: "Quantity / strips / pens the patient asked for. Optional." },
+            },
+            required: ["medication_name"],
+          },
+        },
+        notes: { type: "string", description: "Optional free-text note for the pharmacy team." },
+      },
+      required: ["items"],
+    },
+  },
+  {
+    name: "propose_pre_visit_symptoms",
+    description:
+      "Open the pre-visit symptom logger — the same UI the patient sees on the home screen before an upcoming appointment. ONLY use this when the patient has an appointment within the next 7 days (verify with get_appointments scope='next' first). For day-to-day symptom tracking with no upcoming visit, use propose_log with logType='Symptom' instead.",
+    input_schema: {
+      type: "object",
+      properties: {
+        appointment_id: {
+          type: "integer",
+          description: "Optional appointment id from get_appointments. The sheet will attach the symptoms to this visit.",
+        },
+        symptoms: {
+          type: "array",
+          description: "List of symptom names the patient mentioned (e.g. ['headache','fatigue']).",
+          items: { type: "string" },
+        },
+        note: { type: "string", description: "Optional free-text note alongside the symptom list." },
+      },
+      required: ["symptoms"],
+    },
+  },
+  {
+    name: "call_clinic",
+    description:
+      "Surface an inline phone-icon card with the clinic's reception number. Tap dials. Use ONLY when the patient explicitly asks to call the hospital / reception / clinic, or when the situation is too urgent for the asynchronous reception chat. NEVER use for clinical handoff (use open_doctor_chat) or routine admin like booking (use open_reception_chat).",
+    input_schema: {
+      type: "object",
+      properties: {
+        reason: { type: "string", description: "Short tag for telemetry — not shown to patient." },
+      },
+    },
+  },
+  {
+    name: "open_reception_chat",
+    description:
+      "Surface an inline 'Chat with reception' card in the patient's chat for ADMIN / SCHEDULING / NON-CLINICAL requests the app cannot fulfil directly — e.g. book appointment, reschedule visit, book lab test, home sample pickup, general queries about timings, billing, reports delivery. The card lets the patient tap to open the Gini Advanced Care (reception) chat with the seed pre-filled. Do NOT use this for clinical/medical questions (use open_doctor_chat) or for things you can answer with patient data tools.",
+    input_schema: {
+      type: "object",
+      properties: {
+        seed: {
+          type: "string",
+          description:
+            "Pre-filled message the patient can review and send to reception, e.g. 'I'd like to book a lab test with home pickup.'",
+        },
+        topic: {
+          type: "string",
+          enum: [
+            "book_appointment",
+            "reschedule_visit",
+            "book_lab_test",
+            "home_sample_pickup",
+            "billing",
+            "reports",
+            "general",
+          ],
+          description: "What the patient is asking reception to help with.",
+        },
+        reason: { type: "string", description: "Short tag for telemetry — not shown." },
+      },
+      required: ["seed", "topic"],
+    },
+  },
 ];
 
 // ── SQL helpers ────────────────────────────────────────────────────────
@@ -596,7 +770,6 @@ function buildQuery(baseSql, args, dateCol, params, patientId) {
   }
   return sql;
 }
-
 
 async function qProfile(pool, patientId) {
   const { rows } = await pool.query(
@@ -661,7 +834,7 @@ async function qVitalsMerged(pool, patientId, args, fields /* Set */) {
   ];
   const vitSelectCols = [
     "'vitals' AS source_table",
-    "recorded_at::date AS recorded_date",
+    "(recorded_at AT TIME ZONE 'Asia/Kolkata')::date AS recorded_date",
     wantBp || wantVitalsAll ? "bp_sys AS bp_systolic" : "NULL::int AS bp_systolic",
     wantBp || wantVitalsAll ? "bp_dia AS bp_diastolic" : "NULL::int AS bp_diastolic",
     wantBp || wantVitalsAll ? "pulse" : "NULL::int AS pulse",
@@ -704,7 +877,7 @@ async function qVitalsMerged(pool, patientId, args, fields /* Set */) {
   if (matchClauses.length > 0) {
     sql += ` WHERE (${matchClauses.join(" OR ")})`;
   }
-  sql += ` ORDER BY recorded_date DESC LIMIT ${limit}`;
+  sql += ` ORDER BY recorded_date DESC, id DESC LIMIT ${limit}`;
 
   try {
     const { rows } = await pool.query(sql, params);
@@ -722,7 +895,7 @@ async function qVitalsMerged(pool, patientId, args, fields /* Set */) {
                 bp_systolic, bp_diastolic, pulse, rbs, meal_type,
                 weight_kg, bmi, NULL::numeric AS waist, NULL::numeric AS body_fat, spo2
            FROM patient_vitals_log WHERE patient_id = $1
-          ORDER BY recorded_date DESC LIMIT ${limit}`,
+          ORDER BY recorded_date DESC, id DESC LIMIT ${limit}`,
         [patientId],
       );
       return fallback.rows;
@@ -758,8 +931,7 @@ async function fetchMergedLabHistory(pool, patientId) {
   const { rows: labRows } = await pool.query(
     `SELECT lr.id, COALESCE(lr.test_date, a.appointment_date) AS test_date,
             lr.test_name, lr.canonical_name, lr.result, lr.result_text, lr.unit,
-            lr.flag, lr.ref_range, lr.panel_name, lr.created_at,
-            lr.lab_test_date
+            lr.flag, lr.ref_range, lr.panel_name, lr.created_at
        FROM lab_results lr
        LEFT JOIN appointments a ON a.id = lr.appointment_id
       WHERE lr.patient_id = $1`,
@@ -902,7 +1074,15 @@ async function qLabs(pool, patientId, args) {
       });
     }
   }
-  flat.sort((a, b) => String(b.test_date || "").localeCompare(String(a.test_date || "")));
+  flat.sort((a, b) => {
+    const d = String(b.test_date || "").localeCompare(String(a.test_date || ""));
+    if (d !== 0) return d;
+    // Tiebreaker: higher id first so the most-recently-saved row on the
+    // same day wins. Falls through to 0 when neither side has an id.
+    const ai = a.id ?? a.lab_result_id ?? 0;
+    const bi = b.id ?? b.lab_result_id ?? 0;
+    return Number(bi) - Number(ai);
+  });
   return flat.slice(0, limit);
 }
 
@@ -911,17 +1091,18 @@ async function qMeds(pool, patientId, args) {
   const { rows } = await pool.query(
     `SELECT id, name, dose, frequency, timing, when_to_take, route, med_group, drug_class,
             is_active, started_date, stopped_date, stop_reason, parent_medication_id,
-            days_of_week, sort_order
-       FROM medications WHERE patient_id = $1
+            days_of_week, sort_order, visit_status
+       FROM medications
+      WHERE patient_id = $1
+        AND is_active = TRUE
+        AND (visit_status IS NULL OR visit_status <> 'previous')
+      ORDER BY COALESCE(started_date, '0001-01-01'::date) DESC, id DESC
       LIMIT ${limit}`,
     [patientId],
   );
-  // Order active meds with the same class-aware ranking /visit applies, so
-  // the model's "first N meds" framing matches what the doctor sees. Stopped
-  // meds fall behind active in the original SQL ordering — preserve that.
-  const active = rows.filter((r) => r.is_active);
-  const stopped = rows.filter((r) => !r.is_active);
-  return [...sortMedications(active), ...stopped];
+  // Only current-visit active meds — stopped and prior-visit carryovers are
+  // excluded so the model doesn't recommend off treatments the doctor dropped.
+  return sortMedications(rows);
 }
 
 async function qMeals(pool, patientId, args) {
@@ -951,28 +1132,6 @@ async function qSymptoms(pool, patientId, args) {
     params,
     patientId,
   );
-  sql += ` ORDER BY log_date DESC, id DESC LIMIT ${limit}`;
-  const { rows } = await pool.query(sql, params);
-  return rows;
-}
-
-// Self-logged Exercise / Sleep / Mood / Body rows from the companion app.
-// `activityType` is one of those four (or null for "give me everything").
-async function qActivity(pool, patientId, args, activityType) {
-  const params = [];
-  const limit = Math.min(Math.max(args.limit || 50, 1), 200);
-  let sql = buildQuery(
-    `SELECT id, activity_type, value, value2, context, duration_minutes,
-            mood_score, log_date, log_time, source
-       FROM patient_activity_log`,
-    args,
-    "log_date",
-    params,
-    patientId,
-  );
-  if (activityType) {
-    sql += ` AND LOWER(activity_type) = LOWER($${params.push(activityType)})`;
-  }
   sql += ` ORDER BY log_date DESC, id DESC LIMIT ${limit}`;
   const { rows } = await pool.query(sql, params);
   return rows;
@@ -1009,6 +1168,10 @@ async function qAppointments(pool, patientId, args) {
   //
   // Tolerate environments where the optional columns aren't present.
   const limit = Math.min(Math.max(args.limit || 20, 1), 100);
+  // Mirrors the merged visit-history query at server/routes/visit.js:286–326,
+  // so past visits surface the same diagnoses / medications / assessment /
+  // advice the /visit history panel renders. Future appointments use the
+  // same shape with the rich fields naturally null.
   const buildQuery = ({ withFollowUpWith, withHealthrayFollowUp }) => `
     WITH cons AS (
       SELECT
@@ -1020,7 +1183,11 @@ async function qAppointments(pool, patientId, args) {
         status,
         NULL::text           AS notes,
         NULL::text           AS follow_up_with,
-        con_data->'follow_up' AS follow_up,
+        con_data->'follow_up'           AS follow_up,
+        con_data->'diagnoses'           AS diagnoses,
+        con_data->'medications_confirmed' AS medications,
+        con_data->>'assessment_summary' AS assessment_summary,
+        NULL::text                       AS advice,
         'consultation'       AS source
       FROM consultations
       WHERE patient_id = $1
@@ -1036,6 +1203,10 @@ async function qAppointments(pool, patientId, args) {
         notes,
         ${withFollowUpWith ? "follow_up_with" : "NULL::text AS follow_up_with"},
         ${withHealthrayFollowUp ? "healthray_follow_up AS follow_up" : "NULL::jsonb AS follow_up"},
+        healthray_diagnoses    AS diagnoses,
+        healthray_medications  AS medications,
+        NULL::text             AS assessment_summary,
+        healthray_advice       AS advice,
         'appointment' AS source
       FROM appointments
       WHERE patient_id = $1
@@ -1082,7 +1253,7 @@ async function qDiagnoses(pool, patientId) {
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (diagnosis_id) *
        FROM diagnoses WHERE patient_id = $1
-      ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
+      ORDER BY diagnosis_id, is_active DESC, updated_at DESC, id DESC`,
     [patientId],
   );
   return sortDiagnoses(rows);
@@ -1114,7 +1285,7 @@ async function summariseProgress(pool, patientId, window) {
          SELECT recorded_date::date AS d, bp_systolic, bp_diastolic, rbs, meal_type, weight_kg
            FROM patient_vitals_log WHERE patient_id=$1
          UNION ALL
-         SELECT recorded_at::date AS d, bp_sys AS bp_systolic, bp_dia AS bp_diastolic,
+         SELECT (recorded_at AT TIME ZONE 'Asia/Kolkata')::date AS d, bp_sys AS bp_systolic, bp_dia AS bp_diastolic,
                 rbs, meal_type, weight AS weight_kg
            FROM vitals WHERE patient_id=$1
        )
@@ -1266,7 +1437,6 @@ async function getFullPatientContext(pool, patientId, args = {}) {
     labHistory,
     recentVitals,
     recentSymptoms,
-    recentActivity,
     allAppointments,
     adherenceRow,
   ] = await Promise.all([
@@ -1276,7 +1446,6 @@ async function getFullPatientContext(pool, patientId, args = {}) {
     fetchMergedLabHistory(pool, patientId),
     qVitalsAll(pool, patientId, { range_days: vitalsDays, limit: 200 }),
     qSymptoms(pool, patientId, { range_days: symptomsDays, limit: 50 }),
-    qActivity(pool, patientId, { range_days: symptomsDays, limit: 50 }, null),
     qAppointments(pool, patientId, { limit: 20 }),
     pool
       .query(
@@ -1340,9 +1509,8 @@ async function getFullPatientContext(pool, patientId, args = {}) {
     med_group: m.med_group,
     drug_class: m.drug_class,
     is_active: m.is_active,
+    visit_status: m.visit_status,
     started_date: m.started_date,
-    stopped_date: m.stopped_date,
-    stop_reason: m.stop_reason,
   }));
 
   const upcomingAppts = allAppointments.filter((a) => String(a.appointment_date) >= today);
@@ -1353,8 +1521,7 @@ async function getFullPatientContext(pool, patientId, args = {}) {
     profile,
     diagnoses,
     medications: {
-      active: medList.filter((m) => m.is_active),
-      stopped: medList.filter((m) => !m.is_active),
+      active: medList,
       adherence_last_30d: {
         active_meds: Number(adherenceRow.active_meds || 0),
         taken_doses: Number(adherenceRow.taken_doses || 0),
@@ -1372,10 +1539,6 @@ async function getFullPatientContext(pool, patientId, args = {}) {
     symptoms_recent: {
       window_days: symptomsDays,
       rows: recentSymptoms,
-    },
-    activity_recent: {
-      window_days: symptomsDays,
-      rows: recentActivity,
     },
     appointments: {
       upcoming: upcomingAppts,
@@ -1417,25 +1580,104 @@ function classifyTimingSlot(timing) {
 async function getMedSchedule(pool, patientId) {
   const meds = await qMeds(pool, patientId, { limit: 200 });
   const active = meds.filter((m) => m.is_active && !m.parent_medication_id);
+
+  // Pull today's (IST) taken doses so each scheduled med can be flagged
+  // taken/missed — the model needs this to know what's still pending and
+  // avoid recommending a dose the patient has already taken.
+  const { rows: todayLogs } = await pool.query(
+    `SELECT medication_name, medication_dose, dose_time, status
+       FROM patient_med_log
+      WHERE patient_id = $1
+        AND log_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+        AND status = 'taken'`,
+    [patientId],
+  );
+  const norm = (s) =>
+    String(s || "")
+      .trim()
+      .toLowerCase();
+  const takenByName = new Map();
+  for (const log of todayLogs) {
+    const key = norm(log.medication_name);
+    if (!key) continue;
+    if (!takenByName.has(key)) takenByName.set(key, []);
+    takenByName.get(key).push({ dose_time: log.dose_time, status: log.status });
+  }
+
   const grouped = {};
   for (const m of active) {
     const slot = classifyTimingSlot(m.when_to_take || m.timing);
     if (!grouped[slot]) grouped[slot] = [];
+    const takenEntries = takenByName.get(norm(m.name)) || [];
     grouped[slot].push({
       name: m.name,
       dose: m.dose,
       frequency: m.frequency,
       when_to_take: m.when_to_take,
       timing: m.timing,
+      taken_today: takenEntries.length > 0,
+      taken_doses: takenEntries.map((t) => t.dose_time).filter(Boolean),
     });
   }
-  return Object.entries(grouped).map(([slot, items]) => ({
-    slot,
-    label: TIME_SLOT_LABELS[slot] || slot,
-    meds: items,
-  }));
-}
+  // Slot → approximate clock time (IST). Mirrors the SYSTEM prompt mapping
+  // so the agent and tool agree on what counts as past / upcoming.
+  const SLOT_HOUR = {
+    fasting: 7,
+    before_breakfast: 7,
+    after_breakfast: 9,
+    before_lunch: 12.5,
+    after_lunch: 14,
+    before_dinner: 19,
+    after_dinner: 21,
+    bedtime: 22.5,
+    anytime: -1,
+  };
+  const istNow = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+  );
+  const istHourFloat = istNow.getHours() + istNow.getMinutes() / 60;
+  const istStr = `${String(istNow.getHours()).padStart(2, "0")}:${String(
+    istNow.getMinutes(),
+  ).padStart(2, "0")}`;
 
+  const slotsOut = Object.entries(grouped).map(([slot, items]) => {
+    const slotHour = SLOT_HOUR[slot] ?? -1;
+    const isPast = slotHour > 0 && istHourFloat > slotHour + 0.5; // 30-min grace
+    const isUpcoming = slotHour > 0 && !isPast;
+    return {
+      slot,
+      label: TIME_SLOT_LABELS[slot] || slot,
+      slot_clock: slotHour > 0
+        ? `${String(Math.floor(slotHour)).padStart(2, "0")}:${String(
+            Math.round((slotHour % 1) * 60),
+          ).padStart(2, "0")}`
+        : "any time",
+      is_past: isPast,
+      is_upcoming: isUpcoming,
+      meds: items.map((m) => ({
+        ...m,
+        status: m.taken_today
+          ? "taken"
+          : isPast
+            ? "overdue"
+            : isUpcoming
+              ? "due"
+              : "scheduled",
+      })),
+    };
+  });
+
+  return {
+    now_ist: istStr,
+    note:
+      "STRICT: only meds with status='taken' have a real adherence row for today. " +
+      "status='overdue' = slot time already passed today with no log. " +
+      "status='due' = upcoming slot today. " +
+      "Never claim a med was taken unless its status is 'taken'. " +
+      "When answering 'kab dawai leni hai?', list ALL slots that are still due or overdue today — do not skip evening/night doses.",
+    slots: slotsOut,
+  };
+}
 
 const MAX_SQL_ROWS = 200;
 const MAX_SQL_JSON_BYTES = 60_000;
@@ -1604,53 +1846,6 @@ async function executeCreateHealthLog(pool, patientId, input) {
     };
   }
 
-  // ── Lifestyle: Exercise, Sleep, Mood ────────────────────────────────
-  if (type === "Exercise") {
-    const duration = Number(v1);
-    if (!Number.isFinite(duration) || duration <= 0)
-      return { ok: false, error: "value1 (duration minutes) must be a positive number." };
-    const exerciseType = (v2 || "Exercise").slice(0, 100);
-    const session = (context || "General").slice(0, 100);
-    await pool.query(
-      `INSERT INTO patient_activity_log
-         (patient_id, activity_type, value, value2, context, log_date, source)
-       VALUES ($1, 'Exercise', $2, $3, $4, $5, 'agent')`,
-      [patientId, String(duration), exerciseType, session, logDate],
-    );
-    return {
-      ok: true,
-      saved: { type, duration_min: duration, exercise_type: exerciseType, date: logDate },
-    };
-  }
-
-  if (type === "Sleep") {
-    const hours = Number(v1);
-    if (!Number.isFinite(hours) || hours <= 0)
-      return { ok: false, error: "value1 (hours) must be a positive number." };
-    const quality = v2 ? Number(v2) : null;
-    await pool.query(
-      `INSERT INTO patient_activity_log
-         (patient_id, activity_type, value, value2, log_date, source)
-       VALUES ($1, 'Sleep', $2, $3, $4, 'agent')`,
-      [patientId, String(hours), quality != null ? String(quality) : null, logDate],
-    );
-    return { ok: true, saved: { type, hours, quality, date: logDate } };
-  }
-
-  if (type === "Mood") {
-    const score = Number(v1);
-    if (!Number.isFinite(score) || score < 1 || score > 10)
-      return { ok: false, error: "value1 (mood score) must be between 1 and 10." };
-    const notes = v2.slice(0, 200) || null;
-    await pool.query(
-      `INSERT INTO patient_activity_log
-         (patient_id, activity_type, value, value2, log_date, source)
-       VALUES ($1, 'Mood', $2, $3, $4, 'agent')`,
-      [patientId, String(score), notes, logDate],
-    );
-    return { ok: true, saved: { type, mood_score: score, notes, date: logDate } };
-  }
-
   // ── Symptom ─────────────────────────────────────────────────────────
   if (type === "Symptom") {
     if (!v1) return { ok: false, error: "value1 (symptom name) is required." };
@@ -1711,14 +1906,6 @@ export async function executeTool(name, input, ctx) {
           return qAppointments(pool, scribePatientId, args);
         case "diagnoses":
           return qDiagnoses(pool, scribePatientId);
-        case "activity":
-          return qActivity(pool, scribePatientId, args, null);
-        case "exercise":
-          return qActivity(pool, scribePatientId, args, "Exercise");
-        case "sleep":
-          return qActivity(pool, scribePatientId, args, "Sleep");
-        case "mood":
-          return qActivity(pool, scribePatientId, args, "Mood");
         case "med_adherence":
           return qMedAdherence(pool, scribePatientId, args);
         default:
@@ -1738,7 +1925,7 @@ export async function executeTool(name, input, ctx) {
                 storage_path, file_url, consultation_id, created_at
            FROM documents
           WHERE patient_id = $1 AND doc_type = 'prescription'
-          ORDER BY doc_date DESC NULLS LAST, created_at DESC
+          ORDER BY doc_date DESC NULLS LAST, created_at DESC, id DESC
           LIMIT ${limit}`,
         [scribePatientId],
       );
@@ -1746,16 +1933,49 @@ export async function executeTool(name, input, ctx) {
       return rows;
     }
     case "get_appointments": {
-      const all = await qAppointments(pool, scribePatientId, { limit: args.limit || 20 });
+      const raw = await qAppointments(pool, scribePatientId, { limit: args.limit || 20 });
+      // Filter out no-show appointments — the patient never attended, so
+      // they shouldn't surface in history or upcoming lists.
+      const all = raw.filter((a) => String(a.status || "").toLowerCase() !== "no_show");
       const today = new Date().toISOString().slice(0, 10);
-      if (args.scope === "upcoming") return all.filter((a) => String(a.appointment_date) >= today);
-      if (args.scope === "past") return all.filter((a) => String(a.appointment_date) < today);
-      if (args.scope === "next") {
-        const up = all
-          .filter((a) => String(a.appointment_date) >= today)
-          .sort((a, b) => String(a.appointment_date).localeCompare(String(b.appointment_date)));
-        return up[0] || null;
-      }
+
+      // Mirror /visit's post-SQL dedupe (visit.js:593–600) — drop rows that
+      // share visit_date+status with one already kept. Without this the
+      // panel's "6 Visits" count and the tool's row count diverge.
+      const dedupeByDateStatus = (rows) => {
+        const seen = new Set();
+        return rows.filter((r) => {
+          const key = `${String(r.appointment_date || "").slice(0, 10)}|${r.status || ""}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+
+      const pastRows = dedupeByDateStatus(all.filter((a) => String(a.appointment_date) < today));
+      const futureRows = all
+        .filter((a) => String(a.appointment_date) >= today)
+        .sort((a, b) => String(a.appointment_date).localeCompare(String(b.appointment_date)));
+
+      // For future scheduled rows the rich history fields don't apply; strip
+      // them, but enrich with the follow-up plan from the most recent past
+      // consultation (matches VisitPlan.jsx's "Next Visit Scheduled" source).
+      const latestPastFollowUp =
+        pastRows.find((r) => r.follow_up && (r.follow_up.date || r.follow_up.when))?.follow_up ||
+        null;
+      const stripFuture = (a) => {
+        const { diagnoses, medications, assessment_summary, advice, ...rest } = a;
+        const follow_up = rest.follow_up || latestPastFollowUp;
+        return {
+          ...rest,
+          follow_up,
+          follow_up_date: follow_up?.date || follow_up?.when || null,
+        };
+      };
+
+      if (args.scope === "upcoming") return futureRows.map(stripFuture);
+      if (args.scope === "past") return pastRows;
+      if (args.scope === "next") return futureRows[0] ? stripFuture(futureRows[0]) : null;
       return all;
     }
     case "create_health_log":
@@ -1800,12 +2020,20 @@ const LAB_TYPE_MAP = {
   Temperature: { test_name: "Temperature", unit: "°F", canonical_name: "temperature" },
   HeartRate: { test_name: "Heart Rate", unit: "bpm", canonical_name: "heart_rate" },
   SpO2: { test_name: "SpO2", unit: "%", canonical_name: "spo2" },
-  RespiratoryRate: { test_name: "Respiratory Rate", unit: "breaths/min", canonical_name: "respiratory_rate" },
+  RespiratoryRate: {
+    test_name: "Respiratory Rate",
+    unit: "breaths/min",
+    canonical_name: "respiratory_rate",
+  },
   FBS: { test_name: "Fasting Blood Sugar", unit: "mg/dL", canonical_name: "fbs" },
   PPBS: { test_name: "Postprandial Blood Sugar", unit: "mg/dL", canonical_name: "ppbs" },
   RandomSugar: { test_name: "Random Blood Sugar", unit: "mg/dL", canonical_name: "rbs" },
   HDL: { test_name: "HDL", unit: "mg/dL", canonical_name: "hdl" },
-  TotalCholesterol: { test_name: "Total Cholesterol", unit: "mg/dL", canonical_name: "total_cholesterol" },
+  TotalCholesterol: {
+    test_name: "Total Cholesterol",
+    unit: "mg/dL",
+    canonical_name: "total_cholesterol",
+  },
   Triglycerides: { test_name: "Triglycerides", unit: "mg/dL", canonical_name: "triglycerides" },
   NonHDL: { test_name: "Non-HDL Cholesterol", unit: "mg/dL", canonical_name: "non_hdl" },
   VLDL: { test_name: "VLDL", unit: "mg/dL", canonical_name: "vldl" },
@@ -1829,13 +2057,21 @@ const LAB_TYPE_MAP = {
   Iron: { test_name: "Iron", unit: "µg/dL", canonical_name: "iron" },
   Ferritin: { test_name: "Ferritin", unit: "ng/mL", canonical_name: "ferritin" },
   TIBC: { test_name: "TIBC", unit: "µg/dL", canonical_name: "tibc" },
-  TransferrinSat: { test_name: "Transferrin Saturation", unit: "%", canonical_name: "transferrin_sat" },
+  TransferrinSat: {
+    test_name: "Transferrin Saturation",
+    unit: "%",
+    canonical_name: "transferrin_sat",
+  },
   ALT: { test_name: "ALT (SGPT)", unit: "U/L", canonical_name: "alt" },
   AST: { test_name: "AST (SGOT)", unit: "U/L", canonical_name: "ast" },
   ALP: { test_name: "Alkaline Phosphatase", unit: "U/L", canonical_name: "alp" },
   GGT: { test_name: "GGT", unit: "U/L", canonical_name: "ggt" },
   Bilirubin: { test_name: "Total Bilirubin", unit: "mg/dL", canonical_name: "bilirubin_total" },
-  DirectBilirubin: { test_name: "Direct Bilirubin", unit: "mg/dL", canonical_name: "bilirubin_direct" },
+  DirectBilirubin: {
+    test_name: "Direct Bilirubin",
+    unit: "mg/dL",
+    canonical_name: "bilirubin_direct",
+  },
   Albumin: { test_name: "Albumin", unit: "g/dL", canonical_name: "albumin" },
   Globulin: { test_name: "Globulin", unit: "g/dL", canonical_name: "globulin" },
   TotalProtein: { test_name: "Total Protein", unit: "g/dL", canonical_name: "total_protein" },
@@ -1951,13 +2187,111 @@ export function buildClientAction(name, input) {
       ack: { status: "queued_for_client", note: "Care → Team chat will open." },
     };
   }
+  if (name === "open_reception_chat") {
+    const ca = {
+      type: "open_reception_chat",
+      seed: input.seed ?? "",
+      topic: input.topic ?? "general",
+    };
+    return {
+      clientAction: ca,
+      ack: {
+        status: "queued_for_client",
+        note: "Reception chat card will appear inline in the patient's chat.",
+      },
+    };
+  }
+  if (name === "propose_med_dose") {
+    const ca = {
+      type: "open_med_log_sheet",
+      medication_name: String(input.medication_name || "").trim(),
+      dose: input.dose ?? null,
+      slot: input.slot ?? null,
+      status: input.status === "missed" ? "missed" : "taken",
+      date: input.date ?? null,
+    };
+    return {
+      clientAction: ca,
+      ack: { status: "queued_for_client", note: "Med-log confirmation sheet will open." },
+    };
+  }
+  if (name === "propose_med_reminder") {
+    const ca = {
+      type: "open_med_reminder_sheet",
+      medication_name: String(input.medication_name || "").trim(),
+      times: Array.isArray(input.times) ? input.times.filter((t) => typeof t === "string") : [],
+      enable: input.enable !== false,
+    };
+    return {
+      clientAction: ca,
+      ack: { status: "queued_for_client", note: "Reminder editor will open for this medicine." },
+    };
+  }
+  if (name === "propose_refill") {
+    const ca = {
+      type: "open_refill_sheet",
+      items: Array.isArray(input.items)
+        ? input.items
+            .filter((it) => it && typeof it.medication_name === "string")
+            .map((it) => ({
+              medication_name: it.medication_name.trim(),
+              dose: it.dose ?? null,
+              quantity: it.quantity ?? null,
+            }))
+        : [],
+      notes: input.notes ?? null,
+    };
+    return {
+      clientAction: ca,
+      ack: { status: "queued_for_client", note: "Refill request modal will open pre-selected." },
+    };
+  }
+  if (name === "propose_pre_visit_symptoms") {
+    const ca = {
+      type: "open_pre_symptom_sheet",
+      appointment_id: input.appointment_id ?? null,
+      symptoms: Array.isArray(input.symptoms)
+        ? input.symptoms.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim())
+        : [],
+      note: input.note ?? null,
+    };
+    return {
+      clientAction: ca,
+      ack: { status: "queued_for_client", note: "Pre-visit symptom sheet will open." },
+    };
+  }
+  if (name === "call_clinic") {
+    // Server-resolved phone + name so the model can't fabricate digits.
+    const phone = (process.env.HOSPITAL_PHONE || "").trim();
+    const label = (process.env.HOSPITAL_NAME || "Gini Health").trim();
+    const ca = {
+      type: "call_clinic",
+      phone,
+      label,
+    };
+    return {
+      clientAction: ca,
+      ack: phone
+        ? { status: "queued_for_client", note: "Inline call card will appear." }
+        : {
+            status: "missing_config",
+            note: "HOSPITAL_PHONE is not configured on the server. The chip will not be rendered.",
+          },
+    };
+  }
   return null;
 }
 
 export const UI_TOOL_NAMES = new Set([
   "propose_log",
   "open_doctor_chat",
+  "open_reception_chat",
   "open_document",
   "classify_and_extract_attachment",
+  "propose_med_dose",
+  "propose_med_reminder",
+  "propose_refill",
+  "propose_pre_visit_symptoms",
+  "call_clinic",
 ]);
 export const FINAL_TOOL_NAME = "respond_to_patient";
