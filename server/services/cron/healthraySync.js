@@ -131,6 +131,41 @@ function buildVitalsAndBiomarkers(appt, apptDate) {
   return { opdVitals, biomarkers };
 }
 
+// ── Analyse follow-up date headers in a raw clinical text string ─────────────
+// Returns whether the note has ANY dated follow-up sections and whether any of
+// them matches the given appointment date (YYYY-MM-DD). Used to decide if
+// OBSERVATIONS baseline data should be treated as this visit's prescription.
+function analyzeFollowUpDates(text, apptDate) {
+  if (!text) return { hasAny: false, matchesApptDate: false };
+  const [yyyy, mm, dd] = (apptDate || "").split("-");
+  const d = parseInt(dd, 10);
+  const m = parseInt(mm, 10);
+  const yy = yyyy?.slice(-2);
+  const apptVariants =
+    yyyy && mm && dd
+      ? [
+          `${d}/${m}/${yy}`,
+          `${d}/${m}/${yyyy}`,
+          `${dd}/${mm}/${yy}`,
+          `${dd}/${mm}/${yyyy}`,
+          `${d}-${m}-${yy}`,
+          `${dd}-${mm}-${yy}`,
+          `${d}-${m}-${yyyy}`,
+        ]
+      : [];
+  const fuPattern = /FOLLOW\s*UP\s*(TODAY|ON|NOTES?|\s)/i;
+  const dateInLine = /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/;
+  let hasAny = false;
+  let matchesApptDate = false;
+  for (const line of text.split("\n")) {
+    if (fuPattern.test(line) && dateInLine.test(line)) {
+      hasAny = true;
+      if (apptVariants.some((v) => line.includes(v))) matchesApptDate = true;
+    }
+  }
+  return { hasAny, matchesApptDate };
+}
+
 // ── Fetch clinical text — handles show_previous_appointment fallback ────────
 async function fetchClinicalText(appt, healthrayId, doctorId) {
   const clinicalData = await fetchClinicalNotes(healthrayId, doctorId);
@@ -501,9 +536,24 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           return { skipped: true, id: existing.id };
         }
 
-        // Parse with AI
-        const parsed = await parsePrescriptionWithAi(rawText, apptDate);
         clinical.clinicalRaw = rawText;
+
+        // Guard: only parse OBSERVATIONS-based data if this is a first visit
+        // (note has no follow-up date sections at all). If the note has follow-up
+        // sections but none match today's appointment date, the patient likely
+        // didn't visit — skip the AI parse to avoid syncing stale OBSERVATIONS data.
+        const { hasAny: noteHasFuDates, matchesApptDate: noteMatchesDate } =
+          analyzeFollowUpDates(rawText, apptDate);
+        const skipParse = noteHasFuDates && !noteMatchesDate;
+        if (skipParse) {
+          log(
+            "Enrich",
+            `${healthrayId}: skip parse — note has follow-up dates but none match ${apptDate}`,
+          );
+        }
+
+        // Parse with AI
+        const parsed = skipParse ? null : await parsePrescriptionWithAi(rawText, apptDate);
 
         // Guard against a flaky re-parse silently wiping prior good data.
         // parsePrescriptionWithAi returns null on any hard failure (API error,
