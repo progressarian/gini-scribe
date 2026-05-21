@@ -511,6 +511,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   const assigned = !!appt.doctor_name;
   const status = appt.status || "";
   const isCheckedIn = ["checkedin", "in_visit", "seen", "completed"].includes(status);
+  const [extrasOpen, setExtrasOpen] = useState(false);
 
   const bucketAccent =
     bucket === "worse_out"
@@ -538,7 +539,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   // The chip's colour tone is driven by the rightmost (most recent) value.
   const DEFAULT_CHIP_KEYS = ["hba1c", "fg", "ldl", "tg", "uacr", "egfr"];
   const bioRows = [];
-  const pushChip = (k) => {
+  const buildRow = (k) => {
     const curRaw = num(b[k]);
     const prevRaw = k === "hba1c" ? prevHba1c : num(p[k]);
     let cur = null;
@@ -553,12 +554,15 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
       cur = prevRaw;
       prev = null;
     } else {
-      return;
+      return null;
     }
     const tone = targetStatus(k, cur);
-    bioRows.push({ k, label: KEY_LABEL[k] || k, cur, prev, tone });
+    return { k, label: KEY_LABEL[k] || k.toUpperCase(), cur, prev, tone };
   };
-  for (const k of DEFAULT_CHIP_KEYS) pushChip(k);
+  for (const k of DEFAULT_CHIP_KEYS) {
+    const r = buildRow(k);
+    if (r) bioRows.push(r);
+  }
   // Also surface ANY other biomarker whose current value is out of range —
   // even non-standard markers (BP, HDL, TSH, Hb, ALT…) — so the clinician
   // never misses a bad reading just because it isn't in the default chip set.
@@ -566,13 +570,44 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   for (const k of Object.keys(b)) {
     if (k.startsWith("_")) continue;
     if (seen.has(k)) continue;
-    const cur = num(b[k]);
-    if (cur == null) continue;
-    const tone = targetStatus(k, cur);
-    if (tone !== "bad") continue;
-    const prev = num(p[k]);
-    bioRows.push({ k, label: KEY_LABEL[k] || k.toUpperCase(), cur, prev, tone });
-    seen.add(k);
+    const r = buildRow(k);
+    if (!r) continue;
+    if (r.tone !== "bad") continue;
+    bioRows.push(r);
+    seen.add(r.k);
+  }
+  // "Extra" rows — every remaining biomarker we have a value for. Hidden
+  // behind a "+ N more" toggle for non-Review cards. On Review cards we
+  // surface them inline (the whole point of Review is to eyeball whatever
+  // values *did* come through), and we also fold them into the main row when
+  // the default chip strip turned up empty.
+  // Only surface recognised lab values + vitals (keys in KEY_LABEL) — skip
+  // any non-clinical/unknown fields that may live on the biomarkers blob.
+  const extraRows = [];
+  const pushExtra = (k) => {
+    if (k.startsWith("_")) return;
+    if (seen.has(k)) return;
+    if (!KEY_LABEL[k]) return;
+    const r = buildRow(k);
+    if (!r) return;
+    extraRows.push(r);
+    seen.add(r.k);
+  };
+  for (const k of Object.keys(b)) pushExtra(k);
+  // Also include lab/vital values we only have historical readings for — gives
+  // the clinician the full picture when deciding who to assign the patient to.
+  for (const k of Object.keys(p)) pushExtra(k);
+  // If the default chip strip turned up empty (e.g. Review cards with only
+  // non-default markers), promote a handful of extras up to the main row so
+  // there's always something visible before the toggle.
+  if (bioRows.length === 0 && extraRows.length > 0) {
+    bioRows.push(...extraRows.splice(0, 4));
+  }
+  // Cap the always-visible row so the card stays compact — overflow goes
+  // behind the "+ N more values" toggle.
+  const MAIN_CAP = 4;
+  if (bioRows.length > MAIN_CAP) {
+    extraRows.unshift(...bioRows.splice(MAIN_CAP));
   }
 
   const chipPal = (tone) =>
@@ -1020,6 +1055,68 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
               </span>
             );
           })}
+        </div>
+      )}
+
+      {/* Extras — hidden by default; click "+ N more" to reveal additional
+          biomarkers we have on file (BP, TSH, Hb, ALT, BMI, etc.) in the
+          same prev → cur format. */}
+      {extraRows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setExtrasOpen((v) => !v);
+            }}
+            style={{
+              alignSelf: "flex-start",
+              fontSize: 9,
+              fontWeight: 700,
+              color: INK3,
+              background: BG,
+              border: `1px solid ${BD}`,
+              borderRadius: 5,
+              padding: "2px 7px",
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            {extrasOpen
+              ? "− Hide other values"
+              : `+ ${extraRows.length} more value${extraRows.length > 1 ? "s" : ""}`}
+          </button>
+          {extrasOpen && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+              {extraRows.map((r) => {
+                const pal = chipPal(r.tone);
+                return (
+                  <span
+                    key={r.k}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      fontFamily: FM,
+                      padding: "3px 7px",
+                      borderRadius: 6,
+                      background: pal.bg,
+                      color: pal.fg,
+                      border: `1px solid ${pal.fg}22`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, marginRight: 4 }}>{r.label}</span>
+                    {r.prev != null && (
+                      <>
+                        <span style={{ opacity: 0.6, fontSize: 9 }}>{r.prev}</span>
+                        <span style={{ opacity: 0.55, fontSize: 9, margin: "0 2px" }}>→</span>
+                      </>
+                    )}
+                    <span style={{ fontWeight: 800 }}>{r.cur}</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1547,13 +1644,15 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
 
 // ── Upload modal (styled to match OPD, not Visit) ──
 const REPORT_TYPES = [
-  { value: "lab_report", label: "Blood Report (HbA1c, Lipids, TFT, KFT)" },
-  { value: "imaging", label: "Radiology (X-Ray, USG, Echo, MRI, CT)" },
-  { value: "abi", label: "ABI (Ankle-Brachial Index)" },
-  { value: "vpt", label: "VPT (Vibration Perception Threshold)" },
-  { value: "ecg", label: "ECG / Holter" },
-  { value: "urine", label: "Urine Report" },
-  { value: "other", label: "Other" },
+  { value: "lab_report", label: "🩸 Blood Test (HbA1c, Lipids, TFT, KFT)" },
+  { value: "abi", label: "🫀 ABI (Ankle-Brachial Index)" },
+  { value: "vpt", label: "⚡ VPT (Vibration Perception Threshold)" },
+  { value: "xray", label: "🦴 X-Ray" },
+  { value: "usg", label: "🔊 Ultrasound" },
+  { value: "mri", label: "🧲 MRI" },
+  { value: "ecg", label: "📈 ECG / Holter" },
+  { value: "echo", label: "❤️ Echo" },
+  { value: "other", label: "📄 Other" },
 ];
 
 function UploadModal({ patient, onClose, onSubmit }) {
