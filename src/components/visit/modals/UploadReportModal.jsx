@@ -1,13 +1,15 @@
 import { memo, useState, useRef } from "react";
 
 const REPORT_TYPES = [
-  { value: "lab_report", label: "Blood Report (HbA1c, Lipids, TFT, KFT)" },
-  { value: "imaging", label: "Radiology (X-Ray, USG, Echo, MRI, CT)" },
-  { value: "abi", label: "ABI (Ankle-Brachial Index)" },
-  { value: "vpt", label: "VPT (Vibration Perception Threshold)" },
-  { value: "ecg", label: "ECG / Holter" },
-  { value: "urine", label: "Urine Report" },
-  { value: "other", label: "Other" },
+  { value: "lab_report", label: "🩸 Blood Test (HbA1c, Lipids, TFT, KFT)" },
+  { value: "abi", label: "🫀 ABI (Ankle-Brachial Index)" },
+  { value: "vpt", label: "⚡ VPT (Vibration Perception Threshold)" },
+  { value: "xray", label: "🦴 X-Ray" },
+  { value: "usg", label: "🔊 Ultrasound" },
+  { value: "mri", label: "🧲 MRI" },
+  { value: "ecg", label: "📈 ECG / Holter" },
+  { value: "echo", label: "❤️ Echo" },
+  { value: "other", label: "📄 Other" },
 ];
 
 const UploadReportModal = memo(function UploadReportModal({ onClose, onSubmit }) {

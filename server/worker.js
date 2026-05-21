@@ -3,6 +3,10 @@ import { startCronJobs, stopCronJobs } from "./services/cron/index.js";
 import { startSheetsCron, stopSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron, stopTodaysShowCron } from "./services/cron/todaysShowSync.js";
 import { startGenieSyncCron, stopGenieSyncCron } from "./services/cron/genieSync.js";
+import {
+  startAppointmentInsertListener,
+  stopAppointmentInsertListener,
+} from "./services/cron/appointmentInsertListener.js";
 import pool from "./config/db.js";
 
 console.log("🛠️  Gini Scribe Worker starting...");
@@ -11,6 +15,9 @@ startCronJobs();
 startSheetsCron();
 startTodaysShowCron();
 startGenieSyncCron();
+startAppointmentInsertListener().catch((e) =>
+  console.error("[Worker] appointment-insert listener failed to start:", e.message),
+);
 
 console.log("✅ Worker ready — cron jobs active (separate from API process)");
 
@@ -24,6 +31,7 @@ async function shutdown(signal) {
     stopSheetsCron();
     stopTodaysShowCron();
     stopGenieSyncCron();
+    await stopAppointmentInsertListener();
   } catch (e) {
     console.error("[Worker] error stopping cron:", e.message);
   }
