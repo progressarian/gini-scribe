@@ -579,7 +579,10 @@ export const AGENT_TOOLS = [
           type: "string",
           description: "Exact medicine name as stored in their schedule (e.g. 'Metformin 500mg').",
         },
-        dose: { type: "string", description: "Dose string the patient confirms, e.g. '500 mg', '10 units'." },
+        dose: {
+          type: "string",
+          description: "Dose string the patient confirms, e.g. '500 mg', '10 units'.",
+        },
         slot: {
           type: "string",
           enum: [
@@ -602,7 +605,8 @@ export const AGENT_TOOLS = [
         },
         date: {
           type: "string",
-          description: "ISO YYYY-MM-DD. Omit for 'today/now', set explicitly for 'yesterday', 'on Monday', etc.",
+          description:
+            "ISO YYYY-MM-DD. Omit for 'today/now', set explicitly for 'yesterday', 'on Monday', etc.",
         },
       },
       required: ["medication_name", "status"],
@@ -626,7 +630,8 @@ export const AGENT_TOOLS = [
         },
         enable: {
           type: "boolean",
-          description: "True to enable the reminders; false only when the patient explicitly asks to turn them off.",
+          description:
+            "True to enable the reminders; false only when the patient explicitly asks to turn them off.",
         },
       },
       required: ["medication_name", "times", "enable"],
@@ -647,7 +652,10 @@ export const AGENT_TOOLS = [
             properties: {
               medication_name: { type: "string" },
               dose: { type: "string" },
-              quantity: { type: "string", description: "Quantity / strips / pens the patient asked for. Optional." },
+              quantity: {
+                type: "string",
+                description: "Quantity / strips / pens the patient asked for. Optional.",
+              },
             },
             required: ["medication_name"],
           },
@@ -666,14 +674,18 @@ export const AGENT_TOOLS = [
       properties: {
         appointment_id: {
           type: "integer",
-          description: "Optional appointment id from get_appointments. The sheet will attach the symptoms to this visit.",
+          description:
+            "Optional appointment id from get_appointments. The sheet will attach the symptoms to this visit.",
         },
         symptoms: {
           type: "array",
           description: "List of symptom names the patient mentioned (e.g. ['headache','fatigue']).",
           items: { type: "string" },
         },
-        note: { type: "string", description: "Optional free-text note alongside the symptom list." },
+        note: {
+          type: "string",
+          description: "Optional free-text note alongside the symptom list.",
+        },
       },
       required: ["symptoms"],
     },
@@ -1632,9 +1644,7 @@ async function getMedSchedule(pool, patientId) {
     bedtime: 22.5,
     anytime: -1,
   };
-  const istNow = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
-  );
+  const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const istHourFloat = istNow.getHours() + istNow.getMinutes() / 60;
   const istStr = `${String(istNow.getHours()).padStart(2, "0")}:${String(
     istNow.getMinutes(),
@@ -1647,22 +1657,17 @@ async function getMedSchedule(pool, patientId) {
     return {
       slot,
       label: TIME_SLOT_LABELS[slot] || slot,
-      slot_clock: slotHour > 0
-        ? `${String(Math.floor(slotHour)).padStart(2, "0")}:${String(
-            Math.round((slotHour % 1) * 60),
-          ).padStart(2, "0")}`
-        : "any time",
+      slot_clock:
+        slotHour > 0
+          ? `${String(Math.floor(slotHour)).padStart(2, "0")}:${String(
+              Math.round((slotHour % 1) * 60),
+            ).padStart(2, "0")}`
+          : "any time",
       is_past: isPast,
       is_upcoming: isUpcoming,
       meds: items.map((m) => ({
         ...m,
-        status: m.taken_today
-          ? "taken"
-          : isPast
-            ? "overdue"
-            : isUpcoming
-              ? "due"
-              : "scheduled",
+        status: m.taken_today ? "taken" : isPast ? "overdue" : isUpcoming ? "due" : "scheduled",
       })),
     };
   });

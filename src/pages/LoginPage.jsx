@@ -24,6 +24,7 @@ export default function LoginPage() {
     authReady,
     initAuth,
     doctorsList,
+    doctorsLoading,
     loginPin,
     loginDoctorId,
     loginError,
@@ -71,36 +72,41 @@ export default function LoginPage() {
             value={loginDoctorId}
             onChange={(e) => setLoginDoctorId(e.target.value)}
             className="login-select"
+            disabled={doctorsLoading}
           >
-            <option value="">Choose your name...</option>
-            {ROLE_GROUPS.map((g) => {
-              const docs = doctorsList.filter((d) => d.role === g.role);
-              if (!docs.length) return null;
-              return (
-                <optgroup key={g.role} label={g.label}>
-                  {docs.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                      {g.showSpecialty && d.specialty ? ` — ${d.specialty}` : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-            {(() => {
-              const others = doctorsList.filter((d) => ["guest", "longevity"].includes(d.role));
-              if (!others.length) return null;
-              return (
-                <optgroup label="Other">
-                  {others.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                      {d.specialty ? ` — ${d.specialty}` : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })()}
+            <option value="">
+              {doctorsLoading ? "Loading doctors..." : "Choose your name..."}
+            </option>
+            {!doctorsLoading &&
+              ROLE_GROUPS.map((g) => {
+                const docs = doctorsList.filter((d) => d.role === g.role);
+                if (!docs.length) return null;
+                return (
+                  <optgroup key={g.role} label={g.label}>
+                    {docs.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                        {g.showSpecialty && d.specialty ? ` — ${d.specialty}` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            {!doctorsLoading &&
+              (() => {
+                const others = doctorsList.filter((d) => ["guest", "longevity"].includes(d.role));
+                if (!others.length) return null;
+                return (
+                  <optgroup label="Other">
+                    {others.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                        {d.specialty ? ` — ${d.specialty}` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })()}
           </select>
         </div>
         <div className="login-field--pin">

@@ -2784,6 +2784,67 @@ textarea.nf:focus {
 }
 
 /* ════════════════════════════════════════════════════
+   RESPONSIVE — INTERMEDIATE (≤960px)
+   Keeps the sidebar visible but stops the topbar pieces
+   from clipping in the 775–957px range.
+   ════════════════════════════════════════════════════ */
+@media (max-width: 960px) {
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 48px;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .ptinfo {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .ptname {
+    font-size: 13px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ptname span {
+    font-size: 11px !important;
+  }
+  .ptmeta {
+    flex-wrap: wrap;
+    font-size: 11px;
+    gap: 4px !important;
+  }
+  .ptmeta .allergy {
+    display: none;
+  }
+  .clock-block {
+    display: none;
+  }
+  .visit-status-pill {
+    margin-left: 4px !important;
+    padding: 3px 8px 3px 8px !important;
+    font-size: 10px !important;
+  }
+  .visit-status-pill > span:last-child {
+    display: none; /* "Vitals done" tail */
+  }
+  .sep {
+    display: none;
+  }
+  .tbr {
+    margin-left: auto;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .tbr .btn {
+    height: 28px;
+    padding: 0 9px;
+    font-size: 11px;
+  }
+}
+
+/* ════════════════════════════════════════════════════
    RESPONSIVE — MOBILE (≤768px)
    ════════════════════════════════════════════════════ */
 @media (max-width: 768px) {

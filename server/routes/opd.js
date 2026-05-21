@@ -407,9 +407,12 @@ router.get("/opd/appointments", async (req, res) => {
                     )
               ) u
             ))::int AS visit_count,
+           -- Only count actually-attended visits; a missed slot or cancelled
+           -- booking is not a "last visit" the clinician should rely on.
            (SELECT MAX(a3.appointment_date) FROM appointments a3
               WHERE a3.patient_id = pids.pid
-                AND a3.appointment_date < $2) AS last_visit_date,
+                AND a3.appointment_date < $2
+                AND LOWER(COALESCE(a3.status, '')) IN ('seen', 'completed', 'in_visit', 'checkedin')) AS last_visit_date,
            (SELECT a4.healthray_diagnoses FROM appointments a4
               WHERE a4.patient_id = pids.pid
                 AND a4.healthray_diagnoses IS NOT NULL
@@ -874,40 +877,58 @@ router.get("/opd/appointments", async (req, res) => {
       // recent becomes the chip's current value (only if not already in
       // row.biomarkers), and the second-most-recent becomes the prev. This
       // mirrors how the /visit page chart sources values from every stream.
+      // Build per-biomarker candidate lists. We tag each candidate with its
+      // *source priority* so that authoritative date streams (lab_results
+      // test_date, vitals recorded_at, patient-app log timestamps) outrank
+      // appointment-history fallbacks, where the only available date is the
+      // appointment_date — which can be much newer than the actual reading
+      // and would otherwise wrongly bubble an ancient value to the top.
+      //   1 = real test/recorded date (lab_results, vitals, app readings)
+      //   2 = appointment_date fallback (prevHistByPt)
       const candidates = {};
-      const addCand = (k, val, d) => {
+      const addCand = (k, val, d, priority = 1) => {
         if (val == null || !isFinite(val)) return;
         const list = candidates[k] || (candidates[k] = []);
-        list.push({ val, date: d || null });
+        list.push({ val, date: d || null, priority });
       };
-      for (const [k, { val, date: d }] of Object.entries(prevLabs)) addCand(k, val, d);
-      for (const [k, entry] of Object.entries(prevHist)) addCand(k, entry.val, entry.date);
-      if (prevVit.sbp != null) addCand("sbp", prevVit.sbp, prevVit.date);
-      if (prevVit.dbp != null) addCand("dbp", prevVit.dbp, prevVit.date);
-      if (prevVit.weight != null) addCand("weight", prevVit.weight, prevVit.date);
-      if (prevVit.bmi != null) addCand("bmi", prevVit.bmi, prevVit.date);
+      for (const [k, { val, date: d }] of Object.entries(prevLabs)) addCand(k, val, d, 1);
+      for (const [k, entry] of Object.entries(prevHist)) addCand(k, entry.val, entry.date, 2);
+      if (prevVit.sbp != null) addCand("sbp", prevVit.sbp, prevVit.date, 1);
+      if (prevVit.dbp != null) addCand("dbp", prevVit.dbp, prevVit.date, 1);
+      if (prevVit.weight != null) addCand("weight", prevVit.weight, prevVit.date, 1);
+      if (prevVit.bmi != null) addCand("bmi", prevVit.bmi, prevVit.date, 1);
       // Patient-app readings (rbs fasting → fg, app BP/weight/BMI/waist).
       for (const [k, list] of Object.entries(appReads)) {
-        for (const e of list) addCand(k, e.val, e.date);
+        for (const e of list) addCand(k, e.val, e.date, 1);
       }
-      // Sort each key's candidates newest-first, dedupe rows that share the
-      // exact same date+value (lab + appointment biomarker JSON often mirror
-      // each other), then promote the freshest non-current reading to prev.
+      // For each key, prefer the highest-priority source. Within the chosen
+      // priority tier, sort newest-first by date and pick the freshest non-
+      // current reading. Falls through to the next priority only if the
+      // higher-priority tier yields nothing usable.
       const curBio = row.biomarkers || {};
       const prev = {};
       for (const [k, list] of Object.entries(candidates)) {
-        list.sort((x, y) => {
-          const dx = x.date ? new Date(x.date).getTime() : 0;
-          const dy = y.date ? new Date(y.date).getTime() : 0;
-          return dy - dx;
-        });
         const cur = parseFloat(curBio[k]);
-        // Walk newest-first and pick the first reading whose value differs
-        // from the current chip value — anything equal would render as X→X.
-        for (const c of list) {
-          if (isFinite(cur) && c.val === cur) continue;
-          prev[k] = c.val;
-          break;
+        // Walk priority tiers in ascending order (1 first).
+        const tiers = [...new Set(list.map((c) => c.priority))].sort((a, b) => a - b);
+        for (const tier of tiers) {
+          const tierList = list
+            .filter((c) => c.priority === tier)
+            .sort((x, y) => {
+              const dx = x.date ? new Date(x.date).getTime() : 0;
+              const dy = y.date ? new Date(y.date).getTime() : 0;
+              return dy - dx;
+            });
+          let picked = null;
+          for (const c of tierList) {
+            if (isFinite(cur) && c.val === cur) continue;
+            picked = c.val;
+            break;
+          }
+          if (picked != null) {
+            prev[k] = picked;
+            break;
+          }
         }
       }
       row.prev_biomarkers = normalizeBiomarkerKeys(prev);
@@ -1639,7 +1660,12 @@ router.post("/appointments/:id/compliance", async (req, res) => {
           const storedName = cleanName || m.name;
           const key = canonicalMedKey(storedName);
           if (key)
-            stopped.set(key, { ...m, _clean_name: storedName, _canonical: key, _detected_form: detectedForm });
+            stopped.set(key, {
+              ...m,
+              _clean_name: storedName,
+              _canonical: key,
+              _detected_form: detectedForm,
+            });
         }
         const rows = Array.from(stopped.values());
         if (rows.length) {

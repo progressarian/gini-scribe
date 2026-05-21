@@ -7,6 +7,7 @@ const useAuthStore = create((set, get) => ({
   currentDoctor: null,
   authReady: false,
   doctorsList: [],
+  doctorsLoading: false,
   loginPin: "",
   loginDoctorId: "",
   loginError: "",
@@ -115,11 +116,14 @@ const useAuthStore = create((set, get) => ({
 
   // ── init: fetch doctors list ──
   fetchDoctorsList: async (toast) => {
+    set({ doctorsLoading: true });
     try {
       const { data: list } = await api.get("/api/doctors");
       set({ doctorsList: list });
     } catch {
       if (toast) toast("Failed to load doctors list", "warn");
+    } finally {
+      set({ doctorsLoading: false });
     }
   },
 }));

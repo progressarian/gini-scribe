@@ -154,7 +154,8 @@ function SkeletonColumn({ accent }) {
   return (
     <div
       style={{
-        flex: "0 0 290px",
+        flex: "1 1 0",
+        minWidth: 260,
         display: "flex",
         flexDirection: "column",
         borderRadius: 11,
@@ -201,10 +202,21 @@ const KEY_LABEL = {
   sbp: "BP",
   dbp: "DBP",
   fg: "FBS",
+  ppbs: "PPBS",
   ldl: "LDL",
+  hdl: "HDL",
   tg: "TG",
+  total_chol: "Total Chol",
   uacr: "UACR",
   egfr: "eGFR",
+  creatinine: "Creatinine",
+  tsh: "TSH",
+  hb: "Hb",
+  wbc: "WBC",
+  alt: "ALT",
+  ast: "AST",
+  weight: "Weight",
+  bmi: "BMI",
 };
 
 // Panels we expect on a "full" lab work-up. Used to render the missing-panel banner.
@@ -271,6 +283,87 @@ function triageTierV3(appt) {
   return "worse_in";
 }
 
+// Build a one-line plain-English explanation of why this appointment sits
+// in the bucket it does. Used by the card's "Why" line so coordinators can
+// audit the triage decision at a glance.
+function bucketReason(appt, bucket) {
+  const b = bioOf(appt);
+  const p = prevOf(appt);
+  const tier1Keys = Object.keys(BIO_TIER).filter((k) => BIO_TIER[k] === 1);
+  const present1 = tier1Keys.filter((k) => num(b[k]) != null);
+  const badMarkers = present1
+    .filter((k) => targetStatus(k, num(b[k])) === "bad")
+    .map((k) => KEY_LABEL[k] || k);
+  const warnMarkers = present1
+    .filter((k) => targetStatus(k, num(b[k])) === "warn")
+    .map((k) => KEY_LABEL[k] || k);
+
+  // Compare cur vs prev for the markers we have on both sides — gives us a
+  // human-readable "improved on …, worsened on …" picture.
+  const improved = [];
+  const worsened = [];
+  for (const k of present1) {
+    const cur = num(b[k]);
+    const prev = num(p[k]);
+    if (cur == null || prev == null) continue;
+    const lowerBetter = !["egfr", "hdl"].includes(k);
+    const delta = cur - prev;
+    if (Math.abs(delta) < 0.001) continue;
+    const better = lowerBetter ? delta < 0 : delta > 0;
+    (better ? improved : worsened).push(KEY_LABEL[k] || k);
+  }
+
+  switch (bucket) {
+    case "worse_out":
+      return badMarkers.length
+        ? `Out of range on ${badMarkers.slice(0, 3).join(", ")}`
+        : "Tier-1 marker in red zone";
+    case "worse_in":
+      if (worsened.length)
+        return `In range but trending up on ${worsened.slice(0, 3).join(", ")}`;
+      if (warnMarkers.length)
+        return `Borderline on ${warnMarkers.slice(0, 3).join(", ")}`;
+      return "Mixed signals — borderline trend";
+    case "getting_better":
+      return improved.length
+        ? `Improving on ${improved.slice(0, 3).join(", ")} (not at target yet)`
+        : "Trending toward target, not there yet";
+    case "in_control":
+      return present1.length > 0
+        ? `All ${present1.length} Tier-1 marker${present1.length > 1 ? "s" : ""} at target`
+        : "Stable — values at clinical goal";
+    case "lab_processing": {
+      const pend = Number(appt.pending_labs) || 0;
+      const partial = Number(appt.partial_labs) || 0;
+      const bits = [];
+      if (pend > 0) bits.push(`${pend} pending`);
+      if (partial > 0) bits.push(`${partial} partial`);
+      return `Gini-Lab order(s) open: ${bits.join(", ") || "in progress"}`;
+    }
+    case "review": {
+      const recent = Number(appt.recent_labs) || 0;
+      const uploaded = Number(appt.uploaded_labs) || 0;
+      if (recent > 0 && uploaded > 0)
+        return "Gini-Lab synced & document uploaded · no canonical value extracted";
+      if (recent > 0)
+        return "Gini-Lab synced · no canonical value extracted";
+      return "Document uploaded · no canonical value extracted";
+    }
+    case "no_reports": {
+      const last = appt.uploaded_labs_date;
+      if (last) {
+        const lv = appt.last_visit_date;
+        if (lv && new Date(last) <= new Date(lv))
+          return "Last upload is older than the previous visit";
+        return "Last upload doesn't cover today's visit window";
+      }
+      return "No report uploaded or received for today's visit";
+    }
+    default:
+      return "";
+  }
+}
+
 // Determine which required panels are missing from this appointment.
 function missingPanels(appt) {
   const b = bioOf(appt);
@@ -304,6 +397,7 @@ function derivePipeline(appts) {
   const buckets = {
     total: [],
     labReceived: [],
+    labProcessing: [],
     uploaded: [],
     dataComplete: [],
     categorised: [],
@@ -313,8 +407,18 @@ function derivePipeline(appts) {
   };
   for (const a of appts) {
     buckets.total.push(a);
-    if ((a.uploaded_labs || 0) > 0 || hasAnyTier1Biomarker(a)) buckets.labReceived.push(a);
-    if ((a.uploaded_labs || 0) > 0 || (a.patient_report_count || 0) > 0) buckets.uploaded.push(a);
+    const pending = Number(a.pending_labs) || 0;
+    const partial = Number(a.partial_labs) || 0;
+    const recent = Number(a.recent_labs) || 0;
+    const uploaded = Number(a.uploaded_labs) || 0;
+    // Lab received: only counts a report that landed in our system **between
+    // the previous visit and today's visit** — the freshness flag is computed
+    // upstream in `enriched`. This keeps the pill aligned with the freshness
+    // rule that decides whether a patient moves out of No Reports.
+    if (a.__freshReport) buckets.labReceived.push(a);
+    // Lab processing: orders pending / partial AND no results received yet.
+    if (recent === 0 && (pending > 0 || partial > 0)) buckets.labProcessing.push(a);
+    if (uploaded > 0 || (a.patient_report_count || 0) > 0) buckets.uploaded.push(a);
     if (hasAnyTier1Biomarker(a)) buckets.dataComplete.push(a);
     if (a.category) buckets.categorised.push(a);
     if (a.doctor_name) buckets.assigned.push(a);
@@ -326,23 +430,21 @@ function derivePipeline(appts) {
 }
 
 // ── Pipeline pill ──
-function PipelinePill({ label, sub, count, active, tone, onClick }) {
+function PipelinePill({ label, sub, count, tone }) {
   const fg =
     tone === "ok" ? MG : tone === "warn" ? AM : tone === "crit" ? RE : tone === "lv" ? LV : INK3;
   return (
-    <button
-      onClick={onClick}
+    <div
       style={{
         flex: 1,
         minWidth: 110,
         padding: "8px 10px",
         textAlign: "center",
-        background: active ? `${fg}11` : WH,
-        border: `1px solid ${active ? fg : BD}`,
+        background: WH,
+        border: `1.5px solid ${BD}`,
         borderRadius: 9,
-        cursor: "pointer",
         fontFamily: FB,
-        transition: "all .15s",
+        position: "relative",
       }}
     >
       <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: fg, lineHeight: 1 }}>
@@ -361,7 +463,7 @@ function PipelinePill({ label, sub, count, active, tone, onClick }) {
         {label}
       </div>
       {sub && <div style={{ fontSize: 9, color: INK4, marginTop: 1, lineHeight: 1.3 }}>{sub}</div>}
-    </button>
+    </div>
   );
 }
 
@@ -406,6 +508,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   const p = prevOf(appt);
   const missing = missingPanels(appt);
   const lifestyle = lifestyleConcerns(appt);
+  // eslint-disable-next-line no-unused-vars
   const route = autoRouteHint(appt);
   const compPct = num(appt.compliance?.medPct);
   const assigned = !!appt.doctor_name;
@@ -421,19 +524,58 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
           ? "#2d9a42"
           : bucket === "in_control"
             ? MG
-            : LV;
+            : bucket === "lab_processing"
+              ? SK
+              : bucket === "review"
+                ? AM
+                : LV;
 
   // Append prev_hba1c as a fallback for the legacy field.
   const prevHba1c = num(p.hba1c) ?? num(appt.prev_hba1c);
 
-  // Bio chips — show prev → cur where both exist, otherwise just cur.
+  // Bio chips — always compare the two most recent readings we have.
+  //   - If a value exists for the current visit, chip shows prev → cur.
+  //   - If only historical readings exist, chip shows the older one → the more
+  //     recent one (treating the latest historical as the "right side" so the
+  //     trend arrow always reads oldest → newest).
+  // The chip's colour tone is driven by the rightmost (most recent) value.
+  const DEFAULT_CHIP_KEYS = ["hba1c", "fg", "ldl", "tg", "uacr", "egfr"];
   const bioRows = [];
-  for (const k of ["hba1c", "fg", "ldl", "tg", "uacr", "egfr"]) {
-    const cur = num(b[k]);
-    if (cur == null) continue;
-    const prev = k === "hba1c" ? prevHba1c : num(p[k]);
+  const pushChip = (k) => {
+    const curRaw = num(b[k]);
+    const prevRaw = k === "hba1c" ? prevHba1c : num(p[k]);
+    let cur = null;
+    let prev = null;
+    if (curRaw != null) {
+      cur = curRaw;
+      prev = prevRaw;
+    } else if (prevRaw != null) {
+      // No current reading — use the latest historical as "cur" so the chip
+      // still shows the most recent value. We don't have a third reading to
+      // fill `prev` with, so the chip renders as a single value.
+      cur = prevRaw;
+      prev = null;
+    } else {
+      return;
+    }
     const tone = targetStatus(k, cur);
     bioRows.push({ k, label: KEY_LABEL[k] || k, cur, prev, tone });
+  };
+  for (const k of DEFAULT_CHIP_KEYS) pushChip(k);
+  // Also surface ANY other biomarker whose current value is out of range —
+  // even non-standard markers (BP, HDL, TSH, Hb, ALT…) — so the clinician
+  // never misses a bad reading just because it isn't in the default chip set.
+  const seen = new Set(bioRows.map((r) => r.k));
+  for (const k of Object.keys(b)) {
+    if (k.startsWith("_")) continue;
+    if (seen.has(k)) continue;
+    const cur = num(b[k]);
+    if (cur == null) continue;
+    const tone = targetStatus(k, cur);
+    if (tone !== "bad") continue;
+    const prev = num(p[k]);
+    bioRows.push({ k, label: KEY_LABEL[k] || k.toUpperCase(), cur, prev, tone });
+    seen.add(k);
   }
 
   const chipPal = (tone) =>
@@ -446,18 +588,31 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
           : { bg: BG, fg: INK3 };
 
   // Report banner: missing 0 = ok, missing some = partial, missing all = missing.
+  // "review" bucket gets its own tone — Gini-Lab synced but no canonical value
+  // extracted, so the action is "review the document", not "chase a report".
   const reportTone =
-    bucket === "no_reports" || missing.length === REQUIRED_PANELS.length
-      ? "missing"
-      : missing.length === 0
-        ? "ok"
-        : "partial";
+    bucket === "review"
+      ? "review"
+      : bucket === "no_reports" || missing.length === REQUIRED_PANELS.length
+        ? "missing"
+        : missing.length === 0
+          ? "ok"
+          : "partial";
   const reportPal =
-    reportTone === "missing"
-      ? { bg: LVL, fg: LV, txt: "No reports uploaded or received" }
-      : reportTone === "partial"
-        ? { bg: AML, fg: AM, txt: `Missing: ${missing.join(" · ")}` }
-        : { bg: GNL, fg: MG, txt: "All required panels present" };
+    reportTone === "review"
+      ? {
+          bg: AML,
+          fg: AM,
+          txt:
+            (Number(appt.uploaded_labs) || 0) > 0 && (Number(appt.recent_labs) || 0) === 0
+              ? "Report uploaded · review document, no canonical value extracted"
+              : "Gini-Lab synced · review document, no canonical value extracted",
+        }
+      : reportTone === "missing"
+        ? { bg: LVL, fg: LV, txt: "No reports uploaded or received" }
+        : reportTone === "partial"
+          ? { bg: AML, fg: AM, txt: `Missing: ${missing.join(" · ")}` }
+          : { bg: GNL, fg: MG, txt: "All required panels present" };
 
   return (
     <div
@@ -557,33 +712,143 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
             Visit {appt.visit_count}
           </span>
         )}
+        {(() => {
+          const pend = Number(appt.pending_labs) || 0;
+          const recent = Number(appt.recent_labs) || 0;
+          const partial = Number(appt.partial_labs) || 0;
+          const uploaded = Number(appt.uploaded_labs) || 0;
+          // Has the sync actually surfaced biomarker values? If Gini-Lab says
+          // "received" but no canonical value made it into our lab_results,
+          // there's nothing for the clinician to read — flag that distinctly.
+          const hasValues = hasAnyTier1Biomarker(appt);
+          const chips = [];
+          if (recent > 0 && hasValues) {
+            chips.push({
+              key: "received",
+              bg: GNL,
+              fg: MG,
+              label: `🧪 Gini-Lab received${recent > 1 ? ` (${recent})` : ""}`,
+              title: "Results received from Gini-Lab",
+            });
+          } else if (recent > 0 && !hasValues) {
+            chips.push({
+              key: "syncedNoValues",
+              bg: AML,
+              fg: AM,
+              label: "🧪 Gini-Lab synced · no values yet",
+              title: "Gini-Lab marked the case received, but no canonical values were extracted",
+            });
+          } else if (uploaded > 0 && !hasValues) {
+            chips.push({
+              key: "uploadedNoValues",
+              bg: AML,
+              fg: AM,
+              label: "⬆ Uploaded · no values yet",
+              title:
+                "Report was uploaded but no canonical biomarker value has been extracted yet",
+            });
+          } else if (pend > 0) {
+            chips.push({
+              key: "pending",
+              bg: AML,
+              fg: AM,
+              label: `🧪 Gini-Lab: ${pend} pending`,
+              title: "Lab orders awaiting results",
+            });
+          } else if (partial > 0) {
+            chips.push({
+              key: "partial",
+              bg: AML,
+              fg: AM,
+              label: `🧪 Gini-Lab: ${partial} partial`,
+              title: "Partial results received",
+            });
+          }
+          if (uploaded > 0) {
+            chips.push({
+              key: "uploaded",
+              bg: "#eef2ff",
+              fg: "#4338ca",
+              label: "⬆ Lab uploaded",
+              title: "Lab report uploaded manually",
+            });
+          }
+          return chips.map((c) => (
+            <span
+              key={c.key}
+              title={c.title}
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "2px 7px",
+                borderRadius: 5,
+                background: c.bg,
+                color: c.fg,
+                border: `1px solid ${c.fg}33`,
+              }}
+            >
+              {c.label}
+            </span>
+          ));
+        })()}
       </div>
 
       {/* Dates */}
       <div style={{ fontSize: 9, color: INK4, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {appt.uploaded_labs_date && (
+        {appt.uploaded_labs_date ? (
           <span>
-            📅 Report added:{" "}
+            📅 Last report:{" "}
             <strong style={{ color: INK3 }}>
               {new Date(appt.uploaded_labs_date).toLocaleDateString("en-IN", {
                 day: "numeric",
                 month: "short",
-              })}
-            </strong>
-          </span>
-        )}
-        {appt.last_visit_date && (
-          <span>
-            🩺 Last visit:{" "}
-            <strong style={{ color: INK3 }}>
-              {new Date(appt.last_visit_date).toLocaleDateString("en-IN", {
-                day: "numeric",
-                month: "short",
                 year: "numeric",
               })}
-            </strong>
+            </strong>{" "}
+            <span style={{ color: INK4 }}>
+              · via{" "}
+              {(Number(appt.recent_labs) || 0) > 0 && (Number(appt.uploaded_labs) || 0) > 0
+                ? "Gini-Lab + Upload"
+                : (Number(appt.recent_labs) || 0) > 0
+                  ? "Gini-Lab"
+                  : "Upload"}
+            </span>
           </span>
-        )}
+        ) : (Number(appt.recent_labs) || 0) > 0 ? (
+          hasAnyTier1Biomarker(appt) ? (
+            <span>
+              📅 Last report: <strong style={{ color: INK3 }}>Received today</strong>{" "}
+              <span style={{ color: INK4 }}>· via Gini-Lab</span>
+            </span>
+          ) : (
+            <span>
+              📅 Gini-Lab synced today <span style={{ color: INK4 }}>· no values extracted yet</span>
+            </span>
+          )
+        ) : null}
+        {(() => {
+          // Drop the "Last visit" stamp when the recorded date is the same as
+          // (or after) today's appointment — that's the current slot, not a
+          // prior visit, and showing it confuses the clinician.
+          if (!appt.last_visit_date) return null;
+          const lv = new Date(appt.last_visit_date).getTime();
+          const apptMs = appt.appointment_date
+            ? new Date(appt.appointment_date).getTime()
+            : Date.now();
+          if (!isFinite(lv) || lv >= apptMs) return null;
+          return (
+            <span>
+              🩺 Last visit:{" "}
+              <strong style={{ color: INK3 }}>
+                {new Date(lv).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </strong>
+            </span>
+          );
+        })()}
       </div>
 
       {/* Report banner */}
@@ -626,6 +891,109 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
         )}
       </div>
 
+      {/* Why this bucket — short audit line so coordinators can see at a
+          glance which signal put this patient in their current column. */}
+      {(() => {
+        const reason = bucketReason(appt, bucket);
+        if (!reason) return null;
+        return (
+          <div
+            style={{
+              fontSize: 9,
+              color: bucketAccent,
+              display: "flex",
+              gap: 4,
+              alignItems: "flex-start",
+              lineHeight: 1.35,
+            }}
+          >
+            <span style={{ fontWeight: 800 }}>Why:</span>
+            <span style={{ color: INK3, fontWeight: 500 }}>{reason}</span>
+          </div>
+        );
+      })()}
+
+      {/* Underlying condition badge — shown on no-reports cards so the
+          clinician still sees how the patient was trending on their last fresh
+          set of labs. */}
+      {bucket === "no_reports" &&
+        appt.__conditionBucket &&
+        appt.__conditionBucket !== "no_reports" && (
+          (() => {
+            const cb = appt.__conditionBucket;
+            const cond =
+              cb === "worse_out"
+                ? { bg: REL, fg: RE, icon: "🔴", label: "Last labs: Out of range" }
+                : cb === "worse_in"
+                  ? { bg: AML, fg: AM, icon: "🟡", label: "Last labs: Trending up" }
+                  : cb === "getting_better"
+                    ? { bg: GNL, fg: "#2d9a42", icon: "↑", label: "Last labs: Improving" }
+                    : { bg: GNL, fg: MG, icon: "✅", label: "Last labs: In control" };
+            return (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 8px",
+                  borderRadius: 7,
+                  background: cond.bg,
+                  color: cond.fg,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  border: `1px solid ${cond.fg}22`,
+                }}
+              >
+                <span>{cond.icon}</span>
+                <span style={{ flex: 1 }}>{cond.label}</span>
+              </div>
+            );
+          })()
+        )}
+
+      {/* Stale-data stamp — when this card lives in No Reports but still has
+          biomarker values, tell the clinician when those values entered our
+          system. The truth is per-biomarker (biomarkers._lab_dates), so we
+          surface the most recent test_date across the chips we're showing,
+          and fall back to prev_biomarkers when the latest entry has no date. */}
+      {bucket === "no_reports" && bioRows.length > 0 && (
+        (() => {
+          const labDates = (appt.biomarkers && appt.biomarkers._lab_dates) || {};
+          const prevLabDates =
+            (appt.prev_biomarkers && appt.prev_biomarkers._lab_dates) || {};
+          let latestMs = null;
+          for (const r of bioRows) {
+            const d = labDates[r.k] || prevLabDates[r.k];
+            if (!d) continue;
+            const t = new Date(d).getTime();
+            if (!isNaN(t) && (latestMs == null || t > latestMs)) latestMs = t;
+          }
+          const stamp =
+            latestMs != null
+              ? new Date(latestMs).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "date unknown";
+          return (
+            <div
+              style={{
+                fontSize: 9,
+                color: INK4,
+                fontStyle: "italic",
+                display: "flex",
+                gap: 4,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>📥 Values recorded in system:</span>
+              <strong style={{ color: INK3, fontStyle: "normal" }}>{stamp}</strong>
+            </div>
+          );
+        })()
+      )}
+
       {/* Bio chips — prev → cur */}
       {bioRows.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -646,14 +1014,14 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
                   whiteSpace: "nowrap",
                 }}
               >
+                <span style={{ fontWeight: 600, marginRight: 4 }}>{r.label}</span>
                 {r.prev != null && (
                   <>
                     <span style={{ opacity: 0.6, fontSize: 9 }}>{r.prev}</span>
                     <span style={{ opacity: 0.55, fontSize: 9, margin: "0 2px" }}>→</span>
                   </>
                 )}
-                <span style={{ fontWeight: 800 }}>{r.cur}</span>{" "}
-                <span style={{ fontWeight: 600 }}>{r.label}</span>
+                <span style={{ fontWeight: 800 }}>{r.cur}</span>
               </span>
             );
           })}
@@ -759,12 +1127,13 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
         </div>
       )}
 
-      {/* Route hint */}
+      {/* Route hint — temporarily disabled per product request.
       {route && (
         <div style={{ fontSize: 10, color: INK3, display: "flex", gap: 5 }}>
           <span>{route}</span>
         </div>
       )}
+      */}
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
@@ -783,46 +1152,45 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
           {assigned ? `→ ${appt.doctor_name}` : "⏳ Unassigned"}
         </span>
         <div style={{ display: "flex", gap: 5, marginLeft: "auto" }}>
-          {!["seen", "completed", "no_show", "cancelled"].includes(status) && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onAssign(appt);
-              }}
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                padding: "4px 9px",
-                borderRadius: 6,
-                border: `1px solid ${assigned ? BD : T}`,
-                background: assigned ? WH : T,
-                color: assigned ? INK3 : WH,
-                cursor: "pointer",
-                fontFamily: FB,
-              }}
-            >
-              {assigned ? "↺" : "+ Assign"}
-            </button>
-          )}
-          {bucket === "no_reports" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onAssign(appt);
+            }}
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "4px 9px",
+              borderRadius: 6,
+              border: `1px solid ${assigned ? BD : T}`,
+              background: assigned ? WH : T,
+              color: assigned ? INK3 : WH,
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            {assigned ? "↺ Reassign" : "+ Assign"}
+          </button>
+          {onUpload && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onUpload(appt);
               }}
+              title={bucket === "no_reports" ? "Upload report" : "Upload / update report"}
               style={{
                 fontSize: 10,
                 fontWeight: 700,
                 padding: "4px 9px",
                 borderRadius: 6,
-                border: `1px solid ${LV}`,
-                background: LV,
-                color: WH,
+                border: `1px solid ${bucket === "no_reports" ? LV : BD}`,
+                background: bucket === "no_reports" ? LV : WH,
+                color: bucket === "no_reports" ? WH : INK2,
                 cursor: "pointer",
                 fontFamily: FB,
               }}
             >
-              ⬆ Upload
+              ⬆ {bucket === "no_reports" ? "Upload" : "Update"}
             </button>
           )}
           <button
@@ -855,7 +1223,8 @@ function Column({ accent, icon, title, hint, items, onAssign, onOpen, onUpload }
   return (
     <div
       style={{
-        flex: "0 0 290px",
+        flex: "1 1 0",
+        minWidth: 260,
         display: "flex",
         flexDirection: "column",
         borderRadius: 11,
@@ -1051,9 +1420,14 @@ function PatientPickerModal({ appointments, onPick, onClose }) {
 // ── Lightweight assign modal ──
 function AssignModal({ appt, doctors, onClose, onConfirm }) {
   const [sel, setSel] = useState(appt.doctor_name || "");
-  const list = (
+  const [q, setQ] = useState("");
+  const baseList = (
     doctors && doctors.length > 0 ? doctors : ["Dr. Bhansali", "Dr. Beant Sidhu", "Dr. Simranpreet"]
   ).slice();
+  const needle = q.trim().toLowerCase();
+  const list = needle
+    ? baseList.filter((d) => String(d).toLowerCase().includes(needle))
+    : baseList;
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -1073,17 +1447,49 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
           borderRadius: 14,
           padding: 18,
           width: 360,
+          maxHeight: "80vh",
+          display: "flex",
+          flexDirection: "column",
           boxShadow: "0 20px 50px rgba(0,0,0,.22)",
         }}
       >
         <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>
           Assign — {appt.patient_name}
         </div>
-        <div style={{ fontSize: 11, color: INK3, marginTop: 3, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: INK3, marginTop: 3, marginBottom: 10 }}>
           Select the doctor responsible for this patient.
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {list.map((d) => (
+        <input
+          autoFocus
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search doctor…"
+          style={{
+            padding: "7px 10px",
+            border: `1px solid ${BD}`,
+            borderRadius: 7,
+            fontSize: 12,
+            fontFamily: FB,
+            outline: "none",
+            marginBottom: 10,
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            overflowY: "auto",
+            flex: 1,
+            minHeight: 0,
+            paddingRight: 4,
+          }}
+        >
+          {list.length === 0 ? (
+            <div style={{ fontSize: 11, color: INK4, textAlign: "center", padding: 16 }}>
+              No matching doctors
+            </div>
+          ) : list.map((d) => (
             <button
               key={d}
               onClick={() => setSel(d)}
@@ -1435,7 +1841,6 @@ export default function TriageViewV3({
 }) {
   const isMobile = useIsMobile();
   const [view, setView] = useState("category"); // "category" | "assign"
-  const [pipelineFilter, setPipelineFilter] = useState(null); // "labReceived" | ...
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | bucket id
   const [doctorFilter, setDoctorFilter] = useState(() => new Set()); // Set of selected names
   const [doctorMenuOpen, setDoctorMenuOpen] = useState(false);
@@ -1468,15 +1873,62 @@ export default function TriageViewV3({
 
   // Annotate appointments with their v3 bucket so child components can read it.
   const enriched = useMemo(() => {
-    return appointments.map((a) => ({ ...a, __bucket: triageTierV3(a) }));
-  }, [appointments]);
+    // Report-freshness rule: a report counts as fresh for this visit when it
+    // was uploaded **after the previous visit** and **on or before the current
+    // visit**. Anything outside that window (or missing) → no_reports.
+    // For first-visit patients (no last_visit_date) we accept any upload dated
+    // on or before today as fresh.
+    const visitMs = date ? new Date(date).getTime() : Date.now();
+    return appointments.map((a) => {
+      const conditionBucket = triageTierV3(a);
+      const uploadedAt = a.uploaded_labs_date ? new Date(a.uploaded_labs_date).getTime() : null;
+      const lastVisitAt = a.last_visit_date ? new Date(a.last_visit_date).getTime() : null;
+      const pending = Number(a.pending_labs) || 0;
+      const partial = Number(a.partial_labs) || 0;
+      const recent = Number(a.recent_labs) || 0;
+      // Gini-Lab "received" — results synced AND at least one canonical
+      // biomarker value made it through extraction. A sync without any values
+      // is no better than no report at all (clinician has nothing to read).
+      const hasValues = hasAnyTier1Biomarker(a);
+      const giniReceived = recent > 0 && hasValues;
+      // Report present in the system (Gini-Lab synced OR a document was
+      // uploaded) but the canonical-tag biomarkers triageTier classifies on
+      // (hba1c/sbp/fg/ldl/tg/uacr/egfr…) are absent. Either no canonical
+      // value was extracted, or the values that came through don't map to
+      // the triage keys. Either way, a human needs to review the document.
+      const reportPresent = recent > 0 || (Number(a.uploaded_labs) || 0) > 0;
+      const needsReview =
+        reportPresent && (!hasValues || conditionBucket === "no_reports");
+      let fresh = false;
+      if (uploadedAt != null) {
+        const afterLastVisit = lastVisitAt == null || uploadedAt > lastVisitAt;
+        const beforeOrOnVisit = uploadedAt <= visitMs;
+        fresh = afterLastVisit && beforeOrOnVisit;
+      }
+      // If Gini-Lab has reported results, count this patient as having a
+      // fresh report for today's visit even if there's no uploaded-labs date.
+      if (giniReceived) fresh = true;
+      // Lab Processing: pending or partial orders AND no results yet received.
+      const labInProgress = !giniReceived && !needsReview && (pending > 0 || partial > 0);
+      let bucket;
+      if (needsReview) bucket = "review";
+      else if (labInProgress) bucket = "lab_processing";
+      else if (!fresh) bucket = "no_reports";
+      else bucket = conditionBucket;
+      return {
+        ...a,
+        __bucket: bucket,
+        __conditionBucket: conditionBucket,
+        __freshReport: fresh,
+      };
+    });
+  }, [appointments, date]);
 
   const pipeline = useMemo(() => derivePipeline(enriched), [enriched]);
 
   // Apply chip filters → produce visible appointment list.
   const visible = useMemo(() => {
     let arr = enriched;
-    if (pipelineFilter) arr = pipeline[pipelineFilter] || [];
     if (categoryFilter !== "all") arr = arr.filter((a) => a.__bucket === categoryFilter);
     if (doctorFilter.size > 0) arr = arr.filter((a) => doctorFilter.has(a.doctor_name || ""));
     const q = searchQ.trim().toLowerCase();
@@ -1490,13 +1942,84 @@ export default function TriageViewV3({
       );
     }
     return arr;
-  }, [enriched, pipeline, pipelineFilter, categoryFilter, doctorFilter, searchQ]);
+  }, [enriched, categoryFilter, doctorFilter, searchQ]);
 
   const buckets = useMemo(() => {
-    const out = { worse_out: [], worse_in: [], getting_better: [], in_control: [], no_reports: [] };
+    const out = {
+      worse_out: [],
+      worse_in: [],
+      getting_better: [],
+      in_control: [],
+      lab_processing: [],
+      review: [],
+      no_reports: [],
+    };
     for (const a of visible) {
       if (out[a.__bucket]) out[a.__bucket].push(a);
     }
+    // Helper: does the patient have any Gini-Lab activity (orders awaiting
+    // results, partial results, or recent synced results)?
+    const hasLab = (a) =>
+      (Number(a.pending_labs) || 0) +
+        (Number(a.partial_labs) || 0) +
+        (Number(a.recent_labs) || 0) >
+      0;
+    // Visit-status priority: in_visit → checkedin → seen → everything else.
+    // Lower number = higher priority (sorts to top).
+    const visitRank = (a) => {
+      const s = (a.status || "").toLowerCase();
+      if (s === "in_visit") return 0;
+      if (s === "checkedin") return 1;
+      if (s === "seen") return 2;
+      if (s === "completed") return 3;
+      return 4;
+    };
+    // Condition columns: assigned first, then unassigned. Within each group,
+    // active-visit patients (in_visit / checkedin / seen) float to the top.
+    for (const k of ["worse_out", "worse_in", "getting_better", "in_control"]) {
+      out[k] = out[k]
+        .map((a, i) => ({ a, i }))
+        .sort((x, y) => {
+          const xa = x.a.doctor_name ? 0 : 1;
+          const ya = y.a.doctor_name ? 0 : 1;
+          return xa - ya || visitRank(x.a) - visitRank(y.a) || x.i - y.i;
+        })
+        .map((x) => x.a);
+    }
+    // Lab Processing column: assigned first then unassigned, with pending
+    // labs surfaced above partial-only labs within each group.
+    out.lab_processing = out.lab_processing
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => {
+        const xa = x.a.doctor_name ? 0 : 1;
+        const ya = y.a.doctor_name ? 0 : 1;
+        const xp = (Number(x.a.pending_labs) || 0) > 0 ? 0 : 1;
+        const yp = (Number(y.a.pending_labs) || 0) > 0 ? 0 : 1;
+        return (
+          xa - ya || xp - yp || visitRank(x.a) - visitRank(y.a) || x.i - y.i
+        );
+      })
+      .map((x) => x.a);
+    // Review column: assigned first, then unassigned; visit-status priority.
+    out.review = out.review
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => {
+        const xa = x.a.doctor_name ? 0 : 1;
+        const ya = y.a.doctor_name ? 0 : 1;
+        return xa - ya || visitRank(x.a) - visitRank(y.a) || x.i - y.i;
+      })
+      .map((x) => x.a);
+    // No-Reports column: 1) assigned + no gini-lab, 2) assigned + gini-lab
+    // processing, 3) unassigned + no gini-lab, 4) unassigned + gini-lab.
+    // Within each tier, prioritise by visit status (in_visit → checkedin → seen).
+    out.no_reports = out.no_reports
+      .map((a, i) => {
+        const assignedRank = a.doctor_name ? 0 : 1;
+        const labRank = hasLab(a) ? 1 : 0;
+        return { a, i, rank: assignedRank * 2 + labRank };
+      })
+      .sort((x, y) => x.rank - y.rank || visitRank(x.a) - visitRank(y.a) || x.i - y.i)
+      .map((x) => x.a);
     return out;
   }, [visible]);
 
@@ -1961,75 +2484,49 @@ export default function TriageViewV3({
                 label="Total"
                 sub="Appointments today"
                 count={pipeline.total.length}
-                active={!pipelineFilter}
                 tone="dim"
-                onClick={() => setPipelineFilter(null)}
               />
               <PipelinePill
                 label="Lab received"
                 sub="From Gini Lab or uploaded"
                 count={pipeline.labReceived.length}
-                active={pipelineFilter === "labReceived"}
                 tone="warn"
-                onClick={() =>
-                  setPipelineFilter(pipelineFilter === "labReceived" ? null : "labReceived")
-                }
+              />
+              <PipelinePill
+                label="Lab processing"
+                sub="Gini-Lab orders in progress"
+                count={pipeline.labProcessing.length}
+                tone="dim"
               />
               <PipelinePill
                 label="Uploaded"
                 sub="Reports uploaded"
                 count={pipeline.uploaded.length}
-                active={pipelineFilter === "uploaded"}
                 tone="dim"
-                onClick={() => setPipelineFilter(pipelineFilter === "uploaded" ? null : "uploaded")}
               />
               <PipelinePill
                 label="Data complete"
                 sub="Can be categorised"
                 count={pipeline.dataComplete.length}
-                active={pipelineFilter === "dataComplete"}
                 tone="ok"
-                onClick={() =>
-                  setPipelineFilter(pipelineFilter === "dataComplete" ? null : "dataComplete")
-                }
-              />
-              <PipelinePill
-                label="Categorised"
-                sub="Triaged"
-                count={pipeline.categorised.length}
-                active={pipelineFilter === "categorised"}
-                tone="ok"
-                onClick={() =>
-                  setPipelineFilter(pipelineFilter === "categorised" ? null : "categorised")
-                }
               />
               <PipelinePill
                 label="Assigned"
                 sub="To a doctor"
                 count={pipeline.assigned.length}
-                active={pipelineFilter === "assigned"}
                 tone="ok"
-                onClick={() => setPipelineFilter(pipelineFilter === "assigned" ? null : "assigned")}
               />
               <PipelinePill
                 label="Checked in"
                 sub="In clinic"
                 count={pipeline.checkedIn.length}
-                active={pipelineFilter === "checkedIn"}
                 tone="lv"
-                onClick={() =>
-                  setPipelineFilter(pipelineFilter === "checkedIn" ? null : "checkedIn")
-                }
               />
               <PipelinePill
                 label="No-show / Cancel"
                 sub="Did not attend"
                 count={pipeline.noShowCancel.length}
-                active={pipelineFilter === "noShowCancel"}
                 tone="crit"
-                onClick={() =>
-                  setPipelineFilter(pipelineFilter === "noShowCancel" ? null : "noShowCancel")
-                }
               />
             </>
           )}
@@ -2060,6 +2557,8 @@ export default function TriageViewV3({
               <SkeletonColumn accent={AM} />
               <SkeletonColumn accent="#2d9a42" />
               <SkeletonColumn accent={MG} />
+              <SkeletonColumn accent={SK} />
+              <SkeletonColumn accent={AM} />
               <SkeletonColumn accent={LV} />
             </>
           )
@@ -2129,6 +2628,26 @@ export default function TriageViewV3({
               onUpload={openUploadForAppt}
             />
             <Column
+              accent={SK}
+              icon="🧪"
+              title="Lab Processing"
+              hint="Gini-Lab orders in progress · awaiting / partial results"
+              items={buckets.lab_processing}
+              onAssign={(a) => setAssignAppt(a)}
+              onOpen={onSelectAppt}
+              onUpload={openUploadForAppt}
+            />
+            <Column
+              accent={AM}
+              icon="🔎"
+              title="Review"
+              hint="Gini-Lab synced · no canonical value extracted yet"
+              items={buckets.review}
+              onAssign={(a) => setAssignAppt(a)}
+              onOpen={onSelectAppt}
+              onUpload={openUploadForAppt}
+            />
+            <Column
               accent={LV}
               icon="🔵"
               title="No Reports"
@@ -2167,7 +2686,11 @@ export default function TriageViewV3({
       {assignAppt && (
         <AssignModal
           appt={assignAppt}
-          doctors={docChoices.map((d) => d.name)}
+          doctors={
+            Array.isArray(doctors) && doctors.length > 0
+              ? doctors.map((d) => (typeof d === "string" ? d : d.name)).filter(Boolean)
+              : docChoices.map((d) => d.name)
+          }
           onClose={() => setAssignAppt(null)}
           onConfirm={handleAssignConfirm}
         />

@@ -38,6 +38,8 @@ const AiRow = memo(function AiRow({ zone, text }) {
 
 const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointmentId }) {
   const [open, setOpen] = useState(false);
+  const [showAmber, setShowAmber] = useState(false);
+  const [showGreen, setShowGreen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rules, setRules] = useState(null); // { red, amber, green }
   const [ai, setAi] = useState(null); // { red, amber, green } | null
@@ -77,8 +79,16 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
     // Re-fetch whenever the patient or the appointment changes so we never
     // show a stale summary belonging to a previously-opened patient.
     loadSummary();
+    setShowAmber(false);
+    setShowGreen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, appointmentId]);
+
+  // Auto-open the panel when there are red items so the doctor sees them
+  // immediately on the visit page.
+  useEffect(() => {
+    if (rules?.red?.length > 0) setOpen(true);
+  }, [rules]);
 
   if (loading) {
     return (
@@ -168,9 +178,18 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
           <>
             {hasRed && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-amber">
-              <span>🟡 Also consider</span>
+              <span>
+                🟡 Also consider · {display.amber.length} item
+                {display.amber.length !== 1 ? "s" : ""}
+              </span>
+              <button
+                className="bx bx-n sp-toggle-btn"
+                onClick={() => setShowAmber((v) => !v)}
+              >
+                {showAmber ? "Hide ▴" : "Show ▾"}
+              </button>
             </div>
-            {renderZone("amber", display.amber)}
+            {showAmber && renderZone("amber", display.amber)}
           </>
         )}
 
@@ -179,10 +198,18 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
             {(hasRed || hasAmber) && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-green">
               <span>
-                ✅ Working well <span className="sp-zone-hd-sub">— tell the patient</span>
+                ✅ Working well · {display.green.length} item
+                {display.green.length !== 1 ? "s" : ""}{" "}
+                <span className="sp-zone-hd-sub">— tell the patient</span>
               </span>
+              <button
+                className="bx bx-n sp-toggle-btn"
+                onClick={() => setShowGreen((v) => !v)}
+              >
+                {showGreen ? "Hide ▴" : "Show ▾"}
+              </button>
             </div>
-            {renderZone("green", display.green)}
+            {showGreen && renderZone("green", display.green)}
           </>
         )}
       </div>
