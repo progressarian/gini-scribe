@@ -319,10 +319,8 @@ function bucketReason(appt, bucket) {
         ? `Out of range on ${badMarkers.slice(0, 3).join(", ")}`
         : "Tier-1 marker in red zone";
     case "worse_in":
-      if (worsened.length)
-        return `In range but trending up on ${worsened.slice(0, 3).join(", ")}`;
-      if (warnMarkers.length)
-        return `Borderline on ${warnMarkers.slice(0, 3).join(", ")}`;
+      if (worsened.length) return `In range but trending up on ${worsened.slice(0, 3).join(", ")}`;
+      if (warnMarkers.length) return `Borderline on ${warnMarkers.slice(0, 3).join(", ")}`;
       return "Mixed signals — borderline trend";
     case "getting_better":
       return improved.length
@@ -345,8 +343,7 @@ function bucketReason(appt, bucket) {
       const uploaded = Number(appt.uploaded_labs) || 0;
       if (recent > 0 && uploaded > 0)
         return "Gini-Lab synced & document uploaded · no canonical value extracted";
-      if (recent > 0)
-        return "Gini-Lab synced · no canonical value extracted";
+      if (recent > 0) return "Gini-Lab synced · no canonical value extracted";
       return "Document uploaded · no canonical value extracted";
     }
     case "no_reports": {
@@ -744,8 +741,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
               bg: AML,
               fg: AM,
               label: "⬆ Uploaded · no values yet",
-              title:
-                "Report was uploaded but no canonical biomarker value has been extracted yet",
+              title: "Report was uploaded but no canonical biomarker value has been extracted yet",
             });
           } else if (pend > 0) {
             chips.push({
@@ -822,7 +818,8 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
             </span>
           ) : (
             <span>
-              📅 Gini-Lab synced today <span style={{ color: INK4 }}>· no values extracted yet</span>
+              📅 Gini-Lab synced today{" "}
+              <span style={{ color: INK4 }}>· no values extracted yet</span>
             </span>
           )
         ) : null}
@@ -918,49 +915,48 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
           set of labs. */}
       {bucket === "no_reports" &&
         appt.__conditionBucket &&
-        appt.__conditionBucket !== "no_reports" && (
-          (() => {
-            const cb = appt.__conditionBucket;
-            const cond =
-              cb === "worse_out"
-                ? { bg: REL, fg: RE, icon: "🔴", label: "Last labs: Out of range" }
-                : cb === "worse_in"
-                  ? { bg: AML, fg: AM, icon: "🟡", label: "Last labs: Trending up" }
-                  : cb === "getting_better"
-                    ? { bg: GNL, fg: "#2d9a42", icon: "↑", label: "Last labs: Improving" }
-                    : { bg: GNL, fg: MG, icon: "✅", label: "Last labs: In control" };
-            return (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "4px 8px",
-                  borderRadius: 7,
-                  background: cond.bg,
-                  color: cond.fg,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  border: `1px solid ${cond.fg}22`,
-                }}
-              >
-                <span>{cond.icon}</span>
-                <span style={{ flex: 1 }}>{cond.label}</span>
-              </div>
-            );
-          })()
-        )}
+        appt.__conditionBucket !== "no_reports" &&
+        (() => {
+          const cb = appt.__conditionBucket;
+          const cond =
+            cb === "worse_out"
+              ? { bg: REL, fg: RE, icon: "🔴", label: "Last labs: Out of range" }
+              : cb === "worse_in"
+                ? { bg: AML, fg: AM, icon: "🟡", label: "Last labs: Trending up" }
+                : cb === "getting_better"
+                  ? { bg: GNL, fg: "#2d9a42", icon: "↑", label: "Last labs: Improving" }
+                  : { bg: GNL, fg: MG, icon: "✅", label: "Last labs: In control" };
+          return (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 8px",
+                borderRadius: 7,
+                background: cond.bg,
+                color: cond.fg,
+                fontSize: 10,
+                fontWeight: 600,
+                border: `1px solid ${cond.fg}22`,
+              }}
+            >
+              <span>{cond.icon}</span>
+              <span style={{ flex: 1 }}>{cond.label}</span>
+            </div>
+          );
+        })()}
 
       {/* Stale-data stamp — when this card lives in No Reports but still has
           biomarker values, tell the clinician when those values entered our
           system. The truth is per-biomarker (biomarkers._lab_dates), so we
           surface the most recent test_date across the chips we're showing,
           and fall back to prev_biomarkers when the latest entry has no date. */}
-      {bucket === "no_reports" && bioRows.length > 0 && (
+      {bucket === "no_reports" &&
+        bioRows.length > 0 &&
         (() => {
           const labDates = (appt.biomarkers && appt.biomarkers._lab_dates) || {};
-          const prevLabDates =
-            (appt.prev_biomarkers && appt.prev_biomarkers._lab_dates) || {};
+          const prevLabDates = (appt.prev_biomarkers && appt.prev_biomarkers._lab_dates) || {};
           let latestMs = null;
           for (const r of bioRows) {
             const d = labDates[r.k] || prevLabDates[r.k];
@@ -991,8 +987,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
               <strong style={{ color: INK3, fontStyle: "normal" }}>{stamp}</strong>
             </div>
           );
-        })()
-      )}
+        })()}
 
       {/* Bio chips — prev → cur */}
       {bioRows.length > 0 && (
@@ -1425,9 +1420,7 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
     doctors && doctors.length > 0 ? doctors : ["Dr. Bhansali", "Dr. Beant Sidhu", "Dr. Simranpreet"]
   ).slice();
   const needle = q.trim().toLowerCase();
-  const list = needle
-    ? baseList.filter((d) => String(d).toLowerCase().includes(needle))
-    : baseList;
+  const list = needle ? baseList.filter((d) => String(d).toLowerCase().includes(needle)) : baseList;
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -1489,26 +1482,28 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
             <div style={{ fontSize: 11, color: INK4, textAlign: "center", padding: 16 }}>
               No matching doctors
             </div>
-          ) : list.map((d) => (
-            <button
-              key={d}
-              onClick={() => setSel(d)}
-              style={{
-                padding: "8px 12px",
-                border: `1px solid ${sel === d ? T : BD}`,
-                borderRadius: 8,
-                background: sel === d ? TL : WH,
-                cursor: "pointer",
-                fontFamily: FB,
-                textAlign: "left",
-                fontSize: 12,
-                fontWeight: 700,
-                color: INK,
-              }}
-            >
-              {d}
-            </button>
-          ))}
+          ) : (
+            list.map((d) => (
+              <button
+                key={d}
+                onClick={() => setSel(d)}
+                style={{
+                  padding: "8px 12px",
+                  border: `1px solid ${sel === d ? T : BD}`,
+                  borderRadius: 8,
+                  background: sel === d ? TL : WH,
+                  cursor: "pointer",
+                  fontFamily: FB,
+                  textAlign: "left",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: INK,
+                }}
+              >
+                {d}
+              </button>
+            ))
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
           <button
@@ -1897,8 +1892,7 @@ export default function TriageViewV3({
       // value was extracted, or the values that came through don't map to
       // the triage keys. Either way, a human needs to review the document.
       const reportPresent = recent > 0 || (Number(a.uploaded_labs) || 0) > 0;
-      const needsReview =
-        reportPresent && (!hasValues || conditionBucket === "no_reports");
+      const needsReview = reportPresent && (!hasValues || conditionBucket === "no_reports");
       let fresh = false;
       if (uploadedAt != null) {
         const afterLastVisit = lastVisitAt == null || uploadedAt > lastVisitAt;
@@ -1960,9 +1954,7 @@ export default function TriageViewV3({
     // Helper: does the patient have any Gini-Lab activity (orders awaiting
     // results, partial results, or recent synced results)?
     const hasLab = (a) =>
-      (Number(a.pending_labs) || 0) +
-        (Number(a.partial_labs) || 0) +
-        (Number(a.recent_labs) || 0) >
+      (Number(a.pending_labs) || 0) + (Number(a.partial_labs) || 0) + (Number(a.recent_labs) || 0) >
       0;
     // Visit-status priority: in_visit → checkedin → seen → everything else.
     // Lower number = higher priority (sorts to top).
@@ -1995,9 +1987,7 @@ export default function TriageViewV3({
         const ya = y.a.doctor_name ? 0 : 1;
         const xp = (Number(x.a.pending_labs) || 0) > 0 ? 0 : 1;
         const yp = (Number(y.a.pending_labs) || 0) > 0 ? 0 : 1;
-        return (
-          xa - ya || xp - yp || visitRank(x.a) - visitRank(y.a) || x.i - y.i
-        );
+        return xa - ya || xp - yp || visitRank(x.a) - visitRank(y.a) || x.i - y.i;
       })
       .map((x) => x.a);
     // Review column: assigned first, then unassigned; visit-status priority.

@@ -542,8 +542,10 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         // (note has no follow-up date sections at all). If the note has follow-up
         // sections but none match today's appointment date, the patient likely
         // didn't visit — skip the AI parse to avoid syncing stale OBSERVATIONS data.
-        const { hasAny: noteHasFuDates, matchesApptDate: noteMatchesDate } =
-          analyzeFollowUpDates(rawText, apptDate);
+        const { hasAny: noteHasFuDates, matchesApptDate: noteMatchesDate } = analyzeFollowUpDates(
+          rawText,
+          apptDate,
+        );
         const skipParse = noteHasFuDates && !noteMatchesDate;
         if (skipParse) {
           log(
