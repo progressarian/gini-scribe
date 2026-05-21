@@ -182,10 +182,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
                 🟡 Also consider · {display.amber.length} item
                 {display.amber.length !== 1 ? "s" : ""}
               </span>
-              <button
-                className="bx bx-n sp-toggle-btn"
-                onClick={() => setShowAmber((v) => !v)}
-              >
+              <button className="bx bx-n sp-toggle-btn" onClick={() => setShowAmber((v) => !v)}>
                 {showAmber ? "Hide ▴" : "Show ▾"}
               </button>
             </div>
@@ -202,10 +199,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
                 {display.green.length !== 1 ? "s" : ""}{" "}
                 <span className="sp-zone-hd-sub">— tell the patient</span>
               </span>
-              <button
-                className="bx bx-n sp-toggle-btn"
-                onClick={() => setShowGreen((v) => !v)}
-              >
+              <button className="bx bx-n sp-toggle-btn" onClick={() => setShowGreen((v) => !v)}>
                 {showGreen ? "Hide ▴" : "Show ▾"}
               </button>
             </div>

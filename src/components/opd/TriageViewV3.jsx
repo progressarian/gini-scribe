@@ -319,10 +319,8 @@ function bucketReason(appt, bucket) {
         ? `Out of range on ${badMarkers.slice(0, 3).join(", ")}`
         : "Tier-1 marker in red zone";
     case "worse_in":
-      if (worsened.length)
-        return `In range but trending up on ${worsened.slice(0, 3).join(", ")}`;
-      if (warnMarkers.length)
-        return `Borderline on ${warnMarkers.slice(0, 3).join(", ")}`;
+      if (worsened.length) return `In range but trending up on ${worsened.slice(0, 3).join(", ")}`;
+      if (warnMarkers.length) return `Borderline on ${warnMarkers.slice(0, 3).join(", ")}`;
       return "Mixed signals — borderline trend";
     case "getting_better":
       return improved.length
@@ -345,8 +343,7 @@ function bucketReason(appt, bucket) {
       const uploaded = Number(appt.uploaded_labs) || 0;
       if (recent > 0 && uploaded > 0)
         return "Gini-Lab synced & document uploaded · no canonical value extracted";
-      if (recent > 0)
-        return "Gini-Lab synced · no canonical value extracted";
+      if (recent > 0) return "Gini-Lab synced · no canonical value extracted";
       return "Document uploaded · no canonical value extracted";
     }
     case "no_reports": {
@@ -514,6 +511,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   const assigned = !!appt.doctor_name;
   const status = appt.status || "";
   const isCheckedIn = ["checkedin", "in_visit", "seen", "completed"].includes(status);
+  const [extrasOpen, setExtrasOpen] = useState(false);
 
   const bucketAccent =
     bucket === "worse_out"
@@ -541,7 +539,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   // The chip's colour tone is driven by the rightmost (most recent) value.
   const DEFAULT_CHIP_KEYS = ["hba1c", "fg", "ldl", "tg", "uacr", "egfr"];
   const bioRows = [];
-  const pushChip = (k) => {
+  const buildRow = (k) => {
     const curRaw = num(b[k]);
     const prevRaw = k === "hba1c" ? prevHba1c : num(p[k]);
     let cur = null;
@@ -556,12 +554,15 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
       cur = prevRaw;
       prev = null;
     } else {
-      return;
+      return null;
     }
     const tone = targetStatus(k, cur);
-    bioRows.push({ k, label: KEY_LABEL[k] || k, cur, prev, tone });
+    return { k, label: KEY_LABEL[k] || k.toUpperCase(), cur, prev, tone };
   };
-  for (const k of DEFAULT_CHIP_KEYS) pushChip(k);
+  for (const k of DEFAULT_CHIP_KEYS) {
+    const r = buildRow(k);
+    if (r) bioRows.push(r);
+  }
   // Also surface ANY other biomarker whose current value is out of range —
   // even non-standard markers (BP, HDL, TSH, Hb, ALT…) — so the clinician
   // never misses a bad reading just because it isn't in the default chip set.
@@ -569,13 +570,44 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
   for (const k of Object.keys(b)) {
     if (k.startsWith("_")) continue;
     if (seen.has(k)) continue;
-    const cur = num(b[k]);
-    if (cur == null) continue;
-    const tone = targetStatus(k, cur);
-    if (tone !== "bad") continue;
-    const prev = num(p[k]);
-    bioRows.push({ k, label: KEY_LABEL[k] || k.toUpperCase(), cur, prev, tone });
-    seen.add(k);
+    const r = buildRow(k);
+    if (!r) continue;
+    if (r.tone !== "bad") continue;
+    bioRows.push(r);
+    seen.add(r.k);
+  }
+  // "Extra" rows — every remaining biomarker we have a value for. Hidden
+  // behind a "+ N more" toggle for non-Review cards. On Review cards we
+  // surface them inline (the whole point of Review is to eyeball whatever
+  // values *did* come through), and we also fold them into the main row when
+  // the default chip strip turned up empty.
+  // Only surface recognised lab values + vitals (keys in KEY_LABEL) — skip
+  // any non-clinical/unknown fields that may live on the biomarkers blob.
+  const extraRows = [];
+  const pushExtra = (k) => {
+    if (k.startsWith("_")) return;
+    if (seen.has(k)) return;
+    if (!KEY_LABEL[k]) return;
+    const r = buildRow(k);
+    if (!r) return;
+    extraRows.push(r);
+    seen.add(r.k);
+  };
+  for (const k of Object.keys(b)) pushExtra(k);
+  // Also include lab/vital values we only have historical readings for — gives
+  // the clinician the full picture when deciding who to assign the patient to.
+  for (const k of Object.keys(p)) pushExtra(k);
+  // If the default chip strip turned up empty (e.g. Review cards with only
+  // non-default markers), promote a handful of extras up to the main row so
+  // there's always something visible before the toggle.
+  if (bioRows.length === 0 && extraRows.length > 0) {
+    bioRows.push(...extraRows.splice(0, 4));
+  }
+  // Cap the always-visible row so the card stays compact — overflow goes
+  // behind the "+ N more values" toggle.
+  const MAIN_CAP = 4;
+  if (bioRows.length > MAIN_CAP) {
+    extraRows.unshift(...bioRows.splice(MAIN_CAP));
   }
 
   const chipPal = (tone) =>
@@ -744,8 +776,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
               bg: AML,
               fg: AM,
               label: "⬆ Uploaded · no values yet",
-              title:
-                "Report was uploaded but no canonical biomarker value has been extracted yet",
+              title: "Report was uploaded but no canonical biomarker value has been extracted yet",
             });
           } else if (pend > 0) {
             chips.push({
@@ -822,7 +853,8 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
             </span>
           ) : (
             <span>
-              📅 Gini-Lab synced today <span style={{ color: INK4 }}>· no values extracted yet</span>
+              📅 Gini-Lab synced today{" "}
+              <span style={{ color: INK4 }}>· no values extracted yet</span>
             </span>
           )
         ) : null}
@@ -918,49 +950,48 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
           set of labs. */}
       {bucket === "no_reports" &&
         appt.__conditionBucket &&
-        appt.__conditionBucket !== "no_reports" && (
-          (() => {
-            const cb = appt.__conditionBucket;
-            const cond =
-              cb === "worse_out"
-                ? { bg: REL, fg: RE, icon: "🔴", label: "Last labs: Out of range" }
-                : cb === "worse_in"
-                  ? { bg: AML, fg: AM, icon: "🟡", label: "Last labs: Trending up" }
-                  : cb === "getting_better"
-                    ? { bg: GNL, fg: "#2d9a42", icon: "↑", label: "Last labs: Improving" }
-                    : { bg: GNL, fg: MG, icon: "✅", label: "Last labs: In control" };
-            return (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "4px 8px",
-                  borderRadius: 7,
-                  background: cond.bg,
-                  color: cond.fg,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  border: `1px solid ${cond.fg}22`,
-                }}
-              >
-                <span>{cond.icon}</span>
-                <span style={{ flex: 1 }}>{cond.label}</span>
-              </div>
-            );
-          })()
-        )}
+        appt.__conditionBucket !== "no_reports" &&
+        (() => {
+          const cb = appt.__conditionBucket;
+          const cond =
+            cb === "worse_out"
+              ? { bg: REL, fg: RE, icon: "🔴", label: "Last labs: Out of range" }
+              : cb === "worse_in"
+                ? { bg: AML, fg: AM, icon: "🟡", label: "Last labs: Trending up" }
+                : cb === "getting_better"
+                  ? { bg: GNL, fg: "#2d9a42", icon: "↑", label: "Last labs: Improving" }
+                  : { bg: GNL, fg: MG, icon: "✅", label: "Last labs: In control" };
+          return (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 8px",
+                borderRadius: 7,
+                background: cond.bg,
+                color: cond.fg,
+                fontSize: 10,
+                fontWeight: 600,
+                border: `1px solid ${cond.fg}22`,
+              }}
+            >
+              <span>{cond.icon}</span>
+              <span style={{ flex: 1 }}>{cond.label}</span>
+            </div>
+          );
+        })()}
 
       {/* Stale-data stamp — when this card lives in No Reports but still has
           biomarker values, tell the clinician when those values entered our
           system. The truth is per-biomarker (biomarkers._lab_dates), so we
           surface the most recent test_date across the chips we're showing,
           and fall back to prev_biomarkers when the latest entry has no date. */}
-      {bucket === "no_reports" && bioRows.length > 0 && (
+      {bucket === "no_reports" &&
+        bioRows.length > 0 &&
         (() => {
           const labDates = (appt.biomarkers && appt.biomarkers._lab_dates) || {};
-          const prevLabDates =
-            (appt.prev_biomarkers && appt.prev_biomarkers._lab_dates) || {};
+          const prevLabDates = (appt.prev_biomarkers && appt.prev_biomarkers._lab_dates) || {};
           let latestMs = null;
           for (const r of bioRows) {
             const d = labDates[r.k] || prevLabDates[r.k];
@@ -991,8 +1022,7 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
               <strong style={{ color: INK3, fontStyle: "normal" }}>{stamp}</strong>
             </div>
           );
-        })()
-      )}
+        })()}
 
       {/* Bio chips — prev → cur */}
       {bioRows.length > 0 && (
@@ -1025,6 +1055,68 @@ function PatientCard({ appt, bucket, onAssign, onOpen, onUpload }) {
               </span>
             );
           })}
+        </div>
+      )}
+
+      {/* Extras — hidden by default; click "+ N more" to reveal additional
+          biomarkers we have on file (BP, TSH, Hb, ALT, BMI, etc.) in the
+          same prev → cur format. */}
+      {extraRows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setExtrasOpen((v) => !v);
+            }}
+            style={{
+              alignSelf: "flex-start",
+              fontSize: 9,
+              fontWeight: 700,
+              color: INK3,
+              background: BG,
+              border: `1px solid ${BD}`,
+              borderRadius: 5,
+              padding: "2px 7px",
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            {extrasOpen
+              ? "− Hide other values"
+              : `+ ${extraRows.length} more value${extraRows.length > 1 ? "s" : ""}`}
+          </button>
+          {extrasOpen && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+              {extraRows.map((r) => {
+                const pal = chipPal(r.tone);
+                return (
+                  <span
+                    key={r.k}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      fontFamily: FM,
+                      padding: "3px 7px",
+                      borderRadius: 6,
+                      background: pal.bg,
+                      color: pal.fg,
+                      border: `1px solid ${pal.fg}22`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, marginRight: 4 }}>{r.label}</span>
+                    {r.prev != null && (
+                      <>
+                        <span style={{ opacity: 0.6, fontSize: 9 }}>{r.prev}</span>
+                        <span style={{ opacity: 0.55, fontSize: 9, margin: "0 2px" }}>→</span>
+                      </>
+                    )}
+                    <span style={{ fontWeight: 800 }}>{r.cur}</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1425,9 +1517,7 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
     doctors && doctors.length > 0 ? doctors : ["Dr. Bhansali", "Dr. Beant Sidhu", "Dr. Simranpreet"]
   ).slice();
   const needle = q.trim().toLowerCase();
-  const list = needle
-    ? baseList.filter((d) => String(d).toLowerCase().includes(needle))
-    : baseList;
+  const list = needle ? baseList.filter((d) => String(d).toLowerCase().includes(needle)) : baseList;
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -1489,26 +1579,28 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
             <div style={{ fontSize: 11, color: INK4, textAlign: "center", padding: 16 }}>
               No matching doctors
             </div>
-          ) : list.map((d) => (
-            <button
-              key={d}
-              onClick={() => setSel(d)}
-              style={{
-                padding: "8px 12px",
-                border: `1px solid ${sel === d ? T : BD}`,
-                borderRadius: 8,
-                background: sel === d ? TL : WH,
-                cursor: "pointer",
-                fontFamily: FB,
-                textAlign: "left",
-                fontSize: 12,
-                fontWeight: 700,
-                color: INK,
-              }}
-            >
-              {d}
-            </button>
-          ))}
+          ) : (
+            list.map((d) => (
+              <button
+                key={d}
+                onClick={() => setSel(d)}
+                style={{
+                  padding: "8px 12px",
+                  border: `1px solid ${sel === d ? T : BD}`,
+                  borderRadius: 8,
+                  background: sel === d ? TL : WH,
+                  cursor: "pointer",
+                  fontFamily: FB,
+                  textAlign: "left",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: INK,
+                }}
+              >
+                {d}
+              </button>
+            ))
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
           <button
@@ -1552,13 +1644,15 @@ function AssignModal({ appt, doctors, onClose, onConfirm }) {
 
 // ── Upload modal (styled to match OPD, not Visit) ──
 const REPORT_TYPES = [
-  { value: "lab_report", label: "Blood Report (HbA1c, Lipids, TFT, KFT)" },
-  { value: "imaging", label: "Radiology (X-Ray, USG, Echo, MRI, CT)" },
-  { value: "abi", label: "ABI (Ankle-Brachial Index)" },
-  { value: "vpt", label: "VPT (Vibration Perception Threshold)" },
-  { value: "ecg", label: "ECG / Holter" },
-  { value: "urine", label: "Urine Report" },
-  { value: "other", label: "Other" },
+  { value: "lab_report", label: "🩸 Blood Test (HbA1c, Lipids, TFT, KFT)" },
+  { value: "abi", label: "🫀 ABI (Ankle-Brachial Index)" },
+  { value: "vpt", label: "⚡ VPT (Vibration Perception Threshold)" },
+  { value: "xray", label: "🦴 X-Ray" },
+  { value: "usg", label: "🔊 Ultrasound" },
+  { value: "mri", label: "🧲 MRI" },
+  { value: "ecg", label: "📈 ECG / Holter" },
+  { value: "echo", label: "❤️ Echo" },
+  { value: "other", label: "📄 Other" },
 ];
 
 function UploadModal({ patient, onClose, onSubmit }) {
@@ -1897,8 +1991,7 @@ export default function TriageViewV3({
       // value was extracted, or the values that came through don't map to
       // the triage keys. Either way, a human needs to review the document.
       const reportPresent = recent > 0 || (Number(a.uploaded_labs) || 0) > 0;
-      const needsReview =
-        reportPresent && (!hasValues || conditionBucket === "no_reports");
+      const needsReview = reportPresent && (!hasValues || conditionBucket === "no_reports");
       let fresh = false;
       if (uploadedAt != null) {
         const afterLastVisit = lastVisitAt == null || uploadedAt > lastVisitAt;
@@ -1960,9 +2053,7 @@ export default function TriageViewV3({
     // Helper: does the patient have any Gini-Lab activity (orders awaiting
     // results, partial results, or recent synced results)?
     const hasLab = (a) =>
-      (Number(a.pending_labs) || 0) +
-        (Number(a.partial_labs) || 0) +
-        (Number(a.recent_labs) || 0) >
+      (Number(a.pending_labs) || 0) + (Number(a.partial_labs) || 0) + (Number(a.recent_labs) || 0) >
       0;
     // Visit-status priority: in_visit → checkedin → seen → everything else.
     // Lower number = higher priority (sorts to top).
@@ -1995,9 +2086,7 @@ export default function TriageViewV3({
         const ya = y.a.doctor_name ? 0 : 1;
         const xp = (Number(x.a.pending_labs) || 0) > 0 ? 0 : 1;
         const yp = (Number(y.a.pending_labs) || 0) > 0 ? 0 : 1;
-        return (
-          xa - ya || xp - yp || visitRank(x.a) - visitRank(y.a) || x.i - y.i
-        );
+        return xa - ya || xp - yp || visitRank(x.a) - visitRank(y.a) || x.i - y.i;
       })
       .map((x) => x.a);
     // Review column: assigned first, then unassigned; visit-status priority.

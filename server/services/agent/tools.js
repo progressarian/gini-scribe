@@ -571,7 +571,7 @@ export const AGENT_TOOLS = [
   {
     name: "propose_med_dose",
     description:
-      "Open a confirmation bottom sheet so the patient can record a medicine dose as 'taken' or 'missed'. Use this — NOT propose_log — when the patient says 'I took my Metformin', 'log my Glizid as taken', 'I missed my morning insulin'. Resolve the med name from medications they're actually on (run get_medication_schedule first if you're unsure of the exact name or slot). One call per medicine.",
+      "Open a confirmation bottom sheet so the patient can record a medicine dose as 'taken' or 'missed'. ONLY call this when the patient EXPLICITLY states they took or missed a specific dose in THIS message — e.g. 'I took my Metformin', 'log my Glizid as taken', 'I missed my morning insulin', 'maine Ryzodeg le liya'. DO NOT call this proactively, speculatively, or because the patient mentioned a medicine name in any other context — side effects, dose questions, interactions, refills, reminders, or any informational question about a drug. If the patient is ASKING about a medicine rather than REPORTING that they took or missed it, do NOT call this tool. Resolve the med name from medications they're actually on (run get_medication_schedule first if you're unsure of the exact name or slot). One call per medicine. IMPORTANT: ALWAYS include `slot` when the patient mentions a time of day or when the medicine has multiple doses per day — do NOT omit it. Mapping: 'morning'/'subah' → 'after_breakfast', 'evening'/'shaam' → 'after_dinner', 'night'/'raat' → 'bedtime', 'afternoon' → 'after_lunch', 'fasting'/'khali pet' → 'fasting'. For a BD/TDS medicine where the patient does not specify which dose, open one sheet per dose (one call per slot).",
     input_schema: {
       type: "object",
       properties: {
@@ -596,7 +596,8 @@ export const AGENT_TOOLS = [
             "bedtime",
             "anytime",
           ],
-          description: "Which scheduled slot this dose belongs to.",
+          description:
+            "Which scheduled slot this dose belongs to. REQUIRED whenever the patient mentions morning/evening/night/afternoon or the medicine is BD/TDS. morning/subah → after_breakfast; evening/shaam → after_dinner; night/raat → bedtime; afternoon → after_lunch; fasting/khali pet → fasting.",
         },
         status: {
           type: "string",
@@ -609,7 +610,7 @@ export const AGENT_TOOLS = [
             "ISO YYYY-MM-DD. Omit for 'today/now', set explicitly for 'yesterday', 'on Monday', etc.",
         },
       },
-      required: ["medication_name", "status"],
+      required: ["medication_name", "status", "slot"],
     },
   },
   {
@@ -2094,7 +2095,21 @@ const LAB_TYPE_MAP = {
   CPeptide: { test_name: "C-Peptide", unit: "ng/mL", canonical_name: "c_peptide" },
 };
 
-export function buildClientAction(name, input) {
+// Infer a slot key from free text (user message or dose string).
+function inferSlotFromText(text) {
+  const t = String(text || "").toLowerCase();
+  if (/fasting|khali\s*pet|empty\s*stomach/.test(t)) return "fasting";
+  if (/before\s*breakfast/.test(t)) return "before_breakfast";
+  if (/morning|subah|breakfast/.test(t)) return "after_breakfast";
+  if (/before\s*lunch/.test(t)) return "before_lunch";
+  if (/afternoon|lunch|dopahar/.test(t)) return "after_lunch";
+  if (/before\s*dinner/.test(t)) return "before_dinner";
+  if (/evening|shaam|dinner/.test(t)) return "after_dinner";
+  if (/bedtime|night|raat|sote\s*waqt/.test(t)) return "bedtime";
+  return null;
+}
+
+export function buildClientAction(name, input, conversation = []) {
   if (name === "propose_log") {
     // Flatten any extended enum value the RN client doesn't render natively
     // into the generic Lab modal, pre-filling test_name/unit/canonical_name
@@ -2207,11 +2222,27 @@ export function buildClientAction(name, input) {
     };
   }
   if (name === "propose_med_dose") {
+    // Resolve slot: use agent-supplied value first, then infer from the
+    // last user message in the conversation, then from the dose string.
+    let slot = input.slot ?? null;
+    if (!slot) {
+      const lastUserContent = [...conversation].reverse().find((m) => m.role === "user")?.content;
+      const lastUserText =
+        typeof lastUserContent === "string"
+          ? lastUserContent
+          : Array.isArray(lastUserContent)
+            ? lastUserContent
+                .filter((b) => b.type === "text")
+                .map((b) => b.text || "")
+                .join(" ")
+            : "";
+      slot = inferSlotFromText(lastUserText) ?? inferSlotFromText(input.dose) ?? null;
+    }
     const ca = {
       type: "open_med_log_sheet",
       medication_name: String(input.medication_name || "").trim(),
       dose: input.dose ?? null,
-      slot: input.slot ?? null,
+      slot,
       status: input.status === "missed" ? "missed" : "taken",
       date: input.date ?? null,
     };
