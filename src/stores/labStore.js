@@ -6,6 +6,8 @@ import useAuthStore from "./authStore.js";
 import { toast } from "./uiStore.js";
 import { patientIdsMatch, patientNamesMatch } from "../utils/patientMatch.js";
 
+const SESSION_KEY = "mhg_intake_reports";
+
 const useLabStore = create((set, get) => ({
   // ── state ──
   labData: null,
@@ -301,7 +303,20 @@ const useLabStore = create((set, get) => ({
     }
   },
 
-  resetLab: () =>
+  rehydrateFromSession: () => {
+    if (get().intakeReports.length > 0) return;
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return;
+      const reports = JSON.parse(raw).map((r) => ({ ...r, extracting: false, saving: false }));
+      if (reports.length > 0) set({ intakeReports: reports });
+    } catch {}
+  },
+
+  resetLab: () => {
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch {}
     set({
       labData: null,
       labImageData: null,
@@ -309,7 +324,22 @@ const useLabStore = create((set, get) => ({
       intakeReports: [],
       imagingFiles: [],
       labRequisition: [],
-    }),
+    });
+  },
 }));
+
+// Persist intakeReports to sessionStorage so a page refresh doesn't wipe
+// pending/failed uploads. Cleared by resetLab() when a new patient is selected.
+let _cachedReports = useLabStore.getState().intakeReports;
+useLabStore.subscribe((state) => {
+  if (state.intakeReports === _cachedReports) return;
+  _cachedReports = state.intakeReports;
+  try {
+    sessionStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify(state.intakeReports.map((r) => ({ ...r, extracting: false, saving: false }))),
+    );
+  } catch {}
+});
 
 export default useLabStore;

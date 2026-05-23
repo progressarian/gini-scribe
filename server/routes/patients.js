@@ -201,6 +201,29 @@ async function cleanOrphanDocsForPatient(patientId) {
   }
 }
 
+router.get("/patients/genie-lookup", async (req, res) => {
+  try {
+    const phone = String(req.query.phone || "").trim();
+    if (!phone) return res.status(400).json({ error: "phone required" });
+    const rows = await lookupGeniePatientsByPhone(phone);
+    res.json({
+      found: rows.length > 0,
+      candidates: rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        phone: p.phone,
+        dob: p.dob,
+        sex: p.sex,
+        blood_group: p.blood_group,
+        email: p.email,
+        created_at: p.created_at,
+      })),
+    });
+  } catch (e) {
+    handleError(res, e, "Genie lookup");
+  }
+});
+
 router.get("/patients/:id", async (req, res) => {
   cleanOrphanDocsForPatient(req.params.id).catch(() => {});
   try {
@@ -500,32 +523,6 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
     res.json(row);
   } catch (e) {
     handleError(res, e, "Patient update");
-  }
-});
-
-// Lookup app-DB patients by phone (for IntakePage "import from app").
-// Returns ALL non-migrated rows — a phone may host several family-member
-// accounts. The doctor picks which one(s) to import.
-router.get("/patients/genie-lookup", async (req, res) => {
-  try {
-    const phone = String(req.query.phone || "").trim();
-    if (!phone) return res.status(400).json({ error: "phone required" });
-    const rows = await lookupGeniePatientsByPhone(phone);
-    res.json({
-      found: rows.length > 0,
-      candidates: rows.map((p) => ({
-        id: p.id,
-        name: p.name,
-        phone: p.phone,
-        dob: p.dob,
-        sex: p.sex,
-        blood_group: p.blood_group,
-        email: p.email,
-        created_at: p.created_at,
-      })),
-    });
-  } catch (e) {
-    handleError(res, e, "Genie lookup");
   }
 });
 

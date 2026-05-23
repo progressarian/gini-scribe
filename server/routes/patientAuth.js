@@ -129,8 +129,8 @@ async function markAppRowMigrated(appId, scribePatientId) {
       gini_patient_id: String(scribePatientId),
     })
     .eq("id", appId)
-    .then(() => {})
-    .catch(() => {});
+    .then(() => { })
+    .catch(() => { });
 }
 
 async function listLinkedPatients(db, phone) {
@@ -497,7 +497,7 @@ router.post("/patient/auth/login", loginLimiter, async (req, res) => {
 // ── POST /patient/auth/logout ───────────────────────────────────────────────
 router.post("/patient/auth/logout", async (req, res) => {
   if (req.patient?.jti) {
-    await pool.query("DELETE FROM auth_sessions WHERE token=$1", [req.patient.jti]).catch(() => {});
+    await pool.query("DELETE FROM auth_sessions WHERE token=$1", [req.patient.jti]).catch(() => { });
   }
   res.json({ ok: true });
 });
@@ -594,7 +594,7 @@ router.post("/patient/auth/change-password", async (req, res) => {
          WHERE patient_db=$1 AND patient_ref=$2 AND token<>$3`,
         [db, String(patient.id), req.patient.jti],
       )
-      .catch(() => {});
+      .catch(() => { });
 
     res.json({ ok: true });
   } catch (e) {
