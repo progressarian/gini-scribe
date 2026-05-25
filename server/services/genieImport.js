@@ -645,3 +645,25 @@ async function doConvert(db, geniePatient) {
     imported: counts,
   };
 }
+
+/**
+ * Fire-and-forget: copy all genie app data into the hospital DB when a
+ * collision is first detected (same phone in both DBs). Safe to call without
+ * await — errors are logged, never thrown. Idempotent: bulkInsert uses
+ * ON CONFLICT DO NOTHING so re-runs are safe.
+ */
+export async function autoMigrateGeniePatient(geniePatient) {
+  const db = getGenieDb();
+  if (!db || !geniePatient || geniePatient.migrated_to_gini) return;
+  try {
+    const result = await doConvert(db, geniePatient);
+    if (result.ok) {
+      console.log(
+        `[AutoMigrate] genie ${geniePatient.id} → scribe ${result.scribePatientId}`,
+        result.imported,
+      );
+    }
+  } catch (e) {
+    console.error(`[AutoMigrate] Failed for genie ${geniePatient.id}:`, e.message);
+  }
+}
