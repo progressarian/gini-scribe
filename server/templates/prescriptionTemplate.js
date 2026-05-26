@@ -248,6 +248,10 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-summary-block .sum-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin:0 0 4px}
 .rx-summary-block p{margin:0}
 .rx-summary-block p+p{margin-top:6px}
+.rx-summary-tests{margin-top:8px;padding-top:8px;border-top:1px solid var(--tlb)}
+.rx-summary-tests-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin-bottom:5px}
+.rx-summary-tests-list{display:flex;flex-wrap:wrap;gap:4px}
+.rx-summary-test-chip{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--tlb);color:var(--ink2)}
 
 .rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd)}
 .rx-med-cat{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
@@ -358,7 +362,12 @@ function buildPrescriptionHtml(data = {}) {
     appt_plan?.follow_up ||
     latestCon.follow_up ||
     {};
-  const tests = latestCon.investigations_to_order || latestCon.tests_ordered || [];
+  const tests =
+    latestCon.investigations_to_order ||
+    latestCon.investigations_ordered ||
+    latestCon.tests_ordered ||
+    appt_plan?.investigations_to_order ||
+    [];
   // FOLLOW UP WITH — free-text patient instructions for the next visit
   // (fasting / tests to bring / preparations). Captured from prescription
   // extraction or set inline on /visit. Printed as a dedicated section so the
@@ -457,10 +466,10 @@ function buildPrescriptionHtml(data = {}) {
       raw: latestVitals.bp_sys,
       sparks: prevVitals?.bp_sys
         ? buildSparkline(
-            [{ result: prevVitals.bp_sys }, { result: latestVitals.bp_sys }],
-            130,
-            true,
-          )
+          [{ result: prevVitals.bp_sys }, { result: latestVitals.bp_sys }],
+          130,
+          true,
+        )
         : { bars: [], goalPct: null },
       goal: 130,
       lowerBetter: true,
@@ -755,11 +764,10 @@ function buildPrescriptionHtml(data = {}) {
         <div class="rx-dx">
           <div class="rx-dx-num">${i + 1}.</div>
           <div class="rx-dx-body">
-            <div class="rx-dx-name">${escape(d.label || d.diagnosis_id || "")}${metaHtml}${
-              d.status
-                ? `<span class="rx-dx-badge" style="background:${badge.bg};color:${badge.color}">${escape(badge.label)}</span>`
-                : ""
-            }</div>
+            <div class="rx-dx-name">${escape(d.label || d.diagnosis_id || "")}${metaHtml}${d.status
+          ? `<span class="rx-dx-badge" style="background:${badge.bg};color:${badge.color}">${escape(badge.label)}</span>`
+          : ""
+        }</div>
             ${bioLine ? `<div class="rx-dx-detail">${bioLine}</div>` : ""}
           </div>
         </div>`;
@@ -776,11 +784,10 @@ function buildPrescriptionHtml(data = {}) {
         <div class="rx-goal">
           <div class="rx-goal-label">${escape(g.marker || "")}</div>
           <div class="rx-goal-val" style="color:${color}">${escape(g.target_value || "")}</div>
-          ${
-            g.current_value != null
-              ? `<div class="rx-goal-current">Today: ${escape(g.current_value)}</div>`
-              : ""
-          }
+          ${g.current_value != null
+          ? `<div class="rx-goal-current">Today: ${escape(g.current_value)}</div>`
+          : ""
+        }
         </div>`;
     })
     .join("");
@@ -854,11 +861,11 @@ function buildPrescriptionHtml(data = {}) {
       const datesHtml =
         bars.length > 0
           ? `<div class="sp-dates">${bars
-              .map(
-                (s, i) =>
-                  `<div class="sp-date${i === bars.length - 1 ? " latest" : ""}">${escape(s.dateLabel || "")}</div>`,
-              )
-              .join("")}</div>`
+            .map(
+              (s, i) =>
+                `<div class="sp-date${i === bars.length - 1 ? " latest" : ""}">${escape(s.dateLabel || "")}</div>`,
+            )
+            .join("")}</div>`
           : "";
       const goalLabel =
         b.goal != null
@@ -872,9 +879,8 @@ function buildPrescriptionHtml(data = {}) {
           </div>
           <div class="rx-bio-val" style="color:${color}">${escape(b.val)}</div>
           ${trendText ? `<div class="rx-bio-trend" style="color:${trendColor}">${trendText}</div>` : ""}
-          ${
-            sparksHtml
-              ? `<div class="rx-bio-chart">
+          ${sparksHtml
+          ? `<div class="rx-bio-chart">
                   <div class="rx-bio-sparkline">
                     ${trendSvg}
                     ${goalLineHtml}
@@ -882,8 +888,8 @@ function buildPrescriptionHtml(data = {}) {
                   </div>
                   ${datesHtml}
                 </div>`
-              : ""
-          }
+          : ""
+        }
         </div>`;
     })
     .join("");
@@ -989,37 +995,36 @@ function buildPrescriptionHtml(data = {}) {
   const referralsHtml =
     referrals.length > 0
       ? `<div class="rx-ref-grid">${referrals
-          .map((r) => {
-            const title = `${r.icon || "🩺"} ${escape(r.specialty || r.name || "Referral")}`;
-            const body = [
-              r.referred_to ? `Referred to ${escape(r.referred_to)}` : "",
-              r.reason || r.note ? escape(r.reason || r.note) : "",
-            ]
-              .filter(Boolean)
-              .join("<br>");
-            return `
+        .map((r) => {
+          const title = `${r.icon || "🩺"} ${escape(r.specialty || r.name || "Referral")}`;
+          const body = [
+            r.referred_to ? `Referred to ${escape(r.referred_to)}` : "",
+            r.reason || r.note ? escape(r.reason || r.note) : "",
+          ]
+            .filter(Boolean)
+            .join("<br>");
+          return `
               <div class="rx-ref">
                 <div class="rx-ref-title">${title}</div>
                 <div class="rx-ref-body">${body}</div>
               </div>`;
-          })
-          .join("")}</div>`
+        })
+        .join("")}</div>`
       : "";
 
   // ── Lab tests grid
   const labTestsHtml =
     labTests.length > 0
       ? `<div class="rx-test" style="margin-top:${referrals.length > 0 ? 8 : 0}px">
-          <div class="rx-test-title">🔬 Bring these reports to next visit${
-            followUp.duration ? ` (${escape(followUp.duration)})` : ""
-          }</div>
+          <div class="rx-test-title">🔬 Bring these reports to next visit${followUp.duration ? ` (${escape(followUp.duration)})` : ""
+      }</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px">
             ${labTests
-              .map((t) => {
-                const name = typeof t === "string" ? t : t.name || t.test || "";
-                return `<div class="rx-test-item"><span>·</span><span>${escape(name)}</span></div>`;
-              })
-              .join("")}
+        .map((t) => {
+          const name = typeof t === "string" ? t : t.name || t.test || "";
+          return `<div class="rx-test-item"><span>·</span><span>${escape(name)}</span></div>`;
+        })
+        .join("")}
           </div>
         </div>`
       : "";
@@ -1029,8 +1034,8 @@ function buildPrescriptionHtml(data = {}) {
     ? `<div class="rx-test" style="margin-top:8px;background:#fff7ed;border:1px solid #fed7aa">
           <div class="rx-test-title" style="color:#7c2d12">📋 Follow up with</div>
           <div style="margin-top:4px;font-size:12px;color:#7c2d12;white-space:pre-line;line-height:1.5">${escape(
-            followUpWith,
-          )}</div>
+      followUpWith,
+    )}</div>
         </div>`
     : "";
 
@@ -1077,58 +1082,60 @@ function buildPrescriptionHtml(data = {}) {
   </div>
 
   <div class="rx-body">
-    ${
-      visitSummaryText
-        ? (() => {
-            const paragraphs = String(visitSummaryText)
+    ${visitSummaryText || tests.length > 0
+      ? (() => {
+        const paragraphs = visitSummaryText
+          ? String(visitSummaryText)
               .replace(/\r\n/g, "\n")
               .split(/\n{2,}/)
               .map((p) => p.replace(/^\s+|\s+$/g, ""))
               .filter(Boolean)
               .map((p) => `<p>${escape(p).replace(/\n/g, "<br>")}</p>`)
-              .join("");
-            return `<div class="rx-summary-block">
+              .join("")
+          : "";
+        const testsHtml = tests.length > 0
+          ? `<div class="rx-summary-tests">
+               <div class="rx-summary-tests-title">Investigations ordered</div>
+               <div class="rx-summary-tests-list">${tests.map((t) => `<span class="rx-summary-test-chip">${escape(typeof t === "string" ? t : t.name || t.test || String(t))}</span>`).join("")}</div>
+             </div>`
+          : "";
+        return `<div class="rx-summary-block">
              <div class="sum-title">Visit summary</div>
-             ${paragraphs}
+             ${paragraphs}${testsHtml}
            </div>`;
-          })()
-        : ""
+      })()
+      : ""
     }
 
     ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnoses</div>${dxHtml}` : ""}
 
-    ${
-      goals.length > 0
-        ? `<div class="rx-section-title">Goals for next visit</div>
+    ${goals.length > 0
+      ? `<div class="rx-section-title">Goals for next visit</div>
            <div class="rx-goals">${goalsHtml}</div>`
-        : ""
+      : ""
     }
 
-    ${
-      biomarkerCards.length > 0
-        ? `<div class="rx-bio-section"><div class="rx-section-title">Biomarker trends — last 4 visits</div>
+    ${biomarkerCards.length > 0
+      ? `<div class="rx-bio-section"><div class="rx-section-title">Biomarker trends — last 4 visits</div>
            <div class="rx-bio-grid">${bioHtml}</div></div>`
-        : ""
+      : ""
     }
 
-    ${
-      ownMeds.length > 0
-        ? `<div class="rx-section-title">Medicines — prescribed by ${escape(doctorShortName(doctor.name))}</div>${ownMedsHtml}`
-        : ""
+    ${ownMeds.length > 0
+      ? `<div class="rx-section-title">Medicines — prescribed by ${escape(doctorShortName(doctor.name))}</div>${ownMedsHtml}`
+      : ""
     }
 
-    ${
-      externalMeds.length > 0
-        ? `<div class="rx-section-title" style="margin-top:14px">External medicines — prescribed by other doctors</div>${extMedsHtml}`
-        : ""
+    ${externalMeds.length > 0
+      ? `<div class="rx-section-title" style="margin-top:14px">External medicines — prescribed by other doctors</div>${extMedsHtml}`
+      : ""
     }
 
-    ${
-      referrals.length > 0 || labTests.length > 0
-        ? `<div class="rx-section-title">Referrals &amp; tests for next visit</div>
+    ${referrals.length > 0 || labTests.length > 0
+      ? `<div class="rx-section-title">Referrals &amp; tests for next visit</div>
            ${referralsHtml}
            ${labTestsHtml}`
-        : ""
+      : ""
     }
     ${followUpWithHtml}
   </div>
@@ -1136,9 +1143,8 @@ function buildPrescriptionHtml(data = {}) {
   <div class="rx-footer">
     <div class="rx-sig">
       <div style="font-weight:700">${escape(doctor.name || "Doctor")}</div>
-      <div style="font-size:10px;color:var(--ink3)">${
-        doctor.reg_no ? `Reg. No. ${escape(doctor.reg_no)} · ` : ""
-      }Date: ${fmtDateLong(today)}</div>
+      <div style="font-size:10px;color:var(--ink3)">${doctor.reg_no ? `Reg. No. ${escape(doctor.reg_no)} · ` : ""
+    }Date: ${fmtDateLong(today)}</div>
     </div>
     <div class="rx-next">${nextVisitText}</div>
   </div>

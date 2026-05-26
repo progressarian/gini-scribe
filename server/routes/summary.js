@@ -264,6 +264,60 @@ function fmtPrep(prep) {
   return `Compliance & symptoms (since last visit):\n${out.join("\n")}`;
 }
 
+// Returns a human-readable relative label for a follow-up date string.
+// e.g. "in 1 week", "in about 2 months", "tomorrow", "2 days ago"
+function relativeFollowUp(dateStr) {
+  if (!dateStr) return null;
+  const fuDate = new Date(String(dateStr).slice(0, 10));
+  if (isNaN(fuDate.getTime())) return null;
+  const diffDays = Math.round((fuDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "tomorrow";
+  if (diffDays === -1) return "yesterday";
+  if (diffDays > 0) {
+    if (diffDays <= 6) return `in ${diffDays} days`;
+    if (diffDays <= 10) return "in 1 week";
+    if (diffDays <= 17) return "in about 2 weeks";
+    if (diffDays <= 24) return "in about 3 weeks";
+    if (diffDays <= 45) return "in about 1 month";
+    if (diffDays <= 75) return "in about 2 months";
+    if (diffDays <= 105) return "in about 3 months";
+    if (diffDays <= 135) return "in about 4 months";
+    if (diffDays <= 165) return "in about 5 months";
+    if (diffDays <= 195) return "in about 6 months";
+    const months = Math.round(diffDays / 30);
+    return `in about ${months} months`;
+  }
+  // Past date — still useful for historical briefs
+  const abs = Math.abs(diffDays);
+  if (abs <= 6) return `${abs} day${abs === 1 ? "" : "s"} ago`;
+  if (abs <= 10) return "1 week ago";
+  if (abs <= 17) return "about 2 weeks ago";
+  if (abs <= 45) return "about 1 month ago";
+  const months = Math.round(abs / 30);
+  return `about ${months} month${months === 1 ? "" : "s"} ago`;
+}
+
+function fmtFollowUp(followUp, followUpWith, investigations = []) {
+  if (!followUp && !followUpWith) return null;
+  const parts = [];
+  if (followUp) {
+    const fu = typeof followUp === "string" ? { date: followUp } : followUp;
+    if (fu.date) {
+      const rel = relativeFollowUp(fu.date);
+      parts.push(`Relative time: ${rel || String(fu.date).slice(0, 10)}`);
+    }
+    if (fu.timing) parts.push(`Timing: ${fu.timing}`);
+    if (fu.notes) parts.push(`Notes: ${fu.notes}`);
+  }
+  if (followUpWith) parts.push(`Follow up with: ${followUpWith}`);
+  const invNames = (investigations || [])
+    .map((t) => (typeof t === "string" ? t : t.name || t.test || ""))
+    .filter(Boolean);
+  if (invNames.length > 0) parts.push(`Tests ordered for this follow-up: ${invNames.join(", ")}`);
+  return parts.length ? `Scheduled follow-up:\n${parts.map((p) => `  ${p}`).join("\n")}` : null;
+}
+
 function fmtDiagnoses(diagnoses) {
   if (!diagnoses || diagnoses.length === 0) return "Diagnoses: (none recorded)";
   const lines = diagnoses.slice(0, 15).map((d) => {
@@ -360,6 +414,11 @@ async function _generateAiBriefInner(
     fmtVitals(ctx.vitals || []),
     ``,
     fmtPrep(ctx.prep),
+    ``,
+    fmtFollowUp(ctx.followUp, ctx.followUpWith, ctx.investigations) || "Scheduled follow-up: (not recorded)",
+    ctx.followUp || ctx.followUpWith
+      ? `FOLLOW-UP INSTRUCTION (MANDATORY): A follow-up is scheduled for this patient (see "Scheduled follow-up" above). You MUST end the third paragraph with exactly one sentence that: (1) uses the RELATIVE TIME label verbatim (e.g. "next week", "in about 1 month", "in 2 weeks") — never the calendar date; (2) names the specific tests from "Tests ordered for this follow-up" if present (e.g. "for HbA1c, FBS, and UACR"); (3) weaves in any timing/preparation notes (e.g. "fasting", "after stopping medication 1 day prior"). Example shapes: "He is due next week for HbA1c and lipid panel, fasting." / "She is invited back in about 1 month for FBG and PP charting." / "He is scheduled in 2 weeks for HbA1c, creatinine, and UACR, after stopping antidiabetic medication 1 day prior." Do not skip or omit this sentence.`
+      : `FOLLOW-UP INSTRUCTION: No follow-up is recorded — do not mention or fabricate one.`,
     ``,
     `Rule engine alerts:`,
     formatAlerts(alerts),
@@ -615,7 +674,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     // same labLatest/labHistory/vitals as the /visit page UI (including
     // appointments.biomarkers JSONB and patient_vitals_log app readings).
     const labCtxPromise = buildVisitLabContext(pool, pid);
-    const [patientR, diagnosesR, apptR, latestReportR, activeMedsR, stoppedMedsR] =
+    const [patientR, diagnosesR, apptR, latestReportR, activeMedsR, stoppedMedsR, followupApptR] =
       await Promise.all([
         pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
 
@@ -627,9 +686,9 @@ router.get("/patients/:id/summary", async (req, res) => {
 
         // Prep from latest appointment (or specific appointment)
         apptId
-          ? pool.query(`SELECT id, compliance, biomarkers FROM appointments WHERE id=$1`, [apptId])
+          ? pool.query(`SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments WHERE id=$1`, [apptId])
           : pool.query(
-              `SELECT id, compliance, biomarkers FROM appointments
+              `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments
                WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
                ORDER BY appointment_date DESC LIMIT 1`,
               [pid],
@@ -667,6 +726,16 @@ router.get("/patients/:id/summary", async (req, res) => {
          WHERE patient_id=$1 AND is_active=false AND stopped_date > CURRENT_DATE - INTERVAL '60 days'`,
           [pid],
         ),
+
+        // Latest appointment with a biomarkers.followup value — mirrors
+        // visit.js query #25 so follow-up date resolution is identical.
+        pool.query(
+          `SELECT biomarkers, healthray_follow_up FROM appointments
+            WHERE patient_id=$1 AND biomarkers ? 'followup'
+            ORDER BY appointment_date DESC NULLS LAST, id DESC
+            LIMIT 1`,
+          [pid],
+        ),
       ]);
 
     const patient = patientR.rows[0];
@@ -684,6 +753,33 @@ router.get("/patients/:id/summary", async (req, res) => {
       missed: apptCompliance.missed || null,
       symptoms: apptCompliance.symptoms || [],
     };
+    // Replicate visit.js 4-tier follow-up resolution so the brief sees the
+    // same date as the visit page — healthray_follow_up → biomarkers.followup
+    // on the primary appt → same two fields on the biomarkers-followup appt.
+    const apptBiomarkers = apptRow?.biomarkers || {};
+    const followupApptRow = followupApptR.rows[0] || null;
+    const followupApptBio = followupApptRow?.biomarkers || {};
+    const _withDate = (fu) => (fu && fu.date ? fu : null);
+    const resolvedFollowUp =
+      _withDate(apptRow?.healthray_follow_up) ||
+      (apptBiomarkers.followup
+        ? {
+            date: apptBiomarkers.followup,
+            notes: apptRow?.healthray_follow_up?.notes || null,
+            timing: apptRow?.healthray_follow_up?.timing || null,
+          }
+        : null) ||
+      _withDate(followupApptRow?.healthray_follow_up) ||
+      (followupApptBio.followup
+        ? {
+            date: followupApptBio.followup,
+            notes: followupApptRow?.healthray_follow_up?.notes || null,
+            timing: followupApptRow?.healthray_follow_up?.timing || null,
+          }
+        : null);
+    const apptFollowUp = resolvedFollowUp ?? null;
+    const apptFollowUpWith = apptRow?.follow_up_with ?? null;
+    const apptInvestigations = apptRow?.healthray_investigations || [];
 
     // ── 4b. Split active meds into current-visit vs previous-visit buckets
     // off the persisted `visit_status` column (stamped by scribe write paths
@@ -783,6 +879,9 @@ router.get("/patients/:id/summary", async (req, res) => {
       stoppedMeds: stoppedParents,
       vitals: mergedVitals,
       prep,
+      followUp: apptFollowUp,
+      followUpWith: apptFollowUpWith,
+      investigations: apptInvestigations,
       visitsLast7d,
       visitsLast30d,
       isFrequentVisitor,
@@ -803,6 +902,8 @@ router.get("/patients/:id/summary", async (req, res) => {
       cached: false,
       latestReport,
       visitContext: { totalVisits, monthsWithGini, carePhase },
+      followUp: apptFollowUp ?? null,
+      followUpWith: apptFollowUpWith ?? null,
     };
 
     // ── 7. Store in cache (await so a fast follow-up request finds the row) ──

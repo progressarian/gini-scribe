@@ -931,7 +931,10 @@ router.get("/visit/:patientId", async (req, res) => {
                 typeof t === "string" ? { name: t, urgency: "routine" } : t,
               ),
               follow_up: followUpDate,
-              follow_up_with: apptPlan?.follow_up_with || null,
+              follow_up_with:
+                apptPlan?.follow_up_with ||
+                apptPlan?.healthray_follow_up?.notes ||
+                null,
               advice: apptPlan?.healthray_advice || null,
               diet_lifestyle: [
                 apptCompliance.diet,

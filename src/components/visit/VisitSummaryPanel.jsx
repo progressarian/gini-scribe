@@ -38,8 +38,8 @@ const AiRow = memo(function AiRow({ zone, text }) {
 
 const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointmentId }) {
   const [open, setOpen] = useState(false);
-  const [showAmber, setShowAmber] = useState(false);
-  const [showGreen, setShowGreen] = useState(false);
+  const [showAmber, setShowAmber] = useState(true);
+  const [showGreen, setShowGreen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [rules, setRules] = useState(null); // { red, amber, green }
   const [ai, setAi] = useState(null); // { red, amber, green } | null
@@ -84,10 +84,10 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, appointmentId]);
 
-  // Auto-open the panel when there are red items so the doctor sees them
-  // immediately on the visit page.
+  // Auto-open when there are amber or green items to show.
   useEffect(() => {
-    if (rules?.red?.length > 0) setOpen(true);
+    if ((rules?.amber?.length > 0 || rules?.green?.length > 0) && !open) setOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]);
 
   if (loading) {
@@ -108,12 +108,12 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
   if (!hasRed && !hasAmber && !hasGreen) return null;
 
   const topZone = rules.red.length > 0 ? "red" : rules.amber.length > 0 ? "amber" : "green";
-  const totalCount = display.red.length + display.amber.length + display.green.length;
+  const totalCount = display.amber.length + display.green.length;
   const summaryText =
     rules.red.length > 0
-      ? `🔴 ${rules.red.length} item${rules.red.length !== 1 ? "s" : ""} need attention`
+      ? `🔴 Items need attention`
       : rules.amber.length > 0
-        ? `🟡 ${rules.amber.length} item${rules.amber.length !== 1 ? "s" : ""} to consider`
+        ? `🟡 Items to consider`
         : `✅ All parameters on track — routine visit`;
 
   let footerText;
@@ -153,10 +153,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
     <div className={`sp-panel zone-${topZone}`}>
       <div className="sp-body">
         <div className={`sp-zone-hd zone-${topZone}`}>
-          <span>
-            {summaryText}
-            {totalCount > 0 ? ` · ${totalCount} item${totalCount !== 1 ? "s" : ""}` : ""}
-          </span>
+          <span>{summaryText}</span>
           <div className="sp-actions">
             <button
               className="bx bx-n sp-toggle-btn"
@@ -172,11 +169,8 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
           </div>
         </div>
 
-        {hasRed && <>{renderZone("red", display.red)}</>}
-
         {hasAmber && (
           <>
-            {hasRed && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-amber">
               <span>
                 🟡 Also consider · {display.amber.length} item
@@ -192,7 +186,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
 
         {hasGreen && (
           <>
-            {(hasRed || hasAmber) && <div className="sp-divider" />}
+            {hasAmber && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-green">
               <span>
                 ✅ Working well · {display.green.length} item

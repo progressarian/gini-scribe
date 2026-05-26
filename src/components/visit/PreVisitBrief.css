@@ -30,3 +30,34 @@
   border-radius: 4px;
   margin-bottom: 8px;
 }
+
+.pvb-followup {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.pvb-followup-label {
+  font-weight: 700;
+  color: var(--primary, #2563eb);
+  margin-right: 2px;
+}
+
+.pvb-followup-date {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pvb-followup-notes {
+  color: var(--text-muted, #6b7280);
+}
+
+.pvb-followup-with {
+  color: var(--text-muted, #6b7280);
+  font-style: italic;
+}
