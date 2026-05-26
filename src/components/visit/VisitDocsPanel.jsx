@@ -8,6 +8,7 @@ import { cleanNote } from "../../utils/cleanNote";
 import DocStatusPill from "../ui/DocStatusPill";
 import MismatchActions from "./MismatchActions";
 import usePatientStore from "../../stores/patientStore";
+import ConfirmModal from "../ui/ConfirmModal";
 
 const ICON_MAP = {
   lab_report: "🧪",
@@ -47,7 +48,26 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
 }) {
   const [viewingDoc, setViewingDoc] = useState(null);
   const [regenerating, setRegenerating] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [confirmDoc, setConfirmDoc] = useState(null);
   const patient = usePatientStore((s) => s.patient);
+
+  const handleDelete = useCallback(
+    async (doc) => {
+      setConfirmDoc(null);
+      setDeleting(doc.id);
+      try {
+        await api.delete(`/api/documents/${doc.id}`);
+        toast("Document deleted", "success");
+        onRefresh?.();
+      } catch (err) {
+        toast(err?.response?.data?.error || "Failed to delete document", "error");
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [onRefresh],
+  );
 
   const handleRegenerate = useCallback(
     async (e, doc) => {
@@ -166,29 +186,42 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
             </>
           )}
         </div>
-        {status.label ? (
-          <DocStatusPill doc={doc} patientId={patientId} size="sm" />
-        ) : doc.doc_type === "prescription" ? (
-          <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-            {doc.source === "visit" && (
-              <button
-                className="bx bx-s"
-                disabled={regenerating === doc.id}
-                onClick={(e) => handleRegenerate(e, doc)}
-                title="Regenerate prescription from current medicines"
-              >
-                {regenerating === doc.id ? "…" : "↻ Regen"}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          {status.label ? (
+            <DocStatusPill doc={doc} patientId={patientId} size="sm" />
+          ) : doc.doc_type === "prescription" ? (
+            <>
+              {doc.source === "visit" && (
+                <button
+                  className="bx bx-s"
+                  disabled={regenerating === doc.id}
+                  onClick={(e) => handleRegenerate(e, doc)}
+                  title="Regenerate prescription from current medicines"
+                >
+                  {regenerating === doc.id ? "…" : "↻ Regen"}
+                </button>
+              )}
+              <button className="bx bx-p" onClick={() => openDoc(doc)}>
+                View PDF
               </button>
-            )}
-            <button className="bx bx-p" onClick={() => openDoc(doc)}>
-              View PDF
+            </>
+          ) : (
+            <span className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}>
+              {doc.has_abnormal ? "Finding" : "Reviewed"}
+            </span>
+          )}
+          {doc.storage_path && (
+            <button
+              className="bx bx-s"
+              disabled={deleting === doc.id}
+              onClick={(e) => { e.stopPropagation(); setConfirmDoc(doc); }}
+              title="Delete this patient-uploaded document"
+              style={{ color: "#dc2626", borderColor: "#fecaca" }}
+            >
+              {deleting === doc.id ? "…" : "✕"}
             </button>
-          </div>
-        ) : (
-          <span className={`report-status ${doc.has_abnormal ? "rs-ab" : "rs-ok"}`}>
-            {doc.has_abnormal ? "Finding" : "Reviewed"}
-          </span>
-        )}
+          )}
+        </div>
       </div>
     );
   };
@@ -196,6 +229,14 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
   return (
     <>
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
+      <ConfirmModal
+        open={!!confirmDoc}
+        title="Delete document?"
+        message={`"${confirmDoc?.title || confirmDoc?.file_name || "This document"}" will be permanently deleted along with its extracted lab results. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => handleDelete(confirmDoc)}
+        onCancel={() => setConfirmDoc(null)}
+      />
       <div className="panel-body">
         <div className="sc">
           <div className="sch">

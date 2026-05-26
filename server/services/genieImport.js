@@ -38,7 +38,9 @@ function normalisePhone(phone) {
   if (!phone) return [];
   const digits = String(phone).replace(/[^\d]/g, "");
   const last10 = digits.slice(-10);
-  return Array.from(new Set([phone, digits, `+${digits}`, last10].filter(Boolean)));
+  // patientAuth stores 10-digit Indian numbers as +91XXXXXXXXXX — always include that variant
+  const withCountry = last10.length === 10 ? `+91${last10}` : null;
+  return Array.from(new Set([phone, digits, `+${digits}`, last10, withCountry].filter(Boolean)));
 }
 
 /**
@@ -52,7 +54,8 @@ export async function lookupGeniePatientsByPhone(phone, { includeMigrated = fals
   const variants = normalisePhone(phone);
   if (variants.length === 0) return [];
   let q = db.from("patients").select("*").in("phone", variants);
-  if (!includeMigrated) q = q.eq("migrated_to_gini", false);
+  // New patients have migrated_to_gini = null (not set on insert) — treat null as not migrated
+  if (!includeMigrated) q = q.or("migrated_to_gini.eq.false,migrated_to_gini.is.null");
   const { data, error } = await q;
   if (error || !data) return [];
   return data;
@@ -641,4 +644,26 @@ async function doConvert(db, geniePatient) {
     geniePatientId: geniePatient.id,
     imported: counts,
   };
+}
+
+/**
+ * Fire-and-forget: copy all genie app data into the hospital DB when a
+ * collision is first detected (same phone in both DBs). Safe to call without
+ * await — errors are logged, never thrown. Idempotent: bulkInsert uses
+ * ON CONFLICT DO NOTHING so re-runs are safe.
+ */
+export async function autoMigrateGeniePatient(geniePatient) {
+  const db = getGenieDb();
+  if (!db || !geniePatient || geniePatient.migrated_to_gini) return;
+  try {
+    const result = await doConvert(db, geniePatient);
+    if (result.ok) {
+      console.log(
+        `[AutoMigrate] genie ${geniePatient.id} → scribe ${result.scribePatientId}`,
+        result.imported,
+      );
+    }
+  } catch (e) {
+    console.error(`[AutoMigrate] Failed for genie ${geniePatient.id}:`, e.message);
+  }
 }

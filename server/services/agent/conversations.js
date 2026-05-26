@@ -3,7 +3,8 @@
 // The patient app only sends the latest user message + a conversation_id.
 // We hydrate the thread, run the agent loop in routes/ai.js, then persist
 // the new user turn + assistant turn back. When the thread grows beyond
-// LIVE_WINDOW turns, the oldest pairs get folded into `checkpoint_summary`
+// LIVE_WINDOW turns, the oldest pairs get
+// folded into `checkpoint_summary`
 // (an LLM-written paragraph) so per-turn token cost stays bounded.
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -231,11 +232,12 @@ export function buildOutgoingMessages(conversation, latestUserBlock) {
   // only the prefix changes; tool-use blocks (image / document) are kept
   // intact by appending the guard as a leading text block.
   const guardText =
-    `[ANSWER ONLY THIS MESSAGE. The prior turns above are CONTEXT, not topics to revisit. ` +
-    `Do NOT prepend "Your current weight…" / "Your BP…" / any status line that wasn't asked for. ` +
-    `Do NOT append "For snack ideas…" / "let me know…" / any upsell for topics not in this message. ` +
-    `If the question is about meds, answer only meds. If it's about progress, answer only progress. ` +
-    `If it's a greeting, just greet. No stitching. No recaps. The reply addresses THIS message and stops.]\n\n`;
+    `[FRESH TURN — YOUR ONLY TASK IS THE PATIENT MESSAGE WRITTEN BELOW THIS LINE. ` +
+    `Treat everything above as silent read-only history. ` +
+    `Do NOT reference, summarise, revisit, or continue any topic from prior turns ` +
+    `unless the patient's message below explicitly mentions it. ` +
+    `Do not add status lines, recaps, or suggestions that were not directly requested. ` +
+    `One message in → one focused answer out. Nothing else.]\n\n`;
   const guardedLatest = (() => {
     const c = latestUserBlock?.content;
     if (typeof c === "string") {

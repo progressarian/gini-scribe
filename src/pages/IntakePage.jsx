@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
 import useClinicalStore from "../stores/clinicalStore";
@@ -36,6 +36,7 @@ export default function IntakePage() {
   const setIntakeReports = useLabStore((s) => s.setIntakeReports);
   const saveIntakeReportToDB = useLabStore((s) => s.saveIntakeReportToDB);
   const saveAllIntakeReports = useLabStore((s) => s.saveAllIntakeReports);
+  const rehydrateFromSession = useLabStore((s) => s.rehydrateFromSession);
   const processLab = useLabStore((s) => s.processLab);
   const conData = useClinicalStore((s) => s.conData);
   const complaints = useVisitStore((s) => s.complaints);
@@ -57,6 +58,10 @@ export default function IntakePage() {
   const clearErr = useUiStore((s) => s.clearErr);
   const saveDraft = useVisitStore((s) => s.saveDraft);
   const [continuing, setContinuing] = useState(false);
+
+  useEffect(() => {
+    rehydrateFromSession();
+  }, []);
 
   return (
     <div>

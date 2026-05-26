@@ -542,8 +542,10 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         // (note has no follow-up date sections at all). If the note has follow-up
         // sections but none match today's appointment date, the patient likely
         // didn't visit — skip the AI parse to avoid syncing stale OBSERVATIONS data.
-        const { hasAny: noteHasFuDates, matchesApptDate: noteMatchesDate } =
-          analyzeFollowUpDates(rawText, apptDate);
+        const { hasAny: noteHasFuDates, matchesApptDate: noteMatchesDate } = analyzeFollowUpDates(
+          rawText,
+          apptDate,
+        );
         const skipParse = noteHasFuDates && !noteMatchesDate;
         if (skipParse) {
           log(
@@ -554,6 +556,14 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
 
         // Parse with AI
         const parsed = skipParse ? null : await parsePrescriptionWithAi(rawText, apptDate);
+
+        // Drop any labs the AI tagged as "today" when a matching FOLLOW UP
+        // section exists — those "today" entries come from the OBSERVATIONS
+        // baseline block, not from the actual visit. The prompt rule is
+        // unreliable for this; code-level filtering is the only safe fix.
+        if (parsed?.labs?.length && noteMatchesDate) {
+          parsed.labs = parsed.labs.filter((lab) => lab.date !== "today");
+        }
 
         // Guard against a flaky re-parse silently wiping prior good data.
         // parsePrescriptionWithAi returns null on any hard failure (API error,

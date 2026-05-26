@@ -25,7 +25,7 @@ import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { sendOtpSms } from "../services/msg91.js";
-import { getGenieDb } from "../services/genieImport.js";
+import { getGenieDb, autoMigrateGeniePatient } from "../services/genieImport.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
 const JWT_PATIENT_EXPIRES_IN = "30d";
@@ -80,11 +80,13 @@ async function findAppPatient(phone) {
   if (!db) return null;
 
   // First try exact-variant match (the common case).
+  // null = new self-registered patient (insertAppPatient doesn't set the field);
+  // false = explicitly not migrated. Treat both as "not yet migrated".
   const { data, error } = await db
     .from("patients")
     .select("*")
     .in("phone", phoneVariants(phone))
-    .eq("migrated_to_gini", false)
+    .or("migrated_to_gini.eq.false,migrated_to_gini.is.null")
     .limit(1);
   if (!error && data && data.length > 0) return data[0];
 
@@ -96,8 +98,8 @@ async function findAppPatient(phone) {
   const { data: data2 } = await db
     .from("patients")
     .select("*")
-    .or([`phone.ilike.%${last10}`, `phone.ilike.%${last10}%`].join(","))
-    .eq("migrated_to_gini", false)
+    .or(`phone.ilike.%${last10},phone.ilike.+91${last10}`)
+    .or("migrated_to_gini.eq.false,migrated_to_gini.is.null")
     .limit(1);
   return data2?.[0] || null;
 }
@@ -108,29 +110,16 @@ async function findAppPatient(phone) {
 async function resolvePatientByPhone(phone) {
   const hospital = await findHospitalPatient(phone);
   if (hospital) {
-    // Opportunistic collision cleanup
+    // Collision: both DBs have a row for this phone. Fire full data migration
+    // in background (non-blocking) — doConvert copies all app history into the
+    // hospital DB and flips migrated_to_gini=true at the end.
     const app = await findAppPatient(phone);
-    if (app) await markAppRowMigrated(app.id, hospital.id);
+    if (app) autoMigrateGeniePatient(app).catch(() => {});
     return { db: "hospital", patient: hospital };
   }
   const app = await findAppPatient(phone);
   if (app) return { db: "app", patient: app };
   return { db: null, patient: null };
-}
-
-async function markAppRowMigrated(appId, scribePatientId) {
-  const db = getGenieDb();
-  if (!db) return;
-  await db
-    .from("patients")
-    .update({
-      migrated_to_gini: true,
-      migrated_to_gini_at: new Date().toISOString(),
-      gini_patient_id: String(scribePatientId),
-    })
-    .eq("id", appId)
-    .then(() => {})
-    .catch(() => {});
 }
 
 async function listLinkedPatients(db, phone) {
