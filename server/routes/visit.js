@@ -870,10 +870,24 @@ router.get("/visit/:patientId", async (req, res) => {
         recorded_date: r.recorded_date || null,
       };
     });
+    // Numeric sequence key for tie-breaking. Clinic rows have an integer id;
+    // app rows are tagged "app:<n>" (see appVitals above). Within a single
+    // source a higher id == more recently inserted, so this gives a stable,
+    // deterministic order when recorded_at collides — e.g. several app readings
+    // logged on the same recorded_date with no created_at all collapse to
+    // midnight UTC and would otherwise tie. (Note: app rows already fold
+    // created_at into recorded_at, and the clinic `vitals` table has no
+    // created_at column, so recorded_at is the only timestamp to compare.)
+    const seq = (r) => {
+      const raw = typeof r.id === "string" ? r.id.replace(/^app:/, "") : r.id;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 0;
+    };
     const mergedVitals = [...vitalsR.rows, ...appVitals].sort((a, b) => {
       const ta = a.recorded_at ? new Date(a.recorded_at).getTime() : 0;
       const tb = b.recorded_at ? new Date(b.recorded_at).getTime() : 0;
-      return tb - ta;
+      if (tb !== ta) return tb - ta; // newest first
+      return seq(b) - seq(a); // tie-break: higher id first (within a source)
     });
 
     res.json({
