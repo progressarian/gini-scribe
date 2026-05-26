@@ -186,7 +186,10 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
             </>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+          onClick={(e) => e.stopPropagation()}
+        >
           {status.label ? (
             <DocStatusPill doc={doc} patientId={patientId} size="sm" />
           ) : doc.doc_type === "prescription" ? (
@@ -210,17 +213,20 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
               {doc.has_abnormal ? "Finding" : "Reviewed"}
             </span>
           )}
-          {doc.storage_path && (
+          {/* {doc.storage_path && (
             <button
               className="bx bx-s"
               disabled={deleting === doc.id}
-              onClick={(e) => { e.stopPropagation(); setConfirmDoc(doc); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDoc(doc);
+              }}
               title="Delete this patient-uploaded document"
               style={{ color: "#dc2626", borderColor: "#fecaca" }}
             >
               {deleting === doc.id ? "…" : "✕"}
             </button>
-          )}
+          )} */}
         </div>
       </div>
     );
