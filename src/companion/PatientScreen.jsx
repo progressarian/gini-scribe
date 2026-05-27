@@ -1,5 +1,5 @@
 import "./PatientScreen.css";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { makeNavClick } from "../lib/navClick";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -11,6 +11,9 @@ import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 import { useCompanionPatient } from "../queries/hooks/useCompanionPatient.js";
 import { qk } from "../queries/keys.js";
 import DocStatusPill from "../components/ui/DocStatusPill.jsx";
+import ConfirmModal from "../components/ui/ConfirmModal.jsx";
+import { toast } from "../stores/uiStore.js";
+import api from "../services/api.js";
 
 const tabs = [
   ["records", "📎 Docs"],
@@ -149,7 +152,26 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
   const rejectMismatchedExtraction = useCompanionStore((s) => s.rejectMismatchedExtraction);
   const [mismatchReview, setMismatchReview] = useState(null);
   const [processing, setProcessing] = useState({}); // { [docId]: "accept"|"reject" }
+  const [confirmDoc, setConfirmDoc] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const queryClient = useQueryClient();
+
+  const handleDelete = useCallback(
+    async (doc) => {
+      setConfirmDoc(null);
+      setDeleting(doc.id);
+      try {
+        await api.delete(`/api/documents/${doc.id}`);
+        toast("Document deleted", "success");
+        queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientData.id) });
+      } catch (err) {
+        toast(err?.response?.data?.error || "Failed to delete document", "error");
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [queryClient, patientData.id],
+  );
 
   // Refetch patient docs + mismatch list every time the Records tab mounts
   // (user switches tabs → RecordsTab remounts → effect fires).
@@ -365,6 +387,25 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
                   View
                 </button>
               )}
+              {(doc.storage_path || doc.file_url) && (
+                <button
+                  disabled={deleting === doc.id}
+                  onClick={() => setConfirmDoc(doc)}
+                  style={{
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#dc2626",
+                    background: "#fff",
+                    border: "1px solid #fecaca",
+                    borderRadius: 5,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {deleting === doc.id ? "…" : "🗑"}
+                </button>
+              )}
             </div>
             {state?.status === "mismatch" && state.mismatch && (
               <div
@@ -448,6 +489,14 @@ const RecordsTab = memo(function RecordsTab({ patientData, onCapture, onViewDoc 
           </div>
         );
       })}
+      <ConfirmModal
+        open={!!confirmDoc}
+        title="Delete document?"
+        message={`"${confirmDoc?.title || confirmDoc?.file_name || "This document"}" will be permanently deleted along with its extracted lab results. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => handleDelete(confirmDoc)}
+        onCancel={() => setConfirmDoc(null)}
+      />
       {mismatchReview && (
         <MismatchReviewModal
           action={mismatchReview.action}

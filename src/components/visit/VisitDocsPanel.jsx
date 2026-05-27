@@ -213,7 +213,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
               {doc.has_abnormal ? "Finding" : "Reviewed"}
             </span>
           )}
-          {/* {doc.storage_path && (
+          {(doc.storage_path || doc.file_url) && (
             <button
               className="bx bx-s"
               disabled={deleting === doc.id}
@@ -221,12 +221,12 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
                 e.stopPropagation();
                 setConfirmDoc(doc);
               }}
-              title="Delete this patient-uploaded document"
+              title="Delete this document"
               style={{ color: "#dc2626", borderColor: "#fecaca" }}
             >
               {deleting === doc.id ? "…" : "✕"}
             </button>
-          )} */}
+          )}
         </div>
       </div>
     );

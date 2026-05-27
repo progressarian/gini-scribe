@@ -62,7 +62,15 @@ export default function ConfirmModal({
           {title}
         </div>
         {message && (
-          <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.55, marginBottom: 18 }}>
+          <div
+            style={{
+              fontSize: 13,
+              color: "#475569",
+              lineHeight: 1.55,
+              marginBottom: 18,
+              wordBreak: "break-word",
+            }}
+          >
             {message}
           </div>
         )}

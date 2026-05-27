@@ -2297,6 +2297,31 @@ function BiomarkersTab({ appt, onSave, onContinue, showToast }) {
                                 View
                               </button>
                             )}
+                            {!r.uploading && !r.extracting && r.docId && (
+                              <button
+                                onClick={() =>
+                                  setReportToDelete({
+                                    typeId: activeType,
+                                    name: r.name,
+                                    docId: r.docId,
+                                    extractedData: edParsed,
+                                  })
+                                }
+                                style={{
+                                  fontSize: 11,
+                                  color: "#dc2626",
+                                  background: "#fff",
+                                  border: "1px solid #fecaca",
+                                  cursor: "pointer",
+                                  padding: "3px 8px",
+                                  borderRadius: 5,
+                                  fontWeight: 600,
+                                  fontFamily: FB,
+                                }}
+                              >
+                                🗑
+                              </button>
+                            )}
                           </div>
                           {/* Extracted data preview */}
                           {r.extractedData &&

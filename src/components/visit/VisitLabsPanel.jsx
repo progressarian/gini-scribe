@@ -9,6 +9,9 @@ import { cleanNote } from "../../utils/cleanNote";
 import DocStatusPill from "../ui/DocStatusPill";
 import MismatchActions from "./MismatchActions";
 import usePatientStore from "../../stores/patientStore";
+import ConfirmModal from "../ui/ConfirmModal";
+import { toast } from "../../stores/uiStore";
+import api from "../../services/api";
 
 // Panel grouping config lives in src/config/labOrder.js — single source of
 // truth shared with Outcomes, Sidebar, Assess and the dashboard. See
@@ -810,11 +813,31 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   labLatest,
   labOrders,
   onUploadReport,
+  onRefresh,
 }) {
   const [viewingDoc, setViewingDoc] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null); // null = "Latest"
   const [labSearch, setLabSearch] = useState("");
+  const [confirmDoc, setConfirmDoc] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const patient = usePatientStore((s) => s.patient);
+
+  const handleDelete = useCallback(
+    async (doc) => {
+      setConfirmDoc(null);
+      setDeleting(doc.id);
+      try {
+        await api.delete(`/api/documents/${doc.id}`);
+        toast("Document deleted", "success");
+        onRefresh?.();
+      } catch (err) {
+        toast(err?.response?.data?.error || "Failed to delete document", "error");
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [onRefresh],
+  );
 
   // On the Labs tab we want every uploaded document to be visible except
   // prescriptions (those belong to the Rx / visit history, not the lab view).
@@ -932,6 +955,14 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
   return (
     <>
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
+      <ConfirmModal
+        open={!!confirmDoc}
+        title="Delete document?"
+        message={`"${confirmDoc?.title || confirmDoc?.file_name || "This document"}" will be permanently deleted along with its extracted lab results. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => handleDelete(confirmDoc)}
+        onCancel={() => setConfirmDoc(null)}
+      />
       <div className="panel-body">
         {/* Blood Reports */}
         <div className="sc">
@@ -997,15 +1028,31 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         </>
                       )}
                     </div>
-                    {status.label ? (
-                      <DocStatusPill doc={doc} patientId={patientId} size="sm" />
-                    ) : (
-                      <span
-                        className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
-                      >
-                        {i === 0 ? "Latest" : doc.has_abnormal ? "Abnormal" : "Normal"}
-                      </span>
-                    )}
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {status.label ? (
+                        <DocStatusPill doc={doc} patientId={patientId} size="sm" />
+                      ) : (
+                        <span
+                          className={`report-status ${i === 0 ? "rs-new" : doc.has_abnormal ? "rs-ab" : "rs-ok"}`}
+                        >
+                          {i === 0 ? "Latest" : doc.has_abnormal ? "Abnormal" : "Normal"}
+                        </span>
+                      )}
+                      {(doc.storage_path || doc.file_url) && (
+                        <button
+                          className="bx bx-s"
+                          disabled={deleting === doc.id}
+                          onClick={() => setConfirmDoc(doc)}
+                          title="Delete this document"
+                          style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                        >
+                          {deleting === doc.id ? "…" : "✕"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -1081,11 +1128,27 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                         </>
                       )}
                     </div>
-                    {status.label ? (
-                      <DocStatusPill doc={doc} patientId={patientId} size="sm" />
-                    ) : (
-                      <span className="report-status rs-ab">Review</span>
-                    )}
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {status.label ? (
+                        <DocStatusPill doc={doc} patientId={patientId} size="sm" />
+                      ) : (
+                        <span className="report-status rs-ab">Review</span>
+                      )}
+                      {(doc.storage_path || doc.file_url) && (
+                        <button
+                          className="bx bx-s"
+                          disabled={deleting === doc.id}
+                          onClick={() => setConfirmDoc(doc)}
+                          title="Delete this document"
+                          style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                        >
+                          {deleting === doc.id ? "…" : "✕"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })

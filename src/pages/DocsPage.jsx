@@ -1,5 +1,5 @@
 import "./DocsPage.css";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import usePatientStore from "../stores/patientStore";
 import useLabPortalStore from "../stores/labPortalStore";
 import { ts } from "../config/constants.js";
@@ -9,6 +9,9 @@ import { usePatientFullData } from "../queries/hooks/usePatientFullData.js";
 import DocStatusPill from "../components/ui/DocStatusPill.jsx";
 import MismatchActions from "../components/visit/MismatchActions.jsx";
 import { cleanNote } from "../utils/cleanNote.js";
+import ConfirmModal from "../components/ui/ConfirmModal.jsx";
+import { toast } from "../stores/uiStore.js";
+import api from "../services/api.js";
 
 export default function DocsPage() {
   const patient = usePatientStore((s) => s.patient);
@@ -16,15 +19,42 @@ export default function DocsPage() {
   const expandedDocId = useLabPortalStore((s) => s.expandedDocId);
   const setExpandedDocId = useLabPortalStore((s) => s.setExpandedDocId);
   const [viewingDoc, setViewingDoc] = useState(null);
+  const [confirmDoc, setConfirmDoc] = useState(null);
+  const [deleting, setDeleting] = useState(null);
 
   // Refetches on mount (every time user navigates to /docs), on window
   // focus, and polls every 5s while any doc is still extracting so status
   // pills update live.
-  const { data: pfd, isFetching } = usePatientFullData(dbPatientId);
+  const { data: pfd, isFetching, refetch } = usePatientFullData(dbPatientId);
+
+  const handleDelete = useCallback(
+    async (doc) => {
+      setConfirmDoc(null);
+      setDeleting(doc.id);
+      try {
+        await api.delete(`/api/documents/${doc.id}`);
+        toast("Document deleted", "success");
+        refetch();
+      } catch (err) {
+        toast(err?.response?.data?.error || "Failed to delete document", "error");
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [refetch],
+  );
 
   return (
     <>
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
+      <ConfirmModal
+        open={!!confirmDoc}
+        title="Delete document?"
+        message={`"${confirmDoc?.title || confirmDoc?.file_name || "This document"}" will be permanently deleted along with its extracted lab results. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => handleDelete(confirmDoc)}
+        onCancel={() => setConfirmDoc(null)}
+      />
       <div>
         <div className="docs__title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span>📎 Patient Documents</span>
@@ -222,53 +252,7 @@ export default function DocsPage() {
         ) : (
           <div>
             {(() => {
-              const docConsultIds = new Set(
-                (pfd?.documents || []).map((d) => d.consultation_id).filter(Boolean),
-              );
-              const synthRx = (pfd?.consultations || [])
-                .filter(
-                  (c) =>
-                    c.con_data &&
-                    !docConsultIds.has(c.id) &&
-                    (c.con_data.medications_confirmed || []).length > 0,
-                )
-                .map((c) => {
-                  const cd = c.con_data;
-                  const vd = c.visit_date
-                    ? new Date(String(c.visit_date).slice(0, 10) + "T12:00:00").toLocaleDateString(
-                        "en-IN",
-                        { day: "2-digit", month: "short", year: "numeric" },
-                      )
-                    : "";
-                  return {
-                    id: `consult_rx_${c.id}`,
-                    doc_type: "prescription",
-                    title: `Prescription — ${c.con_name || "Dr. Bhansali"} — ${vd}`,
-                    doc_date: c.visit_date,
-                    source: "consultation",
-                    extracted_data: {
-                      doctor: c.con_name || "Dr. Bhansali",
-                      mo: c.mo_name || null,
-                      diagnoses: cd.diagnoses || [],
-                      chief_complaints: cd.chief_complaints || [],
-                      medications: (cd.medications_confirmed || []).map((m) => ({
-                        name: m.name,
-                        dose: m.dose,
-                        frequency: m.frequency,
-                        timing: m.timing,
-                        route: m.route || "Oral",
-                        composition: m.composition,
-                        forDiagnosis: m.forDiagnosis || [],
-                        isNew: m.isNew || false,
-                      })),
-                      goals: cd.goals || [],
-                      diet_lifestyle: cd.diet_lifestyle || [],
-                      assessment_summary: cd.assessment_summary || null,
-                      follow_up: cd.follow_up || null,
-                    },
-                  };
-                });
-              const docs = [...(pfd?.documents || []), ...synthRx].sort(
+              const docs = [...(pfd?.documents || [])].sort(
                 (a, b) => new Date(b.doc_date || 0) - new Date(a.doc_date || 0),
               );
               const groups = {};
@@ -494,6 +478,25 @@ export default function DocsPage() {
                               {expandedDocId === doc.id ? "▲ Hide Plan" : "📋 View Plan"}
                             </button>
                           )}
+                          {typeof doc.id === "number" && (
+                            <button
+                              disabled={deleting === doc.id}
+                              onClick={() => setConfirmDoc(doc)}
+                              style={{
+                                padding: "4px 10px",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: "#dc2626",
+                                background: "#fff",
+                                border: "1px solid #fecaca",
+                                borderRadius: 6,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                              }}
+                            >
+                              {deleting === doc.id ? "Deleting…" : "🗑 Delete"}
+                            </button>
+                          )}
                         </div>
                         {expandedDocId === doc.id && doc.doc_type === "prescription" && ed && (
                           <div className="docs__plan">
@@ -572,9 +575,13 @@ export default function DocsPage() {
                                   : ""}
                               </div>
                             )}
-                            {ed.doctor && (
+                            {(ed.doctor || ed.mo) && (
                               <div className="docs__plan-doctor">
-                                Doctor: {ed.doctor} {ed.mo ? `| MO: ${ed.mo}` : ""}
+                                Doctor:{" "}
+                                {typeof ed.doctor === "string" ? ed.doctor : ed.doctor?.name || ""}
+                                {ed.mo
+                                  ? ` | MO: ${typeof ed.mo === "string" ? ed.mo : ed.mo?.name || ""}`
+                                  : ""}
                               </div>
                             )}
                           </div>

@@ -87,7 +87,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
   // Auto-open when there are amber or green items to show.
   useEffect(() => {
     if ((rules?.amber?.length > 0 || rules?.green?.length > 0) && !open) setOpen(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]);
 
   if (loading) {
@@ -101,7 +101,15 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
 
   if (!rules) return null;
 
-  const display = ai ?? rules;
+  // Per-zone fallback: if AI returned empty arrays, use rule-engine items so
+  // the card is never blank when there is clinical data to show.
+  const display = ai
+    ? {
+        red: ai.red?.length > 0 ? ai.red : rules.red,
+        amber: ai.amber?.length > 0 ? ai.amber : rules.amber,
+        green: ai.green?.length > 0 ? ai.green : rules.green,
+      }
+    : rules;
   const hasRed = display.red.length > 0;
   const hasAmber = display.amber.length > 0;
   const hasGreen = display.green.length > 0;
@@ -130,7 +138,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
 
   const renderZone = (zone, items) =>
     items.map((item, i) =>
-      ai ? (
+      typeof item === "string" ? (
         <AiRow key={i} zone={zone} text={item} />
       ) : (
         <AlertRow key={item.id} zone={zone} alert={item} />
@@ -173,7 +181,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
           <>
             <div className="sp-zone-hd zone-amber">
               <span>
-                🟡 Also consider · {display.amber.length} item
+                🟡 Also consider item
                 {display.amber.length !== 1 ? "s" : ""}
               </span>
               <button className="bx bx-n sp-toggle-btn" onClick={() => setShowAmber((v) => !v)}>
@@ -189,7 +197,7 @@ const VisitSummaryPanel = memo(function VisitSummaryPanel({ patientId, appointme
             {hasAmber && <div className="sp-divider" />}
             <div className="sp-zone-hd zone-green">
               <span>
-                ✅ Working well · {display.green.length} item
+                ✅ Working well item
                 {display.green.length !== 1 ? "s" : ""}{" "}
                 <span className="sp-zone-hd-sub">— tell the patient</span>
               </span>

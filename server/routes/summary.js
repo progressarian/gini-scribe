@@ -415,10 +415,13 @@ async function _generateAiBriefInner(
     ``,
     fmtPrep(ctx.prep),
     ``,
-    fmtFollowUp(ctx.followUp, ctx.followUpWith, ctx.investigations) || "Scheduled follow-up: (not recorded)",
-    ctx.followUp || ctx.followUpWith
+    fmtFollowUp(ctx.followUp, ctx.followUpWith, ctx.investigations) ||
+      "Scheduled follow-up: (not recorded)",
+    (ctx.followUp || ctx.followUpWith) && ctx.followUpIsFuture
       ? `FOLLOW-UP INSTRUCTION (MANDATORY): A follow-up is scheduled for this patient (see "Scheduled follow-up" above). You MUST end the third paragraph with exactly one sentence that: (1) uses the RELATIVE TIME label verbatim (e.g. "next week", "in about 1 month", "in 2 weeks") — never the calendar date; (2) names the specific tests from "Tests ordered for this follow-up" if present (e.g. "for HbA1c, FBS, and UACR"); (3) weaves in any timing/preparation notes (e.g. "fasting", "after stopping medication 1 day prior"). Example shapes: "He is due next week for HbA1c and lipid panel, fasting." / "She is invited back in about 1 month for FBG and PP charting." / "He is scheduled in 2 weeks for HbA1c, creatinine, and UACR, after stopping antidiabetic medication 1 day prior." Do not skip or omit this sentence.`
-      : `FOLLOW-UP INSTRUCTION: No follow-up is recorded — do not mention or fabricate one.`,
+      : ctx.followUp && !ctx.followUpIsFuture
+        ? `FOLLOW-UP INSTRUCTION: The scheduled follow-up date has already passed — do not include a follow-up sentence in the summary.`
+        : `FOLLOW-UP INSTRUCTION: No follow-up is recorded — do not mention or fabricate one.`,
     ``,
     `Rule engine alerts:`,
     formatAlerts(alerts),
@@ -686,7 +689,10 @@ router.get("/patients/:id/summary", async (req, res) => {
 
         // Prep from latest appointment (or specific appointment)
         apptId
-          ? pool.query(`SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments WHERE id=$1`, [apptId])
+          ? pool.query(
+              `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments WHERE id=$1`,
+              [apptId],
+            )
           : pool.query(
               `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments
                WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
@@ -730,7 +736,7 @@ router.get("/patients/:id/summary", async (req, res) => {
         // Latest appointment with a biomarkers.followup value — mirrors
         // visit.js query #25 so follow-up date resolution is identical.
         pool.query(
-          `SELECT biomarkers, healthray_follow_up FROM appointments
+          `SELECT biomarkers, healthray_follow_up, healthray_investigations, follow_up_with FROM appointments
             WHERE patient_id=$1 AND biomarkers ? 'followup'
             ORDER BY appointment_date DESC NULLS LAST, id DESC
             LIMIT 1`,
@@ -778,8 +784,17 @@ router.get("/patients/:id/summary", async (req, res) => {
           }
         : null);
     const apptFollowUp = resolvedFollowUp ?? null;
-    const apptFollowUpWith = apptRow?.follow_up_with ?? null;
-    const apptInvestigations = apptRow?.healthray_investigations || [];
+    // Prefer follow_up_with and investigations from the appointment that
+    // supplied the follow-up date — it may differ from the latest apptRow.
+    const apptFollowUpWith = apptRow?.follow_up_with || followupApptRow?.follow_up_with || null;
+    const apptInvestigations =
+      (apptRow?.healthray_investigations?.length ? apptRow.healthray_investigations : null) ||
+      (followupApptRow?.healthray_investigations?.length
+        ? followupApptRow.healthray_investigations
+        : null) ||
+      [];
+    const _fuRel = apptFollowUp?.date ? relativeFollowUp(apptFollowUp.date) : null;
+    const followUpIsFuture = _fuRel ? !_fuRel.includes(" ago") && _fuRel !== "yesterday" : false;
 
     // ── 4b. Split active meds into current-visit vs previous-visit buckets
     // off the persisted `visit_status` column (stamped by scribe write paths
@@ -881,6 +896,7 @@ router.get("/patients/:id/summary", async (req, res) => {
       prep,
       followUp: apptFollowUp,
       followUpWith: apptFollowUpWith,
+      followUpIsFuture,
       investigations: apptInvestigations,
       visitsLast7d,
       visitsLast30d,

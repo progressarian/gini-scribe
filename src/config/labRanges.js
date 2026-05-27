@@ -19,6 +19,8 @@ export const FALLBACK_RANGES = {
 
   // Lipids
   "Total Cholesterol": "< 200 mg/dL",
+  "Serum Cholesterol": "< 200 mg/dL",
+  Cholesterol: "< 200 mg/dL",
   LDL: "< 100 mg/dL",
   HDL: "> 40 mg/dL",
   Triglycerides: "< 150 mg/dL",

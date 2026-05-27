@@ -1,5 +1,5 @@
 import "./LabPortalPage.css";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { makeNavClick } from "../lib/navClick";
 import { toast } from "../stores/uiStore.js";
@@ -9,10 +9,12 @@ import useLabPortalStore from "../stores/labPortalStore.js";
 import PdfViewerModal from "../components/visit/PdfViewerModal.jsx";
 import { getDocStatus } from "../utils/docStatus.js";
 import DocStatusPill from "../components/ui/DocStatusPill.jsx";
+import ConfirmModal from "../components/ui/ConfirmModal.jsx";
+import api from "../services/api.js";
 
 export default function LabPortalPage() {
   const { currentDoctor } = useAuthStore();
-  const { patient, dbPatientId, getPfd, newPatient } = usePatientStore();
+  const { patient, dbPatientId, getPfd, newPatient, setPatientFullData } = usePatientStore();
   const {
     labPortalFiles,
     labPortalDate,
@@ -24,8 +26,28 @@ export default function LabPortalPage() {
   const navigate = useNavigate();
   const navClick = makeNavClick(navigate);
   const [viewingDoc, setViewingDoc] = useState(null);
+  const [confirmDoc, setConfirmDoc] = useState(null);
+  const [deleting, setDeleting] = useState(null);
 
   const pfd = getPfd();
+
+  const handleDelete = useCallback(
+    async (doc) => {
+      setConfirmDoc(null);
+      setDeleting(doc.id);
+      try {
+        await api.delete(`/api/documents/${doc.id}`);
+        toast("Document deleted", "success");
+        const { data: full } = await api.get(`/api/patients/${dbPatientId}`);
+        setPatientFullData(full);
+      } catch (err) {
+        toast(err?.response?.data?.error || "Failed to delete document", "error");
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [dbPatientId, setPatientFullData],
+  );
 
   return (
     <div>
@@ -323,6 +345,25 @@ export default function LabPortalPage() {
                         📄 View
                       </button>
                     )}
+                    {(doc.storage_path || doc.file_url) && (
+                      <button
+                        disabled={deleting === doc.id}
+                        onClick={() => setConfirmDoc(doc)}
+                        style={{
+                          padding: "3px 8px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#dc2626",
+                          background: "#fff",
+                          border: "1px solid #fecaca",
+                          borderRadius: 5,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {deleting === doc.id ? "…" : "🗑"}
+                      </button>
+                    )}
                     <span className="lab-portal__prev-doc-source">{doc.source || ""}</span>
                   </div>
                 );
@@ -332,6 +373,14 @@ export default function LabPortalPage() {
         </div>
       )}
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
+      <ConfirmModal
+        open={!!confirmDoc}
+        title="Delete document?"
+        message={`"${confirmDoc?.title || confirmDoc?.file_name || "This document"}" will be permanently deleted along with its extracted lab results. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => handleDelete(confirmDoc)}
+        onCancel={() => setConfirmDoc(null)}
+      />
     </div>
   );
 }

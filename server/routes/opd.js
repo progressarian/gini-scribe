@@ -407,6 +407,11 @@ router.get("/opd/appointments", async (req, res) => {
                     )
               ) u
             ))::int AS visit_count,
+           (SELECT EXISTS(
+              SELECT 1 FROM consultations c
+               WHERE c.patient_id = pids.pid
+                 AND c.visit_date::date = $2
+            )) AS has_today_visit,
            -- Only count actually-attended visits; a missed slot or cancelled
            -- booking is not a "last visit" the clinician should rely on.
            (SELECT MAX(a3.appointment_date) FROM appointments a3
@@ -802,7 +807,13 @@ router.get("/opd/appointments", async (req, res) => {
       const uplDate =
         [a?.upl_lab_date_lr, a?.upl_lab_date_doc].filter(Boolean).sort().pop() || null;
 
-      row.visit_count = a?.visit_count || row.visit_count || 1;
+      const baseCount = a?.visit_count || row.visit_count || 1;
+      // Bump by 1 only when today's appointment isn't counted yet:
+      // - no consultation exists for today (has_today_visit = false), AND
+      // - appointment has no healthray_id (HealthRay-linked appointments are
+      //   already included in the agg UNION ALL, so they're already counted).
+      row.visit_count =
+        !a?.has_today_visit && !row.healthray_id ? baseCount + 1 : baseCount;
       row.last_visit_date = a?.last_visit_date || null;
       // Fall back to latest non-empty healthray_diagnoses if this row's is empty.
       if (

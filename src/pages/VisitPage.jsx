@@ -1799,6 +1799,7 @@ export default function VisitPage() {
               labLatest={data.labLatest}
               labOrders={data.labOrders}
               onUploadReport={() => setModal({ type: "uploadReport" })}
+              onRefresh={refreshData}
             />
           </div>
           <div className={`panel ${tab === "exam" ? "on" : ""}`}>

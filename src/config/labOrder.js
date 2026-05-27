@@ -88,6 +88,9 @@ export const LAB_PANELS = [
     keys: [
       "total_cholesterol",
       "total cholesterol",
+      "serum_cholesterol",
+      "serum cholesterol",
+      "cholesterol",
       "triglyceride",
       "hdl_cholesterol",
       "hdl cholesterol",

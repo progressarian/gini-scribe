@@ -39,15 +39,37 @@ Body style (English):
 - Warm, simple, second-person ("you", "your"). Use everyday words a non-medical reader can understand.
 - Avoid Latin / abbreviations (write "blood pressure" not "BP", "blood sugar" not "FBS", "long-term sugar" or "HbA1c (3-month sugar average)" — explain abbreviations).
 - Keep it a GENERAL summary of the patient's current health picture and care plan — what's improving, what's being managed, and what they should focus on going forward.
-- End with one clear, general next step (a lifestyle reminder, what to keep tracking, or what tests to keep up with).
 - 60-110 words.
 
 Hard rules:
 - Do NOT invent values. Only use numbers from the input JSON.
 - Do NOT list every medicine — name only what is being adjusted in the current plan.
-- Do NOT mention the visit number, visit count, "this visit", "today", "this time", "last visit", dates, or any time-specific reference. Write as a timeless general summary.
-- Do NOT reference the next appointment date or "next visit" — keep next steps general.
+- Do NOT mention the visit number, visit count, "this visit", "today", "this time", "last visit", or any calendar date. Write as a timeless general summary.
+- FOLLOW-UP RULE: If "followUpRelative" is present in the input JSON, end the body with exactly one sentence using that relative time phrase (e.g. "Your next visit is in about 1 month." / "We will see you next week."). If "followUpNotes" is also present, weave those instructions into the same sentence (e.g. "Please come in about 3 weeks for your HbA1c and lipid tests, fasting."). If "followUpRelative" is null or absent, do NOT mention the next visit at all — keep the closing sentence a general next-step reminder instead.
 - Output ONLY the JSON object. No preamble, no markdown fence, no commentary.`;
+
+function relativeFollowUp(dateStr) {
+  if (!dateStr) return null;
+  const fuDate = new Date(String(dateStr).slice(0, 10));
+  if (isNaN(fuDate.getTime())) return null;
+  const diffDays = Math.round((fuDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "tomorrow";
+  if (diffDays > 0) {
+    if (diffDays <= 6) return `in ${diffDays} days`;
+    if (diffDays <= 10) return "next week";
+    if (diffDays <= 17) return "in about 2 weeks";
+    if (diffDays <= 24) return "in about 3 weeks";
+    if (diffDays <= 45) return "in about 1 month";
+    if (diffDays <= 75) return "in about 2 months";
+    if (diffDays <= 105) return "in about 3 months";
+    if (diffDays <= 135) return "in about 4 months";
+    if (diffDays <= 165) return "in about 5 months";
+    if (diffDays <= 195) return "in about 6 months";
+    return `in about ${Math.round(diffDays / 30)} months`;
+  }
+  return null; // past dates — don't show relative for patient-facing summary
+}
 
 function buildContext(data) {
   const {
@@ -61,6 +83,7 @@ function buildContext(data) {
     labHistory = {},
     consultations = [],
     goals = [],
+    appt_plan = null,
   } = data;
 
   const labKey = (name) => String(name || "").toLowerCase();
@@ -102,10 +125,20 @@ function buildContext(data) {
       frequency: m.frequency,
     }));
 
-  const followUp = consultations?.[0]?.con_data?.follow_up || {};
+  const conFollowUp = consultations?.[0]?.con_data?.follow_up || {};
+  const resolvedFollowUp =
+    (conFollowUp.date ? conFollowUp : null) ||
+    (appt_plan?.follow_up?.date ? appt_plan.follow_up : null) ||
+    null;
+  const followUpRelative = resolvedFollowUp?.date ? relativeFollowUp(resolvedFollowUp.date) : null;
+  const followUpNotes =
+    resolvedFollowUp?.notes || appt_plan?.follow_up_with || conFollowUp.notes || null;
+  const followUp = conFollowUp;
   const tests =
     consultations?.[0]?.con_data?.investigations_to_order ||
+    consultations?.[0]?.con_data?.investigations_ordered ||
     consultations?.[0]?.con_data?.tests_ordered ||
+    appt_plan?.investigations_to_order ||
     [];
 
   return {
@@ -144,6 +177,8 @@ function buildContext(data) {
       ...(followUp.tests_to_bring || []),
       ...(tests || []).map((t) => (typeof t === "string" ? t : t.name || t.test)),
     ],
+    followUpRelative: followUpRelative || null,
+    followUpNotes: followUpNotes || null,
   };
 }
 

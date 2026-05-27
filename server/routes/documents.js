@@ -764,7 +764,7 @@ router.patch("/documents/:id", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const { extracted_data, notes, doc_type } = req.body;
+    const { extracted_data, notes, doc_type, title } = req.body;
     const sets = [];
     const vals = [req.params.id];
     let idx = 2;
@@ -781,6 +781,11 @@ router.patch("/documents/:id", async (req, res) => {
     if (doc_type !== undefined) {
       sets.push(`doc_type = $${idx}`);
       vals.push(doc_type);
+      idx++;
+    }
+    if (title !== undefined) {
+      sets.push(`title = $${idx}`);
+      vals.push(title);
       idx++;
     }
     if (!sets.length) {
@@ -1974,6 +1979,20 @@ router.delete("/documents/:id", async (req, res) => {
     await pool.query("DELETE FROM lab_results WHERE document_id=$1", [req.params.id]);
     await pool.query("DELETE FROM medications WHERE document_id=$1", [req.params.id]);
     await pool.query("DELETE FROM documents WHERE id=$1", [req.params.id]);
+
+    // Bust the AI pre-visit summary cache when a lab report is deleted — the
+    // extracted results that drove the summary are now gone, so any cached
+    // brief would be stale.
+    if (deletedDoc.patient_id && deletedDoc.doc_type === "lab_report") {
+      await pool
+        .query(
+          `UPDATE appointments
+             SET ai_summary = NULL, ai_summary_generated_at = NULL
+           WHERE patient_id = $1`,
+          [deletedDoc.patient_id],
+        )
+        .catch(() => {});
+    }
 
     // Refresh OPD consultations with remaining prescription data
     if (deletedDoc.patient_id && deletedDoc.doc_type === "prescription") {

@@ -428,6 +428,7 @@ export function runSummaryRules({
     "error",
     "never started",
     "not prescribed",
+    "not in latest prescription",
     "switched to",
     "changed to",
     "replaced by",
@@ -493,11 +494,11 @@ export function runSummaryRules({
         detail: "Target ≤ 100 mg/dL for diabetic patients.",
         action: "Statin initiation or dose increase",
       });
-    } else if (ldl > 100) {
+    } else if (ldl > 130) {
       amber.push({
         id: "bio_ldl_elevated",
         title: `LDL ${ldl} mg/dL — above target`,
-        detail: "Target ≤ 100 mg/dL.",
+        detail: "Target ≤ 100 mg/dL for diabetic patients.",
         action: "Review lipid management",
       });
     }

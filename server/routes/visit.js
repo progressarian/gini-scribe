@@ -486,7 +486,7 @@ router.get("/visit/:patientId", async (req, res) => {
       //     so the visit page surfaces the same scheduled date even when the
       //     latest clinical-notes appointment lags behind.
       pool.query(
-        `SELECT biomarkers, healthray_follow_up FROM appointments
+        `SELECT biomarkers, healthray_follow_up, healthray_investigations, follow_up_with FROM appointments
           WHERE patient_id=$1 AND biomarkers ? 'followup'
           ORDER BY appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
@@ -927,13 +927,21 @@ router.get("/visit/:patientId", async (req, res) => {
       appt_plan:
         apptPlan || followUpDate
           ? {
-              investigations_to_order: (apptPlan?.healthray_investigations || []).map((t) =>
-                typeof t === "string" ? { name: t, urgency: "routine" } : t,
-              ),
+              investigations_to_order: (
+                (apptPlan?.healthray_investigations?.length
+                  ? apptPlan.healthray_investigations
+                  : null) ||
+                (followupApptRow?.healthray_investigations?.length
+                  ? followupApptRow.healthray_investigations
+                  : null) ||
+                []
+              ).map((t) => (typeof t === "string" ? { name: t, urgency: "routine" } : t)),
               follow_up: followUpDate,
               follow_up_with:
                 apptPlan?.follow_up_with ||
                 apptPlan?.healthray_follow_up?.notes ||
+                followupApptRow?.follow_up_with ||
+                followupApptRow?.healthray_follow_up?.notes ||
                 null,
               advice: apptPlan?.healthray_advice || null,
               diet_lifestyle: [

@@ -221,6 +221,9 @@ async function _generatePostVisitNarrativeInner(
     prep,
     ctx,
     doctorNote,
+    followUpRelative = null,
+    followUpNotes = null,
+    investigations = [],
   },
   attemptLabel = "1",
 ) {
@@ -270,6 +273,20 @@ async function _generatePostVisitNarrativeInner(
     ``,
     `Lab panel (latest vs. previous):`,
     fmtLabs(labHistory),
+    ``,
+    followUpRelative
+      ? `Follow-up scheduled: ${followUpRelative}${followUpNotes ? ` — ${followUpNotes}` : ""}${
+          investigations.length > 0
+            ? ` — Tests: ${investigations
+                .map((t) => (typeof t === "string" ? t : t.name || t.test || ""))
+                .filter(Boolean)
+                .join(", ")}`
+            : ""
+        }`
+      : `Follow-up: not scheduled / not recorded`,
+    followUpRelative
+      ? `FOLLOW-UP INSTRUCTION (MANDATORY): Close paragraph 2 with one sentence using the relative time above (never the calendar date). Name the specific tests if listed. Weave in any preparation notes. Example: "He is due ${followUpRelative} for his HbA1c and lipid panel, fasting."`
+      : `FOLLOW-UP INSTRUCTION: No follow-up date is recorded — close with a general next-step sentence instead (e.g. monitoring intent, lifestyle focus, or next review trigger).`,
     ``,
     `Generate the post-visit clinical brief as a JSON object { "narrative": "..." } using the two-paragraph structure from the system prompt. Use exact numbers from above; do not invent values. Only list currently active medications. Every diagnosis you mention must inline EVERY qualifier present above (since-year, AOO, grade/marker, severity, status, trend, complication type) verbatim.`,
   ].join("\n");
@@ -541,6 +558,8 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       recentChangesR,
       consAllR,
       apptComplianceR,
+      apptPlanR,
+      followupApptR,
     ] = await Promise.all([
       pool.query("SELECT * FROM patients WHERE id=$1", [pid]),
       pool.query(
@@ -596,6 +615,20 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
             `SELECT compliance FROM appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 1`,
             [pid],
           ),
+      // Latest appointment with clinical notes — source of healthray_follow_up + investigations
+      pool.query(
+        `SELECT healthray_follow_up, follow_up_with, healthray_investigations, biomarkers
+           FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
+           ORDER BY appointment_date DESC LIMIT 1`,
+        [pid],
+      ),
+      // Latest appointment carrying biomarkers.followup — 4-tier fallback
+      pool.query(
+        `SELECT biomarkers, healthray_follow_up FROM appointments
+           WHERE patient_id=$1 AND biomarkers ? 'followup'
+           ORDER BY appointment_date DESC NULLS LAST, id DESC LIMIT 1`,
+        [pid],
+      ),
     ]);
 
     const patient = patientR.rows[0];
@@ -657,6 +690,44 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       symptoms: apptCompliance.symptoms || [],
     };
 
+    // ── Resolve follow-up (4-tier, mirrors visit.js) ──
+    const apptPlanRow = apptPlanR.rows[0] || null;
+    const fuApptRow = followupApptR.rows[0] || null;
+    const _withDate = (fu) => (fu && fu.date ? fu : null);
+    const apptBio = apptPlanRow?.biomarkers || {};
+    const fuBio = fuApptRow?.biomarkers || {};
+    const resolvedFollowUp =
+      _withDate(apptPlanRow?.healthray_follow_up) ||
+      (apptBio.followup
+        ? { date: apptBio.followup, notes: apptPlanRow?.healthray_follow_up?.notes || null }
+        : null) ||
+      _withDate(fuApptRow?.healthray_follow_up) ||
+      (fuBio.followup
+        ? { date: fuBio.followup, notes: fuApptRow?.healthray_follow_up?.notes || null }
+        : null);
+    const followUpNotes = resolvedFollowUp?.notes || apptPlanRow?.follow_up_with || null;
+    const apptInvestigations = apptPlanRow?.healthray_investigations || [];
+    const followUpRelative = (() => {
+      if (!resolvedFollowUp?.date) return null;
+      const diffDays = Math.round(
+        (new Date(String(resolvedFollowUp.date).slice(0, 10)).getTime() - Date.now()) /
+          (1000 * 60 * 60 * 24),
+      );
+      if (diffDays <= 0) return null;
+      if (diffDays === 1) return "tomorrow";
+      if (diffDays <= 6) return `in ${diffDays} days`;
+      if (diffDays <= 10) return "next week";
+      if (diffDays <= 17) return "in about 2 weeks";
+      if (diffDays <= 24) return "in about 3 weeks";
+      if (diffDays <= 45) return "in about 1 month";
+      if (diffDays <= 75) return "in about 2 months";
+      if (diffDays <= 105) return "in about 3 months";
+      if (diffDays <= 135) return "in about 4 months";
+      if (diffDays <= 165) return "in about 5 months";
+      if (diffDays <= 195) return "in about 6 months";
+      return `in about ${Math.round(diffDays / 30)} months`;
+    })();
+
     const aiResult = await generatePostVisitNarrative({
       patient,
       diagnoses: sortDiagnoses(diagnosesR.rows),
@@ -670,6 +741,9 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       prep,
       ctx: { totalVisits, monthsWithGini, daysWithGini, carePhase },
       doctorNote,
+      followUpRelative,
+      followUpNotes,
+      investigations: apptInvestigations,
     });
     const narrative = aiResult?.narrative || null;
     const aiError = aiResult?.error || null;
