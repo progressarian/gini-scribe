@@ -812,8 +812,7 @@ router.get("/opd/appointments", async (req, res) => {
       // - no consultation exists for today (has_today_visit = false), AND
       // - appointment has no healthray_id (HealthRay-linked appointments are
       //   already included in the agg UNION ALL, so they're already counted).
-      row.visit_count =
-        !a?.has_today_visit && !row.healthray_id ? baseCount + 1 : baseCount;
+      row.visit_count = !a?.has_today_visit && !row.healthray_id ? baseCount + 1 : baseCount;
       row.last_visit_date = a?.last_visit_date || null;
       // Fall back to latest non-empty healthray_diagnoses if this row's is empty.
       if (

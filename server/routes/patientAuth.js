@@ -169,7 +169,7 @@ async function insertAppPatient(phone) {
   // stored name is still falsy.
   const { data, error } = await db
     .from("patients")
-    .insert({ phone, name: phone, program_type: "standard" })
+    .insert({ phone, name: phone, program_type: "gini_patient" })
     .select("*")
     .single();
   if (error) throw new Error(`App DB insert failed: ${error.message}`);

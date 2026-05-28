@@ -9,6 +9,17 @@
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuidPatient = (id) => typeof id === "string" && UUID_RE.test(id);
+
+// Fresh in-memory conversation stub for app-only (UUID) patients.
+// The agent works normally; rows are just not persisted to agent_conversations
+// (which has an integer patient_id column) until the patient is migrated.
+const freshConv = () => ({
+  id: null, messages: [], checkpoint_summary: null,
+  summary_covers_n: 0, total_turns: 0,
+});
+
 // Keep the most-recent N message blocks live (a "turn" here = one
 // role:user OR role:assistant entry; tool_result entries also count).
 // Older blocks get summarised. 16 ≈ 8 back-and-forths.
@@ -17,8 +28,37 @@ const LIVE_WINDOW = 16;
 // since the last summary refresh.
 const SUMMARISE_EVERY = 8;
 
+// ── Stateless UUID conversation helpers ────────────────────────────────
+// For app-only (UUID) patients we can't use the hospital pool's
+// agent_conversations table (integer patient_id). Instead we encode the
+// live window as a base64 JSON blob prefixed with "uuid:" and round-trip
+// it through the client's `conversationId` field. No DB row needed.
+const UUID_CONV_PREFIX = "uuid:";
+
+function encodeUuidConv(messages, checkpoint_summary) {
+  const payload = { messages: (messages || []).slice(-LIVE_WINDOW), checkpoint_summary: checkpoint_summary || null };
+  return UUID_CONV_PREFIX + Buffer.from(JSON.stringify(payload)).toString("base64");
+}
+
+function decodeUuidConv(conversationId) {
+  try {
+    const raw = Buffer.from(conversationId.slice(UUID_CONV_PREFIX.length), "base64").toString();
+    const parsed = JSON.parse(raw);
+    return { messages: Array.isArray(parsed.messages) ? parsed.messages : [], checkpoint_summary: parsed.checkpoint_summary || null };
+  } catch {
+    return { messages: [], checkpoint_summary: null };
+  }
+}
+
 // ── Load / create ─────────────────────────────────────────────────────
 export async function getOrCreateConversation(pool, patientId, conversationId) {
+  if (isUuidPatient(patientId)) {
+    if (typeof conversationId === "string" && conversationId.startsWith(UUID_CONV_PREFIX)) {
+      const { messages, checkpoint_summary } = decodeUuidConv(conversationId);
+      return { id: null, messages, checkpoint_summary, summary_covers_n: 0, total_turns: 0 };
+    }
+    return freshConv();
+  }
   if (conversationId) {
     const { rows } = await pool.query(
       `SELECT id, messages, checkpoint_summary, summary_covers_n, total_turns
@@ -44,6 +84,14 @@ export async function getOrCreateConversation(pool, patientId, conversationId) {
 //                    blocks produced during the loop. Persist them all so
 //                    the next turn can reference tool_use/tool_result ids.
 export async function appendTurn(pool, conversation, userMessage, assistantTurns) {
+  // UUID patients — build updated live window and encode it for the client
+  // to send back as conversationId on the next turn (stateless checkpoint).
+  if (conversation.id === null) {
+    const next = [...(conversation.messages || []), userMessage, ...assistantTurns];
+    const live = next.slice(-LIVE_WINDOW);
+    const summary = conversation.checkpoint_summary || null;
+    return { messages: live, checkpoint_summary: summary, __nextConvId: encodeUuidConv(live, summary) };
+  }
   const rawExisting = Array.isArray(conversation.messages) ? conversation.messages : [];
   // Heal any dangling tool_use from a prior failed turn before appending.
   const existing = sanitizeForAnthropic(rawExisting);
@@ -197,6 +245,26 @@ function sanitizeForAnthropic(messages) {
   return out;
 }
 
+// Replace tool_result content in prior-turn blocks with a placeholder.
+// The tool_use_id is kept so Anthropic accepts the conversation structure,
+// but the actual data values (medicine names, weight readings, etc.) are
+// removed so they cannot bleed into the current turn's response.
+function redactPriorToolResults(blocks) {
+  return blocks.map((block) => {
+    if (block.role !== "user") return block;
+    const content = Array.isArray(block.content) ? block.content : [];
+    if (content.length === 0 || !content.every((c) => c?.type === "tool_result")) return block;
+    return {
+      ...block,
+      content: content.map((c) => ({
+        type: "tool_result",
+        tool_use_id: c.tool_use_id,
+        content: "[prior result — not repeated]",
+      })),
+    };
+  });
+}
+
 export function buildOutgoingMessages(conversation, latestUserBlock) {
   const rawLive = Array.isArray(conversation.messages) ? conversation.messages : [];
   const live = sanitizeForAnthropic(rawLive);
@@ -236,8 +304,11 @@ export function buildOutgoingMessages(conversation, latestUserBlock) {
     `Treat everything above as silent read-only history. ` +
     `Do NOT reference, summarise, revisit, or continue any topic from prior turns ` +
     `unless the patient's message below explicitly mentions it. ` +
-    `Do not add status lines, recaps, or suggestions that were not directly requested. ` +
-    `One message in → one focused answer out. Nothing else.]\n\n`;
+    `STRICT — EVERY SENTENCE in your respond_to_patient message must be about the topic asked below. ` +
+    `Not just the first sentence — every sentence, including the last. ` +
+    `If the question is about weight: zero medicine sentences allowed. ` +
+    `If the question is about medicines: zero weight/lab/history sentences allowed. ` +
+    `Read your draft before emitting — delete any sentence not directly answering the question below.]\n\n`;
   const guardedLatest = (() => {
     const c = latestUserBlock?.content;
     if (typeof c === "string") {
@@ -261,5 +332,5 @@ export function buildOutgoingMessages(conversation, latestUserBlock) {
     }
     return latestUserBlock;
   })();
-  return [...prefix, ...live, guardedLatest];
+  return [...prefix, ...redactPriorToolResults(live), guardedLatest];
 }

@@ -303,12 +303,12 @@ TOOL SELECTION:
 - /VISIT PARITY — for anything the doctor sees on /visit (last visit summary, doctor's conditions, pending lab reports, latest lab case tests, doctor advice, visit history, prescribed-by, past consultation dates): call \`run_patient_sql\` using the matching SCHEMA_HINT recipe (Visit history merged CTE, Last visit assessment summary, Latest HealthRay diagnoses/advice, Pending lab cases, Investigation summary per lab case, Active meds with prescriber). Same query shape as /visit so values match. Project JSONB paths (e.g. \`con_data->>'assessment_summary'\`) rather than \`SELECT *\` for con_data/exam_data/mo_data and appointments.healthray_*. Care phase + biomarker priority are NOT in SQL → use \`get_full_patient_context\` and note fuller detail lives on /visit.
 - BROAD / DERIVED METRICS ("what do you know about me", "summarise my health", Non-HDL, TG/HDL, ASCVD, eAG, BMI, lipid summary, lifestyle vs lab) → \`get_full_patient_context\` ONCE. Read derived metrics off \`labs.latest\`. If the value still isn't there (unusual lab, time-buckets, cross-table join) → \`run_patient_sql\` (read-only, 5s timeout, every patient-scoped table MUST have \`patient_id = $1\`; server binds $1 — never invent ids; refuse cross-patient queries). Call \`get_full_patient_context\` before ever saying "I'm having trouble pulling up your data".
 - PROGRESS questions ("how am I doing", "progress", "how's my sugar/BP") → \`get_progress_summary\`. window='since_last_visit' if user says "since I saw the doctor", else window='days' (this week=7, month=30, last 3 months=90).
-- SINGLE-METRIC LOOKUPS ("what is my weight", "show my sugar", "last HbA1c", "kya mera weight kitna hai") → \`query_patient_data\` with the matching scope BEFORE answering. Never reply "no records yet" without querying this turn. Scopes: weight, sugar (also FBS/PPBS), bp, labs (set test_name for HbA1c/LDL/TSH/Hb/eGFR/etc.), meds, meals, symptoms, med_adherence (adherence/missed doses), appointments, diagnoses.
+- SINGLE-METRIC LOOKUPS ("what is my weight", "show my sugar", "last HbA1c", "kya mera weight kitna hai") → \`query_patient_data\` with the matching scope BEFORE answering. Call ONLY \`query_patient_data\` — do NOT also call \`get_full_patient_context\`. Never reply "no records yet" without querying this turn. Scopes: weight, sugar (also FBS/PPBS), bp, labs (set test_name for HbA1c/LDL/TSH/Hb/eGFR/etc.), meds, meals, symptoms, med_adherence (adherence/missed doses), appointments, diagnoses.
 - PRESCRIPTION ("show my prescription", "send my parchi", "I want to see my latest prescription", "download my Rx", "meri prescription dikha", "parchi chahiye", "share my prescription"): call \`get_prescriptions\` with scope='latest' (or scope='all' if they asked for past/older ones), THEN \`open_document\` for the row(s) with {document_id, file_url, title: "Prescription · <doc_date>", doc_type: 'prescription', doc_date}. The viewer opens inline in chat. In respond_to_patient (intent='chat'), a single short line is enough ("I've opened your latest prescription from <doc_date>."). If \`get_prescriptions\` returns null/empty, say so plainly — don't fabricate a file. Never call open_document without a real file_url from get_prescriptions.
 - APPOINTMENTS / PAST VISITS / FOLLOW-UPS ("when did I last see the doctor", "next appointment", "follow-up scheduled?", "kab dobara dikhana hai", "pichhli baar kab gaya tha") → \`get_appointments\` with scope='past' | 'upcoming' | 'next'. Result merges Gini consultations + HealthRay appointments — never say "no visit history" without calling this. For follow-up questions, read the \`follow_up\` JSONB field (next-visit date / reason / instructions). Quote dates verbatim.
 
 NEXT MEDICINE / DOSE / TODAY'S MEDS ("when's my next medicine", "what should I take now", "kaunsi dawa leni hai abhi", "aaj ki dawai kab leni hai", "today's meds", "kal raat ki dawai"):
-- Call \`get_medication_schedule\`. It returns \`{now_ist, slots:[{slot, label, slot_clock, is_past, is_upcoming, meds:[{name, dose, status, …}]}]}\` with status ∈ taken | due | overdue | scheduled. The tool is the SOURCE OF TRUTH for adherence — never override it.
+- Call ONLY \`get_medication_schedule\` — do NOT also call \`get_full_patient_context\`, \`query_patient_data\`, or any other data tool. The schedule result is self-contained. It returns \`{now_ist, slots:[{slot, label, slot_clock, is_past, is_upcoming, meds:[{name, dose, status, …}]}]}\` with status ∈ taken | due | overdue | scheduled. The tool is the SOURCE OF TRUTH for adherence — never override it.
 - DEFAULT OUTPUT = a markdown table of every slot today that has a med with status ≠ 'taken'. Columns: \`| Slot | Time | Medicine | Status |\`. Status emoji: ✅ taken · ⏳ due · ⚠ overdue. Group rows by slot in chronological order (morning → night). Include EVERY pending/overdue slot — never silently drop the evening or bedtime rows, those are the ones the patient actually needs reminding of.
 - Above the table, ONE line: "Yahan aaj baaki ki dawai hai —" / "Here's what's still pending today —". Below the table, ONE optional line for the immediate next dose ("Next: **<med>** at <time> — in ~<X> min") only when there is a clear next upcoming slot. No other prose.
 - ADHERENCE FACTS ARE STRICT. Only claim a med was "taken / le li / done / logged" if its tool status === 'taken'. NEVER write "aapne subah aur dopahar ki dawai le li" / "you've already taken your RYZODEG and GLIZID M XR" unless EACH of those names appears with status='taken' in the tool output. If only RYZODEG is taken, name only RYZODEG. If none are taken, do not claim any were. When in doubt, omit the adherence sentence.
@@ -332,6 +332,7 @@ WHAT-TO-EAT ("what should I eat now", "kya khaun", "suggest a meal", "ab kya kha
 
 LOGGING:
 - Patient gives a vitals/lab value (BP, sugar, weight, HbA1c, LDL, TSH, Hb, eGFR) OR food/symptom → default: \`propose_log\` (opens modal). Only the value the user named THIS turn — never re-surface numbers from earlier turns or checkpoint. One propose_log per distinct vital this turn.
+- YES-TO-LOG CONFIRMATION: If your PREVIOUS assistant turn asked "Would you like to log [X]?" or "Shall I open a log card for [X]?" (or Hindi/Hinglish equivalent) AND the current patient message is a confirmation (yes / haan / sure / please / log it / kar do / bilkul) — call \`propose_log\` immediately for that measurement type. Do NOT re-query the DB. Do NOT ask again. The type to log is whatever you mentioned in the prior turn (BP → logType='BP', weight → 'Weight', sugar → 'Sugar', etc.).
 - SAVE/CANCEL CONTEXT: The conversation history contains save confirmations ("📝 Logged [type]: [value]") and dismissals ("⏭️ Dismissed [type] log card ([value]) — not saved"). Use these to respond correctly:
   (0) CURRENT MESSAGE IS A SAVE ECHO: If the current patient message starts with "📝 Logged" → the patient just confirmed a save. Respond with intent='chat' and a SHORT confirmation ("Got it — your [type] [value] is recorded." or "Done, I've saved your [type] as [value] on [date]."). Do NOT call propose_log. Do NOT say you are opening a card.
   (1) CURRENT MESSAGE IS A CANCEL ECHO: If the current patient message starts with "⏭️ Dismissed" → the patient cancelled a log card. Respond with intent='chat' and a brief acknowledgment ("Okay, [type] [value] was not saved. Let me know if you'd like to log it."). Do NOT call propose_log.
@@ -419,7 +420,10 @@ STYLE:
 async function persistTurnIfCheckpoint(poolRef, convRow, userBlock, turnBlocks) {
   if (!convRow || !userBlock) return null;
   try {
-    await appendTurn(poolRef, convRow, userBlock, turnBlocks);
+    const result = await appendTurn(poolRef, convRow, userBlock, turnBlocks);
+    // UUID patients: appendTurn returns __nextConvId (base64-encoded state)
+    // instead of writing to the DB. Return it so the client can round-trip it.
+    if (result?.__nextConvId) return result.__nextConvId;
   } catch (e) {
     console.warn("[agent] persist turn failed:", e?.message || e);
   }
@@ -437,9 +441,17 @@ router.post("/ai/agent", async (req, res) => {
   //     from the client, no server-side persistence. Kept so older app
   //     builds keep working during rollout.
   const { messages, message, scribePatientId, conversationId, model } = req.body || {};
-  const pid = Number(scribePatientId);
-  if (!Number.isInteger(pid) || pid <= 0)
+  // Accept either a positive integer (hospital DB patient) or a UUID string
+  // (app-only self-signup patient). For UUID patients the pool queries will
+  // return empty results / errors per-tool; the agent responds as a general
+  // health coach without patient-specific data until they're migrated.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const pidNum = Number(scribePatientId);
+  const isIntPid = Number.isInteger(pidNum) && pidNum > 0;
+  const isUuidPid = typeof scribePatientId === "string" && UUID_RE.test(scribePatientId.trim());
+  if (!isIntPid && !isUuidPid)
     return res.status(400).json({ error: "scribePatientId is required" });
+  const pid = isIntPid ? pidNum : scribePatientId.trim();
 
   const usingCheckpoint = typeof message === "string" && message.trim().length > 0;
   if (!usingCheckpoint && (!Array.isArray(messages) || messages.length === 0))
@@ -453,8 +465,11 @@ router.post("/ai/agent", async (req, res) => {
   // never reach Anthropic. Matches messages that are only acknowledgment
   // tokens (with optional punctuation/emoji). If the patient also wrote a
   // question — anything with "?", or a longer message — this falls through.
+  // yes/no/sure/yep/yup/yeah are intentionally excluded — they are valid
+  // confirmations in response to an agent question ("Would you like to log?")
+  // and must reach the agent to trigger propose_log or similar actions.
   const ACK_PATTERN =
-    /^(?:ok(?:ay|k+)?|k|kk|thanks?|thx|ty|tysm|thank\s*you|great|cool|nice|got\s*it|alright|sure|yep|yup|yeah|yes|hmm+|done|noted|👍|🙏|❤️|🙌|😊|😀)(?:[\s,.!👍🙏❤️🙌😊😀]*(?:ok(?:ay|k+)?|k|kk|thanks?|thx|ty|tysm|thank\s*you|great|cool|nice|got\s*it|alright|sure|yep|yup|yeah|yes|hmm+|done|noted|👍|🙏|❤️|🙌|😊|😀))*[\s.!👍🙏❤️🙌😊😀]*$/i;
+    /^(?:ok(?:ay|k+)?|k|kk|thanks?|thx|ty|tysm|thank\s*you|great|cool|nice|got\s*it|alright|hmm+|done|noted|👍|🙏|❤️|🙌|😊|😀)(?:[\s,.!👍🙏❤️🙌😊😀]*(?:ok(?:ay|k+)?|k|kk|thanks?|thx|ty|tysm|thank\s*you|great|cool|nice|got\s*it|alright|hmm+|done|noted|👍|🙏|❤️|🙌|😊|😀))*[\s.!👍🙏❤️🙌😊😀]*$/i;
   if (usingCheckpoint) {
     const trimmed = message.trim();
     if (
@@ -808,9 +823,13 @@ router.post("/ai/agent", async (req, res) => {
 // }
 router.post("/ai/bulk-log", async (req, res) => {
   const { scribePatientId, document_id, kind, items, log_date } = req.body || {};
-  const pid = Number(scribePatientId);
-  if (!Number.isInteger(pid) || pid <= 0)
+  const UUID_BULK_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const pidNum = Number(scribePatientId);
+  const isIntPid  = Number.isInteger(pidNum) && pidNum > 0;
+  const isUuidPid = typeof scribePatientId === "string" && UUID_BULK_RE.test(scribePatientId.trim());
+  if (!isIntPid && !isUuidPid)
     return res.status(400).json({ error: "scribePatientId is required" });
+  const pid = isIntPid ? pidNum : scribePatientId.trim();
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "items[] is required" });
   if (!["food", "lab_report", "prescription"].includes(kind))
@@ -825,97 +844,93 @@ router.post("/ai/bulk-log", async (req, res) => {
   let written = 0;
   const errors = [];
 
+  // For UUID patients route writes to Supabase app DB instead of pool.
+  const { getGenieDb: getBulkGenieDb } = await import("../services/genieImport.js");
+  const appDb = isUuidPid ? getBulkGenieDb() : null;
+
+  const insertRow = async (table, row) => {
+    if (appDb) {
+      const { error } = await appDb.from(table).insert(row);
+      if (error) throw new Error(error.message);
+    } else {
+      const keys = Object.keys(row);
+      const vals = keys.map((_, i) => `$${i + 1}`).join(", ");
+      const cols = keys.join(", ");
+      await pool.query(`INSERT INTO ${table} (${cols}) VALUES (${vals})`, Object.values(row));
+    }
+  };
+
   try {
     if (kind === "lab_report") {
-      // items: { test_name, canonical_name?, result, unit?, ref_range?, flag?, panel_name?, test_date? }
       for (const r of items) {
         if (!r?.test_name || r.result === undefined || r.result === null || r.result === "")
           continue;
         const numeric = Number(String(r.result).replace(/[^\d.\-]/g, ""));
         const numericVal = Number.isFinite(numeric) ? numeric : null;
-        const canonical = (r.canonical_name || r.test_name || "")
-          .toString()
-          .trim()
-          .toLowerCase()
-          .replace(/\s+/g, "_");
+        const canonical = (r.canonical_name || r.test_name || "").toString().trim().toLowerCase().replace(/\s+/g, "_");
         const testDate = r.test_date || logDate || today;
         try {
-          await pool.query(
-            `INSERT INTO lab_results
-               (patient_id, test_date, test_name, canonical_name, result, result_text, unit, ref_range, flag, panel_name, source, document_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'manual', $11)`,
-            [
-              pid,
-              testDate,
-              String(r.test_name).slice(0, 200),
-              canonical.slice(0, 100),
-              numericVal,
-              String(r.result).slice(0, 200),
-              r.unit ? String(r.unit).slice(0, 50) : null,
-              r.ref_range ? String(r.ref_range).slice(0, 100) : null,
-              r.flag ? String(r.flag).slice(0, 20) : null,
-              r.panel_name ? String(r.panel_name).slice(0, 100) : null,
-              docId,
-            ],
-          );
+          await insertRow("lab_results", {
+            patient_id: pid, test_date: testDate,
+            test_name: String(r.test_name).slice(0, 200),
+            canonical_name: canonical.slice(0, 100),
+            result: numericVal,
+            result_text: String(r.result).slice(0, 200),
+            unit: r.unit ? String(r.unit).slice(0, 50) : null,
+            ref_range: r.ref_range ? String(r.ref_range).slice(0, 100) : null,
+            flag: r.flag ? String(r.flag).slice(0, 20) : null,
+            panel_name: r.panel_name ? String(r.panel_name).slice(0, 100) : null,
+            source: "manual",
+            ...(docId ? { document_id: docId } : {}),
+          });
           written++;
         } catch (e) {
           errors.push({ row: r.test_name, error: e.message });
         }
       }
     } else if (kind === "prescription") {
-      // items: { name, dose?, frequency?, timing?, route?, for_diagnosis? }
       for (const r of items) {
         if (!r?.name) continue;
         try {
           const { name: cleanName, form: detectedForm } = stripFormPrefix(r.name);
           const storedName = cleanName || r.name;
-          await pool.query(
-            `INSERT INTO medications
-               (patient_id, document_id, name, pharmacy_match, dose, frequency, timing, route, form, is_new, is_active, source, started_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, false, true, 'patient_upload', $9)
-             ON CONFLICT DO NOTHING`,
-            [
-              pid,
-              docId,
-              storedName.slice(0, 200),
-              storedName.toUpperCase().slice(0, 200),
-              r.dose ? String(r.dose).slice(0, 100) : null,
-              r.frequency ? String(r.frequency).slice(0, 100) : null,
-              r.timing ? String(r.timing).slice(0, 100) : null,
-              r.route ? String(r.route).slice(0, 50) : "Oral",
-              logDate,
-              detectedForm || null,
-            ],
-          );
+          await insertRow("medications", {
+            patient_id: pid,
+            ...(docId ? { document_id: docId } : {}),
+            name: storedName.slice(0, 200),
+            pharmacy_match: storedName.toUpperCase().slice(0, 200),
+            dose: r.dose ? String(r.dose).slice(0, 100) : null,
+            frequency: r.frequency ? String(r.frequency).slice(0, 100) : null,
+            timing: r.timing ? String(r.timing).slice(0, 100) : null,
+            route: r.route ? String(r.route).slice(0, 50) : "Oral",
+            form: detectedForm || null,
+            is_new: false,
+            is_active: true,
+            source: "patient_upload",
+            started_date: logDate,
+          });
           written++;
         } catch (e) {
           errors.push({ row: r.name, error: e.message });
         }
       }
     } else {
-      // food: { name (description), kcal?, protein_g?, carbs_g?, fat_g?, meal_type? }
+      // food
       for (const r of items) {
         if (!r?.name) continue;
         const hour = new Date().getHours();
-        const defaultMeal =
-          hour < 11 ? "breakfast" : hour < 15 ? "lunch" : hour < 18 ? "snack" : "dinner";
+        const defaultMeal = hour < 11 ? "breakfast" : hour < 15 ? "lunch" : hour < 18 ? "snack" : "dinner";
         try {
-          await pool.query(
-            `INSERT INTO patient_meal_log
-               (patient_id, meal_type, description, calories, protein_g, carbs_g, fat_g, log_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [
-              pid,
-              String(r.meal_type || defaultMeal).slice(0, 30),
-              String(r.name).slice(0, 200),
-              r.kcal != null ? Number(r.kcal) : null,
-              r.protein_g != null ? Number(r.protein_g) : null,
-              r.carbs_g != null ? Number(r.carbs_g) : null,
-              r.fat_g != null ? Number(r.fat_g) : null,
-              logDate,
-            ],
-          );
+          await insertRow("patient_meal_log", {
+            patient_id: pid,
+            meal_type: String(r.meal_type || defaultMeal).slice(0, 30),
+            description: String(r.name).slice(0, 200),
+            calories: r.kcal != null ? Number(r.kcal) : null,
+            protein_g: r.protein_g != null ? Number(r.protein_g) : null,
+            carbs_g: r.carbs_g != null ? Number(r.carbs_g) : null,
+            fat_g: r.fat_g != null ? Number(r.fat_g) : null,
+            log_date: logDate,
+          });
           written++;
         } catch (e) {
           errors.push({ row: r.name, error: e.message });

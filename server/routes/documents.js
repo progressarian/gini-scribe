@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
+import { getGenieDb } from "../services/genieImport.js";
+
+const UUID_DOC_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -279,11 +282,31 @@ router.post("/patients/:id/documents", validate(documentCreateSchema), async (re
     // tagging rows correctly without a release bump.
     const fromPatient =
       typeof uploaded_by_patient === "boolean" ? uploaded_by_patient : source === "patient_upload";
+    const patientId = req.params.id;
+
+    // UUID patient → insert into Supabase app DB patient_documents table
+    if (UUID_DOC_RE.test(patientId)) {
+      const appDb = getGenieDb();
+      if (!appDb) return res.status(503).json({ error: "App DB not configured." });
+      const { data, error } = await appDb.from("patient_documents").insert({
+        patient_id: patientId,
+        doc_type: n(doc_type),
+        title: n(title),
+        source: n(source) || "patient_upload",
+        document_date: n(doc_date) || null,
+        file_url: n(file_url) || null,
+        extracted_data: extracted_data || null,
+      }).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ ...data, id: data.id, patient_id: patientId });
+    }
+
+    // Integer patient → hospital DB documents table
     const result = await pool.query(
       `INSERT INTO documents (patient_id, consultation_id, doc_type, title, file_name, file_url, extracted_text, extracted_data, doc_date, source, uploaded_by_patient, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [
-        req.params.id,
+        patientId,
         n(consultation_id),
         n(doc_type),
         n(title),
@@ -306,7 +329,15 @@ router.post("/patients/:id/documents", validate(documentCreateSchema), async (re
 // Get specific document
 router.get("/documents/:id", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM documents WHERE id=$1", [req.params.id]);
+    const docId = req.params.id;
+    if (UUID_DOC_RE.test(docId)) {
+      const appDb = getGenieDb();
+      if (!appDb) return res.status(503).json({ error: "App DB not configured." });
+      const { data, error } = await appDb.from("patient_documents").select("*").eq("id", docId).single();
+      if (error || !data) return res.status(404).json({ error: "Not found" });
+      return res.json(data);
+    }
+    const result = await pool.query("SELECT * FROM documents WHERE id=$1", [docId]);
     if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
     res.json(result.rows[0]);
   } catch (e) {
@@ -327,11 +358,26 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
       return res.status(400).json({ error: "Storage not configured" });
 
-    const doc = await pool.query("SELECT * FROM documents WHERE id=$1", [req.params.id]);
-    if (!doc.rows[0]) return res.status(404).json({ error: "Document not found" });
-    const patientId = doc.rows[0].patient_id;
+    const docId = req.params.id;
+    const UUID_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isUuidDoc = UUID_ID_RE.test(docId);
 
-    const docType = doc.rows[0].doc_type || "other";
+    let patientId, docType;
+    if (isUuidDoc) {
+      // App DB — look up in patient_documents
+      const appDb = getGenieDb();
+      if (!appDb) return res.status(503).json({ error: "App DB not configured." });
+      const { data, error } = await appDb.from("patient_documents").select("patient_id,doc_type").eq("id", docId).single();
+      if (error || !data) return res.status(404).json({ error: "Document not found" });
+      patientId = data.patient_id;
+      docType = data.doc_type || "other";
+    } else {
+      const doc = await pool.query("SELECT * FROM documents WHERE id=$1", [docId]);
+      if (!doc.rows[0]) return res.status(404).json({ error: "Document not found" });
+      patientId = doc.rows[0].patient_id;
+      docType = doc.rows[0].doc_type || "other";
+    }
+
     const ts = Date.now();
     const safeName = sanitizeForStorageKey(fileName);
     const storagePath = `patients/${patientId}/${docType}/${ts}_${safeName}`;
@@ -355,24 +401,25 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
       return res.status(500).json({ error: "Upload failed: " + err });
     }
 
-    await pool.query(
-      "UPDATE documents SET storage_path=$1, mime_type=$2, file_name=COALESCE(NULLIF($3,''),file_name) WHERE id=$4",
-      [storagePath, mediaType, fileName || null, req.params.id],
-    );
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
 
-    // Kick off server-side extraction in the background. skipIfNotPending
-    // means if the client (companion / OPD) finishes its own fast path
-    // first, we no-op instead of clobbering the result. This is what
-    // makes refresh-mid-upload recoverable: even if the tab closes, the
-    // server still has the file and will produce extraction_status =
-    // extracted | failed, never leaving the row stuck on "pending".
-    runServerExtraction(req.params.id, { skipIfNotPending: true }).catch((err) => {
-      console.error(`[upload-file] Background extraction for doc ${req.params.id} crashed:`, err);
-    });
-
-    syncDocumentsToGenie(patientId, pool).catch((e) =>
-      console.warn("[upload-file] Genie doc push skipped:", e.message),
-    );
+    if (isUuidDoc) {
+      // Update file_url in app DB patient_documents
+      const appDb = getGenieDb();
+      await appDb.from("patient_documents").update({ file_url: publicUrl }).eq("id", docId);
+    } else {
+      await pool.query(
+        "UPDATE documents SET storage_path=$1, mime_type=$2, file_name=COALESCE(NULLIF($3,''),file_name) WHERE id=$4",
+        [storagePath, mediaType, fileName || null, docId],
+      );
+      // Kick off server-side extraction for hospital patients
+      runServerExtraction(docId, { skipIfNotPending: true }).catch((err) => {
+        console.error(`[upload-file] Background extraction for doc ${docId} crashed:`, err);
+      });
+      syncDocumentsToGenie(patientId, pool).catch((e) =>
+        console.warn("[upload-file] Genie doc push skipped:", e.message),
+      );
+    }
 
     res.json({ success: true, storage_path: storagePath, file_name: fileName });
   } catch (e) {
