@@ -16,8 +16,11 @@ const isUuidPatient = (id) => typeof id === "string" && UUID_RE.test(id);
 // The agent works normally; rows are just not persisted to agent_conversations
 // (which has an integer patient_id column) until the patient is migrated.
 const freshConv = () => ({
-  id: null, messages: [], checkpoint_summary: null,
-  summary_covers_n: 0, total_turns: 0,
+  id: null,
+  messages: [],
+  checkpoint_summary: null,
+  summary_covers_n: 0,
+  total_turns: 0,
 });
 
 // Keep the most-recent N message blocks live (a "turn" here = one
@@ -36,7 +39,10 @@ const SUMMARISE_EVERY = 8;
 const UUID_CONV_PREFIX = "uuid:";
 
 function encodeUuidConv(messages, checkpoint_summary) {
-  const payload = { messages: (messages || []).slice(-LIVE_WINDOW), checkpoint_summary: checkpoint_summary || null };
+  const payload = {
+    messages: (messages || []).slice(-LIVE_WINDOW),
+    checkpoint_summary: checkpoint_summary || null,
+  };
   return UUID_CONV_PREFIX + Buffer.from(JSON.stringify(payload)).toString("base64");
 }
 
@@ -44,7 +50,10 @@ function decodeUuidConv(conversationId) {
   try {
     const raw = Buffer.from(conversationId.slice(UUID_CONV_PREFIX.length), "base64").toString();
     const parsed = JSON.parse(raw);
-    return { messages: Array.isArray(parsed.messages) ? parsed.messages : [], checkpoint_summary: parsed.checkpoint_summary || null };
+    return {
+      messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+      checkpoint_summary: parsed.checkpoint_summary || null,
+    };
   } catch {
     return { messages: [], checkpoint_summary: null };
   }
@@ -90,7 +99,11 @@ export async function appendTurn(pool, conversation, userMessage, assistantTurns
     const next = [...(conversation.messages || []), userMessage, ...assistantTurns];
     const live = next.slice(-LIVE_WINDOW);
     const summary = conversation.checkpoint_summary || null;
-    return { messages: live, checkpoint_summary: summary, __nextConvId: encodeUuidConv(live, summary) };
+    return {
+      messages: live,
+      checkpoint_summary: summary,
+      __nextConvId: encodeUuidConv(live, summary),
+    };
   }
   const rawExisting = Array.isArray(conversation.messages) ? conversation.messages : [];
   // Heal any dangling tool_use from a prior failed turn before appending.

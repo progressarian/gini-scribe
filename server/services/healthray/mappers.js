@@ -40,6 +40,7 @@ export function mapVisitType(reason) {
   if (r.includes("follow")) return "Follow-Up";
   if (r.includes("new") || r.includes("first")) return "New Patient";
   if (r.includes("online") || r.includes("tele")) return "Tele";
+  if (r.includes("invest")) return "Investigation";
   return "OPD";
 }
 

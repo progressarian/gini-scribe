@@ -288,15 +288,19 @@ router.post("/patients/:id/documents", validate(documentCreateSchema), async (re
     if (UUID_DOC_RE.test(patientId)) {
       const appDb = getGenieDb();
       if (!appDb) return res.status(503).json({ error: "App DB not configured." });
-      const { data, error } = await appDb.from("patient_documents").insert({
-        patient_id: patientId,
-        doc_type: n(doc_type),
-        title: n(title),
-        source: n(source) || "patient_upload",
-        document_date: n(doc_date) || null,
-        file_url: n(file_url) || null,
-        extracted_data: extracted_data || null,
-      }).select().single();
+      const { data, error } = await appDb
+        .from("patient_documents")
+        .insert({
+          patient_id: patientId,
+          doc_type: n(doc_type),
+          title: n(title),
+          source: n(source) || "patient_upload",
+          document_date: n(doc_date) || null,
+          file_url: n(file_url) || null,
+          extracted_data: extracted_data || null,
+        })
+        .select()
+        .single();
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ ...data, id: data.id, patient_id: patientId });
     }
@@ -333,7 +337,11 @@ router.get("/documents/:id", async (req, res) => {
     if (UUID_DOC_RE.test(docId)) {
       const appDb = getGenieDb();
       if (!appDb) return res.status(503).json({ error: "App DB not configured." });
-      const { data, error } = await appDb.from("patient_documents").select("*").eq("id", docId).single();
+      const { data, error } = await appDb
+        .from("patient_documents")
+        .select("*")
+        .eq("id", docId)
+        .single();
       if (error || !data) return res.status(404).json({ error: "Not found" });
       return res.json(data);
     }
@@ -367,7 +375,11 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
       // App DB — look up in patient_documents
       const appDb = getGenieDb();
       if (!appDb) return res.status(503).json({ error: "App DB not configured." });
-      const { data, error } = await appDb.from("patient_documents").select("patient_id,doc_type").eq("id", docId).single();
+      const { data, error } = await appDb
+        .from("patient_documents")
+        .select("patient_id,doc_type")
+        .eq("id", docId)
+        .single();
       if (error || !data) return res.status(404).json({ error: "Document not found" });
       patientId = data.patient_id;
       docType = data.doc_type || "other";

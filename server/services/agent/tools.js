@@ -1895,63 +1895,95 @@ async function executeCreateHealthLogForAppDb(uuid, input) {
 
   const today = new Date().toISOString().slice(0, 10);
   const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  const logDate = typeof input.date === "string" && ISO_DATE_RE.test(input.date) ? input.date : today;
-  const type    = String(input.type   || "").trim();
-  const v1      = String(input.value1 ?? "").trim();
-  const v2      = String(input.value2 ?? "").trim();
+  const logDate =
+    typeof input.date === "string" && ISO_DATE_RE.test(input.date) ? input.date : today;
+  const type = String(input.type || "").trim();
+  const v1 = String(input.value1 ?? "").trim();
+  const v2 = String(input.value2 ?? "").trim();
   const context = String(input.context ?? "").trim();
 
   try {
     if (type === "BP") {
-      const sys = Number(v1), dia = Number(v2);
-      if (!Number.isFinite(sys) || sys <= 0) return { ok: false, error: "value1 (systolic) must be a positive number." };
-      if (!Number.isFinite(dia) || dia <= 0) return { ok: false, error: "value2 (diastolic) must be a positive number." };
-      const { error } = await db.from("patient_vitals_log").insert({ patient_id: uuid, recorded_date: logDate, systolic: sys, diastolic: dia });
+      const sys = Number(v1),
+        dia = Number(v2);
+      if (!Number.isFinite(sys) || sys <= 0)
+        return { ok: false, error: "value1 (systolic) must be a positive number." };
+      if (!Number.isFinite(dia) || dia <= 0)
+        return { ok: false, error: "value2 (diastolic) must be a positive number." };
+      const { error } = await db
+        .from("patient_vitals_log")
+        .insert({ patient_id: uuid, recorded_date: logDate, systolic: sys, diastolic: dia });
       if (error) return { ok: false, error: error.message };
       return { ok: true, saved: { type, systolic: sys, diastolic: dia, date: logDate } };
     }
 
     if (type === "Sugar") {
       const rbs = Number(v1);
-      if (!Number.isFinite(rbs) || rbs <= 0) return { ok: false, error: "value1 (sugar mg/dL) must be a positive number." };
+      if (!Number.isFinite(rbs) || rbs <= 0)
+        return { ok: false, error: "value1 (sugar mg/dL) must be a positive number." };
       const mealType = (context || "Random").slice(0, 50);
-      const { error } = await db.from("patient_vitals_log").insert({ patient_id: uuid, recorded_date: logDate, rbs, meal_type: mealType });
+      const { error } = await db
+        .from("patient_vitals_log")
+        .insert({ patient_id: uuid, recorded_date: logDate, rbs, meal_type: mealType });
       if (error) return { ok: false, error: error.message };
       return { ok: true, saved: { type, rbs, meal_type: mealType, date: logDate } };
     }
 
     if (type === "Weight") {
       const wt = Number(v1);
-      if (!Number.isFinite(wt) || wt <= 0) return { ok: false, error: "value1 (weight kg) must be a positive number." };
-      const { error } = await db.from("patient_vitals_log").insert({ patient_id: uuid, recorded_date: logDate, weight: wt });
+      if (!Number.isFinite(wt) || wt <= 0)
+        return { ok: false, error: "value1 (weight kg) must be a positive number." };
+      const { error } = await db
+        .from("patient_vitals_log")
+        .insert({ patient_id: uuid, recorded_date: logDate, weight: wt });
       if (error) return { ok: false, error: error.message };
       return { ok: true, saved: { type, weight_kg: wt, date: logDate } };
     }
 
     const NAMED_LAB_META = {
-      HbA1c:       { testName: "HbA1c",           canonicalName: "hba1c",       unit: "%" },
-      LDL:         { testName: "LDL Cholesterol",  canonicalName: "ldl",         unit: "mg/dL" },
-      TSH:         { testName: "TSH",              canonicalName: "tsh",         unit: "µIU/mL" },
-      Haemoglobin: { testName: "Haemoglobin",      canonicalName: "haemoglobin", unit: "g/dL" },
-      eGFR:        { testName: "eGFR",             canonicalName: "egfr",        unit: "mL/min" },
+      HbA1c: { testName: "HbA1c", canonicalName: "hba1c", unit: "%" },
+      LDL: { testName: "LDL Cholesterol", canonicalName: "ldl", unit: "mg/dL" },
+      TSH: { testName: "TSH", canonicalName: "tsh", unit: "µIU/mL" },
+      Haemoglobin: { testName: "Haemoglobin", canonicalName: "haemoglobin", unit: "g/dL" },
+      eGFR: { testName: "eGFR", canonicalName: "egfr", unit: "mL/min" },
     };
     if (NAMED_LAB_META[type] || type === "Lab") {
-      const meta     = NAMED_LAB_META[type];
+      const meta = NAMED_LAB_META[type];
       const testName = meta ? meta.testName : String(input.test_name || "").trim();
       if (!testName) return { ok: false, error: "test_name is required for type='Lab'." };
-      const numeric  = Number(v1);
-      if (!Number.isFinite(numeric) || numeric <= 0) return { ok: false, error: "value1 must be a positive number." };
-      const unit      = meta ? meta.unit : String(input.unit || "").trim();
-      const canonical = meta ? meta.canonicalName : String(input.canonical_name || testName).toLowerCase().replace(/\s+/g, "_").slice(0, 100);
-      const refRange  = String(input.ref_range || "").trim() || null;
+      const numeric = Number(v1);
+      if (!Number.isFinite(numeric) || numeric <= 0)
+        return { ok: false, error: "value1 must be a positive number." };
+      const unit = meta ? meta.unit : String(input.unit || "").trim();
+      const canonical = meta
+        ? meta.canonicalName
+        : String(input.canonical_name || testName)
+            .toLowerCase()
+            .replace(/\s+/g, "_")
+            .slice(0, 100);
+      const refRange = String(input.ref_range || "").trim() || null;
       const { error } = await db.from("lab_results").insert({
-        patient_id: uuid, test_date: logDate,
-        test_name: testName.slice(0, 200), canonical_name: canonical,
-        result: numeric, result_text: v1,
-        unit: unit.slice(0, 50) || null, ref_range: refRange, source: "agent",
+        patient_id: uuid,
+        test_date: logDate,
+        test_name: testName.slice(0, 200),
+        canonical_name: canonical,
+        result: numeric,
+        result_text: v1,
+        unit: unit.slice(0, 50) || null,
+        ref_range: refRange,
+        source: "agent",
       });
       if (error) return { ok: false, error: error.message };
-      return { ok: true, saved: { type: type === "Lab" ? "Lab" : type, test_name: testName, result: numeric, unit, date: logDate } };
+      return {
+        ok: true,
+        saved: {
+          type: type === "Lab" ? "Lab" : type,
+          test_name: testName,
+          result: numeric,
+          unit,
+          date: logDate,
+        },
+      };
     }
 
     if (type === "Symptom") {
@@ -1959,8 +1991,11 @@ async function executeCreateHealthLogForAppDb(uuid, input) {
       const severity = v2 && Number.isFinite(Number(v2)) ? Number(v2) : null;
       const bodyArea = (context || "General").slice(0, 100);
       const { error } = await db.from("symptom_logs").insert({
-        patient_id: uuid, symptom: v1.slice(0, 200),
-        severity, body_area: bodyArea, context: "Tracked via Genie",
+        patient_id: uuid,
+        symptom: v1.slice(0, 200),
+        severity,
+        body_area: bodyArea,
+        context: "Tracked via Genie",
         logged_at: new Date().toISOString(),
       });
       if (error) return { ok: false, error: error.message };
@@ -1970,7 +2005,14 @@ async function executeCreateHealthLogForAppDb(uuid, input) {
     if (type === "Food") {
       if (!v1) return { ok: false, error: "value1 (food description) is required." };
       const mealType = (context || "snack").toLowerCase().slice(0, 30);
-      const { error } = await db.from("patient_meal_log").insert({ patient_id: uuid, meal_type: mealType, description: v1.slice(0, 200), log_date: logDate });
+      const { error } = await db
+        .from("patient_meal_log")
+        .insert({
+          patient_id: uuid,
+          meal_type: mealType,
+          description: v1.slice(0, 200),
+          log_date: logDate,
+        });
       if (error) return { ok: false, error: error.message };
       return { ok: true, saved: { type, description: v1, meal_type: mealType, date: logDate } };
     }
@@ -1990,53 +2032,102 @@ async function queryAppPatientData(uuid, scope, args = {}) {
   const limit = args.limit || 10;
   try {
     if (scope === "bp") {
-      const { data } = await db.from("patient_vitals_log")
+      const { data } = await db
+        .from("patient_vitals_log")
         .select("recorded_date,systolic,diastolic,pulse,created_at")
-        .eq("patient_id", uuid).not("systolic", "is", null)
-        .order("recorded_date", { ascending: false }).order("created_at", { ascending: false }).limit(limit);
-      return { records: (data || []).map(r => ({ date: r.recorded_date, systolic: r.systolic, diastolic: r.diastolic, pulse: r.pulse })), total: data?.length ?? 0, scope };
+        .eq("patient_id", uuid)
+        .not("systolic", "is", null)
+        .order("recorded_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      return {
+        records: (data || []).map((r) => ({
+          date: r.recorded_date,
+          systolic: r.systolic,
+          diastolic: r.diastolic,
+          pulse: r.pulse,
+        })),
+        total: data?.length ?? 0,
+        scope,
+      };
     }
     if (scope === "weight") {
-      const { data } = await db.from("patient_vitals_log")
+      const { data } = await db
+        .from("patient_vitals_log")
         .select("recorded_date,weight,created_at")
-        .eq("patient_id", uuid).not("weight", "is", null)
-        .order("recorded_date", { ascending: false }).order("created_at", { ascending: false }).limit(limit);
-      return { records: (data || []).map(r => ({ date: r.recorded_date, value: r.weight, unit: "kg" })), total: data?.length ?? 0, scope };
+        .eq("patient_id", uuid)
+        .not("weight", "is", null)
+        .order("recorded_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      return {
+        records: (data || []).map((r) => ({ date: r.recorded_date, value: r.weight, unit: "kg" })),
+        total: data?.length ?? 0,
+        scope,
+      };
     }
     if (scope === "sugar") {
-      const { data } = await db.from("patient_vitals_log")
+      const { data } = await db
+        .from("patient_vitals_log")
         .select("recorded_date,rbs,meal_type,created_at")
-        .eq("patient_id", uuid).not("rbs", "is", null)
-        .order("recorded_date", { ascending: false }).order("created_at", { ascending: false }).limit(limit);
-      return { records: (data || []).map(r => ({ date: r.recorded_date, value: r.rbs, meal_type: r.meal_type, unit: "mg/dL" })), total: data?.length ?? 0, scope };
+        .eq("patient_id", uuid)
+        .not("rbs", "is", null)
+        .order("recorded_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      return {
+        records: (data || []).map((r) => ({
+          date: r.recorded_date,
+          value: r.rbs,
+          meal_type: r.meal_type,
+          unit: "mg/dL",
+        })),
+        total: data?.length ?? 0,
+        scope,
+      };
     }
     if (scope === "meds") {
-      const { data } = await db.from("medications")
+      const { data } = await db
+        .from("medications")
         .select("name,dose,frequency,timing,is_active,started_date,for_diagnosis")
-        .eq("patient_id", uuid).eq("is_active", true).limit(30);
+        .eq("patient_id", uuid)
+        .eq("is_active", true)
+        .limit(30);
       return { records: data || [], total: data?.length ?? 0, scope };
     }
     if (scope === "diagnoses") {
-      const { data } = await db.from("conditions")
-        .select("name,status,source").eq("patient_id", uuid).limit(20);
+      const { data } = await db
+        .from("conditions")
+        .select("name,status,source")
+        .eq("patient_id", uuid)
+        .limit(20);
       return { records: data || [], total: data?.length ?? 0, scope };
     }
     if (scope === "labs") {
-      const { data } = await db.from("lab_results")
+      const { data } = await db
+        .from("lab_results")
         .select("test_name,canonical_name,result,result_text,unit,ref_range,flag,test_date")
-        .eq("patient_id", uuid).order("test_date", { ascending: false }).limit(limit);
+        .eq("patient_id", uuid)
+        .order("test_date", { ascending: false })
+        .limit(limit);
       return { records: data || [], total: data?.length ?? 0, scope };
     }
     if (scope === "symptoms") {
-      const { data } = await db.from("symptom_logs")
+      const { data } = await db
+        .from("symptom_logs")
         .select("symptom,severity,body_area,context,logged_at")
-        .eq("patient_id", uuid).order("logged_at", { ascending: false }).limit(limit);
+        .eq("patient_id", uuid)
+        .order("logged_at", { ascending: false })
+        .limit(limit);
       return { records: data || [], total: data?.length ?? 0, scope };
     }
     if (scope === "meals") {
-      const { data } = await db.from("patient_meal_log")
+      const { data } = await db
+        .from("patient_meal_log")
         .select("description,meal_type,calories,protein_g,carbs_g,fat_g,log_date")
-        .eq("patient_id", uuid).order("log_date", { ascending: false }).limit(limit);
+        .eq("patient_id", uuid)
+        .order("log_date", { ascending: false })
+        .limit(limit);
       return { records: data || [], total: data?.length ?? 0, scope };
     }
   } catch (e) {
@@ -2047,23 +2138,54 @@ async function queryAppPatientData(uuid, scope, args = {}) {
 
 async function getAppFullContext(uuid) {
   const db = getGenieDb();
-  if (!db) return { patient: null, conditions: [], medications: [], labs: { latest: {} }, vitals: {} };
+  if (!db)
+    return { patient: null, conditions: [], medications: [], labs: { latest: {} }, vitals: {} };
   try {
     const [patRes, condRes, medRes, vitRes] = await Promise.all([
-      db.from("patients").select("name,dob,sex,blood_group,program_type,doctor_name").eq("id", uuid).maybeSingle(),
+      db
+        .from("patients")
+        .select("name,dob,sex,blood_group,program_type,doctor_name")
+        .eq("id", uuid)
+        .maybeSingle(),
       db.from("conditions").select("name,status").eq("patient_id", uuid).limit(20),
-      db.from("medications").select("name,dose,frequency,timing,for_diagnosis").eq("patient_id", uuid).eq("is_active", true).limit(20),
-      db.from("patient_vitals_log").select("recorded_date,systolic,diastolic,rbs,weight,meal_type").eq("patient_id", uuid).order("recorded_date", { ascending: false }).limit(5),
+      db
+        .from("medications")
+        .select("name,dose,frequency,timing,for_diagnosis")
+        .eq("patient_id", uuid)
+        .eq("is_active", true)
+        .limit(20),
+      db
+        .from("patient_vitals_log")
+        .select("recorded_date,systolic,diastolic,rbs,weight,meal_type")
+        .eq("patient_id", uuid)
+        .order("recorded_date", { ascending: false })
+        .limit(5),
     ]);
     const latestVitals = {};
-    for (const row of (vitRes.data || [])) {
-      if (row.systolic && !latestVitals.bp) latestVitals.bp = `${row.systolic}/${row.diastolic} mmHg (${row.recorded_date})`;
-      if (row.weight  && !latestVitals.weight) latestVitals.weight = `${row.weight} kg (${row.recorded_date})`;
-      if (row.rbs     && !latestVitals.sugar)  latestVitals.sugar = `${row.rbs} mg/dL${row.meal_type ? ` (${row.meal_type})` : ""} (${row.recorded_date})`;
+    for (const row of vitRes.data || []) {
+      if (row.systolic && !latestVitals.bp)
+        latestVitals.bp = `${row.systolic}/${row.diastolic} mmHg (${row.recorded_date})`;
+      if (row.weight && !latestVitals.weight)
+        latestVitals.weight = `${row.weight} kg (${row.recorded_date})`;
+      if (row.rbs && !latestVitals.sugar)
+        latestVitals.sugar = `${row.rbs} mg/dL${row.meal_type ? ` (${row.meal_type})` : ""} (${row.recorded_date})`;
     }
-    return { patient: patRes.data, conditions: condRes.data || [], medications: medRes.data || [], labs: { latest: {} }, vitals: latestVitals };
+    return {
+      patient: patRes.data,
+      conditions: condRes.data || [],
+      medications: medRes.data || [],
+      labs: { latest: {} },
+      vitals: latestVitals,
+    };
   } catch (e) {
-    return { patient: null, conditions: [], medications: [], labs: { latest: {} }, vitals: {}, error: e?.message };
+    return {
+      patient: null,
+      conditions: [],
+      medications: [],
+      labs: { latest: {} },
+      vitals: {},
+      error: e?.message,
+    };
   }
 }
 
@@ -2071,8 +2193,17 @@ async function getAppMedSchedule(uuid) {
   const db = getGenieDb();
   if (!db) return { now_ist: new Date().toISOString(), slots: [] };
   try {
-    const { data } = await db.from("medications").select("name,dose,frequency,timing,scheduled_time").eq("patient_id", uuid).eq("is_active", true).limit(30);
-    return { now_ist: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), slots: [], meds: data || [] };
+    const { data } = await db
+      .from("medications")
+      .select("name,dose,frequency,timing,scheduled_time")
+      .eq("patient_id", uuid)
+      .eq("is_active", true)
+      .limit(30);
+    return {
+      now_ist: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+      slots: [],
+      meds: data || [],
+    };
   } catch {
     return { now_ist: new Date().toISOString(), slots: [] };
   }
@@ -2080,15 +2211,24 @@ async function getAppMedSchedule(uuid) {
 
 async function uuidPatientTool(name, input, uuid) {
   switch (name) {
-    case "query_patient_data":       return queryAppPatientData(uuid, input?.scope, input);
-    case "get_full_patient_context": return getAppFullContext(uuid);
-    case "get_progress_summary":     return { summary: "Progress tracking not yet available.", trends: [] };
-    case "get_medication_schedule":  return getAppMedSchedule(uuid);
-    case "create_health_log":        return executeCreateHealthLogForAppDb(uuid, input);
-    case "run_patient_sql":          return { rows: [], note: "Direct SQL not available for app patients." };
-    case "get_prescriptions":        return { prescriptions: [] };
-    case "get_appointments":         return { appointments: [] };
-    default:                         return { records: [], total: 0 };
+    case "query_patient_data":
+      return queryAppPatientData(uuid, input?.scope, input);
+    case "get_full_patient_context":
+      return getAppFullContext(uuid);
+    case "get_progress_summary":
+      return { summary: "Progress tracking not yet available.", trends: [] };
+    case "get_medication_schedule":
+      return getAppMedSchedule(uuid);
+    case "create_health_log":
+      return executeCreateHealthLogForAppDb(uuid, input);
+    case "run_patient_sql":
+      return { rows: [], note: "Direct SQL not available for app patients." };
+    case "get_prescriptions":
+      return { prescriptions: [] };
+    case "get_appointments":
+      return { appointments: [] };
+    default:
+      return { records: [], total: 0 };
   }
 }
 

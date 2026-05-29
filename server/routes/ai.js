@@ -825,8 +825,9 @@ router.post("/ai/bulk-log", async (req, res) => {
   const { scribePatientId, document_id, kind, items, log_date } = req.body || {};
   const UUID_BULK_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const pidNum = Number(scribePatientId);
-  const isIntPid  = Number.isInteger(pidNum) && pidNum > 0;
-  const isUuidPid = typeof scribePatientId === "string" && UUID_BULK_RE.test(scribePatientId.trim());
+  const isIntPid = Number.isInteger(pidNum) && pidNum > 0;
+  const isUuidPid =
+    typeof scribePatientId === "string" && UUID_BULK_RE.test(scribePatientId.trim());
   if (!isIntPid && !isUuidPid)
     return res.status(400).json({ error: "scribePatientId is required" });
   const pid = isIntPid ? pidNum : scribePatientId.trim();
@@ -867,11 +868,16 @@ router.post("/ai/bulk-log", async (req, res) => {
           continue;
         const numeric = Number(String(r.result).replace(/[^\d.\-]/g, ""));
         const numericVal = Number.isFinite(numeric) ? numeric : null;
-        const canonical = (r.canonical_name || r.test_name || "").toString().trim().toLowerCase().replace(/\s+/g, "_");
+        const canonical = (r.canonical_name || r.test_name || "")
+          .toString()
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_");
         const testDate = r.test_date || logDate || today;
         try {
           await insertRow("lab_results", {
-            patient_id: pid, test_date: testDate,
+            patient_id: pid,
+            test_date: testDate,
             test_name: String(r.test_name).slice(0, 200),
             canonical_name: canonical.slice(0, 100),
             result: numericVal,
@@ -919,7 +925,8 @@ router.post("/ai/bulk-log", async (req, res) => {
       for (const r of items) {
         if (!r?.name) continue;
         const hour = new Date().getHours();
-        const defaultMeal = hour < 11 ? "breakfast" : hour < 15 ? "lunch" : hour < 18 ? "snack" : "dinner";
+        const defaultMeal =
+          hour < 11 ? "breakfast" : hour < 15 ? "lunch" : hour < 18 ? "snack" : "dinner";
         try {
           await insertRow("patient_meal_log", {
             patient_id: pid,
