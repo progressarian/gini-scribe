@@ -934,9 +934,7 @@ async function qSugar(pool, patientId, args) {
   const labParams = [patientId];
   const sinceVal = args.since_last_visit && args.__lastVisit ? args.__lastVisit : null;
   const days =
-    typeof args.range_days === "number" && args.range_days > 0
-      ? Math.floor(args.range_days)
-      : null;
+    typeof args.range_days === "number" && args.range_days > 0 ? Math.floor(args.range_days) : null;
 
   let labSql = `SELECT
       lr.test_date          AS recorded_date,
@@ -985,9 +983,7 @@ async function qSugar(pool, patientId, args) {
     seen.add(key);
     merged.push(row);
   }
-  merged.sort((a, b) =>
-    String(b.recorded_date || "").localeCompare(String(a.recorded_date || "")),
-  );
+  merged.sort((a, b) => String(b.recorded_date || "").localeCompare(String(a.recorded_date || "")));
   return merged.slice(0, limit);
 }
 async function qBP(pool, patientId, args) {
@@ -2132,24 +2128,71 @@ async function queryAppPatientData(uuid, scope, args = {}) {
       };
     }
     if (scope === "sugar") {
-      const { data } = await db
-        .from("patient_vitals_log")
-        .select("recorded_date,rbs,meal_type,created_at")
-        .eq("patient_id", uuid)
-        .not("rbs", "is", null)
-        .order("recorded_date", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(limit);
-      return {
-        records: (data || []).map((r) => ({
-          date: r.recorded_date,
-          value: r.rbs,
-          meal_type: r.meal_type,
-          unit: "mg/dL",
-        })),
-        total: data?.length ?? 0,
-        scope,
-      };
+      // Pull from both vitals (rbs) AND lab_results (FBS/PPBS/RBS entries),
+      // then merge and sort newest-first so the agent always sees the latest reading.
+      const [vitalsRes, labRes] = await Promise.all([
+        db
+          .from("patient_vitals_log")
+          .select("recorded_date,rbs,meal_type,created_at")
+          .eq("patient_id", uuid)
+          .not("rbs", "is", null)
+          .order("recorded_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(limit),
+        db
+          .from("lab_results")
+          .select("test_date,result,canonical_name,test_name,unit,created_at")
+          .eq("patient_id", uuid)
+          .not("result", "is", null)
+          .or(
+            "canonical_name.ilike.fbs,canonical_name.ilike.ppbs,canonical_name.ilike.rbs," +
+            "canonical_name.ilike.blood_sugar,canonical_name.ilike.glucose," +
+            "test_name.ilike.*fasting*sugar*,test_name.ilike.*fasting*glucose*," +
+            "test_name.ilike.*fasting blood*,test_name.ilike.*post*prandial*," +
+            "test_name.ilike.*random*sugar*,test_name.ilike.*random blood*," +
+            "test_name.ilike.*blood sugar*,test_name.ilike.*blood glucose*," +
+            "test_name.ilike.*rbs*",
+          )
+          .order("test_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(limit),
+      ]);
+
+      const vitalsRecords = (vitalsRes.data || []).map((r) => ({
+        date: r.recorded_date,
+        value: r.rbs,
+        meal_type: r.meal_type,
+        unit: "mg/dL",
+        source: "vitals",
+      }));
+      const labRecords = (labRes.data || []).map((r) => ({
+        date: r.test_date,
+        value: r.result,
+        meal_type:
+          (r.canonical_name || "").toLowerCase().startsWith("fbs") ||
+          (r.test_name || "").toLowerCase().includes("fasting")
+            ? "Fasting"
+            : (r.canonical_name || "").toLowerCase().startsWith("ppbs") ||
+              (r.test_name || "").toLowerCase().includes("post")
+            ? "Post-meal"
+            : "Random",
+        unit: r.unit || "mg/dL",
+        source: "lab_results",
+        test_name: r.test_name,
+        canonical_name: r.canonical_name,
+      }));
+
+      // Deduplicate same-day same-value rows, then sort newest first.
+      const seen = new Set();
+      const merged = [];
+      for (const r of [...vitalsRecords, ...labRecords]) {
+        const key = `${String(r.date || "").slice(0, 10)}|${r.value}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(r);
+      }
+      merged.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      return { records: merged.slice(0, limit), total: merged.length, scope };
     }
     if (scope === "meds") {
       const { data } = await db

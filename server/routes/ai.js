@@ -416,16 +416,16 @@ STYLE:
 // ── Language detection ───────────────────────────────────────────────
 // Returns 'english' | 'hindi' | 'punjabi' | null (null = Hinglish/mixed,
 // let the model decide from the LANGUAGE RULE in AGENT_SYSTEM_PROMPT).
-const HINGLISH_RE = /\b(aap|kya|hai|hain|mera|meri|tera|teri|nahi|nahin|haan|abhi|karo|dena|lena|bata|chahiye|tha|thi|the|wala|wali|jao|aao|agar|toh|phir|bahut|thoda|aaj|kal|subah|raat|dawa|dawai|khana|pani|bolo|dekho|lelo|loge|doge)\b/i;
+const HINGLISH_RE =
+  /\b(aap|kya|hai|hain|mera|meri|tera|teri|nahi|nahin|haan|abhi|karo|dena|lena|bata|chahiye|tha|thi|the|wala|wali|jao|aao|agar|toh|phir|bahut|thoda|aaj|kal|subah|raat|dawa|dawai|khana|pani|bolo|dekho|lelo|loge|doge)\b/i;
 function detectLang(text) {
   if (!text || typeof text !== "string") return null;
   if (/[\u0A00-\u0A7F]/.test(text)) return "punjabi"; // Gurmukhi script
-  if (/[\u0900-\u097F]/.test(text)) return "hindi";   // Devanagari script
-  if (/[^\u0000-\u007F]/.test(text)) return null;     // non-ASCII non-script -> mixed
-  if (HINGLISH_RE.test(text)) return null;               // romanized Hinglish
+  if (/[\u0900-\u097F]/.test(text)) return "hindi"; // Devanagari script
+  if (/[^\u0000-\u007F]/.test(text)) return null; // non-ASCII non-script -> mixed
+  if (HINGLISH_RE.test(text)) return null; // romanized Hinglish
   return "english";
 }
-
 
 // Persist the user message + every model-produced block from this turn
 // back to agent_conversations. No-ops on the legacy path (when convRow is
@@ -556,14 +556,20 @@ router.post("/ai/agent", async (req, res) => {
       const c = latestUserBlock.content;
       if (typeof c === "string") return c;
       if (Array.isArray(c))
-        return c.filter((b) => b?.type === "text").map((b) => b.text || "").join(" ");
+        return c
+          .filter((b) => b?.type === "text")
+          .map((b) => b.text || "")
+          .join(" ");
     }
     const lastUser = [...(conversation || [])].reverse().find((m) => m.role === "user");
     if (!lastUser) return "";
     const c = lastUser.content;
     if (typeof c === "string") return c;
     if (Array.isArray(c))
-      return c.filter((b) => b?.type === "text").map((b) => b.text || "").join(" ");
+      return c
+        .filter((b) => b?.type === "text")
+        .map((b) => b.text || "")
+        .join(" ");
     return "";
   })();
   const detectedLang = detectLang(latestMsgText);
