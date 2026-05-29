@@ -413,6 +413,20 @@ STYLE:
 - ACKNOWLEDGMENTS ("ok", "okk", "thanks", "great", "got it", "👍", "hmm", "ok thanks", filler "yes/no") → ONE short friendly sentence ("Anytime — ping me if you need anything else."). Do NOT re-state numbers, re-explain BP/sugar/labs, call DB tools, or propose logs. intent='chat', numbers=[], no log_proposal.
 - Mention the current time only when load-bearing (next-dose timing, meal slot, "in ~X min"). Patient age in profile is server-computed; trust it.`;
 
+// ── Language detection ───────────────────────────────────────────────
+// Returns 'english' | 'hindi' | 'punjabi' | null (null = Hinglish/mixed,
+// let the model decide from the LANGUAGE RULE in AGENT_SYSTEM_PROMPT).
+const HINGLISH_RE = /\b(aap|kya|hai|hain|mera|meri|tera|teri|nahi|nahin|haan|abhi|karo|dena|lena|bata|chahiye|tha|thi|the|wala|wali|jao|aao|agar|toh|phir|bahut|thoda|aaj|kal|subah|raat|dawa|dawai|khana|pani|bolo|dekho|lelo|loge|doge)\b/i;
+function detectLang(text) {
+  if (!text || typeof text !== "string") return null;
+  if (/[\u0A00-\u0A7F]/.test(text)) return "punjabi"; // Gurmukhi script
+  if (/[\u0900-\u097F]/.test(text)) return "hindi";   // Devanagari script
+  if (/[^\u0000-\u007F]/.test(text)) return null;     // non-ASCII non-script -> mixed
+  if (HINGLISH_RE.test(text)) return null;               // romanized Hinglish
+  return "english";
+}
+
+
 // Persist the user message + every model-produced block from this turn
 // back to agent_conversations. No-ops on the legacy path (when convRow is
 // null because the client sent `messages[]` instead of `message`+id).
@@ -534,6 +548,46 @@ router.post("/ai/agent", async (req, res) => {
   // Track the blocks the model produced this turn (assistant + interleaved
   // tool_result user blocks) so we can persist them in one go at the end.
   const turnBlocksToPersist = [];
+
+  // Detect the language of the latest user message and tag it in the message
+  // itself so the model's LANGUAGE RULE has a clear signal to act on.
+  const latestMsgText = (() => {
+    if (latestUserBlock) {
+      const c = latestUserBlock.content;
+      if (typeof c === "string") return c;
+      if (Array.isArray(c))
+        return c.filter((b) => b?.type === "text").map((b) => b.text || "").join(" ");
+    }
+    const lastUser = [...(conversation || [])].reverse().find((m) => m.role === "user");
+    if (!lastUser) return "";
+    const c = lastUser.content;
+    if (typeof c === "string") return c;
+    if (Array.isArray(c))
+      return c.filter((b) => b?.type === "text").map((b) => b.text || "").join(" ");
+    return "";
+  })();
+  const detectedLang = detectLang(latestMsgText);
+  // Inject a compact language tag at the front of the latest user message.
+  // The tag is stripped from display — it just gives the model a reliable
+  // signal to enforce the existing LANGUAGE RULE in the system prompt.
+  if (detectedLang && latestUserBlock) {
+    const tag = `[lang:${detectedLang}] `;
+    const c = latestUserBlock.content;
+    if (typeof c === "string") {
+      latestUserBlock = { ...latestUserBlock, content: tag + c };
+    } else if (Array.isArray(c)) {
+      latestUserBlock = {
+        ...latestUserBlock,
+        content: c.map((b, i) =>
+          i === 0 && b?.type === "text" ? { ...b, text: tag + (b.text || "") } : b,
+        ),
+      };
+    }
+    // Rebuild conversation with the tagged block as the last user turn.
+    if (usingCheckpoint) {
+      conversation = buildOutgoingMessages(convRow, latestUserBlock);
+    }
+  }
 
   try {
     for (let turn = 0; turn < 5; turn++) {

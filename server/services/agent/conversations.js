@@ -278,6 +278,23 @@ function redactPriorToolResults(blocks) {
   });
 }
 
+// After sanitizeForAnthropic, prior user messages often have no following
+// assistant response (their tool chains were stripped). Two consequences:
+// (1) Anthropic rejects consecutive user-role messages.
+// (2) The model sees an "unanswered" question and tries to answer it alongside
+//     the current one — the classic context bleed. Insert a minimal placeholder
+//     assistant turn after each stranded user block to fix both.
+function patchAlternatingRoles(blocks) {
+  const out = [];
+  for (let i = 0; i < blocks.length; i++) {
+    out.push(blocks[i]);
+    if (blocks[i].role === "user" && blocks[i + 1]?.role !== "assistant") {
+      out.push({ role: "assistant", content: "(previous response)" });
+    }
+  }
+  return out;
+}
+
 export function buildOutgoingMessages(conversation, latestUserBlock) {
   const rawLive = Array.isArray(conversation.messages) ? conversation.messages : [];
   const live = sanitizeForAnthropic(rawLive);
@@ -345,5 +362,5 @@ export function buildOutgoingMessages(conversation, latestUserBlock) {
     }
     return latestUserBlock;
   })();
-  return [...prefix, ...redactPriorToolResults(live), guardedLatest];
+  return [...prefix, ...redactPriorToolResults(patchAlternatingRoles(live)), guardedLatest];
 }

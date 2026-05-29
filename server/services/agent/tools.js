@@ -2005,14 +2005,12 @@ async function executeCreateHealthLogForAppDb(uuid, input) {
     if (type === "Food") {
       if (!v1) return { ok: false, error: "value1 (food description) is required." };
       const mealType = (context || "snack").toLowerCase().slice(0, 30);
-      const { error } = await db
-        .from("patient_meal_log")
-        .insert({
-          patient_id: uuid,
-          meal_type: mealType,
-          description: v1.slice(0, 200),
-          log_date: logDate,
-        });
+      const { error } = await db.from("patient_meal_log").insert({
+        patient_id: uuid,
+        meal_type: mealType,
+        description: v1.slice(0, 200),
+        log_date: logDate,
+      });
       if (error) return { ok: false, error: error.message };
       return { ok: true, saved: { type, description: v1, meal_type: mealType, date: logDate } };
     }
