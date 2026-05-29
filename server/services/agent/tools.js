@@ -921,7 +921,74 @@ async function qVitalsMerged(pool, patientId, args, fields /* Set */) {
 }
 
 async function qSugar(pool, patientId, args) {
-  return qVitalsMerged(pool, patientId, args, new Set(["sugar"]));
+  const limit = Math.min(Math.max(args.limit || 50, 1), 200);
+
+  // 1. Vitals-table sugar (rbs field in patient_vitals_log + vitals)
+  const vitalsRows = await qVitalsMerged(pool, patientId, args, new Set(["sugar"]));
+
+  // 2. Lab-results sugar: FBS / PPBS / RBS rows that were logged as lab
+  //    entries (e.g. via the LogModal type='FBS'/'PPBS'/'Sugar'). These
+  //    do NOT appear in patient_vitals_log.rbs, so they were invisible to
+  //    scope='sugar' before this fix — causing the agent to return an older
+  //    vitals reading instead of the more-recent lab entry.
+  const labParams = [patientId];
+  const sinceVal = args.since_last_visit && args.__lastVisit ? args.__lastVisit : null;
+  const days =
+    typeof args.range_days === "number" && args.range_days > 0
+      ? Math.floor(args.range_days)
+      : null;
+
+  let labSql = `SELECT
+      lr.test_date          AS recorded_date,
+      lr.result             AS rbs,
+      CASE
+        WHEN lr.canonical_name ILIKE 'fbs%'
+          OR lr.test_name ILIKE '%fasting%' THEN 'Fasting'
+        WHEN lr.canonical_name ILIKE 'ppbs%'
+          OR lr.test_name ILIKE '%post%prandial%'
+          OR lr.test_name ILIKE '%pp%glucose%' THEN 'Post-meal'
+        ELSE 'Random'
+      END                   AS meal_type,
+      'lab_results'         AS source_table,
+      lr.unit,
+      lr.flag,
+      lr.canonical_name
+    FROM lab_results lr
+   WHERE lr.patient_id = $1
+     AND lr.result     IS NOT NULL
+     AND (
+       lr.canonical_name ILIKE ANY(ARRAY['fbs','ppbs','rbs','blood_sugar','glucose','random_sugar','blood sugar'])
+       OR lr.test_name ILIKE ANY(ARRAY['%fasting%sugar%','%fasting%glucose%','%fasting blood%','%post%prandial%','%random%sugar%','%random blood%','%rbs%','%blood sugar%','%blood glucose%'])
+     )`;
+
+  if (sinceVal) {
+    labSql += ` AND lr.test_date >= $${labParams.push(sinceVal)}`;
+  } else if (days) {
+    labSql += ` AND lr.test_date >= (CURRENT_DATE - INTERVAL '${days} days')`;
+  }
+  labSql += ` ORDER BY lr.test_date DESC LIMIT ${limit}`;
+
+  let labRows = [];
+  try {
+    const { rows } = await pool.query(labSql, labParams);
+    labRows = rows;
+  } catch (e) {
+    console.warn("[qSugar] lab_results query failed:", e?.message);
+  }
+
+  // 3. Merge both sources, deduplicate same-day same-value rows, sort newest first.
+  const seen = new Set();
+  const merged = [];
+  for (const row of [...vitalsRows, ...labRows]) {
+    const key = `${String(row.recorded_date || "").slice(0, 10)}|${row.rbs}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+  }
+  merged.sort((a, b) =>
+    String(b.recorded_date || "").localeCompare(String(a.recorded_date || "")),
+  );
+  return merged.slice(0, limit);
 }
 async function qBP(pool, patientId, args) {
   return qVitalsMerged(pool, patientId, args, new Set(["bp"]));
