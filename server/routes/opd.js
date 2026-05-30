@@ -390,6 +390,8 @@ router.get("/opd/appointments", async (req, res) => {
            -- Mirror /api/visit/:patientId dedup: consultations UNION appointments
            -- (only HealthRay-linked), dropping appointments whose date already
            -- has a consultation, then distinct on (date, status).
+           -- Dr. Hospital Admin = lab-only offline registration; excluded here
+           -- and counted separately in lab_visit_count.
            (SELECT COUNT(*) FROM (
               SELECT DISTINCT v_date, v_status FROM (
                 SELECT c.visit_date::date AS v_date, c.status AS v_status
@@ -400,6 +402,7 @@ router.get("/opd/appointments", async (req, res) => {
                   WHERE a2.patient_id = pids.pid
                     AND a2.healthray_id IS NOT NULL
                     AND a2.appointment_date IS NOT NULL
+                    AND COALESCE(a2.doctor_name, '') != 'Dr. Hospital Admin'
                     AND NOT EXISTS (
                       SELECT 1 FROM consultations c2
                        WHERE c2.patient_id = pids.pid
@@ -407,6 +410,11 @@ router.get("/opd/appointments", async (req, res) => {
                     )
               ) u
             ))::int AS visit_count,
+           (SELECT COUNT(*)::int FROM appointments a_lab
+              WHERE a_lab.patient_id = pids.pid
+                AND a_lab.doctor_name = 'Dr. Hospital Admin'
+                AND a_lab.healthray_id IS NOT NULL
+            ) AS lab_visit_count,
            (SELECT EXISTS(
               SELECT 1 FROM consultations c
                WHERE c.patient_id = pids.pid
@@ -813,6 +821,7 @@ router.get("/opd/appointments", async (req, res) => {
       // - appointment has no healthray_id (HealthRay-linked appointments are
       //   already included in the agg UNION ALL, so they're already counted).
       row.visit_count = !a?.has_today_visit && !row.healthray_id ? baseCount + 1 : baseCount;
+      row.lab_visit_count = a?.lab_visit_count || 0;
       row.last_visit_date = a?.last_visit_date || null;
       // Fall back to latest non-empty healthray_diagnoses if this row's is empty.
       if (

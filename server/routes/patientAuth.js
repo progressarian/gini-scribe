@@ -285,7 +285,7 @@ router.post("/patient/auth/send-otp", loginLimiter, async (req, res) => {
 
     if (purpose === "signup" && patient?.password_hash) {
       return res.status(409).json({
-        error: "An account with this number already exists. Sign in with your password.",
+        error: "An account with this number already exists. Sign in instead.",
         code: "ALREADY_REGISTERED",
       });
     }

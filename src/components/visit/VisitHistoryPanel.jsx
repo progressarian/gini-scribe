@@ -205,41 +205,95 @@ function VisitCard({ c, visitNum, isToday, expanded, onToggle }) {
 
 const VisitHistoryPanel = memo(function VisitHistoryPanel({ consultations }) {
   const [expanded, setExpanded] = useState({});
+  const [activeTab, setActiveTab] = useState("visits");
 
   const toggle = (id) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
+
+  // Lab-only = HealthRay appointment registered under Hospital Admin
+  const isLabOnly = (c) =>
+    c.source_type === "appointment" &&
+    (c.con_name === "Dr. Hospital Admin" ||
+      (c.visit_type === "Investigation" && c.con_name === "Dr. Hospital Admin"));
+
+  const visits = consultations.filter((c) => !isLabOnly(c));
+  const labs = consultations.filter((c) => isLabOnly(c));
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  const renderList = (list, countLabel) => (
+    <div className="scb">
+      {list.map((c, i) => {
+        const visitNum = list.length - i;
+        const visitDateStr = c.visit_date ? String(c.visit_date).slice(0, 10) : null;
+        const isToday = visitDateStr === todayStr;
+        return (
+          <VisitCard
+            key={`${c.source_type}-${c.id}`}
+            c={c}
+            visitNum={visitNum}
+            isToday={isToday}
+            expanded={!!expanded[`${c.source_type}-${c.id}`]}
+            onToggle={() => toggle(`${c.source_type}-${c.id}`)}
+          />
+        );
+      })}
+      {list.length === 0 && (
+        <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
+          No {countLabel}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="panel-body">
       <div className="sc">
         <div className="sch">
           <div className="sct">
-            <div className="sci ic-b">📅</div>Visit History — {consultations.length} Visits
+            <div className="sci ic-b">📅</div>Visit History
+          </div>
+          {/* Internal tab switcher */}
+          <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+            {[
+              { id: "visits", label: "Visits", count: visits.length },
+              { id: "labs", label: "🧪 Lab Tests", count: labs.length },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                  background: activeTab === t.id ? "var(--primary, #3b5bdb)" : "var(--bg2)",
+                  color: activeTab === t.id ? "#fff" : "var(--t2)",
+                  transition: "all .15s",
+                }}
+              >
+                {t.label}
+                <span
+                  style={{
+                    marginLeft: 5,
+                    fontSize: 10,
+                    opacity: 0.8,
+                    background:
+                      activeTab === t.id ? "rgba(255,255,255,0.25)" : "var(--bg3,#e9ecef)",
+                    borderRadius: 8,
+                    padding: "1px 5px",
+                  }}
+                >
+                  {t.count}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
-        <div className="scb">
-          {consultations.map((c, i) => {
-            const visitNum = consultations.length - i;
-            const today = new Date();
-            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-            const visitDateStr = c.visit_date ? String(c.visit_date).slice(0, 10) : null;
-            const isToday = visitDateStr === todayStr;
-            return (
-              <VisitCard
-                key={`${c.source_type}-${c.id}`}
-                c={c}
-                visitNum={visitNum}
-                isToday={isToday}
-                expanded={!!expanded[`${c.source_type}-${c.id}`]}
-                onToggle={() => toggle(`${c.source_type}-${c.id}`)}
-              />
-            );
-          })}
-          {consultations.length === 0 && (
-            <div style={{ fontSize: 13, color: "var(--t3)", padding: 20, textAlign: "center" }}>
-              No visit history
-            </div>
-          )}
-        </div>
+        {activeTab === "visits" && renderList(visits, "visit history")}
+        {activeTab === "labs" && renderList(labs, "lab test visits")}
       </div>
     </div>
   );

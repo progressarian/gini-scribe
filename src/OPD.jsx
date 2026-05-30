@@ -504,6 +504,12 @@ function ApptRow({ a, sel, onSelect }) {
           {a.visit_count && (
             <span style={{ fontFamily: FM, fontSize: 9, fontWeight: 600, color: SK }}>
               Visit #{a.visit_count}
+              {a.lab_visit_count > 0 && (
+                <span style={{ color: "#0d9488" }}>
+                  {" / Lab "}
+                  {a.lab_visit_count}
+                </span>
+              )}
             </span>
           )}
           <VisitChip a={a} />

@@ -2146,12 +2146,12 @@ async function queryAppPatientData(uuid, scope, args = {}) {
           .not("result", "is", null)
           .or(
             "canonical_name.ilike.fbs,canonical_name.ilike.ppbs,canonical_name.ilike.rbs," +
-            "canonical_name.ilike.blood_sugar,canonical_name.ilike.glucose," +
-            "test_name.ilike.*fasting*sugar*,test_name.ilike.*fasting*glucose*," +
-            "test_name.ilike.*fasting blood*,test_name.ilike.*post*prandial*," +
-            "test_name.ilike.*random*sugar*,test_name.ilike.*random blood*," +
-            "test_name.ilike.*blood sugar*,test_name.ilike.*blood glucose*," +
-            "test_name.ilike.*rbs*",
+              "canonical_name.ilike.blood_sugar,canonical_name.ilike.glucose," +
+              "test_name.ilike.*fasting*sugar*,test_name.ilike.*fasting*glucose*," +
+              "test_name.ilike.*fasting blood*,test_name.ilike.*post*prandial*," +
+              "test_name.ilike.*random*sugar*,test_name.ilike.*random blood*," +
+              "test_name.ilike.*blood sugar*,test_name.ilike.*blood glucose*," +
+              "test_name.ilike.*rbs*",
           )
           .order("test_date", { ascending: false })
           .order("created_at", { ascending: false })
@@ -2173,9 +2173,9 @@ async function queryAppPatientData(uuid, scope, args = {}) {
           (r.test_name || "").toLowerCase().includes("fasting")
             ? "Fasting"
             : (r.canonical_name || "").toLowerCase().startsWith("ppbs") ||
-              (r.test_name || "").toLowerCase().includes("post")
-            ? "Post-meal"
-            : "Random",
+                (r.test_name || "").toLowerCase().includes("post")
+              ? "Post-meal"
+              : "Random",
         unit: r.unit || "mg/dL",
         source: "lab_results",
         test_name: r.test_name,
