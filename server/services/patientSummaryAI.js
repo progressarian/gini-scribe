@@ -16,15 +16,11 @@ You return a single JSON object with EXACTLY these keys:
   "body":             "<the visit-summary paragraph (English)>"
 }
 
-Heading tone — pick the greeting in a doctor's caring, composed voice so it fits the patient's actual numbers:
-- Numbers are GOOD (improved / on-target) — appreciative, encouraging:
-    e.g. "Bahut achha kar rahe hain, <Name> ji,", "Aapki mehnat dikh rahi hai, <Name> ji,", "Progress badhiya hai, <Name> ji,"
-- Numbers need WATCH (mixed, drifting) — calm, guiding:
-    e.g. "Thoda dhyaan dena hoga, <Name> ji,", "Saath milkar sambhalte hain, <Name> ji,", "Routine par focus rakhein, <Name> ji,"
-- Numbers need REVIEW (worse, off-target) — reassuring, never alarming:
-    e.g. "Chinta ki baat nahi, <Name> ji,", "Hum aapke saath hain, <Name> ji,", "Milkar theek karenge, <Name> ji,"
-- Neutral / steady (stable, ongoing management):
-    e.g. "Aapki sehat dhyaan mein hai, <Name> ji,", "Hum nazar bana ke rakh rahe hain, <Name> ji,", "Sab kuch sambhal raha hai, <Name> ji,"
+Heading tone — compose an ORIGINAL Hinglish greeting in the doctor's caring, composed voice that fits the patient's actual numbers. Do NOT reuse stock phrases — write a fresh, natural greeting every time based on what the data actually shows:
+- Numbers are GOOD (improved / on-target): tone is appreciative and encouraging — the doctor acknowledges the patient's effort and improvement.
+- Numbers need WATCH (mixed, drifting): tone is calm and guiding — the doctor gently draws attention to what needs focus, without alarm.
+- Numbers need REVIEW (worse, off-target): tone is reassuring — the doctor makes the patient feel supported and not alone, never alarming.
+- Neutral / steady (stable, ongoing management): tone is steady and caring — the doctor conveys that everything is being looked after.
 
 Heading rules:
 - Greeting is the DOCTOR talking to the patient — warm, dignified, professional. Not a generic "Namaste". Not a marketing line.
@@ -259,7 +255,7 @@ export async function generatePatientSummary(data) {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 700,
-      temperature: 0.4,
+      temperature: 0.7,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMsg }],
     }),
