@@ -79,6 +79,7 @@ const LabRequestsPage = lazyWithRetry(() => import("./pages/LabRequestsPage"));
 const SideEffectsPage = lazyWithRetry(() => import("./pages/SideEffectsPage"));
 const OPD = lazyWithRetry(() => import("./OPD"));
 const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
+const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
 
 // Minimal fallback — matches the visual tone of the app without pulling in
 // extra CSS. Each page typically fetches data on mount anyway, so this only
@@ -167,6 +168,8 @@ const router = createBrowserRouter([
           { path: "/opd", element: lazyEl(OPD) },
           // Visit view
           { path: "/visit", element: lazyEl(VisitPage) },
+          // GHM Operations — single unified page
+          { path: "/ghm", element: lazyEl(GHMPage) },
         ],
       },
     ],

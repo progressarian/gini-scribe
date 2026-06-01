@@ -78,6 +78,8 @@ const NAV_ITEMS = [
   { path: "/ai", label: "🤖 AI", show: (s) => !s.isLabRole },
   { path: "/reports", label: "📊 Reports", show: (s) => s.isAdminOrConsultant },
   { path: "/ci", label: "🧠 CI", show: (s) => s.isAdminOrConsultant },
+  // GHM Operations — single page
+  { path: "/ghm", label: "🏥 GHM Ops", show: () => true },
 ];
 
 export default function AppLayout() {
@@ -249,21 +251,40 @@ export default function AppLayout() {
       {/* Navigation */}
       {!(duplicateWarning && !dbPatientId) && (
         <div className="tabs">
-          {NAV_ITEMS.filter((t) => t.show(navState)).map((t) => (
-            <NavLink
-              key={t.path}
-              to={t.path}
-              end={t.path === "/"}
-              className={({ isActive }) =>
-                `tab-btn ${isActive ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`
+          {(() => {
+            const visible = NAV_ITEMS.filter((t) => t.show(navState));
+            const rendered = [];
+            let lastSection = null;
+            for (const t of visible) {
+              const sec = t.section || null;
+              if (sec && sec !== lastSection) {
+                rendered.push(
+                  <span key={`sep-${sec}`} className="tab-section-sep">
+                    {sec}
+                  </span>,
+                );
+                lastSection = sec;
+              } else if (!sec && lastSection) {
+                lastSection = null;
               }
-            >
-              {t.label}
-              {t.badge && t.badge(navState) && !location.pathname.startsWith(t.path) && (
-                <span className="tab-badge" />
-              )}
-            </NavLink>
-          ))}
+              rendered.push(
+                <NavLink
+                  key={t.path}
+                  to={t.path}
+                  end={t.path === "/"}
+                  className={({ isActive }) =>
+                    `tab-btn ${isActive ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`
+                  }
+                >
+                  {t.label}
+                  {t.badge && t.badge(navState) && !location.pathname.startsWith(t.path) && (
+                    <span className="tab-badge" />
+                  )}
+                </NavLink>,
+              );
+            }
+            return rendered;
+          })()}
         </div>
       )}
 

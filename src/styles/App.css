@@ -872,6 +872,23 @@
   color: #64748b;
 }
 
+.tab-section-sep {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #94a3b8;
+  background: #f1f5f9;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-left: 2px solid #e2e8f0;
+}
+
 .tab-badge {
   position: absolute;
   top: 2px;

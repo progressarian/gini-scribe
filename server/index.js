@@ -34,6 +34,17 @@ import extractRoutes from "./routes/extract.js";
 import summaryRoutes from "./routes/summary.js";
 import postVisitSummaryRoutes from "./routes/postVisitSummary.js";
 import dashboardRoutes from "./routes/dashboard.js";
+import ghmAppointmentRoutes from "./routes/ghm-appointments.js";
+import ccCallingRoutes from "./routes/cc-calling.js";
+import clinicHolidayRoutes from "./routes/clinic-holidays.js";
+import appointmentSlotRoutes from "./routes/appointment-slots.js";
+import stationTrackingRoutes from "./routes/station-tracking.js";
+import cancellationRoutes from "./routes/cancellations.js";
+import walkinRoutes from "./routes/walkins.js";
+import obtStatusRoutes from "./routes/obt-status.js";
+import patientAlertRoutes from "./routes/patient-alerts.js";
+import diabetesChampionRoutes from "./routes/diabetes-champions.js";
+import appInstallRoutes from "./routes/app-installs.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
@@ -127,6 +138,18 @@ app.use("/api", visitRoutes);
 app.use("/api", summaryRoutes);
 app.use("/api", postVisitSummaryRoutes);
 app.use("/api", dashboardRoutes);
+// GHM + CC system routes
+app.use("/api", ghmAppointmentRoutes);
+app.use("/api", ccCallingRoutes);
+app.use("/api", clinicHolidayRoutes);
+app.use("/api", appointmentSlotRoutes);
+app.use("/api", stationTrackingRoutes);
+app.use("/api", cancellationRoutes);
+app.use("/api", walkinRoutes);
+app.use("/api", obtStatusRoutes);
+app.use("/api", patientAlertRoutes);
+app.use("/api", diabetesChampionRoutes);
+app.use("/api", appInstallRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
