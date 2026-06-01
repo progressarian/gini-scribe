@@ -231,7 +231,7 @@ export default function AppLayout() {
       </div>
 
       {/* Active Patient Bar */}
-      {patient.name && location.pathname !== '/dashboard' && (
+      {patient.name && location.pathname !== "/dashboard" && (
         <div className="patient-bar">
           <div className="patient-bar__avatar">{patient.name.charAt(0).toUpperCase()}</div>
           <div className="patient-bar__info">
