@@ -62,6 +62,169 @@ function buildWhatsappMessage({
   return { whatsapp_message: base, additional_whatsapp_msg: additional };
 }
 
+// ─── Call attempt history ──────────────────────────────────────────────────
+
+// GET /api/call-attempts?appointment_id=X — full history, newest first
+router.get("/call-attempts", async (req, res) => {
+  try {
+    const { appointment_id } = req.query;
+    if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    const r = await pool.query(
+      `SELECT * FROM call_attempts WHERE appointment_id=$1
+       ORDER BY called_at DESC, id DESC`,
+      [appointment_id],
+    );
+    res.json(r.rows);
+  } catch (e) {
+    handleError(res, e, "Call attempts list");
+  }
+});
+
+// POST /api/call-attempts/counts — { appointment_ids:[...] } → { id: count }
+router.post("/call-attempts/counts", async (req, res) => {
+  try {
+    const ids = (req.body?.appointment_ids || []).filter((x) => Number.isInteger(x));
+    if (!ids.length) return res.json({});
+    const r = await pool.query(
+      `SELECT appointment_id, COUNT(*)::int AS cnt
+       FROM call_attempts WHERE appointment_id = ANY($1::int[])
+       GROUP BY appointment_id`,
+      [ids],
+    );
+    const out = {};
+    for (const row of r.rows) out[row.appointment_id] = row.cnt;
+    res.json(out);
+  } catch (e) {
+    handleError(res, e, "Call attempt counts");
+  }
+});
+
+// POST /api/call-attempts — log one attempt + sync appointment summary
+router.post("/call-attempts", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      appointment_id, outcome, called_by, notes,
+      duration_mins, reschedule_date,
+    } = req.body;
+    if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    if (!outcome) return res.status(400).json({ error: "outcome required" });
+
+    await client.query("BEGIN");
+
+    // patient_id + next attempt number
+    const appt = await client.query(
+      "SELECT patient_id FROM appointments WHERE id=$1",
+      [appointment_id],
+    );
+    if (!appt.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Appointment not found" });
+    }
+    const patient_id = appt.rows[0].patient_id;
+    const cnt = await client.query(
+      "SELECT COUNT(*)::int AS c FROM call_attempts WHERE appointment_id=$1",
+      [appointment_id],
+    );
+    const attempt_no = cnt.rows[0].c + 1;
+
+    const ins = await client.query(
+      `INSERT INTO call_attempts
+       (appointment_id, patient_id, attempt_no, outcome, called_by, notes, duration_mins, reschedule_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [appointment_id, patient_id, attempt_no, outcome, called_by || null,
+       notes || null, duration_mins || null, reschedule_date || null],
+    );
+
+    // Mirror latest attempt onto the appointment summary columns
+    await client.query(
+      `UPDATE appointments
+       SET call_status = $1,
+           call_made_by = COALESCE($2, call_made_by),
+           call_date = CURRENT_DATE,
+           call_notes = COALESCE($3, call_notes),
+           call_reschedule_date = COALESCE($4, call_reschedule_date)
+       WHERE id = $5`,
+      [outcome, called_by || null, notes || null, reschedule_date || null, appointment_id],
+    );
+
+    await client.query("COMMIT");
+    res.status(201).json(ins.rows[0]);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    handleError(res, e, "Call attempt create");
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/call-attempts/:id — remove an attempt, renumber the rest,
+// and re-sync the appointment summary to the new latest attempt.
+router.delete("/call-attempts/:id", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const found = await client.query(
+      "SELECT appointment_id FROM call_attempts WHERE id=$1",
+      [req.params.id],
+    );
+    if (!found.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Call attempt not found" });
+    }
+    const apptId = found.rows[0].appointment_id;
+
+    await client.query("DELETE FROM call_attempts WHERE id=$1", [req.params.id]);
+
+    // Renumber remaining attempts sequentially by time
+    await client.query(
+      `WITH ordered AS (
+         SELECT id, ROW_NUMBER() OVER (ORDER BY called_at ASC, id ASC) AS rn
+         FROM call_attempts WHERE appointment_id=$1
+       )
+       UPDATE call_attempts c SET attempt_no = o.rn
+       FROM ordered o WHERE c.id = o.id`,
+      [apptId],
+    );
+
+    // Re-sync appointment summary to the latest remaining attempt (or reset)
+    const latest = await client.query(
+      `SELECT outcome, called_by, notes, reschedule_date, called_at
+       FROM call_attempts WHERE appointment_id=$1
+       ORDER BY called_at DESC, id DESC LIMIT 1`,
+      [apptId],
+    );
+    if (latest.rows.length) {
+      const l = latest.rows[0];
+      await client.query(
+        `UPDATE appointments
+         SET call_status=$1, call_made_by=$2, call_notes=$3,
+             call_reschedule_date=$4, call_date=$5::date
+         WHERE id=$6`,
+        [l.outcome, l.called_by, l.notes, l.reschedule_date, l.called_at, apptId],
+      );
+    } else {
+      // no attempts left — clear the summary back to "not called"
+      await client.query(
+        `UPDATE appointments
+         SET call_status='pending', call_made_by=NULL, call_notes=NULL,
+             call_reschedule_date=NULL, call_date=NULL
+         WHERE id=$1`,
+        [apptId],
+      );
+    }
+
+    await client.query("COMMIT");
+    res.json({ ok: true, appointment_id: apptId });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    handleError(res, e, "Call attempt delete");
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/ghm-appointments/doctors — distinct doctor names with counts
 router.get("/ghm-appointments/doctors", async (_req, res) => {
   try {
@@ -75,6 +238,47 @@ router.get("/ghm-appointments/doctors", async (_req, res) => {
     res.json(r.rows);
   } catch (e) {
     handleError(res, e, "GHM doctors list");
+  }
+});
+
+// POST /api/ghm-appointments/biomarkers — latest 2 HbA1c & FBS per patient
+// Body: { patient_ids: [1,2,3] } → { "1": { hba1c: [{v,d},..], fbs: [..] }, ... }
+router.post("/ghm-appointments/biomarkers", async (req, res) => {
+  try {
+    const ids = (req.body?.patient_ids || []).filter((x) => Number.isInteger(x));
+    if (!ids.length) return res.json({});
+
+    const r = await pool.query(
+      `SELECT patient_id, canonical_name, result, result_text, unit, test_date, rn
+       FROM (
+         SELECT lr.patient_id, lr.canonical_name, lr.result, lr.result_text, lr.unit, lr.test_date,
+                ROW_NUMBER() OVER (
+                  PARTITION BY lr.patient_id, lr.canonical_name
+                  ORDER BY lr.test_date DESC NULLS LAST, lr.created_at DESC
+                ) AS rn
+         FROM lab_results lr
+         WHERE lr.patient_id = ANY($1::int[])
+           AND lr.canonical_name IN ('HbA1c','FBS')
+       ) t
+       WHERE rn <= 2
+       ORDER BY patient_id, canonical_name, rn`,
+      [ids],
+    );
+
+    const out = {};
+    for (const row of r.rows) {
+      const pid = row.patient_id;
+      const key = row.canonical_name === "HbA1c" ? "hba1c" : "fbs";
+      out[pid] = out[pid] || { hba1c: [], fbs: [] };
+      out[pid][key].push({
+        v: row.result ?? row.result_text,
+        unit: row.unit || "",
+        d: row.test_date,
+      });
+    }
+    res.json(out);
+  } catch (e) {
+    handleError(res, e, "GHM biomarkers");
   }
 });
 
@@ -110,8 +314,8 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.whatsapp_message, a.additional_whatsapp_msg,
                 a.notes, a.is_walkin, a.age, a.sex,
                 a.call_status, a.call_made_by, a.call_date,
-                a.call_notes, a.call_reschedule_date,
-                p.address, p.email,
+                a.call_notes, a.call_reschedule_date, a.pt_recovery,
+                p.id AS patient_id, p.address, p.email,
                 -- Auto follow-up: next booked appointment for this patient after today
                 (SELECT nxt.appointment_date
                  FROM appointments nxt
@@ -186,11 +390,39 @@ router.post("/ghm-appointments", async (req, res) => {
         .status(400)
         .json({ error: "patient_name, appointment_date, doctor_name required" });
 
-    // Resolve patient_id from file_no
+    // Resolve patient_id — by file_no, then phone. If still none, register a
+    // brand-new patient (auto-generates a GNI-xxxxx file_no).
     let patient_id = null;
+    let resolved_file_no = file_no || null;
+
     if (file_no) {
       const pr = await pool.query("SELECT id FROM patients WHERE file_no=$1 LIMIT 1", [file_no]);
       patient_id = pr.rows[0]?.id || null;
+    }
+    if (!patient_id && phone) {
+      const pr = await pool.query("SELECT id, file_no FROM patients WHERE phone=$1 LIMIT 1", [phone]);
+      if (pr.rows[0]) {
+        patient_id = pr.rows[0].id;
+        resolved_file_no = resolved_file_no || pr.rows[0].file_no;
+      }
+    }
+    // New patient — create a master record so they're tracked permanently
+    if (!patient_id) {
+      let newFileNo = file_no;
+      if (!newFileNo) {
+        const seq = await pool.query(
+          `SELECT COALESCE(MAX(CAST(SUBSTRING(file_no FROM 'GNI-([0-9]+)') AS INTEGER)), 0) + 1 AS next
+           FROM patients WHERE file_no ~ '^GNI-[0-9]+$'`,
+        );
+        newFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
+      }
+      const created = await pool.query(
+        `INSERT INTO patients (name, phone, file_no)
+         VALUES ($1, $2, $3) RETURNING id, file_no`,
+        [patient_name, phone || null, newFileNo],
+      );
+      patient_id = created.rows[0].id;
+      resolved_file_no = created.rows[0].file_no;
     }
 
     // Auto-generate reporting slot and WhatsApp message
@@ -221,7 +453,7 @@ router.post("/ghm-appointments", async (req, res) => {
       [
         patient_id,
         patient_name,
-        file_no,
+        resolved_file_no,
         phone,
         doctor_name,
         appointment_date,
@@ -299,6 +531,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "call_date",
       "call_notes",
       "call_reschedule_date",
+      "pt_recovery",
     ];
     const sets = [];
     const vals = [];

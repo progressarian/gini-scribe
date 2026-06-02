@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import "./GHMPage.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
@@ -31,6 +31,44 @@ const SHOW_STATUSES = [
   { value: "", label: "— Not Marked", color: "gray" },
   { value: "Show", label: "✅ Patient Came", color: "green" },
   { value: "No Show", label: "❌ Did Not Come", color: "red" },
+];
+
+const RECOVERY_STATUSES = [
+  { value: "", label: "—", color: "gray" },
+  { value: "Yes", label: "🟢 Improving", color: "green" },
+  { value: "No", label: "🔴 Not Improving", color: "red" },
+];
+
+// Outcomes for an individual call attempt (richer than the row summary)
+const ATTEMPT_OUTCOMES = [
+  { value: "called", label: "✅ Called / Spoke", color: "green" },
+  { value: "not_picked", label: "📵 Not Picked Up", color: "red" },
+  { value: "busy", label: "📞 Busy", color: "amber" },
+  { value: "switched_off", label: "🔌 Switched Off", color: "amber" },
+  { value: "wrong_number", label: "❓ Wrong Number", color: "red" },
+  { value: "rescheduled", label: "📅 Rescheduled", color: "blue" },
+  { value: "call_later", label: "🕐 Will Call Later", color: "amber" },
+];
+const attemptLabel = (v) => ATTEMPT_OUTCOMES.find((o) => o.value === v)?.label || v;
+const attemptColor = (v) => ATTEMPT_OUTCOMES.find((o) => o.value === v)?.color || "gray";
+
+function fmtDateTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleString("en-IN", {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true,
+  });
+}
+
+const TIME_SLOTS = [
+  "9:30 AM to 10 AM", "10 AM to 11 AM", "11 AM to 12 PM",
+  "12 PM to 1 PM", "1 PM to 2 PM", "2 PM to 2:30 PM",
+  "2:30 PM to 3 PM", "3 PM to 3:30 PM", "3:30 PM to 4 PM",
+];
+
+const VISIT_TYPES = [
+  "New", "Follow Up", "6 weeks", "12 weeks", "18 weeks",
+  "24 weeks", "48 weeks", "56 weeks", "FU within week",
 ];
 
 const callColor = (v) => CALL_STATUSES.find((s) => s.value === v)?.color || "gray";
@@ -167,6 +205,52 @@ function ColorSelect({ value, options, onChange }) {
   );
 }
 
+// ─── Biomarker cell — auto from lab data, shows latest 2 with trend ─────────
+function fmtNum(v) {
+  if (v == null) return null;
+  // result_text may be "10.2%" or "95.2mg/dL"; extract leading number
+  const m = String(v).match(/-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+function BioRow({ label, readings }) {
+  if (!readings || !readings.length) return null;
+  // readings[0] = latest, readings[1] = previous
+  const latest = readings[0];
+  const prev = readings[1];
+  const lv = fmtNum(latest.v);
+  const pv = prev ? fmtNum(prev.v) : null;
+
+  let trend = null;
+  if (lv != null && pv != null) {
+    if (lv < pv) trend = { arrow: "↓", cls: "bio-down" };   // lower sugar = improving
+    else if (lv > pv) trend = { arrow: "↑", cls: "bio-up" };
+    else trend = { arrow: "→", cls: "bio-flat" };
+  }
+
+  return (
+    <div className="bio-row">
+      <span className="bio-label">{label}</span>
+      {prev && <span className="bio-prev">{fmtNum(prev.v)}</span>}
+      {prev && <span className="bio-sep">→</span>}
+      <span className="bio-latest">{fmtNum(latest.v)}</span>
+      {trend && <span className={`bio-arrow ${trend.cls}`}>{trend.arrow}</span>}
+    </div>
+  );
+}
+
+function BiomarkerCell({ bio }) {
+  if (!bio || (!bio.hba1c?.length && !bio.fbs?.length)) {
+    return <span className="muted">No labs</span>;
+  }
+  return (
+    <div className="bio-cell">
+      <BioRow label="HbA1c" readings={bio.hba1c} />
+      <BioRow label="FBS" readings={bio.fbs} />
+    </div>
+  );
+}
+
 // ─── Summary bar ──────────────────────────────────────────────────────────
 function Summary({ rows }) {
   const total = rows.length;
@@ -180,6 +264,8 @@ function Summary({ rows }) {
   const fu = rows.filter(
     (r) => r.visit_type && !r.visit_type.toLowerCase().startsWith("new"),
   ).length;
+  const improving = rows.filter((r) => r.pt_recovery === "Yes").length;
+  const notImproving = rows.filter((r) => r.pt_recovery === "No").length;
 
   return (
     <div className="summary">
@@ -203,19 +289,326 @@ function Summary({ rows }) {
           <span className="spill spill--blue">{rescheduled} Rescheduled</span>
         </div>
       </div>
+      <div className="summary__sep" />
+      <div className="summary__group">
+        <div className="summary__label">Recovery</div>
+        <div className="summary__pills">
+          <span className="spill spill--green">{improving} Improving</span>
+          <span className="spill spill--red">{notImproving} Not Improving</span>
+        </div>
+      </div>
     </div>
+  );
+}
+
+// ─── New Appointment modal ─────────────────────────────────────────────────
+function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated }) {
+  const isPrefilled = !!prefill?.patient_name;
+  const [form, setForm] = useState({
+    patient_name: prefill?.patient_name || "",
+    file_no: prefill?.file_no || "",
+    phone: prefill?.phone || "",
+    doctor_name: prefill?.doctor_name || doctors[0] || "",
+    appointment_date: defaultDate,
+    time_slot: "",
+    // A repeat booking for a known patient is almost always a follow-up
+    visit_type: isPrefilled ? "Follow Up" : "New",
+    condition: prefill?.condition || "",
+    booked_by_name: "",
+    notes: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Phone: keep digits only, cap at 10
+  const setPhone = (v) => set("phone", v.replace(/\D/g, "").slice(0, 10));
+
+  const save = async () => {
+    const name = form.patient_name.trim();
+    if (!name) return setErr("Patient name is required");
+    if (!/^[A-Za-z.\s'-]+$/.test(name))
+      return setErr("Patient name should contain letters only");
+    if (!form.doctor_name) return setErr("Please select a doctor");
+    if (!form.appointment_date) return setErr("Please select a date");
+    // Phone is optional, but if entered must be exactly 10 digits
+    if (form.phone && !/^\d{10}$/.test(form.phone))
+      return setErr("Mobile number must be exactly 10 digits");
+    // A brand-new patient (no file no) needs a phone to be reachable
+    if (!form.file_no.trim() && !form.phone)
+      return setErr("Mobile number is required for a new patient");
+    if (form.file_no && !/^[A-Za-z0-9_-]+$/.test(form.file_no.trim()))
+      return setErr("File No can only contain letters, numbers, _ and -");
+
+    setSaving(true);
+    setErr("");
+    try {
+      const res = await api("/api/ghm-appointments", {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      if (res?.error) {
+        setErr(res.error);
+        setSaving(false);
+        return;
+      }
+      onCreated(form.appointment_date);
+    } catch {
+      setErr("Could not save. Please try again.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal__hdr">
+          <span>{isPrefilled ? `➕ Book Next Appointment — ${prefill.patient_name}` : "➕ New Appointment"}</span>
+          <button className="modal__x" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="modal__body">
+          {err && <div className="modal__err">{err}</div>}
+          {isPrefilled && (
+            <div className="modal__prefill-note">
+              ✓ Patient details auto-filled. Just pick the date, slot &amp; doctor.
+            </div>
+          )}
+
+          <div className="fgrid">
+            <label className="fld fld--wide">
+              <span>Patient Name *</span>
+              <input value={form.patient_name} onChange={(e) => set("patient_name", e.target.value)} placeholder="Full name" autoFocus />
+            </label>
+            <label className="fld">
+              <span>File No <em className="fld__opt">(blank = new patient)</em></span>
+              <input value={form.file_no} onChange={(e) => set("file_no", e.target.value)} placeholder="Leave blank for new patient" />
+            </label>
+            <label className="fld">
+              <span>Mobile {form.phone && form.phone.length !== 10 && <em className="fld__warn">{form.phone.length}/10</em>}</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                value={form.phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="10-digit number"
+              />
+            </label>
+            <label className="fld">
+              <span>Date *</span>
+              <input type="date" value={form.appointment_date} onChange={(e) => set("appointment_date", e.target.value)} />
+            </label>
+            <label className="fld">
+              <span>Time Slot</span>
+              <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
+                <option value="">— Select slot</option>
+                {TIME_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="fld fld--wide">
+              <span>Doctor *</span>
+              <select value={form.doctor_name} onChange={(e) => set("doctor_name", e.target.value)}>
+                <option value="">— Select doctor</option>
+                {doctors.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </label>
+            <label className="fld">
+              <span>Visit Type</span>
+              <select value={form.visit_type} onChange={(e) => set("visit_type", e.target.value)}>
+                {VISIT_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </label>
+            <label className="fld">
+              <span>Condition</span>
+              <input value={form.condition} onChange={(e) => set("condition", e.target.value)} placeholder="Diabetes / Thyroid…" />
+            </label>
+            <label className="fld">
+              <span>Booked By</span>
+              <input value={form.booked_by_name} onChange={(e) => set("booked_by_name", e.target.value)} placeholder="Your name" />
+            </label>
+            <label className="fld fld--wide">
+              <span>Notes</span>
+              <input value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Any note…" />
+            </label>
+          </div>
+
+          <p className="modal__hint">
+            📱 WhatsApp message &amp; reporting time are generated automatically after booking.
+            <br />🆕 If File No is blank, a new patient record is created automatically with a new File No.
+          </p>
+        </div>
+
+        <div className="modal__foot">
+          <button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn--primary" onClick={save} disabled={saving}>
+            {saving ? "Booking…" : "Book Appointment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Call history expandable row content ───────────────────────────────────
+function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
+  const [history, setHistory] = useState(null); // null = loading
+  const [outcome, setOutcome] = useState("not_picked");
+  const [calledBy, setCalledBy] = useState("");
+  const [notes, setNotes] = useState("");
+  const [reschedule, setReschedule] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null); // attempt object pending delete
+  const [deleting, setDeleting] = useState(false);
+
+  const load = useCallback(() => {
+    api(`/api/call-attempts?appointment_id=${row.id}`)
+      .then((d) => setHistory(safeArr(d)))
+      .catch(() => setHistory([]));
+  }, [row.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const logAttempt = async () => {
+    if (!outcome) return;
+    setSaving(true);
+    const res = await api("/api/call-attempts", {
+      method: "POST",
+      body: JSON.stringify({
+        appointment_id: row.id,
+        outcome,
+        called_by: calledBy.trim() || null,
+        notes: notes.trim() || null,
+        reschedule_date: outcome === "rescheduled" ? reschedule || null : null,
+      }),
+    });
+    setSaving(false);
+    if (res?.error) return;
+    // reset form, reload history, tell parent to refresh summary/badge
+    setNotes("");
+    setReschedule("");
+    load();
+    onLogged?.();
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDel) return;
+    setDeleting(true);
+    const res = await api(`/api/call-attempts/${confirmDel.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setConfirmDel(null);
+    if (res?.error) return;
+    load();
+    onDeleted?.();
+  };
+
+  return (
+    <tr className="hist-row">
+      <td colSpan={colSpan} className="hist-cell">
+        <div className="hist-wrap">
+          <div className="hist-title">📞 Call History — {row.patient_name}</div>
+
+          {history === null ? (
+            <div className="hist-loading">Loading history…</div>
+          ) : history.length === 0 ? (
+            <div className="hist-empty">No calls logged yet. Add the first attempt below.</div>
+          ) : (
+            <div className="hist-list">
+              {history.map((h) => (
+                <div key={h.id} className="hist-item">
+                  <span className="hist-no">#{h.attempt_no}</span>
+                  <span className="hist-when">{fmtDateTime(h.called_at)}</span>
+                  <span className={`badge badge--${attemptColor(h.outcome)}`}>{attemptLabel(h.outcome)}</span>
+                  {h.called_by && <span className="hist-by">— {h.called_by}</span>}
+                  {h.reschedule_date && <span className="hist-resch">→ {h.reschedule_date}</span>}
+                  {h.notes && <span className="hist-notes">“{h.notes}”</span>}
+                  <button
+                    className="hist-del"
+                    title="Delete this call log"
+                    onClick={() => setConfirmDel(h)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="hist-form">
+            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className={`csel csel--${attemptColor(outcome)}`}>
+              {ATTEMPT_OUTCOMES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <input
+              list="cc-agents-list"
+              value={calledBy}
+              onChange={(e) => setCalledBy(e.target.value)}
+              placeholder="Called by"
+              className="hist-input hist-input--by"
+            />
+            {outcome === "rescheduled" && (
+              <input type="date" value={reschedule} onChange={(e) => setReschedule(e.target.value)} className="hist-input" />
+            )}
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") logAttempt(); }}
+              placeholder="What happened / patient said…"
+              className="hist-input hist-input--notes"
+            />
+            <button className="btn btn--primary hist-log-btn" onClick={logAttempt} disabled={saving}>
+              {saving ? "Saving…" : "+ Log Call"}
+            </button>
+          </div>
+        </div>
+
+        {/* Delete confirmation dialog */}
+        {confirmDel && (
+          <div className="cdlg-overlay" onClick={() => !deleting && setConfirmDel(null)}>
+            <div className="cdlg" onClick={(e) => e.stopPropagation()}>
+              <div className="cdlg__icon">🗑️</div>
+              <div className="cdlg__title">Delete this call log?</div>
+              <div className="cdlg__body">
+                <div className="cdlg__line">
+                  <strong>#{confirmDel.attempt_no}</strong> · {fmtDateTime(confirmDel.called_at)}
+                </div>
+                <span className={`badge badge--${attemptColor(confirmDel.outcome)}`}>
+                  {attemptLabel(confirmDel.outcome)}
+                </span>
+                {confirmDel.called_by && <span className="cdlg__by">— {confirmDel.called_by}</span>}
+                {confirmDel.notes && <div className="cdlg__notes">“{confirmDel.notes}”</div>}
+              </div>
+              <div className="cdlg__hint">This action cannot be undone.</div>
+              <div className="cdlg__actions">
+                <button className="btn btn--ghost" onClick={() => setConfirmDel(null)} disabled={deleting}>
+                  Cancel
+                </button>
+                <button className="btn btn--danger" onClick={confirmDelete} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────
 export default function GHMPage() {
   const [date, setDate] = useState(todayStr());
+  const [showNew, setShowNew] = useState(false);
+  const [newPrefill, setNewPrefill] = useState(null);
   const [doctor, setDoctor] = useState("All");
   const [doctors, setDoctors] = useState([]);
   const [ccAgents, setCcAgents] = useState([]);
   const [filter, setFilter] = useState("all"); // all | need_call | came | no_show
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
+  const [biomarkers, setBiomarkers] = useState({}); // { patient_id: { hba1c:[], fbs:[] } }
+  const [attemptCounts, setAttemptCounts] = useState({}); // { appointment_id: count }
+  const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState({});
 
@@ -237,7 +630,34 @@ export default function GHMPage() {
       const p = new URLSearchParams({ date, limit: 200 });
       if (doctor !== "All") p.set("doctor", doctor);
       const res = await api(`/api/ghm-appointments?${p}`);
-      setRows(safeArr(res?.data));
+      const data = safeArr(res?.data);
+      setRows(data);
+
+      // Fetch biomarkers for all patients in one batch call
+      const pids = [...new Set(data.map((r) => r.patient_id).filter(Boolean))];
+      if (pids.length) {
+        api("/api/ghm-appointments/biomarkers", {
+          method: "POST",
+          body: JSON.stringify({ patient_ids: pids }),
+        })
+          .then((bm) => setBiomarkers(bm || {}))
+          .catch(() => setBiomarkers({}));
+      } else {
+        setBiomarkers({});
+      }
+
+      // Fetch call-attempt counts for the badge (one batch call)
+      const apptIds = data.map((r) => r.id).filter(Boolean);
+      if (apptIds.length) {
+        api("/api/call-attempts/counts", {
+          method: "POST",
+          body: JSON.stringify({ appointment_ids: apptIds }),
+        })
+          .then((c) => setAttemptCounts(c || {}))
+          .catch(() => setAttemptCounts({}));
+      } else {
+        setAttemptCounts({});
+      }
     } finally {
       setLoading(false);
     }
@@ -319,8 +739,27 @@ export default function GHMPage() {
             placeholder="🔍 Search patient, file no…"
             className="ctrl ctrl--search"
           />
+          <button className="btn btn--primary" onClick={() => { setNewPrefill(null); setShowNew(true); }}>
+            ➕ New Appointment
+          </button>
         </div>
       </div>
+
+      {/* ── New Appointment modal ── */}
+      {showNew && (
+        <NewAppointmentModal
+          doctors={doctors}
+          defaultDate={date}
+          prefill={newPrefill}
+          onClose={() => { setShowNew(false); setNewPrefill(null); }}
+          onCreated={(createdDate) => {
+            setShowNew(false);
+            setNewPrefill(null);
+            if (createdDate === date) load();
+            else setDate(createdDate);
+          }}
+        />
+      )}
 
       {/* ── Summary ── */}
       {!loading && rows.length > 0 && <Summary rows={rows} />}
@@ -375,13 +814,16 @@ export default function GHMPage() {
           <table className="tbl">
             <thead>
               <tr>
+                <th style={{ width: 30 }}></th>
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 115 }}>Time Slot</th>
                 <th style={{ minWidth: 170 }}>Patient</th>
+                <th style={{ width: 155 }}>Biomarkers (auto)</th>
                 <th style={{ width: 100 }}>Visit Type</th>
-                <th style={{ width: 140 }}>Doctor</th>
+                <th style={{ width: 220 }}>Doctor</th>
                 <th style={{ width: 150 }}>Show / No Show</th>
                 <th style={{ width: 170 }}>Call Status</th>
+                <th style={{ width: 150 }}>Recovery</th>
                 <th style={{ width: 100 }}>Called By</th>
                 <th style={{ width: 105 }}>Call Date</th>
                 <th style={{ minWidth: 210 }}>Notes / Reason</th>
@@ -395,19 +837,34 @@ export default function GHMPage() {
                 const callStat = row.call_status || "pending";
                 const showStat = row.show_no_show || "";
 
+                const isOpen = expanded === row.id;
+                const attempts = attemptCounts[row.id] || 0;
+
                 return (
+                  <Fragment key={row.id}>
                   <tr
-                    key={row.id}
                     className={[
                       "tbl__row",
                       showStat === "Show" ? "tbl__row--came" : "",
                       showStat === "No Show" ? "tbl__row--noshow" : "",
                       callStat === "not_picked" ? "tbl__row--notpicked" : "",
                       isSaving ? "tbl__row--saving" : "",
+                      isOpen ? "tbl__row--open" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
                   >
+                    {/* Chevron toggle */}
+                    <td className="tc">
+                      <button
+                        className={`chev ${isOpen ? "chev--open" : ""}`}
+                        title="Show call history"
+                        onClick={() => setExpanded(isOpen ? null : row.id)}
+                      >
+                        ▸
+                      </button>
+                    </td>
+
                     {/* # */}
                     <td className="tc">
                       <span className="rnum">{i + 1}</span>
@@ -427,7 +884,28 @@ export default function GHMPage() {
                         {row.file_no && <span className="pcell__file">{row.file_no}</span>}
                         {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
                         {row.condition && <span className="pcell__cond">{row.condition}</span>}
+                        <button
+                          className="book-next-btn"
+                          title="Book next appointment for this patient"
+                          onClick={() => {
+                            setNewPrefill({
+                              patient_name: row.patient_name,
+                              file_no: row.file_no,
+                              phone: row.phone,
+                              condition: row.condition,
+                              doctor_name: row.doctor_name,
+                            });
+                            setShowNew(true);
+                          }}
+                        >
+                          ➕ Book next
+                        </button>
                       </div>
+                    </td>
+
+                    {/* Biomarkers — auto from lab data */}
+                    <td>
+                      <BiomarkerCell bio={biomarkers[row.patient_id]} />
                     </td>
 
                     {/* Visit type */}
@@ -441,9 +919,20 @@ export default function GHMPage() {
                       )}
                     </td>
 
-                    {/* Doctor */}
+                    {/* Doctor — assignable */}
                     <td>
-                      <span className="fs12 muted">{row.doctor_name || "—"}</span>
+                      <select
+                        value={row.doctor_name || ""}
+                        onChange={(e) => patch(row.id, "doctor_name", e.target.value)}
+                        className="doc-assign-sel"
+                      >
+                        <option value="">— Assign Doctor</option>
+                        {doctors.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
                     </td>
 
                     {/* Came? */}
@@ -457,10 +946,30 @@ export default function GHMPage() {
 
                     {/* Call status */}
                     <td>
+                      <div className="callstat-cell">
+                        <ColorSelect
+                          value={callStat}
+                          options={CALL_STATUSES}
+                          onChange={(v) => handleCallStatus(row, v)}
+                        />
+                        {attempts > 0 && (
+                          <button
+                            className="attempt-badge"
+                            title={`${attempts} call attempt(s) — click to view history`}
+                            onClick={() => setExpanded(isOpen ? null : row.id)}
+                          >
+                            📞 ×{attempts}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Recovery — is patient improving? */}
+                    <td>
                       <ColorSelect
-                        value={callStat}
-                        options={CALL_STATUSES}
-                        onChange={(v) => handleCallStatus(row, v)}
+                        value={row.pt_recovery}
+                        options={RECOVERY_STATUSES}
+                        onChange={(v) => patch(row.id, "pt_recovery", v)}
                       />
                     </td>
 
@@ -528,6 +1037,25 @@ export default function GHMPage() {
                       )}
                     </td>
                   </tr>
+
+                  {isOpen && (
+                    <CallHistoryPanel
+                      row={row}
+                      ccAgents={ccAgents}
+                      colSpan={14}
+                      onLogged={() => {
+                        // refresh badge count + row summary after logging
+                        setAttemptCounts((c) => ({ ...c, [row.id]: (c[row.id] || 0) + 1 }));
+                        load();
+                      }}
+                      onDeleted={() => {
+                        // refresh badge count + row summary after delete
+                        setAttemptCounts((c) => ({ ...c, [row.id]: Math.max(0, (c[row.id] || 0) - 1) }));
+                        load();
+                      }}
+                    />
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
