@@ -92,13 +92,29 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
     (d) => d.storage_path || d.file_url || d.source === "healthray",
   );
 
+  // Imaging / specialist report types — kept in sync with VisitLabsPanel's
+  // RADIOLOGY_DOC_TYPES. HealthRay buckets echo/TMT/ECG under "X-Rays", so once
+  // mapRecordType resolves them to their real modality they belong here, not in
+  // "Other Documents".
+  const RADIOLOGY_DOC_TYPES = [
+    "imaging",
+    "radiology",
+    "xray",
+    "usg",
+    "ultrasound",
+    "mri",
+    "dexa",
+    "ecg",
+    "echo",
+    "tmt",
+    "ncs",
+    "eye",
+  ];
   const prescriptions = visibleDocuments.filter((d) => d.doc_type === "prescription");
   const labReports = visibleDocuments.filter((d) => d.doc_type === "lab_report");
-  const radiologyReports = visibleDocuments.filter(
-    (d) => d.doc_type === "imaging" || d.doc_type === "radiology",
-  );
+  const radiologyReports = visibleDocuments.filter((d) => RADIOLOGY_DOC_TYPES.includes(d.doc_type));
   const otherDocs = visibleDocuments.filter(
-    (d) => !["prescription", "lab_report", "imaging", "radiology"].includes(d.doc_type),
+    (d) => !["prescription", "lab_report", ...RADIOLOGY_DOC_TYPES].includes(d.doc_type),
   );
 
   const openDoc = useCallback((doc) => {

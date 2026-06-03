@@ -103,20 +103,16 @@ router.post("/call-attempts/counts", async (req, res) => {
 router.post("/call-attempts", async (req, res) => {
   const client = await pool.connect();
   try {
-    const {
-      appointment_id, outcome, called_by, notes,
-      duration_mins, reschedule_date,
-    } = req.body;
+    const { appointment_id, outcome, called_by, notes, duration_mins, reschedule_date } = req.body;
     if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
     if (!outcome) return res.status(400).json({ error: "outcome required" });
 
     await client.query("BEGIN");
 
     // patient_id + next attempt number
-    const appt = await client.query(
-      "SELECT patient_id FROM appointments WHERE id=$1",
-      [appointment_id],
-    );
+    const appt = await client.query("SELECT patient_id FROM appointments WHERE id=$1", [
+      appointment_id,
+    ]);
     if (!appt.rows.length) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Appointment not found" });
@@ -132,8 +128,16 @@ router.post("/call-attempts", async (req, res) => {
       `INSERT INTO call_attempts
        (appointment_id, patient_id, attempt_no, outcome, called_by, notes, duration_mins, reschedule_date)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [appointment_id, patient_id, attempt_no, outcome, called_by || null,
-       notes || null, duration_mins || null, reschedule_date || null],
+      [
+        appointment_id,
+        patient_id,
+        attempt_no,
+        outcome,
+        called_by || null,
+        notes || null,
+        duration_mins || null,
+        reschedule_date || null,
+      ],
     );
 
     // Mirror latest attempt onto the appointment summary columns
@@ -165,10 +169,9 @@ router.delete("/call-attempts/:id", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const found = await client.query(
-      "SELECT appointment_id FROM call_attempts WHERE id=$1",
-      [req.params.id],
-    );
+    const found = await client.query("SELECT appointment_id FROM call_attempts WHERE id=$1", [
+      req.params.id,
+    ]);
     if (!found.rows.length) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Call attempt not found" });
@@ -314,7 +317,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.whatsapp_message, a.additional_whatsapp_msg,
                 a.notes, a.is_walkin, a.age, a.sex,
                 a.call_status, a.call_made_by, a.call_date,
-                a.call_notes, a.call_reschedule_date, a.pt_recovery,
+                a.call_notes, a.call_reschedule_date, a.pt_recovery, a.preferred_date, a.preferred_doctor,
                 p.id AS patient_id, p.address, p.email,
                 -- Auto follow-up: next booked appointment for this patient after today
                 (SELECT nxt.appointment_date
@@ -400,7 +403,9 @@ router.post("/ghm-appointments", async (req, res) => {
       patient_id = pr.rows[0]?.id || null;
     }
     if (!patient_id && phone) {
-      const pr = await pool.query("SELECT id, file_no FROM patients WHERE phone=$1 LIMIT 1", [phone]);
+      const pr = await pool.query("SELECT id, file_no FROM patients WHERE phone=$1 LIMIT 1", [
+        phone,
+      ]);
       if (pr.rows[0]) {
         patient_id = pr.rows[0].id;
         resolved_file_no = resolved_file_no || pr.rows[0].file_no;
@@ -532,6 +537,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "call_notes",
       "call_reschedule_date",
       "pt_recovery",
+      "preferred_date",
+      "preferred_doctor",
     ];
     const sets = [];
     const vals = [];
@@ -542,15 +549,72 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       }
     }
     if (!sets.length) return res.status(400).json({ error: "Nothing to update" });
+
+    // If a doctor field is being changed, record the old value first (for audit log)
+    const TRACK = {
+      doctor_name: "Assigned Doctor",
+      preferred_doctor: "Preferred Doctor",
+      preferred_date: "Preferred Date",
+    };
+    const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
+    let before = {};
+    if (trackingNow.length) {
+      const prev = await pool.query(
+        `SELECT ${trackingNow.join(",")} FROM appointments WHERE id=$1`,
+        [id],
+      );
+      before = prev.rows[0] || {};
+    }
+
     vals.push(id);
     const r = await pool.query(
       `UPDATE appointments SET ${sets.join(",")} WHERE id=$${vals.length} RETURNING *`,
       vals,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
+
+    // Log doctor changes
+    for (const k of trackingNow) {
+      const oldV = before[k] || "";
+      const newV = req.body[k] || "";
+      if (oldV !== newV) {
+        await pool.query(
+          `INSERT INTO appointment_change_log (appointment_id, field, field_label, old_value, new_value)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [id, k, TRACK[k], oldV || null, newV || null],
+        );
+      }
+    }
+
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "GHM appointment update");
+  }
+});
+
+// GET /api/appointment-changes?appointment_id=X — doctor change history
+router.get("/appointment-changes", async (req, res) => {
+  try {
+    const { appointment_id } = req.query;
+    if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    const r = await pool.query(
+      `SELECT * FROM appointment_change_log WHERE appointment_id=$1
+       ORDER BY changed_at DESC, id DESC`,
+      [appointment_id],
+    );
+    res.json(r.rows);
+  } catch (e) {
+    handleError(res, e, "Appointment changes list");
+  }
+});
+
+// DELETE /api/appointment-changes/:id — remove a doctor-change log entry
+router.delete("/appointment-changes/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM appointment_change_log WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    handleError(res, e, "Appointment change delete");
   }
 });
 

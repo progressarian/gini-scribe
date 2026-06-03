@@ -85,14 +85,22 @@ export function mapRecordType(recordType, fileName) {
 
   if (rt.includes("prescription") || rt.includes("rx")) return "prescription";
   if (rt.includes("lab report")) return "blood";
-  if (rt.includes("x-ray") || rt.includes("xray")) return "xray";
 
-  if (fn.includes("ecg")) return "ecg";
+  // Imaging modalities — match on the file name FIRST. HealthRay files echo,
+  // TMT, ECG, MRI, USG etc. all under the generic "X-Rays" record_type, so
+  // trusting the record_type here would mislabel (e.g.) an echo as an x-ray.
   if (fn.includes("echo")) return "echo";
-  if (fn.includes("mri")) return "mri";
-  if (fn.includes("ultrasound") || fn.includes("usg")) return "ultrasound";
+  if (fn.includes("tmt") || fn.includes("treadmill") || fn.includes("stress test")) return "tmt";
+  if (fn.includes("ecg") || fn.includes("ekg")) return "ecg";
+  if (fn.includes("mri") || fn.includes("ct scan")) return "mri";
+  if (fn.includes("ultrasound") || fn.includes("usg") || fn.includes("sonography"))
+    return "ultrasound";
   if (fn.includes("abi")) return "abi";
   if (fn.includes("vpt")) return "vpt";
+
+  // Generic imaging bucket — only after the specific modality checks above.
+  if (rt.includes("x-ray") || rt.includes("xray")) return "xray";
+
   if (fn.includes("blood") || fn.includes("lab") || fn.includes("report")) return "blood";
 
   return "other";

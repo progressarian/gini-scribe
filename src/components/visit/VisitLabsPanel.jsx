@@ -849,9 +849,12 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     "radiology",
     "xray",
     "usg",
+    "ultrasound",
     "mri",
     "dexa",
     "ecg",
+    "echo",
+    "tmt",
     "ncs",
     "eye",
   ]);

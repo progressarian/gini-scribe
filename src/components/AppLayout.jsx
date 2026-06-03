@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import api from "../services/api";
 import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
@@ -68,14 +70,25 @@ const NAV_ITEMS = [
   { path: "/lab-portal", label: "🔬 Upload", show: (s) => s.isLabRole },
   { path: "/refills", label: "💊 Refills", show: () => true },
   { path: "/dose-change-requests", label: "⚕️ Dose Reviews", show: () => true },
-  { path: "/lab-requests", label: "🧪 Lab Requests", show: () => true },
+  {
+    path: "/lab-requests",
+    label: "🧪 Lab Requests",
+    show: () => true,
+    count: (s) => s.labRequestCount,
+  },
   { path: "/side-effects", label: "💊 Side FX", show: (s) => !s.isLabRole },
   // { path: "/messages", label: "💬 Messages", show: () => true, badge: (s) => s.unreadCount > 0 },
-  { path: "/reception-inbox", label: "🏥 Reception", show: (s) => !s.isLabRole },
-  { path: "/lab-inbox", label: "🔬 Lab Chat", show: () => true },
+  {
+    path: "/reception-inbox",
+    label: "🏥 Reception",
+    show: (s) => !s.isLabRole,
+    count: (s) => s.receptionCount,
+  },
+  { path: "/lab-inbox", label: "🔬 Lab Chat", show: () => false },
   { path: "/history", label: "📜 Hx", show: (s) => !s.isLabRole && s.hasPatient },
   { path: "/outcomes", label: "📊", show: (s) => !s.isLabRole && !!s.dbPatientId },
   { path: "/ai", label: "🤖 AI", show: (s) => !s.isLabRole },
+  { path: "/genie-chats", label: "🧞 Genie Chats", show: (s) => !s.isLabRole },
   { path: "/reports", label: "📊 Reports", show: (s) => s.isAdminOrConsultant },
   { path: "/ci", label: "🧠 CI", show: (s) => s.isAdminOrConsultant },
   // GHM Operations — single page
@@ -93,6 +106,33 @@ export default function AppLayout() {
   const { visitActive, endVisit, updateVisitRoute, saveDraft } = useVisitStore();
   const { saveStatus, draftSaved, saveConsultation } = useUiStore();
   const { unreadCount } = useMessagingStore();
+
+  // Pending lab-request count for the nav badge. Polls modestly so the badge
+  // reflects new patient bookings without a manual refresh.
+  const labRequestCountQuery = useQuery({
+    queryKey: ["labRequests", "navCount"],
+    queryFn: async () => {
+      const { data } = await api.get("/api/lab-requests?status=pending");
+      return Array.isArray(data) ? data.length : 0;
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const labRequestCount = labRequestCountQuery.data || 0;
+
+  // Unread reception-chat count for the nav badge — sum of team_unread_count
+  // across the shared reception conversations.
+  const receptionCountQuery = useQuery({
+    queryKey: ["conversations", "reception", "navCount"],
+    queryFn: async () => {
+      const { data } = await api.get("/api/conversations", { params: { kind: "reception" } });
+      const list = data?.data ?? [];
+      return list.reduce((n, c) => n + (c.team_unread_count || 0), 0);
+    },
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+  const receptionCount = receptionCountQuery.data || 0;
 
   // Track route changes during active visit so refresh lands on the right page
   const prevPath = useRef(location.pathname);
@@ -120,6 +160,8 @@ export default function AppLayout() {
     isFollowUp,
     dbPatientId,
     unreadCount,
+    labRequestCount,
+    receptionCount,
   };
 
   const onLogout = () => {
@@ -277,6 +319,9 @@ export default function AppLayout() {
                   }
                 >
                   {t.label}
+                  {t.count && t.count(navState) > 0 && (
+                    <span className="tab-count">{t.count(navState)}</span>
+                  )}
                   {t.badge && t.badge(navState) && !location.pathname.startsWith(t.path) && (
                     <span className="tab-badge" />
                   )}

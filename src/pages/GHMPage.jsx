@@ -16,6 +16,25 @@ const api = (url, opts = {}) =>
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 const todayStr = () => new Date().toISOString().split("T")[0];
+// date N days from today as YYYY-MM-DD
+const addDaysStr = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split("T")[0];
+};
+// pretty label like "Wed, 4 Jun"
+const prettyDate = (s) => {
+  if (!s) return "";
+  const d = new Date(s + "T00:00:00");
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+};
+
+// The day-view tabs
+const VIEW_TABS = [
+  { id: "by_date", label: "📅 By Date", offset: null },
+  { id: "tomorrow", label: "🌅 Tomorrow", offset: 1 },
+  { id: "fu3", label: "📞 Follow-up in 3 Days", offset: 3 },
+];
 
 // ─── Call status options ───────────────────────────────────────────────────
 const CALL_STATUSES = [
@@ -56,19 +75,36 @@ function fmtDateTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
   return d.toLocaleString("en-IN", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true,
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
   });
 }
 
 const TIME_SLOTS = [
-  "9:30 AM to 10 AM", "10 AM to 11 AM", "11 AM to 12 PM",
-  "12 PM to 1 PM", "1 PM to 2 PM", "2 PM to 2:30 PM",
-  "2:30 PM to 3 PM", "3 PM to 3:30 PM", "3:30 PM to 4 PM",
+  "9:30 AM to 10 AM",
+  "10 AM to 11 AM",
+  "11 AM to 12 PM",
+  "12 PM to 1 PM",
+  "1 PM to 2 PM",
+  "2 PM to 2:30 PM",
+  "2:30 PM to 3 PM",
+  "3 PM to 3:30 PM",
+  "3:30 PM to 4 PM",
 ];
 
 const VISIT_TYPES = [
-  "New", "Follow Up", "6 weeks", "12 weeks", "18 weeks",
-  "24 weeks", "48 weeks", "56 weeks", "FU within week",
+  "New",
+  "Follow Up",
+  "6 weeks",
+  "12 weeks",
+  "18 weeks",
+  "24 weeks",
+  "48 weeks",
+  "56 weeks",
+  "FU within week",
 ];
 
 const callColor = (v) => CALL_STATUSES.find((s) => s.value === v)?.color || "gray";
@@ -223,7 +259,8 @@ function BioRow({ label, readings }) {
 
   let trend = null;
   if (lv != null && pv != null) {
-    if (lv < pv) trend = { arrow: "↓", cls: "bio-down" };   // lower sugar = improving
+    if (lv < pv)
+      trend = { arrow: "↓", cls: "bio-down" }; // lower sugar = improving
     else if (lv > pv) trend = { arrow: "↑", cls: "bio-up" };
     else trend = { arrow: "→", cls: "bio-flat" };
   }
@@ -273,8 +310,6 @@ function Summary({ rows }) {
         <div className="summary__label">Appointments</div>
         <div className="summary__pills">
           <span className="spill">{total} Total</span>
-          <span className="spill spill--green">{came} Patient Came</span>
-          <span className="spill spill--red">{noShow} Did Not Come</span>
           <span className="spill spill--gray">{pendingShow} Pending</span>
           <span className="spill spill--amber">{fu} Follow-up</span>
         </div>
@@ -328,8 +363,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   const save = async () => {
     const name = form.patient_name.trim();
     if (!name) return setErr("Patient name is required");
-    if (!/^[A-Za-z.\s'-]+$/.test(name))
-      return setErr("Patient name should contain letters only");
+    if (!/^[A-Za-z.\s'-]+$/.test(name)) return setErr("Patient name should contain letters only");
     if (!form.doctor_name) return setErr("Please select a doctor");
     if (!form.appointment_date) return setErr("Please select a date");
     // Phone is optional, but if entered must be exactly 10 digits
@@ -364,8 +398,14 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__hdr">
-          <span>{isPrefilled ? `➕ Book Next Appointment — ${prefill.patient_name}` : "➕ New Appointment"}</span>
-          <button className="modal__x" onClick={onClose}>✕</button>
+          <span>
+            {isPrefilled
+              ? `➕ Book Next Appointment — ${prefill.patient_name}`
+              : "➕ New Appointment"}
+          </span>
+          <button className="modal__x" onClick={onClose}>
+            ✕
+          </button>
         </div>
 
         <div className="modal__body">
@@ -379,14 +419,30 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
           <div className="fgrid">
             <label className="fld fld--wide">
               <span>Patient Name *</span>
-              <input value={form.patient_name} onChange={(e) => set("patient_name", e.target.value)} placeholder="Full name" autoFocus />
+              <input
+                value={form.patient_name}
+                onChange={(e) => set("patient_name", e.target.value)}
+                placeholder="Full name"
+                autoFocus
+              />
             </label>
             <label className="fld">
-              <span>File No <em className="fld__opt">(blank = new patient)</em></span>
-              <input value={form.file_no} onChange={(e) => set("file_no", e.target.value)} placeholder="Leave blank for new patient" />
+              <span>
+                File No <em className="fld__opt">(blank = new patient)</em>
+              </span>
+              <input
+                value={form.file_no}
+                onChange={(e) => set("file_no", e.target.value)}
+                placeholder="Leave blank for new patient"
+              />
             </label>
             <label className="fld">
-              <span>Mobile {form.phone && form.phone.length !== 10 && <em className="fld__warn">{form.phone.length}/10</em>}</span>
+              <span>
+                Mobile{" "}
+                {form.phone && form.phone.length !== 10 && (
+                  <em className="fld__warn">{form.phone.length}/10</em>
+                )}
+              </span>
               <input
                 type="tel"
                 inputMode="numeric"
@@ -398,50 +454,82 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
             </label>
             <label className="fld">
               <span>Date *</span>
-              <input type="date" value={form.appointment_date} onChange={(e) => set("appointment_date", e.target.value)} />
+              <input
+                type="date"
+                value={form.appointment_date}
+                onChange={(e) => set("appointment_date", e.target.value)}
+              />
             </label>
             <label className="fld">
               <span>Time Slot</span>
               <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
                 <option value="">— Select slot</option>
-                {TIME_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                {TIME_SLOTS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="fld fld--wide">
               <span>Doctor *</span>
               <select value={form.doctor_name} onChange={(e) => set("doctor_name", e.target.value)}>
                 <option value="">— Select doctor</option>
-                {doctors.map((d) => <option key={d} value={d}>{d}</option>)}
+                {doctors.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="fld">
               <span>Visit Type</span>
               <select value={form.visit_type} onChange={(e) => set("visit_type", e.target.value)}>
-                {VISIT_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+                {VISIT_TYPES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="fld">
               <span>Condition</span>
-              <input value={form.condition} onChange={(e) => set("condition", e.target.value)} placeholder="Diabetes / Thyroid…" />
+              <input
+                value={form.condition}
+                onChange={(e) => set("condition", e.target.value)}
+                placeholder="Diabetes / Thyroid…"
+              />
             </label>
             <label className="fld">
               <span>Booked By</span>
-              <input value={form.booked_by_name} onChange={(e) => set("booked_by_name", e.target.value)} placeholder="Your name" />
+              <input
+                value={form.booked_by_name}
+                onChange={(e) => set("booked_by_name", e.target.value)}
+                placeholder="Your name"
+              />
             </label>
             <label className="fld fld--wide">
               <span>Notes</span>
-              <input value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Any note…" />
+              <input
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder="Any note…"
+              />
             </label>
           </div>
 
           <p className="modal__hint">
             📱 WhatsApp message &amp; reporting time are generated automatically after booking.
-            <br />🆕 If File No is blank, a new patient record is created automatically with a new File No.
+            <br />
+            🆕 If File No is blank, a new patient record is created automatically with a new File
+            No.
           </p>
         </div>
 
         <div className="modal__foot">
-          <button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
           <button className="btn btn--primary" onClick={save} disabled={saving}>
             {saving ? "Booking…" : "Book Appointment"}
           </button>
@@ -461,14 +549,21 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null); // attempt object pending delete
   const [deleting, setDeleting] = useState(false);
+  const [changes, setChanges] = useState([]); // doctor change history
+  const [confirmChg, setConfirmChg] = useState(null); // change object pending delete
 
   const load = useCallback(() => {
     api(`/api/call-attempts?appointment_id=${row.id}`)
       .then((d) => setHistory(safeArr(d)))
       .catch(() => setHistory([]));
+    api(`/api/appointment-changes?appointment_id=${row.id}`)
+      .then((d) => setChanges(safeArr(d)))
+      .catch(() => setChanges([]));
   }, [row.id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const logAttempt = async () => {
     if (!outcome) return;
@@ -503,6 +598,16 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
     onDeleted?.();
   };
 
+  const confirmDeleteChange = async () => {
+    if (!confirmChg) return;
+    setDeleting(true);
+    const res = await api(`/api/appointment-changes/${confirmChg.id}`, { method: "DELETE" });
+    setDeleting(false);
+    setConfirmChg(null);
+    if (res?.error) return;
+    load();
+  };
+
   return (
     <tr className="hist-row">
       <td colSpan={colSpan} className="hist-cell">
@@ -519,7 +624,9 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
                 <div key={h.id} className="hist-item">
                   <span className="hist-no">#{h.attempt_no}</span>
                   <span className="hist-when">{fmtDateTime(h.called_at)}</span>
-                  <span className={`badge badge--${attemptColor(h.outcome)}`}>{attemptLabel(h.outcome)}</span>
+                  <span className={`badge badge--${attemptColor(h.outcome)}`}>
+                    {attemptLabel(h.outcome)}
+                  </span>
                   {h.called_by && <span className="hist-by">— {h.called_by}</span>}
                   {h.reschedule_date && <span className="hist-resch">→ {h.reschedule_date}</span>}
                   {h.notes && <span className="hist-notes">“{h.notes}”</span>}
@@ -535,9 +642,41 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
             </div>
           )}
 
+          {changes.length > 0 && (
+            <div className="chg-section">
+              <div className="chg-title">📝 Change History (Doctor / Preferred Date)</div>
+              <div className="hist-list">
+                {changes.map((c) => (
+                  <div key={c.id} className="hist-item">
+                    <span className="hist-when">{fmtDateTime(c.changed_at)}</span>
+                    <span className="chg-field">{c.field_label}</span>
+                    <span className="chg-old">{c.old_value || "—"}</span>
+                    <span className="chg-arrow">→</span>
+                    <span className="chg-new">{c.new_value || "—"}</span>
+                    <button
+                      className="hist-del"
+                      title="Delete this change log"
+                      onClick={() => setConfirmChg(c)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="hist-form">
-            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className={`csel csel--${attemptColor(outcome)}`}>
-              {ATTEMPT_OUTCOMES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <select
+              value={outcome}
+              onChange={(e) => setOutcome(e.target.value)}
+              className={`csel csel--${attemptColor(outcome)}`}
+            >
+              {ATTEMPT_OUTCOMES.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
             <input
               list="cc-agents-list"
@@ -547,16 +686,27 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
               className="hist-input hist-input--by"
             />
             {outcome === "rescheduled" && (
-              <input type="date" value={reschedule} onChange={(e) => setReschedule(e.target.value)} className="hist-input" />
+              <input
+                type="date"
+                value={reschedule}
+                onChange={(e) => setReschedule(e.target.value)}
+                className="hist-input"
+              />
             )}
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") logAttempt(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") logAttempt();
+              }}
               placeholder="What happened / patient said…"
               className="hist-input hist-input--notes"
             />
-            <button className="btn btn--primary hist-log-btn" onClick={logAttempt} disabled={saving}>
+            <button
+              className="btn btn--primary hist-log-btn"
+              onClick={logAttempt}
+              disabled={saving}
+            >
               {saving ? "Saving…" : "+ Log Call"}
             </button>
           </div>
@@ -580,10 +730,48 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
               </div>
               <div className="cdlg__hint">This action cannot be undone.</div>
               <div className="cdlg__actions">
-                <button className="btn btn--ghost" onClick={() => setConfirmDel(null)} disabled={deleting}>
+                <button
+                  className="btn btn--ghost"
+                  onClick={() => setConfirmDel(null)}
+                  disabled={deleting}
+                >
                   Cancel
                 </button>
                 <button className="btn btn--danger" onClick={confirmDelete} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete doctor-change confirmation dialog */}
+        {confirmChg && (
+          <div className="cdlg-overlay" onClick={() => !deleting && setConfirmChg(null)}>
+            <div className="cdlg" onClick={(e) => e.stopPropagation()}>
+              <div className="cdlg__icon">🗑️</div>
+              <div className="cdlg__title">Delete this change log?</div>
+              <div className="cdlg__body">
+                <div className="cdlg__line">{fmtDateTime(confirmChg.changed_at)}</div>
+                <span className="chg-field">{confirmChg.field_label}</span>
+                <div className="cdlg__notes">
+                  {confirmChg.old_value || "—"} → {confirmChg.new_value || "—"}
+                </div>
+              </div>
+              <div className="cdlg__hint">This action cannot be undone.</div>
+              <div className="cdlg__actions">
+                <button
+                  className="btn btn--ghost"
+                  onClick={() => setConfirmChg(null)}
+                  disabled={deleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--danger"
+                  onClick={confirmDeleteChange}
+                  disabled={deleting}
+                >
                   {deleting ? "Deleting…" : "Delete"}
                 </button>
               </div>
@@ -597,13 +785,13 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
 
 // ─── Main page ─────────────────────────────────────────────────────────────
 export default function GHMPage() {
+  const [view, setView] = useState("by_date"); // by_date | tomorrow | fu3
   const [date, setDate] = useState(todayStr());
   const [showNew, setShowNew] = useState(false);
   const [newPrefill, setNewPrefill] = useState(null);
   const [doctor, setDoctor] = useState("All");
   const [doctors, setDoctors] = useState([]);
   const [ccAgents, setCcAgents] = useState([]);
-  const [filter, setFilter] = useState("all"); // all | need_call | came | no_show
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
   const [biomarkers, setBiomarkers] = useState({}); // { patient_id: { hba1c:[], fbs:[] } }
@@ -622,6 +810,14 @@ export default function GHMPage() {
       .then((data) => setCcAgents(safeArr(data).map((a) => a.name)))
       .catch(() => {});
   }, []);
+
+  // ── Switch the day-view tab (also sets the date) ─────────────────────────
+  const switchView = (tab) => {
+    setView(tab.id);
+    setExpanded(null);
+    if (tab.offset !== null) setDate(addDaysStr(tab.offset));
+    else setDate(todayStr());
+  };
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -690,25 +886,33 @@ export default function GHMPage() {
     [patch],
   );
 
-  // ── Filter + search ───────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────
   const visible = rows.filter((r) => {
-    if (filter === "need_call" && r.call_status && r.call_status !== "pending") return false;
-    if (filter === "came" && r.show_no_show !== "Show") return false;
-    if (filter === "no_show" && r.show_no_show !== "No Show") return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        r.patient_name?.toLowerCase().includes(q) ||
-        r.file_no?.toLowerCase().includes(q) ||
-        r.phone?.includes(q) ||
-        r.condition?.toLowerCase().includes(q)
-      );
-    }
-    return true;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      r.patient_name?.toLowerCase().includes(q) ||
+      r.file_no?.toLowerCase().includes(q) ||
+      r.phone?.includes(q) ||
+      r.condition?.toLowerCase().includes(q)
+    );
   });
 
-  const needCall = rows.filter((r) => !r.call_status || r.call_status === "pending").length;
   const isToday = date === todayStr();
+  // Per-tab column visibility
+  const showTime = view !== "fu3"; // hide Time Slot on Follow-up in 3 Days
+  const showShowNoShow = false; // Show/No-Show column hidden on all tabs
+  const showCallStatus = view !== "by_date"; // on Tomorrow & Follow-up tabs
+  const showRecovery = view === "by_date"; // only on By Date tab
+  const showCallDate = view !== "by_date"; // on Tomorrow & Follow-up tabs
+  // total columns (for the expanded history row colSpan): 11 always-on + optionals
+  const colSpan =
+    11 +
+    (showTime ? 1 : 0) +
+    (showShowNoShow ? 1 : 0) +
+    (showCallStatus ? 1 : 0) +
+    (showRecovery ? 1 : 0) +
+    (showCallDate ? 1 : 0);
 
   return (
     <div className="ghm">
@@ -723,15 +927,19 @@ export default function GHMPage() {
       <div className="ghm__hdr">
         <div className="ghm__title">
           <h1>Daily Patient Sheet</h1>
-          <span className="ghm__datelab">{isToday ? "Today" : date}</span>
+          <span className="ghm__datelab">{isToday ? "Today" : prettyDate(date)}</span>
         </div>
         <div className="ghm__controls">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="ctrl"
-          />
+          {view === "by_date" ? (
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="ctrl"
+            />
+          ) : (
+            <span className="ctrl ctrl--readonly">{prettyDate(date)}</span>
+          )}
           <DocDropdown value={doctor} options={doctors} onChange={setDoctor} />
           <input
             value={search}
@@ -739,10 +947,32 @@ export default function GHMPage() {
             placeholder="🔍 Search patient, file no…"
             className="ctrl ctrl--search"
           />
-          <button className="btn btn--primary" onClick={() => { setNewPrefill(null); setShowNew(true); }}>
+          <button
+            className="btn btn--primary"
+            onClick={() => {
+              setNewPrefill(null);
+              setShowNew(true);
+            }}
+          >
             ➕ New Appointment
           </button>
         </div>
+      </div>
+
+      {/* ── View tabs ── */}
+      <div className="ghm__tabs">
+        {VIEW_TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`ghm__tab ${view === t.id ? "ghm__tab--active" : ""}`}
+            onClick={() => switchView(t)}
+          >
+            {t.label}
+            {t.offset !== null && (
+              <span className="ghm__tab-date">{prettyDate(addDaysStr(t.offset))}</span>
+            )}
+          </button>
+        ))}
       </div>
 
       {/* ── New Appointment modal ── */}
@@ -751,7 +981,10 @@ export default function GHMPage() {
           doctors={doctors}
           defaultDate={date}
           prefill={newPrefill}
-          onClose={() => { setShowNew(false); setNewPrefill(null); }}
+          onClose={() => {
+            setShowNew(false);
+            setNewPrefill(null);
+          }}
           onCreated={(createdDate) => {
             setShowNew(false);
             setNewPrefill(null);
@@ -764,22 +997,8 @@ export default function GHMPage() {
       {/* ── Summary ── */}
       {!loading && rows.length > 0 && <Summary rows={rows} />}
 
-      {/* ── Quick filters ── */}
+      {/* ── Hint ── */}
       <div className="qfilter">
-        {[
-          { id: "all", label: `All  (${rows.length})` },
-          { id: "need_call", label: `📞 Need to Call  (${needCall})`, highlight: needCall > 0 },
-          { id: "came", label: `✅ Patient Came` },
-          { id: "no_show", label: `❌ Did Not Come` },
-        ].map((f) => (
-          <button
-            key={f.id}
-            className={`qfilter__btn ${filter === f.id ? "qfilter__btn--active" : ""} ${f.highlight ? "qfilter__btn--alert" : ""}`}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
         <span className="qfilter__hint">Click any cell to edit · saves automatically</span>
       </div>
 
@@ -816,19 +1035,20 @@ export default function GHMPage() {
               <tr>
                 <th style={{ width: 30 }}></th>
                 <th style={{ width: 36 }}>#</th>
-                <th style={{ width: 115 }}>Time Slot</th>
+                {showTime && <th style={{ width: 115 }}>Time Slot</th>}
                 <th style={{ minWidth: 170 }}>Patient</th>
                 <th style={{ width: 155 }}>Biomarkers (auto)</th>
                 <th style={{ width: 100 }}>Visit Type</th>
                 <th style={{ width: 220 }}>Doctor</th>
-                <th style={{ width: 150 }}>Show / No Show</th>
-                <th style={{ width: 170 }}>Call Status</th>
-                <th style={{ width: 150 }}>Recovery</th>
+                {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
+                {showCallStatus && <th style={{ width: 170 }}>Call Status</th>}
+                {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
                 <th style={{ width: 100 }}>Called By</th>
-                <th style={{ width: 105 }}>Call Date</th>
+                {showCallDate && <th style={{ width: 105 }}>Call Date</th>}
                 <th style={{ minWidth: 210 }}>Notes / Reason</th>
-                <th style={{ width: 150 }}>Reschedule Date</th>
                 <th style={{ width: 130 }}>Follow-up Date</th>
+                <th style={{ width: 180 }}>Preferred Doctor</th>
+                <th style={{ width: 150 }}>Preferred Date</th>
               </tr>
             </thead>
             <tbody>
@@ -842,219 +1062,264 @@ export default function GHMPage() {
 
                 return (
                   <Fragment key={row.id}>
-                  <tr
-                    className={[
-                      "tbl__row",
-                      showStat === "Show" ? "tbl__row--came" : "",
-                      showStat === "No Show" ? "tbl__row--noshow" : "",
-                      callStat === "not_picked" ? "tbl__row--notpicked" : "",
-                      isSaving ? "tbl__row--saving" : "",
-                      isOpen ? "tbl__row--open" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  >
-                    {/* Chevron toggle */}
-                    <td className="tc">
-                      <button
-                        className={`chev ${isOpen ? "chev--open" : ""}`}
-                        title="Show call history"
-                        onClick={() => setExpanded(isOpen ? null : row.id)}
-                      >
-                        ▸
-                      </button>
-                    </td>
-
-                    {/* # */}
-                    <td className="tc">
-                      <span className="rnum">{i + 1}</span>
-                    </td>
-
-                    {/* Time */}
-                    <td>
-                      <span className="fw7 fs12 nowrap">
-                        {row.reporting_time_slot || row.time_slot || "—"}
-                      </span>
-                    </td>
-
-                    {/* Patient */}
-                    <td>
-                      <div className="pcell">
-                        <span className="pcell__name">{row.patient_name || "—"}</span>
-                        {row.file_no && <span className="pcell__file">{row.file_no}</span>}
-                        {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
-                        {row.condition && <span className="pcell__cond">{row.condition}</span>}
+                    <tr
+                      className={[
+                        "tbl__row",
+                        showStat === "Show" ? "tbl__row--came" : "",
+                        showStat === "No Show" ? "tbl__row--noshow" : "",
+                        callStat === "not_picked" ? "tbl__row--notpicked" : "",
+                        isSaving ? "tbl__row--saving" : "",
+                        isOpen ? "tbl__row--open" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      {/* Chevron toggle */}
+                      <td className="tc">
                         <button
-                          className="book-next-btn"
-                          title="Book next appointment for this patient"
-                          onClick={() => {
-                            setNewPrefill({
-                              patient_name: row.patient_name,
-                              file_no: row.file_no,
-                              phone: row.phone,
-                              condition: row.condition,
-                              doctor_name: row.doctor_name,
-                            });
-                            setShowNew(true);
-                          }}
+                          className={`chev ${isOpen ? "chev--open" : ""}`}
+                          title="Show call history"
+                          onClick={() => setExpanded(isOpen ? null : row.id)}
                         >
-                          ➕ Book next
+                          ▸
                         </button>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Biomarkers — auto from lab data */}
-                    <td>
-                      <BiomarkerCell bio={biomarkers[row.patient_id]} />
-                    </td>
+                      {/* # */}
+                      <td className="tc">
+                        <span className="rnum">{i + 1}</span>
+                      </td>
 
-                    {/* Visit type */}
-                    <td>
-                      {row.visit_type && (
-                        <span
-                          className={`badge badge--${row.visit_type.toLowerCase().startsWith("new") ? "blue" : "amber"}`}
-                        >
-                          {row.visit_type}
-                        </span>
+                      {/* Time */}
+                      {showTime && (
+                        <td>
+                          <span className="fw7 fs12 nowrap">
+                            {row.reporting_time_slot || row.time_slot || "—"}
+                          </span>
+                        </td>
                       )}
-                    </td>
 
-                    {/* Doctor — assignable */}
-                    <td>
-                      <select
-                        value={row.doctor_name || ""}
-                        onChange={(e) => patch(row.id, "doctor_name", e.target.value)}
-                        className="doc-assign-sel"
-                      >
-                        <option value="">— Assign Doctor</option>
-                        {doctors.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    {/* Came? */}
-                    <td>
-                      <ColorSelect
-                        value={row.show_no_show}
-                        options={SHOW_STATUSES}
-                        onChange={(v) => patch(row.id, "show_no_show", v)}
-                      />
-                    </td>
-
-                    {/* Call status */}
-                    <td>
-                      <div className="callstat-cell">
-                        <ColorSelect
-                          value={callStat}
-                          options={CALL_STATUSES}
-                          onChange={(v) => handleCallStatus(row, v)}
-                        />
-                        {attempts > 0 && (
+                      {/* Patient */}
+                      <td>
+                        <div className="pcell">
+                          <span className="pcell__name">{row.patient_name || "—"}</span>
+                          {row.file_no && <span className="pcell__file">{row.file_no}</span>}
+                          {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
+                          {row.address && <span className="pcell__addr">📍 {row.address}</span>}
+                          {row.condition && <span className="pcell__cond">{row.condition}</span>}
                           <button
-                            className="attempt-badge"
-                            title={`${attempts} call attempt(s) — click to view history`}
-                            onClick={() => setExpanded(isOpen ? null : row.id)}
+                            className="book-next-btn"
+                            title="Book next appointment for this patient"
+                            onClick={() => {
+                              setNewPrefill({
+                                patient_name: row.patient_name,
+                                file_no: row.file_no,
+                                phone: row.phone,
+                                condition: row.condition,
+                                doctor_name: row.doctor_name,
+                              });
+                              setShowNew(true);
+                            }}
                           >
-                            📞 ×{attempts}
+                            ➕ Book next
                           </button>
+                        </div>
+                      </td>
+
+                      {/* Biomarkers — auto from lab data */}
+                      <td>
+                        <BiomarkerCell bio={biomarkers[row.patient_id]} />
+                      </td>
+
+                      {/* Visit type */}
+                      <td>
+                        {row.visit_type && (
+                          <span
+                            className={`badge badge--${row.visit_type.toLowerCase().startsWith("new") ? "blue" : "amber"}`}
+                          >
+                            {row.visit_type}
+                          </span>
                         )}
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Recovery — is patient improving? */}
-                    <td>
-                      <ColorSelect
-                        value={row.pt_recovery}
-                        options={RECOVERY_STATUSES}
-                        onChange={(v) => patch(row.id, "pt_recovery", v)}
-                      />
-                    </td>
+                      {/* Doctor — editable. Investigation/lab tests default to Hospital Admin. */}
+                      <td>
+                        {(() => {
+                          const isInvestigation =
+                            (row.visit_type || "").toLowerCase() === "investigation";
+                          // build option list; ensure current value + Hospital Admin are present
+                          const opts = [...doctors];
+                          if (!opts.includes("Dr. Hospital Admin"))
+                            opts.unshift("Dr. Hospital Admin");
+                          if (row.doctor_name && !opts.includes(row.doctor_name))
+                            opts.unshift(row.doctor_name);
+                          // for investigation rows with no doctor set, show Hospital Admin as selected
+                          const current =
+                            row.doctor_name || (isInvestigation ? "Dr. Hospital Admin" : "");
+                          return (
+                            <select
+                              value={current}
+                              onChange={(e) => patch(row.id, "doctor_name", e.target.value)}
+                              className="doc-assign-sel"
+                            >
+                              <option value="">— Assign Doctor</option>
+                              {opts.map((d) => (
+                                <option key={d} value={d}>
+                                  {d}
+                                </option>
+                              ))}
+                            </select>
+                          );
+                        })()}
+                      </td>
 
-                    {/* Called by — datalist: pick from DB or type manually */}
-                    <td>
-                      <input
-                        list="cc-agents-list"
-                        defaultValue={row.call_made_by || ""}
-                        key={`cb-${row.id}-${row.call_made_by}`}
-                        onBlur={(e) => {
-                          const v = e.target.value.trim();
-                          if (v !== (row.call_made_by || "")) patch(row.id, "call_made_by", v);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") e.target.blur();
-                        }}
-                        placeholder="CC name"
-                        className="cc-input"
-                      />
-                    </td>
+                      {/* Came? */}
+                      {showShowNoShow && (
+                        <td>
+                          <ColorSelect
+                            value={row.show_no_show}
+                            options={SHOW_STATUSES}
+                            onChange={(v) => patch(row.id, "show_no_show", v)}
+                          />
+                        </td>
+                      )}
 
-                    {/* Call date */}
-                    <td>
-                      <InlineEdit
-                        value={row.call_date}
-                        onChange={(v) => patch(row.id, "call_date", v)}
-                        type="date"
-                      />
-                    </td>
+                      {/* Call status */}
+                      {showCallStatus && (
+                        <td>
+                          <div className="callstat-cell">
+                            <ColorSelect
+                              value={callStat}
+                              options={CALL_STATUSES}
+                              onChange={(v) => handleCallStatus(row, v)}
+                            />
+                            {attempts > 0 && (
+                              <button
+                                className="attempt-badge"
+                                title={`${attempts} call attempt(s) — click to view history`}
+                                onClick={() => setExpanded(isOpen ? null : row.id)}
+                              >
+                                📞 ×{attempts}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
 
-                    {/* Notes / reason */}
-                    <td>
-                      <InlineEdit
-                        value={row.call_notes}
-                        onChange={(v) => patch(row.id, "call_notes", v)}
-                        placeholder="Patient said… / reason…"
-                      />
-                    </td>
+                      {/* Recovery — is patient improving? */}
+                      {showRecovery && (
+                        <td>
+                          <ColorSelect
+                            value={row.pt_recovery}
+                            options={RECOVERY_STATUSES}
+                            onChange={(v) => patch(row.id, "pt_recovery", v)}
+                          />
+                        </td>
+                      )}
 
-                    {/* Reschedule date — only visible when status is Rescheduled */}
-                    <td>
-                      {callStat === "rescheduled" ? (
+                      {/* Called by — datalist: pick from DB or type manually */}
+                      <td>
+                        <input
+                          list="cc-agents-list"
+                          defaultValue={row.call_made_by || ""}
+                          key={`cb-${row.id}-${row.call_made_by}`}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (row.call_made_by || "")) patch(row.id, "call_made_by", v);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") e.target.blur();
+                          }}
+                          placeholder="CC name"
+                          className="cc-input"
+                        />
+                      </td>
+
+                      {/* Call date */}
+                      {showCallDate && (
+                        <td>
+                          <InlineEdit
+                            value={row.call_date}
+                            onChange={(v) => patch(row.id, "call_date", v)}
+                            type="date"
+                          />
+                        </td>
+                      )}
+
+                      {/* Notes / reason */}
+                      <td>
+                        <InlineEdit
+                          value={row.call_notes}
+                          onChange={(v) => patch(row.id, "call_notes", v)}
+                          placeholder="Patient said… / reason…"
+                        />
+                      </td>
+
+                      {/* Follow-up date — auto from next booked appointment */}
+                      <td>
+                        {row.follow_up_date ? (
+                          <div className="fu-cell">
+                            <span className="fu-date">{row.follow_up_date}</span>
+                            {row.follow_up_time && (
+                              <span className="fu-time">{row.follow_up_time}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="muted">Not booked</span>
+                        )}
+                      </td>
+
+                      {/* Preferred doctor — doctor the patient prefers (editable) */}
+                      <td>
+                        <select
+                          value={row.preferred_doctor || ""}
+                          onChange={(e) => patch(row.id, "preferred_doctor", e.target.value)}
+                          className="doc-assign-sel"
+                        >
+                          <option value="">— No preference</option>
+                          {(row.preferred_doctor && !doctors.includes(row.preferred_doctor)
+                            ? [row.preferred_doctor, ...doctors]
+                            : doctors
+                          ).map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      {/* Preferred date — date the patient wants (editable) */}
+                      <td>
                         <input
                           type="date"
-                          value={row.call_reschedule_date || ""}
-                          onChange={(e) => patch(row.id, "call_reschedule_date", e.target.value)}
+                          min={todayStr()}
+                          value={row.preferred_date || ""}
+                          onChange={(e) => patch(row.id, "preferred_date", e.target.value)}
                           className="rsd-input"
                         />
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
+                      </td>
+                    </tr>
 
-                    {/* Follow-up date — auto from next booked appointment */}
-                    <td>
-                      {row.follow_up_date ? (
-                        <div className="fu-cell">
-                          <span className="fu-date">{row.follow_up_date}</span>
-                          {row.follow_up_time && (
-                            <span className="fu-time">{row.follow_up_time}</span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="muted">Not booked</span>
-                      )}
-                    </td>
-                  </tr>
-
-                  {isOpen && (
-                    <CallHistoryPanel
-                      row={row}
-                      ccAgents={ccAgents}
-                      colSpan={14}
-                      onLogged={() => {
-                        // refresh badge count + row summary after logging
-                        setAttemptCounts((c) => ({ ...c, [row.id]: (c[row.id] || 0) + 1 }));
-                        load();
-                      }}
-                      onDeleted={() => {
-                        // refresh badge count + row summary after delete
-                        setAttemptCounts((c) => ({ ...c, [row.id]: Math.max(0, (c[row.id] || 0) - 1) }));
-                        load();
-                      }}
-                    />
-                  )}
+                    {isOpen && (
+                      <CallHistoryPanel
+                        row={row}
+                        ccAgents={ccAgents}
+                        colSpan={colSpan}
+                        onLogged={() => {
+                          // refresh badge count + row summary after logging
+                          setAttemptCounts((c) => ({ ...c, [row.id]: (c[row.id] || 0) + 1 }));
+                          load();
+                        }}
+                        onDeleted={() => {
+                          // refresh badge count + row summary after delete
+                          setAttemptCounts((c) => ({
+                            ...c,
+                            [row.id]: Math.max(0, (c[row.id] || 0) - 1),
+                          }));
+                          load();
+                        }}
+                      />
+                    )}
                   </Fragment>
                 );
               })}

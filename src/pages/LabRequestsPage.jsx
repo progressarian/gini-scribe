@@ -8,10 +8,19 @@ import useAuthStore from "../stores/authStore.js";
 // consistent in the staff dashboard.
 
 const STATUS_TABS = [
+  { value: "all", label: "All", color: "#334155", bg: "#f1f5f9", border: "#e2e8f0" },
   { value: "pending", label: "Pending", color: "#92400e", bg: "#fef3c7", border: "#fde68a" },
   { value: "approved", label: "Approved", color: "#047857", bg: "#d1fae5", border: "#a7f3d0" },
   { value: "rejected", label: "Rejected", color: "#b91c1c", bg: "#fee2e2", border: "#fecaca" },
 ];
+
+// Per-card status pill (derived from STATUS_TABS, keyed by status value).
+const STATUS_BADGE = Object.fromEntries(
+  STATUS_TABS.filter((t) => t.value !== "all").map((t) => [
+    t.value,
+    { label: t.label, color: t.color, bg: t.bg },
+  ]),
+);
 
 function fmtDate(iso) {
   if (!iso) return "";
@@ -53,13 +62,13 @@ export default function LabRequestsPage() {
           return Array.isArray(data) ? data.length : 0;
         }),
       );
-      return { pending, approved, rejected };
+      return { pending, approved, rejected, all: pending + approved + rejected };
     },
     staleTime: 15_000,
   });
 
   const rows = useMemo(() => listQuery.data || [], [listQuery.data]);
-  const stats = statsQuery.data || { pending: 0, approved: 0, rejected: 0 };
+  const stats = statsQuery.data || { pending: 0, approved: 0, rejected: 0, all: 0 };
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["labRequests"] });
 
@@ -117,7 +126,7 @@ export default function LabRequestsPage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(4, 1fr)",
           gap: 10,
           marginBottom: 14,
         }}
@@ -178,7 +187,7 @@ export default function LabRequestsPage() {
             borderRadius: 12,
           }}
         >
-          No {status} requests.
+          {status === "all" ? "No lab requests yet." : `No ${status} requests.`}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -240,18 +249,33 @@ function LabRequestCard({ req, onDecide }) {
             Requested {fmtDate(req.created_at)}
           </div>
         </div>
-        <div
-          style={{
-            background: isHome ? "#ede9fe" : "#dbeafe",
-            color: isHome ? "#5b21b6" : "#1e40af",
-            padding: "4px 10px",
-            borderRadius: 10,
-            fontSize: 11,
-            fontWeight: 700,
-            height: "fit-content",
-          }}
-        >
-          {isHome ? "🏠 Home collection" : "🏥 At hospital"}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+          {STATUS_BADGE[req.status] ? (
+            <div
+              style={{
+                background: STATUS_BADGE[req.status].bg,
+                color: STATUS_BADGE[req.status].color,
+                padding: "4px 10px",
+                borderRadius: 10,
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {STATUS_BADGE[req.status].label}
+            </div>
+          ) : null}
+          <div
+            style={{
+              background: isHome ? "#ede9fe" : "#dbeafe",
+              color: isHome ? "#5b21b6" : "#1e40af",
+              padding: "4px 10px",
+              borderRadius: 10,
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+          >
+            {isHome ? "🏠 Home collection" : "🏥 At hospital"}
+          </div>
         </div>
       </div>
 

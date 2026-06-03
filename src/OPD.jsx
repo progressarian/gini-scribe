@@ -1615,6 +1615,7 @@ const REPORT_TYPES = [
   { id: "mri", label: "MRI", icon: "🧲", accept: ".pdf,.jpg,.jpeg,.png" },
   { id: "ecg", label: "ECG", icon: "📈", accept: ".pdf,.jpg,.jpeg,.png" },
   { id: "echo", label: "Echo", icon: "❤️", accept: ".pdf,.jpg,.jpeg,.png" },
+  { id: "tmt", label: "TMT", icon: "🏃", accept: ".pdf,.jpg,.jpeg,.png" },
   { id: "other", label: "Other", icon: "📄", accept: ".pdf,.jpg,.jpeg,.png" },
 ];
 

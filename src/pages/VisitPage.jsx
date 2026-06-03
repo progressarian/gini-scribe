@@ -1405,9 +1405,12 @@ export default function VisitPage() {
       "radiology",
       "xray",
       "usg",
+      "ultrasound",
       "mri",
       "dexa",
       "ecg",
+      "echo",
+      "tmt",
       "ncs",
       "eye",
     ]);
