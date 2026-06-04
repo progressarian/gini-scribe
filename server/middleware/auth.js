@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
+import { CAPABILITIES as CAP, hasCapability } from "../../shared/permissions.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 
@@ -93,21 +94,100 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/refills",
 ];
 
+// Role-based capability gating. Maps an API path-prefix to the capability a
+// doctor must hold to use it. Checked with LONGEST-prefix match, so a nested
+// path like /api/patients/:id/refill-requests resolves to /api/patients
+// (PATIENT_READ) while the top-level /api/refill-requests resolves to REFILLS.
+//
+// NOTE: prefixes are the ACTUAL API segments (verified against route files) —
+// these differ from the frontend nav paths (e.g. refills page → /api/refill-
+// requests). Patient JWTs are unaffected (they use the PUBLIC_PATTERNS
+// allowlist); this only gates doctor sessions. While the master switch in
+// shared/permissions.js is on, hasCapability() returns true for everyone, so
+// these mappings are inert until you flip it off and tune the matrix.
+const ROUTE_CAPABILITIES = [
+  ["/api/reports", CAP.ANALYTICS],
+  ["/api/dashboard", CAP.ANALYTICS],
+  ["/api/stats", CAP.ANALYTICS],
+  ["/api/consultations", CAP.CLINICAL_WRITE],
+  ["/api/clinical", CAP.CLINICAL_WRITE],
+  ["/api/reasoning", CAP.CLINICAL_WRITE],
+  ["/api/summary", CAP.CLINICAL_WRITE],
+  ["/api/post-visit-summary", CAP.CLINICAL_WRITE],
+  ["/api/visit", CAP.CLINICAL_WRITE],
+  ["/api/active-visit", CAP.CLINICAL_WRITE],
+  ["/api/active-visits", CAP.CLINICAL_WRITE],
+  ["/api/alerts", CAP.CLINICAL_WRITE],
+  ["/api/patient-alerts", CAP.CLINICAL_WRITE],
+  ["/api/rx-feedback", CAP.CLINICAL_WRITE],
+  ["/api/ai", CAP.AI_TOOLS],
+  ["/api/genie-chats", CAP.AI_TOOLS],
+  ["/api/genie-patients", CAP.AI_TOOLS],
+  ["/api/refill-requests", CAP.REFILLS],
+  ["/api/dose-change-requests", CAP.DOSE_REVIEWS],
+  ["/api/lab-requests", CAP.LAB_REQUESTS],
+  ["/api/side-effects", CAP.SIDE_EFFECTS],
+  ["/api/opd", CAP.RECEPTION_OPS],
+  ["/api/appointments", CAP.RECEPTION_OPS],
+  ["/api/appointment-slots", CAP.RECEPTION_OPS],
+  ["/api/appointment-changes", CAP.RECEPTION_OPS],
+  ["/api/ghm-appointments", CAP.RECEPTION_OPS],
+  ["/api/walkins", CAP.RECEPTION_OPS],
+  ["/api/cancellations", CAP.RECEPTION_OPS],
+  ["/api/station-tracking", CAP.RECEPTION_OPS],
+  ["/api/cc-calling", CAP.RECEPTION_OPS],
+  ["/api/call-attempts", CAP.RECEPTION_OPS],
+  ["/api/clinic-holidays", CAP.RECEPTION_OPS],
+  ["/api/obt-status", CAP.RECEPTION_OPS],
+  ["/api/diabetes-champions", CAP.RECEPTION_OPS],
+  ["/api/patients", CAP.PATIENT_READ],
+  ["/api/documents", CAP.PATIENT_READ],
+  ["/api/outcomes", CAP.PATIENT_READ],
+  ["/api/conversations", CAP.PATIENT_READ],
+  ["/api/messages", CAP.PATIENT_READ],
+];
+
+// Longest-prefix match → required capability (or null if the path isn't mapped).
+const capabilityForPath = (path) => {
+  let best = null;
+  let bestLen = -1;
+  for (const [prefix, cap] of ROUTE_CAPABILITIES) {
+    if (path === prefix || path.startsWith(prefix + "/")) {
+      if (prefix.length > bestLen) {
+        best = cap;
+        bestLen = prefix.length;
+      }
+    }
+  }
+  return best;
+};
+
 // Accept either a doctor or patient session for any protected route, unless
-// the path falls under DOCTOR_ONLY_PREFIXES.
+// the path falls under DOCTOR_ONLY_PREFIXES. Doctor sessions are additionally
+// gated by the ROUTE_CAPABILITIES map (role-based access control).
 export const requireAuth = (req, res, next) => {
   if (!req.path.startsWith("/api/") || PUBLIC_PATHS.includes(req.path)) return next();
   if (PUBLIC_PREFIXES.some((p) => req.path.startsWith(p))) return next();
   if (PUBLIC_PATTERNS.some((r) => r.test(req.path))) return next();
 
   const isDoctorOnly = DOCTOR_ONLY_PREFIXES.some((p) => req.path.startsWith(p));
-  if (isDoctorOnly) {
-    if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
-    return next();
+  if (isDoctorOnly && !req.doctor) {
+    return res.status(403).json({ error: "Doctor account required" });
   }
 
-  if (req.doctor || req.patient) return next();
-  return res.status(401).json({ error: "Authentication required" });
+  if (!req.doctor && !req.patient) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  // Role-based capability check — applies only to doctor sessions.
+  if (req.doctor) {
+    const requiredCap = capabilityForPath(req.path);
+    if (requiredCap && !hasCapability(req.doctor.role, requiredCap)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+  }
+
+  return next();
 };
 
 // Per-route guard for endpoints that must NOT accept a patient JWT
@@ -115,5 +195,18 @@ export const requireAuth = (req, res, next) => {
 //   router.post("/active-visits", requireDoctor, handler)
 export const requireDoctor = (req, res, next) => {
   if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
+  next();
+};
+
+// Per-route capability guard, for endpoints the prefix map can't cover (e.g.
+// a path that's in PUBLIC_PATHS for one method but privileged for another, like
+// POST /api/doctors). Use as middleware on a router:
+//   router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), handler)
+// Honors the master switch in shared/permissions.js (open while it's on).
+export const requireCapability = (capability) => (req, res, next) => {
+  if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
+  if (!hasCapability(req.doctor.role, capability)) {
+    return res.status(403).json({ error: "Insufficient permissions" });
+  }
   next();
 };

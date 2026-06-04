@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
+import RequireCapability from "./components/RequireCapability";
 import LoginPage from "./pages/LoginPage";
 
 // After a deploy, the user's already-loaded index-*.js still references the
@@ -128,50 +129,56 @@ const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
-          { path: "/", element: lazyEl(HomePage) },
-          { path: "/find", element: lazyEl(FindPage) },
-          { path: "/refills", element: lazyEl(RefillsPage) },
-          { path: "/dose-change-requests", element: lazyEl(DoseChangeRequestsPage) },
-          { path: "/lab-requests", element: lazyEl(LabRequestsPage) },
-          { path: "/side-effects", element: lazyEl(SideEffectsPage) },
-          { path: "/dashboard", element: lazyEl(DashboardPage) },
-          { path: "/quick", element: lazyEl(QuickPage) },
-          { path: "/patient", element: lazyEl(PatientPage) },
-          // Visit workflow - Follow-up
-          { path: "/fu-load", element: lazyEl(FULoadPage) },
-          { path: "/fu-review", element: lazyEl(FUReviewPage) },
-          { path: "/fu-edit", element: lazyEl(FUEditPage) },
-          { path: "/fu-symptoms", element: lazyEl(FUSymptomsPage) },
-          { path: "/fu-gen", element: lazyEl(FUGenPage) },
-          // Visit workflow - New patient
-          { path: "/intake", element: lazyEl(IntakePage) },
-          { path: "/history-clinical", element: lazyEl(HistoryClinicalPage) },
-          { path: "/exam", element: lazyEl(ExamPage) },
-          { path: "/assess", element: lazyEl(AssessPage) },
-          // Clinical
-          { path: "/vitals", element: lazyEl(VitalsPage) },
-          { path: "/mo", element: lazyEl(MOPage) },
-          { path: "/consultant", element: lazyEl(ConsultantPage) },
-          { path: "/plan", element: lazyEl(PlanPage) },
-          // Tools
-          { path: "/docs", element: lazyEl(DocsPage) },
-          { path: "/messages", element: lazyEl(MessagesPage) },
-          { path: "/genie-chats", element: lazyEl(GenieChatsPage) },
-          { path: "/lab-inbox", element: lazyEl(LabInboxPage) },
-          { path: "/reception-inbox", element: lazyEl(ReceptionInboxPage) },
-          { path: "/lab-portal", element: lazyEl(LabPortalPage) },
-          // Analysis
-          { path: "/history", element: lazyEl(HistoryPage) },
-          { path: "/outcomes", element: lazyEl(OutcomesPage) },
-          { path: "/ai", element: lazyEl(AIPage) },
-          { path: "/reports", element: lazyEl(ReportsPage) },
-          { path: "/ci", element: lazyEl(CIPage) },
-          // OPD Manager
-          { path: "/opd", element: lazyEl(OPD) },
-          // Visit view
-          { path: "/visit", element: lazyEl(VisitPage) },
-          // GHM Operations — single unified page
-          { path: "/ghm", element: lazyEl(GHMPage) },
+          {
+            // RBAC guard — blocks direct-URL access to pages the role can't open
+            element: <RequireCapability />,
+            children: [
+              { path: "/", element: lazyEl(HomePage) },
+              { path: "/find", element: lazyEl(FindPage) },
+              { path: "/refills", element: lazyEl(RefillsPage) },
+              { path: "/dose-change-requests", element: lazyEl(DoseChangeRequestsPage) },
+              { path: "/lab-requests", element: lazyEl(LabRequestsPage) },
+              { path: "/side-effects", element: lazyEl(SideEffectsPage) },
+              { path: "/dashboard", element: lazyEl(DashboardPage) },
+              { path: "/quick", element: lazyEl(QuickPage) },
+              { path: "/patient", element: lazyEl(PatientPage) },
+              // Visit workflow - Follow-up
+              { path: "/fu-load", element: lazyEl(FULoadPage) },
+              { path: "/fu-review", element: lazyEl(FUReviewPage) },
+              { path: "/fu-edit", element: lazyEl(FUEditPage) },
+              { path: "/fu-symptoms", element: lazyEl(FUSymptomsPage) },
+              { path: "/fu-gen", element: lazyEl(FUGenPage) },
+              // Visit workflow - New patient
+              { path: "/intake", element: lazyEl(IntakePage) },
+              { path: "/history-clinical", element: lazyEl(HistoryClinicalPage) },
+              { path: "/exam", element: lazyEl(ExamPage) },
+              { path: "/assess", element: lazyEl(AssessPage) },
+              // Clinical
+              { path: "/vitals", element: lazyEl(VitalsPage) },
+              { path: "/mo", element: lazyEl(MOPage) },
+              { path: "/consultant", element: lazyEl(ConsultantPage) },
+              { path: "/plan", element: lazyEl(PlanPage) },
+              // Tools
+              { path: "/docs", element: lazyEl(DocsPage) },
+              { path: "/messages", element: lazyEl(MessagesPage) },
+              { path: "/genie-chats", element: lazyEl(GenieChatsPage) },
+              { path: "/lab-inbox", element: lazyEl(LabInboxPage) },
+              { path: "/reception-inbox", element: lazyEl(ReceptionInboxPage) },
+              { path: "/lab-portal", element: lazyEl(LabPortalPage) },
+              // Analysis
+              { path: "/history", element: lazyEl(HistoryPage) },
+              { path: "/outcomes", element: lazyEl(OutcomesPage) },
+              { path: "/ai", element: lazyEl(AIPage) },
+              { path: "/reports", element: lazyEl(ReportsPage) },
+              { path: "/ci", element: lazyEl(CIPage) },
+              // OPD Manager
+              { path: "/opd", element: lazyEl(OPD) },
+              // Visit view
+              { path: "/visit", element: lazyEl(VisitPage) },
+              // GHM Operations — single unified page
+              { path: "/ghm", element: lazyEl(GHMPage) },
+            ],
+          },
         ],
       },
     ],

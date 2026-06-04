@@ -41,8 +41,17 @@ export default function LoginPage() {
     fetchDoctorsList();
   }, [authReady, initAuth, fetchDoctorsList]);
 
-  const getDefaultRoute = (role) =>
-    role === "lab" || role === "nurse" || role === "tech" ? "/lab-portal" : "/";
+  // Land each role on a page it can actually open under the capability matrix.
+  // ("/" and "/find" need no capability, so home is always a safe fallback —
+  // notably nurse no longer goes to /lab-portal, which it can't access.)
+  const ROLE_LANDING = {
+    lab: "/lab-portal",
+    tech: "/lab-portal",
+    reception: "/opd",
+    coordinator: "/opd",
+    pharmacy: "/refills",
+  };
+  const getDefaultRoute = (role) => ROLE_LANDING[role] || "/";
 
   // If already logged in, redirect to intended page or home
   useEffect(() => {

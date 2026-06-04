@@ -1,5 +1,12 @@
 import { create } from "zustand";
 import api from "../services/api.js";
+import { normalizeRole } from "../../shared/permissions.js";
+
+// Return a shallow copy of the doctor with its role normalized to a canonical
+// lowercase value (fixes the mis-cased "MO" and any legacy aliases), so all
+// downstream role/capability checks behave consistently.
+const withNormalizedRole = (doctor) =>
+  doctor ? { ...doctor, role: normalizeRole(doctor.role) } : doctor;
 
 const useAuthStore = create((set, get) => ({
   // ── state ──
@@ -52,7 +59,7 @@ const useAuthStore = create((set, get) => ({
     try {
       const { data } = await api.get("/api/auth/me");
       if (data.authenticated && data.doctor) {
-        const doctor = data.doctor;
+        const doctor = withNormalizedRole(data.doctor);
         set({ currentDoctor: doctor, authReady: true });
         // Auto-set names based on role
         if (doctor.role === "mo") set({ moName: doctor.short_name });
@@ -83,7 +90,7 @@ const useAuthStore = create((set, get) => ({
         pin: loginPin,
       });
       if (data.token) {
-        const doctor = data.doctor;
+        const doctor = withNormalizedRole(data.doctor);
         set({
           authToken: data.token,
           currentDoctor: doctor,

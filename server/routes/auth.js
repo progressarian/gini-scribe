@@ -8,6 +8,8 @@ import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import { loginSchema } from "../schemas/index.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
+import { requireCapability } from "../middleware/auth.js";
+import { CAPABILITIES } from "../../shared/permissions.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "24h";
@@ -128,8 +130,10 @@ router.get("/auth/me", async (req, res) => {
   }
 });
 
-// Create a new doctor (with bcrypt-hashed PIN)
-router.post("/doctors", async (req, res) => {
+// Create a new doctor (with bcrypt-hashed PIN). Admin-only — note GET /doctors
+// stays public (login dropdown) but this POST shares the path, so it's guarded
+// per-route rather than via the prefix map.
+router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
     const { name, short_name, specialty, role, pin, phone, license_no } = req.body;
     if (!name || !pin) return res.status(400).json({ error: "Name and PIN are required" });

@@ -9,90 +9,115 @@ import useVisitStore from "../stores/visitStore";
 import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
+import { PAGE_CAPABILITIES } from "../config/routes";
+import { hasCapability } from "../../shared/permissions";
 import "../styles/App.css";
+
+// Each item's `cap` is the capability required to see it (from the shared
+// PAGE_CAPABILITIES map; paths without one are always visible). The `show`
+// predicates carry only CONTEXTUAL gating (active visit, loaded patient,
+// follow-up vs new). Role gating now flows entirely through `cap` + the matrix
+// in shared/permissions.js — while its master switch is on, every role sees
+// every item (subject to context).
+const C = PAGE_CAPABILITIES;
 
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: () => true },
   { path: "/find", label: "🔍 Find", show: () => true },
-  { path: "/opd", label: "🏥 OPD", show: () => true },
-  { path: "/dashboard", label: "📋 Patient", show: (s) => s.hasPatient },
-  { path: "/visit", label: "👁 Visit", show: (s) => s.hasPatient },
-  { path: "/quick", label: "⚡ Quick", show: (s) => !s.isLabRole && !s.visitActive },
-  { path: "/patient", label: "👤", show: (s) => !s.visitActive },
+  { path: "/opd", label: "🏥 OPD", cap: C["/opd"], show: () => true },
+  { path: "/dashboard", label: "📋 Patient", cap: C["/dashboard"], show: (s) => s.hasPatient },
+  { path: "/visit", label: "👁 Visit", cap: C["/visit"], show: (s) => s.hasPatient },
+  { path: "/quick", label: "⚡ Quick", cap: C["/quick"], show: (s) => !s.visitActive },
+  { path: "/patient", label: "👤", cap: C["/patient"], show: (s) => !s.visitActive },
   // Follow-up visit workflow
   {
     path: "/fu-load",
     label: "📤 Load",
-    show: (s) => !s.isLabRole && s.visitActive && s.isFollowUp,
+    cap: C["/fu-load"],
+    show: (s) => s.visitActive && s.isFollowUp,
   },
   {
     path: "/fu-review",
     label: "📊 Review",
-    show: (s) => !s.isLabRole && s.visitActive && s.isFollowUp,
+    cap: C["/fu-review"],
+    show: (s) => s.visitActive && s.isFollowUp,
   },
   {
     path: "/fu-edit",
     label: "📋 Edit Plan",
-    show: (s) => !s.isLabRole && s.visitActive && s.isFollowUp,
+    cap: C["/fu-edit"],
+    show: (s) => s.visitActive && s.isFollowUp,
   },
   {
     path: "/fu-symptoms",
     label: "🗣️ Symptoms",
-    show: (s) => !s.isLabRole && s.visitActive && s.isFollowUp,
+    cap: C["/fu-symptoms"],
+    show: (s) => s.visitActive && s.isFollowUp,
   },
   {
     path: "/fu-gen",
     label: "🤖 Create Plan",
-    show: (s) => !s.isLabRole && s.visitActive && s.isFollowUp,
+    cap: C["/fu-gen"],
+    show: (s) => s.visitActive && s.isFollowUp,
   },
   // New patient visit workflow
   {
     path: "/intake",
     label: "📝 Intake",
-    show: (s) => !s.isLabRole && s.visitActive && !s.isFollowUp,
+    cap: C["/intake"],
+    show: (s) => s.visitActive && !s.isFollowUp,
   },
   {
     path: "/history-clinical",
     label: "📜 History",
-    show: (s) => !s.isLabRole && s.visitActive && !s.isFollowUp,
+    cap: C["/history-clinical"],
+    show: (s) => s.visitActive && !s.isFollowUp,
   },
-  { path: "/exam", label: "🔍 Exam", show: (s) => !s.isLabRole && s.visitActive && !s.isFollowUp },
+  { path: "/exam", label: "🔍 Exam", cap: C["/exam"], show: (s) => s.visitActive && !s.isFollowUp },
   {
     path: "/assess",
     label: "🧪 Assess",
-    show: (s) => !s.isLabRole && s.visitActive && !s.isFollowUp,
+    cap: C["/assess"],
+    show: (s) => s.visitActive && !s.isFollowUp,
   },
   // Documentation
-  { path: "/mo", label: "🎤 MO", show: (s) => !s.isLabRole && !s.visitActive },
-  { path: "/consultant", label: "👨‍⚕️ Con", show: (s) => !s.isLabRole && !s.isFollowUp },
-  { path: "/plan", label: "📄 Plan", show: (s) => !s.isLabRole },
-  { path: "/docs", label: "📎 Docs", show: (s) => s.hasPatient },
-  { path: "/lab-portal", label: "🔬 Upload", show: (s) => s.isLabRole },
-  { path: "/refills", label: "💊 Refills", show: () => true },
-  { path: "/dose-change-requests", label: "⚕️ Dose Reviews", show: () => true },
+  { path: "/mo", label: "🎤 MO", cap: C["/mo"], show: (s) => !s.visitActive },
+  { path: "/consultant", label: "👨‍⚕️ Con", cap: C["/consultant"], show: (s) => !s.isFollowUp },
+  { path: "/plan", label: "📄 Plan", cap: C["/plan"], show: () => true },
+  { path: "/docs", label: "📎 Docs", cap: C["/docs"], show: (s) => s.hasPatient },
+  { path: "/lab-portal", label: "🔬 Upload", cap: C["/lab-portal"], show: () => true },
+  { path: "/refills", label: "💊 Refills", cap: C["/refills"], show: () => true },
+  {
+    path: "/dose-change-requests",
+    label: "⚕️ Dose Reviews",
+    cap: C["/dose-change-requests"],
+    show: () => true,
+  },
   {
     path: "/lab-requests",
     label: "🧪 Lab Requests",
+    cap: C["/lab-requests"],
     show: () => true,
     count: (s) => s.labRequestCount,
   },
-  { path: "/side-effects", label: "💊 Side FX", show: (s) => !s.isLabRole },
+  { path: "/side-effects", label: "💊 Side FX", cap: C["/side-effects"], show: () => true },
   // { path: "/messages", label: "💬 Messages", show: () => true, badge: (s) => s.unreadCount > 0 },
   {
     path: "/reception-inbox",
     label: "🏥 Reception",
-    show: (s) => !s.isLabRole,
+    cap: C["/reception-inbox"],
+    show: () => true,
     count: (s) => s.receptionCount,
   },
-  { path: "/lab-inbox", label: "🔬 Lab Chat", show: () => false },
-  { path: "/history", label: "📜 Hx", show: (s) => !s.isLabRole && s.hasPatient },
-  { path: "/outcomes", label: "📊", show: (s) => !s.isLabRole && !!s.dbPatientId },
-  { path: "/ai", label: "🤖 AI", show: (s) => !s.isLabRole },
-  { path: "/genie-chats", label: "🧞 Genie Chats", show: (s) => !s.isLabRole },
-  { path: "/reports", label: "📊 Reports", show: (s) => s.isAdminOrConsultant },
-  { path: "/ci", label: "🧠 CI", show: (s) => s.isAdminOrConsultant },
+  { path: "/lab-inbox", label: "🔬 Lab Chat", cap: C["/lab-inbox"], show: () => false },
+  { path: "/history", label: "📜 Hx", cap: C["/history"], show: (s) => s.hasPatient },
+  { path: "/outcomes", label: "📊", cap: C["/outcomes"], show: (s) => !!s.dbPatientId },
+  { path: "/ai", label: "🤖 AI", cap: C["/ai"], show: () => true },
+  { path: "/genie-chats", label: "🧞 Genie Chats", cap: C["/genie-chats"], show: () => true },
+  { path: "/reports", label: "📊 Reports", cap: C["/reports"], show: () => true },
+  { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page
-  { path: "/ghm", label: "🏥 GHM Ops", show: () => true },
+  { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
 ];
 
 export default function AppLayout() {
@@ -144,17 +169,11 @@ export default function AppLayout() {
   }, [visitActive, location.pathname, updateVisitRoute]);
 
   const isFollowUp = usePatientStore((s) => s.getIsFollowUp());
-  const isLabRole =
-    currentDoctor?.role === "lab" ||
-    currentDoctor?.role === "nurse" ||
-    currentDoctor?.role === "tech";
-  const isAdminOrConsultant =
-    currentDoctor?.role === "admin" || currentDoctor?.role === "consultant";
+  const role = currentDoctor?.role;
   const hasPatient = !!dbPatientId || !!patient.name;
 
   const navState = {
-    isLabRole,
-    isAdminOrConsultant,
+    role,
     hasPatient,
     visitActive,
     isFollowUp,
@@ -294,7 +313,9 @@ export default function AppLayout() {
       {!(duplicateWarning && !dbPatientId) && (
         <div className="tabs">
           {(() => {
-            const visible = NAV_ITEMS.filter((t) => t.show(navState));
+            const visible = NAV_ITEMS.filter(
+              (t) => (!t.cap || hasCapability(navState.role, t.cap)) && t.show(navState),
+            );
             const rendered = [];
             let lastSection = null;
             for (const t of visible) {
