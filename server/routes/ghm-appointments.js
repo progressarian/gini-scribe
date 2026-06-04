@@ -321,12 +321,18 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.call_status, a.call_made_by, a.call_date,
                 a.call_notes, a.call_reschedule_date, a.pt_recovery, a.preferred_date, a.preferred_doctor,
                 p.id AS patient_id, p.address, p.email,
-                -- Auto follow-up: next booked appointment for this patient after today
+                COALESCE(a.age, p.age) AS disp_age,
+                COALESCE(a.sex, p.sex) AS disp_sex,
+                a.healthray_follow_up,
+                a.appointment_type AS mode_of_appointment,
+                COALESCE(a.assigned_mo, c.mo_name) AS assigned_mo,
+                COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by,
+                -- Next booked appointment for this patient AFTER this row's own date
                 (SELECT nxt.appointment_date
                  FROM appointments nxt
                  WHERE nxt.file_no = a.file_no
                    AND nxt.file_no IS NOT NULL
-                   AND nxt.appointment_date > $1
+                   AND nxt.appointment_date > a.appointment_date
                    AND nxt.status NOT IN ('cancelled','no_show')
                  ORDER BY nxt.appointment_date ASC
                  LIMIT 1
@@ -335,13 +341,24 @@ router.get("/ghm-appointments", async (req, res) => {
                  FROM appointments nxt
                  WHERE nxt.file_no = a.file_no
                    AND nxt.file_no IS NOT NULL
-                   AND nxt.appointment_date > $1
+                   AND nxt.appointment_date > a.appointment_date
                    AND nxt.status NOT IN ('cancelled','no_show')
                  ORDER BY nxt.appointment_date ASC
                  LIMIT 1
-                ) AS follow_up_time
+                ) AS follow_up_time,
+                -- Latest prescription's follow-up info (timing/notes) for this patient
+                (SELECT c2.healthray_follow_up
+                 FROM appointments c2
+                 WHERE c2.file_no = a.file_no AND c2.file_no IS NOT NULL
+                   AND c2.healthray_follow_up IS NOT NULL
+                   AND c2.appointment_date <= a.appointment_date
+                 ORDER BY c2.appointment_date DESC
+                 LIMIT 1
+                ) AS last_rx_follow_up
          FROM appointments a
          LEFT JOIN patients p ON p.file_no = a.file_no
+         LEFT JOIN consultations c ON c.id = a.consultation_id
+         LEFT JOIN station_tracking st ON st.appointment_id = a.id
          ${where}
          ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -541,6 +558,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "pt_recovery",
       "preferred_date",
       "preferred_doctor",
+      "assigned_mo",
+      "prescription_explained_by",
     ];
     const sets = [];
     const vals = [];

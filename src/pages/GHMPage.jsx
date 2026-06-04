@@ -329,8 +329,6 @@ function Summary({ rows }) {
   const fu = rows.filter(
     (r) => r.visit_type && !r.visit_type.toLowerCase().startsWith("new"),
   ).length;
-  const improving = rows.filter((r) => r.pt_recovery === "Yes").length;
-  const notImproving = rows.filter((r) => r.pt_recovery === "No").length;
 
   return (
     <div className="summary">
@@ -350,14 +348,6 @@ function Summary({ rows }) {
           <span className="spill spill--green">{called} Spoke</span>
           <span className="spill spill--red">{notPicked} Not Picked</span>
           <span className="spill spill--blue">{rescheduled} Rescheduled</span>
-        </div>
-      </div>
-      <div className="summary__sep" />
-      <div className="summary__group">
-        <div className="summary__label">Recovery</div>
-        <div className="summary__pills">
-          <span className="spill spill--green">{improving} Improving</span>
-          <span className="spill spill--red">{notImproving} Not Improving</span>
         </div>
       </div>
     </div>
@@ -939,9 +929,9 @@ export default function GHMPage() {
   const showRecovery = false; // Recovery column hidden on all tabs
   const showCalledBy = view !== "by_date"; // hide Called By on By Date tab
   const showCallDate = view !== "by_date"; // on Tomorrow & Follow-up tabs
-  // total columns (for the expanded history row colSpan): 10 always-on + optionals
+  // total columns (for the expanded history row colSpan): 13 always-on + optionals
   const colSpan =
-    10 +
+    13 +
     (showTime ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
     (showCallStatus ? 1 : 0) +
@@ -1075,7 +1065,10 @@ export default function GHMPage() {
                 <th style={{ minWidth: 170 }}>Patient</th>
                 <th style={{ width: 155 }}>Biomarkers (auto)</th>
                 <th style={{ width: 100 }}>Visit Type</th>
+                <th style={{ width: 110 }}>Mode</th>
                 <th style={{ width: 220 }}>Doctor</th>
+                <th style={{ width: 150 }}>Assigned MO</th>
+                <th style={{ width: 160 }}>Prescription Explained By</th>
                 {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
                 {showCallStatus && <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>}
                 {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
@@ -1150,6 +1143,13 @@ export default function GHMPage() {
                             )}
                           </span>
                           {row.file_no && <span className="pcell__file">{row.file_no}</span>}
+                          {(row.disp_sex || row.disp_age != null) && (
+                            <span className="pcell__ageSex">
+                              {[row.disp_sex, row.disp_age != null ? `${row.disp_age} yrs` : null]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          )}
                           {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
                           {row.address && <span className="pcell__addr">📍 {row.address}</span>}
                           {row.condition && <span className="pcell__cond">{row.condition}</span>}
@@ -1188,6 +1188,21 @@ export default function GHMPage() {
                         )}
                       </td>
 
+                      {/* Mode of appointment — editable */}
+                      <td>
+                        <select
+                          value={row.mode_of_appointment || ""}
+                          onChange={(e) => patch(row.id, "appointment_type", e.target.value)}
+                          className="doc-assign-sel"
+                          style={{ minWidth: 100 }}
+                        >
+                          <option value="">—</option>
+                          {["Physical", "Digital", "Online"].map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </td>
+
                       {/* Doctor — editable. Investigation/lab tests default to Hospital Admin. */}
                       <td>
                         {(() => {
@@ -1217,6 +1232,24 @@ export default function GHMPage() {
                             </select>
                           );
                         })()}
+                      </td>
+
+                      {/* Assigned MO — editable */}
+                      <td>
+                        <InlineEdit
+                          value={row.assigned_mo}
+                          onChange={(v) => patch(row.id, "assigned_mo", v)}
+                          placeholder="MO name…"
+                        />
+                      </td>
+
+                      {/* Prescription explained by — editable */}
+                      <td>
+                        <InlineEdit
+                          value={row.prescription_explained_by}
+                          onChange={(v) => patch(row.id, "prescription_explained_by", v)}
+                          placeholder="Explained by…"
+                        />
                       </td>
 
                       {/* Came? */}
@@ -1294,18 +1327,18 @@ export default function GHMPage() {
                         </td>
                       )}
 
-                      {/* Follow-up date — auto from next booked appointment */}
+                      {/* Follow-up date — date only (no timing/notes text) */}
                       <td>
-                        {row.follow_up_date ? (
-                          <div className="fu-cell">
-                            <span className="fu-date">{row.follow_up_date}</span>
-                            {row.follow_up_time && (
-                              <span className="fu-time">{row.follow_up_time}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="muted">Not booked</span>
-                        )}
+                        {(() => {
+                          const hrDate =
+                            row.healthray_follow_up?.date || row.last_rx_follow_up?.date || "";
+                          const fuDate = row.follow_up_date || hrDate;
+                          return fuDate ? (
+                            <span className="fu-date">{fuDate}</span>
+                          ) : (
+                            <span className="muted">—</span>
+                          );
+                        })()}
                       </td>
 
                       {/* Preferred doctor — doctor the patient prefers (editable) */}
