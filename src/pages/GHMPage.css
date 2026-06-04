@@ -590,9 +590,20 @@
   color: #94a3b8;
 }
 
+.ie-text--multi {
+  white-space: pre-wrap; /* preserve line breaks in notes */
+  min-width: 200px;
+}
+
 .ie-placeholder {
   color: #cbd5e1;
   font-style: italic;
+}
+
+.ie-textarea {
+  min-width: 220px;
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .ie-text:hover {
@@ -886,6 +897,12 @@
   flex-direction: column;
   gap: 4px;
   align-items: flex-start;
+}
+/* Call Status dropdown sizes to fit its selected option text */
+.callstat-cell .csel {
+  width: auto;
+  min-width: 100%;
+  white-space: nowrap;
 }
 .attempt-badge {
   font-size: 10px;
@@ -1197,4 +1214,17 @@
   color: #0f172a;
   font-weight: 600;
   font-size: 12px;
+}
+
+.pref-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde047;
+  border-radius: 10px;
+  padding: 0 7px;
+  vertical-align: middle;
 }

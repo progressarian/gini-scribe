@@ -293,7 +293,8 @@ router.get("/ghm-appointments", async (req, res) => {
     const offset = (Math.max(1, +page) - 1) * Math.min(100, +limit);
 
     const params = [d];
-    let where = `WHERE a.appointment_date = $1`;
+    // Show appointments on this date OR patients whose preferred date is this date
+    let where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
     if (doctor) {
       params.push(`%${doctor}%`);
       where += ` AND a.doctor_name ILIKE $${params.length}`;
@@ -307,6 +308,7 @@ router.get("/ghm-appointments", async (req, res) => {
       pool.query(`SELECT COUNT(*)::int AS total FROM appointments a ${where}`, params),
       pool.query(
         `SELECT a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
+                (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
                 a.doctor_name, a.patient_name, a.file_no, a.phone,
                 a.visit_type, a.appointment_type, a.booking_source,
                 a.booked_by_name, a.booking_date, a.condition, a.chief_complaint,
@@ -544,7 +546,9 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     const vals = [];
     for (const key of allowed) {
       if (key in req.body) {
-        vals.push(req.body[key]);
+        // Empty string → NULL so DATE/numeric columns can be cleared
+        const v = req.body[key] === "" ? null : req.body[key];
+        vals.push(v);
         sets.push(`${key}=$${vals.length}`);
       }
     }
@@ -555,6 +559,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       doctor_name: "Assigned Doctor",
       preferred_doctor: "Preferred Doctor",
       preferred_date: "Preferred Date",
+      call_made_by: "Called By",
     };
     const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
     let before = {};
@@ -609,12 +614,55 @@ router.get("/appointment-changes", async (req, res) => {
 });
 
 // DELETE /api/appointment-changes/:id — remove a doctor-change log entry
+// Columns that may be reverted when their change log is deleted
+const REVERTIBLE_FIELDS = new Set([
+  "doctor_name",
+  "preferred_doctor",
+  "preferred_date",
+  "call_made_by",
+]);
+
 router.delete("/appointment-changes/:id", async (req, res) => {
+  const client = await pool.connect();
   try {
-    await pool.query("DELETE FROM appointment_change_log WHERE id=$1", [req.params.id]);
-    res.json({ ok: true });
+    await client.query("BEGIN");
+
+    const found = await client.query(
+      "SELECT appointment_id, field, old_value, changed_at FROM appointment_change_log WHERE id=$1",
+      [req.params.id],
+    );
+    if (!found.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Change log not found" });
+    }
+    const { appointment_id, field, old_value, changed_at } = found.rows[0];
+
+    await client.query("DELETE FROM appointment_change_log WHERE id=$1", [req.params.id]);
+
+    // Undo the change: if this was the LATEST change for that field, revert the
+    // appointment's value back to what it was before (old_value).
+    if (REVERTIBLE_FIELDS.has(field)) {
+      const newer = await client.query(
+        `SELECT 1 FROM appointment_change_log
+         WHERE appointment_id=$1 AND field=$2 AND changed_at > $3
+         LIMIT 1`,
+        [appointment_id, field, changed_at],
+      );
+      if (!newer.rows.length) {
+        await client.query(
+          `UPDATE appointments SET ${field} = $1 WHERE id = $2`,
+          [old_value || null, appointment_id],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    res.json({ ok: true, reverted_field: field, appointment_id });
   } catch (e) {
+    await client.query("ROLLBACK");
     handleError(res, e, "Appointment change delete");
+  } finally {
+    client.release();
   }
 });
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import "./GHMPage.css";
+import useAuthStore from "../stores/authStore";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 const getToken = () => localStorage.getItem("gini_auth_token") || "";
@@ -161,7 +162,7 @@ function DocDropdown({ value, options, onChange }) {
 }
 
 // ─── Inline text/date cell that saves on blur / Enter ─────────────────────
-function InlineEdit({ value, onChange, type = "text", placeholder }) {
+function InlineEdit({ value, onChange, type = "text", placeholder, multiline = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || "");
   const ref = useRef();
@@ -187,27 +188,54 @@ function InlineEdit({ value, onChange, type = "text", placeholder }) {
 
   if (!editing) {
     return (
-      <span className={`ie-text ${!value ? "ie-empty" : ""}`} onClick={open} title="Click to edit">
+      <span
+        className={`ie-text ${!value ? "ie-empty" : ""} ${multiline ? "ie-text--multi" : ""}`}
+        onClick={open}
+        title="Click to edit"
+      >
         {value || <span className="ie-placeholder">{placeholder || "—"}</span>}
       </span>
     );
   }
 
-  return type === "date" ? (
-    <input
-      ref={ref}
-      type="date"
-      value={draft}
-      onChange={(e) => {
-        const v = e.target.value;
-        setDraft(v);
-        setEditing(false);
-        if (v !== (value || "")) onChange(v);
-      }}
-      onBlur={() => setEditing(false)}
-      className="ie-input"
-    />
-  ) : (
+  if (type === "date") {
+    return (
+      <input
+        ref={ref}
+        type="date"
+        value={draft}
+        onChange={(e) => {
+          const v = e.target.value;
+          setDraft(v);
+          setEditing(false);
+          if (v !== (value || "")) onChange(v);
+        }}
+        onBlur={() => setEditing(false)}
+        className="ie-input"
+      />
+    );
+  }
+
+  if (multiline) {
+    return (
+      <textarea
+        ref={ref}
+        value={draft}
+        rows={3}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          // Enter adds a new line; Ctrl/Cmd+Enter or Escape commits/closes
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        placeholder={placeholder}
+        className="ie-input ie-textarea"
+      />
+    );
+  }
+
+  return (
     <input
       ref={ref}
       value={draft}
@@ -606,6 +634,7 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
     setConfirmChg(null);
     if (res?.error) return;
     load();
+    onDeleted?.(); // refresh the main row so the reverted value shows
   };
 
   return (
@@ -644,7 +673,7 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
 
           {changes.length > 0 && (
             <div className="chg-section">
-              <div className="chg-title">📝 Change History (Doctor / Preferred Date)</div>
+              <div className="chg-title">📝 Change History (Doctor / Preferred Date / Called By)</div>
               <div className="hist-list">
                 {changes.map((c) => (
                   <div key={c.id} className="hist-item">
@@ -785,6 +814,8 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
 
 // ─── Main page ─────────────────────────────────────────────────────────────
 export default function GHMPage() {
+  const currentDoctor = useAuthStore((s) => s.currentDoctor);
+  const loggedInName = currentDoctor?.short_name || currentDoctor?.name || "";
   const [view, setView] = useState("by_date"); // by_date | tomorrow | fu3
   const [date, setDate] = useState(todayStr());
   const [showNew, setShowNew] = useState(false);
@@ -804,11 +835,11 @@ export default function GHMPage() {
   useEffect(() => {
     api("/api/ghm-appointments/doctors")
       .then((data) => setDoctors(safeArr(data).map((d) => d.doctor_name)))
-      .catch(() => {});
+      .catch(() => { });
 
     api("/api/cc-calling/agents")
       .then((data) => setCcAgents(safeArr(data).map((a) => a.name)))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // ── Switch the day-view tab (also sets the date) ─────────────────────────
@@ -875,15 +906,17 @@ export default function GHMPage() {
     setSaving((s) => ({ ...s, [id]: false }));
   }, []);
 
-  // ── When call status set to "called", auto-fill today's date ─────────────
+  // ── When call status changes, auto-fill date + caller (logged-in user) ────
   const handleCallStatus = useCallback(
     (row, value) => {
       patch(row.id, "call_status", value);
-      if (value === "called" && !row.call_date) {
-        patch(row.id, "call_date", todayStr());
+      // any real call action auto-stamps date + who made the call (if empty)
+      if (value && value !== "pending") {
+        if (!row.call_date) patch(row.id, "call_date", todayStr());
+        if (!row.call_made_by && loggedInName) patch(row.id, "call_made_by", loggedInName);
       }
     },
-    [patch],
+    [patch, loggedInName],
   );
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -903,15 +936,17 @@ export default function GHMPage() {
   const showTime = view !== "fu3"; // hide Time Slot on Follow-up in 3 Days
   const showShowNoShow = false; // Show/No-Show column hidden on all tabs
   const showCallStatus = view !== "by_date"; // on Tomorrow & Follow-up tabs
-  const showRecovery = view === "by_date"; // only on By Date tab
+  const showRecovery = false; // Recovery column hidden on all tabs
+  const showCalledBy = view !== "by_date"; // hide Called By on By Date tab
   const showCallDate = view !== "by_date"; // on Tomorrow & Follow-up tabs
-  // total columns (for the expanded history row colSpan): 11 always-on + optionals
+  // total columns (for the expanded history row colSpan): 10 always-on + optionals
   const colSpan =
-    11 +
+    10 +
     (showTime ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
     (showCallStatus ? 1 : 0) +
     (showRecovery ? 1 : 0) +
+    (showCalledBy ? 1 : 0) +
     (showCallDate ? 1 : 0);
 
   return (
@@ -930,15 +965,16 @@ export default function GHMPage() {
           <span className="ghm__datelab">{isToday ? "Today" : prettyDate(date)}</span>
         </div>
         <div className="ghm__controls">
-          {view === "by_date" ? (
+          {view === "tomorrow" ? (
+            <span className="ctrl ctrl--readonly">{prettyDate(date)}</span>
+          ) : (
             <input
               type="date"
               value={date}
+              min={view === "fu3" ? todayStr() : undefined}
               onChange={(e) => setDate(e.target.value)}
               className="ctrl"
             />
-          ) : (
-            <span className="ctrl ctrl--readonly">{prettyDate(date)}</span>
           )}
           <DocDropdown value={doctor} options={doctors} onChange={setDoctor} />
           <input
@@ -1041,14 +1077,14 @@ export default function GHMPage() {
                 <th style={{ width: 100 }}>Visit Type</th>
                 <th style={{ width: 220 }}>Doctor</th>
                 {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
-                {showCallStatus && <th style={{ width: 170 }}>Call Status</th>}
+                {showCallStatus && <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>}
                 {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
-                <th style={{ width: 100 }}>Called By</th>
-                {showCallDate && <th style={{ width: 105 }}>Call Date</th>}
-                <th style={{ minWidth: 210 }}>Notes / Reason</th>
+                {showCalledBy && <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>}
+                {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
                 <th style={{ width: 130 }}>Follow-up Date</th>
                 <th style={{ width: 180 }}>Preferred Doctor</th>
                 <th style={{ width: 150 }}>Preferred Date</th>
+                <th style={{ minWidth: 210 }}>Notes / Reason</th>
               </tr>
             </thead>
             <tbody>
@@ -1102,7 +1138,17 @@ export default function GHMPage() {
                       {/* Patient */}
                       <td>
                         <div className="pcell">
-                          <span className="pcell__name">{row.patient_name || "—"}</span>
+                          <span className="pcell__name">
+                            {row.patient_name || "—"}
+                            {row.via_preferred && (
+                              <span
+                                className="pref-tag"
+                                title={`Appears here because patient's preferred date is ${date}. Actual appointment: ${row.appointment_date}`}
+                              >
+                                ⭐ Preferred
+                              </span>
+                            )}
+                          </span>
                           {row.file_no && <span className="pcell__file">{row.file_no}</span>}
                           {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
                           {row.address && <span className="pcell__addr">📍 {row.address}</span>}
@@ -1217,23 +1263,25 @@ export default function GHMPage() {
                         </td>
                       )}
 
-                      {/* Called by — datalist: pick from DB or type manually */}
-                      <td>
-                        <input
-                          list="cc-agents-list"
-                          defaultValue={row.call_made_by || ""}
-                          key={`cb-${row.id}-${row.call_made_by}`}
-                          onBlur={(e) => {
-                            const v = e.target.value.trim();
-                            if (v !== (row.call_made_by || "")) patch(row.id, "call_made_by", v);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") e.target.blur();
-                          }}
-                          placeholder="CC name"
-                          className="cc-input"
-                        />
-                      </td>
+                      {/* Called by — auto-fills logged-in user, editable, with dropdown */}
+                      {showCalledBy && (
+                        <td>
+                          <input
+                            list="cc-agents-list"
+                            defaultValue={row.call_made_by || loggedInName || ""}
+                            key={`cb-${row.id}-${row.call_made_by}`}
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              if (v !== (row.call_made_by || "")) patch(row.id, "call_made_by", v);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.target.blur();
+                            }}
+                            placeholder="CC name"
+                            className="cc-input"
+                          />
+                        </td>
+                      )}
 
                       {/* Call date */}
                       {showCallDate && (
@@ -1245,15 +1293,6 @@ export default function GHMPage() {
                           />
                         </td>
                       )}
-
-                      {/* Notes / reason */}
-                      <td>
-                        <InlineEdit
-                          value={row.call_notes}
-                          onChange={(v) => patch(row.id, "call_notes", v)}
-                          placeholder="Patient said… / reason…"
-                        />
-                      </td>
 
                       {/* Follow-up date — auto from next booked appointment */}
                       <td>
@@ -1296,6 +1335,16 @@ export default function GHMPage() {
                           value={row.preferred_date || ""}
                           onChange={(e) => patch(row.id, "preferred_date", e.target.value)}
                           className="rsd-input"
+                        />
+                      </td>
+
+                      {/* Notes / reason — last column (multiline) */}
+                      <td>
+                        <InlineEdit
+                          value={row.call_notes}
+                          onChange={(v) => patch(row.id, "call_notes", v)}
+                          placeholder="Patient said… / reason…"
+                          multiline
                         />
                       </td>
                     </tr>
