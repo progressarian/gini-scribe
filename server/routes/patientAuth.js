@@ -181,13 +181,15 @@ async function writePatient(db, id, fields) {
   return updateAppPatient(id, fields);
 }
 
-/** Apply password_hash (and any sibling fields you want propagated, e.g.
- *  force_password_reset) to every patients row sharing this phone, across
- *  BOTH the hospital and app DBs. We want a single password to unlock any
- *  of the records linked to a phone number, no matter which row was the
- *  canonical one at set-time. Errors are swallowed so a single failure on
- *  one DB doesn't block the primary write. */
-export async function propagatePasswordToAllRows(phone, fields) {
+/** Apply the given fields to every patients row sharing this phone, across
+ *  BOTH the hospital and app DBs. One phone can map to multiple patient rows
+ *  (family members share a number), so anything that must be consistent for
+ *  auth to work no matter which row resolves next — the password
+ *  (password_hash, force_password_reset) AND the OTP (otp_code,
+ *  otp_expires_at, verification_token, …) — gets mirrored to all of them.
+ *  Errors are swallowed so a single failure on one DB doesn't block the
+ *  primary write. */
+export async function propagateToAllRows(phone, fields) {
   const variants = phoneVariants(phone);
 
   // Hospital DB
@@ -323,15 +325,23 @@ router.post("/patient/auth/send-otp", loginLimiter, async (req, res) => {
     const otp = generateOtp();
     const otpHash = await bcrypt.hash(otp, 10);
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
-
-    await writePatient(db, patient.id, {
+    const otpFields = {
       otp_code: otpHash,
       otp_expires_at: expiresAt,
       otp_attempts: 0,
       otp_last_sent_at: new Date(),
       verification_token: null,
       verification_token_expires_at: null,
-    });
+    };
+
+    // Authoritative write to the canonical row — throws on a real DB error so
+    // we don't send an OTP we never managed to store.
+    await writePatient(db, patient.id, otpFields);
+    // This phone may map to multiple patient rows (family members share a
+    // number). Mirror the SAME otp_code/expiry to every linked row across
+    // both DBs so verify-otp succeeds no matter which row auth resolves to
+    // next — same reasoning as the password propagation.
+    await propagateToAllRows(phone, otpFields);
 
     await sendOtpSms(phone, otp);
 
@@ -369,13 +379,17 @@ router.post("/patient/auth/verify-otp", loginLimiter, async (req, res) => {
 
     const verificationToken = crypto.randomBytes(32).toString("hex");
     const verExpires = new Date(Date.now() + VERIFICATION_TTL_MS);
-    await writePatient(db, patient.id, {
+    const verifiedFields = {
       otp_code: null,
       otp_expires_at: null,
       otp_attempts: 0,
       verification_token: verificationToken,
       verification_token_expires_at: verExpires,
-    });
+    };
+    await writePatient(db, patient.id, verifiedFields);
+    // Mirror the verification token to every linked row so set-password finds
+    // it regardless of which row resolves next.
+    await propagateToAllRows(phone, verifiedFields);
 
     res.json({ verification_token: verificationToken, source: db });
   } catch (e) {
@@ -423,7 +437,7 @@ router.post("/patient/auth/set-password", async (req, res) => {
     // Sync the password to every other row sharing this phone (across both
     // DBs) so the user can log in regardless of which record auth resolves
     // to next time.
-    await propagatePasswordToAllRows(phone, {
+    await propagateToAllRows(phone, {
       password_hash: passwordHash,
       force_password_reset: false,
     });
@@ -571,7 +585,7 @@ router.post("/patient/auth/change-password", async (req, res) => {
     });
 
     // Mirror the new password to every other row sharing this phone.
-    await propagatePasswordToAllRows(patient.phone, {
+    await propagateToAllRows(patient.phone, {
       password_hash: newHash,
       force_password_reset: false,
     });

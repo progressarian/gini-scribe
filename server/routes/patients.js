@@ -15,7 +15,7 @@ import {
   convertGeniePatientByPhone,
   convertGeniePatientById,
 } from "../services/genieImport.js";
-import { propagatePasswordToAllRows } from "./patientAuth.js";
+import { propagateToAllRows } from "./patientAuth.js";
 
 // Outbound Genie sync removed (2026-05-01): patients live in exactly one DB
 // (this scribe Postgres OR the Genie Supabase), and the patient app picks the
@@ -627,7 +627,7 @@ router.post("/patients/:id/reset-app-password", requireDoctor, async (req, res) 
     // Mirror the temp password + force-reset flag to every other row
     // sharing this phone (across both DBs) so the patient can sign in
     // regardless of which record auth resolves to next time.
-    await propagatePasswordToAllRows(hospitalPatient.phone, {
+    await propagateToAllRows(hospitalPatient.phone, {
       password_hash: hash,
       force_password_reset: true,
     });
