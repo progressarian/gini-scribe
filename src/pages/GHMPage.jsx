@@ -663,7 +663,9 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
 
           {changes.length > 0 && (
             <div className="chg-section">
-              <div className="chg-title">📝 Change History (Doctor / Preferred Date / Called By)</div>
+              <div className="chg-title">
+                📝 Change History (Doctor / Preferred Date / Called By)
+              </div>
               <div className="hist-list">
                 {changes.map((c) => (
                   <div key={c.id} className="hist-item">
@@ -825,11 +827,11 @@ export default function GHMPage() {
   useEffect(() => {
     api("/api/ghm-appointments/doctors")
       .then((data) => setDoctors(safeArr(data).map((d) => d.doctor_name)))
-      .catch(() => { });
+      .catch(() => {});
 
     api("/api/cc-calling/agents")
       .then((data) => setCcAgents(safeArr(data).map((a) => a.name)))
-      .catch(() => { });
+      .catch(() => {});
   }, []);
 
   // ── Switch the day-view tab (also sets the date) ─────────────────────────
@@ -1075,7 +1077,9 @@ export default function GHMPage() {
                 <th style={{ width: 150 }}>Assigned MO</th>
                 <th style={{ width: 160 }}>Prescription Explained By</th>
                 {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
-                {showCallStatus && <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>}
+                {showCallStatus && (
+                  <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
+                )}
                 {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
                 {showCalledBy && <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>}
                 {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
@@ -1203,7 +1207,9 @@ export default function GHMPage() {
                         >
                           <option value="">—</option>
                           {["Physical", "Digital", "Online"].map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
                           ))}
                         </select>
                       </td>

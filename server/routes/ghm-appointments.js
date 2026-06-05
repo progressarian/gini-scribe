@@ -294,14 +294,26 @@ router.get("/ghm-appointments", async (req, res) => {
 
     const params = [d];
     // Two listing modes:
-    //  - followup: patients whose advised follow-up date is this date (the
-    //    follow-up calling list). The matching row is the PAST visit that
+    //  - followup: patients whose CURRENT advised follow-up date is this date
+    //    (the follow-up calling list). The matching row is the PAST visit that
     //    carries the follow_up_date — its "Follow-up Date" column shows $1.
+    //    Only the patient's LATEST follow-up-bearing visit counts, so a stale
+    //    follow-up from an earlier visit can't drag the patient onto a date
+    //    that a more recent visit has already superseded.
     //  - default: appointments booked on this date OR patients whose preferred
     //    date is this date.
     let where =
       mode === "followup"
-        ? `WHERE a.follow_up_date = $1`
+        ? `WHERE a.follow_up_date = $1
+             AND (
+               a.file_no IS NULL
+               OR a.appointment_date = (
+                 SELECT MAX(prev.appointment_date)
+                 FROM appointments prev
+                 WHERE prev.file_no = a.file_no
+                   AND prev.follow_up_date IS NOT NULL
+               )
+             )`
         : `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
     if (doctor) {
       params.push(`%${doctor}%`);
@@ -661,10 +673,10 @@ router.delete("/appointment-changes/:id", async (req, res) => {
         [appointment_id, field, changed_at],
       );
       if (!newer.rows.length) {
-        await client.query(
-          `UPDATE appointments SET ${field} = $1 WHERE id = $2`,
-          [old_value || null, appointment_id],
-        );
+        await client.query(`UPDATE appointments SET ${field} = $1 WHERE id = $2`, [
+          old_value || null,
+          appointment_id,
+        ]);
       }
     }
 
