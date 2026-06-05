@@ -347,10 +347,16 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.appointment_type AS mode_of_appointment,
                 COALESCE(a.assigned_mo, c.mo_name) AS assigned_mo,
                 COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by,
-                -- Follow-up date: synced HealthRay date on THIS visit, else the
-                -- latest prior visit's synced follow-up date for this patient.
+                -- Follow-up date for THIS visit, in priority order:
+                --   1. the follow_up_date column (populated by the later sync step)
+                --   2. this visit's own synced HealthRay value in biomarkers.followup
+                --      — present immediately after sync even when the column above
+                --      hasn't been filled yet, so a freshly-seen patient shows their
+                --      NEW follow-up instead of a stale one from a prior visit
+                --   3. else the latest PRIOR visit's follow_up_date for this patient
                 COALESCE(
                   a.follow_up_date,
+                  NULLIF(a.biomarkers->>'followup', '')::date,
                   (SELECT prev.follow_up_date
                    FROM appointments prev
                    WHERE prev.file_no = a.file_no

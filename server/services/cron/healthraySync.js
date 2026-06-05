@@ -119,7 +119,10 @@ function buildVitalsAndBiomarkers(appt, apptDate) {
   if (bmi) opdVitals.bmi = bmi;
 
   const biomarkers = {};
-  if (appt.followup_days) biomarkers.followup = appt.followup_days.split("T")[0];
+  // Use toISTDate (not a naive split) so an IST-midnight follow-up stored as a
+  // UTC instant (…T18:30:00Z) maps to the correct calendar day, not one early.
+  // Must match how appointment_date is derived from app_date_time.
+  if (appt.followup_days) biomarkers.followup = toISTDate(appt.followup_days);
   if (appt.rmo_doctor) biomarkers.rmo = appt.rmo_doctor;
   if (appt.reason) biomarkers.reason = appt.reason;
   if (appt.tag) biomarkers.tag = appt.tag;
