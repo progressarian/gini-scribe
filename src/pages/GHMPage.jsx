@@ -848,9 +848,10 @@ export default function GHMPage() {
     try {
       const p = new URLSearchParams({ date, limit: 200 });
       if (doctor !== "All") p.set("doctor", doctor);
-      // The Follow-up tab lists patients whose follow-up is DUE on this date
-      // (matched on follow_up_date), not appointments booked that day.
-      if (view === "fu3") p.set("mode", "followup");
+      // The Tomorrow and Follow-up tabs are follow-up calling lists: patients
+      // whose follow-up is DUE on this date (matched on follow_up_date), not
+      // appointments booked that day. Only "By Date" lists booked appointments.
+      if (view === "tomorrow" || view === "fu3") p.set("mode", "followup");
       const res = await api(`/api/ghm-appointments?${p}`);
       const data = safeArr(res?.data);
       setRows(data);
@@ -928,21 +929,28 @@ export default function GHMPage() {
 
   const isToday = date === todayStr();
   // Per-tab column visibility
-  const showTime = view !== "fu3"; // hide Time Slot on Follow-up in 3 Days
+  // Time Slot only makes sense for booked appointments (By Date). On the
+  // follow-up calling lists (Tomorrow, Follow-up) the matched row is a PAST
+  // visit, so its time slot is stale — hide it.
+  const showTime = view === "by_date";
   const showShowNoShow = false; // Show/No-Show column hidden on all tabs
   const showCallStatus = view !== "by_date"; // on Tomorrow & Follow-up tabs
   const showRecovery = false; // Recovery column hidden on all tabs
   const showCalledBy = view !== "by_date"; // hide Called By on By Date tab
   const showCallDate = view !== "by_date"; // on Tomorrow & Follow-up tabs
-  // total columns (for the expanded history row colSpan): 13 always-on + optionals
+  // On the Tomorrow tab every row's follow-up is due tomorrow, so the Follow-up
+  // Date column is redundant there — hide it.
+  const showFollowUpDate = view !== "tomorrow";
+  // total columns (for the expanded history row colSpan): 12 always-on + optionals
   const colSpan =
-    13 +
+    12 +
     (showTime ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
     (showCallStatus ? 1 : 0) +
     (showRecovery ? 1 : 0) +
     (showCalledBy ? 1 : 0) +
-    (showCallDate ? 1 : 0);
+    (showCallDate ? 1 : 0) +
+    (showFollowUpDate ? 1 : 0);
 
   return (
     <div className="ghm">
@@ -1083,7 +1091,7 @@ export default function GHMPage() {
                 {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
                 {showCalledBy && <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>}
                 {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
-                <th style={{ width: 130 }}>Follow-up Date</th>
+                {showFollowUpDate && <th style={{ width: 130 }}>Follow-up Date</th>}
                 <th style={{ width: 180 }}>Preferred Doctor</th>
                 <th style={{ width: 150 }}>Preferred Date</th>
                 <th style={{ minWidth: 210 }}>Notes / Reason</th>
@@ -1338,9 +1346,11 @@ export default function GHMPage() {
                         </td>
                       )}
 
-                      {/* Follow-up date — next booked appt, else prescription timing/notes */}
-                      <td>
-                        {(() => {
+                      {/* Follow-up date — next booked appt, else prescription timing/notes.
+                          Hidden on the Tomorrow tab (every row is due tomorrow). */}
+                      {showFollowUpDate && (
+                        <td>
+                          {(() => {
                           // 1) Next booked appointment after this visit → most reliable date
                           if (row.follow_up_date) {
                             return (
@@ -1352,27 +1362,31 @@ export default function GHMPage() {
                               </div>
                             );
                           }
-                          // 2) Else the latest prescription's follow-up (date / timing / notes)
+                          // 2) Else the latest prescription's follow-up DATE or
+                          //    timing only. The free-text notes (e.g. "FBG and PP
+                          //    glucose charting") are clinical instructions, not a
+                          //    date — never render them as the cell value; keep them
+                          //    on hover so the info isn't lost.
                           const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
                           const hrDate = hr.date || "";
                           const hrTiming = hr.timing || "";
                           const hrNotes = hr.notes || "";
-                          if (hrDate || hrTiming || hrNotes) {
+                          if (hrDate || hrTiming) {
                             return (
                               <div className="fu-cell">
                                 {hrDate && <span className="fu-date">{hrDate}</span>}
                                 {hrTiming && <span className="fu-time">{hrTiming}</span>}
-                                {!hrDate && !hrTiming && hrNotes && (
-                                  <span className="fu-time" title={hrNotes}>
-                                    {hrNotes.length > 40 ? hrNotes.slice(0, 40) + "…" : hrNotes}
-                                  </span>
-                                )}
                               </div>
                             );
                           }
-                          return <span className="muted">—</span>;
-                        })()}
-                      </td>
+                          return (
+                            <span className="muted" title={hrNotes || undefined}>
+                              —
+                            </span>
+                          );
+                          })()}
+                        </td>
+                      )}
 
                       {/* Preferred doctor — doctor the patient prefers (editable) */}
                       <td>

@@ -293,25 +293,39 @@ router.get("/ghm-appointments", async (req, res) => {
     const offset = (Math.max(1, +page) - 1) * Math.min(100, +limit);
 
     const params = [d];
+
+    // A visit's OWN effective follow-up date, from whichever source has it, in
+    // priority order: the follow_up_date column → the synced HealthRay
+    // appointment value (biomarkers.followup) → the date extracted from the
+    // prescription (healthray_follow_up.date). The last one is AI-extracted and
+    // dirty (can hold "4 weeks", "today", "09/10/2025", "null", …), so it is
+    // ONLY cast when it is a clean YYYY-MM-DD — an unguarded ::date would throw
+    // and break the whole query.
+    const ownFu = (a) => `COALESCE(
+      ${a}.follow_up_date,
+      NULLIF(${a}.biomarkers->>'followup', '')::date,
+      CASE WHEN ${a}.healthray_follow_up->>'date' ~ '^\\d{4}-\\d{2}-\\d{2}$'
+           THEN (${a}.healthray_follow_up->>'date')::date END
+    )`;
+
     // Two listing modes:
     //  - followup: patients whose CURRENT advised follow-up date is this date
-    //    (the follow-up calling list). The matching row is the PAST visit that
-    //    carries the follow_up_date — its "Follow-up Date" column shows $1.
-    //    Only the patient's LATEST follow-up-bearing visit counts, so a stale
-    //    follow-up from an earlier visit can't drag the patient onto a date
-    //    that a more recent visit has already superseded.
+    //    (the follow-up calling list), matched on the visit's effective follow-up
+    //    date (any source). Only the patient's LATEST follow-up-bearing visit
+    //    counts, so a stale follow-up from an earlier visit can't drag the
+    //    patient onto a date a more recent visit has already superseded.
     //  - default: appointments booked on this date OR patients whose preferred
     //    date is this date.
     let where =
       mode === "followup"
-        ? `WHERE a.follow_up_date = $1
+        ? `WHERE ${ownFu("a")} = $1
              AND (
                a.file_no IS NULL
                OR a.appointment_date = (
                  SELECT MAX(prev.appointment_date)
                  FROM appointments prev
                  WHERE prev.file_no = a.file_no
-                   AND prev.follow_up_date IS NOT NULL
+                   AND ${ownFu("prev")} IS NOT NULL
                )
              )`
         : `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
@@ -347,22 +361,25 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.appointment_type AS mode_of_appointment,
                 COALESCE(a.assigned_mo, c.mo_name) AS assigned_mo,
                 COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by,
-                -- Follow-up date for THIS visit, in priority order:
-                --   1. the follow_up_date column (populated by the later sync step)
-                --   2. this visit's own synced HealthRay value in biomarkers.followup
-                --      — present immediately after sync even when the column above
-                --      hasn't been filled yet, so a freshly-seen patient shows their
-                --      NEW follow-up instead of a stale one from a prior visit
-                --   3. else the latest PRIOR visit's follow_up_date for this patient
+                -- Follow-up date shown for THIS visit:
+                --   1. the visit's OWN effective follow-up date (column, synced
+                --      HealthRay appointment value, or prescription-extracted date —
+                --      see ownFu above). This covers freshly-seen patients whose
+                --      column hasn't been backfilled yet.
+                --   2. else the latest PRIOR visit's effective follow-up — but only
+                --      if it is still pending (>= this visit's date). A prior
+                --      follow-up that already passed before this appointment is
+                --      stale (e.g. an upcoming/unseen visit would otherwise show a
+                --      months-old follow-up date).
                 COALESCE(
-                  a.follow_up_date,
-                  NULLIF(a.biomarkers->>'followup', '')::date,
+                  ${ownFu("a")},
                   (SELECT prev.follow_up_date
                    FROM appointments prev
                    WHERE prev.file_no = a.file_no
                      AND prev.file_no IS NOT NULL
                      AND prev.follow_up_date IS NOT NULL
                      AND prev.appointment_date <= a.appointment_date
+                     AND prev.follow_up_date >= a.appointment_date
                    ORDER BY prev.appointment_date DESC
                    LIMIT 1)
                 ) AS follow_up_date
