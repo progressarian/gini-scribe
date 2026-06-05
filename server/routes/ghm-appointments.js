@@ -288,13 +288,21 @@ router.post("/ghm-appointments/biomarkers", async (req, res) => {
 // GET /api/ghm-appointments — list by date + optional doctor
 router.get("/ghm-appointments", async (req, res) => {
   try {
-    const { date, doctor, status, page = 1, limit = 50 } = req.query;
+    const { date, doctor, status, mode, page = 1, limit = 50 } = req.query;
     const d = date || new Date().toISOString().split("T")[0];
     const offset = (Math.max(1, +page) - 1) * Math.min(100, +limit);
 
     const params = [d];
-    // Show appointments on this date OR patients whose preferred date is this date
-    let where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
+    // Two listing modes:
+    //  - followup: patients whose advised follow-up date is this date (the
+    //    follow-up calling list). The matching row is the PAST visit that
+    //    carries the follow_up_date — its "Follow-up Date" column shows $1.
+    //  - default: appointments booked on this date OR patients whose preferred
+    //    date is this date.
+    let where =
+      mode === "followup"
+        ? `WHERE a.follow_up_date = $1`
+        : `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
     if (doctor) {
       params.push(`%${doctor}%`);
       where += ` AND a.doctor_name ILIKE $${params.length}`;
@@ -327,34 +335,19 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.appointment_type AS mode_of_appointment,
                 COALESCE(a.assigned_mo, c.mo_name) AS assigned_mo,
                 COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by,
-                -- Next booked appointment for this patient AFTER this row's own date
-                (SELECT nxt.appointment_date
-                 FROM appointments nxt
-                 WHERE nxt.file_no = a.file_no
-                   AND nxt.file_no IS NOT NULL
-                   AND nxt.appointment_date > a.appointment_date
-                   AND nxt.status NOT IN ('cancelled','no_show')
-                 ORDER BY nxt.appointment_date ASC
-                 LIMIT 1
-                ) AS follow_up_date,
-                (SELECT nxt.time_slot
-                 FROM appointments nxt
-                 WHERE nxt.file_no = a.file_no
-                   AND nxt.file_no IS NOT NULL
-                   AND nxt.appointment_date > a.appointment_date
-                   AND nxt.status NOT IN ('cancelled','no_show')
-                 ORDER BY nxt.appointment_date ASC
-                 LIMIT 1
-                ) AS follow_up_time,
-                -- Latest prescription's follow-up info (timing/notes) for this patient
-                (SELECT c2.healthray_follow_up
-                 FROM appointments c2
-                 WHERE c2.file_no = a.file_no AND c2.file_no IS NOT NULL
-                   AND c2.healthray_follow_up IS NOT NULL
-                   AND c2.appointment_date <= a.appointment_date
-                 ORDER BY c2.appointment_date DESC
-                 LIMIT 1
-                ) AS last_rx_follow_up
+                -- Follow-up date: synced HealthRay date on THIS visit, else the
+                -- latest prior visit's synced follow-up date for this patient.
+                COALESCE(
+                  a.follow_up_date,
+                  (SELECT prev.follow_up_date
+                   FROM appointments prev
+                   WHERE prev.file_no = a.file_no
+                     AND prev.file_no IS NOT NULL
+                     AND prev.follow_up_date IS NOT NULL
+                     AND prev.appointment_date <= a.appointment_date
+                   ORDER BY prev.appointment_date DESC
+                   LIMIT 1)
+                ) AS follow_up_date
          FROM appointments a
          LEFT JOIN patients p ON p.file_no = a.file_no
          LEFT JOIN consultations c ON c.id = a.consultation_id

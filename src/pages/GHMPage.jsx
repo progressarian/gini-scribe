@@ -846,6 +846,9 @@ export default function GHMPage() {
     try {
       const p = new URLSearchParams({ date, limit: 200 });
       if (doctor !== "All") p.set("doctor", doctor);
+      // The Follow-up tab lists patients whose follow-up is DUE on this date
+      // (matched on follow_up_date), not appointments booked that day.
+      if (view === "fu3") p.set("mode", "followup");
       const res = await api(`/api/ghm-appointments?${p}`);
       const data = safeArr(res?.data);
       setRows(data);
@@ -878,7 +881,7 @@ export default function GHMPage() {
     } finally {
       setLoading(false);
     }
-  }, [date, doctor]);
+  }, [date, doctor, view]);
 
   useEffect(() => {
     load();
@@ -995,7 +998,9 @@ export default function GHMPage() {
           >
             {t.label}
             {t.offset !== null && (
-              <span className="ghm__tab-date">{prettyDate(addDaysStr(t.offset))}</span>
+              <span className="ghm__tab-date">
+                {prettyDate(view === t.id ? date : addDaysStr(t.offset))}
+              </span>
             )}
           </button>
         ))}
@@ -1327,17 +1332,39 @@ export default function GHMPage() {
                         </td>
                       )}
 
-                      {/* Follow-up date — date only (no timing/notes text) */}
+                      {/* Follow-up date — next booked appt, else prescription timing/notes */}
                       <td>
                         {(() => {
-                          const hrDate =
-                            row.healthray_follow_up?.date || row.last_rx_follow_up?.date || "";
-                          const fuDate = row.follow_up_date || hrDate;
-                          return fuDate ? (
-                            <span className="fu-date">{fuDate}</span>
-                          ) : (
-                            <span className="muted">—</span>
-                          );
+                          // 1) Next booked appointment after this visit → most reliable date
+                          if (row.follow_up_date) {
+                            return (
+                              <div className="fu-cell">
+                                <span className="fu-date">{row.follow_up_date}</span>
+                                {row.follow_up_time && (
+                                  <span className="fu-time">{row.follow_up_time}</span>
+                                )}
+                              </div>
+                            );
+                          }
+                          // 2) Else the latest prescription's follow-up (date / timing / notes)
+                          const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
+                          const hrDate = hr.date || "";
+                          const hrTiming = hr.timing || "";
+                          const hrNotes = hr.notes || "";
+                          if (hrDate || hrTiming || hrNotes) {
+                            return (
+                              <div className="fu-cell">
+                                {hrDate && <span className="fu-date">{hrDate}</span>}
+                                {hrTiming && <span className="fu-time">{hrTiming}</span>}
+                                {!hrDate && !hrTiming && hrNotes && (
+                                  <span className="fu-time" title={hrNotes}>
+                                    {hrNotes.length > 40 ? hrNotes.slice(0, 40) + "…" : hrNotes}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          }
+                          return <span className="muted">—</span>;
                         })()}
                       </td>
 
