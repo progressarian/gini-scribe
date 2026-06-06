@@ -523,9 +523,32 @@ router.get("/patient/auth/me", async (req, res) => {
     }
     if (!patient) return res.status(401).json({ error: "Not authenticated" });
 
-    // If an app session's row got migrated since the JWT was minted, surface
-    // that so the client can refresh against hospital next time.
+    // If an app session's row got migrated since the JWT was minted (e.g.
+    // onboarding's ensure-scribe-patient created the hospital record),
+    // upgrade the session TRANSPARENTLY: the phone was already verified for
+    // this session, so re-resolve the hospital row by the same phone and
+    // rotate the token instead of forcing a logout + re-login.
     if (db === "app" && patient.migrated_to_gini) {
+      const hospital = await findHospitalPatient(patient.phone);
+      if (hospital) {
+        const token = await issueSession("hospital", hospital);
+        // Revoke the superseded app session.
+        if (req.patient.jti) {
+          await pool
+            .query("DELETE FROM auth_sessions WHERE token=$1", [req.patient.jti])
+            .catch(() => {});
+        }
+        const linkedPatients = await listLinkedPatients("hospital", hospital.phone);
+        return res.json({
+          db: "hospital",
+          token, // rotated — client persists it and carries on seamlessly
+          patient: stripSensitive(hospital),
+          linkedPatients,
+          force_password_reset: !!hospital.force_password_reset,
+        });
+      }
+      // No hospital row found for the phone (unexpected) — keep the old
+      // behaviour as a fallback so the client can recover via re-login.
       return res.status(409).json({
         error: "Account migrated to hospital. Please sign in again.",
         code: "MIGRATED",

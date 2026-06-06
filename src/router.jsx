@@ -66,6 +66,7 @@ const PlanPage = lazyWithRetry(() => import("./pages/PlanPage"));
 const DocsPage = lazyWithRetry(() => import("./pages/DocsPage"));
 const MessagesPage = lazyWithRetry(() => import("./pages/MessagesPage"));
 const GenieChatsPage = lazyWithRetry(() => import("./pages/GenieChatsPage"));
+const AppPatientsPage = lazyWithRetry(() => import("./pages/AppPatientsPage"));
 const LabInboxPage = lazyWithRetry(() => import("./pages/LabInboxPage"));
 const ReceptionInboxPage = lazyWithRetry(() => import("./pages/ReceptionInboxPage"));
 const LabPortalPage = lazyWithRetry(() => import("./pages/LabPortalPage"));
@@ -162,6 +163,7 @@ const router = createBrowserRouter([
               { path: "/docs", element: lazyEl(DocsPage) },
               { path: "/messages", element: lazyEl(MessagesPage) },
               { path: "/genie-chats", element: lazyEl(GenieChatsPage) },
+              { path: "/app-patients", element: lazyEl(AppPatientsPage) },
               { path: "/lab-inbox", element: lazyEl(LabInboxPage) },
               { path: "/reception-inbox", element: lazyEl(ReceptionInboxPage) },
               { path: "/lab-portal", element: lazyEl(LabPortalPage) },

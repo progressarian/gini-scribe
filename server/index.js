@@ -9,6 +9,8 @@ import { authMiddleware, requireAuth } from "./middleware/auth.js";
 import { ipLimiter, userLimiter } from "./middleware/rateLimit.js";
 import authRoutes from "./routes/auth.js";
 import patientAuthRoutes from "./routes/patientAuth.js";
+import patientAppRoutes from "./routes/patientApp.js";
+import appPatientsRoutes from "./routes/appPatients.js";
 import patientRoutes from "./routes/patients.js";
 import consultationRoutes from "./routes/consultations.js";
 import clinicalRoutes from "./routes/clinical.js";
@@ -85,6 +87,8 @@ app.use((req, res, next) => {
     p.endsWith("/chat-attachment") ||
     p.includes("/audio") ||
     p === "/api/convert-heic" ||
+    // Profile photo upload (base64 image ≤5MB raw → ~6.7MB JSON)
+    p === "/api/patient/app/avatar" ||
     p.startsWith("/api/ai/");
 
   // 5MB: AI-extracted documents, reasoning text, rx-feedback, history import, visit doc uploads
@@ -116,6 +120,8 @@ app.use("/api", userLimiter);
 // Routes
 app.use("/api", authRoutes);
 app.use("/api", patientAuthRoutes);
+app.use("/api", patientAppRoutes);
+app.use("/api", appPatientsRoutes);
 app.use("/api", patientRoutes);
 app.use("/api", consultationRoutes);
 app.use("/api", clinicalRoutes);

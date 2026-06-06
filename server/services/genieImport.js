@@ -330,13 +330,18 @@ export async function convertGeniePatientByPhone(phone) {
   return doConvert(db, geniePatient);
 }
 
-async function doConvert(db, geniePatient) {
-  // Find or create scribe patient.
-  const existing = (
-    await pool.query("SELECT id FROM patients WHERE phone = $1 LIMIT 1", [geniePatient.phone])
-  ).rows[0];
-
-  let scribePatientId = existing?.id;
+async function doConvert(db, geniePatient, opts = {}) {
+  // Target scribe patient: caller-supplied (e.g. file-no linking, where the
+  // hospital record was already verified by phone match) wins over the
+  // exact-phone lookup — that lookup can miss differently-formatted phones
+  // and would then create a duplicate GNI- patient.
+  let scribePatientId = opts.scribePatientId ?? null;
+  if (!scribePatientId) {
+    const existing = (
+      await pool.query("SELECT id FROM patients WHERE phone = $1 LIMIT 1", [geniePatient.phone])
+    ).rows[0];
+    scribePatientId = existing?.id;
+  }
   if (!scribePatientId) {
     const seq = await pool.query(
       `SELECT COALESCE(MAX(CAST(SUBSTRING(file_no FROM 'GNI-([0-9]+)') AS INTEGER)), 0) + 1 AS next
@@ -627,6 +632,18 @@ async function doConvert(db, geniePatient) {
     );
   }
 
+  // Carry the app login over: after migration "hospital wins" at login, so a
+  // hospital row without a password would force the user back through
+  // OTP + set-password even though they just set one in the app. Copy the
+  // genie hash when the hospital row has none (never overwrite an existing
+  // hospital password).
+  if (geniePatient.password_hash) {
+    await pool.query(
+      `UPDATE patients SET password_hash = COALESCE(password_hash, $1) WHERE id = $2`,
+      [geniePatient.password_hash, scribePatientId],
+    );
+  }
+
   // Flip the migrated flag last so a partial import can be retried safely.
   await db
     .from("patients")
@@ -652,6 +669,20 @@ async function doConvert(db, geniePatient) {
  * await — errors are logged, never thrown. Idempotent: bulkInsert uses
  * ON CONFLICT DO NOTHING so re-runs are safe.
  */
+/**
+ * Import a genie patient's app history into a SPECIFIC scribe patient (or, if
+ * scribePatientId is null, doConvert's own find-or-create). Used by the
+ * patient-app endpoints: ensure-scribe-patient and link-file-no (where the
+ * target hospital record was verified by phone match first). Idempotent —
+ * bulkInsert uses ON CONFLICT DO NOTHING.
+ */
+export async function importGenieHistoryToScribePatient(geniePatient, scribePatientId = null) {
+  const db = getGenieDb();
+  if (!db) return { ok: false, reason: "genie_db_not_configured" };
+  if (!geniePatient) return { ok: false, reason: "no_genie_patient" };
+  return doConvert(db, geniePatient, { scribePatientId });
+}
+
 export async function autoMigrateGeniePatient(geniePatient) {
   const db = getGenieDb();
   if (!db || !geniePatient || geniePatient.migrated_to_gini) return;

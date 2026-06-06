@@ -114,6 +114,7 @@ const NAV_ITEMS = [
   { path: "/outcomes", label: "📊", cap: C["/outcomes"], show: (s) => !!s.dbPatientId },
   { path: "/ai", label: "🤖 AI", cap: C["/ai"], show: () => true },
   { path: "/genie-chats", label: "🧞 Genie Chats", cap: C["/genie-chats"], show: () => true },
+  { path: "/app-patients", label: "📱 App Patients", cap: C["/genie-chats"], show: () => true },
   { path: "/reports", label: "📊 Reports", cap: C["/reports"], show: () => true },
   { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page

@@ -1351,39 +1351,39 @@ export default function GHMPage() {
                       {showFollowUpDate && (
                         <td>
                           {(() => {
-                          // 1) Next booked appointment after this visit → most reliable date
-                          if (row.follow_up_date) {
+                            // 1) Next booked appointment after this visit → most reliable date
+                            if (row.follow_up_date) {
+                              return (
+                                <div className="fu-cell">
+                                  <span className="fu-date">{row.follow_up_date}</span>
+                                  {row.follow_up_time && (
+                                    <span className="fu-time">{row.follow_up_time}</span>
+                                  )}
+                                </div>
+                              );
+                            }
+                            // 2) Else the latest prescription's follow-up DATE or
+                            //    timing only. The free-text notes (e.g. "FBG and PP
+                            //    glucose charting") are clinical instructions, not a
+                            //    date — never render them as the cell value; keep them
+                            //    on hover so the info isn't lost.
+                            const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
+                            const hrDate = hr.date || "";
+                            const hrTiming = hr.timing || "";
+                            const hrNotes = hr.notes || "";
+                            if (hrDate || hrTiming) {
+                              return (
+                                <div className="fu-cell">
+                                  {hrDate && <span className="fu-date">{hrDate}</span>}
+                                  {hrTiming && <span className="fu-time">{hrTiming}</span>}
+                                </div>
+                              );
+                            }
                             return (
-                              <div className="fu-cell">
-                                <span className="fu-date">{row.follow_up_date}</span>
-                                {row.follow_up_time && (
-                                  <span className="fu-time">{row.follow_up_time}</span>
-                                )}
-                              </div>
+                              <span className="muted" title={hrNotes || undefined}>
+                                —
+                              </span>
                             );
-                          }
-                          // 2) Else the latest prescription's follow-up DATE or
-                          //    timing only. The free-text notes (e.g. "FBG and PP
-                          //    glucose charting") are clinical instructions, not a
-                          //    date — never render them as the cell value; keep them
-                          //    on hover so the info isn't lost.
-                          const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
-                          const hrDate = hr.date || "";
-                          const hrTiming = hr.timing || "";
-                          const hrNotes = hr.notes || "";
-                          if (hrDate || hrTiming) {
-                            return (
-                              <div className="fu-cell">
-                                {hrDate && <span className="fu-date">{hrDate}</span>}
-                                {hrTiming && <span className="fu-time">{hrTiming}</span>}
-                              </div>
-                            );
-                          }
-                          return (
-                            <span className="muted" title={hrNotes || undefined}>
-                              —
-                            </span>
-                          );
                           })()}
                         </td>
                       )}
