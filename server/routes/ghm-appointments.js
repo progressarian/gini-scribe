@@ -1,6 +1,7 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
 
 const router = Router();
 
@@ -228,15 +229,34 @@ router.delete("/call-attempts/:id", async (req, res) => {
   }
 });
 
-// GET /api/ghm-appointments/doctors — distinct doctor names with counts
+// GET /api/ghm-appointments/doctors — bookable doctors with appointment counts.
+// Every ACTIVE doctor (from the doctors table) is included even with zero
+// bookings, so a freshly-added doctor is immediately bookable. Legacy doctor
+// names that only exist on past appointments are kept too.
 router.get("/ghm-appointments/doctors", async (_req, res) => {
   try {
     const r = await pool.query(
-      `SELECT doctor_name, COUNT(*)::int AS cnt
-       FROM appointments
-       WHERE doctor_name IS NOT NULL AND doctor_name NOT IN ('N/A','Dr. Hospital Admin')
-       GROUP BY doctor_name
-       ORDER BY cnt DESC`,
+      `WITH appt AS (
+         SELECT doctor_name, COUNT(*)::int AS cnt
+           FROM appointments
+          WHERE doctor_name IS NOT NULL
+          GROUP BY doctor_name
+       )
+       SELECT doctor_name, cnt FROM (
+         -- active clinical doctors (consultant/MO), with their count if any.
+         -- Non-clinical staff (nurse/lab/reception/etc.) are not bookable.
+         SELECT d.name AS doctor_name, COALESCE(a.cnt, 0) AS cnt
+           FROM doctors d
+           LEFT JOIN appt a ON a.doctor_name = d.name
+          WHERE d.is_active AND lower(d.role) IN ('consultant', 'mo')
+         UNION
+         -- legacy appointment names not matching an active doctor
+         SELECT a.doctor_name, a.cnt
+           FROM appt a
+          WHERE a.doctor_name NOT IN ('N/A','Dr. Hospital Admin')
+            AND NOT EXISTS (SELECT 1 FROM doctors d WHERE d.is_active AND d.name = a.doctor_name)
+       ) u
+       ORDER BY cnt DESC, doctor_name ASC`,
     );
     res.json(r.rows);
   } catch (e) {
@@ -477,6 +497,24 @@ router.post("/ghm-appointments", async (req, res) => {
       resolved_file_no = created.rows[0].file_no;
     }
 
+    // Availability gate (no-op unless SCHEDULE_ENFORCEMENT=warn|strict). Only
+    // catalog slots are enforced; unknown doctor/slot passes through.
+    const gateDoctorId = await resolveDoctorIdByName(doctor_name);
+    const avail = await checkBookingAvailability({
+      doctorId: gateDoctorId,
+      date: appointment_date,
+      slot: time_slot,
+      force: req.body.force,
+      role: req.doctor?.role,
+    });
+    if (avail?.blocked) {
+      return res.status(409).json({
+        error: "doctor_unavailable",
+        reason: avail.reason,
+        detail: avail.detail || null,
+      });
+    }
+
     // Auto-generate reporting slot and WhatsApp message
     const reporting_time_slot = REPORTING_MAP[time_slot] || time_slot;
     const { whatsapp_message, additional_whatsapp_msg } = buildWhatsappMessage({
@@ -544,6 +582,12 @@ router.post("/ghm-appointments", async (req, res) => {
       );
     }
 
+    if (avail?.warn && r.rows[0]) {
+      r.rows[0]._availability_warning = { reason: avail.reason, detail: avail.detail || null };
+      console.warn(
+        `[GHM] availability WARN: ${doctor_name} ${appointment_date} ${time_slot} -> ${avail.reason}`,
+      );
+    }
     res.status(201).json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "GHM appointment create");

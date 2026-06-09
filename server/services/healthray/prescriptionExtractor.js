@@ -63,7 +63,13 @@ export async function extractFromFile(base64, buffer) {
       model: "claude-sonnet-4-20250514",
       max_tokens: 24000,
       temperature: 0,
-      system: CLINICAL_EXTRACTION_PROMPT,
+      // Cache the static extraction prompt. The document (image/PDF) sits in the
+      // user turn after `system`, so this prefix is identical across every
+      // extraction and is re-read at ~0.1x cost when docs are processed in a
+      // burst (e.g. during a cron sync) within the 5-minute cache window.
+      system: [
+        { type: "text", text: CLINICAL_EXTRACTION_PROMPT, cache_control: { type: "ephemeral" } },
+      ],
       messages: [
         {
           role: "user",
@@ -85,6 +91,13 @@ export async function extractFromFile(base64, buffer) {
   }
 
   const data = await claudeRes.json();
+  if (data?.usage) {
+    const u = data.usage;
+    console.log(
+      `[prescription-extract usage] in=${u.input_tokens} out=${u.output_tokens} ` +
+        `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
+    );
+  }
   const text = (data.content || []).map((c) => c.text || "").join("");
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Claude returned no JSON");

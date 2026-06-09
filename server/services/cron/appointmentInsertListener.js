@@ -53,7 +53,11 @@ async function handleNotification(msg) {
     `[ApptInsert] backfill kick patient=${patient_id} appt=${appt_id} source=${source || "(null)"}`,
   );
 
-  backfillPatientOpd(patient_id)
+  // Only the day-before (source='sheets') imports batch — they have ~1 day of
+  // slack before the OBT call team works the list, so a ~1h enrichment delay is
+  // harmless and earns the 50% batch discount. Same-day walk-in / GHM inserts
+  // parse inline (allowBatch=false) so their clinical context is ready instantly.
+  backfillPatientOpd(patient_id, { allowBatch: source === "sheets", origin: "day_before" })
     .then((result) => {
       console.log(
         `[ApptInsert] patient=${patient_id} → ${result.status}${result.apptId ? ` (appt ${result.apptId})` : ""}`,

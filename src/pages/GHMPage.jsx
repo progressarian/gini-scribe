@@ -35,6 +35,7 @@ const VIEW_TABS = [
   { id: "by_date", label: "📅 By Date", offset: null },
   { id: "tomorrow", label: "🌅 Tomorrow", offset: 1 },
   { id: "fu3", label: "📞 Follow-up in 3 Days", offset: 3 },
+  { id: "reassign", label: "🔄 Reassign Needed", offset: null },
 ];
 
 // ─── Call status options ───────────────────────────────────────────────────
@@ -94,7 +95,39 @@ const TIME_SLOTS = [
   "2:30 PM to 3 PM",
   "3 PM to 3:30 PM",
   "3:30 PM to 4 PM",
+  "4 PM to 4:30 PM",
+  "4:30 PM to 5 PM",
+  "5 PM to 6 PM",
+  "6 PM to 7 PM",
+  "7 PM to 8 PM",
+  "8 PM to 9 PM",
+  "9 PM to 10 PM",
+  "10 PM to 11 PM",
+  "11 PM to 12 AM",
+  "12 AM to 1 AM",
+  "1 AM to 2 AM",
+  "2 AM to 3 AM",
+  "3 AM to 4 AM",
+  "4 AM to 5 AM",
+  "5 AM to 6 AM",
+  "6 AM to 7 AM",
+  "7 AM to 8 AM",
+  "8 AM to 9 AM",
+  "9 AM to 9:30 AM",
 ];
+
+// Why a slot is unavailable (from the doctor-availability resolver).
+const SLOT_REASON = {
+  day_off: "Day off",
+  not_working: "Not working",
+  clinic_holiday: "Clinic holiday",
+  break: "Break",
+  leave: "On leave",
+  emergency: "Emergency leave",
+  holiday: "Holiday",
+  manual_block: "Blocked",
+  full: "Full",
+};
 
 const VISIT_TYPES = [
   "New",
@@ -372,8 +405,41 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  // Availability for the selected doctor+date. null ⇒ use plain TIME_SLOTS
+  // (doctor not configured / unknown).
+  const [availSlots, setAvailSlots] = useState(null);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Fetch the doctor's day availability so we can grey out unbookable slots.
+  useEffect(() => {
+    const doctor = form.doctor_name;
+    const date = form.appointment_date;
+    if (!doctor || !date) {
+      setAvailSlots(null);
+      return;
+    }
+    let cancelled = false;
+    api(`/api/availability/day?doctor=${encodeURIComponent(doctor)}&date=${date}`)
+      .then((d) => {
+        if (cancelled) return;
+        const slots = d?.resolved ? d.slots || [] : null;
+        setAvailSlots(slots);
+        // If the chosen slot just became unavailable, clear it.
+        if (slots) {
+          setForm((f) => {
+            const sel = slots.find((x) => x.slot_label === f.time_slot);
+            return sel && !sel.available ? { ...f, time_slot: "" } : f;
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailSlots(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.doctor_name, form.appointment_date]);
 
   // Phone: keep digits only, cap at 10
   const setPhone = (v) => set("phone", v.replace(/\D/g, "").slice(0, 10));
@@ -482,11 +548,19 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
               <span>Time Slot</span>
               <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
                 <option value="">— Select slot</option>
-                {TIME_SLOTS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                {availSlots
+                  ? availSlots
+                      .filter((s) => s.available)
+                      .map((s) => (
+                        <option key={s.slot_label} value={s.slot_label}>
+                          {s.slot_label}
+                        </option>
+                      ))
+                  : TIME_SLOTS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
               </select>
             </label>
             <label className="fld fld--wide">
@@ -804,6 +878,179 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
   );
 }
 
+// ─── Reassign Needed view ──────────────────────────────────────────────────
+// Patients booked to a doctor who is now unavailable (leave / break / day off /
+// holiday) for that date+slot. Shows the previous doctor + reason and lets you
+// reassign to a free doctor.
+function ReassignNeededView() {
+  const [date, setDate] = useState(todayStr());
+  const [conflicts, setConflicts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [picks, setPicks] = useState({}); // appointment_id → doctor_id
+  const [busyId, setBusyId] = useState(null);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setMsg("");
+    api(`/api/appointments/conflicts?date=${date}`)
+      .then((d) => setConflicts(safeArr(d?.conflicts)))
+      .catch(() => setConflicts([]))
+      .finally(() => setLoading(false));
+  }, [date]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const reassign = async (c) => {
+    const did = picks[c.appointment_id];
+    const target = c.suggested_doctors?.find((x) => x.doctor_id === did);
+    if (!target) return setMsg("Pick a doctor to reassign to.");
+    setBusyId(c.appointment_id);
+    setMsg("");
+    try {
+      const r = await api(`/api/appointments/${c.appointment_id}/reassign`, {
+        method: "PUT",
+        body: JSON.stringify({
+          to_doctor_id: target.doctor_id,
+          to_doctor_name: target.doctor_name,
+          reason: `Reassigned from ${c.current_doctor} (${c.reason})`,
+          trigger: "manual",
+        }),
+      });
+      if (r?.error) setMsg(r.message || r.error || "Reassign failed");
+      else {
+        setMsg(`✓ ${c.patient_name} moved to ${target.doctor_name}`);
+        load();
+      }
+    } catch {
+      setMsg("Reassign failed.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="qfilter" style={{ alignItems: "center", gap: 12 }}>
+        <label style={{ fontSize: 13 }}>
+          Date <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <span className="qfilter__hint">
+          Patients whose assigned doctor is now unavailable (leave / break / day off). Reassign each
+          to a free doctor.
+        </span>
+      </div>
+
+      {msg && (
+        <div
+          style={{
+            margin: "8px 0",
+            padding: "8px 12px",
+            borderRadius: 7,
+            fontSize: 13,
+            background: msg.startsWith("✓") ? "#e7f2ec" : "#fdf3f2",
+            border: `1px solid ${msg.startsWith("✓") ? "#bfe0cd" : "#f1c9c4"}`,
+            color: msg.startsWith("✓") ? "#1d6f43" : "#b5392b",
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="ghm__loading">
+          <div className="spinner" />
+          Loading…
+        </div>
+      ) : conflicts.length === 0 ? (
+        <div className="ghm__empty">
+          <div className="ghm__empty-icon">✅</div>
+          <div className="ghm__empty-title">No reassignment needed for {prettyDate(date)}</div>
+          <div className="ghm__empty-sub">Every booked patient's doctor is available.</div>
+        </div>
+      ) : (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ minWidth: 160 }}>Patient</th>
+                <th style={{ width: 110 }}>Date</th>
+                <th style={{ width: 130 }}>Slot</th>
+                <th style={{ width: 180 }}>Previous Doctor</th>
+                <th style={{ width: 130 }}>Why unavailable</th>
+                <th style={{ width: 200 }}>Reassign to</th>
+                <th style={{ width: 110 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {conflicts.map((c) => (
+                <tr key={c.appointment_id}>
+                  <td>
+                    {c.patient_name}
+                    {c.file_no ? <small> ({c.file_no})</small> : null}
+                  </td>
+                  <td>{c.appointment_date?.slice(0, 10)}</td>
+                  <td>{c.time_slot}</td>
+                  <td>
+                    <strong>{c.current_doctor}</strong>
+                  </td>
+                  <td>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        background: "#fbeceb",
+                        color: "#a05049",
+                        borderRadius: 10,
+                        padding: "2px 8px",
+                      }}
+                    >
+                      {SLOT_REASON[c.reason] || c.reason}
+                    </span>
+                  </td>
+                  <td>
+                    {c.suggested_doctors?.length ? (
+                      <select
+                        className="doc-assign-sel"
+                        value={picks[c.appointment_id] || ""}
+                        onChange={(e) =>
+                          setPicks((p) => ({
+                            ...p,
+                            [c.appointment_id]: Number(e.target.value) || "",
+                          }))
+                        }
+                      >
+                        <option value="">— choose —</option>
+                        {c.suggested_doctors.map((d) => (
+                          <option key={d.doctor_id} value={d.doctor_id}>
+                            {d.doctor_name}
+                            {d.same_specialty ? " ⭐" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <em style={{ color: "#c0392b", fontSize: 12 }}>No doctor free this slot</em>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className="btn btn--primary"
+                      disabled={busyId === c.appointment_id || !picks[c.appointment_id]}
+                      onClick={() => reassign(c)}
+                    >
+                      {busyId === c.appointment_id ? "…" : "Reassign"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ─────────────────────────────────────────────────────────────
 export default function GHMPage() {
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
@@ -1035,426 +1282,440 @@ export default function GHMPage() {
         />
       )}
 
-      {/* ── Summary ── */}
-      {!loading && rows.length > 0 && <Summary rows={rows} />}
+      {view === "reassign" ? (
+        <ReassignNeededView />
+      ) : (
+        <>
+          {/* ── Summary ── */}
+          {!loading && rows.length > 0 && <Summary rows={rows} />}
 
-      {/* ── Hint ── */}
-      <div className="qfilter">
-        <span className="qfilter__hint">Click any cell to edit · saves automatically</span>
-      </div>
-
-      {/* ── Loading ── */}
-      {loading && (
-        <div className="ghm__loading">
-          <div className="spinner" />
-          Loading…
-        </div>
-      )}
-
-      {/* ── Empty ── */}
-      {!loading && visible.length === 0 && (
-        <div className="ghm__empty">
-          <div className="ghm__empty-icon">📋</div>
-          <div className="ghm__empty-title">
-            {rows.length === 0
-              ? `No appointments found for ${date}`
-              : "No patients match this filter"}
+          {/* ── Hint ── */}
+          <div className="qfilter">
+            <span className="qfilter__hint">Click any cell to edit · saves automatically</span>
           </div>
-          {rows.length === 0 && (
-            <div className="ghm__empty-sub">
-              Select a different date or check if appointments have been booked.
+
+          {/* ── Loading ── */}
+          {loading && (
+            <div className="ghm__loading">
+              <div className="spinner" />
+              Loading…
             </div>
           )}
-        </div>
-      )}
 
-      {/* ── Table ── */}
-      {!loading && visible.length > 0 && (
-        <div className="tbl-wrap">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th style={{ width: 30 }}></th>
-                <th style={{ width: 36 }}>#</th>
-                {showTime && <th style={{ width: 115 }}>Time Slot</th>}
-                <th style={{ minWidth: 170 }}>Patient</th>
-                <th style={{ width: 155 }}>Biomarkers (auto)</th>
-                <th style={{ width: 100 }}>Visit Type</th>
-                <th style={{ width: 110 }}>Mode</th>
-                <th style={{ width: 220 }}>Doctor</th>
-                <th style={{ width: 150 }}>Assigned MO</th>
-                <th style={{ width: 160 }}>Prescription Explained By</th>
-                {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
-                {showCallStatus && (
-                  <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
-                )}
-                {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
-                {showCalledBy && <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>}
-                {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
-                {showFollowUpDate && <th style={{ width: 130 }}>Follow-up Date</th>}
-                <th style={{ width: 180 }}>Preferred Doctor</th>
-                <th style={{ width: 150 }}>Preferred Date</th>
-                <th style={{ minWidth: 210 }}>Notes / Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((row, i) => {
-                const isSaving = saving[row.id];
-                const callStat = row.call_status || "pending";
-                const showStat = row.show_no_show || "";
+          {/* ── Empty ── */}
+          {!loading && visible.length === 0 && (
+            <div className="ghm__empty">
+              <div className="ghm__empty-icon">📋</div>
+              <div className="ghm__empty-title">
+                {rows.length === 0
+                  ? `No appointments found for ${date}`
+                  : "No patients match this filter"}
+              </div>
+              {rows.length === 0 && (
+                <div className="ghm__empty-sub">
+                  Select a different date or check if appointments have been booked.
+                </div>
+              )}
+            </div>
+          )}
 
-                const isOpen = expanded === row.id;
-                const attempts = attemptCounts[row.id] || 0;
+          {/* ── Table ── */}
+          {!loading && visible.length > 0 && (
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th style={{ width: 30 }}></th>
+                    <th style={{ width: 36 }}>#</th>
+                    {showTime && <th style={{ width: 115 }}>Check-in</th>}
+                    <th style={{ minWidth: 170 }}>Patient</th>
+                    <th style={{ width: 155 }}>Biomarkers (auto)</th>
+                    <th style={{ width: 100 }}>Visit Type</th>
+                    <th style={{ width: 110 }}>Mode</th>
+                    <th style={{ width: 220 }}>Doctor</th>
+                    <th style={{ width: 150 }}>Assigned MO</th>
+                    <th style={{ width: 160 }}>Prescription Explained By</th>
+                    {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
+                    {showCallStatus && (
+                      <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
+                    )}
+                    {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
+                    {showCalledBy && (
+                      <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>
+                    )}
+                    {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
+                    {showFollowUpDate && <th style={{ width: 130 }}>Follow-up Date</th>}
+                    <th style={{ width: 180 }}>Preferred Doctor</th>
+                    <th style={{ width: 150 }}>Preferred Date</th>
+                    <th style={{ minWidth: 210 }}>Notes / Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((row, i) => {
+                    const isSaving = saving[row.id];
+                    const callStat = row.call_status || "pending";
+                    const showStat = row.show_no_show || "";
 
-                return (
-                  <Fragment key={row.id}>
-                    <tr
-                      className={[
-                        "tbl__row",
-                        showStat === "Show" ? "tbl__row--came" : "",
-                        showStat === "No Show" ? "tbl__row--noshow" : "",
-                        callStat === "not_picked" ? "tbl__row--notpicked" : "",
-                        isSaving ? "tbl__row--saving" : "",
-                        isOpen ? "tbl__row--open" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                    >
-                      {/* Chevron toggle */}
-                      <td className="tc">
-                        <button
-                          className={`chev ${isOpen ? "chev--open" : ""}`}
-                          title="Show call history"
-                          onClick={() => setExpanded(isOpen ? null : row.id)}
+                    const isOpen = expanded === row.id;
+                    const attempts = attemptCounts[row.id] || 0;
+
+                    return (
+                      <Fragment key={row.id}>
+                        <tr
+                          className={[
+                            "tbl__row",
+                            showStat === "Show" ? "tbl__row--came" : "",
+                            showStat === "No Show" ? "tbl__row--noshow" : "",
+                            callStat === "not_picked" ? "tbl__row--notpicked" : "",
+                            isSaving ? "tbl__row--saving" : "",
+                            isOpen ? "tbl__row--open" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
                         >
-                          ▸
-                        </button>
-                      </td>
+                          {/* Chevron toggle */}
+                          <td className="tc">
+                            <button
+                              className={`chev ${isOpen ? "chev--open" : ""}`}
+                              title="Show call history"
+                              onClick={() => setExpanded(isOpen ? null : row.id)}
+                            >
+                              ▸
+                            </button>
+                          </td>
 
-                      {/* # */}
-                      <td className="tc">
-                        <span className="rnum">{i + 1}</span>
-                      </td>
+                          {/* # */}
+                          <td className="tc">
+                            <span className="rnum">{i + 1}</span>
+                          </td>
 
-                      {/* Time */}
-                      {showTime && (
-                        <td>
-                          <span className="fw7 fs12 nowrap">
-                            {row.reporting_time_slot || row.time_slot || "—"}
-                          </span>
-                        </td>
-                      )}
+                          {/* Time */}
+                          {showTime && (
+                            <td>
+                              <span className="fw7 fs12 nowrap">
+                                {row.reporting_time_slot || row.time_slot || "—"}
+                              </span>
+                            </td>
+                          )}
 
-                      {/* Patient */}
-                      <td>
-                        <div className="pcell">
-                          <span className="pcell__name">
-                            {row.patient_name || "—"}
-                            {row.via_preferred && (
-                              <span
-                                className="pref-tag"
-                                title={`Appears here because patient's preferred date is ${date}. Actual appointment: ${row.appointment_date}`}
+                          {/* Patient */}
+                          <td>
+                            <div className="pcell">
+                              <span className="pcell__name">
+                                {row.patient_name || "—"}
+                                {row.via_preferred && (
+                                  <span
+                                    className="pref-tag"
+                                    title={`Appears here because patient's preferred date is ${date}. Actual appointment: ${row.appointment_date}`}
+                                  >
+                                    ⭐ Preferred
+                                  </span>
+                                )}
+                              </span>
+                              {row.file_no && <span className="pcell__file">{row.file_no}</span>}
+                              {(row.disp_sex || row.disp_age != null) && (
+                                <span className="pcell__ageSex">
+                                  {[
+                                    row.disp_sex,
+                                    row.disp_age != null ? `${row.disp_age} yrs` : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </span>
+                              )}
+                              {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
+                              {row.address && <span className="pcell__addr">📍 {row.address}</span>}
+                              {row.condition && (
+                                <span className="pcell__cond">{row.condition}</span>
+                              )}
+                              <button
+                                className="book-next-btn"
+                                title="Book next appointment for this patient"
+                                onClick={() => {
+                                  setNewPrefill({
+                                    patient_name: row.patient_name,
+                                    file_no: row.file_no,
+                                    phone: row.phone,
+                                    condition: row.condition,
+                                    doctor_name: row.doctor_name,
+                                  });
+                                  setShowNew(true);
+                                }}
                               >
-                                ⭐ Preferred
+                                ➕ Book next
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* Biomarkers — auto from lab data */}
+                          <td>
+                            <BiomarkerCell bio={biomarkers[row.patient_id]} />
+                          </td>
+
+                          {/* Visit type */}
+                          <td>
+                            {row.visit_type && (
+                              <span
+                                className={`badge badge--${row.visit_type.toLowerCase().startsWith("new") ? "blue" : "amber"}`}
+                              >
+                                {row.visit_type}
                               </span>
                             )}
-                          </span>
-                          {row.file_no && <span className="pcell__file">{row.file_no}</span>}
-                          {(row.disp_sex || row.disp_age != null) && (
-                            <span className="pcell__ageSex">
-                              {[row.disp_sex, row.disp_age != null ? `${row.disp_age} yrs` : null]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </span>
-                          )}
-                          {row.phone && <span className="pcell__ph">📞 {row.phone}</span>}
-                          {row.address && <span className="pcell__addr">📍 {row.address}</span>}
-                          {row.condition && <span className="pcell__cond">{row.condition}</span>}
-                          <button
-                            className="book-next-btn"
-                            title="Book next appointment for this patient"
-                            onClick={() => {
-                              setNewPrefill({
-                                patient_name: row.patient_name,
-                                file_no: row.file_no,
-                                phone: row.phone,
-                                condition: row.condition,
-                                doctor_name: row.doctor_name,
-                              });
-                              setShowNew(true);
-                            }}
-                          >
-                            ➕ Book next
-                          </button>
-                        </div>
-                      </td>
+                          </td>
 
-                      {/* Biomarkers — auto from lab data */}
-                      <td>
-                        <BiomarkerCell bio={biomarkers[row.patient_id]} />
-                      </td>
-
-                      {/* Visit type */}
-                      <td>
-                        {row.visit_type && (
-                          <span
-                            className={`badge badge--${row.visit_type.toLowerCase().startsWith("new") ? "blue" : "amber"}`}
-                          >
-                            {row.visit_type}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Mode of appointment — editable */}
-                      <td>
-                        <select
-                          value={row.mode_of_appointment || ""}
-                          onChange={(e) => patch(row.id, "appointment_type", e.target.value)}
-                          className="doc-assign-sel"
-                          style={{ minWidth: 100 }}
-                        >
-                          <option value="">—</option>
-                          {["Physical", "Digital", "Online"].map((m) => (
-                            <option key={m} value={m}>
-                              {m}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* Doctor — editable. Investigation/lab tests default to Hospital Admin. */}
-                      <td>
-                        {(() => {
-                          const isInvestigation =
-                            (row.visit_type || "").toLowerCase() === "investigation";
-                          // build option list; ensure current value + Hospital Admin are present
-                          const opts = [...doctors];
-                          if (!opts.includes("Dr. Hospital Admin"))
-                            opts.unshift("Dr. Hospital Admin");
-                          if (row.doctor_name && !opts.includes(row.doctor_name))
-                            opts.unshift(row.doctor_name);
-                          // for investigation rows with no doctor set, show Hospital Admin as selected
-                          const current =
-                            row.doctor_name || (isInvestigation ? "Dr. Hospital Admin" : "");
-                          return (
+                          {/* Mode of appointment — editable */}
+                          <td>
                             <select
-                              value={current}
-                              onChange={(e) => patch(row.id, "doctor_name", e.target.value)}
+                              value={row.mode_of_appointment || ""}
+                              onChange={(e) => patch(row.id, "appointment_type", e.target.value)}
+                              className="doc-assign-sel"
+                              style={{ minWidth: 100 }}
+                            >
+                              <option value="">—</option>
+                              {["Physical", "Digital", "Online"].map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+
+                          {/* Doctor — editable. Investigation/lab tests default to Hospital Admin. */}
+                          <td>
+                            {(() => {
+                              const isInvestigation =
+                                (row.visit_type || "").toLowerCase() === "investigation";
+                              // build option list; ensure current value + Hospital Admin are present
+                              const opts = [...doctors];
+                              if (!opts.includes("Dr. Hospital Admin"))
+                                opts.unshift("Dr. Hospital Admin");
+                              if (row.doctor_name && !opts.includes(row.doctor_name))
+                                opts.unshift(row.doctor_name);
+                              // for investigation rows with no doctor set, show Hospital Admin as selected
+                              const current =
+                                row.doctor_name || (isInvestigation ? "Dr. Hospital Admin" : "");
+                              return (
+                                <select
+                                  value={current}
+                                  onChange={(e) => patch(row.id, "doctor_name", e.target.value)}
+                                  className="doc-assign-sel"
+                                >
+                                  <option value="">— Assign Doctor</option>
+                                  {opts.map((d) => (
+                                    <option key={d} value={d}>
+                                      {d}
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
+                          </td>
+
+                          {/* Assigned MO — editable */}
+                          <td>
+                            <InlineEdit
+                              value={row.assigned_mo}
+                              onChange={(v) => patch(row.id, "assigned_mo", v)}
+                              placeholder="MO name…"
+                            />
+                          </td>
+
+                          {/* Prescription explained by — editable */}
+                          <td>
+                            <InlineEdit
+                              value={row.prescription_explained_by}
+                              onChange={(v) => patch(row.id, "prescription_explained_by", v)}
+                              placeholder="Explained by…"
+                            />
+                          </td>
+
+                          {/* Came? */}
+                          {showShowNoShow && (
+                            <td>
+                              <ColorSelect
+                                value={row.show_no_show}
+                                options={SHOW_STATUSES}
+                                onChange={(v) => patch(row.id, "show_no_show", v)}
+                              />
+                            </td>
+                          )}
+
+                          {/* Call status */}
+                          {showCallStatus && (
+                            <td>
+                              <div className="callstat-cell">
+                                <ColorSelect
+                                  value={callStat}
+                                  options={CALL_STATUSES}
+                                  onChange={(v) => handleCallStatus(row, v)}
+                                />
+                                {attempts > 0 && (
+                                  <button
+                                    className="attempt-badge"
+                                    title={`${attempts} call attempt(s) — click to view history`}
+                                    onClick={() => setExpanded(isOpen ? null : row.id)}
+                                  >
+                                    📞 ×{attempts}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          )}
+
+                          {/* Recovery — is patient improving? */}
+                          {showRecovery && (
+                            <td>
+                              <ColorSelect
+                                value={row.pt_recovery}
+                                options={RECOVERY_STATUSES}
+                                onChange={(v) => patch(row.id, "pt_recovery", v)}
+                              />
+                            </td>
+                          )}
+
+                          {/* Called by — auto-fills logged-in user, editable, with dropdown */}
+                          {showCalledBy && (
+                            <td>
+                              <input
+                                list="cc-agents-list"
+                                defaultValue={row.call_made_by || loggedInName || ""}
+                                key={`cb-${row.id}-${row.call_made_by}`}
+                                onBlur={(e) => {
+                                  const v = e.target.value.trim();
+                                  if (v !== (row.call_made_by || ""))
+                                    patch(row.id, "call_made_by", v);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") e.target.blur();
+                                }}
+                                placeholder="CC name"
+                                className="cc-input"
+                              />
+                            </td>
+                          )}
+
+                          {/* Call date */}
+                          {showCallDate && (
+                            <td>
+                              <InlineEdit
+                                value={row.call_date}
+                                onChange={(v) => patch(row.id, "call_date", v)}
+                                type="date"
+                              />
+                            </td>
+                          )}
+
+                          {/* Follow-up date — next booked appt, else prescription timing/notes.
+                          Hidden on the Tomorrow tab (every row is due tomorrow). */}
+                          {showFollowUpDate && (
+                            <td>
+                              {(() => {
+                                // 1) Next booked appointment after this visit → most reliable date
+                                if (row.follow_up_date) {
+                                  return (
+                                    <div className="fu-cell">
+                                      <span className="fu-date">{row.follow_up_date}</span>
+                                      {row.follow_up_time && (
+                                        <span className="fu-time">{row.follow_up_time}</span>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                                // 2) Else the latest prescription's follow-up DATE or
+                                //    timing only. The free-text notes (e.g. "FBG and PP
+                                //    glucose charting") are clinical instructions, not a
+                                //    date — never render them as the cell value; keep them
+                                //    on hover so the info isn't lost.
+                                const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
+                                const hrDate = hr.date || "";
+                                const hrTiming = hr.timing || "";
+                                const hrNotes = hr.notes || "";
+                                if (hrDate || hrTiming) {
+                                  return (
+                                    <div className="fu-cell">
+                                      {hrDate && <span className="fu-date">{hrDate}</span>}
+                                      {hrTiming && <span className="fu-time">{hrTiming}</span>}
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <span className="muted" title={hrNotes || undefined}>
+                                    —
+                                  </span>
+                                );
+                              })()}
+                            </td>
+                          )}
+
+                          {/* Preferred doctor — doctor the patient prefers (editable) */}
+                          <td>
+                            <select
+                              value={row.preferred_doctor || ""}
+                              onChange={(e) => patch(row.id, "preferred_doctor", e.target.value)}
                               className="doc-assign-sel"
                             >
-                              <option value="">— Assign Doctor</option>
-                              {opts.map((d) => (
+                              <option value="">— No preference</option>
+                              {(row.preferred_doctor && !doctors.includes(row.preferred_doctor)
+                                ? [row.preferred_doctor, ...doctors]
+                                : doctors
+                              ).map((d) => (
                                 <option key={d} value={d}>
                                   {d}
                                 </option>
                               ))}
                             </select>
-                          );
-                        })()}
-                      </td>
+                          </td>
 
-                      {/* Assigned MO — editable */}
-                      <td>
-                        <InlineEdit
-                          value={row.assigned_mo}
-                          onChange={(v) => patch(row.id, "assigned_mo", v)}
-                          placeholder="MO name…"
-                        />
-                      </td>
-
-                      {/* Prescription explained by — editable */}
-                      <td>
-                        <InlineEdit
-                          value={row.prescription_explained_by}
-                          onChange={(v) => patch(row.id, "prescription_explained_by", v)}
-                          placeholder="Explained by…"
-                        />
-                      </td>
-
-                      {/* Came? */}
-                      {showShowNoShow && (
-                        <td>
-                          <ColorSelect
-                            value={row.show_no_show}
-                            options={SHOW_STATUSES}
-                            onChange={(v) => patch(row.id, "show_no_show", v)}
-                          />
-                        </td>
-                      )}
-
-                      {/* Call status */}
-                      {showCallStatus && (
-                        <td>
-                          <div className="callstat-cell">
-                            <ColorSelect
-                              value={callStat}
-                              options={CALL_STATUSES}
-                              onChange={(v) => handleCallStatus(row, v)}
+                          {/* Preferred date — date the patient wants (editable) */}
+                          <td>
+                            <input
+                              type="date"
+                              min={todayStr()}
+                              value={row.preferred_date || ""}
+                              onChange={(e) => patch(row.id, "preferred_date", e.target.value)}
+                              className="rsd-input"
                             />
-                            {attempts > 0 && (
-                              <button
-                                className="attempt-badge"
-                                title={`${attempts} call attempt(s) — click to view history`}
-                                onClick={() => setExpanded(isOpen ? null : row.id)}
-                              >
-                                📞 ×{attempts}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      )}
+                          </td>
 
-                      {/* Recovery — is patient improving? */}
-                      {showRecovery && (
-                        <td>
-                          <ColorSelect
-                            value={row.pt_recovery}
-                            options={RECOVERY_STATUSES}
-                            onChange={(v) => patch(row.id, "pt_recovery", v)}
-                          />
-                        </td>
-                      )}
+                          {/* Notes / reason — last column (multiline) */}
+                          <td>
+                            <InlineEdit
+                              value={row.call_notes}
+                              onChange={(v) => patch(row.id, "call_notes", v)}
+                              placeholder="Patient said… / reason…"
+                              multiline
+                            />
+                          </td>
+                        </tr>
 
-                      {/* Called by — auto-fills logged-in user, editable, with dropdown */}
-                      {showCalledBy && (
-                        <td>
-                          <input
-                            list="cc-agents-list"
-                            defaultValue={row.call_made_by || loggedInName || ""}
-                            key={`cb-${row.id}-${row.call_made_by}`}
-                            onBlur={(e) => {
-                              const v = e.target.value.trim();
-                              if (v !== (row.call_made_by || "")) patch(row.id, "call_made_by", v);
+                        {isOpen && (
+                          <CallHistoryPanel
+                            row={row}
+                            ccAgents={ccAgents}
+                            colSpan={colSpan}
+                            onLogged={() => {
+                              // refresh badge count + row summary after logging
+                              setAttemptCounts((c) => ({ ...c, [row.id]: (c[row.id] || 0) + 1 }));
+                              load();
                             }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") e.target.blur();
+                            onDeleted={() => {
+                              // refresh badge count + row summary after delete
+                              setAttemptCounts((c) => ({
+                                ...c,
+                                [row.id]: Math.max(0, (c[row.id] || 0) - 1),
+                              }));
+                              load();
                             }}
-                            placeholder="CC name"
-                            className="cc-input"
                           />
-                        </td>
-                      )}
-
-                      {/* Call date */}
-                      {showCallDate && (
-                        <td>
-                          <InlineEdit
-                            value={row.call_date}
-                            onChange={(v) => patch(row.id, "call_date", v)}
-                            type="date"
-                          />
-                        </td>
-                      )}
-
-                      {/* Follow-up date — next booked appt, else prescription timing/notes.
-                          Hidden on the Tomorrow tab (every row is due tomorrow). */}
-                      {showFollowUpDate && (
-                        <td>
-                          {(() => {
-                            // 1) Next booked appointment after this visit → most reliable date
-                            if (row.follow_up_date) {
-                              return (
-                                <div className="fu-cell">
-                                  <span className="fu-date">{row.follow_up_date}</span>
-                                  {row.follow_up_time && (
-                                    <span className="fu-time">{row.follow_up_time}</span>
-                                  )}
-                                </div>
-                              );
-                            }
-                            // 2) Else the latest prescription's follow-up DATE or
-                            //    timing only. The free-text notes (e.g. "FBG and PP
-                            //    glucose charting") are clinical instructions, not a
-                            //    date — never render them as the cell value; keep them
-                            //    on hover so the info isn't lost.
-                            const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
-                            const hrDate = hr.date || "";
-                            const hrTiming = hr.timing || "";
-                            const hrNotes = hr.notes || "";
-                            if (hrDate || hrTiming) {
-                              return (
-                                <div className="fu-cell">
-                                  {hrDate && <span className="fu-date">{hrDate}</span>}
-                                  {hrTiming && <span className="fu-time">{hrTiming}</span>}
-                                </div>
-                              );
-                            }
-                            return (
-                              <span className="muted" title={hrNotes || undefined}>
-                                —
-                              </span>
-                            );
-                          })()}
-                        </td>
-                      )}
-
-                      {/* Preferred doctor — doctor the patient prefers (editable) */}
-                      <td>
-                        <select
-                          value={row.preferred_doctor || ""}
-                          onChange={(e) => patch(row.id, "preferred_doctor", e.target.value)}
-                          className="doc-assign-sel"
-                        >
-                          <option value="">— No preference</option>
-                          {(row.preferred_doctor && !doctors.includes(row.preferred_doctor)
-                            ? [row.preferred_doctor, ...doctors]
-                            : doctors
-                          ).map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* Preferred date — date the patient wants (editable) */}
-                      <td>
-                        <input
-                          type="date"
-                          min={todayStr()}
-                          value={row.preferred_date || ""}
-                          onChange={(e) => patch(row.id, "preferred_date", e.target.value)}
-                          className="rsd-input"
-                        />
-                      </td>
-
-                      {/* Notes / reason — last column (multiline) */}
-                      <td>
-                        <InlineEdit
-                          value={row.call_notes}
-                          onChange={(v) => patch(row.id, "call_notes", v)}
-                          placeholder="Patient said… / reason…"
-                          multiline
-                        />
-                      </td>
-                    </tr>
-
-                    {isOpen && (
-                      <CallHistoryPanel
-                        row={row}
-                        ccAgents={ccAgents}
-                        colSpan={colSpan}
-                        onLogged={() => {
-                          // refresh badge count + row summary after logging
-                          setAttemptCounts((c) => ({ ...c, [row.id]: (c[row.id] || 0) + 1 }));
-                          load();
-                        }}
-                        onDeleted={() => {
-                          // refresh badge count + row summary after delete
-                          setAttemptCounts((c) => ({
-                            ...c,
-                            [row.id]: Math.max(0, (c[row.id] || 0) - 1),
-                          }));
-                          load();
-                        }}
-                      />
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

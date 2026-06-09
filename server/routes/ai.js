@@ -614,7 +614,15 @@ router.post("/ai/agent", async (req, res) => {
         body: JSON.stringify({
           model: anthropicModel,
           max_tokens: 1500,
-          system: AGENT_SYSTEM_PROMPT,
+          // Cache the static tools + system prefix. The breakpoint on the last
+          // (only) system block caches both `tools` and `system` together (render
+          // order is tools → system), so the large static prefix is re-read at
+          // ~0.1x cost on every turn of the loop and on rapid follow-up messages.
+          // AGENT_SYSTEM_PROMPT and AGENT_TOOLS are module-level constants, so the
+          // cached prefix is byte-identical across all requests in a process.
+          system: [
+            { type: "text", text: AGENT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+          ],
           tools: AGENT_TOOLS,
           messages: conversation,
         }),
@@ -630,6 +638,13 @@ router.post("/ai/agent", async (req, res) => {
         return res.status(resp.status >= 500 ? 503 : resp.status).json({ error: clean });
       }
       const data = await resp.json();
+      if (data?.usage) {
+        const u = data.usage;
+        console.log(
+          `[agent usage] model=${anthropicModel} in=${u.input_tokens} out=${u.output_tokens} ` +
+            `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
+        );
+      }
       if (data.error) return res.status(502).json({ error: data.error.message });
 
       const blocks = Array.isArray(data.content) ? data.content : [];

@@ -258,6 +258,8 @@ export const appointmentCreateSchema = z.object({
   notes: optStr,
   category: optStr,
   is_walkin: optBool,
+  // Admin override for availability enforcement (else validate() strips it).
+  force: optBool,
 });
 
 export const appointmentUpdateSchema = z.object({
@@ -270,6 +272,8 @@ export const appointmentUpdateSchema = z.object({
     .optional()
     .nullable(),
   notes: optStr,
+  // Admin override for availability enforcement (else validate() strips it).
+  force: optBool,
 });
 
 // ---- Messages ----
@@ -373,4 +377,128 @@ export const rxFeedbackCreateSchema = z.object({
 
 export const rxAudioUploadSchema = z.object({
   base64: z.string({ required_error: "base64 data is required" }).min(1),
+});
+
+// ---- Doctor Management & Availability ----
+// See docs/doctor-management/03-api-endpoints.md §9.
+
+// Doctor working profile (available-by-default model). All fields optional.
+//   off_weekdays  : weekdays NOT worked (0=Sun..6=Sat); default {Sunday}
+//   work_start/end: clock-time working hours ("HH:MM"); null = all day
+//   lunch_start/end: recurring daily lunch break ("HH:MM"); null = none
+const optTime = z
+  .string()
+  .regex(/^\d{2}:\d{2}(:\d{2})?$/, "time must be HH:MM")
+  .optional()
+  .nullable();
+// Overnight-aware: working hours may wrap past midnight (e.g. 17:00–01:00).
+const _toMin = (t) => {
+  if (!t) return null;
+  const [h, m] = String(t).split(":").map(Number);
+  return h * 60 + m;
+};
+const _within = (ws, we, t) => {
+  if (ws == null || we == null || t == null) return true;
+  let s = ws,
+    e = we,
+    x = t;
+  if (e <= s) e += 1440; // overnight window
+  if (x < s) x += 1440;
+  return x >= s && x <= e; // inclusive (lunch bounds)
+};
+export const profileUpdateSchema = z
+  .object({
+    off_weekdays: z.array(z.number().int().min(0).max(6)).optional().default([]),
+    work_start: optTime,
+    work_end: optTime,
+    lunch_start: optTime,
+    lunch_end: optTime,
+  })
+  // Lunch must sit inside the working hours (when both are set) — wrap-aware.
+  .refine(
+    (v) => {
+      const ws = _toMin(v.work_start);
+      const we = _toMin(v.work_end);
+      const ls = _toMin(v.lunch_start);
+      const le = _toMin(v.lunch_end);
+      if (ls == null || le == null || ws == null || we == null) return true;
+      return _within(ws, we, ls) && _within(ws, we, le);
+    },
+    { message: "Lunch break must be within working hours", path: ["lunch_start"] },
+  );
+
+// Reject windows that start before today (no leave/emergency in the past).
+const notPastStart = (v) => v.start_date >= new Date().toISOString().slice(0, 10);
+const notPastStartOpts = { message: "Cannot select a past date", path: ["start_date"] };
+
+export const unavailabilityCreateSchema = z
+  .object({
+    type: z.enum(["leave", "holiday"]).optional().default("leave"),
+    start_date: z.string({ required_error: "start_date is required" }).min(1),
+    end_date: z.string({ required_error: "end_date is required" }).min(1),
+    slot_labels: z.array(z.string()).optional().nullable(),
+    reason: optStr,
+  })
+  .refine((v) => v.end_date >= v.start_date, {
+    message: "end_date must be >= start_date",
+    path: ["end_date"],
+  })
+  .refine(notPastStart, notPastStartOpts);
+
+// A break is a slot-scoped unavailability — slots are required.
+export const breakCreateSchema = z
+  .object({
+    start_date: z.string({ required_error: "start_date is required" }).min(1),
+    end_date: z.string({ required_error: "end_date is required" }).min(1),
+    slot_labels: z.array(z.string().min(1)).min(1, "pick at least one slot"),
+    reason: optStr,
+  })
+  .refine((v) => v.end_date >= v.start_date, {
+    message: "end_date must be >= start_date",
+    path: ["end_date"],
+  })
+  .refine(notPastStart, notPastStartOpts);
+
+export const unavailabilityUpdateSchema = z.object({
+  start_date: optDate,
+  end_date: optDate,
+  slot_labels: z.array(z.string()).optional().nullable(),
+  reason: optStr,
+  status: z.enum(["active", "cancelled"]).optional(),
+});
+
+export const emergencyLeaveSchema = z
+  .object({
+    start_date: z.string({ required_error: "start_date is required" }).min(1),
+    end_date: z.string({ required_error: "end_date is required" }).min(1),
+    slot_labels: z.array(z.string()).optional().nullable(),
+    from_now: optBool,
+    reason: optStr,
+  })
+  .refine((v) => v.end_date >= v.start_date, {
+    message: "end_date must be >= start_date",
+    path: ["end_date"],
+  })
+  .refine(notPastStart, notPastStartOpts);
+
+export const reassignBulkSchema = z.object({
+  trigger: optStr,
+  unavailability_id: optInt,
+  reason: optStr,
+  moves: z
+    .array(
+      z.object({
+        appointment_id: z.number({ required_error: "appointment_id is required" }).int(),
+        to_doctor_id: z.number({ required_error: "to_doctor_id is required" }).int(),
+        to_doctor_name: z.string({ required_error: "to_doctor_name is required" }).min(1),
+      }),
+    )
+    .min(1, "at least one move is required"),
+});
+
+export const reassignSingleSchema = z.object({
+  to_doctor_id: z.number({ required_error: "to_doctor_id is required" }).int(),
+  to_doctor_name: z.string({ required_error: "to_doctor_name is required" }).min(1),
+  reason: optStr,
+  trigger: optStr,
 });

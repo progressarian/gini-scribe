@@ -11,7 +11,9 @@ import {
   extractClinicalText,
   parsePrescriptionWithAi,
   extractVitalsFromAnswers,
+  buildHealthrayParseRequest,
 } from "../healthray/parser.js";
+import { BATCH_ENABLED, enqueue } from "../batch/batchQueue.js";
 import {
   calcAge,
   buildName,
@@ -946,7 +948,10 @@ import pool from "../../config/db.js";
 //   - 'skipped'    the latest-notes appointment is already flagged opd_backfilled_at
 //   - 'parse_failed' Claude returned null
 //   - 'parsed'     re-parse + sync succeeded; opd_backfilled_at stamped
-export async function backfillPatientOpd(patientId, { force = false } = {}) {
+export async function backfillPatientOpd(
+  patientId,
+  { force = false, allowBatch = false, origin = "unknown" } = {},
+) {
   if (!patientId) return { status: "no_notes" };
 
   const { rows } = await pool.query(
@@ -971,8 +976,55 @@ export async function backfillPatientOpd(patientId, { force = false } = {}) {
       ? appt.appointment_date.toISOString().slice(0, 10)
       : String(appt.appointment_date).slice(0, 10);
 
+  // Batch path: enqueue the parse and return. The result handler applies it via
+  // applyOpdParse (and stamps opd_backfilled_at) when the batch completes (~1h),
+  // so we do NOT stamp here — an un-applied appointment stays eligible and is
+  // simply re-enqueued (deduped) on the next daily run if the batch failed.
+  //
+  // Gated on `allowBatch` so only latency-insensitive callers batch: the daily
+  // backfill and day-before (source='sheets') imports opt in; same-day walk-in /
+  // GHM inserts pass allowBatch=false and parse inline so the call team sees
+  // clinical context immediately.
+  if (BATCH_ENABLED && allowBatch) {
+    await enqueue({
+      jobType: "healthray_parse",
+      request: buildHealthrayParseRequest(appt.healthray_clinical_notes, apptDateStr),
+      context: {
+        patientId,
+        healthrayId: appt.healthray_id,
+        appointmentDate: apptDateStr,
+        apptId: appt.id,
+        origin, // 'daily_backfill' | 'day_before' — for monitoring (see monitoring.sql)
+      },
+      dedupKey: `opd:${appt.id}`,
+    });
+    return { status: "enqueued", apptId: appt.id };
+  }
+
   const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
   if (!parsed) return { status: "parse_failed", apptId: appt.id };
+
+  await applyOpdParse(
+    {
+      patientId,
+      healthrayId: appt.healthray_id,
+      appointmentDate: appt.appointment_date,
+      apptId: appt.id,
+    },
+    parsed,
+  );
+
+  return { status: "parsed", apptId: appt.id };
+}
+
+// ── Apply a parsed OPD prescription to the DB (shared by inline + batch) ─────
+// Writes the appointment JSONB, normalizes diagnoses/medications into their
+// tables, and stamps opd_backfilled_at. Extracted from backfillPatientOpd so
+// the batch result handler can apply a batched parse the same way the inline
+// path does.
+export async function applyOpdParse(ctx, parsed) {
+  const { patientId, healthrayId, appointmentDate, apptId } = ctx || {};
+  if (!patientId || !apptId || !parsed) return;
 
   const diagnoses = parsed.diagnoses || [];
   const medications = parsed.medications || [];
@@ -984,23 +1036,21 @@ export async function backfillPatientOpd(patientId, { force = false } = {}) {
             healthray_medications = $2::jsonb,
             updated_at = NOW()
       WHERE id = $3`,
-    [JSON.stringify(diagnoses), JSON.stringify(medications), appt.id],
+    [JSON.stringify(diagnoses), JSON.stringify(medications), apptId],
   );
 
   if (diagnoses.length > 0) {
-    await syncDiagnoses(patientId, appt.healthray_id, diagnoses);
+    await syncDiagnoses(patientId, healthrayId, diagnoses);
   }
   if (medications.length > 0) {
-    await syncMedications(patientId, appt.healthray_id, appt.appointment_date, medications);
-    await stopStaleHealthrayMeds(patientId, appt.healthray_id, appt.appointment_date, medications);
+    await syncMedications(patientId, healthrayId, appointmentDate, medications);
+    await stopStaleHealthrayMeds(patientId, healthrayId, appointmentDate, medications);
   }
   if (previousMeds.length > 0) {
-    await syncStoppedMedications(patientId, appt.healthray_id, previousMeds, medications);
+    await syncStoppedMedications(patientId, healthrayId, previousMeds, medications);
   }
 
-  await pool.query(`UPDATE appointments SET opd_backfilled_at = NOW() WHERE id = $1`, [appt.id]);
-
-  return { status: "parsed", apptId: appt.id };
+  await pool.query(`UPDATE appointments SET opd_backfilled_at = NOW() WHERE id = $1`, [apptId]);
 }
 
 let dailyBackfillInFlight = false;
@@ -1034,12 +1084,17 @@ export async function runDailyOpdBackfill(dateStr) {
     let done = 0,
       errors = 0,
       fixed = 0,
-      skipped = 0;
+      skipped = 0,
+      queued = 0;
 
     for (const { patient_id } of patients) {
       try {
-        const result = await backfillPatientOpd(patient_id);
+        const result = await backfillPatientOpd(patient_id, {
+          allowBatch: true,
+          origin: "daily_backfill",
+        });
         if (result.status === "parsed") fixed++;
+        else if (result.status === "enqueued") queued++;
         else if (result.status === "skipped") skipped++;
         else if (result.status === "parse_failed") errors++;
       } catch (e) {
@@ -1053,9 +1108,9 @@ export async function runDailyOpdBackfill(dateStr) {
 
     log(
       "Daily Backfill",
-      `Done ${date} — ${done} patients, ${fixed} re-parsed, ${skipped} skipped (already backfilled), ${errors} errors`,
+      `Done ${date} — ${done} patients, ${fixed} re-parsed, ${queued} queued (batch), ${skipped} skipped (already backfilled), ${errors} errors`,
     );
-    return { date, total: patients.length, done, fixed, skipped, errors };
+    return { date, total: patients.length, done, fixed, queued, skipped, errors };
   } finally {
     dailyBackfillInFlight = false;
     await releaseLock();

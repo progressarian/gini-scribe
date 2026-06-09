@@ -48,6 +48,7 @@ import obtStatusRoutes from "./routes/obt-status.js";
 import patientAlertRoutes from "./routes/patient-alerts.js";
 import diabetesChampionRoutes from "./routes/diabetes-champions.js";
 import appInstallRoutes from "./routes/app-installs.js";
+import doctorScheduleRoutes from "./routes/doctorSchedule.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
@@ -158,6 +159,7 @@ app.use("/api", obtStatusRoutes);
 app.use("/api", patientAlertRoutes);
 app.use("/api", diabetesChampionRoutes);
 app.use("/api", appInstallRoutes);
+app.use("/api", doctorScheduleRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");

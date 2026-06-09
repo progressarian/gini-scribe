@@ -119,6 +119,13 @@ const NAV_ITEMS = [
   { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page
   { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
+  // Doctor availability / leave / reassignment
+  {
+    path: "/doctor-management",
+    label: "🗓️ Doctors",
+    cap: C["/doctor-management"],
+    show: () => true,
+  },
 ];
 
 export default function AppLayout() {

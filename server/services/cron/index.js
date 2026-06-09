@@ -21,6 +21,8 @@ import {
   backfillLabPdfs,
 } from "./labSync.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
+import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
+import { BATCH_HANDLERS } from "../batch/handlers.js";
 
 // ── Sync intervals ─────────────────────────────────────────────────────────
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
@@ -166,6 +168,7 @@ let docRecoveryIntervalId = null;
 let missingMedsIntervalId = null;
 let pdfRetryIntervalId = null;
 let blankSweepIntervalId = null;
+let batchQueueIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -333,6 +336,29 @@ export function startCronJobs() {
       );
     }, DOC_RECOVERY_INTERVAL_MS);
   }, 90 * 1000);
+
+  // ── AI batch queue: submit pending + poll/apply results ──────────────────
+  // Only when AI_BATCH_ENABLED=true. Submits queued med-side-effects and
+  // OPD-parse requests to Anthropic's Message Batches API (50% cheaper, async)
+  // and applies results as batches complete. First run 3 min after boot, then
+  // every 5 min. With the flag off this is never registered.
+  if (BATCH_ENABLED) {
+    const BATCH_QUEUE_INTERVAL_MS = 5 * 60 * 1000;
+    console.log("[Cron] AI batch queue enabled (submit + poll every 5 min)...");
+    setTimeout(
+      () => {
+        processBatchQueue(BATCH_HANDLERS).catch((e) =>
+          console.error("[Cron] Batch queue failed:", e.message),
+        );
+        batchQueueIntervalId = setInterval(() => {
+          processBatchQueue(BATCH_HANDLERS).catch((e) =>
+            console.error("[Cron] Batch queue failed:", e.message),
+          );
+        }, BATCH_QUEUE_INTERVAL_MS);
+      },
+      3 * 60 * 1000,
+    );
+  }
 }
 
 export function stopCronJobs() {
@@ -369,6 +395,11 @@ export function stopCronJobs() {
     clearInterval(dailyBackfillIntervalId);
     dailyBackfillIntervalId = null;
     console.log("[Cron] Daily OPD backfill stopped");
+  }
+  if (batchQueueIntervalId) {
+    clearInterval(batchQueueIntervalId);
+    batchQueueIntervalId = null;
+    console.log("[Cron] AI batch queue stopped");
   }
   if (stuckStatusIntervalId) {
     clearInterval(stuckStatusIntervalId);

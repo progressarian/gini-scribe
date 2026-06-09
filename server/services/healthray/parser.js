@@ -692,14 +692,66 @@ export async function parsePrescriptionWithAi(rawText, visitDate = null) {
       model: "claude-haiku-4-5",
       max_tokens: 12000,
       temperature: 0,
-      system: PRESCRIPTION_EXTRACTION_PROMPT,
+      // Cache the static extraction prompt. This parser runs once per appointment
+      // during the HealthRay sync loop, so the identical prefix is re-read at
+      // ~0.1x cost across the burst of appointments within the 5-minute window.
+      system: [
+        {
+          type: "text",
+          text: PRESCRIPTION_EXTRACTION_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages: [{ role: "user", content: userContent }],
       output_config: { format: zodOutputFormat(PrescriptionSchema) },
     });
 
+    if (response?.usage) {
+      const u = response.usage;
+      console.log(
+        `[healthray-parse usage] in=${u.input_tokens} out=${u.output_tokens} ` +
+          `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
+      );
+    }
+
     return response.parsed_output ?? null;
   } catch (e) {
     error("Parser", "messages.parse failed:", e?.message || e);
+    return null;
+  }
+}
+
+// ── Batch path helpers ──────────────────────────────────────────────────────
+// Build the raw Messages API request for the batch queue. Mirrors
+// parsePrescriptionWithAi exactly (same model, prompt, schema) so a batched
+// parse is identical to the inline one — only the transport differs.
+export function buildHealthrayParseRequest(rawText, visitDate = null) {
+  const userContent = visitDate ? `Visit date: ${visitDate}\n\n${rawText}` : rawText;
+  return {
+    model: "claude-haiku-4-5",
+    max_tokens: 12000,
+    temperature: 0,
+    system: [
+      { type: "text", text: PRESCRIPTION_EXTRACTION_PROMPT, cache_control: { type: "ephemeral" } },
+    ],
+    messages: [{ role: "user", content: userContent }],
+    output_config: { format: zodOutputFormat(PrescriptionSchema) },
+  };
+}
+
+// Extract + validate the structured prescription from a completed batch result
+// message. Returns the parsed object, or null if absent/invalid (treated as a
+// parse failure by the caller, same as the inline null return).
+export function extractPrescriptionFromMessage(message) {
+  try {
+    const text = (message?.content || [])
+      .map((c) => c.text || "")
+      .join("")
+      .trim();
+    if (!text) return null;
+    const validated = PrescriptionSchema.safeParse(JSON.parse(text));
+    return validated.success ? validated.data : null;
+  } catch {
     return null;
   }
 }

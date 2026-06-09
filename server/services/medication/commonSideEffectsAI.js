@@ -16,6 +16,7 @@
 
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
+import { BATCH_ENABLED, enqueue } from "../batch/batchQueue.js";
 
 const { log: info, error } = createLogger("CommonSideEffectsAI");
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -105,6 +106,30 @@ function sanitizeEntries(arr) {
   return out;
 }
 
+// ── Build the Messages API request body for one medication ──────────────────
+// Shared by the inline path (generateCommonSideEffects) and the batch path so
+// both produce identically-shaped requests.
+export function buildSideEffectsRequest({ name, composition }) {
+  return {
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 600,
+    temperature: 0,
+    system: SYSTEM_PROMPT,
+    tools: [SIDE_EFFECTS_TOOL],
+    tool_choice: { type: "tool", name: SIDE_EFFECTS_TOOL.name },
+    messages: [{ role: "user", content: buildUserMessage({ name, composition }) }],
+  };
+}
+
+// ── Extract + sanitize the side-effects array from a Messages response ───────
+function effectsFromMessage(data) {
+  const toolUse = (data?.content || []).find(
+    (c) => c.type === "tool_use" && c.name === SIDE_EFFECTS_TOOL.name,
+  );
+  if (!toolUse || !toolUse.input) return null;
+  return sanitizeEntries(toolUse.input.common_side_effects);
+}
+
 // ── Call Claude to generate side effects for one medication ─────────────────
 export async function generateCommonSideEffects({ name, composition } = {}) {
   if (!ANTHROPIC_KEY) return null;
@@ -118,15 +143,7 @@ export async function generateCommonSideEffects({ name, composition } = {}) {
         "x-api-key": ANTHROPIC_KEY,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 600,
-        temperature: 0,
-        system: SYSTEM_PROMPT,
-        tools: [SIDE_EFFECTS_TOOL],
-        tool_choice: { type: "tool", name: SIDE_EFFECTS_TOOL.name },
-        messages: [{ role: "user", content: buildUserMessage({ name, composition }) }],
-      }),
+      body: JSON.stringify(buildSideEffectsRequest({ name, composition })),
     });
 
     if (!resp.ok) {
@@ -135,15 +152,31 @@ export async function generateCommonSideEffects({ name, composition } = {}) {
     }
 
     const data = await resp.json();
-    const toolUse = (data.content || []).find(
-      (c) => c.type === "tool_use" && c.name === SIDE_EFFECTS_TOOL.name,
-    );
-    if (!toolUse || !toolUse.input) return null;
-    return sanitizeEntries(toolUse.input.common_side_effects);
+    return effectsFromMessage(data);
   } catch (e) {
     error("generate", "failed:", e.message);
     return null;
   }
+}
+
+// ── Batch apply handler: write side effects from a completed batch result ────
+// Mirrors the inline write below. The patient app receives the new side effects
+// on the next genie medication sync (startGenieSyncCron), so this handler only
+// needs to persist the column — exactly like the inline path.
+export async function applySideEffectsResult(context, message) {
+  const id = Number(context?.medication_id);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const effects = effectsFromMessage(message);
+  if (!Array.isArray(effects) || effects.length === 0) return;
+  await pool.query(
+    `UPDATE medications
+        SET common_side_effects = $1::jsonb,
+            updated_at = NOW()
+      WHERE id = $2
+        AND jsonb_array_length(COALESCE(common_side_effects, '[]'::jsonb)) = 0`,
+    [JSON.stringify(effects), id],
+  );
+  info("batch-apply", `filled ${effects.length} side effects for med #${id}`);
 }
 
 // ── Background fill: generate + persist for a medication row, but only if
@@ -155,7 +188,7 @@ export async function backfillCommonSideEffectsForMed(medicationId) {
 
   try {
     const cur = await pool.query(
-      `SELECT id, name, composition, common_side_effects
+      `SELECT id, name, composition, patient_id, common_side_effects
          FROM medications
         WHERE id = $1`,
       [id],
@@ -164,6 +197,20 @@ export async function backfillCommonSideEffectsForMed(medicationId) {
     if (!row) return;
     const existing = Array.isArray(row.common_side_effects) ? row.common_side_effects : [];
     if (existing.length > 0) return;
+
+    // Batch path: enqueue and return immediately. The caller's follow-up genie
+    // sync still runs (meds sync now, without side effects); the side effects
+    // land on the row when the batch result applies (~1h), and propagate to the
+    // patient app on the next genie medication sync.
+    if (BATCH_ENABLED) {
+      await enqueue({
+        jobType: "med_side_effects",
+        request: buildSideEffectsRequest({ name: row.name, composition: row.composition }),
+        context: { medication_id: id, patient_id: row.patient_id },
+        dedupKey: `med:${id}`,
+      });
+      return;
+    }
 
     const effects = await generateCommonSideEffects({
       name: row.name,

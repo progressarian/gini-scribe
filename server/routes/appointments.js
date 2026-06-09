@@ -4,6 +4,11 @@ import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import { appointmentCreateSchema, appointmentUpdateSchema } from "../schemas/index.js";
+import {
+  resolveDoctorIdByName,
+  checkBookingAvailability as checkAvailability,
+} from "../services/bookingGuard.js";
+import { isSlotAvailable, findAvailableDoctors } from "../services/availability.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -58,6 +63,60 @@ router.get("/appointments", async (req, res) => {
     });
   } catch (e) {
     handleError(res, e, "Appointments list");
+  }
+});
+
+// Appointments whose assigned doctor is now UNAVAILABLE for that date+slot
+// (the doctor went on leave/break/etc. after the patient was booked). Returns
+// each with the current ("previous") doctor, the reason, and suggested doctors.
+// MUST be declared before "/appointments/:id" so "conflicts" isn't read as an id.
+router.get("/appointments/conflicts", async (req, res) => {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const start = req.query.from || req.query.date || today;
+    const end = req.query.to || req.query.date || start;
+
+    const { rows } = await pool.query(
+      `SELECT a.id, a.patient_id, a.patient_name, a.file_no, a.phone,
+              a.appointment_date, a.time_slot, a.doctor_name, a.doctor_id, a.status
+         FROM appointments a
+        WHERE a.appointment_date BETWEEN $1 AND $2
+          AND a.doctor_name IS NOT NULL AND a.time_slot IS NOT NULL
+          AND LOWER(COALESCE(a.status,'')) NOT IN
+              ('cancelled','no_show','completed','seen','in_visit','checkedin')
+        ORDER BY a.appointment_date, a.time_slot`,
+      [start, end],
+    );
+
+    const conflicts = [];
+    for (const a of rows) {
+      const doctorId = a.doctor_id || (await resolveDoctorIdByName(a.doctor_name));
+      if (!doctorId) continue; // unknown/legacy doctor name — skip
+      const av = await isSlotAvailable(doctorId, a.appointment_date, a.time_slot);
+      if (av.available) continue;
+      // Only doctor-unavailability conflicts (skip free-form slots and capacity).
+      if (av.reason === "unknown_slot" || av.reason === "full") continue;
+      const suggested = await findAvailableDoctors(a.appointment_date, a.time_slot, {
+        excludeDoctorId: doctorId,
+      });
+      conflicts.push({
+        appointment_id: a.id,
+        patient_id: a.patient_id,
+        patient_name: a.patient_name,
+        file_no: a.file_no,
+        phone: a.phone,
+        appointment_date: a.appointment_date,
+        time_slot: a.time_slot,
+        current_doctor: a.doctor_name,
+        status: a.status,
+        reason: av.reason,
+        detail: av.detail || null,
+        suggested_doctors: suggested,
+      });
+    }
+    res.json({ from: start, to: end, count: conflicts.length, conflicts });
+  } catch (e) {
+    handleError(res, e, "Appointment conflicts");
   }
 });
 
@@ -123,6 +182,24 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
     const apptDate = appointment_date || new Date().toISOString().split("T")[0];
     const apptSlot = time_slot || null;
     const apptDoctor = doctor_name || null;
+    const apptDoctorId = await resolveDoctorIdByName(apptDoctor);
+
+    // Availability enforcement (no-op unless SCHEDULE_ENFORCEMENT=warn|strict).
+    const avail = await checkAvailability({
+      doctorId: apptDoctorId,
+      date: apptDate,
+      slot: apptSlot,
+      force: req.body.force,
+      role: req.doctor?.role,
+    });
+    if (avail?.blocked) {
+      return res.status(409).json({
+        error: "doctor_unavailable",
+        reason: avail.reason,
+        detail: avail.detail || null,
+      });
+    }
+
     // Walk-in inserts always start scheduled — must match the index predicate
     // so the ON CONFLICT arbiter is found.
     const apptStatus = "scheduled";
@@ -133,8 +210,8 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
     // a new row — that lets a cancelled stub + real visit coexist, and a
     // patient seeing two doctors back-to-back is allowed.
     let { rows } = await pool.query(
-      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin, status, doctor_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        ON CONFLICT (file_no, appointment_date, time_slot, doctor_name, status)
          WHERE file_no IS NOT NULL AND appointment_date IS NOT NULL
            AND time_slot IS NOT NULL AND doctor_name IS NOT NULL
@@ -154,6 +231,7 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
         category || null,
         is_walkin || false,
         apptStatus,
+        apptDoctorId,
       ],
     );
     if (!rows[0] && file_no && apptDate && apptSlot && apptDoctor) {
@@ -175,6 +253,13 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
           console.warn("[Appt] Care team push skipped:", e.message),
         );
       }
+    }
+    // In 'warn' mode surface why this would have been blocked (still inserted).
+    if (avail?.warn && rows[0]) {
+      rows[0]._availability_warning = { reason: avail.reason, detail: avail.detail || null };
+      console.warn(
+        `[Appt] availability WARN: ${apptDoctor} ${apptDate} ${apptSlot} -> ${avail.reason}`,
+      );
     }
     res.json(rows[0]);
   } catch (e) {
@@ -205,11 +290,50 @@ router.get("/appointments/:id", async (req, res) => {
 router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, res) => {
   try {
     const { doctor_name, appointment_date, time_slot, visit_type, status, notes } = req.body;
+
+    // Enforce availability when the assignment target (doctor/date/slot) changes.
+    let newDoctorId;
+    if (doctor_name != null || appointment_date != null || time_slot != null) {
+      const cur = await pool.query(
+        "SELECT doctor_name, appointment_date, time_slot FROM appointments WHERE id=$1",
+        [req.params.id],
+      );
+      if (!cur.rows[0]) return res.status(404).json({ error: "Not found" });
+      const effDoctor = doctor_name ?? cur.rows[0].doctor_name;
+      const effDate = appointment_date ?? cur.rows[0].appointment_date;
+      const effSlot = time_slot ?? cur.rows[0].time_slot;
+      const effDoctorId = await resolveDoctorIdByName(effDoctor);
+      if (doctor_name != null) newDoctorId = effDoctorId;
+      const avail = await checkAvailability({
+        doctorId: effDoctorId,
+        date: effDate,
+        slot: effSlot,
+        force: req.body.force,
+        role: req.doctor?.role,
+      });
+      if (avail?.blocked) {
+        return res.status(409).json({
+          error: "doctor_unavailable",
+          reason: avail.reason,
+          detail: avail.detail || null,
+        });
+      }
+    }
+
     const { rows } = await pool.query(
       `UPDATE appointments SET doctor_name=COALESCE($2,doctor_name), appointment_date=COALESCE($3,appointment_date),
        time_slot=COALESCE($4,time_slot), visit_type=COALESCE($5,visit_type), status=COALESCE($6,status),
-       notes=COALESCE($7,notes), updated_at=NOW() WHERE id=$1 RETURNING *`,
-      [req.params.id, doctor_name, appointment_date, time_slot, visit_type, status, notes],
+       notes=COALESCE($7,notes), doctor_id=COALESCE($8,doctor_id), updated_at=NOW() WHERE id=$1 RETURNING *`,
+      [
+        req.params.id,
+        doctor_name,
+        appointment_date,
+        time_slot,
+        visit_type,
+        status,
+        notes,
+        newDoctorId ?? null,
+      ],
     );
     if (!rows[0]) return res.status(404).json({ error: "Not found" });
     if (rows[0].patient_id) {

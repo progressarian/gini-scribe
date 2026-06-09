@@ -5415,6 +5415,34 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
     notes: "",
     is_walkin: false,
   });
+  // Soft heads-up if the chosen doctor is off / on leave that whole day.
+  const [dayWarn, setDayWarn] = useState("");
+
+  useEffect(() => {
+    const { doctor_name, appointment_date } = form;
+    if (!doctor_name || !appointment_date) {
+      setDayWarn("");
+      return;
+    }
+    let cancelled = false;
+    apiFetch(
+      `/api/availability/day?doctor=${encodeURIComponent(doctor_name)}&date=${appointment_date}`,
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const slots = d?.resolved ? d.slots || [] : [];
+        const offTypes = ["day_off", "leave", "holiday", "emergency", "clinic_holiday"];
+        const off = slots.length > 0 && slots.every((s) => offTypes.includes(s.blocked_by));
+        setDayWarn(off ? `${doctor_name} is off / on leave on this date.` : "");
+      })
+      .catch(() => {
+        if (!cancelled) setDayWarn("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.doctor_name, form.appointment_date]);
 
   useEffect(() => {
     if (search.length < 2) {
@@ -6032,6 +6060,21 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
               </select>
             </div>
           </div>
+          {dayWarn && (
+            <div
+              style={{
+                margin: "0 0 10px",
+                padding: "8px 11px",
+                borderRadius: 7,
+                fontSize: 12.5,
+                background: "#fdf3f2",
+                border: "1px solid #f1c9c4",
+                color: "#b5392b",
+              }}
+            >
+              ⚠ {dayWarn} You can still book, but consider another doctor or date.
+            </div>
+          )}
           <div style={{ marginBottom: 10 }}>
             <Lbl>Reason / Notes</Lbl>
             <textarea
@@ -7204,7 +7247,7 @@ export default function OPD() {
           {[
             ["list", "📋 Schedule"],
             ["dashboard", "📊 Live Dashboard"],
-            ["triage", "🔴🟡✅ Triage"],
+            // ["triage", "🔴🟡✅ Triage"],
             ["triage-v3", "🧪 Triage v3"],
             ["new-appt", "➕ New Appointment"],
             ["excel", "📊 Import Excel"],
