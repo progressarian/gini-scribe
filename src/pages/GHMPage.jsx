@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import "./GHMPage.css";
 import useAuthStore from "../stores/authStore";
+import { SLOT_REASON, slotOptions } from "../lib/slotAvailability.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 const getToken = () => localStorage.getItem("gini_auth_token") || "";
@@ -85,49 +86,7 @@ function fmtDateTime(ts) {
   });
 }
 
-const TIME_SLOTS = [
-  "9:30 AM to 10 AM",
-  "10 AM to 11 AM",
-  "11 AM to 12 PM",
-  "12 PM to 1 PM",
-  "1 PM to 2 PM",
-  "2 PM to 2:30 PM",
-  "2:30 PM to 3 PM",
-  "3 PM to 3:30 PM",
-  "3:30 PM to 4 PM",
-  "4 PM to 4:30 PM",
-  "4:30 PM to 5 PM",
-  "5 PM to 6 PM",
-  "6 PM to 7 PM",
-  "7 PM to 8 PM",
-  "8 PM to 9 PM",
-  "9 PM to 10 PM",
-  "10 PM to 11 PM",
-  "11 PM to 12 AM",
-  "12 AM to 1 AM",
-  "1 AM to 2 AM",
-  "2 AM to 3 AM",
-  "3 AM to 4 AM",
-  "4 AM to 5 AM",
-  "5 AM to 6 AM",
-  "6 AM to 7 AM",
-  "7 AM to 8 AM",
-  "8 AM to 9 AM",
-  "9 AM to 9:30 AM",
-];
-
-// Why a slot is unavailable (from the doctor-availability resolver).
-const SLOT_REASON = {
-  day_off: "Day off",
-  not_working: "Not working",
-  clinic_holiday: "Clinic holiday",
-  break: "Break",
-  leave: "On leave",
-  emergency: "Emergency leave",
-  holiday: "Holiday",
-  manual_block: "Blocked",
-  full: "Full",
-};
+// Slot catalog + unavailability-reason labels come from ../lib/slotAvailability.
 
 const VISIT_TYPES = [
   "New",
@@ -405,7 +364,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  // Availability for the selected doctor+date. null ⇒ use plain TIME_SLOTS
+  // Availability for the selected doctor+date. null ⇒ use plain catalog slots
   // (doctor not configured / unknown).
   const [availSlots, setAvailSlots] = useState(null);
 
@@ -548,19 +507,12 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
               <span>Time Slot</span>
               <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
                 <option value="">— Select slot</option>
-                {availSlots
-                  ? availSlots
-                      .filter((s) => s.available)
-                      .map((s) => (
-                        <option key={s.slot_label} value={s.slot_label}>
-                          {s.slot_label}
-                        </option>
-                      ))
-                  : TIME_SLOTS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
+                {slotOptions(availSlots).map((s) => (
+                  <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
+                    {s.slot_label}
+                    {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="fld fld--wide">
@@ -882,8 +834,7 @@ function CallHistoryPanel({ row, ccAgents, onLogged, onDeleted, colSpan }) {
 // Patients booked to a doctor who is now unavailable (leave / break / day off /
 // holiday) for that date+slot. Shows the previous doctor + reason and lets you
 // reassign to a free doctor.
-function ReassignNeededView() {
-  const [date, setDate] = useState(todayStr());
+function ReassignNeededView({ date }) {
   const [conflicts, setConflicts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [picks, setPicks] = useState({}); // appointment_id → doctor_id
@@ -932,13 +883,11 @@ function ReassignNeededView() {
 
   return (
     <div>
-      <div className="qfilter" style={{ alignItems: "center", gap: 12 }}>
-        <label style={{ fontSize: 13 }}>
-          Date <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
+      <div className="qfilter">
         <span className="qfilter__hint">
-          Patients whose assigned doctor is now unavailable (leave / break / day off). Reassign each
-          to a free doctor.
+          Patients whose assigned doctor is now unavailable (leave / break / day off) on{" "}
+          {prettyDate(date)}. Change the day with the date selector at the top. Reassign each to a
+          free doctor.
         </span>
       </div>
 
@@ -1283,7 +1232,7 @@ export default function GHMPage() {
       )}
 
       {view === "reassign" ? (
-        <ReassignNeededView />
+        <ReassignNeededView date={date} />
       ) : (
         <>
           {/* ── Summary ── */}

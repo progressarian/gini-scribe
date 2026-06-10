@@ -73,6 +73,7 @@ export const PAGE_CAPABILITIES = {
   "/opd": CAP.RECEPTION_OPS,
   "/ghm": CAP.RECEPTION_OPS,
   "/doctor-management": CAP.ADMIN,
+  "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
   "/messages": CAP.RECEPTION_OPS,
   // Analytics

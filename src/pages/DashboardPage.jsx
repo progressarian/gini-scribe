@@ -10,6 +10,12 @@ import useVitalsStore from "../stores/vitalsStore";
 import useAuthStore from "../stores/authStore";
 import useVisitStore from "../stores/visitStore";
 import useLabStore from "../stores/labStore";
+import {
+  useDayAvailability,
+  slotOptions,
+  SLOT_REASON,
+  isClinicalDoctor,
+} from "../lib/slotAvailability.js";
 import useMessagingStore from "../stores/messagingStore";
 import { cleanNote } from "../utils/cleanNote.js";
 
@@ -71,6 +77,14 @@ export default function DashboardPage() {
   const fetchThread = useMessagingStore((s) => s.fetchThread);
   const markRead = useMessagingStore((s) => s.markRead);
   const [bookErrors, setBookErrors] = useState({});
+
+  // Doctor's slot availability for the Book Appointment form.
+  const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
+  useEffect(() => {
+    if (!apptSlots || !bookForm.tm) return;
+    const sel = apptSlots.find((s) => s.slot_label === bookForm.tm);
+    if (sel && !sel.available) setBookForm({ ...bookForm, tm: "" });
+  }, [apptSlots]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!doctorsList.length) fetchDoctorsList();
@@ -788,10 +802,10 @@ export default function DashboardPage() {
             </div>
             <div>
               <label style={{ fontSize: 10, fontWeight: 600, color: "#475569" }}>Time</label>
-              <input
-                type="time"
+              <select
                 value={bookForm.tm}
                 onChange={(e) => setBookForm({ ...bookForm, tm: e.target.value })}
+                disabled={!bookForm.doc}
                 style={{
                   width: "100%",
                   padding: "8px",
@@ -799,8 +813,17 @@ export default function DashboardPage() {
                   borderRadius: 6,
                   fontSize: 12,
                   boxSizing: "border-box",
+                  color: bookForm.tm ? "#1e293b" : "#94a3b8",
                 }}
-              />
+              >
+                <option value="">{bookForm.doc ? "Time slot" : "Pick doctor first"}</option>
+                {slotOptions(apptSlots).map((s) => (
+                  <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
+                    {s.slot_label}
+                    {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label style={{ fontSize: 10, fontWeight: 600, color: "#475569" }}>Type</label>
@@ -879,7 +902,7 @@ export default function DashboardPage() {
                 <option value="" disabled>
                   Select Doctor *
                 </option>
-                {doctorsList.map((d) => (
+                {doctorsList.filter(isClinicalDoctor).map((d) => (
                   <option key={d.id} value={d.short_name || d.name}>
                     {d.name}
                     {d.specialty ? ` — ${d.specialty}` : ""}

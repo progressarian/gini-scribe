@@ -6,6 +6,12 @@ import useVisitStore from "../stores/visitStore.js";
 import useUiStore from "../stores/uiStore.js";
 import Shimmer from "../components/Shimmer.jsx";
 import api from "../services/api.js";
+import {
+  useDayAvailability,
+  slotOptions,
+  SLOT_REASON,
+  isClinicalDoctor,
+} from "../lib/slotAvailability.js";
 import "./FindPage.css";
 
 export default function FindPage() {
@@ -53,6 +59,15 @@ export default function FindPage() {
   } = useUiStore();
 
   const [bookErrors, setBookErrors] = useState({});
+
+  // Doctor's slot availability for the quick-book form.
+  const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
+  // Clear a chosen slot that just became unavailable.
+  useEffect(() => {
+    if (!apptSlots || !bookForm.tm) return;
+    const sel = apptSlots.find((s) => s.slot_label === bookForm.tm);
+    if (sel && !sel.available) setBookForm({ ...bookForm, tm: "" });
+  }, [apptSlots]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch data on mount
   useEffect(() => {
@@ -276,17 +291,26 @@ export default function FindPage() {
                 fontSize: 11,
               }}
             />
-            <input
-              type="time"
+            <select
               value={bookForm.tm}
               onChange={(e) => setBookForm({ ...bookForm, tm: e.target.value })}
+              disabled={!bookForm.doc}
               style={{
                 padding: "6px 8px",
                 border: "1px solid #e2e8f0",
                 borderRadius: 6,
                 fontSize: 11,
+                color: bookForm.tm ? "#1e293b" : "#94a3b8",
               }}
-            />
+            >
+              <option value="">{bookForm.doc ? "Time slot" : "Pick doctor first"}</option>
+              {slotOptions(apptSlots).map((s) => (
+                <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
+                  {s.slot_label}
+                  {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                </option>
+              ))}
+            </select>
             <select
               value={bookForm.doc}
               onChange={(e) => {
@@ -304,7 +328,7 @@ export default function FindPage() {
               <option value="" disabled>
                 Select Doctor *
               </option>
-              {doctorsList.map((d) => (
+              {doctorsList.filter(isClinicalDoctor).map((d) => (
                 <option key={d.id} value={d.short_name || d.name}>
                   {d.name}
                 </option>

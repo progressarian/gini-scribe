@@ -48,6 +48,15 @@
   max-width: none;
   padding: 0;
 }
+/* The shared AppLayout header uses negative margins to "break out" of the
+   .app gutter. Here the gutter is zeroed (padding: 0), so those negatives
+   instead pull the header off-screen (clipped by overflow: hidden) and flush
+   it to the viewport edge. Cancel the top/side negatives so the header sits
+   flush-top with its normal inner padding — i.e. identical to /dashboard —
+   while keeping the 14px gap below it that separates it from the tabs. */
+.app:has(.visit-page) > .header {
+  margin: 0 0 14px;
+}
 .visit-page {
   display: flex;
   flex-direction: column;

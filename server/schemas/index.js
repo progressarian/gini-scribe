@@ -379,6 +379,43 @@ export const rxAudioUploadSchema = z.object({
   base64: z.string({ required_error: "base64 data is required" }).min(1),
 });
 
+// ---- Medicine collection (pharmacy fulfillment) ----
+const COLLECTION_STATUS = ["given", "not_given", "partial"];
+const reasonRequired = (status, reason) =>
+  status === "given" || !!(reason && String(reason).trim());
+
+export const collectionMarkSchema = z
+  .object({
+    status: z.enum(COLLECTION_STATUS),
+    reason: optStr, // out_of_stock | patient_declined | buying_outside | not_available | other
+    qty_note: optStr,
+    date: optDate,
+    appointment_id: optInt,
+  })
+  .refine((v) => reasonRequired(v.status, v.reason), {
+    message: "reason is required when not given / partial",
+    path: ["reason"],
+  });
+
+export const collectionBulkSchema = z.object({
+  date: optDate,
+  items: z
+    .array(
+      z
+        .object({
+          medication_id: z.number({ required_error: "medication_id is required" }).int(),
+          status: z.enum(COLLECTION_STATUS),
+          reason: optStr,
+          qty_note: optStr,
+        })
+        .refine((i) => reasonRequired(i.status, i.reason), {
+          message: "reason is required for not-given / partial items",
+          path: ["reason"],
+        }),
+    )
+    .min(1, "at least one item is required"),
+});
+
 // ---- Doctor Management & Availability ----
 // See docs/doctor-management/03-api-endpoints.md §9.
 

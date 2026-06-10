@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 // xlsx is lazy-loaded inside the Excel-upload handler below to keep it out
 // of the main bundle (~900 KB pre-gzip). Nothing else in this file touches it.
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
+import { SLOT_CATALOG, SLOT_REASON, isClinicalDoctor } from "./lib/slotAvailability.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
@@ -60,6 +61,8 @@ const SH = "0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05)";
 const FB = "'Inter',system-ui,sans-serif";
 const FD = "'Instrument Serif',serif";
 const FM = "'DM Mono',monospace";
+
+// SLOT_CATALOG + SLOT_REASON now come from ./lib/slotAvailability.
 
 const getToken = () => localStorage.getItem("gini_auth_token") || "";
 const getDoctor = () => {
@@ -5415,13 +5418,15 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
     notes: "",
     is_walkin: false,
   });
-  // Soft heads-up if the chosen doctor is off / on leave that whole day.
+  // Doctor's day availability → drives the slot dropdown + a day-off heads-up.
   const [dayWarn, setDayWarn] = useState("");
+  const [availSlots, setAvailSlots] = useState(null); // null ⇒ use plain catalog slots
 
   useEffect(() => {
     const { doctor_name, appointment_date } = form;
     if (!doctor_name || !appointment_date) {
       setDayWarn("");
+      setAvailSlots(null);
       return;
     }
     let cancelled = false;
@@ -5431,13 +5436,26 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
-        const slots = d?.resolved ? d.slots || [] : [];
-        const offTypes = ["day_off", "leave", "holiday", "emergency", "clinic_holiday"];
-        const off = slots.length > 0 && slots.every((s) => offTypes.includes(s.blocked_by));
-        setDayWarn(off ? `${doctor_name} is off / on leave on this date.` : "");
+        const slots = d?.resolved ? d.slots || [] : null;
+        setAvailSlots(slots);
+        if (slots) {
+          const offTypes = ["day_off", "leave", "holiday", "emergency", "clinic_holiday"];
+          const off = slots.length > 0 && slots.every((s) => offTypes.includes(s.blocked_by));
+          setDayWarn(off ? `${doctor_name} is off / on leave on this date.` : "");
+          // Clear a chosen slot that just became unavailable.
+          setForm((f) => {
+            const sel = slots.find((x) => x.slot_label === f.time_slot);
+            return sel && !sel.available ? { ...f, time_slot: "" } : f;
+          });
+        } else {
+          setDayWarn("");
+        }
       })
       .catch(() => {
-        if (!cancelled) setDayWarn("");
+        if (!cancelled) {
+          setDayWarn("");
+          setAvailSlots(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -5994,23 +6012,6 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}
           >
             <div>
-              <Lbl>Date *</Lbl>
-              <Inp
-                value={form.appointment_date}
-                onChange={(e) => setForm((f) => ({ ...f, appointment_date: e.target.value }))}
-                type="date"
-              />
-            </div>
-            <div>
-              <Lbl>Time Slot</Lbl>
-              <Inp
-                value={form.time_slot}
-                onChange={(e) => setForm((f) => ({ ...f, time_slot: e.target.value }))}
-                placeholder="09:30"
-                type="time"
-              />
-            </div>
-            <div>
               <Lbl>Visit Type</Lbl>
               <select
                 value={form.visit_type}
@@ -6050,11 +6051,48 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
                 }}
               >
                 <option value="">— Assign later</option>
-                {doctors
-                  .filter((d) => d.name)
-                  .map((d) => (
-                    <option key={d.id} value={d.name}>
-                      {d.name}
+                {doctors.filter(isClinicalDoctor).map((d) => (
+                  <option key={d.id} value={d.name}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Lbl>Date *</Lbl>
+              <Inp
+                value={form.appointment_date}
+                onChange={(e) => setForm((f) => ({ ...f, appointment_date: e.target.value }))}
+                type="date"
+              />
+            </div>
+            <div>
+              <Lbl>Time Slot</Lbl>
+              <select
+                value={form.time_slot}
+                onChange={(e) => setForm((f) => ({ ...f, time_slot: e.target.value }))}
+                disabled={!form.doctor_name}
+                style={{
+                  border: `1px solid ${BD}`,
+                  borderRadius: 7,
+                  padding: "8px 11px",
+                  fontSize: 13,
+                  color: INK,
+                  outline: "none",
+                  background: WH,
+                  width: "100%",
+                  fontFamily: FB,
+                }}
+              >
+                <option value="">
+                  {form.doctor_name ? "— Select slot" : "— Pick a doctor first"}
+                </option>
+                {(availSlots || SLOT_CATALOG.map((s) => ({ slot_label: s, available: true })))
+                  .filter((s) => s.blocked_by !== "not_working")
+                  .map((s) => (
+                    <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
+                      {s.slot_label}
+                      {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
                     </option>
                   ))}
               </select>

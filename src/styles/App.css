@@ -6,9 +6,14 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  max-width: 1100px;
+  max-width: none;
   margin: 0 auto;
-  padding: 8px 12px;
+  /* Page gutter as variables so the header can break out of it (full-width,
+     flush-top) by exactly cancelling these, and stay in sync at every
+     breakpoint where the gutter changes. */
+  --pad-x: 32px;
+  --pad-y: 24px;
+  padding: var(--pad-y) var(--pad-x);
   background: #fff;
   min-height: 100vh;
 }
@@ -17,10 +22,16 @@
 .header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid #1e293b;
+  gap: 10px;
+  /* Break out of the .app gutter: negative margins cancel the page padding so
+     the header spans the full viewport width and sits flush to the top — a
+     standard app-shell chrome bar. Inner horizontal padding re-aligns the
+     header content with the page content below. */
+  margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x)) 14px;
+  padding: 10px var(--pad-x);
+  background: #ffffff;
+  border-bottom: 1px solid #e8edf3;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -28,35 +39,39 @@
 .header__brand {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 9px;
   min-width: 0;
   flex-shrink: 1;
 }
 
 .header__logo {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, #1e293b, #334155);
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #0f172a, #334155);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
   font-weight: 900;
-  font-size: 14px;
+  font-size: 15px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
 }
 
 .header__title {
   font-size: 15px;
   font-weight: 800;
-  color: #1e293b;
-  line-height: 1.1;
+  color: #0f172a;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
 }
 
 .header__doctor {
-  font-size: 10px;
+  font-size: 10.5px;
   color: #64748b;
   font-weight: 500;
+  margin-top: 1px;
 }
 
 .header__spacer {
@@ -97,71 +112,84 @@
   white-space: nowrap;
 }
 
-.header__find-btn {
-  border: 1px solid #cbd5e1;
-  padding: 8px 14px;
+/* Shared base for all header action buttons — keeps them the same height,
+   radius, and typography so the cluster reads as one consistent control group. */
+.header__find-btn,
+.header__save-btn,
+.header__new-btn,
+.header__logout-btn {
+  height: 34px;
+  padding: 0 14px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition: all 0.15s;
+  gap: 5px;
+  white-space: nowrap;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.header__find-btn:active,
+.header__save-btn:active,
+.header__new-btn:active,
+.header__logout-btn:active {
+  transform: translateY(1px);
 }
 
+.header__find-btn {
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
 .header__find-btn--active {
-  background: #1e293b;
+  background: #0f172a;
   color: white;
+  border-color: #0f172a;
 }
-
 .header__find-btn--inactive {
   background: #f1f5f9;
   color: #1e293b;
+}
+.header__find-btn--inactive:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
 }
 
 .header__save-btn {
   background: #2563eb;
   color: white;
-  border: none;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  border: 1px solid transparent;
   box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
-  transition: all 0.15s;
+}
+.header__save-btn:hover {
+  background: #1d4ed8;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
 }
 
 .header__new-btn {
   background: #059669;
   color: white;
-  border: none;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  border: 1px solid transparent;
   box-shadow: 0 1px 3px rgba(5, 150, 105, 0.3);
-  transition: all 0.15s;
+}
+.header__new-btn:hover {
+  background: #047857;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.35);
 }
 
 .header__logout-btn {
   background: #fef2f2;
   color: #dc2626;
   border: 1px solid #fecaca;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
+  padding: 0 12px;
+}
+.header__logout-btn:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
 }
 
 /* ============ DUPLICATE WARNING BANNER ============ */
@@ -241,6 +269,21 @@
   border: 1px solid #bfdbfe;
   flex-wrap: nowrap;
   min-width: 0;
+}
+
+/* Inline variant: lives inside the header row instead of its own strip, so
+   it reclaims the ~40px the standalone bar used to take. */
+.patient-bar--inline {
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  margin-bottom: 0;
+  max-width: 340px;
+  flex: 0 1 auto;
+}
+.patient-bar--inline .patient-bar__avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
 }
 
 .patient-bar__avatar {
@@ -1044,14 +1087,42 @@
   padding: 4px 8px;
 }
 
-/* ============ RESPONSIVE — narrow screens ============ */
-/* Keep header / patient-bar / tabs on a single row each. When content
-   overflows horizontally, the row scrolls instead of wrapping onto multiple
-   lines — wrapping was stealing vertical height and pushing the page
-   content below the fold. */
+/* ============ RESPONSIVE — header, patient chip, tabs ============ */
+/* The header is one non-wrapping row at every width. The flex spacers
+   (.header__spacer) auto-collapse to 0 when space is tight — keeping the
+   action buttons right-aligned when there's room — and the actions/tabs rows
+   scroll horizontally instead of wrapping onto a second line (which stole
+   vertical height). Each breakpoint tightens spacing, then drops the least
+   essential element first: doctor name → patient phone → file-no → brand
+   wordmark, so the core controls stay usable from wide desktop to small phone. */
+
+/* ---- Tablet / small laptop (≤1024px) ---- */
+@media (max-width: 1024px) {
+  .app {
+    --pad-x: 24px;
+    --pad-y: 20px;
+  }
+  .header {
+    gap: 7px;
+  }
+  .header__find-btn,
+  .header__save-btn,
+  .header__new-btn,
+  .header__logout-btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+  .patient-bar--inline {
+    max-width: 280px;
+  }
+}
+
+/* ---- Tablet portrait (≤900px) ---- */
 @media (max-width: 900px) {
   .app {
-    padding: 6px 8px;
+    --pad-x: 18px;
+    --pad-y: 16px;
   }
   .header {
     gap: 6px;
@@ -1064,37 +1135,89 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 180px;
+    max-width: 160px;
   }
-  .header__spacer {
-    display: none;
+  .patient-bar--inline {
+    max-width: 220px;
   }
   .header__find-btn,
   .header__save-btn,
-  .header__new-btn {
-    padding: 6px 10px;
+  .header__new-btn,
+  .header__logout-btn {
+    height: 32px;
+    padding: 0 10px;
     font-size: 12px;
   }
-  .header__logout-btn {
-    padding: 6px 8px;
-  }
   .tab-btn {
-    padding: 7px 8px;
+    padding: 7px 9px;
   }
 }
 
+/* ---- Large phone (≤600px) ---- */
 @media (max-width: 600px) {
+  .app {
+    --pad-x: 12px;
+    --pad-y: 12px;
+  }
+  .header {
+    gap: 5px;
+  }
+  .header__logo {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
   .header__doctor {
     display: none;
   }
   .patient-bar__phone {
     display: none;
   }
+  .patient-bar--inline {
+    max-width: 170px;
+    padding: 3px 6px 3px 3px;
+  }
+  .patient-bar--inline .patient-bar__avatar {
+    width: 20px;
+    height: 20px;
+  }
   .header__find-btn,
   .header__save-btn,
   .header__new-btn,
   .header__logout-btn {
-    padding: 6px 8px;
+    height: 30px;
+    padding: 0 9px;
     font-size: 11px;
+  }
+  .tab-btn {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+}
+
+/* ---- Small phone (≤400px) ---- */
+@media (max-width: 400px) {
+  .app {
+    --pad-x: 10px;
+    --pad-y: 10px;
+  }
+  /* Keep the logo as the brand; drop the wordmark + patient file-no to free
+     width for the action buttons. */
+  .header__title {
+    display: none;
+  }
+  .patient-bar__fileno {
+    display: none;
+  }
+  .patient-bar--inline {
+    max-width: 120px;
+  }
+  .header__find-btn,
+  .header__save-btn,
+  .header__new-btn,
+  .header__logout-btn {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 10px;
   }
 }

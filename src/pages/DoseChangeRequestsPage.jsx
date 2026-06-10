@@ -117,7 +117,7 @@ export default function DoseChangeRequestsPage() {
   };
 
   return (
-    <div style={{ padding: "16px 20px", maxWidth: 1180, margin: "0 auto" }}>
+    <div style={{ margin: "0 auto" }}>
       <div
         style={{
           display: "flex",

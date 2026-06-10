@@ -8,7 +8,8 @@
     "worker": "node worker.js",
     "dev:worker": "nodemon worker.js",
     "db:init": "node db-init.js",
-    "smoke:doctors": "node scripts/smoke-doctor-management.mjs"
+    "smoke:doctors": "node scripts/smoke-doctor-management.mjs",
+    "smoke:med-collection": "node scripts/smoke-med-collection.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

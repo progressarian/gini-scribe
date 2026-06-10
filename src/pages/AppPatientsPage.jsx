@@ -12,13 +12,13 @@ const fmtDate = (iso) =>
 const fmtDateTime = (iso) =>
   iso
     ? new Date(iso).toLocaleString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
     : "—";
 
 const cellStyle = { padding: "10px 12px", fontSize: 13, color: "#0f172a", verticalAlign: "top" };
@@ -223,7 +223,7 @@ export default function AppPatientsPage() {
   }, [rows, search]);
 
   return (
-    <div style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ padding: 20, margin: "0 auto" }}>
       <div
         style={{
           display: "flex",

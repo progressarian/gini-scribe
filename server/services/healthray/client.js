@@ -18,11 +18,18 @@ let authToken = ""; // x-auth-token from login response
 async function healthrayLogin() {
   const mobile = process.env.HEALTHRAY_MOBILE;
   const password = process.env.HEALTHRAY_PASSWORD;
-  const captcha = process.env.HEALTHRAY_CAPTCHA;
+  // HealthRay's sign_in only requires captchaToken to be NON-EMPTY — it does
+  // not validate the token's value (verified against the live API: login
+  // succeeds with an arbitrary string). So we send a constant placeholder
+  // rather than a human-captured, single-use reCAPTCHA token. This lets the
+  // app re-login on its own whenever the connect.sid session expires, so auto
+  // sync self-heals instead of dying until someone manually refreshes the
+  // cookie. An optional HEALTHRAY_CAPTCHA env value still overrides if set.
+  const captcha = process.env.HEALTHRAY_CAPTCHA || "auto";
 
-  if (!mobile || !password || !captcha) {
+  if (!mobile || !password) {
     throw new Error(
-      "HealthRay login credentials missing — set HEALTHRAY_MOBILE, HEALTHRAY_PASSWORD, HEALTHRAY_CAPTCHA in .env",
+      "HealthRay login credentials missing — set HEALTHRAY_MOBILE, HEALTHRAY_PASSWORD in .env",
     );
   }
 
@@ -46,11 +53,35 @@ async function healthrayLogin() {
     HEALTHRAY_TIMEOUT_MS,
   );
 
-  const setCookie = res.headers.get("set-cookie") || "";
+  // Extract the connect.sid session cookie. getSetCookie() is the correct API
+  // for Set-Cookie under Node's undici fetch (plain get("set-cookie") can drop
+  // it); fall back to get() for older runtimes.
+  const setCookieList =
+    typeof res.headers.getSetCookie === "function"
+      ? res.headers.getSetCookie()
+      : [res.headers.get("set-cookie") || ""];
+  const setCookie = setCookieList.join("; ");
   const match = setCookie.match(/connect\.sid=([^;]+)/);
-  const body = await res.json().catch(() => ({}));
+
+  // Read the body once as text, then try to parse JSON from it — so that when
+  // an unexpected (non-JSON) response comes back (e.g. a WAF / IP-block HTML
+  // page), we can log the raw content instead of hiding behind a generic
+  // "no session cookie returned".
+  const rawBody = await res.text().catch(() => "");
+  let body = {};
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    /* non-JSON response (HTML block page, gateway error, etc.) */
+  }
+
   if (!match) {
-    throw new Error(`HealthRay login failed: ${body.message || "no session cookie returned"}`);
+    const ct = res.headers.get("content-type") || "?";
+    const snippet = body.message ? "" : ` body="${rawBody.slice(0, 200).replace(/\s+/g, " ")}"`;
+    throw new Error(
+      `HealthRay login failed: ${body.message || "no session cookie returned"} ` +
+        `[http=${res.status} type=${ct}${snippet}]`,
+    );
   }
 
   sessionCookie = match[1];

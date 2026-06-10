@@ -1,3 +1,18 @@
+/* ============ BASE RESET ============ */
+/* No body margin reset existed, so the browser default (8px) inset the whole
+   app. Zero it so .app touches the viewport edges — required for the full-width
+   header to reach the edges cleanly, and makes the full-screen OPD/Visit pages
+   truly edge-to-edge. overflow-x:hidden guards against any sub-pixel breakout
+   triggering a horizontal scrollbar. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  overflow-x: hidden;
+}
+
 /* ============ KEYFRAMES ============ */
 @keyframes pulse {
   0%,
@@ -35,10 +50,28 @@
   height: 100vh;
   overflow: hidden;
   max-width: none;
-  padding: 0;
+  /* Match the shell gutter used by every other tab page, but keep the fixed
+     100vh height intact by counting padding inside the box. */
+  box-sizing: border-box;
+  /* Keep the gutter vars in sync with the literal padding so the full-width
+     header breakout (negative margins = -var) lands flush, not offset. */
+  --pad-x: 32px;
+  --pad-y: 24px;
+  padding: var(--pad-y) var(--pad-x);
 }
 .opd-page {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  border-radius: 12px;
+}
+/* On phones the gutter wastes scarce width — go full-bleed like before. */
+@media (max-width: 900px) {
+  .app:has(.opd-page) {
+    --pad-x: 0px;
+    --pad-y: 0px;
+  }
+  .opd-page {
+    border-radius: 0;
+  }
 }

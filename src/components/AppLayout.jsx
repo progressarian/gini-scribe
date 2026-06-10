@@ -126,6 +126,13 @@ const NAV_ITEMS = [
     cap: C["/doctor-management"],
     show: () => true,
   },
+  // Pharmacy: medicine collection tracking
+  {
+    path: "/medicine-collection",
+    label: "💊 Medicine Collection",
+    cap: C["/medicine-collection"],
+    show: () => true,
+  },
 ];
 
 export default function AppLayout() {
@@ -215,6 +222,21 @@ export default function AppLayout() {
           </div>
         </div>
         <div className="header__spacer" />
+        {patient.name && location.pathname !== "/dashboard" && (
+          <div className="patient-bar patient-bar--inline">
+            <div className="patient-bar__avatar">{patient.name.charAt(0).toUpperCase()}</div>
+            <div className="patient-bar__info">
+              <span className="patient-bar__name">{patient.name}</span>
+              <span className="patient-bar__age">
+                {patient.age}Y/{patient.sex?.charAt(0)}
+              </span>
+              {patient.fileNo && <span className="patient-bar__fileno">{patient.fileNo}</span>}
+              {patient.phone && <span className="patient-bar__phone">📱 {patient.phone}</span>}
+            </div>
+            {dbPatientId && <span className="patient-bar__db-id">DB #{dbPatientId}</span>}
+          </div>
+        )}
+        <div className="header__spacer" />
         {draftSaved && <span className="header__draft">{draftSaved}</span>}
         {saveStatus && (
           <span
@@ -300,22 +322,6 @@ export default function AppLayout() {
           </button>
         </div>
       </div>
-
-      {/* Active Patient Bar */}
-      {patient.name && location.pathname !== "/dashboard" && (
-        <div className="patient-bar">
-          <div className="patient-bar__avatar">{patient.name.charAt(0).toUpperCase()}</div>
-          <div className="patient-bar__info">
-            <span className="patient-bar__name">{patient.name}</span>
-            <span className="patient-bar__age">
-              {patient.age}Y/{patient.sex?.charAt(0)}
-            </span>
-            {patient.fileNo && <span className="patient-bar__fileno">{patient.fileNo}</span>}
-            {patient.phone && <span className="patient-bar__phone">📱 {patient.phone}</span>}
-          </div>
-          {dbPatientId && <span className="patient-bar__db-id">DB #{dbPatientId}</span>}
-        </div>
-      )}
 
       {/* Navigation */}
       {!(duplicateWarning && !dbPatientId) && (

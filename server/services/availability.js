@@ -232,7 +232,8 @@ export async function findAvailableDoctors(
 ) {
   const docs = await client.query(
     `SELECT id, name, role, specialty FROM doctors
-      WHERE is_active AND ($1::int IS NULL OR id <> $1) ORDER BY name`,
+      WHERE is_active AND lower(role) IN ('consultant','mo')
+        AND ($1::int IS NULL OR id <> $1) ORDER BY name`,
     [excludeDoctorId],
   );
 
