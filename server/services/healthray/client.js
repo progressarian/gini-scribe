@@ -15,6 +15,16 @@ export const ORG_ID = process.env.HEALTHRAY_ORG_ID || "1528";
 let sessionCookie = process.env.HEALTHRAY_SESSION || "";
 let authToken = ""; // x-auth-token from login response
 
+// Login circuit-breaker. When the login endpoint rejects us — e.g. HealthRay
+// rate-limits the IP with a 403 HTML page after too many attempts — retrying
+// every ~10s keeps the limiter tripped indefinitely (a vicious loop: 403 → no
+// session → re-login → 403). Back off exponentially so the window can clear,
+// then recover automatically. Reset on the first success.
+let loginFailCount = 0;
+let loginBackoffUntil = 0;
+const LOGIN_BACKOFF_BASE_MS = 20_000; // 20s, doubles each consecutive failure
+const LOGIN_BACKOFF_MAX_MS = 10 * 60_000; // capped at 10 min
+
 async function healthrayLogin() {
   const mobile = process.env.HEALTHRAY_MOBILE;
   const password = process.env.HEALTHRAY_PASSWORD;
@@ -30,6 +40,15 @@ async function healthrayLogin() {
   if (!mobile || !password) {
     throw new Error(
       "HealthRay login credentials missing — set HEALTHRAY_MOBILE, HEALTHRAY_PASSWORD in .env",
+    );
+  }
+
+  // Circuit-breaker: while backing off after recent failures, fail fast WITHOUT
+  // hitting the network, so we stop hammering a rate-limited endpoint.
+  if (Date.now() < loginBackoffUntil) {
+    const waitS = Math.round((loginBackoffUntil - Date.now()) / 1000);
+    throw new Error(
+      `HealthRay login backing off (${loginFailCount} consecutive failures) — next attempt in ~${waitS}s`,
     );
   }
 
@@ -76,14 +95,23 @@ async function healthrayLogin() {
   }
 
   if (!match) {
+    loginFailCount += 1;
+    const backoff = Math.min(
+      LOGIN_BACKOFF_MAX_MS,
+      LOGIN_BACKOFF_BASE_MS * 2 ** (loginFailCount - 1),
+    );
+    loginBackoffUntil = Date.now() + backoff;
     const ct = res.headers.get("content-type") || "?";
     const snippet = body.message ? "" : ` body="${rawBody.slice(0, 200).replace(/\s+/g, " ")}"`;
     throw new Error(
       `HealthRay login failed: ${body.message || "no session cookie returned"} ` +
-        `[http=${res.status} type=${ct}${snippet}]`,
+        `[http=${res.status} type=${ct}${snippet}] — backing off ${Math.round(backoff / 1000)}s`,
     );
   }
 
+  // Success — clear the circuit-breaker.
+  loginFailCount = 0;
+  loginBackoffUntil = 0;
   sessionCookie = match[1];
   // Capture auth token from login response for download endpoints
   if (body.data?.auth_token || body.data?.token) {

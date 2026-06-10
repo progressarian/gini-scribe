@@ -61,6 +61,7 @@ export const PAGE_CAPABILITIES = {
   // AI tools
   "/ai": CAP.AI_TOOLS,
   "/genie-chats": CAP.AI_TOOLS,
+  "/app-patients": CAP.AI_TOOLS,
   // Lab
   "/lab-portal": CAP.LAB_PORTAL,
   "/lab-requests": CAP.LAB_REQUESTS,

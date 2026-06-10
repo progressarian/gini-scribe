@@ -5,16 +5,16 @@
 // `server/` (run directly by Node) and `src/` (bundled by Vite).
 //
 // ── HOW TO ROLL OUT ──────────────────────────────────────────────────────────
-// `GRANT_ALL_CAPABILITIES` is currently TRUE: every logged-in staff member has
-// every capability (no restriction yet). When you're ready to lock things down
-// per role, set it to FALSE and tune the ROLE_CAPABILITIES matrix below — that
-// matrix is the single place that decides who-can-do-what. Both the API guards
-// and the frontend nav read from this file.
+// `GRANT_ALL_CAPABILITIES` is now FALSE: access is enforced per role via the
+// ROLE_CAPABILITIES matrix below — the single place that decides who-can-do-
+// what. Both the API guards and the frontend nav read from this file. Set it
+// back to TRUE to temporarily disable all restrictions (everyone sees/does
+// everything) if you need an emergency bypass.
 // ============================================================================
 
-// Master switch. While true, hasCapability() returns true for any role, so the
-// app behaves exactly as before (everyone sees/does everything). Flip to false
-// to activate the ROLE_CAPABILITIES matrix.
+// Master switch. While true, hasCapability() returns true for any role
+// (everyone sees/does everything). Now false — the ROLE_CAPABILITIES matrix is
+// active. Flip back to true only as an emergency bypass.
 export const GRANT_ALL_CAPABILITIES = true;
 
 // Canonical, lowercase role identifiers stored in doctors.role.
@@ -85,11 +85,14 @@ export const ROLE_CAPABILITIES = {
     C.SIDE_EFFECTS,
     C.RECEPTION_OPS,
   ],
-  [ROLES.NURSE]: [C.PATIENT_READ, C.VITALS, C.LAB_REQUESTS, C.SIDE_EFFECTS],
-  [ROLES.LAB]: [C.LAB_PORTAL, C.LAB_REQUESTS],
-  [ROLES.TECH]: [C.LAB_PORTAL, C.LAB_REQUESTS],
+  [ROLES.NURSE]: [C.PATIENT_READ, C.VITALS, C.LAB_REQUESTS, C.REFILLS, C.SIDE_EFFECTS],
+  // Lab/tech need PATIENT_READ so they can look up whose report they're
+  // uploading (Find + chart), on top of the lab upload/request capabilities.
+  [ROLES.LAB]: [C.PATIENT_READ, C.LAB_PORTAL, C.LAB_REQUESTS],
+  [ROLES.TECH]: [C.PATIENT_READ, C.LAB_PORTAL, C.LAB_REQUESTS],
   [ROLES.RECEPTION]: [C.PATIENT_READ, C.LAB_REQUESTS, C.REFILLS, C.RECEPTION_OPS, C.MED_COLLECTION],
-  [ROLES.COORDINATOR]: [C.PATIENT_READ, C.RECEPTION_OPS],
+  // Coordinators run GHM ops/calling and need Genie Chats with patients.
+  [ROLES.COORDINATOR]: [C.PATIENT_READ, C.AI_TOOLS, C.RECEPTION_OPS],
   [ROLES.PHARMACY]: [C.PATIENT_READ, C.REFILLS, C.DOSE_REVIEWS, C.MED_COLLECTION],
   [ROLES.GUEST]: [],
 };

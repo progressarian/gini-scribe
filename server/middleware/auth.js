@@ -123,6 +123,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/ai", CAP.AI_TOOLS],
   ["/api/genie-chats", CAP.AI_TOOLS],
   ["/api/genie-patients", CAP.AI_TOOLS],
+  ["/api/app-patients", CAP.AI_TOOLS],
   ["/api/refill-requests", CAP.REFILLS],
   ["/api/dose-change-requests", CAP.DOSE_REVIEWS],
   ["/api/lab-requests", CAP.LAB_REQUESTS],

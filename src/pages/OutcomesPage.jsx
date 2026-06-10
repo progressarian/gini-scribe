@@ -979,17 +979,17 @@ export default function OutcomesPage() {
                               const duration =
                                 s.dates.length >= 2
                                   ? (() => {
-                                    const first = new Date(s.dates[0]);
-                                    const last = new Date(s.dates[s.dates.length - 1]);
-                                    const days = Math.round(
-                                      (last - first) / (1000 * 60 * 60 * 24),
-                                    );
-                                    return days > 365
-                                      ? `${Math.round(days / 365)}y`
-                                      : days > 30
-                                        ? `${Math.round(days / 30)}mo`
-                                        : `${days}d`;
-                                  })()
+                                      const first = new Date(s.dates[0]);
+                                      const last = new Date(s.dates[s.dates.length - 1]);
+                                      const days = Math.round(
+                                        (last - first) / (1000 * 60 * 60 * 24),
+                                      );
+                                      return days > 365
+                                        ? `${Math.round(days / 365)}y`
+                                        : days > 30
+                                          ? `${Math.round(days / 30)}mo`
+                                          : `${days}d`;
+                                    })()
                                   : "";
                               return (
                                 <div
@@ -1063,7 +1063,7 @@ export default function OutcomesPage() {
                                           background:
                                             (Date.now() - new Date(d).getTime()) /
                                               (1000 * 60 * 60 * 24) <
-                                              30
+                                            30
                                               ? "#dc2626"
                                               : "#fca5a5",
                                         }}
@@ -1650,7 +1650,7 @@ export default function OutcomesPage() {
                               >
                                 {typeof ev.summary === "string"
                                   ? ev.summary.slice(0, 200) +
-                                  (ev.summary.length > 200 ? "..." : "")
+                                    (ev.summary.length > 200 ? "..." : "")
                                   : ""}
                               </div>
                             )}
