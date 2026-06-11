@@ -242,6 +242,9 @@ const useLabStore = create((set, get) => ({
       if (savedDoc.id && data && (data.panels || data.medications)) {
         await api
           .patch(`/api/documents/${savedDoc.id}`, { extracted_data: data })
+          .then((r) => {
+            if (r.data?.warnings?.future_dates?.length) toast(r.data.warnings.message, "warn");
+          })
           .catch((e) => console.warn("PATCH extracted_data failed:", e.message));
       }
       set((state) => ({

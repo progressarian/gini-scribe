@@ -18,7 +18,7 @@ export const LAB_PROMPT = `Extract ALL test results from this lab report image. 
 {"lab_name":"name of laboratory/hospital that performed tests","report_date":"YYYY-MM-DD","collection_date":"YYYY-MM-DD or null","patient_on_report":{"name":"","age":"","sex":"","patient_id":""},"panels":[{"panel_name":"Panel","tests":[{"test_name":"","result":0.0,"result_text":null,"unit":"","flag":null,"ref_range":""}]}]}
 CRITICAL RULES:
 - Extract EVERY test result on the report without exception, even if there are more than 50 tests. Do not skip or truncate.
-- report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD.
+- report_date: MUST extract the date tests were performed/collected/reported. Look for "Date:", "Report Date:", "Sample Date:", "Collection Date:" in the header. Format as YYYY-MM-DD. A lab report date can NEVER be in the future — if the year you read looks later than the current year, you have misread a digit; re-read it carefully (e.g. a "6" misread as an "8"). Do NOT output a future date.
 - lab_name: Extract the laboratory/hospital name from the report header.
 - test_name: Use SHORT STANDARD names. Map to these canonical names when applicable:
   HbA1c, FBS, PPBS, Fasting Insulin, C-Peptide, Mean Plasma Glucose, RBS, Fructosamine,

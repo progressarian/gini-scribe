@@ -574,7 +574,10 @@ const useCompanionStore = create((set, get) => ({
         ? { ...extraction._rawExtraction }
         : { ...extraction };
       if (payload.extraction_status === "pending") delete payload.extraction_status;
-      await api.patch(`/api/documents/${docId}`, { extracted_data: payload });
+      const patchRes = await api.patch(`/api/documents/${docId}`, { extracted_data: payload });
+      if (patchRes.data?.warnings?.future_dates?.length) {
+        toast(patchRes.data.warnings.message, "warn");
+      }
 
       get()._clearPending(docId);
       queryClient.invalidateQueries({ queryKey: qk.companion.patient(patientId) });
@@ -691,7 +694,10 @@ const useCompanionStore = create((set, get) => ({
         ? { ...extraction._rawExtraction }
         : { ...extraction };
       if (payload.extraction_status === "pending") delete payload.extraction_status;
-      await api.patch(`/api/documents/${docId}`, { extracted_data: payload });
+      const patchRes = await api.patch(`/api/documents/${docId}`, { extracted_data: payload });
+      if (patchRes.data?.warnings?.future_dates?.length) {
+        toast(patchRes.data.warnings.message, "warn");
+      }
 
       get()._clearPending(docId);
       if (patientId) {

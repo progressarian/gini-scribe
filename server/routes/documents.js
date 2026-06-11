@@ -15,7 +15,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/st
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
 import { getCanonical } from "../utils/labCanonical.js";
-import { parseLabDate } from "../utils/labDate.js";
+import { parseLabDateChecked, isFutureISO, todayISO } from "../utils/labDate.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema, normalizeWhenToTake } from "../schemas/index.js";
 import { fetchMedicalRecords } from "../services/healthray/client.js";
@@ -863,24 +863,43 @@ router.patch("/documents/:id", async (req, res) => {
     const doc = result.rows[0];
 
     // ── Sync extracted lab tests to lab_results table ──
+    const futureWarnings = [];
     if (extracted_data?.panels && doc.patient_id) {
       // Remove previous entries synced from this document
       await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);
 
+      // Build the report-level fallback date but never anchor to a FUTURE date —
+      // a future report_date means the extractor misread the year (see labDate.js).
+      const today = todayISO();
+      const reportDateRaw = extracted_data.report_date || extracted_data.collection_date || null;
+      if (isFutureISO(reportDateRaw, today)) {
+        futureWarnings.push({ test: "Report date", date: reportDateRaw });
+      }
       const fallbackDate =
-        extracted_data.report_date ||
-        extracted_data.collection_date ||
-        (doc.doc_date
-          ? new Date(doc.doc_date).toISOString().split("T")[0]
-          : new Date().toISOString().split("T")[0]);
+        (!isFutureISO(extracted_data.report_date, today) && extracted_data.report_date) ||
+        (!isFutureISO(extracted_data.collection_date, today) && extracted_data.collection_date) ||
+        (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : today);
 
       for (const panel of extracted_data.panels) {
         for (const test of panel.tests || []) {
           if (test.result == null && !test.result_text) continue;
           const numResult = typeof test.result === "number" ? test.result : parseFloat(test.result);
           const canonical = getCanonical(test.test_name) || test.test_name;
-          const testDate = parseLabDate(test.date || test.test_date, fallbackDate);
-          if (!testDate) continue;
+          const { date: testDate, futureDropped } = parseLabDateChecked(
+            test.date || test.test_date,
+            fallbackDate,
+            today,
+          );
+          if (futureDropped) {
+            futureWarnings.push({ test: test.test_name, date: test.date || test.test_date });
+          }
+          // Hard guard: never insert a missing or future-dated lab result.
+          if (!testDate || isFutureISO(testDate, today)) {
+            if (isFutureISO(testDate, today)) {
+              futureWarnings.push({ test: test.test_name, date: testDate });
+            }
+            continue;
+          }
 
           // Skip if (patient, canonical, date) already exists from any source —
           // one value per test per day, regardless of which document/path put it there.
@@ -1091,7 +1110,17 @@ router.patch("/documents/:id", async (req, res) => {
         .catch(() => {});
     }
 
-    res.json(doc);
+    res.json(
+      futureWarnings.length
+        ? {
+            ...doc,
+            warnings: {
+              future_dates: futureWarnings,
+              message: `${futureWarnings.length} result(s) had a future date and were not saved. Please check the report date.`,
+            },
+          }
+        : doc,
+    );
   } catch (e) {
     await client.query("ROLLBACK");
     handleError(res, e, "Document patch");
@@ -1281,20 +1310,31 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
 
       if (extracted?.panels && doc.patient_id) {
         await client.query(`DELETE FROM lab_results WHERE document_id = $1`, [doc.id]);
+        // Never anchor to a FUTURE date — a future report_date means the
+        // extractor misread the year (see labDate.js). Drop future-dated rows.
+        const today = todayISO();
         const fallbackDate =
-          extracted.report_date ||
-          extracted.collection_date ||
-          (doc.doc_date
-            ? new Date(doc.doc_date).toISOString().split("T")[0]
-            : new Date().toISOString().split("T")[0]);
+          (!isFutureISO(extracted.report_date, today) && extracted.report_date) ||
+          (!isFutureISO(extracted.collection_date, today) && extracted.collection_date) ||
+          (doc.doc_date ? new Date(doc.doc_date).toISOString().split("T")[0] : today);
         for (const panel of extracted.panels) {
           for (const test of panel.tests || []) {
             if (test.result == null && !test.result_text) continue;
             const numResult =
               typeof test.result === "number" ? test.result : parseFloat(test.result);
             const canonical = getCanonical(test.test_name) || test.test_name;
-            const testDate = parseLabDate(test.date || test.test_date, fallbackDate);
-            if (!testDate) continue;
+            const { date: testDate, futureDropped } = parseLabDateChecked(
+              test.date || test.test_date,
+              fallbackDate,
+              today,
+            );
+            if (futureDropped || isFutureISO(testDate, today)) {
+              console.warn(
+                `[extract] Dropped future-dated lab "${test.test_name}" (${test.date || test.test_date}) for patient ${doc.patient_id}`,
+              );
+            }
+            // Hard guard: never insert a missing or future-dated lab result.
+            if (!testDate || isFutureISO(testDate, today)) continue;
 
             const { rows: existing } = await client.query(
               `SELECT id FROM lab_results
