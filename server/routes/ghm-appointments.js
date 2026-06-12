@@ -328,41 +328,9 @@ router.get("/ghm-appointments", async (req, res) => {
            THEN (${a}.healthray_follow_up->>'date')::date END
     )`;
 
-    // Two listing modes:
-    //  - followup: patients whose CURRENT advised follow-up date is this date
-    //    (the follow-up calling list), matched on the visit's effective follow-up
-    //    date (any source). Only the patient's LATEST follow-up-bearing visit
-    //    counts, so a stale follow-up from an earlier visit can't drag the
-    //    patient onto a date a more recent visit has already superseded.
-    //  - default: appointments booked on this date OR patients whose preferred
-    //    date is this date.
-    let where =
-      mode === "followup"
-        ? `WHERE ${ownFu("a")} = $1
-             AND (
-               a.file_no IS NULL
-               OR a.appointment_date = (
-                 SELECT MAX(prev.appointment_date)
-                 FROM appointments prev
-                 WHERE prev.file_no = a.file_no
-                   AND ${ownFu("prev")} IS NOT NULL
-               )
-             )`
-        : `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
-    if (doctor) {
-      params.push(`%${doctor}%`);
-      where += ` AND a.doctor_name ILIKE $${params.length}`;
-    }
-    if (status) {
-      params.push(status);
-      where += ` AND a.status = $${params.length}`;
-    }
-
-    const [countR, dataR] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS total FROM appointments a ${where}`, params),
-      pool.query(
-        `SELECT a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
-                (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
+    // Column list shared by every listing query. via_preferred and the per-row
+    // follow-up/status date differ per mode, so each query appends its own.
+    const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
                 a.doctor_name, a.patient_name, a.file_no, a.phone,
                 a.visit_type, a.appointment_type, a.booking_source,
                 a.booked_by_name, a.booking_date, a.condition, a.chief_complaint,
@@ -380,7 +348,116 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.healthray_follow_up,
                 a.appointment_type AS mode_of_appointment,
                 COALESCE(a.assigned_mo, c.mo_name) AS assigned_mo,
-                COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by,
+                COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by`;
+    const joins = `FROM appointments a
+         LEFT JOIN patients p ON p.file_no = a.file_no
+         LEFT JOIN consultations c ON c.id = a.consultation_id
+         LEFT JOIN station_tracking st ON st.appointment_id = a.id`;
+
+    // lookup: a date-INDEPENDENT patient search. Type a name / file no / phone and
+    // every matching patient shows up (one row each — their latest visit) with their
+    // current follow-up/booking status, regardless of which date is selected. This is
+    // how a patient who forgot to book a follow-up is found: they appear here even
+    // though they are on no date's calling list. follow_up_date here = the patient's
+    // soonest upcoming booking or advised follow-up; NULL = nothing booked.
+    if (mode === "lookup") {
+      const q = (req.query.q || "").trim();
+      const lim = Math.min(100, +limit);
+      if (q.length < 2) {
+        return res.json({ data: [], total: 0, page: +page, limit: lim });
+      }
+      const like = `%${q}%`;
+      const searchWhere = `WHERE (a.patient_name ILIKE $1 OR a.file_no ILIKE $1 OR a.phone ILIKE $1)`;
+      const statusExpr = `(
+        SELECT MIN(x) FROM (
+          SELECT up.appointment_date AS x FROM appointments up
+            WHERE up.file_no = a.file_no AND a.file_no IS NOT NULL AND up.appointment_date >= $2
+          UNION ALL
+          SELECT ${ownFu("fu")} AS x FROM appointments fu
+            WHERE fu.file_no = a.file_no AND a.file_no IS NOT NULL AND ${ownFu("fu")} >= $2
+        ) s
+      )`;
+      const [countR, dataR] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(*)::int AS total FROM (
+             SELECT DISTINCT COALESCE(a.file_no, a.id::text) FROM appointments a ${searchWhere}
+           ) z`,
+          [like],
+        ),
+        pool.query(
+          `SELECT * FROM (
+             SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
+                    ${baseCols},
+                    FALSE AS via_preferred,
+                    ${statusExpr} AS follow_up_date
+             ${joins}
+             ${searchWhere}
+             ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
+           ) t
+           ORDER BY t.patient_name ASC
+           LIMIT $3 OFFSET $4`,
+          [like, d, lim, offset],
+        ),
+      ]);
+      return res.json({
+        data: dataR.rows,
+        total: countR.rows[0]?.total || 0,
+        page: +page,
+        limit: lim,
+      });
+    }
+
+    // Two date-based listing modes:
+    //  - followup: patients whose CURRENT advised follow-up date is this date
+    //    (the follow-up calling list), matched on the visit's effective follow-up
+    //    date (any source). Only the patient's LATEST follow-up-bearing visit
+    //    counts, so a stale follow-up from an earlier visit can't drag the
+    //    patient onto a date a more recent visit has already superseded.
+    //    PLUS any visit whose preferred_date is this date — if the patient asked
+    //    to come on the 13th while their advised follow-up is the 18th, they need
+    //    to show on the 13th's calling list too.
+    //  - default: appointments booked on this date OR patients whose preferred
+    //    date is this date.
+    let where;
+    const orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC`;
+    if (mode === "followup") {
+      // Logically: (follow-up due on $1 AND it's the latest follow-up visit)
+      //            OR (preferred_date is $1).
+      // Written as two ANDed OR-groups so the planner filters to the small set of
+      // rows matching $1 FIRST (both predicates are cheap, non-subquery), and only
+      // then evaluates the correlated "latest visit" subquery for that handful —
+      // an `(… OR preferred_date)` at the top level made it scan the whole table.
+      where = `WHERE (${ownFu("a")} = $1 OR a.preferred_date = $1)
+             AND (
+               a.preferred_date = $1
+               OR a.file_no IS NULL
+               OR a.appointment_date = (
+                 SELECT MAX(prev.appointment_date)
+                 FROM appointments prev
+                 WHERE prev.file_no = a.file_no
+                   AND ${ownFu("prev")} IS NOT NULL
+               )
+             )`;
+    } else {
+      where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
+    }
+    if (doctor) {
+      // Filter by doctor matches EITHER the appointment's doctor OR the patient's
+      // preferred doctor — so re-assigning a preferred doctor surfaces the patient
+      // under that doctor's filter.
+      params.push(`%${doctor}%`);
+      where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;
+    }
+    if (status) {
+      params.push(status);
+      where += ` AND a.status = $${params.length}`;
+    }
+
+    const [countR, dataR] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS total FROM appointments a ${where}`, params),
+      pool.query(
+        `SELECT ${baseCols},
+                (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced
                 --      HealthRay appointment value, or prescription-extracted date —
@@ -403,12 +480,9 @@ router.get("/ghm-appointments", async (req, res) => {
                    ORDER BY prev.appointment_date DESC
                    LIMIT 1)
                 ) AS follow_up_date
-         FROM appointments a
-         LEFT JOIN patients p ON p.file_no = a.file_no
-         LEFT JOIN consultations c ON c.id = a.consultation_id
-         LEFT JOIN station_tracking st ON st.appointment_id = a.id
+         ${joins}
          ${where}
-         ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC
+         ${orderBy}
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, Math.min(100, +limit), offset],
       ),

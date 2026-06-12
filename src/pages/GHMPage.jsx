@@ -36,6 +36,7 @@ const VIEW_TABS = [
   { id: "by_date", label: "📅 By Date", offset: null },
   { id: "tomorrow", label: "🌅 Tomorrow", offset: 1 },
   { id: "fu3", label: "📞 Follow-up in 3 Days", offset: 3 },
+  { id: "lookup", label: "🔎 Patient Lookup", offset: null },
   { id: "reassign", label: "🔄 Reassign Needed", offset: null },
 ];
 
@@ -1010,6 +1011,8 @@ export default function GHMPage() {
   const [newPrefill, setNewPrefill] = useState(null);
   const [doctor, setDoctor] = useState("All");
   const [doctors, setDoctors] = useState([]);
+  // Debounced copy of `search` — drives the date-independent Patient Lookup fetch
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [ccAgents, setCcAgents] = useState([]);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
@@ -1038,8 +1041,21 @@ export default function GHMPage() {
     else setDate(todayStr());
   };
 
+  // Patient Lookup is search-driven and ignores the date; everywhere else the
+  // search box just filters the already-loaded date list on the client.
+  const lookupQ = view === "lookup" ? debouncedSearch.trim() : "";
+
   // ── Fetch ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
+    // Lookup tab: nothing to show until the user types a real query. Don't hit
+    // the backend (and don't carry over rows from a previous tab).
+    if (view === "lookup" && lookupQ.length < 2) {
+      setRows([]);
+      setBiomarkers({});
+      setAttemptCounts({});
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const p = new URLSearchParams({ date, limit: 200 });
@@ -1048,6 +1064,14 @@ export default function GHMPage() {
       // whose follow-up is DUE on this date (matched on follow_up_date), not
       // appointments booked that day. Only "By Date" lists booked appointments.
       if (view === "tomorrow" || view === "fu3") p.set("mode", "followup");
+      // Patient Lookup: a date-INDEPENDENT search by name / file no / phone. The
+      // patient shows up with their current follow-up/booking status no matter
+      // which date is selected — this is how someone who forgot to book a
+      // follow-up is found (they're on no date's calling list).
+      if (view === "lookup") {
+        p.set("mode", "lookup");
+        p.set("q", lookupQ);
+      }
       const res = await api(`/api/ghm-appointments?${p}`);
       const data = safeArr(res?.data);
       setRows(data);
@@ -1080,11 +1104,17 @@ export default function GHMPage() {
     } finally {
       setLoading(false);
     }
-  }, [date, doctor, view]);
+  }, [date, doctor, view, lookupQ]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Debounce the search box so the Patient Lookup fetch fires after typing stops.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // ── Patch one field on an appointment row ────────────────────────────────
   const patch = useCallback(async (id, field, value) => {
@@ -1112,16 +1142,21 @@ export default function GHMPage() {
   );
 
   // ── Search ────────────────────────────────────────────────────────────────
-  const visible = rows.filter((r) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      r.patient_name?.toLowerCase().includes(q) ||
-      r.file_no?.toLowerCase().includes(q) ||
-      r.phone?.includes(q) ||
-      r.condition?.toLowerCase().includes(q)
-    );
-  });
+  // On the Patient Lookup tab the backend already searched (across all dates),
+  // so show its rows as-is. Other tabs filter the loaded date list client-side.
+  const visible =
+    view === "lookup"
+      ? rows
+      : rows.filter((r) => {
+          if (!search) return true;
+          const q = search.toLowerCase();
+          return (
+            r.patient_name?.toLowerCase().includes(q) ||
+            r.file_no?.toLowerCase().includes(q) ||
+            r.phone?.includes(q) ||
+            r.condition?.toLowerCase().includes(q)
+          );
+        });
 
   const isToday = date === todayStr();
   // Per-tab column visibility
@@ -1164,7 +1199,9 @@ export default function GHMPage() {
           <span className="ghm__datelab">{isToday ? "Today" : prettyDate(date)}</span>
         </div>
         <div className="ghm__controls">
-          {view === "tomorrow" ? (
+          {/* Patient Lookup ignores the date and the doctor filter — it searches
+              every patient by name / file no / phone, so those controls are hidden. */}
+          {view === "lookup" ? null : view === "tomorrow" ? (
             <span className="ctrl ctrl--readonly">{prettyDate(date)}</span>
           ) : (
             <input
@@ -1175,11 +1212,17 @@ export default function GHMPage() {
               className="ctrl"
             />
           )}
-          <DocDropdown value={doctor} options={doctors} onChange={setDoctor} />
+          {view !== "lookup" && (
+            <DocDropdown value={doctor} options={doctors} onChange={setDoctor} />
+          )}
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="🔍 Search patient, file no…"
+            placeholder={
+              view === "lookup"
+                ? "🔎 Search any patient — name, file no, phone (ignores date)"
+                : "🔍 Search patient, file no…"
+            }
             className="ctrl ctrl--search"
           />
           <button
@@ -1252,7 +1295,20 @@ export default function GHMPage() {
           )}
 
           {/* ── Empty ── */}
-          {!loading && visible.length === 0 && (
+          {!loading && visible.length === 0 && view === "lookup" && (
+            <div className="ghm__empty">
+              <div className="ghm__empty-icon">🔎</div>
+              <div className="ghm__empty-title">
+                {lookupQ.length < 2 ? "Search a patient to begin" : "No patient found"}
+              </div>
+              <div className="ghm__empty-sub">
+                {lookupQ.length < 2
+                  ? "Type a name, file number, or phone. Results aren't filtered by date — any patient appears with their current follow-up/booking status."
+                  : "No patient matches that name, file number, or phone."}
+              </div>
+            </div>
+          )}
+          {!loading && visible.length === 0 && view !== "lookup" && (
             <div className="ghm__empty">
               <div className="ghm__empty-icon">📋</div>
               <div className="ghm__empty-title">
