@@ -117,8 +117,11 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       // Persist back to appointments so future fetches see it.
       if (appointmentId) {
         pool
+          // post_visit_summary is a jsonb column — a bare summary string isn't
+          // valid JSON, so JSON.stringify it into a JSON string value (the read
+          // path in buildPrescriptionData unwraps it back to a plain string).
           .query("UPDATE appointments SET post_visit_summary=$1 WHERE id=$2", [
-            summaryResult.body,
+            JSON.stringify(summaryResult.body),
             appointmentId,
           ])
           .catch((e) =>

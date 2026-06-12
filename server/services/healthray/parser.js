@@ -593,7 +593,10 @@ export const PrescriptionSchema = z.object({
       name: z.string(),
       details: z.string(),
       since: z.string(),
-      status: z.enum(["Present", "Absent"]),
+      // .catch() so a rare off-enum value from the model defaults to "Present"
+      // instead of throwing and discarding the ENTIRE parsed note (all
+      // diagnoses + meds). A single mislabelled status beats losing everything.
+      status: z.enum(["Present", "Absent"]).catch("Present"),
     }),
   ),
   labs: z.array(
@@ -650,7 +653,9 @@ export const PrescriptionSchema = z.object({
       form: z.string(),
       dose: z.string(),
       frequency: z.string(),
-      status: z.enum(["stopped", "changed"]),
+      // .catch() — same rationale as diagnoses.status: never let one bad enum
+      // value discard the whole parsed note.
+      status: z.enum(["stopped", "changed"]).catch("stopped"),
       reason: z.string(),
     }),
   ),
