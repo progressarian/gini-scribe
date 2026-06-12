@@ -1020,7 +1020,12 @@ export default function GHMPage() {
   const [attemptCounts, setAttemptCounts] = useState({}); // { appointment_id: count }
   const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1); // last page loaded into `rows`
+  const [totalPages, setTotalPages] = useState(1); // total pages for the current query
+  const [total, setTotal] = useState(0); // total rows matching the current query
   const [saving, setSaving] = useState({});
+  const PAGE_SIZE = 50;
 
   // ── Load doctors + CC agents once on mount ───────────────────────────────
   useEffect(() => {
@@ -1046,69 +1051,83 @@ export default function GHMPage() {
   const lookupQ = view === "lookup" ? debouncedSearch.trim() : "";
 
   // ── Fetch ────────────────────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    // Lookup tab: nothing to show until the user types a real query. Don't hit
-    // the backend (and don't carry over rows from a previous tab).
-    if (view === "lookup" && lookupQ.length < 2) {
-      setRows([]);
-      setBiomarkers({});
-      setAttemptCounts({});
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const p = new URLSearchParams({ date, limit: 200 });
-      if (doctor !== "All") p.set("doctor", doctor);
-      // The Tomorrow and Follow-up tabs are follow-up calling lists: patients
-      // whose follow-up is DUE on this date (matched on follow_up_date), not
-      // appointments booked that day. Only "By Date" lists booked appointments.
-      if (view === "tomorrow" || view === "fu3") p.set("mode", "followup");
-      // Patient Lookup: a date-INDEPENDENT search by name / file no / phone. The
-      // patient shows up with their current follow-up/booking status no matter
-      // which date is selected — this is how someone who forgot to book a
-      // follow-up is found (they're on no date's calling list).
-      if (view === "lookup") {
-        p.set("mode", "lookup");
-        p.set("q", lookupQ);
-      }
-      const res = await api(`/api/ghm-appointments?${p}`);
-      const data = safeArr(res?.data);
-      setRows(data);
-
-      // Fetch biomarkers for all patients in one batch call
-      const pids = [...new Set(data.map((r) => r.patient_id).filter(Boolean))];
-      if (pids.length) {
-        api("/api/ghm-appointments/biomarkers", {
-          method: "POST",
-          body: JSON.stringify({ patient_ids: pids }),
-        })
-          .then((bm) => setBiomarkers(bm || {}))
-          .catch(() => setBiomarkers({}));
-      } else {
+  // Fetch one page. pageNum === 1 replaces the list; higher pages append (the
+  // "Load More" pattern used elsewhere in the app, e.g. FindPage).
+  const fetchPage = useCallback(
+    async (pageNum, append) => {
+      // Lookup tab: nothing to show until the user types a real query. Don't hit
+      // the backend (and don't carry over rows from a previous tab).
+      if (view === "lookup" && lookupQ.length < 2) {
+        setRows([]);
         setBiomarkers({});
-      }
-
-      // Fetch call-attempt counts for the badge (one batch call)
-      const apptIds = data.map((r) => r.id).filter(Boolean);
-      if (apptIds.length) {
-        api("/api/call-attempts/counts", {
-          method: "POST",
-          body: JSON.stringify({ appointment_ids: apptIds }),
-        })
-          .then((c) => setAttemptCounts(c || {}))
-          .catch(() => setAttemptCounts({}));
-      } else {
         setAttemptCounts({});
+        setPage(1);
+        setTotalPages(1);
+        setTotal(0);
+        setLoading(false);
+        return;
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [date, doctor, view, lookupQ]);
+      append ? setLoadingMore(true) : setLoading(true);
+      try {
+        const p = new URLSearchParams({ date, limit: PAGE_SIZE, page: pageNum });
+        if (doctor !== "All") p.set("doctor", doctor);
+        // The Tomorrow and Follow-up tabs are follow-up calling lists: patients
+        // whose follow-up is DUE on this date (matched on follow_up_date), not
+        // appointments booked that day. Only "By Date" lists booked appointments.
+        if (view === "tomorrow" || view === "fu3") p.set("mode", "followup");
+        // Patient Lookup: a date-INDEPENDENT search by name / file no / phone. The
+        // patient shows up with their current follow-up/booking status no matter
+        // which date is selected — this is how someone who forgot to book a
+        // follow-up is found (they're on no date's calling list).
+        if (view === "lookup") {
+          p.set("mode", "lookup");
+          p.set("q", lookupQ);
+        }
+        const res = await api(`/api/ghm-appointments?${p}`);
+        const data = safeArr(res?.data);
+        setRows((prev) => (append ? [...prev, ...data] : data));
+        setPage(res?.page || pageNum);
+        setTotalPages(res?.totalPages || 1);
+        setTotal(res?.total || 0);
 
+        // Fetch biomarkers for the new patients (merge on append)
+        const pids = [...new Set(data.map((r) => r.patient_id).filter(Boolean))];
+        if (pids.length) {
+          api("/api/ghm-appointments/biomarkers", {
+            method: "POST",
+            body: JSON.stringify({ patient_ids: pids }),
+          })
+            .then((bm) => setBiomarkers((prev) => (append ? { ...prev, ...bm } : bm || {})))
+            .catch(() => !append && setBiomarkers({}));
+        } else if (!append) {
+          setBiomarkers({});
+        }
+
+        // Fetch call-attempt counts for the badge (merge on append)
+        const apptIds = data.map((r) => r.id).filter(Boolean);
+        if (apptIds.length) {
+          api("/api/call-attempts/counts", {
+            method: "POST",
+            body: JSON.stringify({ appointment_ids: apptIds }),
+          })
+            .then((c) => setAttemptCounts((prev) => (append ? { ...prev, ...c } : c || {})))
+            .catch(() => !append && setAttemptCounts({}));
+        } else if (!append) {
+          setAttemptCounts({});
+        }
+      } finally {
+        append ? setLoadingMore(false) : setLoading(false);
+      }
+    },
+    [date, doctor, view, lookupQ],
+  );
+
+  // (Re)load page 1 whenever the query (tab/date/doctor/search) changes.
   useEffect(() => {
-    load();
-  }, [load]);
+    fetchPage(1, false);
+  }, [fetchPage]);
+
+  const loadMore = useCallback(() => fetchPage(page + 1, true), [fetchPage, page]);
 
   // Debounce the search box so the Patient Lookup fetch fires after typing stops.
   useEffect(() => {
@@ -1268,7 +1287,7 @@ export default function GHMPage() {
           onCreated={(createdDate) => {
             setShowNew(false);
             setNewPrefill(null);
-            if (createdDate === date) load();
+            if (createdDate === date) fetchPage(1, false);
             else setDate(createdDate);
           }}
         />
@@ -1701,7 +1720,7 @@ export default function GHMPage() {
                             onLogged={() => {
                               // refresh badge count + row summary after logging
                               setAttemptCounts((c) => ({ ...c, [row.id]: (c[row.id] || 0) + 1 }));
-                              load();
+                              fetchPage(1, false);
                             }}
                             onDeleted={() => {
                               // refresh badge count + row summary after delete
@@ -1709,7 +1728,7 @@ export default function GHMPage() {
                                 ...c,
                                 [row.id]: Math.max(0, (c[row.id] || 0) - 1),
                               }));
-                              load();
+                              fetchPage(1, false);
                             }}
                           />
                         )}
@@ -1718,6 +1737,25 @@ export default function GHMPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* ── Load more (pagination) ── */}
+          {!loading && rows.length > 0 && (
+            <div className="ghm__load-more">
+              {page < totalPages ? (
+                <button
+                  className="ghm__load-more-btn"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? "Loading…" : `Load More (${rows.length} of ${total})`}
+                </button>
+              ) : (
+                rows.length > PAGE_SIZE && (
+                  <div className="ghm__load-more-end">— Showing all {total} —</div>
+                )
+              )}
             </div>
           )}
         </>

@@ -1239,3 +1239,36 @@
   padding: 0 6px;
   align-self: flex-start;
 }
+
+/* Load more (pagination) — mirrors the FindPage pattern */
+.ghm__load-more {
+  text-align: center;
+  padding: 14px;
+}
+
+.ghm__load-more-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 8px 24px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ghm__load-more-btn:hover {
+  background: #e2e8f0;
+}
+
+.ghm__load-more-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ghm__load-more-end {
+  text-align: center;
+  padding: 10px;
+  font-size: 11px;
+  color: #cbd5e1;
+}

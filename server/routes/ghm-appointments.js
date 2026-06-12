@@ -310,7 +310,8 @@ router.get("/ghm-appointments", async (req, res) => {
   try {
     const { date, doctor, status, mode, page = 1, limit = 50 } = req.query;
     const d = date || new Date().toISOString().split("T")[0];
-    const offset = (Math.max(1, +page) - 1) * Math.min(100, +limit);
+    const effLimit = Math.min(100, Math.max(1, +limit || 50));
+    const offset = (Math.max(1, +page) - 1) * effLimit;
 
     const params = [d];
 
@@ -362,19 +363,31 @@ router.get("/ghm-appointments", async (req, res) => {
     // soonest upcoming booking or advised follow-up; NULL = nothing booked.
     if (mode === "lookup") {
       const q = (req.query.q || "").trim();
-      const lim = Math.min(100, +limit);
       if (q.length < 2) {
-        return res.json({ data: [], total: 0, page: +page, limit: lim });
+        return res.json({ data: [], total: 0, page: +page, limit: effLimit, totalPages: 0 });
       }
-      const like = `%${q}%`;
-      const searchWhere = `WHERE (a.patient_name ILIKE $1 OR a.file_no ILIKE $1 OR a.phone ILIKE $1)`;
+      // Tokenise on whitespace and require EVERY word to match (in name, file no,
+      // or phone). A single `ILIKE '%surinder jit%'` fails on real data where the
+      // name is stored as "Surinder  jit" (double space) or in another word order;
+      // matching each word independently is robust to spacing and ordering.
+      const tokens = q.split(/\s+/).filter(Boolean).slice(0, 6);
+      const tokenConds = tokens
+        .map(
+          (_, i) =>
+            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1})`,
+        )
+        .join(" AND ");
+      const searchWhere = `WHERE (${tokenConds})`;
+      const likeParams = tokens.map((t) => `%${t}%`);
+      // Param slots after the token params: date (for "upcoming" status), limit, offset.
+      const dIdx = tokens.length + 1;
       const statusExpr = `(
         SELECT MIN(x) FROM (
           SELECT up.appointment_date AS x FROM appointments up
-            WHERE up.file_no = a.file_no AND a.file_no IS NOT NULL AND up.appointment_date >= $2
+            WHERE up.file_no = a.file_no AND a.file_no IS NOT NULL AND up.appointment_date >= $${dIdx}
           UNION ALL
           SELECT ${ownFu("fu")} AS x FROM appointments fu
-            WHERE fu.file_no = a.file_no AND a.file_no IS NOT NULL AND ${ownFu("fu")} >= $2
+            WHERE fu.file_no = a.file_no AND a.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
         ) s
       )`;
       const [countR, dataR] = await Promise.all([
@@ -382,7 +395,7 @@ router.get("/ghm-appointments", async (req, res) => {
           `SELECT COUNT(*)::int AS total FROM (
              SELECT DISTINCT COALESCE(a.file_no, a.id::text) FROM appointments a ${searchWhere}
            ) z`,
-          [like],
+          likeParams,
         ),
         pool.query(
           `SELECT * FROM (
@@ -394,16 +407,21 @@ router.get("/ghm-appointments", async (req, res) => {
              ${searchWhere}
              ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
            ) t
-           ORDER BY t.patient_name ASC
-           LIMIT $3 OFFSET $4`,
-          [like, d, lim, offset],
+           -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
+           -- stable — many patients share an identical name, and ordering by name
+           -- alone lets rows repeat or be skipped across pages.
+           ORDER BY t.patient_name ASC, t.file_no ASC NULLS LAST, t.id ASC
+           LIMIT $${dIdx + 1} OFFSET $${dIdx + 2}`,
+          [...likeParams, d, effLimit, offset],
         ),
       ]);
+      const total = countR.rows[0]?.total || 0;
       return res.json({
         data: dataR.rows,
-        total: countR.rows[0]?.total || 0,
+        total,
         page: +page,
-        limit: lim,
+        limit: effLimit,
+        totalPages: Math.ceil(total / effLimit),
       });
     }
 
@@ -419,7 +437,8 @@ router.get("/ghm-appointments", async (req, res) => {
     //  - default: appointments booked on this date OR patients whose preferred
     //    date is this date.
     let where;
-    const orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC`;
+    // a.id tiebreaker keeps OFFSET paging stable when time_slot/created_at tie.
+    const orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC, a.id ASC`;
     if (mode === "followup") {
       // Logically: (follow-up due on $1 AND it's the latest follow-up visit)
       //            OR (preferred_date is $1).
@@ -484,15 +503,17 @@ router.get("/ghm-appointments", async (req, res) => {
          ${where}
          ${orderBy}
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, Math.min(100, +limit), offset],
+        [...params, effLimit, offset],
       ),
     ]);
 
+    const total = countR.rows[0]?.total || 0;
     res.json({
       data: dataR.rows,
-      total: countR.rows[0]?.total || 0,
+      total,
       page: +page,
-      limit: +limit,
+      limit: effLimit,
+      totalPages: Math.ceil(total / effLimit),
     });
   } catch (e) {
     handleError(res, e, "GHM appointments list");
