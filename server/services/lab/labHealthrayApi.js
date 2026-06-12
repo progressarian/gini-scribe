@@ -17,6 +17,38 @@ let accessToken = process.env.LAB_HEALTHRAY_ACCESS_TOKEN || null;
 let lastLoginAt = 0;
 let loginInFlight = null; // Promise singleton — coalesces concurrent logins
 
+// Circuit-breaker. HealthRay's WAF IP-rate-limits us with a 403 after too many
+// requests (login OR data). Retrying every cron tick (~30s) keeps the limiter
+// tripped indefinitely, so back off exponentially without a network call while
+// the window is open, then recover automatically. Shared by login failures and
+// data-endpoint 403s — they're the same block — and reset on the first success.
+// Mirrors the main HealthRay client's breaker (server/services/healthray/client.js).
+let blockFailCount = 0;
+let blockBackoffUntil = 0;
+const BLOCK_BACKOFF_BASE_MS = 20_000; // 20s, doubles each consecutive failure
+const BLOCK_BACKOFF_MAX_MS = 10 * 60_000; // capped at 10 min
+
+function isBackingOff() {
+  return Date.now() < blockBackoffUntil;
+}
+function backoffRemainingS() {
+  return Math.round((blockBackoffUntil - Date.now()) / 1000);
+}
+function openBreaker(reason) {
+  blockFailCount += 1;
+  const ms = Math.min(BLOCK_BACKOFF_MAX_MS, BLOCK_BACKOFF_BASE_MS * 2 ** (blockFailCount - 1));
+  blockBackoffUntil = Date.now() + ms;
+  log(
+    "Breaker",
+    `${reason} — backing off ${Math.round(ms / 1000)}s (${blockFailCount} consecutive failures)`,
+  );
+}
+function resetBreaker() {
+  if (blockFailCount) log("Breaker", "Lab API recovered — back-off cleared");
+  blockFailCount = 0;
+  blockBackoffUntil = 0;
+}
+
 // Tokens have empirically lasted well over an hour, but long batch runs
 // (the resync script) can outlast them. Refresh proactively before that
 // becomes a problem — the puppeteer path can't auto-401-retry like labFetch.
@@ -83,50 +115,67 @@ async function doLogin() {
     );
   }
 
+  // Circuit-breaker: while backing off after recent blocks, fail fast WITHOUT
+  // hitting the network so we stop hammering a rate-limited endpoint. (Checked
+  // here, not in openBreaker, so polling never extends the window.)
+  if (isBackingOff()) {
+    throw new Error(
+      `Lab login backing off (${blockFailCount} consecutive failures) — next attempt in ~${backoffRemainingS()}s`,
+    );
+  }
+
   log("Login", `Logging in as ${mobile}...`);
 
-  const res = await fetchWithTimeout(
-    `${LAB_API_BASE}/user/sign_in`,
-    {
-      method: "POST",
-      headers: {
-        accept: "*/*",
-        "content-type": "application/json",
-        origin: "https://lab.healthray.com",
-        "x-auth-token": "null",
-        "x-device-token": DEVICE_TOKEN,
+  try {
+    const res = await fetchWithTimeout(
+      `${LAB_API_BASE}/user/sign_in`,
+      {
+        method: "POST",
+        headers: {
+          accept: "*/*",
+          "content-type": "application/json",
+          origin: "https://lab.healthray.com",
+          "x-auth-token": "null",
+          "x-device-token": DEVICE_TOKEN,
+        },
+        body: JSON.stringify({
+          mobile_number: mobile,
+          country_code: countryCode,
+          password,
+        }),
       },
-      body: JSON.stringify({
-        mobile_number: mobile,
-        country_code: countryCode,
-        password,
-      }),
-    },
-    LAB_TIMEOUT_MS,
-  );
+      LAB_TIMEOUT_MS,
+    );
 
-  const json = await res.json().catch(() => ({}));
+    const json = await res.json().catch(() => ({}));
 
-  if (json.status !== 200) {
-    throw new Error(`Lab login failed: ${json.message || `HTTP ${res.status}`}`);
+    if (json.status !== 200) {
+      throw new Error(
+        `Lab login failed: ${json.message || `HTTP ${res.status}`} [http=${res.status}]`,
+      );
+    }
+
+    // Tokens are in json.data
+    const data = json.data || json;
+    const newAuthToken = data.authentication_token || data.healthray_auth_token || null;
+    const newAccessToken = data.healthray_access_token || null;
+
+    if (!newAuthToken) {
+      log("Login", `Response keys: ${Object.keys(data).join(", ")}`);
+      throw new Error("Lab login succeeded but could not find auth token in response");
+    }
+
+    authToken = newAuthToken;
+    if (newAccessToken) accessToken = newAccessToken;
+    lastLoginAt = Date.now();
+    resetBreaker();
+
+    log("Login", "Tokens refreshed successfully");
+    return { authToken, accessToken };
+  } catch (e) {
+    openBreaker(`login failed: ${e.message}`);
+    throw e;
   }
-
-  // Tokens are in json.data
-  const data = json.data || json;
-  const newAuthToken = data.authentication_token || data.healthray_auth_token || null;
-  const newAccessToken = data.healthray_access_token || null;
-
-  if (!newAuthToken) {
-    log("Login", `Response keys: ${Object.keys(data).join(", ")}`);
-    throw new Error("Lab login succeeded but could not find auth token in response");
-  }
-
-  authToken = newAuthToken;
-  if (newAccessToken) accessToken = newAccessToken;
-  lastLoginAt = Date.now();
-
-  log("Login", "Tokens refreshed successfully");
-  return { authToken, accessToken };
 }
 
 // Refresh tokens if missing or older than TOKEN_MAX_AGE_MS — used by the
@@ -139,6 +188,15 @@ async function ensureFreshTokens() {
 
 // ── Core fetch with auto-retry on 401 ───────────────────────────────────────
 async function labFetch(path, isRetry = false) {
+  // Circuit-breaker: while the lab API is blocking us (IP rate-limit 403), fail
+  // fast WITHOUT a network call so the cron stops hammering and the block can
+  // clear. Auto-recovers after the back-off window.
+  if (isBackingOff()) {
+    throw new Error(
+      `Lab API backing off (${blockFailCount} consecutive failures) — next attempt in ~${backoffRemainingS()}s`,
+    );
+  }
+
   // Auto-login if no token in memory yet
   if (!authToken) {
     await labLogin();
@@ -157,10 +215,19 @@ async function labFetch(path, isRetry = false) {
     return labFetch(path, true);
   }
 
+  // 403 = HealthRay WAF / IP rate-limit, NOT a token problem — re-login can't
+  // fix it and only feeds the limiter. Open the breaker so subsequent cron
+  // ticks fail fast until the window clears.
+  if (res.status === 403) {
+    openBreaker(`HTTP 403 at ${path}`);
+    throw new Error(`Lab API HTTP 403 at ${path}`);
+  }
+
   if (!res.ok) throw new Error(`Lab API HTTP ${res.status} at ${path}`);
 
   const json = await res.json();
   if (json.status !== 200) throw new Error(`Lab API error: ${json.message}`);
+  resetBreaker(); // a successful fetch proves the block has cleared
   return json.data;
 }
 
