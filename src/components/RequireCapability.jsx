@@ -11,10 +11,26 @@ import { hasCapability } from "../../shared/permissions";
 // lacks the capability, redirects to Home with a toast. While the master switch
 // in shared/permissions.js is on, hasCapability() is true for everyone, so this
 // never blocks — it activates once you tune the matrix.
+// Exact match first; else the longest registered prefix (so dynamic segments
+// like /flow/station/:role inherit the gate on /flow/station). Existing static
+// routes always hit the exact branch, so their behavior is unchanged.
+function capForPath(pathname) {
+  if (pathname in PAGE_CAPABILITIES) return PAGE_CAPABILITIES[pathname];
+  let best = null;
+  let bestLen = -1;
+  for (const key in PAGE_CAPABILITIES) {
+    if (pathname.startsWith(key + "/") && key.length > bestLen) {
+      best = PAGE_CAPABILITIES[key];
+      bestLen = key.length;
+    }
+  }
+  return best;
+}
+
 export default function RequireCapability() {
   const location = useLocation();
   const role = useAuthStore((s) => s.currentDoctor?.role);
-  const requiredCap = PAGE_CAPABILITIES[location.pathname];
+  const requiredCap = capForPath(location.pathname);
   const allowed = !requiredCap || hasCapability(role, requiredCap);
 
   useEffect(() => {

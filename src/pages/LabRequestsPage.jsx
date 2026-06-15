@@ -2,6 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import useAuthStore from "../stores/authStore.js";
+import StationQueue from "../components/flow/StationQueue.jsx";
+
+// Top-level view toggle style (approval inbox vs live lab execution queue).
+const toggleStyle = (active) => ({
+  cursor: "pointer",
+  padding: "8px 16px",
+  borderRadius: 8,
+  border: `1px solid ${active ? "#1e293b" : "#e2e8f0"}`,
+  background: active ? "#1e293b" : "#fff",
+  color: active ? "#fff" : "#334155",
+  fontWeight: 700,
+  fontSize: 13,
+});
 
 // Doctor's review queue for patient-initiated lab test bookings.
 // Mirrors the DoseChangeRequestsPage layout so the two stay visually
@@ -41,6 +54,7 @@ export default function LabRequestsPage() {
   const reviewerName = currentDoctor?.name || currentDoctor?.email || "";
 
   const [status, setStatus] = useState("pending");
+  const [view, setView] = useState("requests"); // "requests" (approvals) | "flow" (live lab queue)
 
   const listQuery = useQuery({
     queryKey: ["labRequests", "list", status],
@@ -122,79 +136,105 @@ export default function LabRequestsPage() {
         </button>
       </div>
 
-      {/* Status tabs */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
-        {STATUS_TABS.map((t) => {
-          const active = status === t.value;
-          return (
-            <button
-              key={t.value}
-              onClick={() => setStatus(t.value)}
-              style={{
-                cursor: "pointer",
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: `1px solid ${active ? t.color : t.border}`,
-                background: active ? t.color : t.bg,
-                color: active ? "#fff" : t.color,
-                fontWeight: 700,
-                fontSize: 12.5,
-                textAlign: "left",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <span>{t.label}</span>
-              <span
-                style={{
-                  fontSize: 14,
-                  fontWeight: 800,
-                  background: active ? "rgba(255,255,255,0.2)" : "#fff",
-                  color: active ? "#fff" : t.color,
-                  padding: "2px 8px",
-                  borderRadius: 8,
-                }}
-              >
-                {stats[t.value] ?? 0}
-              </span>
-            </button>
-          );
-        })}
+      {/* View toggle: approval inbox vs live lab execution queue (flow module) */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button onClick={() => setView("requests")} style={toggleStyle(view === "requests")}>
+          🧪 Approvals
+        </button>
+        <button onClick={() => setView("flow")} style={toggleStyle(view === "flow")}>
+          🔴 Live Lab Queue
+        </button>
       </div>
 
-      {/* Request list */}
-      {listQuery.isLoading ? (
-        <div style={{ padding: 30, textAlign: "center", color: "#64748b", fontSize: 13 }}>
-          Loading…
+      {view === "flow" && (
+        // .flow-root scopes the flow design tokens StationQueue needs, without
+        // the full-page chrome (padding/background reset to fit this page).
+        <div className="flow-root" style={{ padding: 0, minHeight: 0, background: "transparent" }}>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+            Patients in today's flow whose next step is at the lab. Call one in, record the
+            result/sample, then advance them to their next station.
+          </div>
+          <StationQueue role="lab_tech" form="lab" />
         </div>
-      ) : rows.length === 0 ? (
-        <div
-          style={{
-            padding: 40,
-            textAlign: "center",
-            color: "#94a3b8",
-            fontSize: 13,
-            background: "#f8fafc",
-            border: "1px dashed #e2e8f0",
-            borderRadius: 12,
-          }}
-        >
-          {status === "all" ? "No lab requests yet." : `No ${status} requests.`}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {rows.map((req) => (
-            <LabRequestCard key={req.id} req={req} onDecide={decide} />
-          ))}
-        </div>
+      )}
+
+      {view === "requests" && (
+        <>
+          {/* Status tabs */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 10,
+              marginBottom: 14,
+            }}
+          >
+            {STATUS_TABS.map((t) => {
+              const active = status === t.value;
+              return (
+                <button
+                  key={t.value}
+                  onClick={() => setStatus(t.value)}
+                  style={{
+                    cursor: "pointer",
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: `1px solid ${active ? t.color : t.border}`,
+                    background: active ? t.color : t.bg,
+                    color: active ? "#fff" : t.color,
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    textAlign: "left",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>{t.label}</span>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      background: active ? "rgba(255,255,255,0.2)" : "#fff",
+                      color: active ? "#fff" : t.color,
+                      padding: "2px 8px",
+                      borderRadius: 8,
+                    }}
+                  >
+                    {stats[t.value] ?? 0}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Request list */}
+          {listQuery.isLoading ? (
+            <div style={{ padding: 30, textAlign: "center", color: "#64748b", fontSize: 13 }}>
+              Loading…
+            </div>
+          ) : rows.length === 0 ? (
+            <div
+              style={{
+                padding: 40,
+                textAlign: "center",
+                color: "#94a3b8",
+                fontSize: 13,
+                background: "#f8fafc",
+                border: "1px dashed #e2e8f0",
+                borderRadius: 12,
+              }}
+            >
+              {status === "all" ? "No lab requests yet." : `No ${status} requests.`}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {rows.map((req) => (
+                <LabRequestCard key={req.id} req={req} onDecide={decide} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -80,4 +80,10 @@ export const PAGE_CAPABILITIES = {
   // Analytics
   "/reports": CAP.ANALYTICS,
   "/ci": CAP.ANALYTICS,
+  // Patient Flow Management
+  "/flow/checkin": CAP.FLOW_RECEPTION,
+  "/flow/coordinator": CAP.FLOW_COORDINATOR,
+  "/flow/station": CAP.FLOW_STATION,
+  "/flow/reports": CAP.FLOW_REPORTS,
+  "/flow/admin": CAP.ADMIN,
 };

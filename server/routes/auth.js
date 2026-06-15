@@ -46,7 +46,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, role FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, role, is_chief FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -155,6 +155,24 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
     res.json(result.rows[0]);
   } catch (e) {
     handleError(res, e, "Create doctor");
+  }
+});
+
+// Update editable doctor flags (currently the chief designation). Admin-only.
+router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
+  try {
+    const { is_chief } = req.body || {};
+    if (typeof is_chief !== "boolean") {
+      return res.status(400).json({ error: "is_chief (boolean) required" });
+    }
+    const r = await pool.query(
+      "UPDATE doctors SET is_chief=$2 WHERE id=$1 RETURNING id, name, short_name, is_chief",
+      [req.params.id, is_chief],
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Doctor not found" });
+    res.json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Update doctor");
   }
 });
 

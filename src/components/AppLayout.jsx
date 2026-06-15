@@ -133,6 +133,22 @@ const NAV_ITEMS = [
     cap: C["/medicine-collection"],
     show: () => true,
   },
+  // Patient Flow Management
+  { path: "/flow/checkin", label: "🏥 Flow Check-in", cap: C["/flow/checkin"], show: () => true },
+  {
+    path: "/flow/coordinator",
+    label: "📋 Flow Floor",
+    cap: C["/flow/coordinator"],
+    show: () => true,
+  },
+  {
+    path: "/flow/station/vitals",
+    label: "⚖️ Vitals Station",
+    cap: C["/flow/station"],
+    show: () => true,
+  },
+  { path: "/flow/reports", label: "📊 Flow Reports", cap: C["/flow/reports"], show: () => true },
+  { path: "/flow/admin", label: "⚙️ Flow Settings", cap: C["/flow/admin"], show: () => true },
 ];
 
 export default function AppLayout() {

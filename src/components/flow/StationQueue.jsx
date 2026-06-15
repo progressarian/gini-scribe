@@ -1,0 +1,372 @@
+import { useEffect, useState } from "react";
+import { toast } from "../../stores/uiStore";
+import { useFlowQueue, useFlowAdvance, useFlowStartStep } from "../../queries/hooks/useFlow";
+import "../../styles/flow.css";
+
+// Friendly URL slug → the assigned_role stored on flow_visit_steps, plus the
+// station's display title and which data-entry form to render. Shared by the
+// standalone station page and the "Live Lab Queue" tab on /lab-requests.
+export const ROLES = {
+  vitals: { role: "vitals_associate", title: "⚖️ Vitals Station", form: "vitals" },
+  mo: { role: "mo", title: "🩺 Medical Officer", form: "notes" },
+  lab: { role: "lab_tech", title: "🔬 Lab & Tests", form: "lab" },
+  dietitian: { role: "dietitian", title: "🥗 Dietitian", form: "notes" },
+  rx: { role: "nurse", title: "💬 Prescription Explain", form: "rx" },
+  pharmacy: { role: "pharmacist", title: "💊 Pharmacy — Final Step", form: "pharmacy" },
+};
+
+const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+// The live execution queue for one station role: the active (in-progress)
+// patient with a role-specific form + "advance", a call-in ready queue, and the
+// pending list. Self-contained (owns its data + mutations) so it can be dropped
+// into any page.
+export default function StationQueue({ role, form }) {
+  const { data, isLoading } = useFlowQueue(role);
+  const advance = useFlowAdvance();
+  const startStep = useFlowStartStep();
+
+  const active = data?.active?.[0] || null;
+  const ready = data?.ready || [];
+  const pending = data?.pending || [];
+
+  const [formData, setFormData] = useState({});
+  useEffect(() => setFormData({}), [active?.id]);
+
+  const callIn = async (stepId) => {
+    try {
+      await startStep.mutateAsync(stepId);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const complete = async () => {
+    if (!active) return;
+    try {
+      await advance.mutateAsync({
+        visitId: active.visit_id,
+        step_id: active.id,
+        step_data: formData,
+      });
+      toast(`${active.patient_name} → next step`, "success");
+      setFormData({});
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  if (isLoading) return <div className="flow-card flow-empty">Loading…</div>;
+
+  return (
+    <>
+      {/* Active patient */}
+      {active ? (
+        <div className="station-active">
+          <div className="station-head">
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>
+                {active.patient_name} · Step {active.step_order} of {active.total_steps}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
+                {active.patient_age_sex || ""} · {active.file_no} · {active.visit_type_id} · budget
+                ≤ {active.planned_duration_min} min
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 14 }}>
+                At station: {active.step_timing?.at_station_min ?? 0} min
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.8 }}>
+                Visit: {active.visit_remaining_min}m left
+              </div>
+            </div>
+          </div>
+          <div className="station-body">
+            <StationForm key={active.id} form={form} value={formData} onChange={setFormData} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
+              <button
+                className={`flow-btn ${form === "pharmacy" ? "flow-btn-primary" : "flow-btn-grn"}`}
+                style={{ padding: "8px 18px" }}
+                disabled={advance.isPending}
+                onClick={complete}
+              >
+                {form === "pharmacy"
+                  ? "💊 Dispensed — Confirm Exit (stops clock)"
+                  : "✓ Done — move to next step"}
+              </button>
+              <span className="flow-muted">Patient auto-moves to their next station</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flow-card flow-empty">
+          No patient in progress. Call in the next from your queue.
+        </div>
+      )}
+
+      {/* Ready queue (callable) */}
+      <div className="flow-sec-title">My queue — ready to call in</div>
+      {ready.length === 0 ? (
+        <div className="flow-card flow-empty">No one waiting at this station.</div>
+      ) : (
+        ready.map((s) => (
+          <div
+            key={s.id}
+            className={`qitem${s.visit_urgency === "breach" ? " urgent" : s.visit_urgency === "atrisk" ? " amber" : ""}`}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>
+                {s.patient_name} {s.is_vip ? "⭐" : ""}
+              </div>
+              <div className="flow-muted">
+                {s.patient_age_sex || ""} · {s.file_no} · {s.visit_type_id} · Step {s.step_order} of{" "}
+                {s.total_steps}
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <span className="flow-badge fb-ink">{s.visit_remaining_min}m left of visit</span>
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div className="flow-muted">{fmtTime(s.checkin_time)}</div>
+              <button
+                className="flow-btn flow-btn-primary"
+                style={{ marginTop: 6 }}
+                disabled={!!active || startStep.isPending}
+                title={active ? "Finish the current patient first" : "Call in"}
+                onClick={() => callIn(s.id)}
+              >
+                Call in
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+
+      {/* Pending (waiting on a prior step — e.g. ABI queued after Blood Sample) */}
+      {pending.length > 0 && (
+        <>
+          <div className="flow-sec-title" style={{ marginTop: 12 }}>
+            Queued — waiting on an earlier step
+          </div>
+          {pending.map((s) => (
+            <div key={s.id} className="qitem" style={{ opacity: 0.6 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{s.patient_name}</div>
+                <div className="flow-muted">
+                  {s.file_no} · Step {s.step_order} of {s.total_steps} · queued after an earlier
+                  step
+                </div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+// Role-specific data-entry forms. Values are stored in step.data on advance.
+function StationForm({ form, value, onChange }) {
+  const set = (k, v) => onChange({ ...value, [k]: v });
+  if (form === "vitals") {
+    return <VitalsForm value={value} onChange={onChange} />;
+  }
+  if (form === "lab") {
+    return (
+      <Field label="Result notes">
+        <textarea
+          rows={3}
+          value={value.result_notes || ""}
+          onChange={(e) => set("result_notes", e.target.value)}
+          placeholder="Sample taken / result ready / notes…"
+        />
+      </Field>
+    );
+  }
+  if (form === "pharmacy") {
+    return (
+      <Field label="Dispense notes">
+        <textarea
+          rows={2}
+          value={value.dispense_notes || ""}
+          onChange={(e) => set("dispense_notes", e.target.value)}
+          placeholder="Medicines dispensed / stock notes…"
+        />
+      </Field>
+    );
+  }
+  if (form === "rx") {
+    return (
+      <Field label="Explanation notes">
+        <textarea
+          rows={2}
+          value={value.notes || ""}
+          onChange={(e) => set("notes", e.target.value)}
+          placeholder="Medicines explained · patient understood…"
+        />
+      </Field>
+    );
+  }
+  return (
+    <Field label="Notes">
+      <textarea
+        rows={3}
+        value={value.notes || ""}
+        onChange={(e) => set("notes", e.target.value)}
+        placeholder="Notes / observations…"
+      />
+    </Field>
+  );
+}
+
+// Core vitals (always shown) + an "+ Add vital" picker for extra standard or
+// custom vitals, recorded per patient. Everything is stored in step.data, so
+// any added key persists. Remounts per patient (keyed on the active step).
+const OPTIONAL_VITALS = [
+  ["temperature", "Temp (°F)"],
+  ["rbs", "RBS (mg/dL)"],
+  ["height", "Height (cm)"],
+  ["bmi", "BMI"],
+  ["waist", "Waist (cm)"],
+  ["body_fat", "Body fat (%)"],
+  ["muscle_mass", "Muscle mass (kg)"],
+  ["resp_rate", "Resp. rate (/min)"],
+  ["pain_score", "Pain (0–10)"],
+];
+const CORE_VITAL_KEYS = ["weight", "bp_sys", "bp_dia", "pulse", "spo2"];
+
+function VitalsForm({ value, onChange }) {
+  const set = (k, v) => onChange({ ...value, [k]: v });
+  const removeKey = (k) => {
+    const nv = { ...value };
+    delete nv[k];
+    onChange(nv);
+    setExtras((a) => a.filter((e) => e.key !== k));
+  };
+  // Extra (optional/custom) vitals the associate has added for this patient.
+  const [extras, setExtras] = useState(() =>
+    Object.keys(value)
+      .filter((k) => !CORE_VITAL_KEYS.includes(k))
+      .map((k) => ({ key: k, label: OPTIONAL_VITALS.find((o) => o[0] === k)?.[1] || k })),
+  );
+
+  const addOptional = (key) => {
+    const o = OPTIONAL_VITALS.find((x) => x[0] === key);
+    if (!o || extras.some((e) => e.key === key)) return;
+    setExtras((a) => [...a, { key, label: o[1] }]);
+  };
+  const addCustom = () => {
+    const label = window.prompt("Name of vital (e.g. Grip strength, GRBS, Temp axilla):");
+    if (!label || !label.trim()) return;
+    const key =
+      "x_" +
+      label
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "");
+    if (!key || extras.some((e) => e.key === key)) return;
+    setExtras((a) => [...a, { key, label: label.trim() }]);
+  };
+  const remaining = OPTIONAL_VITALS.filter((o) => !extras.some((e) => e.key === o[0]));
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+        <Field label="Weight (kg)">
+          <input
+            type="number"
+            value={value.weight || ""}
+            onChange={(e) => set("weight", e.target.value)}
+          />
+        </Field>
+        <Field label="BP (mmHg)">
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input
+              type="number"
+              placeholder="Sys"
+              value={value.bp_sys || ""}
+              onChange={(e) => set("bp_sys", e.target.value)}
+            />
+            <span>/</span>
+            <input
+              type="number"
+              placeholder="Dia"
+              value={value.bp_dia || ""}
+              onChange={(e) => set("bp_dia", e.target.value)}
+            />
+          </div>
+        </Field>
+        <Field label="Pulse (bpm)">
+          <input
+            type="number"
+            value={value.pulse || ""}
+            onChange={(e) => set("pulse", e.target.value)}
+          />
+        </Field>
+        <Field label="SpO2 (%)">
+          <input
+            type="number"
+            value={value.spo2 || ""}
+            onChange={(e) => set("spo2", e.target.value)}
+          />
+        </Field>
+        {extras.map((ex) => (
+          <Field
+            key={ex.key}
+            label={
+              <span
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+              >
+                {ex.label}
+                <button
+                  onClick={() => removeKey(ex.key)}
+                  title="Remove"
+                  style={{
+                    border: "none",
+                    background: "none",
+                    color: "var(--fre)",
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
+            }
+          >
+            <input value={value[ex.key] || ""} onChange={(e) => set(ex.key, e.target.value)} />
+          </Field>
+        ))}
+      </div>
+      <select
+        className="jb-add"
+        style={{ marginTop: 8, maxWidth: 260 }}
+        value=""
+        onChange={(e) => {
+          if (e.target.value === "__custom") addCustom();
+          else if (e.target.value) addOptional(e.target.value);
+          e.target.value = "";
+        }}
+      >
+        <option value="">+ Add vital…</option>
+        {remaining.map(([k, label]) => (
+          <option key={k} value={k}>
+            {label}
+          </option>
+        ))}
+        <option value="__custom">Custom…</option>
+      </select>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="flow-field">
+      <label>{label}</label>
+      {children}
+    </div>
+  );
+}

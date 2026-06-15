@@ -52,10 +52,36 @@ export default function DoctorManagementPage() {
               <option key={d.id} value={d.id}>
                 {d.name}
                 {d.specialty ? ` — ${d.specialty}` : ""}
+                {d.is_chief ? " · Chief" : ""}
               </option>
             ))}
           </select>
         </label>
+        {doctor && (
+          <label
+            className="docmgmt-docpick"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title="Mark this doctor as a Chief consultant (used by patient-flow check-in)"
+          >
+            <input
+              type="checkbox"
+              checked={!!doctor.is_chief}
+              onChange={async (e) => {
+                try {
+                  await api.patch(`/api/doctors/${doctor.id}`, { is_chief: e.target.checked });
+                  await fetchDoctorsList();
+                  toast(
+                    `${doctor.short_name || doctor.name} ${e.target.checked ? "marked as" : "removed as"} Chief`,
+                    "success",
+                  );
+                } catch (err) {
+                  toast(err?.response?.data?.error || "Update failed", "error");
+                }
+              }}
+            />
+            Chief consultant
+          </label>
+        )}
       </div>
 
       {!doctorId ? (

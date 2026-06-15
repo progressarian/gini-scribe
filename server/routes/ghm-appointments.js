@@ -471,6 +471,17 @@ router.get("/ghm-appointments", async (req, res) => {
       params.push(status);
       where += ` AND a.status = $${params.length}`;
     }
+    // Free-text search across name / file no / phone / condition. Tokenised on
+    // whitespace with every word required (same robust matching as lookup mode),
+    // so it survives odd spacing and word order. Filtering server-side means the
+    // search spans the WHOLE date — not just the rows already paged into the UI.
+    const q = (req.query.q || "").trim();
+    if (q.length >= 2) {
+      for (const t of q.split(/\s+/).filter(Boolean).slice(0, 6)) {
+        params.push(`%${t}%`);
+        where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.condition ILIKE $${params.length})`;
+      }
+    }
 
     const [countR, dataR] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total FROM appointments a ${where}`, params),

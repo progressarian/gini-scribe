@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { makeNavClick } from "../lib/navClick";
 import useAuthStore from "../stores/authStore";
 import usePatientStore from "../stores/patientStore";
+import FlowPanel from "../components/flow/FlowPanel";
 import useClinicalStore from "../stores/clinicalStore";
 import useVitalsStore from "../stores/vitalsStore";
 import useLabStore from "../stores/labStore";
@@ -68,6 +69,7 @@ export default function ConsultantPage() {
   return (
     <div>
       <NewReportsBanner />
+      <FlowPanel patientDbId={dbPatientId} fileNo={patient?.file_no} roleHint="sd" />
       <div className="consultant__name-row">
         <label className="consultant__name-label">Consultant:</label>
         {doctorsList.filter((d) => d.role === "consultant").length > 0 ? (

@@ -30,6 +30,23 @@ export const qk = {
     all: ["patient"],
     full: (id) => ["patient", "full", String(id)],
   },
+  flow: {
+    all: ["flow"],
+    visits: (date, status) => ["flow", "visits", date, status || null],
+    visit: (id) => ["flow", "visit", String(id)],
+    activeVisit: (patientDbId, fileNo) => [
+      "flow",
+      "active-visit",
+      patientDbId || null,
+      fileNo || null,
+    ],
+    queue: (role, date) => ["flow", "queue", role, date],
+    visitTypes: () => ["flow", "visit-types"],
+    stepCatalog: () => ["flow", "step-catalog"],
+    template: (visitType) => ["flow", "template", visitType],
+    staff: (role) => ["flow", "staff", role || null],
+    reports: (start, end) => ["flow", "reports", start, end],
+  },
   messages: {
     all: ["messages"],
     thread: (patientId, role = null, doctor = null) => [

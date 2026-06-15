@@ -85,6 +85,12 @@ const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
 const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
+const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
+const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
+const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
+const PatientJourneyPage = lazyWithRetry(() => import("./pages/PatientJourneyPage"));
+const FlowReportsPage = lazyWithRetry(() => import("./pages/flow/FlowReportsPage"));
+const FlowAdminPage = lazyWithRetry(() => import("./pages/flow/FlowAdminPage"));
 
 // Minimal fallback — matches the visual tone of the app without pulling in
 // extra CSS. Each page typically fetches data on mount anyway, so this only
@@ -113,6 +119,8 @@ const lazyEl = (Component) => (
 const router = createBrowserRouter([
   // Public routes
   { path: "/login", element: <LoginPage /> },
+  // Public patient visit tracker — no login (opaque token, sanitized data)
+  { path: "/visit/:token", element: lazyEl(PatientJourneyPage) },
 
   // Protected routes (require login)
   {
@@ -185,6 +193,12 @@ const router = createBrowserRouter([
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
               // Pharmacy: mark which medicines each patient collected
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
+              // Patient Flow Management
+              { path: "/flow/checkin", element: lazyEl(FlowCheckinPage) },
+              { path: "/flow/coordinator", element: lazyEl(FlowCoordinatorPage) },
+              { path: "/flow/station/:role", element: lazyEl(FlowStationPage) },
+              { path: "/flow/reports", element: lazyEl(FlowReportsPage) },
+              { path: "/flow/admin", element: lazyEl(FlowAdminPage) },
             ],
           },
         ],

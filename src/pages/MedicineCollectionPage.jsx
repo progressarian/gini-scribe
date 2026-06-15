@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import api from "../services/api";
 import { toast } from "../stores/uiStore";
+import FlowPanel from "../components/flow/FlowPanel";
 import "./MedicineCollectionPage.css";
 
 const todayISO = () => new Date().toISOString().split("T")[0];
@@ -201,6 +202,11 @@ export default function MedicineCollectionPage() {
                       ✓ Mark all given
                     </button>
                   </div>
+                  <FlowPanel
+                    patientDbId={selected}
+                    fileNo={selPatient?.file_no}
+                    roleHint="pharmacy"
+                  />
                   {meds.length === 0 ? (
                     <p className="medcoll-empty">No current medicines for this patient.</p>
                   ) : (

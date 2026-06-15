@@ -47,6 +47,12 @@ export const CAPABILITIES = {
   ANALYTICS: "ANALYTICS", // reports, clinical intelligence, dashboards
   MED_COLLECTION: "MED_COLLECTION", // pharmacy: mark medicine collection at the counter
   ADMIN: "ADMIN", // manage doctors/roles
+  // Patient Flow Management module (docs/FLOW_MANAGEMENT_PLAN.md)
+  FLOW_RECEPTION: "FLOW_RECEPTION", // check-in + journey builder
+  FLOW_COORDINATOR: "FLOW_COORDINATOR", // live floor dashboard
+  FLOW_STATION: "FLOW_STATION", // role station queues (vitals/mo/lab/dietitian/rx)
+  FLOW_PHARMACY: "FLOW_PHARMACY", // pharmacy dispense + confirm-exit (stops the clock)
+  FLOW_REPORTS: "FLOW_REPORTS", // wait-time / bottleneck analytics
 };
 
 const C = CAPABILITIES;
@@ -73,6 +79,8 @@ export const ROLE_CAPABILITIES = {
     C.SIDE_EFFECTS,
     C.RECEPTION_OPS,
     C.ANALYTICS,
+    C.FLOW_STATION,
+    C.FLOW_REPORTS,
   ],
   [ROLES.MO]: [
     C.PATIENT_READ,
@@ -84,16 +92,46 @@ export const ROLE_CAPABILITIES = {
     C.DOSE_REVIEWS,
     C.SIDE_EFFECTS,
     C.RECEPTION_OPS,
+    C.FLOW_STATION,
   ],
-  [ROLES.NURSE]: [C.PATIENT_READ, C.VITALS, C.LAB_REQUESTS, C.REFILLS, C.SIDE_EFFECTS],
+  [ROLES.NURSE]: [
+    C.PATIENT_READ,
+    C.VITALS,
+    C.LAB_REQUESTS,
+    C.REFILLS,
+    C.SIDE_EFFECTS,
+    C.FLOW_STATION,
+  ],
   // Lab/tech need PATIENT_READ so they can look up whose report they're
   // uploading (Find + chart), on top of the lab upload/request capabilities.
-  [ROLES.LAB]: [C.PATIENT_READ, C.LAB_PORTAL, C.LAB_REQUESTS],
-  [ROLES.TECH]: [C.PATIENT_READ, C.LAB_PORTAL, C.LAB_REQUESTS],
-  [ROLES.RECEPTION]: [C.PATIENT_READ, C.LAB_REQUESTS, C.REFILLS, C.RECEPTION_OPS, C.MED_COLLECTION],
+  [ROLES.LAB]: [C.PATIENT_READ, C.LAB_PORTAL, C.LAB_REQUESTS, C.FLOW_STATION],
+  [ROLES.TECH]: [C.PATIENT_READ, C.LAB_PORTAL, C.LAB_REQUESTS, C.FLOW_STATION],
+  [ROLES.RECEPTION]: [
+    C.PATIENT_READ,
+    C.LAB_REQUESTS,
+    C.REFILLS,
+    C.RECEPTION_OPS,
+    C.MED_COLLECTION,
+    C.FLOW_RECEPTION,
+    C.FLOW_COORDINATOR,
+  ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
-  [ROLES.COORDINATOR]: [C.PATIENT_READ, C.AI_TOOLS, C.RECEPTION_OPS],
-  [ROLES.PHARMACY]: [C.PATIENT_READ, C.REFILLS, C.DOSE_REVIEWS, C.MED_COLLECTION],
+  [ROLES.COORDINATOR]: [
+    C.PATIENT_READ,
+    C.AI_TOOLS,
+    C.RECEPTION_OPS,
+    C.FLOW_RECEPTION,
+    C.FLOW_COORDINATOR,
+    C.FLOW_REPORTS,
+  ],
+  [ROLES.PHARMACY]: [
+    C.PATIENT_READ,
+    C.REFILLS,
+    C.DOSE_REVIEWS,
+    C.MED_COLLECTION,
+    C.FLOW_PHARMACY,
+    C.FLOW_STATION,
+  ],
   [ROLES.GUEST]: [],
 };
 

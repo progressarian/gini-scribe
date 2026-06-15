@@ -75,6 +75,10 @@ const PUBLIC_PATTERNS = [
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-symptoms$/,
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-compliance$/,
   /^\/api\/patients\/[^/]+\/side-effects\/notify$/,
+  // Patient flow tracking page — read-only, by opaque visit token, no login.
+  // Plus the file-gated verify/assessment posts on the same public page.
+  /^\/api\/flow\/track\/[^/]+$/,
+  /^\/api\/flow\/track\/[^/]+\/(verify|assessment)$/,
 ];
 
 // Paths under these prefixes must be a doctor — patients are rejected even
@@ -92,6 +96,7 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/reasoning",
   "/api/dose-change-requests",
   "/api/refills",
+  "/api/flow", // all flow endpoints are staff-only EXCEPT /api/flow/track/:token (PUBLIC_PATTERNS, matched first)
 ];
 
 // Role-based capability gating. Maps an API path-prefix to the capability a

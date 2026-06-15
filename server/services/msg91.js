@@ -20,6 +20,12 @@ const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || "";
 const MSG91_WA_TEMPLATE_NAME = process.env.MSG91_WA_TEMPLATE_NAME || "";
 const MSG91_WA_TEMPLATE_LANG = process.env.MSG91_WA_TEMPLATE_LANG || "en";
 const MSG91_WA_INTEGRATED_NUMBER = process.env.MSG91_WA_INTEGRATED_NUMBER || "";
+// Patient-flow check-in template (separate approved template from the OTP one).
+//   MSG91_WA_FLOW_TEMPLATE_NAME — approved Utility-category template with 6 body
+//   variables in this order: {{1}} patient_name, {{2}} file_number,
+//   {{3}} doctor_name, {{4}} estimate_min, {{5}} est_completion_time,
+//   {{6}} visit_link. Language falls back to MSG91_WA_TEMPLATE_LANG.
+const MSG91_WA_FLOW_TEMPLATE_NAME = process.env.MSG91_WA_FLOW_TEMPLATE_NAME || "";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
@@ -72,6 +78,65 @@ export async function sendOtpSms(phone, otp) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`MSG91 WhatsApp send failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return { ok: true };
+}
+
+// Patient-flow check-in confirmation + tracking link. Same dev-fallback as
+// sendOtpSms: until the flow template + WABA env are set, it logs to console and
+// returns { dev: true } so check-in still works. `vars` keys map positionally to
+// the template body variables (see MSG91_WA_FLOW_TEMPLATE_NAME above).
+export async function sendFlowCheckin(phone, vars = {}) {
+  if (
+    IS_DEV ||
+    !MSG91_AUTH_KEY ||
+    !MSG91_WA_FLOW_TEMPLATE_NAME ||
+    !MSG91_WA_INTEGRATED_NUMBER ||
+    !phone
+  ) {
+    console.log(`[DEV] Flow check-in WhatsApp → ${phone || "(no phone)"}:`, vars);
+    return { ok: true, dev: true };
+  }
+
+  const to = String(phone).replace(/^\+/, "");
+  const order = [
+    "patient_name",
+    "file_number",
+    "doctor_name",
+    "estimate_min",
+    "est_completion_time",
+    "visit_link",
+  ];
+  const components = {};
+  order.forEach((k, i) => {
+    components[`body_${i + 1}`] = { type: "text", value: String(vars[k] ?? "") };
+  });
+
+  const body = {
+    integrated_number: MSG91_WA_INTEGRATED_NUMBER,
+    content_type: "template",
+    payload: {
+      messaging_product: "whatsapp",
+      type: "template",
+      template: {
+        name: MSG91_WA_FLOW_TEMPLATE_NAME,
+        language: { code: MSG91_WA_TEMPLATE_LANG, policy: "deterministic" },
+        to_and_components: [{ to: [to], components }],
+      },
+    },
+  };
+
+  const res = await fetch(
+    "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", authkey: MSG91_AUTH_KEY },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`MSG91 flow WhatsApp send failed (${res.status}): ${text.slice(0, 200)}`);
   }
   return { ok: true };
 }
