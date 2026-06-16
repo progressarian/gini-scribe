@@ -149,6 +149,16 @@ export function useFlowAdvance() {
     }
   });
 }
+// Cancel a check-in (started by mistake / patient not present).
+export function useFlowCancel() {
+  return useFlowMutation(async ({ visitId, reason }) => {
+    try {
+      return (await api.post(`/api/flow/visits/${visitId}/cancel`, { reason })).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not cancel check-in"));
+    }
+  });
+}
 export function useFlowStartStep() {
   return useFlowMutation(async (stepId) => {
     try {

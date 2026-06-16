@@ -1744,11 +1744,7 @@ export default function GHMPage() {
           {!loading && rows.length > 0 && (
             <div className="ghm__load-more">
               {page < totalPages ? (
-                <button
-                  className="ghm__load-more-btn"
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                >
+                <button className="ghm__load-more-btn" onClick={loadMore} disabled={loadingMore}>
                   {loadingMore ? "Loading…" : `Load More (${rows.length} of ${total})`}
                 </button>
               ) : (

@@ -584,6 +584,58 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
   }
 });
 
+// Cancel a check-in (e.g. started by mistake for a patient not present). Marks
+// the visit cancelled. If the linked appointment was created BY the flow
+// (booking_source='flow'), cancel that too so it doesn't linger in OPD/GHM; a
+// real OPD/GHM appointment is left untouched (the booking still stands).
+router.post("/flow/visits/:id/cancel", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const visitId = req.params.id;
+    const { reason = null } = req.body || {};
+    await client.query("BEGIN");
+    const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
+      .rows[0];
+    if (!v) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit not found" });
+    }
+    if (v.status === "completed") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "Cannot cancel a completed visit" });
+    }
+    await client.query("UPDATE flow_visits SET status='cancelled', updated_at=NOW() WHERE id=$1", [
+      visitId,
+    ]);
+    await logEvent(client, visitId, "visit_cancelled", null, { reason }, ACTOR(req));
+    await client.query("COMMIT");
+
+    // Only roll back appointments the flow itself created.
+    if (v.appointment_id) {
+      try {
+        const appt = (
+          await pool.query("SELECT booking_source FROM appointments WHERE id=$1", [
+            v.appointment_id,
+          ])
+        ).rows[0];
+        if (appt && appt.booking_source === "flow") {
+          await pool.query("UPDATE appointments SET status='cancelled' WHERE id=$1", [
+            v.appointment_id,
+          ]);
+        }
+      } catch (e) {
+        console.error("Flow cancel appointment cleanup failed:", e.message);
+      }
+    }
+    res.json({ status: "cancelled" });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow cancel");
+  } finally {
+    client.release();
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // Start / Call-in — set a ready/pending step in_progress (one active per station)
 // Auto-completes a preceding wait_* step (plan §4.1).

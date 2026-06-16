@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../../services/api";
 import useAuthStore from "../../stores/authStore";
 import { toast } from "../../stores/uiStore";
+import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import {
   useFlowVisitTypes,
   useFlowTemplate,
@@ -10,6 +11,7 @@ import {
   useFlowStaff,
   useFlowVisits,
   useFlowCheckin,
+  useFlowCancel,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
 
@@ -135,6 +137,21 @@ export default function FlowCheckinPage() {
   const { data: staff = [] } = useFlowStaff();
   const { data: todays = [] } = useFlowVisits();
   const checkin = useFlowCheckin();
+  const cancelVisit = useFlowCancel();
+  const [cancelTarget, setCancelTarget] = useState(null); // visit pending cancel-confirm
+
+  const confirmCancel = async () => {
+    const v = cancelTarget;
+    if (!v) return;
+    try {
+      await cancelVisit.mutateAsync({ visitId: v.id, reason: "reception_cancel" });
+      toast(`Check-in cancelled for ${v.patient_name}`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      setCancelTarget(null);
+    }
+  };
 
   const maxTime = visitTypes.find((t) => t.id === visitTypeId)?.max_time_min || 0;
 
@@ -1076,6 +1093,7 @@ export default function FlowCheckinPage() {
                   <th>Check-in</th>
                   <th>Elapsed</th>
                   <th>Status</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1101,10 +1119,31 @@ export default function FlowCheckinPage() {
                     <td>{v._timing?.elapsed_min}m</td>
                     <td>
                       <span
-                        className={`flow-badge ${v.status === "completed" ? "fb-grn" : v._timing?.urgency === "breach" ? "fb-red" : v._timing?.urgency === "atrisk" ? "fb-amb" : "fb-blu"}`}
+                        className={`flow-badge ${v.status === "completed" ? "fb-grn" : v.status === "cancelled" ? "fb-ink" : v._timing?.urgency === "breach" ? "fb-red" : v._timing?.urgency === "atrisk" ? "fb-amb" : "fb-blu"}`}
                       >
-                        {v.status === "completed" ? "Done" : v._timing?.urgency || "active"}
+                        {v.status === "completed"
+                          ? "Done"
+                          : v.status === "cancelled"
+                            ? "Cancelled"
+                            : v._timing?.urgency || "active"}
                       </span>
+                    </td>
+                    <td>
+                      {v.status === "in_progress" && (
+                        <button
+                          className="flow-btn flow-btn-ghost"
+                          style={{
+                            padding: "3px 8px",
+                            color: "var(--fre)",
+                            borderColor: "var(--fre)",
+                          }}
+                          disabled={cancelVisit.isPending}
+                          onClick={() => setCancelTarget(v)}
+                          title="Cancel this check-in (started by mistake / patient not present)"
+                        >
+                          ✕ Cancel
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1113,6 +1152,20 @@ export default function FlowCheckinPage() {
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!cancelTarget}
+        title="Cancel check-in?"
+        message={
+          cancelTarget
+            ? `Remove ${cancelTarget.patient_name} from the patient flow. Use this for a mistaken check-in or a patient who isn't present. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Cancel check-in"
+        cancelLabel="Keep"
+        onConfirm={confirmCancel}
+        onCancel={() => setCancelTarget(null)}
+      />
     </div>
   );
 }

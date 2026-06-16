@@ -57,7 +57,9 @@ const shorten = (n) =>
     .replace("Pharmacy / Exit", "Pharmacy");
 
 export default function FlowCoordinatorPage() {
-  const { data: visits = [], isLoading, dataUpdatedAt } = useFlowVisits();
+  const { data: allVisits = [], isLoading, dataUpdatedAt } = useFlowVisits();
+  // Cancelled check-ins (mistaken / not-present) don't belong on the live floor.
+  const visits = useMemo(() => allVisits.filter((v) => v.status !== "cancelled"), [allVisits]);
   const [openId, setOpenId] = useState(null);
 
   const stats = useMemo(() => {
