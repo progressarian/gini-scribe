@@ -4,6 +4,7 @@ import api from "../../services/api";
 import useAuthStore from "../../stores/authStore";
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
+import VisitDetailModal from "../../components/flow/VisitDetailModal";
 import {
   useFlowVisitTypes,
   useFlowTemplate,
@@ -54,6 +55,17 @@ const TYPE_BUTTONS = [
 const resolveVisitType = (typeKey, testsAvailable) => {
   if (typeKey === "fu_appt") return testsAvailable ? "FU_APPT" : "FU_APPT_TESTS";
   return TYPE_BUTTONS.find((t) => t.key === typeKey)?.visitType || "NEW_APPT";
+};
+
+// OPD/GHM-aligned stage labels — same vocabulary as the OPD pages.
+const STAGE_LABEL = {
+  checkedin: "Checked-in",
+  in_visit: "In-visit",
+  seen: "Seen",
+  billing: "Billing",
+  at_pharmacy: "At pharmacy",
+  completed: "Done",
+  cancelled: "Cancelled",
 };
 
 // The +91 country code is fixed in the UI; form.phone holds just the 10 local
@@ -139,6 +151,7 @@ export default function FlowCheckinPage() {
   const checkin = useFlowCheckin();
   const cancelVisit = useFlowCancel();
   const [cancelTarget, setCancelTarget] = useState(null); // visit pending cancel-confirm
+  const [detailId, setDetailId] = useState(null); // visit whose detail/edit modal is open
 
   const confirmCancel = async () => {
     const v = cancelTarget;
@@ -1098,7 +1111,12 @@ export default function FlowCheckinPage() {
               </thead>
               <tbody>
                 {todays.map((v) => (
-                  <tr key={v.id}>
+                  <tr
+                    key={v.id}
+                    onClick={() => setDetailId(v.id)}
+                    style={{ cursor: "pointer" }}
+                    title="Click to edit journey / step times"
+                  >
                     <td>
                       <b>{v.patient_name}</b>
                       {v.is_vip ? " ⭐" : ""}
@@ -1121,11 +1139,12 @@ export default function FlowCheckinPage() {
                       <span
                         className={`flow-badge ${v.status === "completed" ? "fb-grn" : v.status === "cancelled" ? "fb-ink" : v._timing?.urgency === "breach" ? "fb-red" : v._timing?.urgency === "atrisk" ? "fb-amb" : "fb-blu"}`}
                       >
-                        {v.status === "completed"
-                          ? "Done"
-                          : v.status === "cancelled"
-                            ? "Cancelled"
-                            : v._timing?.urgency || "active"}
+                        {STAGE_LABEL[v.stage] || "Active"}
+                        {v.status === "in_progress" && v._timing?.urgency === "breach"
+                          ? " ⚠"
+                          : v.status === "in_progress" && v._timing?.urgency === "atrisk"
+                            ? " ⏱"
+                            : ""}
                       </span>
                     </td>
                     <td>
@@ -1138,7 +1157,10 @@ export default function FlowCheckinPage() {
                             borderColor: "var(--fre)",
                           }}
                           disabled={cancelVisit.isPending}
-                          onClick={() => setCancelTarget(v)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCancelTarget(v);
+                          }}
                           title="Cancel this check-in (started by mistake / patient not present)"
                         >
                           ✕ Cancel
@@ -1152,6 +1174,13 @@ export default function FlowCheckinPage() {
           )}
         </div>
       </div>
+
+      {detailId && todays.find((v) => v.id === detailId) && (
+        <VisitDetailModal
+          visit={todays.find((v) => v.id === detailId)}
+          onClose={() => setDetailId(null)}
+        />
+      )}
 
       <ConfirmModal
         open={!!cancelTarget}

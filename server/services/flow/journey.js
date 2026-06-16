@@ -72,6 +72,35 @@ export function compareVisitsForDashboard(a, b) {
   return fa - fb;
 }
 
+// OPD/GHM-aligned stage so the flow uses the same vocabulary everywhere.
+// Derived from where the patient is now (or the step they're queued for):
+//   checkedin   — arrived, pre-doctor (vitals / MO / tests / waiting)
+//   in_visit    — with the SD/Chief right now
+//   seen        — doctor consult(s) done, in the Rx-explain step
+//   billing     — at the billing counter
+//   at_pharmacy — at pharmacy (dispense / exit)
+//   completed   — visit finished · cancelled — check-in cancelled
+const IS_DOCTOR_ROLE = (s) => s.assigned_role === "sd" || s.assigned_role === "chief";
+const IS_PHARMACY = (s) => s.step_catalog_id === "pharmacy" || s.assigned_role === "pharmacist";
+const IS_BILLING = (s) => s.step_catalog_id === "billing" || s.assigned_role === "billing";
+export function deriveStage(visit, steps = []) {
+  if (visit.status === "cancelled") return "cancelled";
+  if (visit.status === "completed") return "completed";
+  const live = steps.filter((s) => s.status !== "skipped");
+  // The step they're at now, else the next one they're queued for.
+  const current =
+    live.find((s) => s.status === "in_progress") ||
+    live.find((s) => s.status === "ready" || s.status === "pending");
+  if (current) {
+    if (IS_PHARMACY(current)) return "at_pharmacy";
+    if (IS_BILLING(current)) return "billing";
+    if (IS_DOCTOR_ROLE(current)) return "in_visit";
+  }
+  const doctorSteps = live.filter(IS_DOCTOR_ROLE);
+  if (doctorSteps.length && doctorSteps.every((s) => s.status === "completed")) return "seen";
+  return "checkedin";
+}
+
 // The current bottleneck message for a visit, if its active step is overdue.
 export function bottleneckFor(steps, now = Date.now()) {
   const active = steps.find((s) => s.status === "in_progress");

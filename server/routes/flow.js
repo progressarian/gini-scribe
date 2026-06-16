@@ -16,6 +16,7 @@ import {
   classifyStep,
   compareVisitsForDashboard,
   bottleneckFor,
+  deriveStage,
   WAITING_ROLE,
 } from "../services/flow/journey.js";
 
@@ -120,6 +121,151 @@ async function ensureFlowAppointment(v) {
     console.error("Flow ensure appointment failed:", e.message);
   }
   return null;
+}
+
+// Reverse sync (OPD/GHM → Flow): if a linked appointment was finished by the
+// clinical workflow (doctor marked it `seen`/`completed`), complete the flow
+// visit so it stops running as "ongoing/breached"; `cancelled`/`no_show` →
+// cancel it. Persists the change AND mutates the in-memory rows/steps so the
+// feed reflects it immediately. Best-effort; never throws to the caller.
+async function reconcileFromAppointments(visits, stepMap) {
+  const linked = visits.filter((v) => v.appointment_id && v.status === "in_progress");
+  if (!linked.length) return;
+  let statusById = {};
+  try {
+    const ids = [...new Set(linked.map((v) => v.appointment_id))];
+    const rows = (
+      await pool.query("SELECT id, status FROM appointments WHERE id = ANY($1::int[])", [ids])
+    ).rows;
+    statusById = Object.fromEntries(rows.map((a) => [a.id, (a.status || "").toLowerCase()]));
+  } catch (e) {
+    console.error("Flow reverse-sync read failed:", e.message);
+    return;
+  }
+  for (const v of linked) {
+    const st = statusById[v.appointment_id];
+    try {
+      if (st === "completed" || st === "seen") {
+        await pool.query(
+          `UPDATE flow_visits SET status='completed',
+             actual_completion=COALESCE(actual_completion, NOW()), current_step_id=NULL, updated_at=NOW()
+           WHERE id=$1 AND status='in_progress'`,
+          [v.id],
+        );
+        // The step they were actually at → completed WITH its measured duration
+        // (now − started_at) so the per-step breakdown isn't lost.
+        await pool.query(
+          `UPDATE flow_visit_steps
+             SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                 actual_duration_min = COALESCE(actual_duration_min,
+                   CASE WHEN started_at IS NOT NULL
+                        THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                        END)
+           WHERE visit_id=$1 AND status='in_progress'`,
+          [v.id],
+        );
+        // Steps never reached in the flow (patient finished via OPD) → skipped,
+        // so reports don't average them as zero-minute steps.
+        await pool.query(
+          `UPDATE flow_visit_steps SET status='skipped'
+           WHERE visit_id=$1 AND status IN ('ready','pending')`,
+          [v.id],
+        );
+        await logEvent(pool, v.id, "visit_completed", null, { from_opd: st }, "opd-sync");
+        v.status = "completed";
+        v.actual_completion = new Date().toISOString();
+        (stepMap.get(v.id) || []).forEach((s) => {
+          if (s.status === "in_progress") {
+            if (s.started_at && s.actual_duration_min == null)
+              s.actual_duration_min = Math.max(
+                0,
+                Math.round((Date.now() - new Date(s.started_at).getTime()) / 60000),
+              );
+            s.status = "completed";
+          } else if (["ready", "pending"].includes(s.status)) {
+            s.status = "skipped";
+          }
+        });
+      } else if (st === "cancelled" || st === "no_show") {
+        await pool.query(
+          "UPDATE flow_visits SET status='cancelled', updated_at=NOW() WHERE id=$1 AND status='in_progress'",
+          [v.id],
+        );
+        await logEvent(pool, v.id, "visit_cancelled", null, { from_opd: st }, "opd-sync");
+        v.status = "cancelled";
+      } else if (st === "in_visit") {
+        // OPD has them with the doctor, but the flow stations weren't clicked
+        // through — pull the flow forward to the doctor's consult step so the
+        // stage matches OPD. Only when the flow is still pre-doctor (behind OPD);
+        // never drag a flow that's already past the doctor backwards.
+        const steps = (stepMap.get(v.id) || []).slice().sort((a, b) => a.step_order - b.step_order);
+        const doc = steps.find(
+          (s) =>
+            (s.assigned_role === "sd" || s.assigned_role === "chief") &&
+            !["completed", "skipped"].includes(s.status),
+        );
+        const pastDoctor =
+          doc &&
+          steps.some(
+            (s) => s.step_order > doc.step_order && ["in_progress", "completed"].includes(s.status),
+          );
+        if (doc && doc.status !== "in_progress" && !pastDoctor) {
+          // The pre-doctor step they were actually at → completed with measured duration.
+          await pool.query(
+            `UPDATE flow_visit_steps
+               SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                   actual_duration_min = COALESCE(actual_duration_min,
+                     CASE WHEN started_at IS NOT NULL
+                          THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                          END)
+               WHERE visit_id=$1 AND step_order < $2 AND status='in_progress'`,
+            [v.id, doc.step_order],
+          );
+          // Earlier steps the patient never went through in the flow → skipped.
+          await pool.query(
+            `UPDATE flow_visit_steps SET status='skipped'
+               WHERE visit_id=$1 AND step_order < $2 AND status IN ('ready','pending')`,
+            [v.id, doc.step_order],
+          );
+          await pool.query(
+            `UPDATE flow_visit_steps SET status='in_progress', started_at=COALESCE(started_at, NOW())
+               WHERE id=$1`,
+            [doc.id],
+          );
+          await pool.query(
+            "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3, updated_at=NOW() WHERE id=$1",
+            [v.id, doc.id, doc.step_order],
+          );
+          await logEvent(
+            pool,
+            v.id,
+            "step_started",
+            doc.step_order,
+            { from_opd: "in_visit" },
+            "opd-sync",
+          );
+          steps.forEach((s) => {
+            if (s.step_order < doc.step_order) {
+              if (s.status === "in_progress") {
+                if (s.started_at && s.actual_duration_min == null)
+                  s.actual_duration_min = Math.max(
+                    0,
+                    Math.round((Date.now() - new Date(s.started_at).getTime()) / 60000),
+                  );
+                s.status = "completed";
+              } else if (["ready", "pending"].includes(s.status)) {
+                s.status = "skipped";
+              }
+            }
+          });
+          doc.status = "in_progress";
+          doc.started_at = new Date().toISOString();
+        }
+      }
+    } catch (e) {
+      console.error("Flow reverse-sync update failed:", e.message);
+    }
+  }
 }
 
 // Is the station for (role, staff) already occupied by an in-progress step?
@@ -932,11 +1078,14 @@ router.get("/flow/visits", async (req, res) => {
     }
     const visits = (await pool.query(`SELECT * FROM flow_visits ${where}`, params)).rows;
     const stepMap = await stepsByVisit(visits.map((v) => v.id));
+    // Reflect clinical-side completion (OPD/GHM "seen"/"completed") before timing.
+    await reconcileFromAppointments(visits, stepMap);
     const now = Date.now();
     for (const v of visits) {
       v.steps = stepMap.get(v.id) || [];
       v._timing = classifyVisit(v, now);
       v.bottleneck = bottleneckFor(v.steps, now);
+      v.stage = deriveStage(v, v.steps);
     }
     visits.sort(compareVisitsForDashboard);
     res.json(visits);
@@ -957,6 +1106,7 @@ router.get("/flow/visits/:id", async (req, res) => {
     const now = Date.now();
     v._timing = classifyVisit(v, now);
     v.bottleneck = bottleneckFor(v.steps, now);
+    v.stage = deriveStage(v, v.steps);
     res.json(v);
   } catch (e) {
     handleError(res, e, "Flow visit");
@@ -997,6 +1147,7 @@ router.get("/flow/active-visit", async (req, res) => {
     const now = Date.now();
     v._timing = classifyVisit(v, now);
     v.bottleneck = bottleneckFor(v.steps, now);
+    v.stage = deriveStage(v, v.steps);
     res.json(v);
   } catch (e) {
     handleError(res, e, "Flow active visit");

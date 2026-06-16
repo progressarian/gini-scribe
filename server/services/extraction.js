@@ -173,9 +173,9 @@ async function callClaudeOnce({ base64, mediaType, prompt, maxTokens, signal }) 
   const block =
     mediaType === "application/pdf"
       ? {
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: base64 },
-      }
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: base64 },
+        }
       : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
 
   const headers = {

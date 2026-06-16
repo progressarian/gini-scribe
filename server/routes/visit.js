@@ -81,7 +81,7 @@ router.use("/visit/:patientId", (req, res, next) => {
   }
   res.on("finish", () => {
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      invalidatePatientSummaries(req.params.patientId).catch(() => { });
+      invalidatePatientSummaries(req.params.patientId).catch(() => {});
     }
   });
   next();
@@ -106,7 +106,7 @@ pool
   UNIQUE(patient_id, symptom_id)
 )`,
   )
-  .catch(() => { });
+  .catch(() => {});
 
 // Ensure referrals table exists (with appointment_id)
 pool
@@ -118,14 +118,14 @@ pool
   status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW()
 )`,
   )
-  .catch(() => { });
+  .catch(() => {});
 // Add appointment_id column if table already exists without it
-pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS appointment_id INTEGER`).catch(() => { });
+pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS appointment_id INTEGER`).catch(() => {});
 
 // Ensure medications.history column exists (timeline of edits)
 pool
   .query(`ALTER TABLE medications ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]'::jsonb`)
-  .catch(() => { });
+  .catch(() => {});
 
 // Genie master medications mirror — populated by syncPatientLogsFromGenie so the
 // scribe visit page can show medicines the patient has added in the Genie app
@@ -148,7 +148,7 @@ pool
   created_at TIMESTAMPTZ
 )`,
   )
-  .catch(() => { });
+  .catch(() => {});
 
 // Genie conditions mirror — conditions the patient or scribe has added on the
 // Genie side so doctors can see them without waiting for the next consultation.
@@ -166,7 +166,7 @@ pool
   created_at TIMESTAMPTZ
 )`,
   )
-  .catch(() => { });
+  .catch(() => {});
 
 // GET /api/visit/:patientId — comprehensive visit-page data
 router.get("/visit/:patientId", async (req, res) => {
@@ -812,18 +812,18 @@ router.get("/visit/:patientId", async (req, res) => {
       withDate(apptPlan?.healthray_follow_up) ||
       (apptBiomarkers.followup
         ? {
-          date: apptBiomarkers.followup,
-          notes: apptPlan?.healthray_follow_up?.notes || null,
-          timing: apptPlan?.healthray_follow_up?.timing || null,
-        }
+            date: apptBiomarkers.followup,
+            notes: apptPlan?.healthray_follow_up?.notes || null,
+            timing: apptPlan?.healthray_follow_up?.timing || null,
+          }
         : null) ||
       withDate(followupApptRow?.healthray_follow_up) ||
       (followupApptBio.followup
         ? {
-          date: followupApptBio.followup,
-          notes: followupApptRow?.healthray_follow_up?.notes || null,
-          timing: followupApptRow?.healthray_follow_up?.timing || null,
-        }
+            date: followupApptBio.followup,
+            notes: followupApptRow?.healthray_follow_up?.notes || null,
+            timing: followupApptRow?.healthray_follow_up?.timing || null,
+          }
         : null);
 
     const healthrayDxAppt = healthrayDxApptR.rows[0] || null;
@@ -927,29 +927,29 @@ router.get("/visit/:patientId", async (req, res) => {
       appt_plan:
         apptPlan || followUpDate
           ? {
-            investigations_to_order: (
-              (apptPlan?.healthray_investigations?.length
-                ? apptPlan.healthray_investigations
-                : null) ||
-              (followupApptRow?.healthray_investigations?.length
-                ? followupApptRow.healthray_investigations
-                : null) ||
-              []
-            ).map((t) => (typeof t === "string" ? { name: t, urgency: "routine" } : t)),
-            follow_up: followUpDate,
-            follow_up_with:
-              apptPlan?.follow_up_with ||
-              apptPlan?.healthray_follow_up?.notes ||
-              followupApptRow?.follow_up_with ||
-              followupApptRow?.healthray_follow_up?.notes ||
-              null,
-            advice: apptPlan?.healthray_advice || null,
-            diet_lifestyle: [
-              apptCompliance.diet,
-              apptCompliance.exercise,
-              apptCompliance.stress,
-            ].filter(Boolean),
-          }
+              investigations_to_order: (
+                (apptPlan?.healthray_investigations?.length
+                  ? apptPlan.healthray_investigations
+                  : null) ||
+                (followupApptRow?.healthray_investigations?.length
+                  ? followupApptRow.healthray_investigations
+                  : null) ||
+                []
+              ).map((t) => (typeof t === "string" ? { name: t, urgency: "routine" } : t)),
+              follow_up: followUpDate,
+              follow_up_with:
+                apptPlan?.follow_up_with ||
+                apptPlan?.healthray_follow_up?.notes ||
+                followupApptRow?.follow_up_with ||
+                followupApptRow?.healthray_follow_up?.notes ||
+                null,
+              advice: apptPlan?.healthray_advice || null,
+              diet_lifestyle: [
+                apptCompliance.diet,
+                apptCompliance.exercise,
+                apptCompliance.stress,
+              ].filter(Boolean),
+            }
           : null,
       loggedData: {
         vitals: vitalsLogR.rows,
@@ -970,24 +970,24 @@ router.get("/visit/:patientId", async (req, res) => {
         carePhaseParameters,
         carePhasePriority: carePhasePriority
           ? {
-            marker: carePhasePriority.marker,
-            value: carePhasePriority.value,
-            target: carePhasePriority.target,
-            status: carePhasePriority.status,
-            label: carePhasePriority.label,
-            date: carePhasePriority.date,
-          }
+              marker: carePhasePriority.marker,
+              value: carePhasePriority.value,
+              target: carePhasePriority.target,
+              status: carePhasePriority.status,
+              label: carePhasePriority.label,
+              date: carePhasePriority.date,
+            }
           : null,
       },
       latestAppointmentId: latestAnyApptR.rows[0]?.id || null,
       latestAppointment: latestAnyApptR.rows[0]
         ? {
-          id: latestAnyApptR.rows[0].id,
-          status: latestAnyApptR.rows[0].status || null,
-          prep_steps: latestAnyApptR.rows[0].prep_steps || null,
-          checked_in_at: latestAnyApptR.rows[0].checked_in_at || null,
-          appointment_date: latestAnyApptR.rows[0].appointment_date || null,
-        }
+            id: latestAnyApptR.rows[0].id,
+            status: latestAnyApptR.rows[0].status || null,
+            prep_steps: latestAnyApptR.rows[0].prep_steps || null,
+            checked_in_at: latestAnyApptR.rows[0].checked_in_at || null,
+            appointment_date: latestAnyApptR.rows[0].appointment_date || null,
+          }
         : null,
       syncStatus: {
         healthray: healthraySyncR.rows[0] || null,
@@ -1285,12 +1285,12 @@ router.post("/visit/:patientId/medication", async (req, res) => {
     // Anything else (strings, out-of-range, dupes) is filtered out.
     const cleanDays = Array.isArray(days_of_week)
       ? Array.from(
-        new Set(
-          days_of_week
-            .map((d) => Number(d))
-            .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
-        ),
-      ).sort((a, b) => a - b)
+          new Set(
+            days_of_week
+              .map((d) => Number(d))
+              .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+          ),
+        ).sort((a, b) => a - b)
       : null;
     const finalDays = cleanDays && cleanDays.length ? cleanDays : null;
 
@@ -1484,23 +1484,23 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
 
     const historyEntry = changed
       ? JSON.stringify([
-        {
-          at: new Date().toISOString(),
-          reason: t(reason, 500) || null,
-          from: {
-            dose: prev.dose,
-            frequency: prev.frequency,
-            timing: prev.timing,
-            when_to_take: prev.when_to_take,
+          {
+            at: new Date().toISOString(),
+            reason: t(reason, 500) || null,
+            from: {
+              dose: prev.dose,
+              frequency: prev.frequency,
+              timing: prev.timing,
+              when_to_take: prev.when_to_take,
+            },
+            to: {
+              dose: nextDose,
+              frequency: nextFreq,
+              timing: nextTiming,
+              when_to_take: nextWhenToTake,
+            },
           },
-          to: {
-            dose: nextDose,
-            frequency: nextFreq,
-            timing: nextTiming,
-            when_to_take: nextWhenToTake,
-          },
-        },
-      ])
+        ])
       : null;
 
     // Optional: explicit last_prescribed_date bump (used by "Move to Active"
@@ -1559,15 +1559,15 @@ router.patch("/visit/:patientId/medication/:id", async (req, res) => {
     const nextDaysOfWeek = setDaysOfWeek
       ? Array.isArray(days_of_week)
         ? (() => {
-          const cleaned = Array.from(
-            new Set(
-              days_of_week
-                .map((d) => Number(d))
-                .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
-            ),
-          ).sort((a, b) => a - b);
-          return cleaned.length ? cleaned : null;
-        })()
+            const cleaned = Array.from(
+              new Set(
+                days_of_week
+                  .map((d) => Number(d))
+                  .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+              ),
+            ).sort((a, b) => a - b);
+            return cleaned.length ? cleaned : null;
+          })()
         : null
       : null;
     const nextForDx = setForDx
@@ -1768,7 +1768,7 @@ router.patch("/visit/:patientId/medication/:id/stop", async (req, res) => {
   } catch (e) {
     try {
       await client.query("ROLLBACK");
-    } catch { }
+    } catch {}
     client.release();
     handleError(res, e, "Stop medication");
   }
@@ -1899,7 +1899,7 @@ router.patch("/visit/:patientId/medication/:id/restart", async (req, res) => {
   } catch (e) {
     try {
       await client.query("ROLLBACK");
-    } catch { }
+    } catch {}
     client.release();
     handleError(res, e, "Restart medication");
   }
@@ -1995,9 +1995,9 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
     const block =
       mediaType === "application/pdf"
         ? {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: base64 },
-        }
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: base64 },
+          }
         : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
 
     const headers = {
@@ -2173,7 +2173,7 @@ router.post("/visit/:patientId/document", async (req, res) => {
     }
     // Fire-and-forget: auto-extract lab results from uploaded lab reports
     if (doc_type === "lab_report" && base64) {
-      autoExtractLab(doc.id, pid, base64, mediaType, doc_date).catch(() => { });
+      autoExtractLab(doc.id, pid, base64, mediaType, doc_date).catch(() => {});
     }
     res.json(doc);
   } catch (e) {
@@ -2393,25 +2393,25 @@ router.patch("/visit/:patientId/follow-up-with", async (req, res) => {
     // Empty / null / whitespace = delete (strip key)
     const r = text
       ? await pool.query(
-        `UPDATE consultations
+          `UPDATE consultations
              SET con_data = jsonb_set(COALESCE(con_data, '{}'::jsonb), '{follow_up_with}', $1::jsonb),
                  updated_at = NOW()
              WHERE id = (
                SELECT id FROM consultations WHERE patient_id = $2
                ORDER BY visit_date DESC, created_at DESC LIMIT 1
              ) RETURNING *`,
-        [JSON.stringify(text), pid],
-      )
+          [JSON.stringify(text), pid],
+        )
       : await pool.query(
-        `UPDATE consultations
+          `UPDATE consultations
              SET con_data = COALESCE(con_data, '{}'::jsonb) - 'follow_up_with',
                  updated_at = NOW()
              WHERE id = (
                SELECT id FROM consultations WHERE patient_id = $1
                ORDER BY visit_date DESC, created_at DESC LIMIT 1
              ) RETURNING *`,
-        [pid],
-      );
+          [pid],
+        );
     if (!r.rows[0]) return res.status(404).json({ error: "No consultation found" });
     // Denormalise onto the patient's upcoming appointment row so the patient
     // app (giniSupabase → vuukipgdegewpwucdgxa) can render it without a JSONB
@@ -2522,13 +2522,13 @@ pool
        created_at TIMESTAMPTZ DEFAULT NOW()
      )`,
   )
-  .catch(() => { });
+  .catch(() => {});
 pool
   .query(
     `CREATE INDEX IF NOT EXISTS idx_doctor_summaries_patient
        ON doctor_summaries (patient_id, version DESC)`,
   )
-  .catch(() => { });
+  .catch(() => {});
 
 // GET /visit/:patientId/doctor-summary — return all versions (latest first)
 router.get("/visit/:patientId/doctor-summary", async (req, res) => {
@@ -2648,13 +2648,13 @@ pool
        created_at TIMESTAMPTZ DEFAULT NOW()
      )`,
   )
-  .catch(() => { });
+  .catch(() => {});
 pool
   .query(
     `CREATE INDEX IF NOT EXISTS idx_patient_summaries_patient
        ON patient_summaries (patient_id, version DESC)`,
   )
-  .catch(() => { });
+  .catch(() => {});
 // Tone-aware Hinglish heading the AI returns alongside the body. greeting is
 // the leading phrase ("Bahut khoob, Test ji,"); accent is the italic-yellow
 // ending phrase ("kuch dekhna hai"). Both null for legacy / manual rows.
@@ -2664,7 +2664,7 @@ pool
        ADD COLUMN IF NOT EXISTS heading_greeting TEXT,
        ADD COLUMN IF NOT EXISTS heading_accent  TEXT`,
   )
-  .catch(() => { });
+  .catch(() => {});
 
 // GET /visit/:patientId/patient-summary — return all versions (latest first)
 router.get("/visit/:patientId/patient-summary", async (req, res) => {
@@ -2751,10 +2751,10 @@ router.post("/visit/:patientId/patient-summary", async (req, res) => {
     // the body doesn't blank the AI-generated greeting/accent.
     const prevHeadingRow = prev.rows[0]
       ? await pool.query(
-        `SELECT heading_greeting, heading_accent
+          `SELECT heading_greeting, heading_accent
              FROM patient_summaries WHERE id = $1`,
-        [prev.rows[0].id],
-      )
+          [prev.rows[0].id],
+        )
       : null;
     const carriedGreeting = prevHeadingRow?.rows[0]?.heading_greeting ?? null;
     const carriedAccent = prevHeadingRow?.rows[0]?.heading_accent ?? null;
@@ -2942,7 +2942,7 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
         [pid],
       );
       visitAnchor = a.rows[0]?.anchor || null;
-    } catch { }
+    } catch {}
   }
   for (const m of medications) {
     try {
@@ -3257,7 +3257,7 @@ router.post("/visit/:patientId/clinical-bulk", async (req, res) => {
       }).catch((e) =>
         console.warn("[Visit] scribe-prescription background save failed:", e.message),
       );
-    } catch { }
+    } catch {}
   }
 
   res.json({ counts, failed, total: totalSaved });
@@ -3323,7 +3323,7 @@ router.patch("/visit/:patientId/medications/reconcile", async (req, res) => {
     // anything. The default no-op case (page load, nothing to stop) must not
     // wipe the cache or every reload regenerates fresh.
     if (r.rowCount > 0) {
-      invalidatePatientSummaries(pid).catch(() => { });
+      invalidatePatientSummaries(pid).catch(() => {});
     }
     res.json({ stopped: r.rowCount });
   } catch (e) {

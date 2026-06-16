@@ -24,7 +24,7 @@ pool
     ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPTZ
 `,
   )
-  .catch(() => { });
+  .catch(() => {});
 
 // ── AI brief generation (server-side, same logic as patientBrief.js) ──────────
 
@@ -416,7 +416,7 @@ async function _generateAiBriefInner(
     fmtPrep(ctx.prep),
     ``,
     fmtFollowUp(ctx.followUp, ctx.followUpWith, ctx.investigations) ||
-    "Scheduled follow-up: (not recorded)",
+      "Scheduled follow-up: (not recorded)",
     (ctx.followUp || ctx.followUpWith) && ctx.followUpIsFuture
       ? `FOLLOW-UP INSTRUCTION (MANDATORY): A follow-up is scheduled for this patient (see "Scheduled follow-up" above). You MUST end the third paragraph with exactly one sentence that: (1) uses the RELATIVE TIME label verbatim (e.g. "next week", "in about 1 month", "in 2 weeks") — never the calendar date; (2) names the specific tests from "Tests ordered for this follow-up" if present (e.g. "for HbA1c, FBS, and UACR"); (3) weaves in any timing/preparation notes (e.g. "fasting", "after stopping medication 1 day prior"). Example shapes: "He is due next week for HbA1c and lipid panel, fasting." / "She is invited back in about 1 month for FBG and PP charting." / "He is scheduled in 2 weeks for HbA1c, creatinine, and UACR, after stopping antidiabetic medication 1 day prior." Do not skip or omit this sentence.`
       : ctx.followUp && !ctx.followUpIsFuture
@@ -643,7 +643,7 @@ router.get("/patients/:id/summary", async (req, res) => {
             `UPDATE appointments SET ai_summary=NULL, ai_summary_generated_at=NULL WHERE id=$1`,
             [apptId],
           )
-          .catch(() => { });
+          .catch(() => {});
       } else {
         console.log(`[summary] MISS patient=${pid} appt=${apptId} — generating`);
       }
@@ -667,7 +667,7 @@ router.get("/patients/:id/summary", async (req, res) => {
     });
     inFlight.set(flightKey, flightPromise);
     flightPromise
-      .catch(() => { })
+      .catch(() => {})
       .finally(() => {
         if (inFlight.get(flightKey) === flightPromise) inFlight.delete(flightKey);
       });
@@ -690,15 +690,15 @@ router.get("/patients/:id/summary", async (req, res) => {
         // Prep from latest appointment (or specific appointment)
         apptId
           ? pool.query(
-            `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments WHERE id=$1`,
-            [apptId],
-          )
+              `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments WHERE id=$1`,
+              [apptId],
+            )
           : pool.query(
-            `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments
+              `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments
                WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
                ORDER BY appointment_date DESC LIMIT 1`,
-            [pid],
-          ),
+              [pid],
+            ),
 
         // Latest report that has extracted lab results
         pool.query(
@@ -770,18 +770,18 @@ router.get("/patients/:id/summary", async (req, res) => {
       _withDate(apptRow?.healthray_follow_up) ||
       (apptBiomarkers.followup
         ? {
-          date: apptBiomarkers.followup,
-          notes: apptRow?.healthray_follow_up?.notes || null,
-          timing: apptRow?.healthray_follow_up?.timing || null,
-        }
+            date: apptBiomarkers.followup,
+            notes: apptRow?.healthray_follow_up?.notes || null,
+            timing: apptRow?.healthray_follow_up?.timing || null,
+          }
         : null) ||
       _withDate(followupApptRow?.healthray_follow_up) ||
       (followupApptBio.followup
         ? {
-          date: followupApptBio.followup,
-          notes: followupApptRow?.healthray_follow_up?.notes || null,
-          timing: followupApptRow?.healthray_follow_up?.timing || null,
-        }
+            date: followupApptBio.followup,
+            notes: followupApptRow?.healthray_follow_up?.notes || null,
+            timing: followupApptRow?.healthray_follow_up?.timing || null,
+          }
         : null);
     const apptFollowUp = resolvedFollowUp ?? null;
     // Prefer follow_up_with and investigations from the appointment that
