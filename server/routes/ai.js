@@ -102,7 +102,7 @@ router.post("/ai/complete", async (req, res) => {
     return res.status(400).json({ error: "messages array is required" });
 
   const anthropicModel =
-    model === "sonnet" ? "claude-sonnet-4-20250514" : "claude-haiku-4-5-20251001";
+    model === "sonnet" ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001";
 
   try {
     const compressedMessages = await compressMessagesImages(messages);
@@ -182,9 +182,9 @@ router.post("/ai/transcribe", async (req, res) => {
 
     const afterFile = Buffer.from(
       `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1` +
-        `\r\n--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${lang}` +
-        `\r\n--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\nMedical consultation in India. Terms: HbA1c, eGFR, creatinine, TSH, LDL, HDL, metformin, insulin, telmisartan, amlodipine, rosuvastatin, dapagliflozin, empagliflozin, thyronorm, dianorm, glimepiride, canagliflozin, proteinuria, nephropathy, retinopathy, CABG, dyslipidemia, hypothyroidism.` +
-        `\r\n--${boundary}--\r\n`,
+      `\r\n--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${lang}` +
+      `\r\n--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\nMedical consultation in India. Terms: HbA1c, eGFR, creatinine, TSH, LDL, HDL, metformin, insulin, telmisartan, amlodipine, rosuvastatin, dapagliflozin, empagliflozin, thyronorm, dianorm, glimepiride, canagliflozin, proteinuria, nephropathy, retinopathy, CABG, dyslipidemia, hypothyroidism.` +
+      `\r\n--${boundary}--\r\n`,
     );
 
     const body = Buffer.concat([filePart, audioBuffer, afterFile]);
@@ -523,7 +523,7 @@ router.post("/ai/agent", async (req, res) => {
   }
 
   const anthropicModel =
-    model === "sonnet" ? "claude-sonnet-4-20250514" : "claude-haiku-4-5-20251001";
+    model === "sonnet" ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001";
 
   // Hydrate the thread (or create one) when using the checkpoint path.
   let convRow = null;
@@ -642,7 +642,7 @@ router.post("/ai/agent", async (req, res) => {
         const u = data.usage;
         console.log(
           `[agent usage] model=${anthropicModel} in=${u.input_tokens} out=${u.output_tokens} ` +
-            `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
+          `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
         );
       }
       if (data.error) return res.status(502).json({ error: data.error.message });

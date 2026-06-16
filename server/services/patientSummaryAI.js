@@ -4,7 +4,7 @@
 // is the caller's responsibility — store the returned text as a new version.
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 
 const SYSTEM_PROMPT = `You are writing a short visit recap for the PATIENT to read in their app and on their printed prescription. Your reader is the patient — not a doctor. The greeting is written in the voice of THEIR DOCTOR speaking to them — warm, reassuring, professional, and respectful (the way a senior physician addresses their patient).
 
@@ -276,8 +276,8 @@ export async function generatePatientSummary(data) {
     typeof parsed?.body === "string" && parsed.body.trim()
       ? parsed.body.trim()
       : // If the model ignored the JSON contract, keep the raw text as the body
-        // so we never block a visit on a heading parse error.
-        text;
+      // so we never block a visit on a heading parse error.
+      text;
   const heading_greeting =
     typeof parsed?.heading_greeting === "string" && parsed.heading_greeting.trim()
       ? parsed.heading_greeting.trim()

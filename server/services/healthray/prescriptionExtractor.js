@@ -60,7 +60,7 @@ export async function extractFromFile(base64, buffer) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 24000,
       temperature: 0,
       // Cache the static extraction prompt. The document (image/PDF) sits in the
@@ -95,7 +95,7 @@ export async function extractFromFile(base64, buffer) {
     const u = data.usage;
     console.log(
       `[prescription-extract usage] in=${u.input_tokens} out=${u.output_tokens} ` +
-        `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
+      `cache_write=${u.cache_creation_input_tokens || 0} cache_read=${u.cache_read_input_tokens || 0}`,
     );
   }
   const text = (data.content || []).map((c) => c.text || "").join("");

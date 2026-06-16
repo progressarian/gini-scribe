@@ -4,7 +4,7 @@
 // the result to doctor_summaries as a new version).
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 
 const SYSTEM_PROMPT = `You are a junior endocrinology resident giving a verbal pre-visit handoff to your senior consultant just before they walk in to see the patient. Speak the way a junior doctor actually briefs a senior — flowing clinical prose, respectful, concise.
 

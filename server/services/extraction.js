@@ -173,9 +173,9 @@ async function callClaudeOnce({ base64, mediaType, prompt, maxTokens, signal }) 
   const block =
     mediaType === "application/pdf"
       ? {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: base64 },
-        }
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: base64 },
+      }
       : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
 
   const headers = {
@@ -186,7 +186,7 @@ async function callClaudeOnce({ base64, mediaType, prompt, maxTokens, signal }) 
   if (mediaType === "application/pdf") headers["anthropic-beta"] = "pdfs-2024-09-25";
 
   const body = {
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: maxTokens,
     messages: [{ role: "user", content: [block, { type: "text", text: prompt }] }],
   };

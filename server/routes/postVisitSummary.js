@@ -21,7 +21,7 @@ pool
     ADD COLUMN IF NOT EXISTS post_visit_summary_generated_at TIMESTAMPTZ
 `,
   )
-  .catch(() => {});
+  .catch(() => { });
 
 const SYSTEM_PROMPT = `You are a junior endocrinology resident giving a verbal post-visit handoff to your senior consultant, immediately after the consultation has ended and the prescription has been finalised. Write the way a junior doctor would brief a senior — clinical, concise, respectful, in flowing prose.
 
@@ -275,14 +275,13 @@ async function _generatePostVisitNarrativeInner(
     fmtLabs(labHistory),
     ``,
     followUpRelative
-      ? `Follow-up scheduled: ${followUpRelative}${followUpNotes ? ` — ${followUpNotes}` : ""}${
-          investigations.length > 0
-            ? ` — Tests: ${investigations
-                .map((t) => (typeof t === "string" ? t : t.name || t.test || ""))
-                .filter(Boolean)
-                .join(", ")}`
-            : ""
-        }`
+      ? `Follow-up scheduled: ${followUpRelative}${followUpNotes ? ` — ${followUpNotes}` : ""}${investigations.length > 0
+        ? ` — Tests: ${investigations
+          .map((t) => (typeof t === "string" ? t : t.name || t.test || ""))
+          .filter(Boolean)
+          .join(", ")}`
+        : ""
+      }`
       : `Follow-up: not scheduled / not recorded`,
     followUpRelative
       ? `FOLLOW-UP INSTRUCTION (MANDATORY): Close paragraph 2 with one sentence using the relative time above (never the calendar date). Name the specific tests if listed. Weave in any preparation notes. Example: "He is due ${followUpRelative} for his HbA1c and lipid panel, fasting."`
@@ -300,7 +299,7 @@ async function _generatePostVisitNarrativeInner(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 1500,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
@@ -517,7 +516,7 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
             `UPDATE appointments SET post_visit_summary=NULL, post_visit_summary_generated_at=NULL WHERE id=$1`,
             [apptId],
           )
-          .catch(() => {});
+          .catch(() => { });
       } else {
         console.log(`[post-visit] MISS patient=${pid} appt=${apptId} — generating`);
       }
@@ -540,7 +539,7 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
     });
     inFlight.set(flightKey, flightPromise);
     flightPromise
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         if (inFlight.get(flightKey) === flightPromise) inFlight.delete(flightKey);
       });
@@ -612,9 +611,9 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       apptId
         ? pool.query(`SELECT compliance FROM appointments WHERE id=$1`, [apptId])
         : pool.query(
-            `SELECT compliance FROM appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 1`,
-            [pid],
-          ),
+          `SELECT compliance FROM appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 1`,
+          [pid],
+        ),
       // Latest appointment with clinical notes — source of healthray_follow_up + investigations
       pool.query(
         `SELECT healthray_follow_up, follow_up_with, healthray_investigations, biomarkers
@@ -711,7 +710,7 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       if (!resolvedFollowUp?.date) return null;
       const diffDays = Math.round(
         (new Date(String(resolvedFollowUp.date).slice(0, 10)).getTime() - Date.now()) /
-          (1000 * 60 * 60 * 24),
+        (1000 * 60 * 60 * 24),
       );
       if (diffDays <= 0) return null;
       if (diffDays === 1) return "tomorrow";
@@ -759,13 +758,13 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       carePhaseParameters: carePhaseResult.carePhaseParameters,
       carePhasePriority: bioPriority
         ? {
-            marker: bioPriority.marker,
-            value: bioPriority.value,
-            target: bioPriority.target,
-            status: bioPriority.status,
-            label: bioPriority.label,
-            date: bioPriority.date,
-          }
+          marker: bioPriority.marker,
+          value: bioPriority.value,
+          target: bioPriority.target,
+          status: bioPriority.status,
+          label: bioPriority.label,
+          date: bioPriority.date,
+        }
         : null,
       visitDate: checkDate,
       totalVisits,

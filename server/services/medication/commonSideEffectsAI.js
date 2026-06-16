@@ -111,7 +111,7 @@ function sanitizeEntries(arr) {
 // both produce identically-shaped requests.
 export function buildSideEffectsRequest({ name, composition }) {
   return {
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 600,
     temperature: 0,
     system: SYSTEM_PROMPT,
