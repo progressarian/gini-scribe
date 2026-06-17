@@ -477,6 +477,42 @@ router.post("/flow/checkin", async (req, res) => {
     if (!vt.rows.length) return res.status(400).json({ error: "Unknown visit_type_id" });
     const maxTime = vt.rows[0].max_time_min;
 
+    // Guard against duplicate check-ins: if this patient already has an active
+    // (in_progress) flow visit today — by file number, patient record, or the
+    // same appointment — block it and point back to the existing visit.
+    const dupOr = [];
+    const dupParams = [];
+    dupParams.push(patient_id);
+    dupOr.push(`patient_id = $${dupParams.length}`);
+    if (patient_db_id) {
+      dupParams.push(patient_db_id);
+      dupOr.push(`patient_db_id = $${dupParams.length}`);
+    }
+    if (appointment_id) {
+      dupParams.push(appointment_id);
+      dupOr.push(`appointment_id = $${dupParams.length}`);
+    }
+    const dup = await client.query(
+      `SELECT id, patient_name, checkin_time FROM flow_visits
+        WHERE status = 'in_progress' AND visit_date::date = CURRENT_DATE
+          AND (${dupOr.join(" OR ")})
+        ORDER BY checkin_time DESC LIMIT 1`,
+      dupParams,
+    );
+    if (dup.rows.length) {
+      const d = dup.rows[0];
+      const at = new Date(d.checkin_time).toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Asia/Kolkata",
+      });
+      return res.status(409).json({
+        error: `${d.patient_name} is already checked in today (at ${at}). Open the existing visit instead of adding a duplicate.`,
+        code: "DUPLICATE_CHECKIN",
+        visit_id: d.id,
+      });
+    }
+
     const totalPlanned = journey_steps.reduce(
       (a, s) => a + (parseInt(s.planned_duration_min) || 0),
       0,
