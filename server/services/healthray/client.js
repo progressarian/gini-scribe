@@ -2,6 +2,7 @@
 
 import { createLogger } from "../logger.js";
 import { fetchWithTimeout } from "../cron/lowPriority.js";
+import pool from "../../config/db.js";
 const { log } = createLogger("HealthRay Sync");
 
 // Upstream call timeout — a slow Healthray API must not stall a sync worker
@@ -15,26 +16,93 @@ export const ORG_ID = process.env.HEALTHRAY_ORG_ID || "1528";
 let sessionCookie = process.env.HEALTHRAY_SESSION || "";
 let authToken = ""; // x-auth-token from login response
 
-// Login circuit-breaker. When the login endpoint rejects us — e.g. HealthRay
-// rate-limits the IP with a 403 HTML page after too many attempts — retrying
-// every ~10s keeps the limiter tripped indefinitely (a vicious loop: 403 → no
-// session → re-login → 403). Back off exponentially so the window can clear,
-// then recover automatically. Reset on the first success.
+// ── Login resilience (the permanent fix for the 403 IP-block loop) ──────────
+// The sync runs in TWO processes (API + worker), each polling on a loop. When
+// HealthRay's web login rejects us — typically a 403 HTML page once its WAF
+// rate-limits the IP — naive per-process retry hammers the endpoint and keeps
+// the limiter tripped forever (403 → no session → re-login → 403). Three guards
+// stop the server from being the thing that triggers/sustains the block:
+//   1. Single-flight: concurrent callers share ONE in-flight login.
+//   2. Shared cooldown in app_kv: BOTH processes (and restarts) honour one
+//      backoff window — so the cluster makes one login attempt, not N.
+//   3. A detected block (403/429/HTML) → a long cooldown (not a fast retry),
+//      because a 403 means "you're blocked", and retrying fast deepens it.
+// On success the session cookie is persisted so the other process and the next
+// restart REUSE it instead of each logging in afresh.
 let loginFailCount = 0;
-let loginBackoffUntil = 0;
-const LOGIN_BACKOFF_BASE_MS = 20_000; // 20s, doubles each consecutive failure
+let loginBackoffUntil = 0; // in-memory mirror of the shared cooldown
+let loginPromise = null; // single-flight guard
+let stateLoadPromise = null;
+const LOGIN_BACKOFF_BASE_MS = 60_000; // 1 min, doubles each consecutive failure
 const LOGIN_BACKOFF_MAX_MS = 10 * 60_000; // capped at 10 min
+const BLOCK_COOLDOWN_MS = 30 * 60_000; // 30 min when HealthRay's WAF 403-blocks us
+const KV_SESSION = "healthray_session";
+const KV_COOLDOWN = "healthray_login_cooldown";
 
+async function kvGet(key) {
+  try {
+    const r = await pool.query("SELECT value FROM app_kv WHERE key=$1", [key]);
+    return r.rows[0]?.value ?? null;
+  } catch {
+    return null; // app_kv missing / DB blip → fall back to in-memory only
+  }
+}
+async function kvSet(key, value) {
+  try {
+    await pool.query(
+      `INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, JSON.stringify(value)],
+    );
+  } catch {
+    /* best-effort — never let persistence break a sync */
+  }
+}
+
+// Pull a session cookie + cooldown another process may have already established
+// (runs once per process). Lets a restart reuse a live session instead of
+// logging in again.
+function loadPersistedState() {
+  if (!stateLoadPromise) {
+    stateLoadPromise = (async () => {
+      const s = await kvGet(KV_SESSION);
+      if (s?.cookie && !sessionCookie) {
+        sessionCookie = s.cookie;
+        authToken = s.authToken || "";
+      }
+      const c = await kvGet(KV_COOLDOWN);
+      if (c?.until) {
+        loginBackoffUntil = c.until;
+        loginFailCount = c.failCount || 0;
+      }
+    })();
+  }
+  return stateLoadPromise;
+}
+
+// Milliseconds left on the login cooldown (0 when clear). The cron loops read
+// this to stop poking HealthRay's data endpoints while we're blocked — without
+// it they'd keep eating 403s every ~10s and sustain the WAF block.
+export function getLoginCooldownMs() {
+  return Math.max(0, loginBackoffUntil - Date.now());
+}
+
+// Public entry: single-flight wrapper so a burst of callers triggers ONE login.
 async function healthrayLogin() {
+  if (loginPromise) return loginPromise;
+  loginPromise = doLogin().finally(() => {
+    loginPromise = null;
+  });
+  return loginPromise;
+}
+
+async function doLogin() {
   const mobile = process.env.HEALTHRAY_MOBILE;
   const password = process.env.HEALTHRAY_PASSWORD;
   // HealthRay's sign_in only requires captchaToken to be NON-EMPTY — it does
-  // not validate the token's value (verified against the live API: login
-  // succeeds with an arbitrary string). So we send a constant placeholder
-  // rather than a human-captured, single-use reCAPTCHA token. This lets the
-  // app re-login on its own whenever the connect.sid session expires, so auto
-  // sync self-heals instead of dying until someone manually refreshes the
-  // cookie. An optional HEALTHRAY_CAPTCHA env value still overrides if set.
+  // not validate the token's value. A constant placeholder lets the app
+  // re-login on its own when the connect.sid session expires. Optional
+  // HEALTHRAY_CAPTCHA env value overrides if set.
   const captcha = process.env.HEALTHRAY_CAPTCHA || "auto";
 
   if (!mobile || !password) {
@@ -43,13 +111,30 @@ async function healthrayLogin() {
     );
   }
 
-  // Circuit-breaker: while backing off after recent failures, fail fast WITHOUT
-  // hitting the network, so we stop hammering a rate-limited endpoint.
-  if (Date.now() < loginBackoffUntil) {
-    const waitS = Math.round((loginBackoffUntil - Date.now()) / 1000);
+  await loadPersistedState();
+  // Honour the SHARED cooldown — re-read it so we respect a block the OTHER
+  // process just hit. While cooling down, fail fast WITHOUT touching the
+  // network, so we stop hammering a rate-limited endpoint.
+  const shared = await kvGet(KV_COOLDOWN);
+  const until = Math.max(loginBackoffUntil, shared?.until || 0);
+  if (Date.now() < until) {
+    loginBackoffUntil = until;
+    loginFailCount = shared?.failCount ?? loginFailCount;
+    const waitS = Math.round((until - Date.now()) / 1000);
+    const why = shared?.reason ? `, ${shared.reason}` : "";
     throw new Error(
-      `HealthRay login backing off (${loginFailCount} consecutive failures) — next attempt in ~${waitS}s`,
+      `HealthRay login backing off (${loginFailCount} consecutive failures${why}) — next attempt in ~${waitS}s`,
     );
+  }
+  // Another process may have refreshed the session while we waited — reuse it.
+  if (shared == null) {
+    const fresh = await kvGet(KV_SESSION);
+    if (fresh?.cookie && fresh.cookie !== sessionCookie) {
+      sessionCookie = fresh.cookie;
+      authToken = fresh.authToken || "";
+      log("Auth", "Reusing session established by another process");
+      return sessionCookie;
+    }
   }
 
   log("Auth", "Session expired, logging in...");
@@ -96,12 +181,24 @@ async function healthrayLogin() {
 
   if (!match) {
     loginFailCount += 1;
-    const backoff = Math.min(
-      LOGIN_BACKOFF_MAX_MS,
-      LOGIN_BACKOFF_BASE_MS * 2 ** (loginFailCount - 1),
-    );
-    loginBackoffUntil = Date.now() + backoff;
     const ct = res.headers.get("content-type") || "?";
+    // A 403/429 or an HTML body means HealthRay's edge/WAF is blocking us, not
+    // a wrong password (which returns JSON). Treat it as "blocked → wait long",
+    // never a fast retry — that's what sustains the block.
+    const blocked = res.status === 403 || res.status === 429 || ct.includes("text/html");
+    const backoff = blocked
+      ? BLOCK_COOLDOWN_MS
+      : Math.min(LOGIN_BACKOFF_MAX_MS, LOGIN_BACKOFF_BASE_MS * 2 ** (loginFailCount - 1));
+    loginBackoffUntil = Date.now() + backoff;
+    const reason = blocked ? `IP likely blocked (http=${res.status})` : "";
+    await kvSet(KV_COOLDOWN, { until: loginBackoffUntil, failCount: loginFailCount, reason });
+    if (blocked) {
+      log(
+        "Auth",
+        `⚠ BLOCKED by HealthRay (http=${res.status}) — cooling down ${Math.round(backoff / 60000)}min. ` +
+          `If this persists, your server IP is rate-limited/blocklisted: request an API token + IP allowlist from HealthRay.`,
+      );
+    }
     const snippet = body.message ? "" : ` body="${rawBody.slice(0, 200).replace(/\s+/g, " ")}"`;
     throw new Error(
       `HealthRay login failed: ${body.message || "no session cookie returned"} ` +
@@ -109,20 +206,25 @@ async function healthrayLogin() {
     );
   }
 
-  // Success — clear the circuit-breaker.
+  // Success — clear the circuit-breaker and persist the session for reuse by
+  // the other process / the next restart.
   loginFailCount = 0;
   loginBackoffUntil = 0;
   sessionCookie = match[1];
-  // Capture auth token from login response for download endpoints
   if (body.data?.auth_token || body.data?.token) {
     authToken = body.data.auth_token || body.data.token;
     log("Auth", `Auth token captured: ${authToken.slice(0, 8)}...`);
   }
+  await kvSet(KV_SESSION, { cookie: sessionCookie, authToken, at: Date.now() });
+  await kvSet(KV_COOLDOWN, { until: 0, failCount: 0, reason: "" });
   log("Auth", "Login successful, new session obtained");
   return sessionCookie;
 }
 
 export async function healthrayFetch(path, isRetry = false) {
+  if (!sessionCookie) {
+    await loadPersistedState(); // a live session may already exist (other process / pre-restart)
+  }
   if (!sessionCookie) {
     await healthrayLogin();
   }
@@ -139,6 +241,15 @@ export async function healthrayFetch(path, isRetry = false) {
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("text/html")) {
     if (isRetry) throw new Error("HealthRay session expired — re-login failed, check credentials");
+    // The other process may have already refreshed the session — pick that up
+    // first so we don't trigger a redundant login (and more login traffic).
+    const fresh = await kvGet(KV_SESSION);
+    if (fresh?.cookie && fresh.cookie !== sessionCookie) {
+      sessionCookie = fresh.cookie;
+      authToken = fresh.authToken || "";
+      log("Auth", "Session refreshed by another process — reusing it");
+      return healthrayFetch(path, true);
+    }
     log("Auth", "Session expired (HTML response) — re-logging in");
     await healthrayLogin();
     return healthrayFetch(path, true);

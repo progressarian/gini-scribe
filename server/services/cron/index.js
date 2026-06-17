@@ -21,6 +21,7 @@ import {
   backfillLabPdfs,
 } from "./labSync.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
+import { getLoginCooldownMs } from "../healthray/client.js";
 import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
 
@@ -83,9 +84,12 @@ function scheduleNextStatusSync(delayMs) {
       console.error("[Cron] Status sync failed:", e.message);
     }
     const elapsed = Date.now() - startedAt;
-    const breakMs =
+    let breakMs =
       STATUS_LOOP_MIN_BREAK_MS +
       Math.floor(Math.random() * (STATUS_LOOP_MAX_BREAK_MS - STATUS_LOOP_MIN_BREAK_MS + 1));
+    // While HealthRay has us blocked, wait out the cooldown instead of poking
+    // its endpoints every ~10s and sustaining the 403 block.
+    breakMs = Math.max(breakMs, getLoginCooldownMs());
     if (elapsed > 5000) {
       console.log(
         `[Cron] Status sync finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
@@ -107,9 +111,12 @@ function scheduleNextHealthraySync(delayMs) {
       console.error("[Cron] Scheduled sync failed:", e.message);
     }
     const elapsed = Date.now() - startedAt;
-    const breakMs =
+    let breakMs =
       HEALTHRAY_LOOP_MIN_BREAK_MS +
       Math.floor(Math.random() * (HEALTHRAY_LOOP_MAX_BREAK_MS - HEALTHRAY_LOOP_MIN_BREAK_MS + 1));
+    // While HealthRay has us blocked, wait out the cooldown instead of poking
+    // its endpoints every ~10s and sustaining the 403 block.
+    breakMs = Math.max(breakMs, getLoginCooldownMs());
     console.log(
       `[Cron] HealthRay sync finished in ${elapsed}ms; next run in ${Math.round(breakMs / 1000)}s`,
     );

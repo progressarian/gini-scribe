@@ -125,9 +125,12 @@ async function ensureFlowAppointment(v) {
 
 // Reverse sync (OPD/GHM → Flow): if a linked appointment was finished by the
 // clinical workflow (doctor marked it `seen`/`completed`), complete the flow
-// visit so it stops running as "ongoing/breached"; `cancelled`/`no_show` →
-// cancel it. Persists the change AND mutates the in-memory rows/steps so the
-// feed reflects it immediately. Best-effort; never throws to the caller.
+// visit so it stops running as "ongoing/breached"; a deliberate `cancelled`
+// cancels it. NOTE: `no_show` is intentionally NOT a cancel trigger — the
+// Sheets sync defaults appointments to `no_show` until the patient is marked
+// present, so treating it as a cancel would auto-cancel real check-ins.
+// Persists the change AND mutates the in-memory rows/steps so the feed reflects
+// it immediately. Best-effort; never throws to the caller.
 async function reconcileFromAppointments(visits, stepMap) {
   const linked = visits.filter((v) => v.appointment_id && v.status === "in_progress");
   if (!linked.length) return;
@@ -186,7 +189,11 @@ async function reconcileFromAppointments(visits, stepMap) {
             s.status = "skipped";
           }
         });
-      } else if (st === "cancelled" || st === "no_show") {
+      } else if (st === "cancelled") {
+        // Only a DELIBERATE cancellation cancels the flow visit. NOT `no_show`:
+        // the Sheets sync defaults every appointment to `no_show` until the
+        // patient is marked "show", so a flow check-in (which is itself proof
+        // the patient is physically present) would get wrongly auto-cancelled.
         await pool.query(
           "UPDATE flow_visits SET status='cancelled', updated_at=NOW() WHERE id=$1 AND status='in_progress'",
           [v.id],
