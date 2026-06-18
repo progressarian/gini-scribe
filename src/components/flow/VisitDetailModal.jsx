@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { toast } from "../../stores/uiStore";
 import {
   useFlowAdvance,
@@ -5,6 +6,14 @@ import {
   useFlowRemoveStep,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
+
+// Quick-pick reasons for skipping a step (free text still allowed).
+const SKIP_REASONS = ["Already done", "Not required", "Done elsewhere", "Patient declined"];
+const fmtSkipTime = (t) => {
+  if (!t) return "";
+  const d = new Date(t);
+  return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
 
 // Patient journey management modal — edit step durations, remove/skip steps, and
 // force-advance. Shared by the Flow Coordinator floor and the Reception "checked
@@ -14,6 +23,9 @@ export default function VisitDetailModal({ visit, onClose }) {
   const advance = useFlowAdvance();
   const editDur = useFlowEditDuration();
   const removeStep = useFlowRemoveStep();
+  // The step whose skip-reason prompt is open, and the reason being typed.
+  const [skipFor, setSkipFor] = useState(null);
+  const [skipReason, setSkipReason] = useState("");
 
   const act = async (fn, okMsg) => {
     try {
@@ -22,6 +34,13 @@ export default function VisitDetailModal({ visit, onClose }) {
     } catch (e) {
       toast(e.message, "error");
     }
+  };
+
+  const confirmSkip = (step) => {
+    const reason = skipReason.trim();
+    act(() => removeStep.mutateAsync({ stepId: step.id, reason }), "Step updated");
+    setSkipFor(null);
+    setSkipReason("");
   };
 
   return (
@@ -73,45 +92,122 @@ export default function VisitDetailModal({ visit, onClose }) {
           </div>
 
           {visit.steps?.map((s) => (
-            <div key={s.id} className="jb-step">
-              <span
-                className="jb-name"
-                style={{
-                  textDecoration: s.status === "skipped" ? "line-through" : "none",
-                  opacity: s.status === "skipped" ? 0.5 : 1,
-                }}
-              >
-                {s.step_order}. {s.step_name}
+            <div key={s.id}>
+              <div className="jb-step">
                 <span
-                  className={`flow-badge ${s.status === "completed" ? "fb-grn" : s.status === "in_progress" ? "fb-blu" : "fb-ink"}`}
-                  style={{ marginLeft: 6 }}
+                  className="jb-name"
+                  style={{
+                    textDecoration: s.status === "skipped" ? "line-through" : "none",
+                    opacity: s.status === "skipped" ? 0.5 : 1,
+                  }}
                 >
-                  {s.status}
+                  {s.step_order}. {s.step_name}
+                  <span
+                    className={`flow-badge ${s.status === "completed" ? "fb-grn" : s.status === "in_progress" ? "fb-blu" : "fb-ink"}`}
+                    style={{ marginLeft: 6 }}
+                  >
+                    {s.status}
+                  </span>
                 </span>
-              </span>
-              <input
-                className="jb-dur"
-                type="number"
-                min="0"
-                defaultValue={s.planned_duration_min}
-                disabled={s.status === "completed"}
-                onBlur={(e) => {
-                  const v = parseInt(e.target.value);
-                  if (v !== s.planned_duration_min)
-                    act(
-                      () => editDur.mutateAsync({ stepId: s.id, new_duration_min: v }),
-                      "Duration updated",
-                    );
-                }}
-              />
-              {!["completed", "skipped"].includes(s.status) && (
-                <button
-                  className="jb-remove"
-                  title="Remove / skip step"
-                  onClick={() => act(() => removeStep.mutateAsync(s.id), "Step removed")}
+                <input
+                  className="jb-dur"
+                  type="number"
+                  min="0"
+                  defaultValue={s.planned_duration_min}
+                  disabled={s.status === "completed"}
+                  onBlur={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (v !== s.planned_duration_min)
+                      act(
+                        () => editDur.mutateAsync({ stepId: s.id, new_duration_min: v }),
+                        "Duration updated",
+                      );
+                  }}
+                />
+                {!["completed", "skipped"].includes(s.status) && (
+                  <button
+                    className="jb-remove"
+                    title="Remove / skip step"
+                    onClick={() => {
+                      setSkipFor(skipFor === s.id ? null : s.id);
+                      setSkipReason("");
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Why a step was skipped — reason · who · when. */}
+              {s.status === "skipped" && s.data?.skip && (
+                <div className="flow-muted" style={{ fontSize: 11, margin: "-2px 0 6px 14px" }}>
+                  ↳ {s.data.skip.reason ? `${s.data.skip.reason} · ` : ""}
+                  {s.data.skip.by || "?"}
+                  {s.data.skip.at ? ` · ${fmtSkipTime(s.data.skip.at)}` : ""}
+                </div>
+              )}
+
+              {/* Reason prompt shown when ✕ is clicked. */}
+              {skipFor === s.id && (
+                <div
+                  style={{
+                    margin: "2px 0 8px 14px",
+                    padding: 8,
+                    border: "1px solid var(--fbd, #e2e2e2)",
+                    borderRadius: 6,
+                    background: "var(--fbg, #fafafa)",
+                  }}
                 >
-                  ✕
-                </button>
+                  <div className="flow-muted" style={{ marginBottom: 6 }}>
+                    Reason for removing “{s.step_name}” (optional):
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                    {SKIP_REASONS.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        className={`flow-badge ${skipReason === r ? "fb-blu" : "fb-ink"}`}
+                        style={{ cursor: "pointer", border: "none" }}
+                        onClick={() => setSkipReason(r)}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={skipReason}
+                    placeholder="or type a reason…"
+                    autoFocus
+                    onChange={(e) => setSkipReason(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && confirmSkip(s)}
+                    style={{
+                      width: "100%",
+                      padding: "4px 6px",
+                      marginBottom: 6,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      className="flow-btn flow-btn-grn"
+                      style={{ flex: 1 }}
+                      disabled={removeStep.isPending}
+                      onClick={() => confirmSkip(s)}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      className="flow-btn flow-btn-ghost"
+                      onClick={() => {
+                        setSkipFor(null);
+                        setSkipReason("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           ))}

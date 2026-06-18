@@ -196,9 +196,15 @@ export function useFlowAddStep() {
   });
 }
 export function useFlowRemoveStep() {
-  return useFlowMutation(async (stepId) => {
+  return useFlowMutation(async (arg) => {
+    // Accepts either a bare stepId (back-compat) or { stepId, reason }.
+    const { stepId, reason } = typeof arg === "object" && arg !== null ? arg : { stepId: arg };
     try {
-      return (await api.delete(`/api/flow/steps/${stepId}`)).data;
+      return (
+        await api.delete(`/api/flow/steps/${stepId}`, {
+          data: reason ? { reason } : undefined,
+        })
+      ).data;
     } catch (err) {
       throw new Error(errMsg(err, "Could not remove step"));
     }

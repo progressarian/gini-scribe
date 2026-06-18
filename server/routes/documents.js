@@ -1352,11 +1352,15 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
                 doc.patient_id,
                 doc.id,
                 testDate,
-                panel.panel_name || null,
+                // panel_name is varchar(100), result_text varchar(200): the AI
+                // extractor can occasionally return an over-long value, which
+                // would 22001-abort the whole document. Clamp to the column
+                // limits so one bad field never fails the extraction.
+                panel.panel_name ? String(panel.panel_name).slice(0, 100) : null,
                 test.test_name,
                 canonical,
                 isNaN(numResult) ? null : numResult,
-                test.result_text || null,
+                test.result_text ? String(test.result_text).slice(0, 200) : null,
                 test.unit || null,
                 test.flag || null,
                 test.ref_range || null,

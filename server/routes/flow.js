@@ -167,10 +167,15 @@ async function reconcileFromAppointments(visits, stepMap) {
            WHERE visit_id=$1 AND status='in_progress'`,
           [v.id],
         );
-        // Steps never reached in the flow (patient finished via OPD) → skipped,
-        // so reports don't average them as zero-minute steps.
+        // Steps never reached in the flow (patient finished via OPD) → mark
+        // COMPLETED (the visit IS done, so the journey should read as done) but
+        // leave actual_duration_min NULL and flag them auto_completed. Reports
+        // average only steps WITH a real duration, so these don't skew timings;
+        // they just stop showing the misleading "skipped" on a finished patient.
         await pool.query(
-          `UPDATE flow_visit_steps SET status='skipped'
+          `UPDATE flow_visit_steps
+             SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                 data = COALESCE(data,'{}'::jsonb) || '{"auto_completed":"opd"}'::jsonb
            WHERE visit_id=$1 AND status IN ('ready','pending')`,
           [v.id],
         );
@@ -184,10 +189,8 @@ async function reconcileFromAppointments(visits, stepMap) {
                 0,
                 Math.round((Date.now() - new Date(s.started_at).getTime()) / 60000),
               );
-            s.status = "completed";
-          } else if (["ready", "pending"].includes(s.status)) {
-            s.status = "skipped";
           }
+          if (["in_progress", "ready", "pending"].includes(s.status)) s.status = "completed";
         });
       } else if (st === "cancelled") {
         // Only a DELIBERATE cancellation cancels the flow visit. NOT `no_show`:
@@ -228,9 +231,13 @@ async function reconcileFromAppointments(visits, stepMap) {
                WHERE visit_id=$1 AND step_order < $2 AND status='in_progress'`,
             [v.id, doc.step_order],
           );
-          // Earlier steps the patient never went through in the flow → skipped.
+          // Earlier steps the patient bypassed in the flow → completed (they're
+          // behind the patient now that they're with the doctor), with NULL
+          // duration + auto_completed flag so timings stay clean.
           await pool.query(
-            `UPDATE flow_visit_steps SET status='skipped'
+            `UPDATE flow_visit_steps
+               SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                   data = COALESCE(data,'{}'::jsonb) || '{"auto_completed":"opd"}'::jsonb
                WHERE visit_id=$1 AND step_order < $2 AND status IN ('ready','pending')`,
             [v.id, doc.step_order],
           );
@@ -253,16 +260,12 @@ async function reconcileFromAppointments(visits, stepMap) {
           );
           steps.forEach((s) => {
             if (s.step_order < doc.step_order) {
-              if (s.status === "in_progress") {
-                if (s.started_at && s.actual_duration_min == null)
-                  s.actual_duration_min = Math.max(
-                    0,
-                    Math.round((Date.now() - new Date(s.started_at).getTime()) / 60000),
-                  );
-                s.status = "completed";
-              } else if (["ready", "pending"].includes(s.status)) {
-                s.status = "skipped";
-              }
+              if (s.status === "in_progress" && s.started_at && s.actual_duration_min == null)
+                s.actual_duration_min = Math.max(
+                  0,
+                  Math.round((Date.now() - new Date(s.started_at).getTime()) / 60000),
+                );
+              if (["in_progress", "ready", "pending"].includes(s.status)) s.status = "completed";
             }
           });
           doc.status = "in_progress";
@@ -1044,6 +1047,8 @@ router.post("/flow/visits/:id/steps", async (req, res) => {
 router.delete("/flow/steps/:stepId", async (req, res) => {
   const client = await pool.connect();
   try {
+    const reason = (req.body?.reason || "").toString().trim().slice(0, 200) || null;
+    const by = ACTOR(req);
     await client.query("BEGIN");
     const step = (
       await client.query("SELECT * FROM flow_visit_steps WHERE id=$1 FOR UPDATE", [
@@ -1060,9 +1065,16 @@ router.delete("/flow/steps/:stepId", async (req, res) => {
     }
     let mode;
     if (step.status === "in_progress" || step.started_at) {
+      // Already-started step → keep it visible as 'skipped' and stamp WHY/WHO/WHEN
+      // onto data.skip so the journey can show the reason next to the badge.
       await client.query(
-        "UPDATE flow_visit_steps SET status='skipped', completed_at=NOW() WHERE id=$1",
-        [step.id],
+        `UPDATE flow_visit_steps
+           SET status='skipped', completed_at=NOW(),
+               data = COALESCE(data,'{}'::jsonb)
+                      || jsonb_build_object('skip',
+                           jsonb_build_object('reason', $2::text, 'by', $3::text, 'at', NOW()))
+         WHERE id=$1`,
+        [step.id, reason, by],
       );
       mode = "skipped";
     } else {
@@ -1079,11 +1091,11 @@ router.delete("/flow/steps/:stepId", async (req, res) => {
       step.visit_id,
       mode === "skipped" ? "step_skipped" : "step_removed",
       step.step_order,
-      { step_name: step.step_name },
-      ACTOR(req),
+      { step_name: step.step_name, reason },
+      by,
     );
     await client.query("COMMIT");
-    res.json({ status: mode });
+    res.json({ status: mode, reason });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     handleError(res, e, "Flow remove step");
