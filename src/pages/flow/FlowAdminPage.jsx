@@ -3,22 +3,32 @@ import { useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import { qk } from "../../queries/keys";
 import { toast } from "../../stores/uiStore";
+import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import {
   useFlowVisitTypes,
   useFlowStepCatalog,
   useFlowEditVisitType,
   useFlowEditCatalog,
+  useFlowCreateCatalogStep,
+  useFlowDeleteCatalogStep,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
 
-// Admin settings: edit visit-type benchmarks (max minutes) and step-catalog
-// default durations / active flag. Inline-edit on blur. ADMIN-gated (route cap +
-// backend requireCapability).
+// Admin settings: edit visit-time benchmarks (max minutes) and fully manage the
+// step catalog (create / update / delete). Inline-edit on blur. ADMIN-gated
+// (route cap + backend requireCapability).
 export default function FlowAdminPage() {
   const { data: types = [] } = useFlowVisitTypes();
   const { data: catalog = [] } = useFlowStepCatalog(true);
   const editType = useFlowEditVisitType();
   const editStep = useFlowEditCatalog();
+  const createStep = useFlowCreateCatalogStep();
+  const deleteStep = useFlowDeleteCatalogStep();
+
+  // "+ Add step" form for the catalog.
+  const [newStep, setNewStep] = useState({ name: "", min: "", station: "", role: "" });
+  // Catalog step pending delete-confirmation (drives ConfirmModal).
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const qc = useQueryClient();
   const [demoBusy, setDemoBusy] = useState(false);
@@ -57,6 +67,38 @@ export default function FlowAdminPage() {
     }
   };
 
+  const addStep = async () => {
+    const name = newStep.name.trim();
+    const min = parseInt(newStep.min);
+    if (!name) return toast("Step needs a name", "error");
+    if (!(min >= 0)) return toast("Enter a default time in minutes", "error");
+    try {
+      await createStep.mutateAsync({
+        name,
+        default_duration_min: min,
+        station: newStep.station.trim(),
+        assigned_role: newStep.role.trim() || "flow_coordinator",
+      });
+      setNewStep({ name: "", min: "", station: "", role: "" });
+      toast(`Added step “${name}”`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const confirmDeleteStep = async () => {
+    const c = deleteTarget;
+    if (!c) return;
+    try {
+      await deleteStep.mutateAsync(c.id);
+      toast(`Deleted “${c.name}”`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
+
   return (
     <div className="flow-root">
       <div className="flow-wrap">
@@ -64,7 +106,7 @@ export default function FlowAdminPage() {
           <div>
             <div className="flow-title">⚙️ Flow Settings</div>
             <div className="flow-sub">
-              Edit visit-time benchmarks and step durations · changes apply to new check-ins
+              Edit visit-time benchmarks and manage journey steps · changes apply to new check-ins
             </div>
           </div>
         </div>
@@ -145,7 +187,7 @@ export default function FlowAdminPage() {
             </table>
           </div>
 
-          {/* Step catalog */}
+          {/* Step catalog — add / edit / delete */}
           <div className="flow-card">
             <div className="flow-sec-title">Step catalog</div>
             <table className="flow-table" style={{ border: "none" }}>
@@ -154,6 +196,7 @@ export default function FlowAdminPage() {
                   <th>Step</th>
                   <th style={{ width: 80 }}>Default min</th>
                   <th style={{ width: 60 }}>Active</th>
+                  <th style={{ width: 36 }} />
                 </tr>
               </thead>
               <tbody>
@@ -185,13 +228,79 @@ export default function FlowAdminPage() {
                         onChange={(e) => saveStep(c.id, { is_active: e.target.checked }, "Saved")}
                       />
                     </td>
+                    <td>
+                      <button
+                        className="jb-remove"
+                        title="Delete step"
+                        disabled={deleteStep.isPending}
+                        onClick={() => setDeleteTarget(c)}
+                      >
+                        ✕
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {/* Add a new step */}
+            <div style={{ marginTop: 10 }}>
+              <div className="flow-sec-title" style={{ fontSize: 10 }}>
+                Add step
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                <input
+                  className="jb-assign"
+                  style={{ maxWidth: "none", flex: "2 1 150px" }}
+                  placeholder="Step name"
+                  value={newStep.name}
+                  onChange={(e) => setNewStep((n) => ({ ...n, name: e.target.value }))}
+                />
+                <input
+                  className="jb-assign"
+                  placeholder="Station"
+                  value={newStep.station}
+                  onChange={(e) => setNewStep((n) => ({ ...n, station: e.target.value }))}
+                />
+                <input
+                  className="jb-assign"
+                  placeholder="Role"
+                  value={newStep.role}
+                  onChange={(e) => setNewStep((n) => ({ ...n, role: e.target.value }))}
+                />
+                <input
+                  className="jb-dur"
+                  type="number"
+                  min="0"
+                  placeholder="min"
+                  value={newStep.min}
+                  onChange={(e) => setNewStep((n) => ({ ...n, min: e.target.value }))}
+                />
+                <button
+                  className="flow-btn flow-btn-primary"
+                  disabled={createStep.isPending}
+                  onClick={addStep}
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete step?"
+        message={
+          deleteTarget
+            ? `Delete “${deleteTarget.name}” from the step catalog? This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteStep}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

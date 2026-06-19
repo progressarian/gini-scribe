@@ -381,19 +381,28 @@ router.patch("/flow/visit-types/:id", requireCapability(CAP.ADMIN), async (req, 
   }
 });
 
+// ── Step catalog CRUD (ADMIN only) — manage the master list of journey steps ──
+// Update any field of a catalog step.
 router.patch("/flow/step-catalog/:id", requireCapability(CAP.ADMIN), async (req, res) => {
   try {
-    const { default_duration_min, name, is_active } = req.body || {};
+    const { default_duration_min, name, station, assigned_role, display_order, is_active } =
+      req.body || {};
     const r = await pool.query(
       `UPDATE flow_step_catalog
           SET default_duration_min = COALESCE($2, default_duration_min),
               name                 = COALESCE($3, name),
-              is_active            = COALESCE($4, is_active)
+              station              = COALESCE($4, station),
+              assigned_role        = COALESCE($5, assigned_role),
+              display_order        = COALESCE($6, display_order),
+              is_active            = COALESCE($7, is_active)
         WHERE id=$1 RETURNING *`,
       [
         req.params.id,
         Number.isInteger(default_duration_min) ? default_duration_min : null,
         name ?? null,
+        station ?? null,
+        assigned_role ?? null,
+        Number.isInteger(display_order) ? display_order : null,
         typeof is_active === "boolean" ? is_active : null,
       ],
     );
@@ -401,6 +410,80 @@ router.patch("/flow/step-catalog/:id", requireCapability(CAP.ADMIN), async (req,
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Flow edit catalog");
+  }
+});
+
+// Create a new catalog step. The TEXT primary key is derived from the name
+// (slug → lowercased), with a numeric suffix on collision. ADMIN only.
+router.post("/flow/step-catalog", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    const {
+      name,
+      default_duration_min,
+      station = "",
+      assigned_role = "flow_coordinator",
+      display_order,
+    } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
+    if (!Number.isInteger(default_duration_min) || default_duration_min < 0)
+      return res.status(400).json({ error: "default_duration_min must be a non-negative integer" });
+
+    const base =
+      name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 40) || "step";
+    // Pick a free id (base, base_2, base_3, …).
+    let id = base;
+    for (let n = 2; ; n++) {
+      const exists = await pool.query("SELECT 1 FROM flow_step_catalog WHERE id=$1", [id]);
+      if (!exists.rows.length) break;
+      id = `${base}_${n}`;
+    }
+    // Default display order to the end of the list when not supplied.
+    let order = display_order;
+    if (!Number.isInteger(order)) {
+      const max = await pool.query(
+        "SELECT COALESCE(MAX(display_order), 0) + 1 AS next FROM flow_step_catalog",
+      );
+      order = max.rows[0].next;
+    }
+    const r = await pool.query(
+      `INSERT INTO flow_step_catalog
+        (id, name, default_duration_min, station, assigned_role, display_order, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,true) RETURNING *`,
+      [id, name.trim(), default_duration_min, station, assigned_role, order],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Flow create catalog step");
+  }
+});
+
+// Delete a catalog step. Blocked if it's used by any default journey (template)
+// or any visit's step — deactivate it instead in those cases. ADMIN only.
+router.delete("/flow/step-catalog/:id", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const inTemplate = await pool.query(
+      "SELECT 1 FROM flow_step_templates WHERE step_catalog_id=$1 LIMIT 1",
+      [id],
+    );
+    const inVisit = await pool.query(
+      "SELECT 1 FROM flow_visit_steps WHERE step_catalog_id=$1 LIMIT 1",
+      [id],
+    );
+    if (inTemplate.rows.length || inVisit.rows.length)
+      return res.status(409).json({
+        error: "Step is in use by a journey or visit. Uncheck 'Active' to hide it instead.",
+      });
+    const del = await pool.query("DELETE FROM flow_step_catalog WHERE id=$1 RETURNING id", [id]);
+    if (!del.rows.length) return res.status(404).json({ error: "Catalog step not found" });
+    res.json({ deleted: id });
+  } catch (e) {
+    handleError(res, e, "Flow delete catalog step");
   }
 });
 

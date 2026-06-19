@@ -46,6 +46,7 @@ import {
   maybeAutoSavePrescription,
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
+import { WAITING_ROLE } from "../flow/journey.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 const { log, error } = createLogger("HealthRay Sync");
 
@@ -447,17 +448,20 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
         if (hasRxPdf) {
           await markAppointmentAsSeen(existing.id, "completed");
+          await syncFlowFromAppointment(existing.id, "completed");
         }
       } else {
         await pool.query(`UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`, [
           existing.id,
           status,
         ]);
+        await syncFlowFromAppointment(existing.id, status);
       }
     } else if (isCompleted && existing.patient_id) {
       const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
       if (hasRxPdf) {
         await markAppointmentAsSeen(existing.id, "completed");
+        await syncFlowFromAppointment(existing.id, "completed");
       }
     }
     return { skipped: true, id: existing.id };
@@ -537,6 +541,14 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           } else if (status === "completed" && existing.patient_id) {
             const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
             if (hasRxPdf) await markAppointmentAsSeen(existing.id, "completed");
+          }
+          // Vitals can be recorded in HealthRay after the clinical note has
+          // stabilized (so we keep hitting this skip). Propagate the persisted
+          // opd_vitals to the Flow board so the vitals step still auto-completes.
+          // Only for still-active visits — completed/cancelled ones get all steps
+          // reconciled via the status path, so this would be redundant work.
+          if (status && !["completed", "cancelled", "no_show"].includes(status)) {
+            await syncFlowVitalsFromOpdColumn(existing.id);
           }
           return { skipped: true, id: existing.id };
         }
@@ -704,6 +716,9 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   });
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
+  // Propagate "vitals taken" into the Flow board so /flow/checkin and
+  // /flow/coordinator auto-advance past the Vitals step without a manual click.
+  await syncFlowVitalsFromAppointment(localApptId, opdVitals);
   await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
   await syncBiomarkersFromLatestLabs(patientId, localApptId);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
@@ -746,6 +761,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, patientId);
     if (hasRxPdf) {
       await markAppointmentAsSeen(localApptId, "completed");
+      await syncFlowFromAppointment(localApptId, "completed");
     }
   }
 
@@ -768,6 +784,271 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   }
 
   return { skipped: false, id: localApptId, enriched: !!clinical.parsedClinical };
+}
+
+// Propagate appointment status into the Flow system so the floor/coordinator
+// views reflect HealthRay changes in near-real-time. Mirrors parts of
+// reconcileFromAppointments() in server/routes/flow.js but runs inside the
+// sync job so updates are applied eagerly when HealthRay reports status.
+async function syncFlowFromAppointment(appointmentId, newStatus) {
+  if (!appointmentId || !newStatus) return;
+  try {
+    const visits = (
+      await pool.query(`SELECT * FROM flow_visits WHERE appointment_id=$1`, [appointmentId])
+    ).rows;
+    if (!visits || !visits.length) return;
+
+    for (const v of visits) {
+      try {
+        if (newStatus === "completed" || newStatus === "seen") {
+          await pool.query(
+            `UPDATE flow_visits SET status='completed', actual_completion=COALESCE(actual_completion, NOW()), current_step_id=NULL, updated_at=NOW() WHERE id=$1 AND status='in_progress'`,
+            [v.id],
+          );
+          await pool.query(
+            `UPDATE flow_visit_steps
+               SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                   actual_duration_min = COALESCE(actual_duration_min,
+                     CASE WHEN started_at IS NOT NULL
+                          THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                          END)
+             WHERE visit_id=$1 AND status='in_progress'`,
+            [v.id],
+          );
+          await pool.query(
+            `UPDATE flow_visit_steps
+               SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                   data = COALESCE(data,'{}'::jsonb) || '{"auto_completed":"opd"}'::jsonb
+             WHERE visit_id=$1 AND status IN ('ready','pending')`,
+            [v.id],
+          );
+        } else if (newStatus === "cancelled") {
+          await pool.query(
+            `UPDATE flow_visits SET status='cancelled', updated_at=NOW() WHERE appointment_id=$1 AND status='in_progress'`,
+            [appointmentId],
+          );
+        } else if (newStatus === "in_visit") {
+          // Pull the flow forward to the doctor's consult step (sd/chief) if behind.
+          const stepsRes = await pool.query(
+            `SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC`,
+            [v.id],
+          );
+          const steps = stepsRes.rows || [];
+          const doc = steps.find(
+            (s) =>
+              (s.assigned_role === "sd" || s.assigned_role === "chief") &&
+              !["completed", "skipped"].includes(s.status),
+          );
+          if (doc) {
+            const pastDoctor =
+              doc &&
+              steps.some(
+                (s) =>
+                  s.step_order > doc.step_order && ["in_progress", "completed"].includes(s.status),
+              );
+            if (doc.status !== "in_progress" && !pastDoctor) {
+              // Complete earlier in_progress step(s)
+              await pool.query(
+                `UPDATE flow_visit_steps
+                   SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                       actual_duration_min = COALESCE(actual_duration_min,
+                         CASE WHEN started_at IS NOT NULL
+                              THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                              END)
+                 WHERE visit_id=$1 AND step_order < $2 AND status='in_progress'`,
+                [v.id, doc.step_order],
+              );
+              await pool.query(
+                `UPDATE flow_visit_steps
+                   SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                       data = COALESCE(data,'{}'::jsonb) || '{"auto_completed":"opd"}'::jsonb
+                 WHERE visit_id=$1 AND step_order < $2 AND status IN ('ready','pending')`,
+                [v.id, doc.step_order],
+              );
+              await pool.query(
+                `UPDATE flow_visit_steps SET status='in_progress', started_at=COALESCE(started_at, NOW()) WHERE id=$1`,
+                [doc.id],
+              );
+              await pool.query(
+                "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3, updated_at=NOW() WHERE id=$1",
+                [v.id, doc.id, doc.step_order],
+              );
+            }
+          }
+        }
+      } catch (e) {
+        console.error("syncFlowFromAppointment update failed:", e.message);
+      }
+    }
+  } catch (e) {
+    console.error("syncFlowFromAppointment failed:", e.message);
+  }
+}
+
+// Map the opdVitals object produced by buildVitalsAndBiomarkers/extractVitalsFromAnswers
+// into the flow_visit_steps `data` keys that the Vitals Station form
+// (src/components/flow/StationQueue.jsx VitalsForm) reads/writes. Returns null
+// when HealthRay surfaced no usable vital for the day (mirrors syncVitals' guard,
+// extended to the full field set so any fresh vital counts as "vitals taken").
+function mapOpdVitalsToFlowData(opdVitals) {
+  if (!opdVitals) return null;
+  const num = (v) => {
+    const n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  };
+  const out = {};
+  const pairs = [
+    ["weight", "weight"],
+    ["height", "height"],
+    ["bmi", "bmi"],
+    ["bpSys", "bp_sys"],
+    ["bpDia", "bp_dia"],
+    ["pulse", "pulse"],
+    ["waist", "waist"],
+    ["bodyFat", "body_fat"],
+    ["muscleMass", "muscle_mass"],
+    ["bpStandingSys", "bp_standing_sys"],
+    ["bpStandingDia", "bp_standing_dia"],
+  ];
+  for (const [src, dst] of pairs) {
+    const n = num(opdVitals[src]);
+    if (n != null) out[dst] = n;
+  }
+  if (Object.keys(out).length === 0) return null; // nothing fresh to record
+  out.auto_completed = "healthray_vitals";
+  out.source = "healthray";
+  return out;
+}
+
+// Is the station for `role`/`staffId` currently occupied by another in-progress
+// step today? Mirrors stationBusy() in server/routes/flow.js so the pull-forward
+// below leaves the next step `ready` (not `in_progress`) when the station is busy.
+async function flowStationBusy(role, staffId) {
+  if (!role || role === WAITING_ROLE) return false;
+  const params = [role];
+  let sql = `SELECT 1 FROM flow_visit_steps s
+             JOIN flow_visits v ON v.id = s.visit_id
+             WHERE s.status='in_progress' AND s.assigned_role=$1
+               AND v.status='in_progress' AND v.visit_date=CURRENT_DATE`;
+  if (staffId) {
+    params.push(staffId);
+    sql += ` AND s.assigned_staff_id=$${params.length}`;
+  }
+  return (await pool.query(sql + " LIMIT 1", params)).rowCount > 0;
+}
+
+// Auto-complete the Flow "Vitals" step for an appointment when HealthRay reports
+// that vitals were taken that day, then pull the visit forward to the next step.
+// HealthRay has no explicit "vitals done" flag, so the presence of any fresh
+// vital (already validated for apptDate by buildVitalsAndBiomarkers /
+// extractVitalsFromAnswers, then written by syncVitals) is the signal. The vital
+// values are copied into the step's `data` so the floor/coordinator boards show
+// them just as if a Vitals Associate had entered them manually.
+//
+// Idempotent + non-destructive: a vitals step already `completed`/`skipped`
+// (e.g. entered manually at the station) is left untouched.
+export async function syncFlowVitalsFromAppointment(appointmentId, opdVitals) {
+  if (!appointmentId) return;
+  const data = mapOpdVitalsToFlowData(opdVitals);
+  if (!data) return; // no fresh vital → nothing to propagate
+  try {
+    const visits = (
+      await pool.query(`SELECT * FROM flow_visits WHERE appointment_id=$1`, [appointmentId])
+    ).rows;
+    if (!visits || !visits.length) return;
+
+    for (const v of visits) {
+      try {
+        // The Vitals step — identified by catalog id, with assigned_role as a fallback.
+        const vital = (
+          await pool.query(
+            `SELECT * FROM flow_visit_steps
+               WHERE visit_id=$1 AND (step_catalog_id='vitals' OR assigned_role='vitals_associate')
+               ORDER BY step_order ASC LIMIT 1`,
+            [v.id],
+          )
+        ).rows[0];
+        // Skip if absent or already in a terminal state (don't clobber manual entry).
+        if (!vital || ["completed", "skipped"].includes(vital.status)) continue;
+
+        // 1) Complete the vitals step, merging the HealthRay values into its data.
+        await pool.query(
+          `UPDATE flow_visit_steps
+             SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                 actual_duration_min = COALESCE(actual_duration_min,
+                   CASE WHEN started_at IS NOT NULL
+                        THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                        END),
+                 data = COALESCE(data,'{}'::jsonb) || $2::jsonb
+           WHERE id=$1`,
+          [vital.id, JSON.stringify(data)],
+        );
+
+        // 2) Pull the flow forward to the next open step (mirrors the advance
+        //    endpoint: in_progress if the station is free, else ready).
+        const next = (
+          await pool.query(
+            `SELECT * FROM flow_visit_steps
+               WHERE visit_id=$1 AND step_order > $2 AND status IN ('pending','ready')
+               ORDER BY step_order ASC LIMIT 1`,
+            [v.id, vital.step_order],
+          )
+        ).rows[0];
+
+        if (next) {
+          const busy = await flowStationBusy(next.assigned_role, next.assigned_staff_id);
+          const nextStatus = busy ? "ready" : "in_progress";
+          await pool.query(
+            `UPDATE flow_visit_steps
+               SET status=$2, started_at = CASE WHEN $2='in_progress' AND started_at IS NULL THEN NOW() ELSE started_at END
+             WHERE id=$1`,
+            [next.id, nextStatus],
+          );
+          await pool.query(
+            "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3, updated_at=NOW() WHERE id=$1",
+            [v.id, next.id, next.step_order],
+          );
+        } else {
+          // Vitals was the last open step → the visit is complete.
+          await pool.query(
+            `UPDATE flow_visits SET status='completed', actual_completion=COALESCE(actual_completion, NOW()), current_step_id=NULL, updated_at=NOW() WHERE id=$1`,
+            [v.id],
+          );
+        }
+      } catch (e) {
+        console.error("syncFlowVitalsFromAppointment update failed:", e.message);
+      }
+    }
+  } catch (e) {
+    console.error("syncFlowVitalsFromAppointment failed:", e.message);
+  }
+}
+
+// Read the appointment's persisted `opd_vitals` column — the authoritative
+// "vitals taken today" signal (it captures HealthRay's structured vital_sign
+// form answers, stamped with _prescriptionDate) — and propagate it to the Flow
+// vitals step. This is the reliable source because:
+//   • it survives the rawText-unchanged fast-skip (which returns before syncVitals);
+//   • it's freshness-aware (only today's vitals carry _prescriptionDate=apptDate),
+//     unlike the `vitals` table which can hold a carry-forward from a prior visit.
+export async function syncFlowVitalsFromOpdColumn(appointmentId) {
+  if (!appointmentId) return;
+  try {
+    const row = (
+      await pool.query(
+        `SELECT opd_vitals, to_char(appointment_date, 'YYYY-MM-DD') AS appt_date
+           FROM appointments WHERE id=$1`,
+        [appointmentId],
+      )
+    ).rows[0];
+    const ov = row?.opd_vitals;
+    if (!ov || typeof ov !== "object") return;
+    // Only propagate vitals recorded for this appointment's own date.
+    if (ov._prescriptionDate && ov._prescriptionDate !== row.appt_date) return;
+    await syncFlowVitalsFromAppointment(appointmentId, ov);
+  } catch (e) {
+    console.error("syncFlowVitalsFromOpdColumn failed:", e.message);
+  }
 }
 
 // ── Helper: run async tasks with limited concurrency ────────────────────────

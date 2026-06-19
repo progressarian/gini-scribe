@@ -230,3 +230,21 @@ export function useFlowEditCatalog() {
     }
   });
 }
+export function useFlowCreateCatalogStep() {
+  return useFlowMutation(async (body) => {
+    try {
+      return (await api.post("/api/flow/step-catalog", body)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not create step"));
+    }
+  });
+}
+export function useFlowDeleteCatalogStep() {
+  return useFlowMutation(async (id) => {
+    try {
+      return (await api.delete(`/api/flow/step-catalog/${id}`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not delete step"));
+    }
+  });
+}

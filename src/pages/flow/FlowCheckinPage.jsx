@@ -129,6 +129,9 @@ export default function FlowCheckinPage() {
   const [chief, setChief] = useState({ id: null, name: "" });
   const [steps, setSteps] = useState([]);
   const [dragIdx, setDragIdx] = useState(null);
+  // Inline "+ Custom step" mini-form (per-visit only; not saved to the catalog).
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customStep, setCustomStep] = useState({ name: "", min: "", station: "", role: "" });
   const [search, setSearch] = useState("");
   const [showResults, setShowResults] = useState(false);
   const [ageSexVal, setAgeSexVal] = useState(null); // "71M" — carried into the visit
@@ -373,6 +376,34 @@ export default function FlowCheckinPage() {
       },
     ]);
   };
+  // Add a one-off custom step (not in the catalog) to this visit's journey.
+  const addCustomStep = () => {
+    const name = customStep.name.trim();
+    const min = parseInt(customStep.min);
+    if (!name) return toast("Custom step needs a name", "error");
+    if (!(min > 0)) return toast("Custom step needs a duration greater than 0 min", "error");
+    setSteps((arr) => [
+      ...arr,
+      {
+        uid: uid(),
+        step_catalog_id: null,
+        step_name: name,
+        planned_duration_min: min,
+        station: customStep.station.trim(),
+        assigned_role: customStep.role || "flow_coordinator",
+        assigned_staff_id: null,
+        assigned_staff_name: null,
+      },
+    ]);
+    setCustomStep({ name: "", min: "", station: "", role: "" });
+    setCustomOpen(false);
+  };
+
+  // Distinct roles seen in the catalog — for the custom-step role picker.
+  const roleOptions = useMemo(
+    () => [...new Set((catalog || []).map((c) => c.assigned_role).filter(Boolean))],
+    [catalog],
+  );
 
   const doneBy = useMemo(() => {
     const d = new Date(Date.now() + total * 60000);
@@ -1002,6 +1033,87 @@ export default function FlowCheckinPage() {
                 </option>
               ))}
             </select>
+
+            {/* Manual / custom step — one-off, not saved to the catalog. */}
+            {!customOpen ? (
+              <button
+                type="button"
+                className="jb-add"
+                style={{ marginTop: 6, textAlign: "left" }}
+                onClick={() => setCustomOpen(true)}
+              >
+                + Custom step (type your own)
+              </button>
+            ) : (
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: "10px 12px",
+                  border: "1px dashed var(--ftl)",
+                  borderRadius: 7,
+                  background: "var(--ftll)",
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    autoFocus
+                    placeholder="Step name (e.g. Counselling)"
+                    value={customStep.name}
+                    onChange={(e) => setCustomStep((c) => ({ ...c, name: e.target.value }))}
+                    style={{ flex: "2 1 160px", minWidth: 120 }}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Min"
+                    value={customStep.min}
+                    onChange={(e) => setCustomStep((c) => ({ ...c, min: e.target.value }))}
+                    className="jb-dur"
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    placeholder="Station (optional)"
+                    value={customStep.station}
+                    onChange={(e) => setCustomStep((c) => ({ ...c, station: e.target.value }))}
+                    style={{ flex: "1 1 140px", minWidth: 120 }}
+                  />
+                  <select
+                    className="jb-assign"
+                    value={customStep.role}
+                    onChange={(e) => setCustomStep((c) => ({ ...c, role: e.target.value }))}
+                  >
+                    <option value="">Role: flow_coordinator</option>
+                    {roleOptions.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="flow-btn flow-btn-primary"
+                    onClick={addCustomStep}
+                  >
+                    Add step
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-btn flow-btn-ghost"
+                    onClick={() => {
+                      setCustomStep({ name: "", min: "", station: "", role: "" });
+                      setCustomOpen(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div
               style={{
