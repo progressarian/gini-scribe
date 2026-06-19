@@ -1,7 +1,7 @@
 // ── HealthRay API Client — auth, session, fetch ─────────────────────────────
 
 import { createLogger } from "../logger.js";
-import { fetchWithTimeout } from "../cron/lowPriority.js";
+import { fetchWithTimeout, createRateLimiter } from "../cron/lowPriority.js";
 import pool from "../../config/db.js";
 const { log } = createLogger("HealthRay Sync");
 
@@ -15,6 +15,27 @@ export const ORG_ID = process.env.HEALTHRAY_ORG_ID || "1528";
 
 let sessionCookie = process.env.HEALTHRAY_SESSION || "";
 let authToken = ""; // x-auth-token from login response
+
+// All HealthRay traffic funnels through ONE shared limiter so the per-doctor
+// fan-out (Promise.allSettled over ~29 doctors) drains as a smooth, capped
+// stream instead of a burst that trips HealthRay's WAF and gets the server IP
+// 403-blocklisted. Tunable via env without a code change. See createRateLimiter.
+const healthrayLimiter = createRateLimiter({
+  ratePerSec: Number(process.env.HEALTHRAY_MAX_RPS) || 3,
+  maxConcurrent: Number(process.env.HEALTHRAY_MAX_CONCURRENT) || 2,
+});
+
+// Drop-in for fetchWithTimeout that first waits for a limiter slot, then
+// releases it the moment the response headers return. Used for every outbound
+// HealthRay call below.
+async function gatedFetch(url, options, timeoutMs) {
+  const release = await healthrayLimiter.acquire();
+  try {
+    return await gatedFetch(url, options, timeoutMs);
+  } finally {
+    release();
+  }
+}
 
 // ── Login resilience (the permanent fix for the 403 IP-block loop) ──────────
 // The sync runs in TWO processes (API + worker), each polling on a loop. When
@@ -139,7 +160,7 @@ async function doLogin() {
 
   log("Auth", "Session expired, logging in...");
 
-  const res = await fetchWithTimeout(
+  const res = await gatedFetch(
     HEALTHRAY_LOGIN_URL,
     {
       method: "POST",
@@ -229,7 +250,7 @@ export async function healthrayFetch(path, isRetry = false) {
     await healthrayLogin();
   }
 
-  const res = await fetchWithTimeout(
+  const res = await gatedFetch(
     `${HEALTHRAY_BASE}${path}`,
     { headers: { Cookie: `connect.sid=${sessionCookie}` } },
     HEALTHRAY_TIMEOUT_MS,
@@ -309,7 +330,7 @@ export async function healthrayRawFetch(url, isRetry = false) {
   const headers = { Cookie: `connect.sid=${sessionCookie}` };
   if (authToken) headers["x-auth-token"] = authToken;
 
-  const res = await fetchWithTimeout(url, { headers, redirect: "follow" }, HEALTHRAY_TIMEOUT_MS);
+  const res = await gatedFetch(url, { headers, redirect: "follow" }, HEALTHRAY_TIMEOUT_MS);
   const ct = res.headers.get("content-type") || "";
 
   if (!res.ok || ct.includes("text/html")) {
@@ -344,7 +365,7 @@ export async function downloadMedicalRecordFile(attachmentId, recordType, medica
   const headers = { Cookie: `connect.sid=${sessionCookie}` };
   if (authToken) headers["x-auth-token"] = authToken;
 
-  const res = await fetchWithTimeout(url, { headers, redirect: "follow" }, HEALTHRAY_TIMEOUT_MS);
+  const res = await gatedFetch(url, { headers, redirect: "follow" }, HEALTHRAY_TIMEOUT_MS);
 
   // Log response details for debugging
   const ct = res.headers.get("content-type") || "";
@@ -365,7 +386,7 @@ export async function downloadMedicalRecordFile(attachmentId, recordType, medica
     await healthrayLogin();
     const retryHeaders = { Cookie: `connect.sid=${sessionCookie}` };
     if (authToken) retryHeaders["x-auth-token"] = authToken;
-    const retry = await fetchWithTimeout(
+    const retry = await gatedFetch(
       url,
       { headers: retryHeaders, redirect: "follow" },
       HEALTHRAY_TIMEOUT_MS,

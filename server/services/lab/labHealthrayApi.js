@@ -2,7 +2,7 @@
 // Separate system from node.healthray.com — JWT auth with auto-refresh on 401
 
 import { createLogger } from "../logger.js";
-import { fetchWithTimeout } from "../cron/lowPriority.js";
+import { fetchWithTimeout, createRateLimiter } from "../cron/lowPriority.js";
 const { log } = createLogger("Lab Auth");
 
 const LAB_API_BASE = "https://labapi.healthray.com/api/v1";
@@ -10,6 +10,21 @@ const LAB_API_BASE = "https://labapi.healthray.com/api/v1";
 // Upstream call timeout — prevents a stalled lab API from holding a sync
 // worker (or a user request) indefinitely.
 const LAB_TIMEOUT_MS = 20000;
+
+// Shared outbound limiter — smooths lab API bursts so the server IP doesn't get
+// WAF 403-blocklisted (same defence as the HealthRay client). Tunable via env.
+const labLimiter = createRateLimiter({
+  ratePerSec: Number(process.env.LAB_HEALTHRAY_MAX_RPS) || 2,
+  maxConcurrent: Number(process.env.LAB_HEALTHRAY_MAX_CONCURRENT) || 2,
+});
+async function gatedFetch(url, options, timeoutMs) {
+  const release = await labLimiter.acquire();
+  try {
+    return await gatedFetch(url, options, timeoutMs);
+  } finally {
+    release();
+  }
+}
 
 // In-memory token cache — seeded from .env, refreshed automatically on 401
 let authToken = process.env.LAB_HEALTHRAY_AUTH_TOKEN || null;
@@ -127,7 +142,7 @@ async function doLogin() {
   log("Login", `Logging in as ${mobile}...`);
 
   try {
-    const res = await fetchWithTimeout(
+    const res = await gatedFetch(
       `${LAB_API_BASE}/user/sign_in`,
       {
         method: "POST",
@@ -202,7 +217,7 @@ async function labFetch(path, isRetry = false) {
     await labLogin();
   }
 
-  const res = await fetchWithTimeout(
+  const res = await gatedFetch(
     `${LAB_API_BASE}${path}`,
     { headers: LAB_HEADERS() },
     LAB_TIMEOUT_MS,

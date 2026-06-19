@@ -1066,6 +1066,17 @@ async function runBatch(items, concurrency, fn) {
 // `prefetched`) bypasses the guard since it owns its own orchestration.
 let syncInFlight = false;
 
+// Doctors (HealthRay ids) that had >=1 appointment on a given date in the most
+// recent FULL sync. The tight status loop polls only these instead of all ~29
+// doctors every tick — a large cut in requests to HealthRay's WAF. A doctor who
+// gets a brand-new appointment is picked up by the next full sync (≤3 min) and
+// added here, so the lag is bounded. Falls back to "all doctors" when no entry
+// exists yet (cold start), so nothing is ever silently dropped.
+const doctorsWithApptsByDate = new Map(); // date(YYYY-MM-DD) -> Set(rayDoctorId)
+export function getDoctorsWithApptsToday(date) {
+  return doctorsWithApptsByDate.get(date) || null;
+}
+
 // ── Run sync for a given date ───────────────────────────────────────────────
 // Accepts optional pre-fetched doctors to avoid redundant API calls in range sync
 async function runSync(date, prefetched = null, opts = {}) {
@@ -1107,9 +1118,23 @@ async function runSync(date, prefetched = null, opts = {}) {
       activeDoctors.map(async (doc) => {
         const localName = doctorMap.get(doc.id) || doc.doctor_name;
         const appointments = await fetchAppointments(doc.id, date);
-        return { localName, appointments: appointments || [] };
+        return { docId: doc.id, localName, appointments: appointments || [] };
       }),
     );
+
+    // Record which doctors actually have appointments today so the lighter
+    // status loop can skip the empty ones. Only update on a complete pass
+    // (no rejected fetches) so a transient failure can't wrongly shrink the set.
+    if (apptFetches.every((s) => s.status === "fulfilled")) {
+      const withAppts = new Set(
+        apptFetches.filter((s) => s.value.appointments.length).map((s) => s.value.docId),
+      );
+      doctorsWithApptsByDate.set(date, withAppts);
+      // Keep the map bounded — only need a few recent dates.
+      while (doctorsWithApptsByDate.size > 7) {
+        doctorsWithApptsByDate.delete(doctorsWithApptsByDate.keys().next().value);
+      }
+    }
 
     // Process each doctor's appointments in batches of 5
     for (const settled of apptFetches) {
@@ -1606,8 +1631,14 @@ export async function syncAppointmentStatuses(date) {
   try {
     const rayDoctors = await fetchDoctors();
     const activeDoctors = rayDoctors.filter((doc) => !doc.is_deactivated);
+    // Poll only doctors the last full sync saw with appointments today; fall
+    // back to all of them until that set is populated (cold start). Cuts the
+    // per-tick request count from ~29 to just the doctors actually in clinic.
+    const known = getDoctorsWithApptsToday(date);
+    const scanDoctors =
+      known && known.size ? activeDoctors.filter((doc) => known.has(doc.id)) : activeDoctors;
     const apptFetches = await Promise.allSettled(
-      activeDoctors.map((doc) => fetchAppointments(doc.id, date)),
+      scanDoctors.map((doc) => fetchAppointments(doc.id, date)),
     );
 
     let scanned = 0;

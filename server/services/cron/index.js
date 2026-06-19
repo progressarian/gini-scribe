@@ -33,16 +33,22 @@ const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 // for the previous sync to finish, then sleeps a short random break (10–15s)
 // before starting the next one. This gives near real-time updates without
 // stacking concurrent runs.
-const HEALTHRAY_LOOP_MIN_BREAK_MS = 10 * 1000;
-const HEALTHRAY_LOOP_MAX_BREAK_MS = 15 * 1000;
+// Full enrichment sync re-fans-out to every doctor AND re-fetches clinical
+// notes — by far the largest request load. It buys nothing to run this every
+// 10–15s (enrichment doesn't change that fast), and that cadence was the
+// dominant trigger of the WAF 403 IP-block. 2–3 min keeps data fresh at a
+// fraction of the volume; the tight status loop below still gives near-real-time
+// status/checkout updates.
+const HEALTHRAY_LOOP_MIN_BREAK_MS = 120 * 1000;
+const HEALTHRAY_LOOP_MAX_BREAK_MS = 180 * 1000;
 
 // Status-only loop runs much tighter (~10s) so checkout / engaged / waiting
 // transitions surface in near real-time and the prescription PDF gets pulled
 // the moment HealthRay flips an appointment to checkout. Status sync only
 // hits the appointment-list endpoint per doctor (no clinical fetch / no AI),
 // so the cost is small.
-const STATUS_LOOP_MIN_BREAK_MS = 10 * 1000;
-const STATUS_LOOP_MAX_BREAK_MS = 12 * 1000;
+const STATUS_LOOP_MIN_BREAK_MS = 30 * 1000;
+const STATUS_LOOP_MAX_BREAK_MS = 45 * 1000;
 
 // Lab sync runs the same continuous-loop pattern, with a slightly longer
 // 30–40s break between runs (lab cases trickle in less aggressively than
@@ -66,6 +72,41 @@ let labLoopTimeoutId = null;
 let partialLoopRunning = false;
 let partialLoopTimeoutId = null;
 
+// Max wall-clock a single loop iteration may take before we assume it hung and
+// reschedule anyway. Without this, one stuck run (e.g. a DB query with no
+// server-side timeout blocked on a row lock held by another cron job) silently
+// kills the self-rescheduling loop forever — the next run is only scheduled
+// after the await settles, so a run that never settles ends the loop until a
+// worker restart. Budgets sit well above normal runtimes (status ~13s, full
+// sync ~130s) so legitimate runs are never cut short. The per-sync in-flight
+// guard (syncInFlight / statusSyncInFlight / status.isRunning / cron advisory
+// lock) keeps a rescheduled tick from running concurrently with the lingering
+// one until it finally settles (statement_timeout guarantees it eventually does).
+const STATUS_WATCHDOG_MS = 60 * 1000;
+const HEALTHRAY_WATCHDOG_MS = 5 * 60 * 1000;
+const LAB_WATCHDOG_MS = 5 * 60 * 1000;
+const PARTIAL_WATCHDOG_MS = 3 * 60 * 1000;
+
+// Race a loop iteration against a max-runtime timeout so the loop always
+// reschedules even if the awaited run never settles. Promise.race does NOT
+// cancel the underlying work — the lingering promise resolves/rejects on its
+// own later — it only unblocks the loop so the next tick can fire.
+function withWatchdog(promise, ms, label) {
+  let timer;
+  const watchdog = new Promise((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `${label} watchdog: exceeded ${Math.round(ms / 1000)}s — assuming hung; rescheduling`,
+          ),
+        ),
+      ms,
+    );
+  });
+  return Promise.race([promise, watchdog]).finally(() => clearTimeout(timer));
+}
+
 function todayISTDate() {
   const now = new Date();
   const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
@@ -79,7 +120,11 @@ function scheduleNextStatusSync(delayMs) {
     if (!statusLoopRunning) return;
     const startedAt = Date.now();
     try {
-      await syncAppointmentStatuses(todayISTDate());
+      await withWatchdog(
+        syncAppointmentStatuses(todayISTDate()),
+        STATUS_WATCHDOG_MS,
+        "Status sync",
+      );
     } catch (e) {
       console.error("[Cron] Status sync failed:", e.message);
     }
@@ -106,7 +151,7 @@ function scheduleNextHealthraySync(delayMs) {
     if (!healthrayLoopRunning) return;
     const startedAt = Date.now();
     try {
-      await syncTodayWalkingAppointments();
+      await withWatchdog(syncTodayWalkingAppointments(), HEALTHRAY_WATCHDOG_MS, "HealthRay sync");
     } catch (e) {
       console.error("[Cron] Scheduled sync failed:", e.message);
     }
@@ -131,7 +176,7 @@ function scheduleNextPartialRetry(delayMs) {
     if (!partialLoopRunning) return;
     const startedAt = Date.now();
     try {
-      await retryPartialLabCases();
+      await withWatchdog(retryPartialLabCases(), PARTIAL_WATCHDOG_MS, "Lab partial retry");
     } catch (e) {
       console.error("[Cron] Lab partial retry failed:", e.message);
     }
@@ -153,7 +198,7 @@ function scheduleNextLabSync(delayMs) {
     if (!labLoopRunning) return;
     const startedAt = Date.now();
     try {
-      await runLabSync();
+      await withWatchdog(runLabSync(), LAB_WATCHDOG_MS, "Lab sync");
     } catch (e) {
       console.error("[Cron] Lab sync failed:", e.message);
     }

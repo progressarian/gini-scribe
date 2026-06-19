@@ -72,3 +72,62 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
     clearTimeout(timer);
   }
 }
+
+/**
+ * Outbound rate limiter — the permanent fix for HealthRay's WAF 403 IP-block.
+ *
+ * The sync loops fan out ~29 appointment requests in parallel (Promise.allSettled
+ * over every doctor) every few seconds with nothing spacing them, which reads as
+ * a bot/scrape burst and gets the server IP rate-limited/blocklisted. Funnelling
+ * every outbound call for an upstream through ONE shared limiter converts those
+ * bursts into a smooth, capped stream WITHOUT changing any call site — the
+ * fan-out still works, it just drains at `ratePerSec` with at most
+ * `maxConcurrent` requests in flight.
+ *
+ * Usage:
+ *   const limiter = createRateLimiter({ ratePerSec: 3, maxConcurrent: 2 });
+ *   const release = await limiter.acquire();
+ *   try { return await fetchWithTimeout(url, opts, ms); } finally { release(); }
+ *
+ * acquire() resolves with a release() fn once a slot is free and the minimum
+ * spacing since the previous start has elapsed. release() MUST be called (use
+ * try/finally) or the limiter will leak slots.
+ */
+export function createRateLimiter({ ratePerSec = 3, maxConcurrent = 2 } = {}) {
+  const minIntervalMs = ratePerSec > 0 ? 1000 / ratePerSec : 0;
+  let active = 0;
+  let lastStartAt = 0;
+  let timer = null;
+  const queue = [];
+
+  const release = () => {
+    active = Math.max(0, active - 1);
+    pump();
+  };
+
+  function pump() {
+    if (timer) return; // a wake-up is already scheduled
+    if (!queue.length || active >= maxConcurrent) return;
+    const wait = Math.max(0, lastStartAt + minIntervalMs - Date.now());
+    if (wait > 0) {
+      timer = setTimeout(() => {
+        timer = null;
+        pump();
+      }, wait);
+      return;
+    }
+    active++;
+    lastStartAt = Date.now();
+    queue.shift()(); // grant one waiter (resolves its acquire())
+    if (queue.length) pump(); // schedule the next grant (will hit the spacing wait)
+  }
+
+  return {
+    acquire() {
+      return new Promise((resolve) => {
+        queue.push(() => resolve(release));
+        pump();
+      });
+    },
+  };
+}

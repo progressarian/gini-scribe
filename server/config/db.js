@@ -17,6 +17,12 @@ const pool = new pg.Pool({
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 20000,
   idleTimeoutMillis: 20000, // close idle connections before Railway's 30s server timeout
+  // Never let a single query hang forever: a stuck query (e.g. blocked on a row
+  // lock held by a hung cron job) with no timeout silently freezes the sync
+  // loops. statement_timeout kills it server-side; query_timeout is the
+  // client-side backstop. 60s is far above any legitimate sync query.
+  statement_timeout: 60000,
+  query_timeout: 60000,
   max: 15,
   allowExitOnIdle: true,
   keepAlive: true, // send TCP keepalives — prevents Railway from closing idle connections
@@ -30,6 +36,8 @@ const cronPool = new pg.Pool({
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 20000,
   idleTimeoutMillis: 20000,
+  statement_timeout: 60000, // see pool above — no background query may hang forever
+  query_timeout: 60000,
   max: 4,
   allowExitOnIdle: true,
   keepAlive: true,
