@@ -1059,10 +1059,11 @@ export default function FlowCheckinPage() {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <input
                     autoFocus
+                    className="jb-assign"
                     placeholder="Step name (e.g. Counselling)"
                     value={customStep.name}
                     onChange={(e) => setCustomStep((c) => ({ ...c, name: e.target.value }))}
-                    style={{ flex: "2 1 160px", minWidth: 120 }}
+                    style={{ flex: "2 1 160px", minWidth: 120, maxWidth: "none" }}
                   />
                   <input
                     type="number"
@@ -1075,10 +1076,11 @@ export default function FlowCheckinPage() {
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <input
+                    className="jb-assign"
                     placeholder="Station (optional)"
                     value={customStep.station}
                     onChange={(e) => setCustomStep((c) => ({ ...c, station: e.target.value }))}
-                    style={{ flex: "1 1 140px", minWidth: 120 }}
+                    style={{ flex: "1 1 140px", minWidth: 120, maxWidth: "none" }}
                   />
                   <select
                     className="jb-assign"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import { qk } from "../../queries/keys";
@@ -29,6 +29,16 @@ export default function FlowAdminPage() {
   const [newStep, setNewStep] = useState({ name: "", min: "", station: "", role: "" });
   // Catalog step pending delete-confirmation (drives ConfirmModal).
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // Distinct stations / roles already in the catalog — for the add-step dropdowns.
+  const stationOptions = useMemo(
+    () => [...new Set(catalog.map((c) => c.station).filter(Boolean))].sort(),
+    [catalog],
+  );
+  const roleOptions = useMemo(
+    () => [...new Set(catalog.map((c) => c.assigned_role).filter(Boolean))].sort(),
+    [catalog],
+  );
 
   const qc = useQueryClient();
   const [demoBusy, setDemoBusy] = useState(false);
@@ -256,18 +266,32 @@ export default function FlowAdminPage() {
                   value={newStep.name}
                   onChange={(e) => setNewStep((n) => ({ ...n, name: e.target.value }))}
                 />
+                {/* Combo-box: pick an existing station or type a new one. */}
                 <input
                   className="jb-assign"
+                  list="flow-station-options"
                   placeholder="Station"
                   value={newStep.station}
                   onChange={(e) => setNewStep((n) => ({ ...n, station: e.target.value }))}
                 />
+                <datalist id="flow-station-options">
+                  {stationOptions.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+                {/* Combo-box: pick an existing role or type a new one. */}
                 <input
                   className="jb-assign"
+                  list="flow-role-options"
                   placeholder="Role"
                   value={newStep.role}
                   onChange={(e) => setNewStep((n) => ({ ...n, role: e.target.value }))}
                 />
+                <datalist id="flow-role-options">
+                  {roleOptions.map((r) => (
+                    <option key={r} value={r} />
+                  ))}
+                </datalist>
                 <input
                   className="jb-dur"
                   type="number"
