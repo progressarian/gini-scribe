@@ -31,7 +31,7 @@ const healthrayLimiter = createRateLimiter({
 async function gatedFetch(url, options, timeoutMs) {
   const release = await healthrayLimiter.acquire();
   try {
-    return await gatedFetch(url, options, timeoutMs);
+    return await fetchWithTimeout(url, options, timeoutMs);
   } finally {
     release();
   }
