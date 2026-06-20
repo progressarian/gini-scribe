@@ -85,11 +85,53 @@ export function extractVitalsFromAnswers(clinicalData) {
   };
 
   const ingest = (a) => {
-    if (!a || a.form_type !== "vital_sign") return;
+    if (!a) return;
     const col = (a.column_name || "").toLowerCase();
-    const label = (a.label || "").toLowerCase();
+    const label = (a.label || "").toLowerCase().trim();
     const alias = (a.alias || "").toLowerCase();
     const raw = a.value;
+
+    // Path 2 — leaner answer shape from get_previous_appt_data's
+    // "Observation / Vitals" category: no form_type / column_name, just a short
+    // label (H / W / BMI / PR / BP) and a self-describing value
+    // (e.g. {"method":"cm","height":168}, {"measured":"kg","weight":68.6}).
+    // medical_clinical_notes vitals carry form_type="vital_sign" + column_name
+    // and are handled by Path 1 below; this branch covers the rows that don't.
+    if (a.form_type !== "vital_sign" && !col) {
+      const p = safeParse(raw);
+      if (p && typeof p === "object" && !Array.isArray(p)) {
+        const h = num(p.height),
+          w = num(p.weight),
+          sys = num(p.systolic),
+          dia = num(p.diastolic),
+          hr = num(p.hr ?? p.pulse);
+        const standing = (p.method || alias || "").toLowerCase().includes("stand");
+        if (h && out.height == null) out.height = h;
+        if (w && out.weight == null) out.weight = w;
+        if (hr && out.pulse == null) out.pulse = hr;
+        if (sys != null || dia != null) {
+          if (standing) {
+            if (sys && out.bpStandingSys == null) out.bpStandingSys = sys;
+            if (dia && out.bpStandingDia == null) out.bpStandingDia = dia;
+          } else {
+            if (sys && out.bpSys == null) out.bpSys = sys;
+            if (dia && out.bpDia == null) out.bpDia = dia;
+          }
+        }
+      } else {
+        const n = num(raw);
+        if (n != null) {
+          if (label === "bmi" && out.bmi == null) out.bmi = n;
+          else if ((label === "w" || label === "wt" || label === "weight") && out.weight == null)
+            out.weight = n;
+          else if ((label === "h" || label === "ht" || label === "height") && out.height == null)
+            out.height = n;
+          else if (label.includes("waist") && out.waist == null) out.waist = n;
+        }
+      }
+      return;
+    }
+    if (a.form_type !== "vital_sign") return;
 
     if (col === "height") {
       const p = safeParse(raw);
