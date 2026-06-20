@@ -214,6 +214,12 @@ export async function ensureSyncColumns() {
       ADD COLUMN IF NOT EXISTS healthray_investigations JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE appointments
       ADD COLUMN IF NOT EXISTS healthray_follow_up JSONB;
+    ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS bill_paid TEXT;
+    ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS bill_created BOOLEAN;
+    ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS healthray_patient_id TEXT;
     ALTER TABLE doctors
       ADD COLUMN IF NOT EXISTS healthray_id INTEGER;
     ALTER TABLE vitals

@@ -137,6 +137,10 @@ export default function FlowCheckinPage() {
   const [ageSexVal, setAgeSexVal] = useState(null); // "71M" — carried into the visit
   const [context, setContext] = useState(null); // { lastVisit, conName, moName, vitals, appt }
   const [appointmentId, setAppointmentId] = useState(null); // linked OPD/GHM appointment
+  // Billing extracted from HealthRay (get_transactions) for the picked patient,
+  // plus suggested journey steps (lab → Blood Sample, imaging) to auto-inject.
+  const [billing, setBilling] = useState(null);
+  const [billingSteps, setBillingSteps] = useState([]);
   const [pendingMo, setPendingMo] = useState(null); // {id,name} to assign to the MO step on (re)load
   const [errors, setErrors] = useState([]);
   const [touched, setTouched] = useState({});
@@ -247,6 +251,37 @@ export default function FlowCheckinPage() {
     );
   }, [sd, chief]);
 
+  // Auto-inject billing-derived steps (Blood Sample for lab items, imaging) as
+  // REMOVABLE suggestions — the coordinator keeps or ✕-removes them like any
+  // other step. Skips ones already in the journey; re-applies if the template
+  // reset wiped them. Returns the same array ref when nothing's added (no loop).
+  useEffect(() => {
+    if (!billingSteps.length || !steps.length) return;
+    setSteps((arr) => {
+      const have = new Set(arr.map((s) => s.step_catalog_id || s.step_name));
+      const additions = billingSteps
+        .filter((sg) => !have.has(sg.step_catalog_id || sg.step_name))
+        .map((sg) => {
+          const c = sg.step_catalog_id ? catalog.find((x) => x.id === sg.step_catalog_id) : null;
+          const tn = sg.tests?.length ? ` (${sg.tests.length})` : "";
+          return {
+            uid: uid(),
+            step_catalog_id: sg.step_catalog_id || null,
+            step_name: sg.step_name + tn,
+            planned_duration_min: c?.default_duration_min ?? 10,
+            station: c?.station || "Lab",
+            assigned_role: c?.assigned_role || "lab_tech",
+            assigned_staff_id: null,
+            assigned_staff_name: "",
+            from_billing: true,
+            tests: sg.tests || undefined,
+          };
+        });
+      return additions.length ? [...arr, ...additions] : arr;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billingSteps, steps.length, catalog]);
+
   const total = steps.reduce((a, s) => a + (parseInt(s.planned_duration_min) || 0), 0);
   const buffer = maxTime - total;
 
@@ -283,16 +318,24 @@ export default function FlowCheckinPage() {
     // Best-effort: pull the patient record (care team + last vitals) and today's
     // appointment (time / type / doctor) in parallel to pre-fill the form.
     try {
-      const [detailRes, apptRes] = await Promise.all([
+      const [detailRes, apptRes, billRes] = await Promise.all([
         api.get(`/api/patients/${p.id}`),
         api
           .get(
             `/api/flow/patient-appointment?patient_db_id=${p.id}&file_no=${encodeURIComponent(p.file_no || "")}`,
           )
           .catch(() => ({ data: null })),
+        api
+          .get(
+            `/api/flow/patient-billing?patient_db_id=${p.id}&file_no=${encodeURIComponent(p.file_no || "")}`,
+          )
+          .catch(() => ({ data: { billing: null, steps: [] } })),
       ]);
       const data = detailRes.data;
       const appt = apptRes.data;
+      // Billing → display + step suggestions to auto-inject (removable).
+      setBilling(billRes.data?.billing || null);
+      setBillingSteps(billRes.data?.steps || []);
 
       if (!ageSex(p) && (data.age || data.sex)) setAgeSexVal(ageSex(data) || null);
       const lastConsult = (data.consultations || []).find((c) => c.con_name || c.mo_name);
@@ -318,6 +361,7 @@ export default function FlowCheckinPage() {
               visit_type: appt.visit_type,
               doctor_name: appt.doctor_name,
               status: appt.status,
+              bill_paid: appt.bill_paid, // "Paid" / "Due" / null (from HealthRay)
             }
           : null,
       });
@@ -797,9 +841,63 @@ export default function FlowCheckinPage() {
                   {context.appt.visit_type ? ` · ${context.appt.visit_type}` : ""}
                   {context.appt.doctor_name ? ` · ${context.appt.doctor_name}` : ""}
                   {context.appt.status ? ` · ${context.appt.status}` : ""}
+                  {context.appt.bill_paid ? (
+                    <span
+                      className={`flow-badge ${context.appt.bill_paid === "Paid" ? "fb-grn" : "fb-red"}`}
+                      style={{ marginLeft: 6 }}
+                      title="Billing status from HealthRay"
+                    >
+                      💳 {context.appt.bill_paid}
+                    </span>
+                  ) : null}
                   <div style={{ fontSize: 10, opacity: 0.8 }}>
                     Pre-filled visit type, time & doctor · linked to this OPD appointment
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Billing from HealthRay (get_transactions) — auto-extracted. Lab /
+                imaging items are auto-added to the journey below as removable steps. */}
+            {billing && (
+              <div
+                className="flow-alert"
+                style={{
+                  marginBottom: 10,
+                  padding: "8px 12px",
+                  background: "var(--fskl)",
+                  border: "1px solid var(--fsk)",
+                }}
+              >
+                <span>🧾</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div>
+                    <b>Billing</b> · {billing.invoice_no || "—"} · ₹{billing.total}
+                    <span
+                      className={`flow-badge ${billing.payment_status === "Paid" ? "fb-grn" : "fb-red"}`}
+                      style={{ marginLeft: 6 }}
+                    >
+                      {billing.payment_status === "Paid"
+                        ? "Paid"
+                        : `Due ₹${billing.due || billing.total}`}
+                    </span>
+                  </div>
+                  {billing.items?.length ? (
+                    <div style={{ fontSize: 11, opacity: 0.85, marginTop: 3 }}>
+                      {billing.items.map((it, i) => (
+                        <span key={i}>
+                          {i ? " · " : ""}
+                          {it.desc} ₹{it.amount}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {billingSteps.length ? (
+                    <div style={{ fontSize: 10, opacity: 0.8, marginTop: 3 }}>
+                      Auto-added to journey: {billingSteps.map((s) => s.step_name).join(", ")} ·
+                      remove any with ✕ if not needed
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -984,6 +1082,20 @@ export default function FlowCheckinPage() {
                   </span>
                   <span className="jb-name">
                     {i + 1}. {s.step_name}
+                    {s.from_billing ? (
+                      <span
+                        className="flow-badge fb-ink"
+                        style={{ marginLeft: 6, fontSize: 9 }}
+                        title="Auto-added from the patient's bill"
+                      >
+                        🧾 bill
+                      </span>
+                    ) : null}
+                    {s.tests?.length ? (
+                      <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 2 }}>
+                        {s.tests.join(", ")}
+                      </div>
+                    ) : null}
                   </span>
                   <input
                     className="jb-dur"

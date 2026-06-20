@@ -1718,6 +1718,40 @@ export async function syncAppointmentStatuses(date) {
         const existing = await findAppointment(healthrayId, fileNo, apptDate);
         if (!existing) continue;
 
+        // Persist HealthRay billing flags (already in this payload — no extra
+        // call) so the OPD/Flow screens can show Paid/Due without hitting
+        // HealthRay per view. Only writes when the value actually changed.
+        {
+          const billPaid = appt.is_bill_paid ?? null; // "Paid" / "Due" / null
+          const billCreated =
+            appt.is_bill_created === 1 ||
+            appt.is_bill_created === true ||
+            appt.is_bill_created === "1"
+              ? true
+              : appt.is_bill_created === 0 || appt.is_bill_created === false
+                ? false
+                : null;
+          // HealthRay patient id — needed to pull billing transactions
+          // (get_transactions is keyed by patient_id, which scribe otherwise
+          // doesn't store). Comes free in this payload.
+          const hrPatientId =
+            appt.patient?.id != null
+              ? String(appt.patient.id)
+              : appt.self_user_id != null
+                ? String(appt.self_user_id)
+                : null;
+          if (billPaid != null || billCreated != null || hrPatientId != null) {
+            await pool.query(
+              `UPDATE appointments
+                  SET bill_paid=$2, bill_created=$3,
+                      healthray_patient_id=COALESCE($4, healthray_patient_id), updated_at=NOW()
+                WHERE id=$1 AND (bill_paid IS DISTINCT FROM $2 OR bill_created IS DISTINCT FROM $3
+                                 OR ($4 IS NOT NULL AND healthray_patient_id IS DISTINCT FROM $4))`,
+              [existing.id, billPaid, billCreated, hrPatientId],
+            );
+          }
+        }
+
         // Real-time Vitals: if this patient's journey is still waiting on the
         // Vitals step, pull today's vitals now and advance the step (~30-45s
         // latency instead of the 2-3 min full sync). Freshness-guarded inside.

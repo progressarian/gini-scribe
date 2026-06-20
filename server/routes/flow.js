@@ -19,6 +19,8 @@ import {
   deriveStage,
   WAITING_ROLE,
 } from "../services/flow/journey.js";
+import { fetchPatientTransactions } from "../services/healthray/client.js";
+import { transactionsToBilling } from "../services/healthray/billingExtractor.js";
 
 const router = Router();
 
@@ -1323,7 +1325,7 @@ router.get("/flow/patient-appointment", async (req, res) => {
       conds.push(`file_no=$${params.length}`);
     }
     const r = await pool.query(
-      `SELECT id, time_slot, visit_type, doctor_name, status
+      `SELECT id, time_slot, visit_type, doctor_name, status, bill_paid, bill_created
          FROM appointments
         WHERE appointment_date::date = $1 AND (${conds.join(" OR ")})
         ORDER BY id DESC LIMIT 1`,
@@ -1332,6 +1334,47 @@ router.get("/flow/patient-appointment", async (req, res) => {
     res.json(r.rows[0] || null);
   } catch (e) {
     handleError(res, e, "Flow patient appointment");
+  }
+});
+
+// Billing for a patient's today appointment, extracted from HealthRay's
+// get_transactions (structured JSON — no PDF/AI). Returns { billing, steps }
+// where steps are removable journey suggestions (Blood Sample for lab items,
+// imaging steps for radiology). Best-effort: never blocks check-in — returns
+// { billing: null, steps: [] } when there's no bill or HealthRay is unreachable.
+router.get("/flow/patient-billing", async (req, res) => {
+  try {
+    const { patient_db_id, file_no } = req.query;
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    if (!patient_db_id && !file_no) return res.json({ billing: null, steps: [] });
+    const params = [date];
+    const conds = [];
+    if (patient_db_id) {
+      params.push(patient_db_id);
+      conds.push(`patient_id=$${params.length}`);
+    }
+    if (file_no) {
+      params.push(file_no);
+      conds.push(`file_no=$${params.length}`);
+    }
+    const appt = (
+      await pool.query(
+        `SELECT healthray_id, healthray_patient_id
+           FROM appointments
+          WHERE appointment_date::date = $1 AND (${conds.join(" OR ")})
+          ORDER BY id DESC LIMIT 1`,
+        params,
+      )
+    ).rows[0];
+    if (!appt?.healthray_patient_id) return res.json({ billing: null, steps: [] });
+
+    const rows = await fetchPatientTransactions(appt.healthray_patient_id);
+    const out = transactionsToBilling(rows, { appointmentId: appt.healthray_id });
+    res.json(out || { billing: null, steps: [] });
+  } catch (e) {
+    // Don't fail check-in over billing — log and return empty.
+    console.error("Flow patient billing:", e.message);
+    res.json({ billing: null, steps: [] });
   }
 });
 

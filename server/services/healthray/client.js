@@ -342,6 +342,44 @@ export function fetchPatientRecentVisits(patientId, doctorId, perPage = 5) {
   );
 }
 
+// Patient's OPD billing transactions (newest-first), each with billing_items
+// carrying category_type (OPD / PATHOLOGY / RADIOLOGY) → maps to journey steps.
+// Structured JSON — no PDF/AI needed. POST endpoint, so it can't use the GET
+// helper; mirrors healthrayFetch's session + re-login-on-HTML retry.
+export async function fetchPatientTransactions(
+  patientId,
+  { txnType = "OPD", limit = 25 } = {},
+  isRetry = false,
+) {
+  if (!sessionCookie) await loadPersistedState();
+  if (!sessionCookie) await healthrayLogin();
+  const url =
+    `${HEALTHRAY_BASE}/appointment/get_transactions?patient_id=${patientId}` +
+    `&organization_id=${ORG_ID}&txn_type=${txnType}&is_agiGrid=1`;
+  const res = await gatedFetch(
+    url,
+    {
+      method: "POST",
+      headers: { Cookie: `connect.sid=${sessionCookie}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ startRow: 0, endRow: limit }),
+    },
+    HEALTHRAY_TIMEOUT_MS,
+  );
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("text/html")) {
+    if (isRetry) throw new Error("HealthRay session expired — re-login failed");
+    await healthrayLogin();
+    return fetchPatientTransactions(patientId, { txnType, limit }, true);
+  }
+  const json = await res.json();
+  if (json.status === 401 && !isRetry) {
+    await healthrayLogin();
+    return fetchPatientTransactions(patientId, { txnType, limit }, true);
+  }
+  if (json.status !== 200) throw new Error(`HealthRay get_transactions error: ${json.message}`);
+  return json.rows || [];
+}
+
 export function fetchMedicalRecords(appointmentId) {
   return healthrayFetch(
     `/medical_records?record_type=${encodeURIComponent("Invoice/Bill,Prescription/Rx,Lab Report,X-Rays,Other,Certificate")}&appointment_id=${appointmentId}`,
