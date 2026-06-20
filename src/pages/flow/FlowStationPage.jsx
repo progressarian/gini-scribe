@@ -66,7 +66,9 @@ export default function FlowStationPage() {
           </div>
         )}
 
-        <StationQueue role={cfg.role} form={cfg.form} />
+        {/* Vitals is a quick, parallel station — let staff move/skip anyone at
+            any time instead of the one-at-a-time call-in queue. */}
+        <StationQueue role={cfg.role} form={cfg.form} freeMove={slug === "vitals"} />
       </div>
     </div>
   );

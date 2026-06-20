@@ -25,7 +25,7 @@ const SKIP_REASONS = ["Already done", "Not required", "Done elsewhere", "Patient
 // patient with a role-specific form + "advance", a call-in ready queue, and the
 // pending list. Self-contained (owns its data + mutations) so it can be dropped
 // into any page.
-export default function StationQueue({ role, form }) {
+export default function StationQueue({ role, form, freeMove = false }) {
   const { data, isLoading } = useFlowQueue(role);
   const advance = useFlowAdvance();
   const startStep = useFlowStartStep();
@@ -34,16 +34,22 @@ export default function StationQueue({ role, form }) {
   const ready = data?.ready || [];
   const pending = data?.pending || [];
 
-  const [formData, setFormData] = useState({});
-  useEffect(() => setFormData({}), [active?.id]);
+  // In free-move stations (vitals) the user picks who sits in the form box. The
+  // box patient is a LOCAL selection (default: whoever is in_progress, else
+  // none); clicking "Move in" on a queued patient just swaps them into the box
+  // (and the previous one returns to the list) — it does NOT advance anyone.
+  const [selectedId, setSelectedId] = useState(null);
+  const queueItems = freeMove ? [...(data?.active || []), ...ready] : [];
+  const boxPatient = freeMove ? queueItems.find((i) => i.id === selectedId) || active : active;
+  const listItems = freeMove ? queueItems.filter((i) => i.id !== boxPatient?.id) : ready;
 
-  // Skip-reason dialog state (replaces the native window.prompt).
-  const [skipOpen, setSkipOpen] = useState(false);
+  const [formData, setFormData] = useState({});
+  useEffect(() => setFormData({}), [boxPatient?.id]);
+
+  // Skip-reason dialog — targets a specific step (the box patient OR any queued
+  // patient), so anyone can be skipped at any time. Replaces the native prompt.
+  const [skipTarget, setSkipTarget] = useState(null);
   const [skipReason, setSkipReason] = useState("");
-  useEffect(() => {
-    setSkipOpen(false);
-    setSkipReason("");
-  }, [active?.id]);
 
   const callIn = async (stepId) => {
     try {
@@ -53,37 +59,44 @@ export default function StationQueue({ role, form }) {
     }
   };
 
+  // Bring a queued patient into the form box (and send whoever was in the box
+  // back to the list). Pure client-side selection — does NOT advance them.
+  const moveIntoBox = (s) => setSelectedId(s.id);
+
   const complete = async () => {
-    if (!active) return;
+    if (!boxPatient) return;
     try {
       await advance.mutateAsync({
-        visitId: active.visit_id,
-        step_id: active.id,
+        visitId: boxPatient.visit_id,
+        step_id: boxPatient.id,
         step_data: formData,
       });
-      toast(`${active.patient_name} → next step`, "success");
+      toast(`${boxPatient.patient_name} → next step`, "success");
       setFormData({});
+      setSelectedId(null);
     } catch (e) {
       toast(e.message, "error");
     }
   };
 
-  // Skip this step (e.g. vitals already taken elsewhere / not applicable) — the
-  // patient still advances to their next station. Confirmed via a dialog with
-  // quick-pick reasons + free text (see the modal at the bottom of the render).
+  // Skip a step (e.g. vitals already taken elsewhere / not applicable) — the
+  // patient still advances. Confirmed via a dialog with quick-pick reasons.
   const confirmSkip = async () => {
-    if (!active) return;
+    if (!skipTarget) return;
     try {
       await advance.mutateAsync({
-        visitId: active.visit_id,
-        step_id: active.id,
+        visitId: skipTarget.visit_id,
+        step_id: skipTarget.id,
         skip: true,
         reason: skipReason.trim(),
       });
-      toast(`${active.patient_name} — ${active.step_name} skipped → next step`, "success");
-      setSkipOpen(false);
+      toast(`${skipTarget.patient_name} — ${skipTarget.step_name} skipped → next step`, "success");
+      if (skipTarget.id === boxPatient?.id) {
+        setFormData({});
+        setSelectedId(null);
+      }
+      setSkipTarget(null);
       setSkipReason("");
-      setFormData({});
     } catch (e) {
       toast(e.message, "error");
     }
@@ -93,30 +106,30 @@ export default function StationQueue({ role, form }) {
 
   return (
     <>
-      {/* Active patient */}
-      {active ? (
+      {/* Patient in the form box */}
+      {boxPatient ? (
         <div className="station-active">
           <div className="station-head">
             <div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>
-                {active.patient_name} · Step {active.step_order} of {active.total_steps}
+                {boxPatient.patient_name} · Step {boxPatient.step_order} of {boxPatient.total_steps}
               </div>
               <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
-                {active.patient_age_sex || ""} · {active.file_no} · {active.visit_type_id} · budget
-                ≤ {active.planned_duration_min} min
+                {boxPatient.patient_age_sex || ""} · {boxPatient.file_no} ·{" "}
+                {boxPatient.visit_type_id} · budget ≤ {boxPatient.planned_duration_min} min
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 14 }}>
-                At station: {active.step_timing?.at_station_min ?? 0} min
+                At station: {boxPatient.step_timing?.at_station_min ?? 0} min
               </div>
               <div style={{ fontSize: 10, opacity: 0.8 }}>
-                Visit: {active.visit_remaining_min}m left
+                Visit: {boxPatient.visit_remaining_min}m left
               </div>
             </div>
           </div>
           <div className="station-body">
-            <StationForm key={active.id} form={form} value={formData} onChange={setFormData} />
+            <StationForm key={boxPatient.id} form={form} value={formData} onChange={setFormData} />
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
               <button
                 className={`flow-btn ${form === "pharmacy" ? "flow-btn-primary" : "flow-btn-grn"}`}
@@ -132,7 +145,7 @@ export default function StationQueue({ role, form }) {
                 className="flow-btn flow-btn-ghost"
                 style={{ padding: "8px 14px" }}
                 disabled={advance.isPending}
-                onClick={() => setSkipOpen(true)}
+                onClick={() => setSkipTarget(boxPatient)}
                 title="Skip this step — patient still advances"
               >
                 ⏭ Skip
@@ -143,16 +156,20 @@ export default function StationQueue({ role, form }) {
         </div>
       ) : (
         <div className="flow-card flow-empty">
-          No patient in progress. Call in the next from your queue.
+          {freeMove
+            ? "No patient selected. Pick one from the queue below."
+            : "No patient in progress. Call in the next from your queue."}
         </div>
       )}
 
-      {/* Ready queue (callable) */}
-      <div className="flow-sec-title">My queue — ready to call in</div>
-      {ready.length === 0 ? (
+      {/* Queue — free-move: pick anyone into the box; else call-in order */}
+      <div className="flow-sec-title">
+        {freeMove ? "My queue — pick anyone" : "My queue — ready to call in"}
+      </div>
+      {listItems.length === 0 ? (
         <div className="flow-card flow-empty">No one waiting at this station.</div>
       ) : (
-        ready.map((s) => (
+        listItems.map((s) => (
           <div
             key={s.id}
             className={`qitem${s.visit_urgency === "breach" ? " urgent" : s.visit_urgency === "atrisk" ? " amber" : ""}`}
@@ -171,15 +188,44 @@ export default function StationQueue({ role, form }) {
             </div>
             <div style={{ textAlign: "right" }}>
               <div className="flow-muted">{fmtTime(s.checkin_time)}</div>
-              <button
-                className="flow-btn flow-btn-primary"
-                style={{ marginTop: 6 }}
-                disabled={!!active || startStep.isPending}
-                title={active ? "Finish the current patient first" : "Call in"}
-                onClick={() => callIn(s.id)}
+              <div
+                style={{
+                  marginTop: 6,
+                  display: "flex",
+                  gap: 6,
+                  justifyContent: "flex-end",
+                  flexWrap: "wrap",
+                }}
               >
-                Call in
-              </button>
+                {freeMove ? (
+                  <>
+                    <button
+                      className="flow-btn flow-btn-ghost"
+                      disabled={advance.isPending}
+                      title="Skip — patient still advances"
+                      onClick={() => setSkipTarget(s)}
+                    >
+                      ⏭ Skip
+                    </button>
+                    <button
+                      className="flow-btn flow-btn-primary"
+                      title="Bring this patient into the form box"
+                      onClick={() => moveIntoBox(s)}
+                    >
+                      ↑ Move in
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="flow-btn flow-btn-primary"
+                    disabled={!!active || startStep.isPending}
+                    title={active ? "Finish the current patient first" : "Call in"}
+                    onClick={() => callIn(s.id)}
+                  >
+                    Call in
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))
@@ -206,9 +252,9 @@ export default function StationQueue({ role, form }) {
       )}
 
       {/* Skip-reason dialog (proper modal — replaces the native prompt) */}
-      {skipOpen && active && (
+      {skipTarget && (
         <div
-          onClick={() => setSkipOpen(false)}
+          onClick={() => setSkipTarget(null)}
           style={{
             position: "fixed",
             inset: 0,
@@ -226,11 +272,11 @@ export default function StationQueue({ role, form }) {
             style={{ width: "100%", maxWidth: 380, borderRadius: 10 }}
           >
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
-              Skip “{active.step_name}”
+              Skip “{skipTarget.step_name}”
             </div>
             <div className="flow-muted" style={{ marginBottom: 10 }}>
-              {active.patient_name} · {active.file_no} — they’ll move to the next step. Pick or type
-              a reason (optional).
+              {skipTarget.patient_name} · {skipTarget.file_no} — they’ll move to the next step. Pick
+              or type a reason (optional).
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
               {SKIP_REASONS.map((r) => (
@@ -253,7 +299,7 @@ export default function StationQueue({ role, form }) {
               style={{ width: "100%", padding: "8px 10px", marginBottom: 12 }}
             />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="flow-btn flow-btn-ghost" onClick={() => setSkipOpen(false)}>
+              <button className="flow-btn flow-btn-ghost" onClick={() => setSkipTarget(null)}>
                 Cancel
               </button>
               <button
