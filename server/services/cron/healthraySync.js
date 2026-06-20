@@ -6,6 +6,7 @@ import {
   fetchClinicalNotes,
   fetchMedicalRecords,
   fetchPreviousAppointmentData,
+  fetchPatientRecentVisits,
 } from "../healthray/client.js";
 import {
   extractClinicalText,
@@ -1024,6 +1025,39 @@ export async function syncFlowVitalsFromAppointment(appointmentId, opdVitals) {
   }
 }
 
+// Near-real-time "vitals taken today" sync for one appointment, independent of
+// the 2-3 min full enrichment loop. Fetches the patient's recent visits
+// (is_all=1, so TODAY's in-progress visit is included — unlike the copy_previous
+// path which returns the PRIOR visit), extracts vitals ONLY from the entry dated
+// today (freshness guard — never a carried-forward weight), persists them to
+// opd_vitals, and advances the Flow Vitals step. Safe to call repeatedly: it
+// no-ops once vitals are found, and syncFlowVitalsFromAppointment skips a Vitals
+// step that's already completed.
+export async function syncTodayVitalsForVisit({ appointmentId, patientHrId, doctorId, apptDate }) {
+  if (!appointmentId || !patientHrId || !doctorId || !apptDate) return false;
+  try {
+    const visits = await fetchPatientRecentVisits(patientHrId, doctorId);
+    if (!Array.isArray(visits)) return false;
+    // Only trust the entry whose appointment date is TODAY — the freshness gate.
+    const todayVisit = visits.find((v) => toISTDate(v.app_date_time) === apptDate);
+    if (!todayVisit?.menus) return false;
+    const vitals = extractVitalsFromAnswers(todayVisit.menus);
+    if (!vitals) return false; // vitals not recorded yet → leave step pending
+
+    const stamped = { ...vitals, _source: "healthray", _prescriptionDate: apptDate };
+    await pool.query(
+      `UPDATE appointments SET opd_vitals = COALESCE(opd_vitals, '{}'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $1`,
+      [appointmentId, JSON.stringify(stamped)],
+    );
+    await syncFlowVitalsFromAppointment(appointmentId, vitals);
+    log("Vitals", `appt ${appointmentId}: today's vitals synced from HealthRay (real-time)`);
+    return true;
+  } catch (e) {
+    console.error("syncTodayVitalsForVisit failed:", e.message);
+    return false;
+  }
+}
+
 // Read the appointment's persisted `opd_vitals` column — the authoritative
 // "vitals taken today" signal (it captures HealthRay's structured vital_sign
 // form answers, stamped with _prescriptionDate) — and propagate it to the Flow
@@ -1641,9 +1675,31 @@ export async function syncAppointmentStatuses(date) {
       scanDoctors.map((doc) => fetchAppointments(doc.id, date)),
     );
 
+    // Bound the real-time vitals pull: only patients whose Flow journey is still
+    // waiting on the Vitals step (a handful at a time). For each, we fetch
+    // today's vitals below; everyone else is skipped, so this adds at most a few
+    // extra HealthRay calls per tick.
+    const pendingVitals = new Set(
+      (
+        await pool
+          .query(
+            `SELECT a.healthray_id
+               FROM flow_visit_steps s
+               JOIN flow_visits fv ON fv.id = s.visit_id
+               JOIN appointments a ON a.id = fv.appointment_id
+              WHERE fv.status = 'in_progress' AND fv.visit_date = CURRENT_DATE
+                AND (s.step_catalog_id = 'vitals' OR s.assigned_role = 'vitals_associate')
+                AND s.status NOT IN ('completed', 'skipped')
+                AND a.healthray_id IS NOT NULL`,
+          )
+          .catch(() => ({ rows: [] }))
+      ).rows.map((r) => String(r.healthray_id)),
+    );
+
     let scanned = 0;
     let updated = 0;
     let rxFetched = 0;
+    let vitalsSynced = 0;
     for (const settled of apptFetches) {
       if (settled.status === "rejected") continue;
       const appts = settled.value || [];
@@ -1656,6 +1712,22 @@ export async function syncAppointmentStatuses(date) {
         if (!newStatus) continue;
         const existing = await findAppointment(healthrayId, fileNo, apptDate);
         if (!existing) continue;
+
+        // Real-time Vitals: if this patient's journey is still waiting on the
+        // Vitals step, pull today's vitals now and advance the step (~30-45s
+        // latency instead of the 2-3 min full sync). Freshness-guarded inside.
+        if (pendingVitals.has(healthrayId)) {
+          const patientHrId = appt.patient?.id || appt.self_user_id;
+          if (patientHrId && appt.doctor_id) {
+            const ok = await syncTodayVitalsForVisit({
+              appointmentId: existing.id,
+              patientHrId,
+              doctorId: appt.doctor_id,
+              apptDate,
+            });
+            if (ok) vitalsSynced++;
+          }
+        }
 
         if (newStatus === "completed" && existing.patient_id) {
           // First make sure the Rx PDF is present locally — pull it now if
@@ -1698,9 +1770,9 @@ export async function syncAppointmentStatuses(date) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     log(
       "Status Sync",
-      `${date} in ${elapsed}s — scanned ${scanned}, updated ${updated}, rx-fetched ${rxFetched}`,
+      `${date} in ${elapsed}s — scanned ${scanned}, updated ${updated}, rx-fetched ${rxFetched}, vitals-synced ${vitalsSynced}`,
     );
-    return { date, scanned, updated, rxFetched };
+    return { date, scanned, updated, rxFetched, vitalsSynced };
   } catch (e) {
     error("Status Sync", `Fatal: ${e.message}`);
     throw e;

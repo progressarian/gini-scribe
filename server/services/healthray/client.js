@@ -316,6 +316,18 @@ export function fetchPreviousAppointmentData(appointmentId, patientId, doctorId)
   );
 }
 
+// All recent visits for a patient (newest first, incl. TODAY's in-progress one),
+// each with its filled clinical menus. Unlike fetchPreviousAppointmentData
+// (copy_previous=1 → the PREVIOUS visit, for copy-forward), is_all=1 returns the
+// list so the caller can pick the entry dated today — the only freshness-safe
+// source for "vitals taken today" (the vitals station writes Observation→Vitals
+// here before the doctor opens the note). Same endpoint the floor app polls.
+export function fetchPatientRecentVisits(patientId, doctorId, perPage = 5) {
+  return healthrayFetch(
+    `/appointment/get_previous_appt_data?patient_id=${patientId}&organization_id=${ORG_ID}&is_cpt_cncl=1&is_all=1&page=1&per_page=${perPage}&is_opd=1&doctor_id=${doctorId}`,
+  );
+}
+
 export function fetchMedicalRecords(appointmentId) {
   return healthrayFetch(
     `/medical_records?record_type=${encodeURIComponent("Invoice/Bill,Prescription/Rx,Lab Report,X-Rays,Other,Certificate")}&appointment_id=${appointmentId}`,
