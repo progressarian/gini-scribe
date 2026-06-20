@@ -764,7 +764,7 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
   const client = await pool.connect();
   try {
     const visitId = req.params.id;
-    const { step_data = null, step_id = null } = req.body || {};
+    const { step_data = null, step_id = null, skip = false, reason = null } = req.body || {};
     await client.query("BEGIN");
 
     const visit = (
@@ -793,19 +793,31 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
     const actualDur = current.started_at
       ? Math.max(0, Math.round((Date.now() - new Date(current.started_at).getTime()) / 60000))
       : null;
+    // skip=true marks the current step 'skipped' (e.g. vitals already taken
+    // elsewhere / not needed) instead of 'completed', stamping who/why onto
+    // data.skip; the patient still advances to the next step exactly the same.
+    const newStatus = skip ? "skipped" : "completed";
+    const mergedData = { ...(step_data || {}) };
+    if (skip) {
+      mergedData.skip = {
+        reason: (reason || "").toString().trim().slice(0, 200) || null,
+        by: ACTOR(req),
+        at: new Date().toISOString(),
+      };
+    }
     await client.query(
       `UPDATE flow_visit_steps
-         SET status='completed', completed_at=NOW(), actual_duration_min=$2,
+         SET status=$4, completed_at=NOW(), actual_duration_min=$2,
              data = COALESCE(data,'{}'::jsonb) || $3::jsonb
        WHERE id=$1`,
-      [current.id, actualDur, JSON.stringify(step_data || {})],
+      [current.id, actualDur, JSON.stringify(mergedData), newStatus],
     );
     await logEvent(
       client,
       visitId,
-      "step_completed",
+      skip ? "step_skipped" : "step_completed",
       current.step_order,
-      { actual_duration_min: actualDur },
+      { actual_duration_min: actualDur, reason: skip ? mergedData.skip.reason : undefined },
       ACTOR(req),
     );
 

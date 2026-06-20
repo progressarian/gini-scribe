@@ -7,6 +7,7 @@ import {
   fetchMedicalRecords,
   fetchPreviousAppointmentData,
   fetchPatientRecentVisits,
+  getOrgDoctorId,
 } from "../healthray/client.js";
 import {
   extractClinicalText,
@@ -1034,9 +1035,13 @@ export async function syncFlowVitalsFromAppointment(appointmentId, opdVitals) {
 // no-ops once vitals are found, and syncFlowVitalsFromAppointment skips a Vitals
 // step that's already completed.
 export async function syncTodayVitalsForVisit({ appointmentId, patientHrId, doctorId, apptDate }) {
-  if (!appointmentId || !patientHrId || !doctorId || !apptDate) return false;
+  // Scope by our logged-in account id, not the appointment's treating doctor —
+  // get_previous_appt_data uses doctor_id as a permission filter, and the
+  // treating doctor's id returns a narrower set that omits today's visit.
+  const scopeDoctorId = getOrgDoctorId() || doctorId;
+  if (!appointmentId || !patientHrId || !scopeDoctorId || !apptDate) return false;
   try {
-    const visits = await fetchPatientRecentVisits(patientHrId, doctorId);
+    const visits = await fetchPatientRecentVisits(patientHrId, scopeDoctorId);
     if (!Array.isArray(visits)) return false;
     // Only trust the entry whose appointment date is TODAY — the freshness gate.
     const todayVisit = visits.find((v) => toISTDate(v.app_date_time) === apptDate);
@@ -1718,7 +1723,7 @@ export async function syncAppointmentStatuses(date) {
         // latency instead of the 2-3 min full sync). Freshness-guarded inside.
         if (pendingVitals.has(healthrayId)) {
           const patientHrId = appt.patient?.id || appt.self_user_id;
-          if (patientHrId && appt.doctor_id) {
+          if (patientHrId) {
             const ok = await syncTodayVitalsForVisit({
               appointmentId: existing.id,
               patientHrId,

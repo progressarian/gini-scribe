@@ -141,9 +141,16 @@ export function useFlowCheckin() {
   });
 }
 export function useFlowAdvance() {
-  return useFlowMutation(async ({ visitId, step_data, step_id }) => {
+  return useFlowMutation(async ({ visitId, step_data, step_id, skip, reason }) => {
     try {
-      return (await api.post(`/api/flow/visits/${visitId}/advance`, { step_data, step_id })).data;
+      return (
+        await api.post(`/api/flow/visits/${visitId}/advance`, {
+          step_data,
+          step_id,
+          skip,
+          reason,
+        })
+      ).data;
     } catch (err) {
       throw new Error(errMsg(err, "Could not advance step"));
     }

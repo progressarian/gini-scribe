@@ -17,6 +17,10 @@ export const ROLES = {
 
 const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
+// Quick-pick reasons for skipping a step (free text still allowed). Mirrors the
+// list in VisitDetailModal so skip reasons stay consistent across the app.
+const SKIP_REASONS = ["Already done", "Not required", "Done elsewhere", "Patient declined"];
+
 // The live execution queue for one station role: the active (in-progress)
 // patient with a role-specific form + "advance", a call-in ready queue, and the
 // pending list. Self-contained (owns its data + mutations) so it can be dropped
@@ -32,6 +36,14 @@ export default function StationQueue({ role, form }) {
 
   const [formData, setFormData] = useState({});
   useEffect(() => setFormData({}), [active?.id]);
+
+  // Skip-reason dialog state (replaces the native window.prompt).
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [skipReason, setSkipReason] = useState("");
+  useEffect(() => {
+    setSkipOpen(false);
+    setSkipReason("");
+  }, [active?.id]);
 
   const callIn = async (stepId) => {
     try {
@@ -50,6 +62,27 @@ export default function StationQueue({ role, form }) {
         step_data: formData,
       });
       toast(`${active.patient_name} → next step`, "success");
+      setFormData({});
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  // Skip this step (e.g. vitals already taken elsewhere / not applicable) — the
+  // patient still advances to their next station. Confirmed via a dialog with
+  // quick-pick reasons + free text (see the modal at the bottom of the render).
+  const confirmSkip = async () => {
+    if (!active) return;
+    try {
+      await advance.mutateAsync({
+        visitId: active.visit_id,
+        step_id: active.id,
+        skip: true,
+        reason: skipReason.trim(),
+      });
+      toast(`${active.patient_name} — ${active.step_name} skipped → next step`, "success");
+      setSkipOpen(false);
+      setSkipReason("");
       setFormData({});
     } catch (e) {
       toast(e.message, "error");
@@ -94,6 +127,15 @@ export default function StationQueue({ role, form }) {
                 {form === "pharmacy"
                   ? "💊 Dispensed — Confirm Exit (stops clock)"
                   : "✓ Done — move to next step"}
+              </button>
+              <button
+                className="flow-btn flow-btn-ghost"
+                style={{ padding: "8px 14px" }}
+                disabled={advance.isPending}
+                onClick={() => setSkipOpen(true)}
+                title="Skip this step — patient still advances"
+              >
+                ⏭ Skip
               </button>
               <span className="flow-muted">Patient auto-moves to their next station</span>
             </div>
@@ -161,6 +203,69 @@ export default function StationQueue({ role, form }) {
             </div>
           ))}
         </>
+      )}
+
+      {/* Skip-reason dialog (proper modal — replaces the native prompt) */}
+      {skipOpen && active && (
+        <div
+          onClick={() => setSkipOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.4)",
+            zIndex: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flow-card"
+            style={{ width: "100%", maxWidth: 380, borderRadius: 10 }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
+              Skip “{active.step_name}”
+            </div>
+            <div className="flow-muted" style={{ marginBottom: 10 }}>
+              {active.patient_name} · {active.file_no} — they’ll move to the next step. Pick or type
+              a reason (optional).
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {SKIP_REASONS.map((r) => (
+                <button
+                  key={r}
+                  className={`flow-btn ${skipReason === r ? "flow-btn-primary" : "flow-btn-ghost"}`}
+                  style={{ padding: "5px 10px", fontSize: 12 }}
+                  onClick={() => setSkipReason(r)}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <input
+              autoFocus
+              value={skipReason}
+              onChange={(e) => setSkipReason(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && confirmSkip()}
+              placeholder="Reason (optional)…"
+              style={{ width: "100%", padding: "8px 10px", marginBottom: 12 }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="flow-btn flow-btn-ghost" onClick={() => setSkipOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="flow-btn flow-btn-grn"
+                disabled={advance.isPending}
+                onClick={confirmSkip}
+              >
+                ⏭ Skip step
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

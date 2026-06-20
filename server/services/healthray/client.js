@@ -15,6 +15,16 @@ export const ORG_ID = process.env.HEALTHRAY_ORG_ID || "1528";
 
 let sessionCookie = process.env.HEALTHRAY_SESSION || "";
 let authToken = ""; // x-auth-token from login response
+// The logged-in account's own user id (the org "owner" we authenticate as).
+// Several HealthRay endpoints (e.g. get_previous_appt_data) scope results by
+// doctor_id as a PERMISSION filter, not by the appointment's treating doctor —
+// passing a specific doctor's id returns a narrower set that can omit today's
+// visit. Using our own account id (what the floor app uses) returns the full
+// set. Captured at login; overridable via env.
+let orgDoctorId = process.env.HEALTHRAY_DOCTOR_ID || "";
+export function getOrgDoctorId() {
+  return orgDoctorId;
+}
 
 // All HealthRay traffic funnels through ONE shared limiter so the per-doctor
 // fan-out (Promise.allSettled over ~29 doctors) drains as a smooth, capped
@@ -91,6 +101,9 @@ function loadPersistedState() {
         sessionCookie = s.cookie;
         authToken = s.authToken || "";
       }
+      // Reuse the logged-in account id even when the session is reused (no fresh
+      // doLogin runs to re-capture it). env override always wins.
+      if (s?.orgDoctorId && !orgDoctorId) orgDoctorId = String(s.orgDoctorId);
       const c = await kvGet(KV_COOLDOWN);
       if (c?.until) {
         loginBackoffUntil = c.until;
@@ -236,7 +249,8 @@ async function doLogin() {
     authToken = body.data.auth_token || body.data.token;
     log("Auth", `Auth token captured: ${authToken.slice(0, 8)}...`);
   }
-  await kvSet(KV_SESSION, { cookie: sessionCookie, authToken, at: Date.now() });
+  if (!process.env.HEALTHRAY_DOCTOR_ID && body.data?.id) orgDoctorId = String(body.data.id);
+  await kvSet(KV_SESSION, { cookie: sessionCookie, authToken, orgDoctorId, at: Date.now() });
   await kvSet(KV_COOLDOWN, { until: 0, failCount: 0, reason: "" });
   log("Auth", "Login successful, new session obtained");
   return sessionCookie;
