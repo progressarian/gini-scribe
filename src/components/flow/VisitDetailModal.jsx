@@ -4,11 +4,26 @@ import {
   useFlowAdvance,
   useFlowEditDuration,
   useFlowRemoveStep,
+  useFlowAddStep,
+  useFlowStepCatalog,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
 
 // Quick-pick reasons for skipping a step (free text still allowed).
 const SKIP_REASONS = ["Already done", "Not required", "Done elsewhere", "Patient declined"];
+// Roles a custom step can be assigned to (default is flow_coordinator).
+const CUSTOM_STEP_ROLES = [
+  "vitals_associate",
+  "mo",
+  "lab_tech",
+  "flow_coordinator",
+  "sd",
+  "chief",
+  "dietitian",
+  "nurse",
+  "billing",
+  "pharmacist",
+];
 const fmtSkipTime = (t) => {
   if (!t) return "";
   const d = new Date(t);
@@ -23,9 +38,57 @@ export default function VisitDetailModal({ visit, onClose }) {
   const advance = useFlowAdvance();
   const editDur = useFlowEditDuration();
   const removeStep = useFlowRemoveStep();
+  const addStep = useFlowAddStep();
+  const { data: catalog = [] } = useFlowStepCatalog();
+
+  // Add a step to the end of this visit's journey (from the catalog or custom).
+  const maxOrder = (visit.steps || []).reduce((m, s) => Math.max(m, s.step_order || 0), 0);
+  const addCatalogStep = (catId) => {
+    const c = catalog.find((x) => x.id === catId);
+    if (!c) return;
+    act(
+      () =>
+        addStep.mutateAsync({
+          visitId: visit.id,
+          step_catalog_id: c.id,
+          step_name: c.name,
+          planned_duration_min: c.default_duration_min,
+          station: c.station,
+          assigned_role: c.assigned_role,
+          insert_after_order: maxOrder,
+        }),
+      "Step added",
+    );
+  };
   // The step whose skip-reason prompt is open, and the reason being typed.
   const [skipFor, setSkipFor] = useState(null);
   const [skipReason, setSkipReason] = useState("");
+  // Inline "custom step" form (shown when "Custom…" is picked from the dropdown).
+  const [showCustom, setShowCustom] = useState(false);
+  const [customStep, setCustomStep] = useState({ name: "", min: "", station: "", role: "" });
+  const resetCustom = () => {
+    setShowCustom(false);
+    setCustomStep({ name: "", min: "", station: "", role: "" });
+  };
+  const addCustomStep = () => {
+    const name = customStep.name.trim();
+    const min = parseInt(customStep.min, 10);
+    if (!name) return toast("Step name is required", "error");
+    if (!Number.isFinite(min) || min < 1) return toast("Enter the step's minutes", "error");
+    act(
+      () =>
+        addStep.mutateAsync({
+          visitId: visit.id,
+          step_name: name,
+          planned_duration_min: min,
+          station: customStep.station.trim(),
+          assigned_role: customStep.role || "flow_coordinator",
+          insert_after_order: maxOrder,
+        }),
+      "Step added",
+    );
+    resetCustom();
+  };
 
   const act = async (fn, okMsg) => {
     try {
@@ -211,6 +274,89 @@ export default function VisitDetailModal({ visit, onClose }) {
               )}
             </div>
           ))}
+
+          {visit.status === "in_progress" && (
+            <div className="jb-addrow">
+              <select
+                className="jb-addsel"
+                value=""
+                disabled={addStep.isPending}
+                onChange={(e) => {
+                  if (e.target.value === "__custom") setShowCustom(true);
+                  else if (e.target.value) addCatalogStep(e.target.value);
+                  e.target.value = "";
+                }}
+              >
+                <option value="">+ Add step…</option>
+                {catalog
+                  .filter((c) => c.is_active !== false)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.default_duration_min}m)
+                    </option>
+                  ))}
+                <option value="__custom">Custom…</option>
+              </select>
+              <span className="jb-addhint">added at the end · ✕ to adjust</span>
+            </div>
+          )}
+
+          {visit.status === "in_progress" && showCustom && (
+            <div className="jb-custom">
+              <div className="jb-custom-row">
+                <input
+                  className="jb-assign"
+                  placeholder="Step name (e.g. Counselling)"
+                  value={customStep.name}
+                  autoFocus
+                  onChange={(e) => setCustomStep((s) => ({ ...s, name: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && addCustomStep()}
+                />
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Min"
+                  className="jb-dur"
+                  value={customStep.min}
+                  onChange={(e) => setCustomStep((s) => ({ ...s, min: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && addCustomStep()}
+                />
+              </div>
+              <div className="jb-custom-row">
+                <input
+                  className="jb-assign"
+                  placeholder="Station (optional)"
+                  value={customStep.station}
+                  onChange={(e) => setCustomStep((s) => ({ ...s, station: e.target.value }))}
+                />
+                <select
+                  className="jb-assign"
+                  value={customStep.role}
+                  onChange={(e) => setCustomStep((s) => ({ ...s, role: e.target.value }))}
+                >
+                  <option value="">Role: flow_coordinator</option>
+                  {CUSTOM_STEP_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="jb-custom-actions">
+                <button
+                  type="button"
+                  className="flow-btn flow-btn-primary"
+                  disabled={addStep.isPending}
+                  onClick={addCustomStep}
+                >
+                  Add step
+                </button>
+                <button type="button" className="flow-btn flow-btn-ghost" onClick={resetCustom}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {visit.status === "in_progress" && (
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>

@@ -381,6 +381,89 @@
   margin-top: 6px;
 }
 
+/* Add-step controls in the visit detail modal */
+.jb-addrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.jb-addsel {
+  flex: 1 1 200px;
+  max-width: 260px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  border: 1px dashed var(--ftl);
+  border-radius: 6px;
+  background: var(--ftll);
+  color: var(--ftl);
+  cursor: pointer;
+}
+.jb-addhint {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--fink3);
+  white-space: nowrap;
+}
+.jb-custom {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--ftl);
+  border-radius: 7px;
+  background: var(--ftll);
+  display: grid;
+  gap: 8px;
+}
+.jb-custom-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.jb-custom-row .jb-assign {
+  flex: 2 1 160px;
+  min-width: 120px;
+  max-width: none;
+}
+.jb-custom-row .jb-dur {
+  flex: 1 1 70px;
+  width: auto;
+  min-width: 60px;
+  text-align: left;
+}
+.jb-custom-row select.jb-assign {
+  flex: 1 1 140px;
+}
+.jb-custom-actions {
+  display: flex;
+  gap: 8px;
+}
+@media (max-width: 540px) {
+  .jb-addsel {
+    max-width: none;
+    flex-basis: 100%;
+  }
+  .jb-addhint {
+    flex-basis: 100%;
+    white-space: normal;
+  }
+  .jb-custom-row {
+    flex-direction: column;
+  }
+  .jb-custom-row .jb-assign,
+  .jb-custom-row .jb-dur,
+  .jb-custom-row select.jb-assign {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .jb-custom-actions .flow-btn {
+    flex: 1;
+  }
+}
+
 /* Journey step pills */
 .j-steps {
   display: flex;
