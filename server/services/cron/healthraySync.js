@@ -1743,10 +1743,11 @@ export async function syncAppointmentStatuses(date) {
           if (billPaid != null || billCreated != null || hrPatientId != null) {
             await pool.query(
               `UPDATE appointments
-                  SET bill_paid=$2, bill_created=$3,
-                      healthray_patient_id=COALESCE($4, healthray_patient_id), updated_at=NOW()
-                WHERE id=$1 AND (bill_paid IS DISTINCT FROM $2 OR bill_created IS DISTINCT FROM $3
-                                 OR ($4 IS NOT NULL AND healthray_patient_id IS DISTINCT FROM $4))`,
+                  SET bill_paid=$2::text, bill_created=$3::boolean,
+                      healthray_patient_id=COALESCE($4::text, healthray_patient_id), updated_at=NOW()
+                WHERE id=$1 AND (bill_paid IS DISTINCT FROM $2::text
+                                 OR bill_created IS DISTINCT FROM $3::boolean
+                                 OR ($4::text IS NOT NULL AND healthray_patient_id IS DISTINCT FROM $4::text))`,
               [existing.id, billPaid, billCreated, hrPatientId],
             );
           }
