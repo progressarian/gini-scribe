@@ -21,6 +21,7 @@ import {
 } from "../services/flow/journey.js";
 import { fetchPatientTransactions } from "../services/healthray/client.js";
 import { transactionsToBilling } from "../services/healthray/billingExtractor.js";
+import { createFlowVisitFromAppointment } from "../services/flow/autoCreate.js";
 
 const router = Router();
 
@@ -1382,131 +1383,28 @@ router.get("/flow/patient-billing", async (req, res) => {
 // visit (+ default journey) linked to the appointment. Idempotent: returns the
 // existing flow visit if one is already linked. Doctor prefilled from the appt.
 router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
-  const client = await pool.connect();
   try {
     const apptId = req.params.appointmentId;
-    const appt = (await client.query("SELECT * FROM appointments WHERE id=$1", [apptId])).rows[0];
+    const appt = (await pool.query("SELECT * FROM appointments WHERE id=$1", [apptId])).rows[0];
     if (!appt) {
       return res.status(404).json({ error: "Appointment not found" });
     }
-    // Idempotent — one flow visit per appointment.
-    const existing = (
-      await client.query(
-        "SELECT id, visit_token FROM flow_visits WHERE appointment_id=$1 AND status<>'cancelled' ORDER BY checkin_time DESC LIMIT 1",
-        [apptId],
-      )
-    ).rows[0];
-    if (existing) {
-      return res.json({ visit_id: existing.id, visit_token: existing.visit_token, existed: true });
+    // Delegates to the shared creator (same engine the auto-sync uses). Manual
+    // "Start Flow" keeps its original behaviour: default journey only, no billing
+    // injection, attributed to the logged-in user. Idempotent.
+    const r = await createFlowVisitFromAppointment(appt, {
+      actor: ACTOR(req) || "flow",
+      includeBilling: false,
+    });
+    if (!r.visit_id) {
+      return res.status(500).json({ error: "Could not create flow visit" });
     }
-
-    const visitTypeId = appt.is_walkin ? "FU_WALK" : "FU_APPT"; // sensible default; editable on the floor
-    const vt = (
-      await client.query("SELECT max_time_min FROM flow_visit_types WHERE id=$1", [visitTypeId])
-    ).rows[0];
-    const tpl = (
-      await client.query(
-        `SELECT c.id AS step_catalog_id, c.name AS step_name,
-                COALESCE(t.override_duration_min, c.default_duration_min)::int AS dur,
-                c.station, c.assigned_role
-           FROM flow_step_templates t JOIN flow_step_catalog c ON c.id=t.step_catalog_id
-          WHERE t.visit_type_id=$1 ORDER BY t.step_order`,
-        [visitTypeId],
-      )
-    ).rows;
-    const total = tpl.reduce((a, s) => a + Number(s.dur), 0);
-
-    // Resolve patient db id + file_no.
-    const patientDbId = appt.patient_id || null;
-    const fileNo = appt.file_no || (patientDbId ? `P_${patientDbId}` : "UNKNOWN");
-    const sdId = appt.doctor_id || null;
-    const sdName = appt.doctor_name || null;
-
-    await client.query("BEGIN");
-    let token = genVisitToken();
-    for (let i = 0; i < 5; i++) {
-      if (!(await client.query("SELECT 1 FROM flow_visits WHERE visit_token=$1", [token])).rowCount)
-        break;
-      token = genVisitToken();
-    }
-    const visit = (
-      await client.query(
-        `INSERT INTO flow_visits
-           (patient_id, patient_db_id, appointment_id, patient_name, patient_phone, visit_type_id,
-            appointment_time, max_time_min, suggested_wait_min, estimated_completion,
-            visit_token, checked_in_by, assigned_sd, assigned_sd_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW() + make_interval(mins => $9), $10,$11,$12,$13)
-         RETURNING *`,
-        [
-          fileNo,
-          patientDbId,
-          apptId,
-          appt.patient_name || "Patient",
-          appt.phone || null,
-          visitTypeId,
-          appt.time_slot || null,
-          vt?.max_time_min || 90,
-          total,
-          token,
-          ACTOR(req),
-          sdId,
-          sdName,
-        ],
-      )
-    ).rows[0];
-
-    for (let i = 0; i < tpl.length; i++) {
-      const s = tpl[i];
-      await client.query(
-        `INSERT INTO flow_visit_steps
-           (visit_id, step_catalog_id, step_order, step_name, planned_duration_min, station, assigned_role,
-            assigned_staff_id, assigned_staff_name, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')`,
-        [
-          visit.id,
-          s.step_catalog_id,
-          i + 1,
-          s.step_name,
-          Number(s.dur),
-          s.station,
-          s.assigned_role,
-          s.step_catalog_id === "sd_consult" && sdId ? String(sdId) : null,
-          s.step_catalog_id === "sd_consult" && sdName ? sdName : null,
-        ],
-      );
-    }
-    const first = (
-      await client.query(
-        "SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC LIMIT 1",
-        [visit.id],
-      )
-    ).rows[0];
-    const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
-    await client.query(
-      "UPDATE flow_visit_steps SET status=$2, started_at=CASE WHEN $2='in_progress' THEN NOW() ELSE NULL END WHERE id=$1",
-      [first.id, busy ? "ready" : "in_progress"],
-    );
-    await client.query(
-      "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3 WHERE id=$1",
-      [visit.id, first.id, first.step_order],
-    );
-    await logEvent(
-      client,
-      visit.id,
-      "checkin",
-      first.step_order,
-      { from_appointment: apptId },
-      ACTOR(req),
-    );
-    await client.query("COMMIT");
-
-    await syncAppointmentStatus(apptId, "checkedin");
-    res.status(201).json({ visit_id: visit.id, visit_token: token });
+    if (r.created) await syncAppointmentStatus(apptId, "checkedin");
+    res
+      .status(r.created ? 201 : 200)
+      .json({ visit_id: r.visit_id, visit_token: r.visit_token, existed: !r.created });
   } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
     handleError(res, e, "Flow from appointment");
-  } finally {
-    client.release();
   }
 });
 
