@@ -1141,6 +1141,53 @@ router.post("/flow/visits/:id/steps", async (req, res) => {
   }
 });
 
+// Reorder a visit's steps. Body: { order: [stepId, …] } — the full set of the
+// visit's step ids in their new order. Rewrites step_order 1..N. Safe because
+// the UNIQUE(visit_id, step_order) constraint is DEFERRABLE INITIALLY DEFERRED,
+// so transient collisions inside the txn are fine (checked only at COMMIT).
+router.post("/flow/visits/:id/reorder", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const visitId = req.params.id;
+    const order = Array.isArray(req.body?.order) ? req.body.order.map(String) : [];
+    if (!order.length) return res.status(400).json({ error: "order[] required" });
+
+    const cur = (
+      await client.query("SELECT id FROM flow_visit_steps WHERE visit_id=$1", [visitId])
+    ).rows.map((r) => String(r.id));
+    const curSet = new Set(cur);
+    // Must list EXACTLY the visit's current steps (no adds/drops here).
+    if (order.length !== cur.length || !order.every((id) => curSet.has(id))) {
+      return res.status(400).json({ error: "order must list exactly the visit's current steps" });
+    }
+
+    await client.query("BEGIN");
+    for (let i = 0; i < order.length; i++) {
+      await client.query("UPDATE flow_visit_steps SET step_order=$2 WHERE id=$1 AND visit_id=$3", [
+        order[i],
+        i + 1,
+        visitId,
+      ]);
+    }
+    // Keep the visit's cached current_step_order in sync with the moved step.
+    await client.query(
+      `UPDATE flow_visits
+          SET current_step_order = (SELECT step_order FROM flow_visit_steps WHERE id=current_step_id),
+              updated_at=NOW()
+        WHERE id=$1`,
+      [visitId],
+    );
+    await logEvent(client, visitId, "reordered", null, { order }, ACTOR(req));
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow reorder steps");
+  } finally {
+    client.release();
+  }
+});
+
 // Remove a step: skip if already started/active, else hard-delete; reorder.
 router.delete("/flow/steps/:stepId", async (req, res) => {
   const client = await pool.connect();

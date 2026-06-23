@@ -202,6 +202,15 @@ export function useFlowAddStep() {
     }
   });
 }
+export function useFlowReorderSteps() {
+  return useFlowMutation(async ({ visitId, order }) => {
+    try {
+      return (await api.post(`/api/flow/visits/${visitId}/reorder`, { order })).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not reorder steps"));
+    }
+  });
+}
 export function useFlowRemoveStep() {
   return useFlowMutation(async (arg) => {
     // Accepts either a bare stepId (back-compat) or { stepId, reason }.

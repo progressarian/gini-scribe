@@ -6,6 +6,7 @@ import {
   useFlowRemoveStep,
   useFlowAddStep,
   useFlowStepCatalog,
+  useFlowReorderSteps,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
 
@@ -39,7 +40,22 @@ export default function VisitDetailModal({ visit, onClose }) {
   const editDur = useFlowEditDuration();
   const removeStep = useFlowRemoveStep();
   const addStep = useFlowAddStep();
+  const reorder = useFlowReorderSteps();
   const { data: catalog = [] } = useFlowStepCatalog();
+
+  // Steps sorted by order — the list we render and reorder against.
+  const steps = (visit.steps || []).slice().sort((a, b) => a.step_order - b.step_order);
+  // Only not-yet-started steps can move, and only past one another (a pending
+  // step can't jump ahead of a completed/in-progress one).
+  const MOVABLE = (st) => st === "pending" || st === "ready";
+  const moveStep = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= steps.length) return;
+    if (!MOVABLE(steps[i].status) || !MOVABLE(steps[j].status)) return;
+    const order = steps.map((s) => s.id);
+    [order[i], order[j]] = [order[j], order[i]];
+    act(() => reorder.mutateAsync({ visitId: visit.id, order }), "Steps reordered");
+  };
 
   // Add a step to the end of this visit's journey (from the catalog or custom).
   const maxOrder = (visit.steps || []).reduce((m, s) => Math.max(m, s.step_order || 0), 0);
@@ -154,9 +170,37 @@ export default function VisitDetailModal({ visit, onClose }) {
             are locked.
           </div>
 
-          {visit.steps?.map((s) => (
+          {steps.map((s, i) => (
             <div key={s.id}>
               <div className="jb-step">
+                <span className="jb-move" title="Reorder step">
+                  <button
+                    className="jb-move-btn"
+                    title="Move up"
+                    disabled={
+                      reorder.isPending ||
+                      i === 0 ||
+                      !MOVABLE(s.status) ||
+                      !MOVABLE(steps[i - 1]?.status)
+                    }
+                    onClick={() => moveStep(i, -1)}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    className="jb-move-btn"
+                    title="Move down"
+                    disabled={
+                      reorder.isPending ||
+                      i === steps.length - 1 ||
+                      !MOVABLE(s.status) ||
+                      !MOVABLE(steps[i + 1]?.status)
+                    }
+                    onClick={() => moveStep(i, 1)}
+                  >
+                    ▼
+                  </button>
+                </span>
                 <span
                   className="jb-name"
                   style={{
