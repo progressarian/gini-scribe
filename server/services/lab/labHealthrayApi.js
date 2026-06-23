@@ -1,6 +1,7 @@
 // ── Lab HealthRay API Client ─────────────────────────────────────────────────
 // Separate system from node.healthray.com — JWT auth with auto-refresh on 401
 
+import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
 import { fetchWithTimeout, createRateLimiter } from "../cron/lowPriority.js";
 const { log } = createLogger("Lab Auth");
@@ -36,14 +37,66 @@ let loginInFlight = null; // Promise singleton — coalesces concurrent logins
 
 // Circuit-breaker. HealthRay's WAF IP-rate-limits us with a 403 after too many
 // requests (login OR data). Retrying every cron tick (~30s) keeps the limiter
-// tripped indefinitely, so back off exponentially without a network call while
-// the window is open, then recover automatically. Shared by login failures and
-// data-endpoint 403s — they're the same block — and reset on the first success.
-// Mirrors the main HealthRay client's breaker (server/services/healthray/client.js).
+// tripped indefinitely, so back off WITHOUT a network call while the window is
+// open, then recover automatically. Shared by login failures and data-endpoint
+// 403s, and reset on the first success.
+//
+// Two backoff regimes (mirrors server/services/healthray/client.js):
+//   • A real WAF block (403/429) → a LONG cooldown that ESCALATES on consecutive
+//     blocks (30m → 1h → 2h cap). A flat short cooldown oscillates forever when
+//     the ban outlasts it (probe → re-banned → wait → probe…), which is exactly
+//     what kept the lab cron spamming "backing off" — see this file's history.
+//   • Any other failure (timeout, login non-200) → a fast 20s → 10min backoff.
+//
+// The cooldown is persisted in app_kv so BOTH processes (worker + API) and
+// restarts honour one window instead of each independently re-poking the WAF.
 let blockFailCount = 0;
 let blockBackoffUntil = 0;
-const BLOCK_BACKOFF_BASE_MS = 20_000; // 20s, doubles each consecutive failure
-const BLOCK_BACKOFF_MAX_MS = 10 * 60_000; // capped at 10 min
+let wafBlockCount = 0; // consecutive WAF 403/429 blocks — escalates the cooldown
+let cooldownLoadPromise = null;
+
+const BLOCK_BACKOFF_BASE_MS = 20_000; // non-block failures: 20s, doubles
+const BLOCK_BACKOFF_MAX_MS = 10 * 60_000; // …capped at 10 min
+const WAF_COOLDOWN_BASE_MS = 30 * 60_000; // WAF block: 30 min base
+const WAF_COOLDOWN_MAX_MS = 2 * 60 * 60_000; // …escalates to a 2 h cap
+const KV_LAB_COOLDOWN = "lab_login_cooldown";
+
+async function kvGet(key) {
+  try {
+    return (
+      (await pool.query("SELECT value FROM app_kv WHERE key=$1", [key])).rows[0]?.value ?? null
+    );
+  } catch {
+    return null; // app_kv missing / DB blip → in-memory only
+  }
+}
+async function kvSet(key, value) {
+  try {
+    await pool.query(
+      `INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, JSON.stringify(value)],
+    );
+  } catch {
+    /* best-effort — never let persistence break a sync */
+  }
+}
+
+// Pull a cooldown another process/restart may have already established (once;
+// promise-singleton so concurrent callers don't each hit the DB).
+function loadPersistedCooldown() {
+  if (!cooldownLoadPromise) {
+    cooldownLoadPromise = (async () => {
+      const c = await kvGet(KV_LAB_COOLDOWN);
+      if (c?.until && c.until > blockBackoffUntil) {
+        blockBackoffUntil = c.until;
+        blockFailCount = c.failCount || 0;
+        wafBlockCount = c.blockCount || 0;
+      }
+    })();
+  }
+  return cooldownLoadPromise;
+}
 
 function isBackingOff() {
   return Date.now() < blockBackoffUntil;
@@ -51,19 +104,42 @@ function isBackingOff() {
 function backoffRemainingS() {
   return Math.round((blockBackoffUntil - Date.now()) / 1000);
 }
-function openBreaker(reason) {
+// `blocked` = a genuine WAF/IP-block (403/429); escalates the long cooldown.
+function openBreaker(reason, blocked = false) {
   blockFailCount += 1;
-  const ms = Math.min(BLOCK_BACKOFF_MAX_MS, BLOCK_BACKOFF_BASE_MS * 2 ** (blockFailCount - 1));
+  let ms;
+  if (blocked) {
+    wafBlockCount += 1;
+    ms = Math.min(WAF_COOLDOWN_MAX_MS, WAF_COOLDOWN_BASE_MS * 2 ** (wafBlockCount - 1));
+  } else {
+    ms = Math.min(BLOCK_BACKOFF_MAX_MS, BLOCK_BACKOFF_BASE_MS * 2 ** (blockFailCount - 1));
+  }
   blockBackoffUntil = Date.now() + ms;
-  log(
-    "Breaker",
-    `${reason} — backing off ${Math.round(ms / 1000)}s (${blockFailCount} consecutive failures)`,
-  );
+  kvSet(KV_LAB_COOLDOWN, {
+    until: blockBackoffUntil,
+    failCount: blockFailCount,
+    blockCount: wafBlockCount,
+    reason,
+  });
+  if (blocked) {
+    log(
+      "Breaker",
+      `⚠ BLOCKED by lab WAF — block #${wafBlockCount}, cooling down ${Math.round(ms / 60000)}min ` +
+        `(auto-recovers, no redeploy). Permanent fix: set HEALTHRAY_PROXY_URL to a static egress IP allowlisted by HealthRay.`,
+    );
+  } else {
+    log(
+      "Breaker",
+      `${reason} — backing off ${Math.round(ms / 1000)}s (${blockFailCount} consecutive failures)`,
+    );
+  }
 }
 function resetBreaker() {
-  if (blockFailCount) log("Breaker", "Lab API recovered — back-off cleared");
+  if (blockFailCount || wafBlockCount) log("Breaker", "Lab API recovered — back-off cleared");
   blockFailCount = 0;
   blockBackoffUntil = 0;
+  wafBlockCount = 0;
+  kvSet(KV_LAB_COOLDOWN, { until: 0, failCount: 0, blockCount: 0, reason: "" });
 }
 
 // Tokens have empirically lasted well over an hour, but long batch runs
@@ -132,6 +208,8 @@ async function doLogin() {
     );
   }
 
+  // Honour a cooldown a sibling process/restart may have already established.
+  await loadPersistedCooldown();
   // Circuit-breaker: while backing off after recent blocks, fail fast WITHOUT
   // hitting the network so we stop hammering a rate-limited endpoint. (Checked
   // here, not in openBreaker, so polling never extends the window.)
@@ -143,6 +221,9 @@ async function doLogin() {
 
   log("Login", `Logging in as ${mobile}...`);
 
+  // Tracks whether this failure was a WAF/IP-block (403/429) vs an ordinary
+  // failure — drives the long-vs-fast cooldown chosen in the catch below.
+  let wafBlocked = false;
   try {
     const res = await gatedFetch(
       `${LAB_API_BASE}/user/sign_in`,
@@ -164,6 +245,7 @@ async function doLogin() {
       LAB_TIMEOUT_MS,
     );
 
+    wafBlocked = res.status === 403 || res.status === 429;
     const json = await res.json().catch(() => ({}));
 
     if (json.status !== 200) {
@@ -190,7 +272,7 @@ async function doLogin() {
     log("Login", "Tokens refreshed successfully");
     return { authToken, accessToken };
   } catch (e) {
-    openBreaker(`login failed: ${e.message}`);
+    openBreaker(`login failed: ${e.message}`, wafBlocked);
     throw e;
   }
 }
@@ -205,6 +287,7 @@ async function ensureFreshTokens() {
 
 // ── Core fetch with auto-retry on 401 ───────────────────────────────────────
 async function labFetch(path, isRetry = false) {
+  await loadPersistedCooldown();
   // Circuit-breaker: while the lab API is blocking us (IP rate-limit 403), fail
   // fast WITHOUT a network call so the cron stops hammering and the block can
   // clear. Auto-recovers after the back-off window.
@@ -232,12 +315,12 @@ async function labFetch(path, isRetry = false) {
     return labFetch(path, true);
   }
 
-  // 403 = HealthRay WAF / IP rate-limit, NOT a token problem — re-login can't
-  // fix it and only feeds the limiter. Open the breaker so subsequent cron
-  // ticks fail fast until the window clears.
-  if (res.status === 403) {
-    openBreaker(`HTTP 403 at ${path}`);
-    throw new Error(`Lab API HTTP 403 at ${path}`);
+  // 403/429 = HealthRay WAF / IP rate-limit, NOT a token problem — re-login
+  // can't fix it and only feeds the limiter. Open the breaker (long, escalating
+  // cooldown) so subsequent cron ticks fail fast until the WAF ban clears.
+  if (res.status === 403 || res.status === 429) {
+    openBreaker(`HTTP ${res.status} at ${path}`, true);
+    throw new Error(`Lab API HTTP ${res.status} at ${path}`);
   }
 
   if (!res.ok) throw new Error(`Lab API HTTP ${res.status} at ${path}`);
