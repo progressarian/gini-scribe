@@ -49,7 +49,6 @@ import {
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 import { WAITING_ROLE } from "../flow/journey.js";
-import { autoCreateEnabled, ensureAutoFlowVisit } from "../flow/autoCreate.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 const { log, error } = createLogger("HealthRay Sync");
 
@@ -1751,27 +1750,6 @@ export async function syncAppointmentStatuses(date) {
                                  OR ($4::text IS NOT NULL AND healthray_patient_id IS DISTINCT FROM $4::text))`,
               [existing.id, billPaid, billCreated, hrPatientId],
             );
-          }
-        }
-
-        // Auto-start the Flow journey from HealthRay status (opt-in via
-        // FLOW_AUTO_CREATE). When a patient is checkedin/in_visit we create the
-        // visit early so the board tracks them live with real per-step timing —
-        // instead of the all-at-once "Elapsed 0m" back-fill. Idempotent + scoped
-        // to this one appointment; never touches another patient's data.
-        // Already-completed patients are intentionally NOT auto-created here
-        // (newStatus is gated to checkedin/in_visit), so we don't reintroduce a
-        // fake 0m row. See docs/FLOW_AUTO_CREATE_PLAN.md.
-        if (autoCreateEnabled() && (newStatus === "checkedin" || newStatus === "in_visit")) {
-          try {
-            const r = await ensureAutoFlowVisit(existing.id, { newStatus });
-            // Newly created at in_visit → advance the journey to the doctor step
-            // immediately so timing reflects the live status.
-            if (r.created && newStatus === "in_visit") {
-              await syncFlowFromAppointment(existing.id, "in_visit");
-            }
-          } catch (e) {
-            error("Status Sync", `auto-create appt ${existing.id}: ${e.message}`);
           }
         }
 

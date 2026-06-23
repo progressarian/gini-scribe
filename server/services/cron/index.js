@@ -251,11 +251,6 @@ export function startCronJobs() {
   // above, so a slow AI parse never blocks status updates.
   if (process.env.HEALTHRAY_MOBILE || process.env.HEALTHRAY_SESSION) {
     console.log("[Cron] Starting HealthRay status sync (continuous loop, 10–12s break)...");
-    console.log(
-      `[Cron] Flow auto-create from HealthRay status: ${
-        process.env.FLOW_AUTO_CREATE === "1" ? "ON" : "OFF (set FLOW_AUTO_CREATE=1 to enable)"
-      }`,
-    );
     statusLoopRunning = true;
     scheduleNextStatusSync(5_000); // 5s after boot — let initial full sync start first
   }

@@ -166,6 +166,26 @@ export function useFlowCancel() {
     }
   });
 }
+// Start the timer on a parked ('waiting') deferred-start visit.
+export function useFlowStartTimer() {
+  return useFlowMutation(async (visitId) => {
+    try {
+      return (await api.post(`/api/flow/visits/${visitId}/start-timer`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not start timer"));
+    }
+  });
+}
+// Stop the timer — reset a running visit back to 'waiting' at 0.
+export function useFlowStopTimer() {
+  return useFlowMutation(async (visitId) => {
+    try {
+      return (await api.post(`/api/flow/visits/${visitId}/stop-timer`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not stop timer"));
+    }
+  });
+}
 export function useFlowStartStep() {
   return useFlowMutation(async (stepId) => {
     try {

@@ -1,10 +1,18 @@
 import { useMemo, useState } from "react";
-import { useFlowVisits } from "../../queries/hooks/useFlow";
+import {
+  useFlowVisits,
+  useFlowStartTimer,
+  useFlowStopTimer,
+  useFlowCancel,
+} from "../../queries/hooks/useFlow";
+import { toast } from "../../stores/uiStore";
+import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import VisitDetailModal from "../../components/flow/VisitDetailModal";
 import "../../styles/flow.css";
 
 // OPD/GHM-aligned stage labels — same vocabulary as the OPD pages.
 const STAGE_LABEL = {
+  waiting: "Waiting",
   checkedin: "Checked-in",
   in_visit: "In-visit",
   seen: "Seen",
@@ -67,6 +75,61 @@ export default function FlowCoordinatorPage() {
   // Cancelled check-ins (mistaken / not-present) don't belong on the live floor.
   const visits = useMemo(() => allVisits.filter((v) => v.status !== "cancelled"), [allVisits]);
   const [openId, setOpenId] = useState(null);
+  const [query, setQuery] = useState("");
+  const [cancelTarget, setCancelTarget] = useState(null); // visit pending cancel-confirm
+  const startTimer = useFlowStartTimer();
+  const stopTimer = useFlowStopTimer();
+  const cancelVisit = useFlowCancel();
+
+  // Free-text filter for the patient rows — name, file number, age/sex, visit
+  // type, or assigned SD/Chief. Stats/occupancy/doctor-load stay on the full set.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return visits;
+    return visits.filter((v) =>
+      [
+        v.patient_name,
+        v.patient_id,
+        v.patient_age_sex,
+        v.visit_type_id,
+        v.assigned_sd_name,
+        v.assigned_chief_name,
+      ]
+        .filter(Boolean)
+        .some((f) => String(f).toLowerCase().includes(q)),
+    );
+  }, [visits, query]);
+
+  const handleStartTimer = async (e, v) => {
+    e.stopPropagation();
+    try {
+      await startTimer.mutateAsync(v.id);
+      toast(`Timer started for ${v.patient_name}`, "success");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  };
+  const handleStopTimer = async (e, v) => {
+    e.stopPropagation();
+    try {
+      await stopTimer.mutateAsync(v.id);
+      toast(`Timer stopped — ${v.patient_name} back to waiting`, "success");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  };
+  const confirmCancel = async () => {
+    const v = cancelTarget;
+    if (!v) return;
+    try {
+      await cancelVisit.mutateAsync({ visitId: v.id, reason: "coordinator_cancel" });
+      toast(`Check-in cancelled for ${v.patient_name}`, "success");
+    } catch (err) {
+      toast(err.message, "error");
+    } finally {
+      setCancelTarget(null);
+    }
+  };
 
   const stats = useMemo(() => {
     const active = visits.filter((v) => v.status === "in_progress");
@@ -202,18 +265,60 @@ export default function FlowCoordinatorPage() {
         )}
 
         {/* Patient flow rows */}
-        <div className="flow-sec-title">
-          All patients{" "}
-          <span className="flow-muted" style={{ textTransform: "none", letterSpacing: 0 }}>
-            sorted by urgency · click to manage
+        <div
+          className="flow-sec-title"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span>
+            All patients{" "}
+            <span className="flow-muted" style={{ textTransform: "none", letterSpacing: 0 }}>
+              sorted by urgency · click to manage
+              {query.trim() ? ` · ${filtered.length}/${visits.length} shown` : ""}
+            </span>
           </span>
+          <div className="flow-field" style={{ position: "relative", minWidth: 220 }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="🔍 Search name / file / doctor…"
+              style={{ paddingRight: query ? 26 : undefined }}
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                title="Clear search"
+                style={{
+                  position: "absolute",
+                  right: 6,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  color: "var(--fink3)",
+                  fontSize: 14,
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
         {isLoading ? (
           <div className="flow-card flow-empty">Loading…</div>
         ) : visits.length === 0 ? (
           <div className="flow-card flow-empty">No patients in flow today.</div>
+        ) : filtered.length === 0 ? (
+          <div className="flow-card flow-empty">No patients match “{query.trim()}”.</div>
         ) : (
-          visits.map((v) => {
+          filtered.map((v) => {
             const t = v._timing || {};
             const cls =
               v.status === "completed"
@@ -283,21 +388,74 @@ export default function FlowCoordinatorPage() {
                   )}
                 </div>
                 <div className="cp-right">
-                  <div className={`cp-bignum ${numColour}`}>{t.elapsed_min}m</div>
-                  <span
-                    className={`flow-badge ${cls === "breach" ? "fb-red" : cls === "atrisk" ? "fb-amb" : v.status === "completed" ? "fb-grn" : "fb-blu"}`}
-                    style={{ marginTop: 3 }}
-                    title={
-                      t.urgency === "breach"
-                        ? "Over benchmark"
-                        : t.urgency === "atrisk"
-                          ? "Near benchmark"
-                          : ""
-                    }
-                  >
-                    {STAGE_LABEL[v.stage] || "Active"}
-                    {t.urgency === "breach" ? " ⚠" : t.urgency === "atrisk" ? " ⏱" : ""}
-                  </span>
+                  <div className={`cp-bignum ${numColour}`}>
+                    {v.status === "waiting" ? "—" : `${t.elapsed_min}m`}
+                  </div>
+                  {v.status === "waiting" ? (
+                    <span
+                      className="flow-badge fb-amb"
+                      style={{ marginTop: 3 }}
+                      title="Timer not started yet"
+                    >
+                      ⏸ Waiting
+                    </span>
+                  ) : (
+                    <span
+                      className={`flow-badge ${cls === "breach" ? "fb-red" : cls === "atrisk" ? "fb-amb" : v.status === "completed" ? "fb-grn" : "fb-blu"}`}
+                      style={{ marginTop: 3 }}
+                      title={
+                        t.urgency === "breach"
+                          ? "Over benchmark"
+                          : t.urgency === "atrisk"
+                            ? "Near benchmark"
+                            : ""
+                      }
+                    >
+                      {STAGE_LABEL[v.stage] || "Active"}
+                      {t.urgency === "breach" ? " ⚠" : t.urgency === "atrisk" ? " ⏱" : ""}
+                    </span>
+                  )}
+                  {v.status === "waiting" && (
+                    <button
+                      className="flow-btn flow-btn-primary"
+                      style={{ marginTop: 6, padding: "3px 10px" }}
+                      disabled={startTimer.isPending}
+                      onClick={(e) => handleStartTimer(e, v)}
+                      title="Start the visit timer now"
+                    >
+                      ▶ Start
+                    </button>
+                  )}
+                  {v.status === "in_progress" && (
+                    <button
+                      className="flow-btn flow-btn-ghost"
+                      style={{ marginTop: 6, padding: "3px 8px" }}
+                      disabled={stopTimer.isPending}
+                      onClick={(e) => handleStopTimer(e, v)}
+                      title="Stop the timer and put the patient back to waiting (resets to 0)"
+                    >
+                      ⏸ Stop
+                    </button>
+                  )}
+                  {(v.status === "in_progress" || v.status === "waiting") && (
+                    <button
+                      className="flow-btn flow-btn-ghost"
+                      style={{
+                        marginTop: 6,
+                        padding: "3px 8px",
+                        color: "var(--fre)",
+                        borderColor: "var(--fre)",
+                      }}
+                      disabled={cancelVisit.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCancelTarget(v);
+                      }}
+                      title="Cancel this check-in (mistaken / patient not present)"
+                    >
+                      ✕ Cancel
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -386,6 +544,20 @@ export default function FlowCoordinatorPage() {
       </div>
 
       {openVisit && <VisitDetailModal visit={openVisit} onClose={() => setOpenId(null)} />}
+
+      <ConfirmModal
+        open={!!cancelTarget}
+        title="Cancel check-in?"
+        message={
+          cancelTarget
+            ? `Remove ${cancelTarget.patient_name} from the patient flow. Use this for a mistaken check-in or a patient who isn't present. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Cancel check-in"
+        cancelLabel="Keep"
+        onConfirm={confirmCancel}
+        onCancel={() => setCancelTarget(null)}
+      />
     </div>
   );
 }

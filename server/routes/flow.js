@@ -21,7 +21,6 @@ import {
 } from "../services/flow/journey.js";
 import { fetchPatientTransactions } from "../services/healthray/client.js";
 import { transactionsToBilling } from "../services/healthray/billingExtractor.js";
-import { createFlowVisitFromAppointment } from "../services/flow/autoCreate.js";
 
 const router = Router();
 
@@ -553,7 +552,13 @@ router.post("/flow/checkin", async (req, res) => {
       assigned_chief_name = null,
       journey_steps = [],
       send_whatsapp = false,
+      start_mode = "now",
     } = req.body || {};
+
+    // Deferred start: park the visit in 'waiting' with the clock stopped (no
+    // timer, no auto-started step) until reception presses ▶ Start. Used when a
+    // patient is registered but still waiting for the doctor / a slot change.
+    const deferred = start_mode === "later";
 
     if (!patient_id || !patient_name || !visit_type_id) {
       return res.status(400).json({ error: "patient_id, patient_name, visit_type_id required" });
@@ -583,7 +588,7 @@ router.post("/flow/checkin", async (req, res) => {
     }
     const dup = await client.query(
       `SELECT id, patient_name, checkin_time FROM flow_visits
-        WHERE status = 'in_progress' AND visit_date::date = CURRENT_DATE
+        WHERE status IN ('in_progress','waiting') AND visit_date::date = CURRENT_DATE
           AND (${dupOr.join(" OR ")})
         ORDER BY checkin_time DESC LIMIT 1`,
       dupParams,
@@ -617,13 +622,21 @@ router.post("/flow/checkin", async (req, res) => {
       token = genVisitToken();
     }
 
+    // $21 = startNow: when false (deferred), the clock and ETA stay NULL until
+    // the timer is started later.
+    const startNow = !deferred;
     const visitRes = await client.query(
       `INSERT INTO flow_visits
         (patient_id, patient_db_id, appointment_id, patient_name, patient_phone, patient_age_sex,
          visit_type_id, appointment_time, has_tests_available, patient_status, max_time_min,
          suggested_wait_min, estimated_completion, is_vip, notes, visit_token, checked_in_by,
-         assigned_sd, assigned_sd_name, assigned_chief, assigned_chief_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW() + make_interval(mins => $12), $13,$14,$15,$16,$17,$18,$19,$20)
+         assigned_sd, assigned_sd_name, assigned_chief, assigned_chief_name,
+         status, timer_started_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+         CASE WHEN $21 THEN NOW() + make_interval(mins => $12) ELSE NULL END,
+         $13,$14,$15,$16,$17,$18,$19,$20,
+         CASE WHEN $21 THEN 'in_progress' ELSE 'waiting' END,
+         CASE WHEN $21 THEN NOW() ELSE NULL END)
        RETURNING *`,
       [
         patient_id,
@@ -646,6 +659,7 @@ router.post("/flow/checkin", async (req, res) => {
         assigned_sd_name,
         assigned_chief,
         assigned_chief_name,
+        startNow,
       ],
     );
     const visit = visitRes.rows[0];
@@ -673,20 +687,24 @@ router.post("/flow/checkin", async (req, res) => {
     }
 
     // Auto-start the first step (in_progress if its station is free, else ready).
+    // Deferred check-ins leave every step 'pending' — the journey only begins
+    // when the timer is started (POST /flow/visits/:id/start-timer).
     const first = (
       await client.query(
         "SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC LIMIT 1",
         [visit.id],
       )
     ).rows[0];
-    const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
-    const firstStatus = busy ? "ready" : "in_progress";
-    await client.query(
-      `UPDATE flow_visit_steps
-         SET status=$2, started_at = CASE WHEN $2='in_progress' THEN NOW() ELSE NULL END
-       WHERE id=$1`,
-      [first.id, firstStatus],
-    );
+    if (!deferred) {
+      const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
+      const firstStatus = busy ? "ready" : "in_progress";
+      await client.query(
+        `UPDATE flow_visit_steps
+           SET status=$2, started_at = CASE WHEN $2='in_progress' THEN NOW() ELSE NULL END
+         WHERE id=$1`,
+        [first.id, firstStatus],
+      );
+    }
     await client.query(
       "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3 WHERE id=$1",
       [visit.id, first.id, first.step_order],
@@ -695,9 +713,9 @@ router.post("/flow/checkin", async (req, res) => {
     await logEvent(
       client,
       visit.id,
-      "checkin",
+      deferred ? "checkin_deferred" : "checkin",
       first.step_order,
-      { visit_type_id, totalPlanned },
+      { visit_type_id, totalPlanned, start_mode },
       ACTOR(req),
     );
 
@@ -921,6 +939,135 @@ router.post("/flow/visits/:id/cancel", async (req, res) => {
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     handleError(res, e, "Flow cancel");
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Start timer — begin a parked ('waiting') visit. Starts the clock fresh from
+// now, sets the ETA, and auto-starts the first journey step (the deferred half
+// of check-in). Used when a "start later" patient's visit actually begins.
+// ─────────────────────────────────────────────────────────────────────────
+router.post("/flow/visits/:id/start-timer", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const visitId = req.params.id;
+    await client.query("BEGIN");
+    const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
+      .rows[0];
+    if (!v) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit not found" });
+    }
+    if (v.status !== "waiting") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error:
+          v.status === "in_progress"
+            ? "Timer is already running for this visit"
+            : `Cannot start a ${v.status} visit`,
+      });
+    }
+
+    // Clock starts now; ETA = now + the planned journey length.
+    await client.query(
+      `UPDATE flow_visits
+         SET status='in_progress', timer_started_at=NOW(),
+             estimated_completion = NOW() + make_interval(mins => COALESCE(suggested_wait_min, 0)),
+             updated_at=NOW()
+       WHERE id=$1`,
+      [visitId],
+    );
+
+    // Auto-start the first step (in_progress if its station is free, else ready) —
+    // mirrors the non-deferred check-in path.
+    const first = (
+      await client.query(
+        "SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC LIMIT 1",
+        [visitId],
+      )
+    ).rows[0];
+    if (first) {
+      const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
+      const firstStatus = busy ? "ready" : "in_progress";
+      await client.query(
+        `UPDATE flow_visit_steps
+           SET status=$2, started_at = CASE WHEN $2='in_progress' THEN NOW() ELSE NULL END
+         WHERE id=$1`,
+        [first.id, firstStatus],
+      );
+      await client.query(
+        "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3 WHERE id=$1",
+        [visitId, first.id, first.step_order],
+      );
+    }
+
+    await logEvent(client, visitId, "timer_started", first?.step_order ?? null, {}, ACTOR(req));
+    await client.query("COMMIT");
+    res.json({ status: "in_progress" });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow start timer");
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Stop timer — reset a running visit back to 'waiting' at 0 (clock cleared,
+// steps re-parked as pending). Only valid before the journey has progressed:
+// once any step is completed, use Cancel instead.
+// ─────────────────────────────────────────────────────────────────────────
+router.post("/flow/visits/:id/stop-timer", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const visitId = req.params.id;
+    await client.query("BEGIN");
+    const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
+      .rows[0];
+    if (!v) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit not found" });
+    }
+    if (v.status !== "in_progress") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "Timer is not running for this visit" });
+    }
+    const doneCount = (
+      await client.query(
+        "SELECT COUNT(*)::int AS n FROM flow_visit_steps WHERE visit_id=$1 AND status='completed'",
+        [visitId],
+      )
+    ).rows[0].n;
+    if (doneCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "This visit has already progressed — cancel it instead of stopping the timer.",
+      });
+    }
+
+    // Park it again: clock cleared, ETA cleared, every step back to pending.
+    await client.query(
+      `UPDATE flow_visits
+         SET status='waiting', timer_started_at=NULL, estimated_completion=NULL,
+             current_step_id=NULL, current_step_order=0, updated_at=NOW()
+       WHERE id=$1`,
+      [visitId],
+    );
+    await client.query(
+      `UPDATE flow_visit_steps
+         SET status='pending', started_at=NULL, actual_duration_min=NULL
+       WHERE visit_id=$1 AND status IN ('in_progress','ready')`,
+      [visitId],
+    );
+
+    await logEvent(client, visitId, "timer_stopped", null, {}, ACTOR(req));
+    await client.query("COMMIT");
+    res.json({ status: "waiting" });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow stop timer");
   } finally {
     client.release();
   }
@@ -1430,28 +1577,131 @@ router.get("/flow/patient-billing", async (req, res) => {
 // visit (+ default journey) linked to the appointment. Idempotent: returns the
 // existing flow visit if one is already linked. Doctor prefilled from the appt.
 router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
+  const client = await pool.connect();
   try {
     const apptId = req.params.appointmentId;
-    const appt = (await pool.query("SELECT * FROM appointments WHERE id=$1", [apptId])).rows[0];
+    const appt = (await client.query("SELECT * FROM appointments WHERE id=$1", [apptId])).rows[0];
     if (!appt) {
       return res.status(404).json({ error: "Appointment not found" });
     }
-    // Delegates to the shared creator (same engine the auto-sync uses). Manual
-    // "Start Flow" keeps its original behaviour: default journey only, no billing
-    // injection, attributed to the logged-in user. Idempotent.
-    const r = await createFlowVisitFromAppointment(appt, {
-      actor: ACTOR(req) || "flow",
-      includeBilling: false,
-    });
-    if (!r.visit_id) {
-      return res.status(500).json({ error: "Could not create flow visit" });
+    // Idempotent — one flow visit per appointment.
+    const existing = (
+      await client.query(
+        "SELECT id, visit_token FROM flow_visits WHERE appointment_id=$1 AND status<>'cancelled' ORDER BY checkin_time DESC LIMIT 1",
+        [apptId],
+      )
+    ).rows[0];
+    if (existing) {
+      return res.json({ visit_id: existing.id, visit_token: existing.visit_token, existed: true });
     }
-    if (r.created) await syncAppointmentStatus(apptId, "checkedin");
-    res
-      .status(r.created ? 201 : 200)
-      .json({ visit_id: r.visit_id, visit_token: r.visit_token, existed: !r.created });
+
+    const visitTypeId = appt.is_walkin ? "FU_WALK" : "FU_APPT"; // sensible default; editable on the floor
+    const vt = (
+      await client.query("SELECT max_time_min FROM flow_visit_types WHERE id=$1", [visitTypeId])
+    ).rows[0];
+    const tpl = (
+      await client.query(
+        `SELECT c.id AS step_catalog_id, c.name AS step_name,
+                COALESCE(t.override_duration_min, c.default_duration_min)::int AS dur,
+                c.station, c.assigned_role
+           FROM flow_step_templates t JOIN flow_step_catalog c ON c.id=t.step_catalog_id
+          WHERE t.visit_type_id=$1 ORDER BY t.step_order`,
+        [visitTypeId],
+      )
+    ).rows;
+    const total = tpl.reduce((a, s) => a + Number(s.dur), 0);
+
+    // Resolve patient db id + file_no.
+    const patientDbId = appt.patient_id || null;
+    const fileNo = appt.file_no || (patientDbId ? `P_${patientDbId}` : "UNKNOWN");
+    const sdId = appt.doctor_id || null;
+    const sdName = appt.doctor_name || null;
+
+    await client.query("BEGIN");
+    let token = genVisitToken();
+    for (let i = 0; i < 5; i++) {
+      if (!(await client.query("SELECT 1 FROM flow_visits WHERE visit_token=$1", [token])).rowCount)
+        break;
+      token = genVisitToken();
+    }
+    const visit = (
+      await client.query(
+        `INSERT INTO flow_visits
+           (patient_id, patient_db_id, appointment_id, patient_name, patient_phone, visit_type_id,
+            appointment_time, max_time_min, suggested_wait_min, estimated_completion,
+            visit_token, checked_in_by, assigned_sd, assigned_sd_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW() + make_interval(mins => $9), $10,$11,$12,$13)
+         RETURNING *`,
+        [
+          fileNo,
+          patientDbId,
+          apptId,
+          appt.patient_name || "Patient",
+          appt.phone || null,
+          visitTypeId,
+          appt.time_slot || null,
+          vt?.max_time_min || 90,
+          total,
+          token,
+          ACTOR(req),
+          sdId,
+          sdName,
+        ],
+      )
+    ).rows[0];
+
+    for (let i = 0; i < tpl.length; i++) {
+      const s = tpl[i];
+      await client.query(
+        `INSERT INTO flow_visit_steps
+           (visit_id, step_catalog_id, step_order, step_name, planned_duration_min, station, assigned_role,
+            assigned_staff_id, assigned_staff_name, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')`,
+        [
+          visit.id,
+          s.step_catalog_id,
+          i + 1,
+          s.step_name,
+          Number(s.dur),
+          s.station,
+          s.assigned_role,
+          s.step_catalog_id === "sd_consult" && sdId ? String(sdId) : null,
+          s.step_catalog_id === "sd_consult" && sdName ? sdName : null,
+        ],
+      );
+    }
+    const first = (
+      await client.query(
+        "SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC LIMIT 1",
+        [visit.id],
+      )
+    ).rows[0];
+    const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
+    await client.query(
+      "UPDATE flow_visit_steps SET status=$2, started_at=CASE WHEN $2='in_progress' THEN NOW() ELSE NULL END WHERE id=$1",
+      [first.id, busy ? "ready" : "in_progress"],
+    );
+    await client.query(
+      "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3 WHERE id=$1",
+      [visit.id, first.id, first.step_order],
+    );
+    await logEvent(
+      client,
+      visit.id,
+      "checkin",
+      first.step_order,
+      { from_appointment: apptId },
+      ACTOR(req),
+    );
+    await client.query("COMMIT");
+
+    await syncAppointmentStatus(apptId, "checkedin");
+    res.status(201).json({ visit_id: visit.id, visit_token: token });
   } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
     handleError(res, e, "Flow from appointment");
+  } finally {
+    client.release();
   }
 });
 

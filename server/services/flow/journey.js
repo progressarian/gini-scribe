@@ -25,9 +25,16 @@ const minsBetween = (a, b) => Math.max(0, Math.round((b - a) / 60000));
 
 // Visit-level timing + urgency. `now` is injected for testability.
 export function classifyVisit(visit, now = Date.now()) {
-  const checkin = ms(visit.checkin_time);
-  const end = visit.actual_completion ? ms(visit.actual_completion) : now;
   const max = visit.max_time_min || 0;
+  // Parked (deferred-start): the clock hasn't started, so nothing is elapsed
+  // and the visit can never be "at risk"/"breach" while it sits in the queue.
+  if (visit.status === "waiting") {
+    return { elapsed_min: 0, remaining_min: max, pct_elapsed: 0, urgency: "waiting" };
+  }
+  // The clock starts when the timer is started (▶ Start), falling back to
+  // checkin_time for legacy rows created before timer_started_at existed.
+  const checkin = ms(visit.timer_started_at) || ms(visit.checkin_time);
+  const end = visit.actual_completion ? ms(visit.actual_completion) : now;
   const elapsed = checkin ? minsBetween(checkin, end) : 0;
   const remaining = max - elapsed;
   const pct = max > 0 ? Math.round((elapsed / max) * 100) : 0;
@@ -61,7 +68,15 @@ export function classifyStep(step, now = Date.now()) {
 // Sort comparator for the coordinator dashboard: breach first, then VIP ahead
 // of same-urgency non-VIP, then by remaining/max ascending (plan §6.2).
 // Completed/cancelled sink to the bottom.
-const URGENCY_RANK = { breach: 0, atrisk: 1, ok: 2, done_ok: 8, done_over: 8, cancelled: 9 };
+const URGENCY_RANK = {
+  breach: 0,
+  atrisk: 1,
+  ok: 2,
+  waiting: 4,
+  done_ok: 8,
+  done_over: 8,
+  cancelled: 9,
+};
 export function compareVisitsForDashboard(a, b) {
   const ra = URGENCY_RANK[a._timing.urgency] ?? 5;
   const rb = URGENCY_RANK[b._timing.urgency] ?? 5;
@@ -86,6 +101,9 @@ const IS_BILLING = (s) => s.step_catalog_id === "billing" || s.assigned_role ===
 export function deriveStage(visit, steps = []) {
   if (visit.status === "cancelled") return "cancelled";
   if (visit.status === "completed") return "completed";
+  // Parked (deferred-start): they've registered but the journey hasn't begun.
+  // Maps to OPD's "checkedin" so appointment-status mirroring stays valid.
+  if (visit.status === "waiting") return "checkedin";
   const live = steps.filter((s) => s.status !== "skipped");
   // The step they're at now, else the next one they're queued for.
   const current =

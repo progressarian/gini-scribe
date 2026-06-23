@@ -13,6 +13,8 @@ import {
   useFlowVisits,
   useFlowCheckin,
   useFlowCancel,
+  useFlowStartTimer,
+  useFlowStopTimer,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
 
@@ -59,6 +61,7 @@ const resolveVisitType = (typeKey, testsAvailable) => {
 
 // OPD/GHM-aligned stage labels — same vocabulary as the OPD pages.
 const STAGE_LABEL = {
+  waiting: "Waiting",
   checkedin: "Checked-in",
   in_visit: "In-visit",
   seen: "Seen",
@@ -114,6 +117,10 @@ export default function FlowCheckinPage() {
   const [typeKey, setTypeKey] = useState("fu_appt");
   const [testsAvailable, setTestsAvailable] = useState(true);
   const [isVip, setIsVip] = useState(false);
+  // "now" → start the visit timer immediately (default). "later" → park the
+  // patient in the queue with the clock stopped; reception presses ▶ Start when
+  // the visit actually begins (e.g. once the doctor is in / the slot is settled).
+  const [startMode, setStartMode] = useState("now");
   const [fuStatus, setFuStatus] = useState("improving");
   const [form, setForm] = useState({
     name: "",
@@ -157,6 +164,8 @@ export default function FlowCheckinPage() {
   const { data: todays = [] } = useFlowVisits();
   const checkin = useFlowCheckin();
   const cancelVisit = useFlowCancel();
+  const startTimer = useFlowStartTimer();
+  const stopTimer = useFlowStopTimer();
   const [cancelTarget, setCancelTarget] = useState(null); // visit pending cancel-confirm
   const [detailId, setDetailId] = useState(null); // visit whose detail/edit modal is open
 
@@ -170,6 +179,23 @@ export default function FlowCheckinPage() {
       toast(e.message, "error");
     } finally {
       setCancelTarget(null);
+    }
+  };
+
+  const handleStartTimer = async (v) => {
+    try {
+      await startTimer.mutateAsync(v.id);
+      toast(`Timer started for ${v.patient_name}`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+  const handleStopTimer = async (v) => {
+    try {
+      await stopTimer.mutateAsync(v.id);
+      toast(`Timer stopped — ${v.patient_name} back to waiting`, "success");
+    } catch (e) {
+      toast(e.message, "error");
     }
   };
 
@@ -546,13 +572,20 @@ export default function FlowCheckinPage() {
           assigned_staff_name: s.assigned_staff_name,
         })),
         send_whatsapp: sendWhatsapp,
+        start_mode: startMode,
       };
       const res = await checkin.mutateAsync(payload);
-      toast(`Checked in ${form.name} · File ${fileNo}`, "success");
+      toast(
+        startMode === "later"
+          ? `Added ${form.name} to queue · File ${fileNo} · timer not started`
+          : `Checked in ${form.name} · File ${fileNo}`,
+        "success",
+      );
       // reset patient-specific fields + touched state, keep type selection
       setForm({ name: "", file_no: "", phone: "", appt_time: "", notes: "", age: "", sex: "" });
       setPatientDbId(null);
       setIsVip(false);
+      setStartMode("now"); // default back to immediate start for the next patient
       setTouched({});
       setAttempted(false);
       setAgeSexVal(null);
@@ -620,6 +653,37 @@ export default function FlowCheckinPage() {
               >
                 ⭐ VIP patient
               </div>
+            </div>
+
+            {/* When to start the visit timer. "Later" parks the patient in the
+                queue with the clock stopped — useful when they're registered but
+                still waiting for the doctor / a slot change. */}
+            <div style={{ marginBottom: 12 }}>
+              <label className="flow-stat-lbl" style={{ display: "block", marginBottom: 6 }}>
+                Visit timer
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div
+                  className={`flow-toggle${startMode === "now" ? " on" : ""}`}
+                  style={{ flex: 1, textAlign: "center" }}
+                  onClick={() => setStartMode("now")}
+                >
+                  ▶ Start now
+                </div>
+                <div
+                  className={`flow-toggle${startMode === "later" ? " on" : ""}`}
+                  style={{ flex: 1, textAlign: "center" }}
+                  onClick={() => setStartMode("later")}
+                >
+                  ⏸ Start later
+                </div>
+              </div>
+              {startMode === "later" && (
+                <div style={{ fontSize: 10, color: "var(--fink3)", marginTop: 4 }}>
+                  Patient is added to the queue with the timer stopped. Press ▶ Start in “Checked in
+                  today” when the visit begins.
+                </div>
+              )}
             </div>
 
             {selected?.followUp && (
@@ -1303,7 +1367,7 @@ export default function FlowCheckinPage() {
                 disabled={checkin.isPending}
                 onClick={() => submit(true)}
               >
-                ✓ Check In + Send WhatsApp
+                ✓ {startMode === "later" ? "Add to Queue" : "Check In"} + Send WhatsApp
               </button>
               <button
                 className="flow-btn flow-btn-ghost"
@@ -1311,7 +1375,7 @@ export default function FlowCheckinPage() {
                 disabled={checkin.isPending}
                 onClick={() => submit(false)}
               >
-                Check In Only
+                {startMode === "later" ? "Add to Queue Only" : "Check In Only"}
               </button>
             </div>
           </div>
@@ -1360,38 +1424,74 @@ export default function FlowCheckinPage() {
                         minute: "2-digit",
                       })}
                     </td>
-                    <td>{v._timing?.elapsed_min}m</td>
+                    <td>{v.status === "waiting" ? "—" : `${v._timing?.elapsed_min}m`}</td>
                     <td>
-                      <span
-                        className={`flow-badge ${v.status === "completed" ? "fb-grn" : v.status === "cancelled" ? "fb-ink" : v._timing?.urgency === "breach" ? "fb-red" : v._timing?.urgency === "atrisk" ? "fb-amb" : "fb-blu"}`}
-                      >
-                        {STAGE_LABEL[v.stage] || "Active"}
-                        {v.status === "in_progress" && v._timing?.urgency === "breach"
-                          ? " ⚠"
-                          : v.status === "in_progress" && v._timing?.urgency === "atrisk"
-                            ? " ⏱"
-                            : ""}
-                      </span>
+                      {v.status === "waiting" ? (
+                        <span className="flow-badge fb-amb" title="Timer not started yet">
+                          ⏸ Waiting
+                        </span>
+                      ) : (
+                        <span
+                          className={`flow-badge ${v.status === "completed" ? "fb-grn" : v.status === "cancelled" ? "fb-ink" : v._timing?.urgency === "breach" ? "fb-red" : v._timing?.urgency === "atrisk" ? "fb-amb" : "fb-blu"}`}
+                        >
+                          {STAGE_LABEL[v.stage] || "Active"}
+                          {v.status === "in_progress" && v._timing?.urgency === "breach"
+                            ? " ⚠"
+                            : v.status === "in_progress" && v._timing?.urgency === "atrisk"
+                              ? " ⏱"
+                              : ""}
+                        </span>
+                      )}
                     </td>
                     <td>
-                      {v.status === "in_progress" && (
-                        <button
-                          className="flow-btn flow-btn-ghost"
-                          style={{
-                            padding: "3px 8px",
-                            color: "var(--fre)",
-                            borderColor: "var(--fre)",
-                          }}
-                          disabled={cancelVisit.isPending}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCancelTarget(v);
-                          }}
-                          title="Cancel this check-in (started by mistake / patient not present)"
-                        >
-                          ✕ Cancel
-                        </button>
-                      )}
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        {v.status === "waiting" && (
+                          <button
+                            className="flow-btn flow-btn-primary"
+                            style={{ padding: "3px 10px" }}
+                            disabled={startTimer.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartTimer(v);
+                            }}
+                            title="Start the visit timer now"
+                          >
+                            ▶ Start
+                          </button>
+                        )}
+                        {v.status === "in_progress" && (
+                          <button
+                            className="flow-btn flow-btn-ghost"
+                            style={{ padding: "3px 8px" }}
+                            disabled={stopTimer.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStopTimer(v);
+                            }}
+                            title="Stop the timer and put the patient back to waiting (resets to 0)"
+                          >
+                            ⏸ Stop
+                          </button>
+                        )}
+                        {(v.status === "in_progress" || v.status === "waiting") && (
+                          <button
+                            className="flow-btn flow-btn-ghost"
+                            style={{
+                              padding: "3px 8px",
+                              color: "var(--fre)",
+                              borderColor: "var(--fre)",
+                            }}
+                            disabled={cancelVisit.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCancelTarget(v);
+                            }}
+                            title="Cancel this check-in (started by mistake / patient not present)"
+                          >
+                            ✕ Cancel
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
