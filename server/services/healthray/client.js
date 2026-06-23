@@ -31,8 +31,11 @@ export function getOrgDoctorId() {
 // stream instead of a burst that trips HealthRay's WAF and gets the server IP
 // 403-blocklisted. Tunable via env without a code change. See createRateLimiter.
 const healthrayLimiter = createRateLimiter({
-  ratePerSec: Number(process.env.HEALTHRAY_MAX_RPS) || 3,
-  maxConcurrent: Number(process.env.HEALTHRAY_MAX_CONCURRENT) || 2,
+  // Default to a gentle, strictly-serial stream (1 concurrent = no bursts, which
+  // is what most often trips the WAF). Raise via env once the egress IP is
+  // allowlisted (HEALTHRAY_PROXY_URL) and bursts are safe again.
+  ratePerSec: Number(process.env.HEALTHRAY_MAX_RPS) || 2,
+  maxConcurrent: Number(process.env.HEALTHRAY_MAX_CONCURRENT) || 1,
 });
 
 // Drop-in for fetchWithTimeout that first waits for a limiter slot, then
@@ -62,11 +65,17 @@ async function gatedFetch(url, options, timeoutMs) {
 // restart REUSE it instead of each logging in afresh.
 let loginFailCount = 0;
 let loginBackoffUntil = 0; // in-memory mirror of the shared cooldown
+let blockCount = 0; // consecutive WAF 403/HTML blocks — escalates the cooldown
 let loginPromise = null; // single-flight guard
 let stateLoadPromise = null;
 const LOGIN_BACKOFF_BASE_MS = 60_000; // 1 min, doubles each consecutive failure
 const LOGIN_BACKOFF_MAX_MS = 10 * 60_000; // capped at 10 min
-const BLOCK_COOLDOWN_MS = 30 * 60_000; // 30 min when HealthRay's WAF 403-blocks us
+const BLOCK_COOLDOWN_MS = 30 * 60_000; // base WAF-block cooldown (30 min)
+// A flat 30-min cooldown oscillates forever if the WAF ban outlasts it (probe →
+// re-ban → wait 30 → probe …), which is why it needed a manual redeploy. Escalate
+// the cooldown on CONSECUTIVE blocks (30m → 1h → 2h, capped) so it waits long
+// enough for the ban to clear and recovers on its own. Resets on first success.
+const BLOCK_COOLDOWN_MAX_MS = 2 * 60 * 60_000; // 2 h cap
 const KV_SESSION = "healthray_session";
 const KV_COOLDOWN = "healthray_login_cooldown";
 
@@ -108,6 +117,7 @@ function loadPersistedState() {
       if (c?.until) {
         loginBackoffUntil = c.until;
         loginFailCount = c.failCount || 0;
+        blockCount = c.blockCount || 0;
       }
     })();
   }
@@ -154,6 +164,7 @@ async function doLogin() {
   if (Date.now() < until) {
     loginBackoffUntil = until;
     loginFailCount = shared?.failCount ?? loginFailCount;
+    blockCount = shared?.blockCount ?? blockCount;
     const waitS = Math.round((until - Date.now()) / 1000);
     const why = shared?.reason ? `, ${shared.reason}` : "";
     throw new Error(
@@ -220,17 +231,29 @@ async function doLogin() {
     // a wrong password (which returns JSON). Treat it as "blocked → wait long",
     // never a fast retry — that's what sustains the block.
     const blocked = res.status === 403 || res.status === 429 || ct.includes("text/html");
-    const backoff = blocked
-      ? BLOCK_COOLDOWN_MS
-      : Math.min(LOGIN_BACKOFF_MAX_MS, LOGIN_BACKOFF_BASE_MS * 2 ** (loginFailCount - 1));
+    let backoff;
+    if (blocked) {
+      // Escalate on consecutive blocks so we wait long enough for the WAF ban to
+      // clear instead of oscillating on a flat cooldown (the old manual-redeploy
+      // trap). 30m → 1h → 2h (capped).
+      blockCount += 1;
+      backoff = Math.min(BLOCK_COOLDOWN_MAX_MS, BLOCK_COOLDOWN_MS * 2 ** (blockCount - 1));
+    } else {
+      backoff = Math.min(LOGIN_BACKOFF_MAX_MS, LOGIN_BACKOFF_BASE_MS * 2 ** (loginFailCount - 1));
+    }
     loginBackoffUntil = Date.now() + backoff;
     const reason = blocked ? `IP likely blocked (http=${res.status})` : "";
-    await kvSet(KV_COOLDOWN, { until: loginBackoffUntil, failCount: loginFailCount, reason });
+    await kvSet(KV_COOLDOWN, {
+      until: loginBackoffUntil,
+      failCount: loginFailCount,
+      blockCount,
+      reason,
+    });
     if (blocked) {
       log(
         "Auth",
-        `⚠ BLOCKED by HealthRay (http=${res.status}) — cooling down ${Math.round(backoff / 60000)}min. ` +
-          `If this persists, your server IP is rate-limited/blocklisted: request an API token + IP allowlist from HealthRay.`,
+        `⚠ BLOCKED by HealthRay (http=${res.status}) — block #${blockCount}, cooling down ${Math.round(backoff / 60000)}min (auto-recovers, no redeploy needed). ` +
+          `Permanent fix: set HEALTHRAY_PROXY_URL to a static egress IP and have HealthRay allowlist it.`,
       );
     }
     const snippet = body.message ? "" : ` body="${rawBody.slice(0, 200).replace(/\s+/g, " ")}"`;
@@ -244,6 +267,7 @@ async function doLogin() {
   // the other process / the next restart.
   loginFailCount = 0;
   loginBackoffUntil = 0;
+  blockCount = 0;
   sessionCookie = match[1];
   if (body.data?.auth_token || body.data?.token) {
     authToken = body.data.auth_token || body.data.token;
@@ -251,7 +275,7 @@ async function doLogin() {
   }
   if (!process.env.HEALTHRAY_DOCTOR_ID && body.data?.id) orgDoctorId = String(body.data.id);
   await kvSet(KV_SESSION, { cookie: sessionCookie, authToken, orgDoctorId, at: Date.now() });
-  await kvSet(KV_COOLDOWN, { until: 0, failCount: 0, reason: "" });
+  await kvSet(KV_COOLDOWN, { until: 0, failCount: 0, blockCount: 0, reason: "" });
   log("Auth", "Login successful, new session obtained");
   return sessionCookie;
 }

@@ -14,8 +14,10 @@ const LAB_TIMEOUT_MS = 20000;
 // Shared outbound limiter — smooths lab API bursts so the server IP doesn't get
 // WAF 403-blocklisted (same defence as the HealthRay client). Tunable via env.
 const labLimiter = createRateLimiter({
+  // Gentle, strictly-serial by default (no bursts). Raise via env once the egress
+  // IP is allowlisted by HealthRay (see HEALTHRAY_PROXY_URL).
   ratePerSec: Number(process.env.LAB_HEALTHRAY_MAX_RPS) || 2,
-  maxConcurrent: Number(process.env.LAB_HEALTHRAY_MAX_CONCURRENT) || 2,
+  maxConcurrent: Number(process.env.LAB_HEALTHRAY_MAX_CONCURRENT) || 1,
 });
 async function gatedFetch(url, options, timeoutMs) {
   const release = await labLimiter.acquire();

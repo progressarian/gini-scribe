@@ -59,14 +59,44 @@ export function yieldToApp(ms = 250) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Static-IP egress proxy (the permanent fix for the recurring HealthRay WAF
+// 403 IP-block): when HEALTHRAY_PROXY_URL is set, route HealthRay + Lab traffic
+// through a fixed IP that HealthRay allowlists, so rate-based bans stop. Node's
+// global fetch can't use an http(s) proxy via the `agent` option, so we switch
+// to undici's fetch + ProxyAgent dispatcher only when a proxy is configured.
+// Unset → unchanged global-fetch path. Both clients funnel through here, so
+// this one switch covers node.healthray.com AND labapi.healthray.com.
+let _proxyTransportP = null;
+function proxyTransport() {
+  const url = process.env.HEALTHRAY_PROXY_URL;
+  if (!url) return null;
+  if (!_proxyTransportP) {
+    _proxyTransportP = import("undici").then(({ fetch: uf, ProxyAgent }) => ({
+      fetch: uf,
+      dispatcher: new ProxyAgent(url),
+    }));
+  }
+  return _proxyTransportP;
+}
+
 /**
  * Wrap a fetch() call with an AbortController timeout so a slow upstream
- * can't hold a background worker indefinitely.
+ * can't hold a background worker indefinitely. Routes through the static-IP
+ * proxy when HEALTHRAY_PROXY_URL is set (see proxyTransport above).
  */
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const proxyP = proxyTransport();
+    if (proxyP) {
+      const proxy = await proxyP;
+      return await proxy.fetch(url, {
+        ...options,
+        dispatcher: proxy.dispatcher,
+        signal: controller.signal,
+      });
+    }
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timer);
