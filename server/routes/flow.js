@@ -588,7 +588,7 @@ router.post("/flow/checkin", async (req, res) => {
     }
     const dup = await client.query(
       `SELECT id, patient_name, checkin_time FROM flow_visits
-        WHERE status IN ('in_progress','waiting') AND visit_date::date = CURRENT_DATE
+        WHERE status IN ('in_progress','waiting','paused') AND visit_date::date = CURRENT_DATE
           AND (${dupOr.join(" OR ")})
         ORDER BY checkin_time DESC LIMIT 1`,
       dupParams,
@@ -945,9 +945,11 @@ router.post("/flow/visits/:id/cancel", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// Start timer — begin a parked ('waiting') visit. Starts the clock fresh from
-// now, sets the ETA, and auto-starts the first journey step (the deferred half
-// of check-in). Used when a "start later" patient's visit actually begins.
+// Start / Resume timer — for a parked ('waiting') visit: start the clock fresh
+// from now, set the ETA, and auto-start the first journey step (the deferred
+// half of check-in). For a paused visit: RESUME — shift the clock, ETA, and the
+// active step's started_at forward by the paused duration so elapsed continues
+// seamlessly from where it froze.
 // ─────────────────────────────────────────────────────────────────────────
 router.post("/flow/visits/:id/start-timer", async (req, res) => {
   const client = await pool.connect();
@@ -960,7 +962,7 @@ router.post("/flow/visits/:id/start-timer", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Visit not found" });
     }
-    if (v.status !== "waiting") {
+    if (v.status !== "waiting" && v.status !== "paused") {
       await client.query("ROLLBACK");
       return res.status(409).json({
         error:
@@ -970,6 +972,30 @@ router.post("/flow/visits/:id/start-timer", async (req, res) => {
       });
     }
 
+    // ── Resume a paused visit ── shift every live timestamp forward by the
+    // time spent paused, so elapsed picks up exactly where it left off.
+    if (v.status === "paused") {
+      await client.query(
+        `UPDATE flow_visit_steps
+           SET started_at = started_at + (NOW() - $2::timestamptz)
+         WHERE visit_id=$1 AND status='in_progress' AND started_at IS NOT NULL`,
+        [visitId, v.paused_at],
+      );
+      await client.query(
+        `UPDATE flow_visits
+           SET status='in_progress',
+               timer_started_at = timer_started_at + (NOW() - $2::timestamptz),
+               estimated_completion = estimated_completion + (NOW() - $2::timestamptz),
+               paused_at = NULL, updated_at = NOW()
+         WHERE id=$1`,
+        [visitId, v.paused_at],
+      );
+      await logEvent(client, visitId, "timer_resumed", null, {}, ACTOR(req));
+      await client.query("COMMIT");
+      return res.json({ status: "in_progress" });
+    }
+
+    // ── Fresh start of a parked (waiting) visit ──
     // Clock starts now; ETA = now + the planned journey length.
     await client.query(
       `UPDATE flow_visits
@@ -1015,9 +1041,11 @@ router.post("/flow/visits/:id/start-timer", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// Stop timer — reset a running visit back to 'waiting' at 0 (clock cleared,
-// steps re-parked as pending). Only valid before the journey has progressed:
-// once any step is completed, use Cancel instead.
+// Stop timer — conditional:
+//   • Journey not begun (no step started/completed) → reset to 'waiting' at 0
+//     (clock cleared, steps re-parked as pending).
+//   • Journey begun (a step is in_progress or completed) → PAUSE: freeze the
+//     clock at now (preserving elapsed) so reception can ▶ Resume later.
 // ─────────────────────────────────────────────────────────────────────────
 router.post("/flow/visits/:id/stop-timer", async (req, res) => {
   const client = await pool.connect();
@@ -1034,20 +1062,29 @@ router.post("/flow/visits/:id/stop-timer", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(409).json({ error: "Timer is not running for this visit" });
     }
-    const doneCount = (
+
+    // Has the journey actually begun? Any step started (in_progress) or completed.
+    const progressed =
+      (
+        await client.query(
+          `SELECT COUNT(*)::int AS n FROM flow_visit_steps
+            WHERE visit_id=$1 AND status IN ('in_progress','completed')`,
+          [visitId],
+        )
+      ).rows[0].n > 0;
+
+    if (progressed) {
+      // Pause: freeze the clock; leave steps/ETA intact so Resume continues.
       await client.query(
-        "SELECT COUNT(*)::int AS n FROM flow_visit_steps WHERE visit_id=$1 AND status='completed'",
+        "UPDATE flow_visits SET status='paused', paused_at=NOW(), updated_at=NOW() WHERE id=$1",
         [visitId],
-      )
-    ).rows[0].n;
-    if (doneCount > 0) {
-      await client.query("ROLLBACK");
-      return res.status(409).json({
-        error: "This visit has already progressed — cancel it instead of stopping the timer.",
-      });
+      );
+      await logEvent(client, visitId, "timer_paused", null, {}, ACTOR(req));
+      await client.query("COMMIT");
+      return res.json({ status: "paused" });
     }
 
-    // Park it again: clock cleared, ETA cleared, every step back to pending.
+    // Not begun yet: park it again — clock cleared, ETA cleared, steps pending.
     await client.query(
       `UPDATE flow_visits
          SET status='waiting', timer_started_at=NULL, estimated_completion=NULL,
@@ -1430,8 +1467,10 @@ router.get("/flow/visits", async (req, res) => {
     const now = Date.now();
     for (const v of visits) {
       v.steps = stepMap.get(v.id) || [];
+      // Paused visits freeze at paused_at so step timers stop growing too.
+      const vnow = v.status === "paused" && v.paused_at ? new Date(v.paused_at).getTime() : now;
       v._timing = classifyVisit(v, now);
-      v.bottleneck = bottleneckFor(v.steps, now);
+      v.bottleneck = bottleneckFor(v.steps, vnow);
       v.stage = deriveStage(v, v.steps);
     }
     visits.sort(compareVisitsForDashboard);
@@ -1451,8 +1490,9 @@ router.get("/flow/visits/:id", async (req, res) => {
       ])
     ).rows;
     const now = Date.now();
+    const vnow = v.status === "paused" && v.paused_at ? new Date(v.paused_at).getTime() : now;
     v._timing = classifyVisit(v, now);
-    v.bottleneck = bottleneckFor(v.steps, now);
+    v.bottleneck = bottleneckFor(v.steps, vnow);
     v.stage = deriveStage(v, v.steps);
     res.json(v);
   } catch (e) {
@@ -1492,8 +1532,9 @@ router.get("/flow/active-visit", async (req, res) => {
       ])
     ).rows;
     const now = Date.now();
+    const vnow = v.status === "paused" && v.paused_at ? new Date(v.paused_at).getTime() : now;
     v._timing = classifyVisit(v, now);
-    v.bottleneck = bottleneckFor(v.steps, now);
+    v.bottleneck = bottleneckFor(v.steps, vnow);
     v.stage = deriveStage(v, v.steps);
     res.json(v);
   } catch (e) {

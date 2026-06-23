@@ -34,7 +34,12 @@ export function classifyVisit(visit, now = Date.now()) {
   // The clock starts when the timer is started (▶ Start), falling back to
   // checkin_time for legacy rows created before timer_started_at existed.
   const checkin = ms(visit.timer_started_at) || ms(visit.checkin_time);
-  const end = visit.actual_completion ? ms(visit.actual_completion) : now;
+  // While paused, freeze the clock at paused_at so elapsed stops growing.
+  const end = visit.actual_completion
+    ? ms(visit.actual_completion)
+    : visit.status === "paused" && visit.paused_at
+      ? ms(visit.paused_at)
+      : now;
   const elapsed = checkin ? minsBetween(checkin, end) : 0;
   const remaining = max - elapsed;
   const pct = max > 0 ? Math.round((elapsed / max) * 100) : 0;
@@ -44,6 +49,8 @@ export function classifyVisit(visit, now = Date.now()) {
     urgency = elapsed <= max ? "done_ok" : "done_over";
   } else if (visit.status === "cancelled") {
     urgency = "cancelled";
+  } else if (visit.status === "paused") {
+    urgency = "paused";
   } else if (elapsed >= max) {
     urgency = "breach";
   } else if (pct >= VISIT_ATRISK_PCT) {
@@ -72,6 +79,7 @@ const URGENCY_RANK = {
   breach: 0,
   atrisk: 1,
   ok: 2,
+  paused: 4,
   waiting: 4,
   done_ok: 8,
   done_over: 8,

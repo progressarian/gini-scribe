@@ -185,15 +185,25 @@ export default function FlowCheckinPage() {
   const handleStartTimer = async (v) => {
     try {
       await startTimer.mutateAsync(v.id);
-      toast(`Timer started for ${v.patient_name}`, "success");
+      toast(
+        v.status === "paused"
+          ? `Resumed timer for ${v.patient_name}`
+          : `Timer started for ${v.patient_name}`,
+        "success",
+      );
     } catch (e) {
       toast(e.message, "error");
     }
   };
   const handleStopTimer = async (v) => {
     try {
-      await stopTimer.mutateAsync(v.id);
-      toast(`Timer stopped — ${v.patient_name} back to waiting`, "success");
+      const res = await stopTimer.mutateAsync(v.id);
+      toast(
+        res?.status === "paused"
+          ? `Paused ${v.patient_name} — elapsed kept; press ▶ Resume to continue`
+          : `Timer stopped — ${v.patient_name} back to waiting`,
+        "success",
+      );
     } catch (e) {
       toast(e.message, "error");
     }
@@ -1430,6 +1440,10 @@ export default function FlowCheckinPage() {
                         <span className="flow-badge fb-amb" title="Timer not started yet">
                           ⏸ Waiting
                         </span>
+                      ) : v.status === "paused" ? (
+                        <span className="flow-badge fb-amb" title="Timer paused — elapsed frozen">
+                          ⏸ Paused
+                        </span>
                       ) : (
                         <span
                           className={`flow-badge ${v.status === "completed" ? "fb-grn" : v.status === "cancelled" ? "fb-ink" : v._timing?.urgency === "breach" ? "fb-red" : v._timing?.urgency === "atrisk" ? "fb-amb" : "fb-blu"}`}
@@ -1445,7 +1459,7 @@ export default function FlowCheckinPage() {
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        {v.status === "waiting" && (
+                        {(v.status === "waiting" || v.status === "paused") && (
                           <button
                             className="flow-btn flow-btn-primary"
                             style={{ padding: "3px 10px" }}
@@ -1454,9 +1468,13 @@ export default function FlowCheckinPage() {
                               e.stopPropagation();
                               handleStartTimer(v);
                             }}
-                            title="Start the visit timer now"
+                            title={
+                              v.status === "paused"
+                                ? "Resume the timer (continues from where it paused)"
+                                : "Start the visit timer now"
+                            }
                           >
-                            ▶ Start
+                            {v.status === "paused" ? "▶ Resume" : "▶ Start"}
                           </button>
                         )}
                         {v.status === "in_progress" && (
@@ -1468,12 +1486,14 @@ export default function FlowCheckinPage() {
                               e.stopPropagation();
                               handleStopTimer(v);
                             }}
-                            title="Stop the timer and put the patient back to waiting (resets to 0)"
+                            title="Stop the timer — pauses if the journey has begun, else resets to waiting"
                           >
                             ⏸ Stop
                           </button>
                         )}
-                        {(v.status === "in_progress" || v.status === "waiting") && (
+                        {(v.status === "in_progress" ||
+                          v.status === "waiting" ||
+                          v.status === "paused") && (
                           <button
                             className="flow-btn flow-btn-ghost"
                             style={{

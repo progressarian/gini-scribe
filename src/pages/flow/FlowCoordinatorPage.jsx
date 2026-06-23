@@ -32,8 +32,9 @@ const initials = (name) =>
     .join("")
     .toUpperCase();
 
-// One journey step → coloured pill.
-function StepPills({ steps }) {
+// One journey step → coloured pill. `now` is frozen (= paused_at) for paused
+// visits so the in-progress step's overage stops growing while paused.
+function StepPills({ steps, now = Date.now() }) {
   return (
     <div className="j-steps">
       {steps
@@ -46,7 +47,7 @@ function StepPills({ steps }) {
             label = `${shorten(s.step_name)} ✓`;
           } else if (s.status === "in_progress") {
             const over = s.started_at
-              ? Math.round((Date.now() - new Date(s.started_at).getTime()) / 60000) -
+              ? Math.round((now - new Date(s.started_at).getTime()) / 60000) -
                 s.planned_duration_min
               : 0;
             cls = over > 5 ? "j-over" : "j-now";
@@ -104,7 +105,12 @@ export default function FlowCoordinatorPage() {
     e.stopPropagation();
     try {
       await startTimer.mutateAsync(v.id);
-      toast(`Timer started for ${v.patient_name}`, "success");
+      toast(
+        v.status === "paused"
+          ? `Resumed timer for ${v.patient_name}`
+          : `Timer started for ${v.patient_name}`,
+        "success",
+      );
     } catch (err) {
       toast(err.message, "error");
     }
@@ -112,8 +118,13 @@ export default function FlowCoordinatorPage() {
   const handleStopTimer = async (e, v) => {
     e.stopPropagation();
     try {
-      await stopTimer.mutateAsync(v.id);
-      toast(`Timer stopped — ${v.patient_name} back to waiting`, "success");
+      const res = await stopTimer.mutateAsync(v.id);
+      toast(
+        res?.status === "paused"
+          ? `Paused ${v.patient_name} — elapsed kept; press ▶ Resume to continue`
+          : `Timer stopped — ${v.patient_name} back to waiting`,
+        "success",
+      );
     } catch (err) {
       toast(err.message, "error");
     }
@@ -320,6 +331,9 @@ export default function FlowCoordinatorPage() {
         ) : (
           filtered.map((v) => {
             const t = v._timing || {};
+            // Paused visits freeze their step pills at paused_at.
+            const rowNow =
+              v.status === "paused" && v.paused_at ? new Date(v.paused_at).getTime() : undefined;
             const cls =
               v.status === "completed"
                 ? "done"
@@ -351,7 +365,7 @@ export default function FlowCoordinatorPage() {
                       {v.patient_age_sex || ""} · {v.visit_type_id} · {v.patient_id} · In{" "}
                       {fmtTime(v.checkin_time)}
                     </div>
-                    <StepPills steps={v.steps || []} />
+                    <StepPills steps={v.steps || []} now={rowNow} />
                   </div>
                 </div>
                 <div className="cp-center">
@@ -399,6 +413,14 @@ export default function FlowCoordinatorPage() {
                     >
                       ⏸ Waiting
                     </span>
+                  ) : v.status === "paused" ? (
+                    <span
+                      className="flow-badge fb-amb"
+                      style={{ marginTop: 3 }}
+                      title="Timer paused — elapsed frozen"
+                    >
+                      ⏸ Paused
+                    </span>
                   ) : (
                     <span
                       className={`flow-badge ${cls === "breach" ? "fb-red" : cls === "atrisk" ? "fb-amb" : v.status === "completed" ? "fb-grn" : "fb-blu"}`}
@@ -415,15 +437,19 @@ export default function FlowCoordinatorPage() {
                       {t.urgency === "breach" ? " ⚠" : t.urgency === "atrisk" ? " ⏱" : ""}
                     </span>
                   )}
-                  {v.status === "waiting" && (
+                  {(v.status === "waiting" || v.status === "paused") && (
                     <button
                       className="flow-btn flow-btn-primary"
                       style={{ marginTop: 6, padding: "3px 10px" }}
                       disabled={startTimer.isPending}
                       onClick={(e) => handleStartTimer(e, v)}
-                      title="Start the visit timer now"
+                      title={
+                        v.status === "paused"
+                          ? "Resume the timer (continues from where it paused)"
+                          : "Start the visit timer now"
+                      }
                     >
-                      ▶ Start
+                      {v.status === "paused" ? "▶ Resume" : "▶ Start"}
                     </button>
                   )}
                   {v.status === "in_progress" && (
@@ -432,12 +458,14 @@ export default function FlowCoordinatorPage() {
                       style={{ marginTop: 6, padding: "3px 8px" }}
                       disabled={stopTimer.isPending}
                       onClick={(e) => handleStopTimer(e, v)}
-                      title="Stop the timer and put the patient back to waiting (resets to 0)"
+                      title="Stop the timer — pauses if the journey has begun, else resets to waiting"
                     >
                       ⏸ Stop
                     </button>
                   )}
-                  {(v.status === "in_progress" || v.status === "waiting") && (
+                  {(v.status === "in_progress" ||
+                    v.status === "waiting" ||
+                    v.status === "paused") && (
                     <button
                       className="flow-btn flow-btn-ghost"
                       style={{
