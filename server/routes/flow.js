@@ -35,6 +35,33 @@ async function logEvent(client, visitId, type, stepOrder, details, by) {
   );
 }
 
+// Collapse the day's rows to one visit per patient. A patient can end up with
+// several flow_visits rows in a day (re-check-in after completion, a manual
+// check-in plus an appointment-linked row, etc.) and the raw table has no
+// per-patient/day uniqueness — so counting rows over-reports "Completed".
+// Keep the most-complete row, tie-broken by the latest check-in. Patients are
+// keyed by patient_db_id when present, else by patient_id (file number).
+const VISIT_STATUS_RANK = { completed: 3, in_progress: 2, waiting: 1, paused: 1, cancelled: 0 };
+function dedupeVisitsByPatient(visits) {
+  const best = new Map();
+  for (const v of visits) {
+    const key = v.patient_db_id != null ? `db:${v.patient_db_id}` : `file:${v.patient_id}`;
+    const cur = best.get(key);
+    if (!cur) {
+      best.set(key, v);
+      continue;
+    }
+    const rv = VISIT_STATUS_RANK[v.status] ?? 0;
+    const rc = VISIT_STATUS_RANK[cur.status] ?? 0;
+    const better =
+      rv !== rc
+        ? rv > rc
+        : new Date(v.checkin_time).getTime() > new Date(cur.checkin_time).getTime();
+    if (better) best.set(key, v);
+  }
+  return [...best.values()];
+}
+
 // Mirror flow progress onto the linked OPD appointment's status so the existing
 // OPD/GHM pages reflect it (checkedin → in_visit → completed). FORWARD-ONLY and
 // never clobbers a cancelled/no_show/seen appointment. Best-effort: runs OUTSIDE
@@ -571,9 +598,12 @@ router.post("/flow/checkin", async (req, res) => {
     if (!vt.rows.length) return res.status(400).json({ error: "Unknown visit_type_id" });
     const maxTime = vt.rows[0].max_time_min;
 
-    // Guard against duplicate check-ins: if this patient already has an active
-    // (in_progress) flow visit today — by file number, patient record, or the
-    // same appointment — block it and point back to the existing visit.
+    // Guard against duplicate check-ins: if this patient already has a visit
+    // today — active OR already completed — by file number, patient record, or
+    // the same appointment, block it and point back to the existing visit.
+    // 'completed' is included so a re-check-in of a patient already seen today
+    // can't spawn a second row that inflates the "Completed" count. Only a
+    // deliberately 'cancelled' visit leaves the patient free to check in afresh.
     const dupOr = [];
     const dupParams = [];
     dupParams.push(patient_id);
@@ -587,8 +617,8 @@ router.post("/flow/checkin", async (req, res) => {
       dupOr.push(`appointment_id = $${dupParams.length}`);
     }
     const dup = await client.query(
-      `SELECT id, patient_name, checkin_time FROM flow_visits
-        WHERE status IN ('in_progress','waiting','paused') AND visit_date::date = CURRENT_DATE
+      `SELECT id, patient_name, checkin_time, status FROM flow_visits
+        WHERE status IN ('in_progress','waiting','paused','completed') AND visit_date::date = CURRENT_DATE
           AND (${dupOr.join(" OR ")})
         ORDER BY checkin_time DESC LIMIT 1`,
       dupParams,
@@ -600,8 +630,9 @@ router.post("/flow/checkin", async (req, res) => {
         minute: "2-digit",
         timeZone: "Asia/Kolkata",
       });
+      const verb = d.status === "completed" ? "was already seen" : "is already checked in";
       return res.status(409).json({
-        error: `${d.patient_name} is already checked in today (at ${at}). Open the existing visit instead of adding a duplicate.`,
+        error: `${d.patient_name} ${verb} today (at ${at}). Open the existing visit instead of adding a duplicate.`,
         code: "DUPLICATE_CHECKIN",
         visit_id: d.id,
       });
@@ -772,6 +803,28 @@ router.post("/flow/checkin", async (req, res) => {
     });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
+    // A concurrent check-in that lost the race against the one-per-patient/day
+    // unique index (idx_flow_visits_one_per_patient_day) surfaces as 23505.
+    // Treat it as a duplicate — point back to the surviving row — not a 500.
+    if (e.code === "23505") {
+      const { patient_id: pid, patient_db_id: pdb = null, patient_name: pname } = req.body || {};
+      const survivor = (
+        await pool
+          .query(
+            `SELECT id FROM flow_visits
+              WHERE status <> 'cancelled' AND visit_date::date = CURRENT_DATE
+                AND ((${pdb ? "patient_db_id = $2 OR " : ""}patient_id = $1))
+              ORDER BY checkin_time DESC LIMIT 1`,
+            pdb ? [pid, pdb] : [pid],
+          )
+          .catch(() => ({ rows: [] }))
+      ).rows[0];
+      return res.status(409).json({
+        error: `${pname} already has a visit today. Open the existing visit instead of adding a duplicate.`,
+        code: "DUPLICATE_CHECKIN",
+        visit_id: survivor?.id,
+      });
+    }
     handleError(res, e, "Flow check-in");
   } finally {
     client.release();
@@ -1473,8 +1526,11 @@ router.get("/flow/visits", async (req, res) => {
       v.bottleneck = bottleneckFor(v.steps, vnow);
       v.stage = deriveStage(v, v.steps);
     }
-    visits.sort(compareVisitsForDashboard);
-    res.json(visits);
+    // One row per patient (see dedupeVisitsByPatient) so the board's counts,
+    // occupancy, and doctor-load reflect distinct patients, not duplicate rows.
+    const deduped = dedupeVisitsByPatient(visits);
+    deduped.sort(compareVisitsForDashboard);
+    res.json(deduped);
   } catch (e) {
     handleError(res, e, "Flow visits");
   }
@@ -1619,6 +1675,9 @@ router.get("/flow/patient-billing", async (req, res) => {
 // existing flow visit if one is already linked. Doctor prefilled from the appt.
 router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
   const client = await pool.connect();
+  // Hoisted so the 23505 handler in catch can identify the patient.
+  let patientDbId = null;
+  let fileNo = null;
   try {
     const apptId = req.params.appointmentId;
     const appt = (await client.query("SELECT * FROM appointments WHERE id=$1", [apptId])).rows[0];
@@ -1653,10 +1712,37 @@ router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
     const total = tpl.reduce((a, s) => a + Number(s.dur), 0);
 
     // Resolve patient db id + file_no.
-    const patientDbId = appt.patient_id || null;
-    const fileNo = appt.file_no || (patientDbId ? `P_${patientDbId}` : "UNKNOWN");
+    patientDbId = appt.patient_id || null;
+    fileNo = appt.file_no || (patientDbId ? `P_${patientDbId}` : "UNKNOWN");
     const sdId = appt.doctor_id || null;
     const sdName = appt.doctor_name || null;
+
+    // Idempotent per patient too, not just per appointment: the same person may
+    // already have a manual check-in row today under a different (or no)
+    // appointment_id. Reuse it — and back-link this appointment — instead of
+    // inserting a second row that would double-count the patient.
+    const byPatient = (
+      await client.query(
+        `SELECT id, visit_token, appointment_id FROM flow_visits
+          WHERE status <> 'cancelled' AND visit_date::date = CURRENT_DATE
+            AND (($1::int IS NOT NULL AND patient_db_id = $1) OR patient_id = $2)
+          ORDER BY checkin_time DESC LIMIT 1`,
+        [patientDbId, fileNo],
+      )
+    ).rows[0];
+    if (byPatient) {
+      if (!byPatient.appointment_id) {
+        await client.query("UPDATE flow_visits SET appointment_id=$2 WHERE id=$1", [
+          byPatient.id,
+          apptId,
+        ]);
+      }
+      return res.json({
+        visit_id: byPatient.id,
+        visit_token: byPatient.visit_token,
+        existed: true,
+      });
+    }
 
     await client.query("BEGIN");
     let token = genVisitToken();
@@ -1740,6 +1826,28 @@ router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
     res.status(201).json({ visit_id: visit.id, visit_token: token });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
+    // Lost the race against the one-per-patient/day unique index — the patient
+    // already has a row today. Return it as existed:true instead of a 500.
+    if (e.code === "23505") {
+      const survivor = (
+        await pool
+          .query(
+            `SELECT id, visit_token FROM flow_visits
+              WHERE status <> 'cancelled' AND visit_date::date = CURRENT_DATE
+                AND ((${patientDbId ? "patient_db_id = $2 OR " : ""}patient_id = $1))
+              ORDER BY checkin_time DESC LIMIT 1`,
+            patientDbId ? [fileNo, patientDbId] : [fileNo],
+          )
+          .catch(() => ({ rows: [] }))
+      ).rows[0];
+      if (survivor) {
+        return res.json({
+          visit_id: survivor.id,
+          visit_token: survivor.visit_token,
+          existed: true,
+        });
+      }
+    }
     handleError(res, e, "Flow from appointment");
   } finally {
     client.release();
