@@ -258,6 +258,19 @@ function hasAnyTier1Biomarker(appt) {
   );
 }
 
+// Lab-only offline registrations come through HealthRay booked under the
+// "Dr. Hospital Admin" provider. They are not real doctor consultations and
+// should never appear on the triage board. Matched by doctor_name only, so a
+// patient's real-doctor appointment on the same day is unaffected.
+const LAB_ONLY_DOCTOR = "Dr. Hospital Admin";
+const isLabOnly = (a) => (a.doctor_name || "") === LAB_ONLY_DOCTOR;
+
+// A report was uploaded (manually, or a document exists for the patient).
+// Shared by the "Uploaded" funnel pill and its click-to-filter so the count
+// and the filtered card set always agree.
+const isUploadedReport = (a) =>
+  (Number(a.uploaded_labs) || 0) > 0 || (Number(a.patient_report_count) || 0) > 0;
+
 // 5-bucket triage classifier.
 //   no_reports     → triageTier flagged noReports
 //   worse_out      → currently off-target on a Tier-1 marker
@@ -407,7 +420,6 @@ function derivePipeline(appts) {
     const pending = Number(a.pending_labs) || 0;
     const partial = Number(a.partial_labs) || 0;
     const recent = Number(a.recent_labs) || 0;
-    const uploaded = Number(a.uploaded_labs) || 0;
     // Lab received: only counts a report that landed in our system **between
     // the previous visit and today's visit** — the freshness flag is computed
     // upstream in `enriched`. This keeps the pill aligned with the freshness
@@ -415,7 +427,7 @@ function derivePipeline(appts) {
     if (a.__freshReport) buckets.labReceived.push(a);
     // Lab processing: orders pending / partial AND no results received yet.
     if (recent === 0 && (pending > 0 || partial > 0)) buckets.labProcessing.push(a);
-    if (uploaded > 0 || (a.patient_report_count || 0) > 0) buckets.uploaded.push(a);
+    if (isUploadedReport(a)) buckets.uploaded.push(a);
     if (hasAnyTier1Biomarker(a)) buckets.dataComplete.push(a);
     if (a.category) buckets.categorised.push(a);
     if (a.doctor_name) buckets.assigned.push(a);
@@ -427,21 +439,29 @@ function derivePipeline(appts) {
 }
 
 // ── Pipeline pill ──
-function PipelinePill({ label, sub, count, tone }) {
+// When `onClick` is provided the pill becomes a toggle filter; `active` shows
+// it as engaged (tinted background + coloured border + ✓ label).
+function PipelinePill({ label, sub, count, tone, onClick, active }) {
   const fg =
     tone === "ok" ? MG : tone === "warn" ? AM : tone === "crit" ? RE : tone === "lv" ? LV : INK3;
+  const clickable = typeof onClick === "function";
   return (
     <div
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      title={clickable ? (active ? "Show all patients" : `Filter to ${label.toLowerCase()}`) : undefined}
       style={{
         flex: 1,
         minWidth: 110,
         padding: "8px 10px",
         textAlign: "center",
-        background: WH,
-        border: `1.5px solid ${BD}`,
+        background: active ? `${fg}14` : WH,
+        border: `1.5px solid ${active ? fg : BD}`,
         borderRadius: 9,
         fontFamily: FB,
         position: "relative",
+        cursor: clickable ? "pointer" : "default",
+        transition: "all .15s",
       }}
     >
       <div style={{ fontFamily: FM, fontSize: 20, fontWeight: 500, color: fg, lineHeight: 1 }}>
@@ -453,10 +473,11 @@ function PipelinePill({ label, sub, count, tone }) {
           fontWeight: 700,
           textTransform: "uppercase",
           letterSpacing: ".07em",
-          color: INK3,
+          color: active ? fg : INK3,
           marginTop: 4,
         }}
       >
+        {active ? "✓ " : ""}
         {label}
       </div>
       {sub && <div style={{ fontSize: 9, color: INK4, marginTop: 1, lineHeight: 1.3 }}>{sub}</div>}
@@ -1936,6 +1957,7 @@ export default function TriageViewV3({
   const isMobile = useIsMobile();
   const [view, setView] = useState("category"); // "category" | "assign"
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | bucket id
+  const [uploadedOnly, setUploadedOnly] = useState(false); // pill toggle: show only uploaded-report patients
   const [doctorFilter, setDoctorFilter] = useState(() => new Set()); // Set of selected names
   const [doctorMenuOpen, setDoctorMenuOpen] = useState(false);
   const doctorMenuRef = useRef(null);
@@ -1973,7 +1995,7 @@ export default function TriageViewV3({
     // For first-visit patients (no last_visit_date) we accept any upload dated
     // on or before today as fresh.
     const visitMs = date ? new Date(date).getTime() : Date.now();
-    return appointments.map((a) => {
+    return appointments.filter((a) => !isLabOnly(a)).map((a) => {
       const conditionBucket = triageTierV3(a);
       const uploadedAt = a.uploaded_labs_date ? new Date(a.uploaded_labs_date).getTime() : null;
       const lastVisitAt = a.last_visit_date ? new Date(a.last_visit_date).getTime() : null;
@@ -2023,6 +2045,7 @@ export default function TriageViewV3({
   const visible = useMemo(() => {
     let arr = enriched;
     if (categoryFilter !== "all") arr = arr.filter((a) => a.__bucket === categoryFilter);
+    if (uploadedOnly) arr = arr.filter((a) => isUploadedReport(a));
     if (doctorFilter.size > 0) arr = arr.filter((a) => doctorFilter.has(a.doctor_name || ""));
     const q = searchQ.trim().toLowerCase();
     if (q) {
@@ -2035,7 +2058,7 @@ export default function TriageViewV3({
       );
     }
     return arr;
-  }, [enriched, categoryFilter, doctorFilter, searchQ]);
+  }, [enriched, categoryFilter, uploadedOnly, doctorFilter, searchQ]);
 
   const buckets = useMemo(() => {
     const out = {
@@ -2117,7 +2140,7 @@ export default function TriageViewV3({
   const docChoices = useMemo(() => {
     const counts = new Map();
     for (const a of appointments) {
-      if (!a.doctor_name) continue;
+      if (!a.doctor_name || isLabOnly(a)) continue;
       counts.set(a.doctor_name, (counts.get(a.doctor_name) || 0) + 1);
     }
     return Array.from(counts.entries())
@@ -2186,7 +2209,7 @@ export default function TriageViewV3({
               <span style={{ fontSize: 11, color: INK4 }}>· v3</span>
             </div>
             <div style={{ fontSize: 11, color: INK3, marginTop: 1 }}>
-              {niceDate} · {appointments.length} patient{appointments.length === 1 ? "" : "s"}
+              {niceDate} · {enriched.length} patient{enriched.length === 1 ? "" : "s"}
             </div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -2589,9 +2612,11 @@ export default function TriageViewV3({
               />
               <PipelinePill
                 label="Uploaded"
-                sub="Reports uploaded"
+                sub={uploadedOnly ? "Filtering board ✓" : "Reports uploaded · click to view"}
                 count={pipeline.uploaded.length}
-                tone="dim"
+                tone="lv"
+                active={uploadedOnly}
+                onClick={() => setUploadedOnly((v) => !v)}
               />
               <PipelinePill
                 label="Data complete"
