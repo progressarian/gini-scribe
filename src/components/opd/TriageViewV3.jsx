@@ -1959,7 +1959,7 @@ export default function TriageViewV3({
   const isMobile = useIsMobile();
   const [view, setView] = useState("category"); // "category" | "assign"
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | bucket id
-  const [uploadedOnly, setUploadedOnly] = useState(false); // pill toggle: show only uploaded-report patients
+  const [pillFilter, setPillFilter] = useState(null); // funnel-pill filter: null | "uploaded" | "labReceived"
   const [doctorFilter, setDoctorFilter] = useState(() => new Set()); // Set of selected names
   const [doctorMenuOpen, setDoctorMenuOpen] = useState(false);
   const doctorMenuRef = useRef(null);
@@ -2049,7 +2049,8 @@ export default function TriageViewV3({
   const visible = useMemo(() => {
     let arr = enriched;
     if (categoryFilter !== "all") arr = arr.filter((a) => a.__bucket === categoryFilter);
-    if (uploadedOnly) arr = arr.filter((a) => isUploadedReport(a));
+    if (pillFilter === "uploaded") arr = arr.filter((a) => isUploadedReport(a));
+    else if (pillFilter === "labReceived") arr = arr.filter((a) => a.__freshReport);
     if (doctorFilter.size > 0) arr = arr.filter((a) => doctorFilter.has(a.doctor_name || ""));
     const q = searchQ.trim().toLowerCase();
     if (q) {
@@ -2062,7 +2063,7 @@ export default function TriageViewV3({
       );
     }
     return arr;
-  }, [enriched, categoryFilter, uploadedOnly, doctorFilter, searchQ]);
+  }, [enriched, categoryFilter, pillFilter, doctorFilter, searchQ]);
 
   const buckets = useMemo(() => {
     const out = {
@@ -2604,9 +2605,17 @@ export default function TriageViewV3({
               />
               <PipelinePill
                 label="Lab received"
-                sub="From Gini Lab or uploaded"
+                sub={
+                  pillFilter === "labReceived"
+                    ? "Filtering board ✓"
+                    : "From Gini Lab or uploaded · click to view"
+                }
                 count={pipeline.labReceived.length}
                 tone="warn"
+                active={pillFilter === "labReceived"}
+                onClick={() =>
+                  setPillFilter((v) => (v === "labReceived" ? null : "labReceived"))
+                }
               />
               <PipelinePill
                 label="Lab processing"
@@ -2616,11 +2625,13 @@ export default function TriageViewV3({
               />
               <PipelinePill
                 label="Uploaded"
-                sub={uploadedOnly ? "Filtering board ✓" : "Reports uploaded · click to view"}
+                sub={
+                  pillFilter === "uploaded" ? "Filtering board ✓" : "Reports uploaded · click to view"
+                }
                 count={pipeline.uploaded.length}
                 tone="lv"
-                active={uploadedOnly}
-                onClick={() => setUploadedOnly((v) => !v)}
+                active={pillFilter === "uploaded"}
+                onClick={() => setPillFilter((v) => (v === "uploaded" ? null : "uploaded"))}
               />
               <PipelinePill
                 label="Data complete"
