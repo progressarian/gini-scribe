@@ -449,7 +449,9 @@ function PipelinePill({ label, sub, count, tone, onClick, active }) {
     <div
       onClick={onClick}
       role={clickable ? "button" : undefined}
-      title={clickable ? (active ? "Show all patients" : `Filter to ${label.toLowerCase()}`) : undefined}
+      title={
+        clickable ? (active ? "Show all patients" : `Filter to ${label.toLowerCase()}`) : undefined
+      }
       style={{
         flex: 1,
         minWidth: 110,
@@ -1995,48 +1997,50 @@ export default function TriageViewV3({
     // For first-visit patients (no last_visit_date) we accept any upload dated
     // on or before today as fresh.
     const visitMs = date ? new Date(date).getTime() : Date.now();
-    return appointments.filter((a) => !isLabOnly(a)).map((a) => {
-      const conditionBucket = triageTierV3(a);
-      const uploadedAt = a.uploaded_labs_date ? new Date(a.uploaded_labs_date).getTime() : null;
-      const lastVisitAt = a.last_visit_date ? new Date(a.last_visit_date).getTime() : null;
-      const pending = Number(a.pending_labs) || 0;
-      const partial = Number(a.partial_labs) || 0;
-      const recent = Number(a.recent_labs) || 0;
-      // Gini-Lab "received" — results synced AND at least one canonical
-      // biomarker value made it through extraction. A sync without any values
-      // is no better than no report at all (clinician has nothing to read).
-      const hasValues = hasAnyTier1Biomarker(a);
-      const giniReceived = recent > 0 && hasValues;
-      // Report present in the system (Gini-Lab synced OR a document was
-      // uploaded) but the canonical-tag biomarkers triageTier classifies on
-      // (hba1c/sbp/fg/ldl/tg/uacr/egfr…) are absent. Either no canonical
-      // value was extracted, or the values that came through don't map to
-      // the triage keys. Either way, a human needs to review the document.
-      const reportPresent = recent > 0 || (Number(a.uploaded_labs) || 0) > 0;
-      const needsReview = reportPresent && (!hasValues || conditionBucket === "no_reports");
-      let fresh = false;
-      if (uploadedAt != null) {
-        const afterLastVisit = lastVisitAt == null || uploadedAt > lastVisitAt;
-        const beforeOrOnVisit = uploadedAt <= visitMs;
-        fresh = afterLastVisit && beforeOrOnVisit;
-      }
-      // If Gini-Lab has reported results, count this patient as having a
-      // fresh report for today's visit even if there's no uploaded-labs date.
-      if (giniReceived) fresh = true;
-      // Lab Processing: pending or partial orders AND no results yet received.
-      const labInProgress = !giniReceived && !needsReview && (pending > 0 || partial > 0);
-      let bucket;
-      if (needsReview) bucket = "review";
-      else if (labInProgress) bucket = "lab_processing";
-      else if (!fresh) bucket = "no_reports";
-      else bucket = conditionBucket;
-      return {
-        ...a,
-        __bucket: bucket,
-        __conditionBucket: conditionBucket,
-        __freshReport: fresh,
-      };
-    });
+    return appointments
+      .filter((a) => !isLabOnly(a))
+      .map((a) => {
+        const conditionBucket = triageTierV3(a);
+        const uploadedAt = a.uploaded_labs_date ? new Date(a.uploaded_labs_date).getTime() : null;
+        const lastVisitAt = a.last_visit_date ? new Date(a.last_visit_date).getTime() : null;
+        const pending = Number(a.pending_labs) || 0;
+        const partial = Number(a.partial_labs) || 0;
+        const recent = Number(a.recent_labs) || 0;
+        // Gini-Lab "received" — results synced AND at least one canonical
+        // biomarker value made it through extraction. A sync without any values
+        // is no better than no report at all (clinician has nothing to read).
+        const hasValues = hasAnyTier1Biomarker(a);
+        const giniReceived = recent > 0 && hasValues;
+        // Report present in the system (Gini-Lab synced OR a document was
+        // uploaded) but the canonical-tag biomarkers triageTier classifies on
+        // (hba1c/sbp/fg/ldl/tg/uacr/egfr…) are absent. Either no canonical
+        // value was extracted, or the values that came through don't map to
+        // the triage keys. Either way, a human needs to review the document.
+        const reportPresent = recent > 0 || (Number(a.uploaded_labs) || 0) > 0;
+        const needsReview = reportPresent && (!hasValues || conditionBucket === "no_reports");
+        let fresh = false;
+        if (uploadedAt != null) {
+          const afterLastVisit = lastVisitAt == null || uploadedAt > lastVisitAt;
+          const beforeOrOnVisit = uploadedAt <= visitMs;
+          fresh = afterLastVisit && beforeOrOnVisit;
+        }
+        // If Gini-Lab has reported results, count this patient as having a
+        // fresh report for today's visit even if there's no uploaded-labs date.
+        if (giniReceived) fresh = true;
+        // Lab Processing: pending or partial orders AND no results yet received.
+        const labInProgress = !giniReceived && !needsReview && (pending > 0 || partial > 0);
+        let bucket;
+        if (needsReview) bucket = "review";
+        else if (labInProgress) bucket = "lab_processing";
+        else if (!fresh) bucket = "no_reports";
+        else bucket = conditionBucket;
+        return {
+          ...a,
+          __bucket: bucket,
+          __conditionBucket: conditionBucket,
+          __freshReport: fresh,
+        };
+      });
   }, [appointments, date]);
 
   const pipeline = useMemo(() => derivePipeline(enriched), [enriched]);

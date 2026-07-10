@@ -8,6 +8,8 @@ import {
   useFlowVisitTypes,
   useFlowStepCatalog,
   useFlowEditVisitType,
+  useFlowCreateVisitType,
+  useFlowDeleteVisitType,
   useFlowEditCatalog,
   useFlowCreateCatalogStep,
   useFlowDeleteCatalogStep,
@@ -21,10 +23,16 @@ export default function FlowAdminPage() {
   const { data: types = [] } = useFlowVisitTypes();
   const { data: catalog = [] } = useFlowStepCatalog(true);
   const editType = useFlowEditVisitType();
+  const createType = useFlowCreateVisitType();
+  const deleteType = useFlowDeleteVisitType();
   const editStep = useFlowEditCatalog();
   const createStep = useFlowCreateCatalogStep();
   const deleteStep = useFlowDeleteCatalogStep();
 
+  // "+ Add visit type" form for the benchmarks table.
+  const [newType, setNewType] = useState({ label: "", min: "", flexible: false });
+  // Visit type pending delete-confirmation (drives its ConfirmModal).
+  const [deleteTypeTarget, setDeleteTypeTarget] = useState(null);
   // "+ Add step" form for the catalog.
   const [newStep, setNewStep] = useState({ name: "", min: "", station: "", role: "" });
   // Catalog step pending delete-confirmation (drives ConfirmModal).
@@ -66,6 +74,37 @@ export default function FlowAdminPage() {
       toast(okMsg, "success");
     } catch (e) {
       toast(e.message, "error");
+    }
+  };
+
+  const addType = async () => {
+    const label = newType.label.trim();
+    const min = parseInt(newType.min);
+    if (!label) return toast("Visit type needs a name", "error");
+    if (!(min >= 1)) return toast("Enter a max time in minutes", "error");
+    try {
+      await createType.mutateAsync({
+        label,
+        max_time_min: min,
+        is_flexible: newType.flexible,
+      });
+      setNewType({ label: "", min: "", flexible: false });
+      toast(`Added “${label}”`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const confirmDeleteType = async () => {
+    const t = deleteTypeTarget;
+    if (!t) return;
+    try {
+      await deleteType.mutateAsync(t.id);
+      toast(`Deleted “${t.label}”`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      setDeleteTypeTarget(null);
     }
   };
   const saveStep = async (id, patch, okMsg) => {
@@ -153,7 +192,7 @@ export default function FlowAdminPage() {
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start" }}
         >
-          {/* Benchmarks */}
+          {/* Benchmarks — add / edit / delete */}
           <div className="flow-card">
             <div className="flow-sec-title">Visit-time benchmarks</div>
             <table className="flow-table" style={{ border: "none" }}>
@@ -162,13 +201,22 @@ export default function FlowAdminPage() {
                   <th>Visit type</th>
                   <th style={{ width: 90 }}>Max (min)</th>
                   <th style={{ width: 70 }}>Flexible</th>
+                  <th style={{ width: 36 }} />
                 </tr>
               </thead>
               <tbody>
                 {types.map((t) => (
                   <tr key={t.id}>
                     <td>
-                      <b>{t.label}</b>
+                      <input
+                        className="jb-assign"
+                        style={{ maxWidth: "none", fontWeight: 700 }}
+                        defaultValue={t.label}
+                        onBlur={(e) => {
+                          const v = e.target.value.trim();
+                          if (v && v !== t.label) saveType(t.id, { label: v }, "Saved");
+                        }}
+                      />
                       <div className="flow-muted">{t.id}</div>
                     </td>
                     <td>
@@ -191,10 +239,63 @@ export default function FlowAdminPage() {
                         onChange={(e) => saveType(t.id, { is_flexible: e.target.checked }, "Saved")}
                       />
                     </td>
+                    <td>
+                      <button
+                        className="jb-remove"
+                        title="Delete visit type"
+                        disabled={deleteType.isPending}
+                        onClick={() => setDeleteTypeTarget(t)}
+                      >
+                        ✕
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {/* Add a new visit type */}
+            <div style={{ marginTop: 10 }}>
+              <div className="flow-sec-title" style={{ fontSize: 10 }}>
+                Add visit type
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                <input
+                  className="jb-assign"
+                  style={{ maxWidth: "none", flex: "2 1 150px" }}
+                  placeholder="Visit type name"
+                  value={newType.label}
+                  onChange={(e) => setNewType((n) => ({ ...n, label: e.target.value }))}
+                />
+                <input
+                  className="jb-dur"
+                  type="number"
+                  min="1"
+                  placeholder="max min"
+                  value={newType.min}
+                  onChange={(e) => setNewType((n) => ({ ...n, min: e.target.value }))}
+                />
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                  <input
+                    type="checkbox"
+                    checked={newType.flexible}
+                    onChange={(e) => setNewType((n) => ({ ...n, flexible: e.target.checked }))}
+                  />
+                  Flexible
+                </label>
+                <button
+                  className="flow-btn flow-btn-primary"
+                  disabled={createType.isPending}
+                  onClick={addType}
+                >
+                  + Add
+                </button>
+              </div>
+              <div className="flow-muted" style={{ marginTop: 4 }}>
+                New types get a code from the name. Build its journey in the journey builder before
+                check-ins can use it. Built-in types can’t be deleted (they’re in use).
+              </div>
+            </div>
           </div>
 
           {/* Step catalog — add / edit / delete */}
@@ -324,6 +425,19 @@ export default function FlowAdminPage() {
         confirmLabel="Delete"
         onConfirm={confirmDeleteStep}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmModal
+        open={!!deleteTypeTarget}
+        title="Delete visit type?"
+        message={
+          deleteTypeTarget
+            ? `Delete “${deleteTypeTarget.label}” benchmark? This cannot be undone. Types in use by a journey or patient visit cannot be deleted.`
+            : ""
+        }
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteType}
+        onCancel={() => setDeleteTypeTarget(null)}
       />
     </div>
   );

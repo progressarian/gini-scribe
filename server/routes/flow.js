@@ -410,6 +410,68 @@ router.patch("/flow/visit-types/:id", requireCapability(CAP.ADMIN), async (req, 
   }
 });
 
+// Create a new visit-type benchmark. The TEXT primary key (code) is derived
+// from the label (slug → UPPERCASE) unless one is supplied, with a numeric
+// suffix on collision. New types have no journey template yet — build one in
+// the journey builder before check-ins can use them. ADMIN only.
+router.post("/flow/visit-types", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    const { id: rawId, label, max_time_min, is_flexible = false, color = "sk" } = req.body || {};
+    if (!label || !label.trim()) return res.status(400).json({ error: "label is required" });
+    if (!Number.isInteger(max_time_min) || max_time_min < 1)
+      return res.status(400).json({ error: "max_time_min must be a positive integer" });
+
+    const slug = (s) =>
+      String(s)
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 40);
+    const base = slug(rawId || label) || "TYPE";
+    // Pick a free id (BASE, BASE_2, BASE_3, …).
+    let id = base;
+    for (let n = 2; ; n++) {
+      const exists = await pool.query("SELECT 1 FROM flow_visit_types WHERE id=$1", [id]);
+      if (!exists.rows.length) break;
+      id = `${base}_${n}`;
+    }
+    const r = await pool.query(
+      `INSERT INTO flow_visit_types (id, label, max_time_min, color, is_flexible)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [id, label.trim(), max_time_min, color || "sk", is_flexible === true],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    handleError(res, e, "Flow create visit type");
+  }
+});
+
+// Delete a visit-type benchmark. Blocked if it's referenced by any journey
+// template or any (live/historical) visit — those FKs are NOT NULL, so the
+// five built-in types can never be deleted; only unused custom types can.
+router.delete("/flow/visit-types/:id", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const inTemplate = await pool.query(
+      "SELECT 1 FROM flow_step_templates WHERE visit_type_id=$1 LIMIT 1",
+      [id],
+    );
+    const inVisit = await pool.query("SELECT 1 FROM flow_visits WHERE visit_type_id=$1 LIMIT 1", [
+      id,
+    ]);
+    if (inTemplate.rows.length || inVisit.rows.length)
+      return res.status(409).json({
+        error: "Visit type is in use by a journey or patient visit and cannot be deleted.",
+      });
+    const del = await pool.query("DELETE FROM flow_visit_types WHERE id=$1 RETURNING id", [id]);
+    if (!del.rows.length) return res.status(404).json({ error: "Visit type not found" });
+    res.json({ deleted: id });
+  } catch (e) {
+    handleError(res, e, "Flow delete visit type");
+  }
+});
+
 // ── Step catalog CRUD (ADMIN only) — manage the master list of journey steps ──
 // Update any field of a catalog step.
 router.patch("/flow/step-catalog/:id", requireCapability(CAP.ADMIN), async (req, res) => {

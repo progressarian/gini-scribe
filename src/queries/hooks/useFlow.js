@@ -257,6 +257,24 @@ export function useFlowEditVisitType() {
     }
   });
 }
+export function useFlowCreateVisitType() {
+  return useFlowMutation(async (body) => {
+    try {
+      return (await api.post("/api/flow/visit-types", body)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not create visit type"));
+    }
+  });
+}
+export function useFlowDeleteVisitType() {
+  return useFlowMutation(async (id) => {
+    try {
+      return (await api.delete(`/api/flow/visit-types/${id}`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not delete visit type"));
+    }
+  });
+}
 export function useFlowEditCatalog() {
   return useFlowMutation(async ({ id, ...body }) => {
     try {
