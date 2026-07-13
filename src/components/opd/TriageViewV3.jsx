@@ -438,10 +438,28 @@ function derivePipeline(appts) {
   return buckets;
 }
 
+// Funnel pills, in display order. `key` is the pipeline bucket each pill
+// filters the board to (see derivePipeline); "total" is the reset (show all).
+const PIPELINE_PILLS = [
+  { key: "total", label: "Total", sub: "Appointments today", tone: "dim" },
+  { key: "labReceived", label: "Lab received", sub: "From Gini Lab or uploaded", tone: "warn" },
+  {
+    key: "labProcessing",
+    label: "Lab processing",
+    sub: "Gini-Lab orders in progress",
+    tone: "dim",
+  },
+  { key: "uploaded", label: "Uploaded", sub: "Reports uploaded", tone: "lv" },
+  { key: "dataComplete", label: "Data complete", sub: "Can be categorised", tone: "ok" },
+  { key: "assigned", label: "Assigned", sub: "To a doctor", tone: "ok" },
+  { key: "checkedIn", label: "Checked in", sub: "In clinic", tone: "lv" },
+  { key: "noShowCancel", label: "No-show / Cancel", sub: "Did not attend", tone: "crit" },
+];
+
 // ── Pipeline pill ──
 // When `onClick` is provided the pill becomes a toggle filter; `active` shows
 // it as engaged (tinted background + coloured border + ✓ label).
-function PipelinePill({ label, sub, count, tone, onClick, active }) {
+function PipelinePill({ label, sub, count, tone, onClick, active, title }) {
   const fg =
     tone === "ok" ? MG : tone === "warn" ? AM : tone === "crit" ? RE : tone === "lv" ? LV : INK3;
   const clickable = typeof onClick === "function";
@@ -450,7 +468,9 @@ function PipelinePill({ label, sub, count, tone, onClick, active }) {
       onClick={onClick}
       role={clickable ? "button" : undefined}
       title={
-        clickable ? (active ? "Show all patients" : `Filter to ${label.toLowerCase()}`) : undefined
+        clickable
+          ? title || (active ? "Show all patients" : `Filter to ${label.toLowerCase()}`)
+          : undefined
       }
       style={{
         flex: 1,
@@ -2049,8 +2069,13 @@ export default function TriageViewV3({
   const visible = useMemo(() => {
     let arr = enriched;
     if (categoryFilter !== "all") arr = arr.filter((a) => a.__bucket === categoryFilter);
-    if (pillFilter === "uploaded") arr = arr.filter((a) => isUploadedReport(a));
-    else if (pillFilter === "labReceived") arr = arr.filter((a) => a.__freshReport);
+    // Funnel-pill filter: narrow to exactly the appts in that pipeline bucket,
+    // so the filtered board always matches the count shown on the pill. "total"
+    // is the reset (show everything), so it is never applied here.
+    if (pillFilter && pillFilter !== "total" && pipeline[pillFilter]) {
+      const ids = new Set(pipeline[pillFilter].map((a) => a.id));
+      arr = arr.filter((a) => ids.has(a.id));
+    }
     if (doctorFilter.size > 0) arr = arr.filter((a) => doctorFilter.has(a.doctor_name || ""));
     const q = searchQ.trim().toLowerCase();
     if (q) {
@@ -2063,7 +2088,7 @@ export default function TriageViewV3({
       );
     }
     return arr;
-  }, [enriched, categoryFilter, pillFilter, doctorFilter, searchQ]);
+  }, [enriched, categoryFilter, pillFilter, pipeline, doctorFilter, searchQ]);
 
   const buckets = useMemo(() => {
     const out = {
@@ -2597,66 +2622,29 @@ export default function TriageViewV3({
             Array.from({ length: 8 }).map((_, i) => <SkeletonPipelinePill key={i} />)
           ) : (
             <>
-              <PipelinePill
-                label="Total"
-                sub="Appointments today"
-                count={pipeline.total.length}
-                tone="dim"
-              />
-              <PipelinePill
-                label="Lab received"
-                sub={
-                  pillFilter === "labReceived"
+              {PIPELINE_PILLS.map((p) => {
+                const isTotal = p.key === "total";
+                const active = isTotal ? !pillFilter : pillFilter === p.key;
+                const sub = isTotal
+                  ? pillFilter
+                    ? "Click to show all"
+                    : p.sub
+                  : active
                     ? "Filtering board ✓"
-                    : "From Gini Lab or uploaded · click to view"
-                }
-                count={pipeline.labReceived.length}
-                tone="warn"
-                active={pillFilter === "labReceived"}
-                onClick={() =>
-                  setPillFilter((v) => (v === "labReceived" ? null : "labReceived"))
-                }
-              />
-              <PipelinePill
-                label="Lab processing"
-                sub="Gini-Lab orders in progress"
-                count={pipeline.labProcessing.length}
-                tone="dim"
-              />
-              <PipelinePill
-                label="Uploaded"
-                sub={
-                  pillFilter === "uploaded" ? "Filtering board ✓" : "Reports uploaded · click to view"
-                }
-                count={pipeline.uploaded.length}
-                tone="lv"
-                active={pillFilter === "uploaded"}
-                onClick={() => setPillFilter((v) => (v === "uploaded" ? null : "uploaded"))}
-              />
-              <PipelinePill
-                label="Data complete"
-                sub="Can be categorised"
-                count={pipeline.dataComplete.length}
-                tone="ok"
-              />
-              <PipelinePill
-                label="Assigned"
-                sub="To a doctor"
-                count={pipeline.assigned.length}
-                tone="ok"
-              />
-              <PipelinePill
-                label="Checked in"
-                sub="In clinic"
-                count={pipeline.checkedIn.length}
-                tone="lv"
-              />
-              <PipelinePill
-                label="No-show / Cancel"
-                sub="Did not attend"
-                count={pipeline.noShowCancel.length}
-                tone="crit"
-              />
+                    : `${p.sub} · click to view`;
+                return (
+                  <PipelinePill
+                    key={p.key}
+                    label={p.label}
+                    sub={sub}
+                    count={pipeline[p.key].length}
+                    tone={p.tone}
+                    active={active}
+                    title={isTotal ? "Show all patients" : undefined}
+                    onClick={() => setPillFilter((v) => (isTotal || v === p.key ? null : p.key))}
+                  />
+                );
+              })}
             </>
           )}
         </div>
