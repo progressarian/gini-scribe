@@ -715,6 +715,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     healthrayInvestigations: clinical.healthrayInvestigations,
     healthrayFollowUp: clinical.healthrayFollowUp,
     healthrayFollowUpWith: clinical.healthrayFollowUpWith,
+    familyMemberId: patientData.healthId,
   });
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);

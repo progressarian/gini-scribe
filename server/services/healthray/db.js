@@ -331,7 +331,60 @@ export async function findAppointment(healthrayId, fileNo, apptDate) {
   return null;
 }
 
+// ── Patient identity helpers ────────────────────────────────────────────────
+
+// A UHID (file_no) belongs to exactly one person at a time in HealthRay. When it
+// is reassigned, the new owner must claim it — null it out on any other row so
+// lookups don't resolve to the previous owner. Their history stays intact, keyed
+// by their own health_id and their appointments' own file_no.
+async function releaseFileNoFromOthers(fileNo, keepPatientId) {
+  if (!fileNo) return;
+  if (keepPatientId) {
+    await pool.query(
+      `UPDATE patients SET file_no = NULL, updated_at = NOW() WHERE file_no = $1 AND id <> $2`,
+      [fileNo, keepPatientId],
+    );
+  } else {
+    await pool.query(`UPDATE patients SET file_no = NULL, updated_at = NOW() WHERE file_no = $1`, [
+      fileNo,
+    ]);
+  }
+}
+
+const normName = (s) =>
+  (s || "")
+    .toLowerCase()
+    .replace(/\b(mr|mrs|ms|dr|master|baby|smt|shri|km|kumari)\b\.?/g, "")
+    .replace(/[^a-z ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+// Best-effort "is this the same person?" check, used only when adopting a legacy
+// row that has no health_id yet (so we cannot match definitively). Different sex
+// is a hard no — that is the signature of a reassigned UHID (see the 102
+// conflicting-sex collisions). Names must be empty or share a given name; a
+// clearly different name means a different person and we create a new record
+// rather than overwrite (a duplicate person is a far safer error than merging
+// two people's clinical data).
+function personLooksSame(existing, incomingName, incomingSex) {
+  if (existing.sex && incomingSex && existing.sex !== incomingSex) return false;
+  const a = normName(existing.name);
+  const b = normName(incomingName);
+  if (!a || !b) return true; // can't compare names — rely on the sex gate above
+  if (a === b) return true;
+  const ta = a.split(" ");
+  const tb = b.split(" ");
+  if (ta[0] === tb[0]) return true; // same given name
+  const setB = new Set(tb);
+  return ta.some((t) => setB.has(t)); // share at least one name token
+}
+
 // ── Upsert patient ──────────────────────────────────────────────────────────
+// Identity is keyed on health_id (HealthRay family_member id) — a stable
+// PER-PERSON id. file_no (patient_case_id / UHID) is NOT stable: HealthRay
+// reuses/reassigns a UHID to a different person over time, so matching on file_no
+// alone silently merges two people onto one record and freezes the name captured
+// at first insert (the P_180848 incident). See migrations/2026-07-14_patient_identity_health_id.sql.
 export async function upsertPatient({
   name,
   phone,
@@ -345,14 +398,92 @@ export async function upsertPatient({
   abhaId,
   healthId,
 }) {
-  // Match by file_no only. Phone is shared across family members so matching
-  // on phone would merge unrelated patients.
-  const existing = fileNo
-    ? await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo])
-    : { rows: [] };
+  if (!healthId) {
+    // No stable person id on this payload — we cannot detect a reassignment.
+    // Fall back to file_no matching (better than nothing) but flag it.
+    log(
+      "DB",
+      `upsertPatient: no health_id for file_no=${fileNo || "?"} (${name}) — file_no match only`,
+    );
+  }
 
-  if (existing.rows[0]) return existing.rows[0].id;
+  // 1) Match by PERSON (health_id). Same person → refresh demographics in place.
+  //    This also applies genuine HealthRay name/typo corrections.
+  if (healthId) {
+    const byHealth = await pool.query(`SELECT id FROM patients WHERE health_id = $1 LIMIT 1`, [
+      healthId,
+    ]);
+    if (byHealth.rows[0]) {
+      const id = byHealth.rows[0].id;
+      // Release the UHID from any previous owner FIRST — file_no is unique among
+      // current owners, so setting it on this row while another row still holds
+      // it would violate the unique index.
+      if (fileNo) await releaseFileNoFromOthers(fileNo, id);
+      await pool.query(
+        `UPDATE patients SET
+           name = COALESCE($2, name),
+           phone = COALESCE($3, phone),
+           file_no = COALESCE($4, file_no),
+           age = COALESCE($5, age),
+           sex = COALESCE($6, sex),
+           address = COALESCE($7, address),
+           dob = COALESCE($8::date, dob),
+           email = COALESCE($9, email),
+           blood_group = COALESCE($10, blood_group),
+           abha_id = COALESCE($11, abha_id),
+           updated_at = NOW()
+         WHERE id = $1`,
+        [id, name, phone, fileNo, age, sex, address, dob, email, bloodGroup, abhaId],
+      );
+      return id;
+    }
+  }
 
+  // 2) No person match. Try file_no, but only ADOPT the row when it is either a
+  //    legacy row without a health_id (and looks like the same person) or the
+  //    incoming payload has no health_id at all. A file_no row that already
+  //    belongs to a DIFFERENT person is a reassignment → fall through to insert.
+  if (fileNo) {
+    const byFile = await pool.query(
+      `SELECT id, health_id, name, sex FROM patients WHERE file_no = $1 ORDER BY id LIMIT 1`,
+      [fileNo],
+    );
+    const row = byFile.rows[0];
+    if (row) {
+      const definiteSame = healthId != null && row.health_id === healthId;
+      const adoptLegacy =
+        row.health_id == null && (healthId == null || personLooksSame(row, name, sex));
+      const noIncomingId = healthId == null && row.health_id != null; // can't tell — keep existing
+      if (definiteSame || adoptLegacy || noIncomingId) {
+        await pool.query(
+          `UPDATE patients SET
+             health_id = COALESCE(health_id, $2),
+             name = COALESCE($3, name),
+             phone = COALESCE(phone, $4),
+             age = COALESCE(age, $5),
+             sex = COALESCE(sex, $6),
+             address = COALESCE(address, $7),
+             dob = COALESCE(dob, $8::date),
+             email = COALESCE(email, $9),
+             blood_group = COALESCE(blood_group, $10),
+             abha_id = COALESCE(abha_id, $11),
+             updated_at = NOW()
+           WHERE id = $1`,
+          [row.id, healthId, name, phone, age, sex, address, dob, email, bloodGroup, abhaId],
+        );
+        return row.id;
+      }
+      // Reassignment: this UHID now belongs to a different person.
+      log(
+        "DB",
+        `file_no ${fileNo} reassigned: "${row.name}" → "${name}" — creating a separate patient`,
+      );
+    }
+    // Free the UHID from its previous owner before the new person claims it.
+    await releaseFileNoFromOthers(fileNo, null);
+  }
+
+  // 3) New person → insert.
   try {
     const res = await pool.query(
       `INSERT INTO patients (name, phone, file_no, age, sex, address, dob, email, blood_group, abha_id, health_id)
@@ -363,21 +494,24 @@ export async function upsertPatient({
     return res.rows[0].id;
   } catch (e) {
     if (e.code === "23505") {
-      // If file_no already exists, use it. Otherwise the conflict is on
-      // phone (shared family number) — retry without phone so we create a
-      // distinct patient instead of merging into the phone owner's record.
-      if (fileNo) {
-        const byFile = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-          fileNo,
+      // Lost a race, or a unique field already exists. Prefer person, then UHID.
+      if (healthId) {
+        const r = await pool.query(`SELECT id FROM patients WHERE health_id = $1 LIMIT 1`, [
+          healthId,
         ]);
-        if (byFile.rows[0]) return byFile.rows[0].id;
+        if (r.rows[0]) return r.rows[0].id;
       }
+      if (fileNo) {
+        const r = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo]);
+        if (r.rows[0]) return r.rows[0].id;
+      }
+      // abha_id collision (rare — family members sharing an ABHA) — retry without it.
       const res2 = await pool
         .query(
-          `INSERT INTO patients (name, file_no, age, sex, address, dob, email, blood_group, abha_id, health_id)
+          `INSERT INTO patients (name, phone, file_no, age, sex, address, dob, email, blood_group, health_id)
            VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, $9, $10)
            RETURNING id`,
-          [name, fileNo, age, sex, address, dob, email, bloodGroup, abhaId, healthId],
+          [name, phone, fileNo, age, sex, address, dob, email, bloodGroup, healthId],
         )
         .catch(() => null);
       return res2?.rows[0]?.id || null;
@@ -488,6 +622,7 @@ export async function upsertAppointment(existingId, data) {
     healthrayFollowUp,
     healthrayPreviousMedications,
     healthrayFollowUpWith,
+    familyMemberId,
   } = data;
 
   if (existingId) {
@@ -512,6 +647,7 @@ export async function upsertAppointment(existingId, data) {
         healthray_investigations = $22::jsonb, healthray_follow_up = $23::jsonb,
         healthray_previous_medications = $24::jsonb,
         follow_up_with = COALESCE($25, follow_up_with),
+        family_member_id = COALESCE($26, family_member_id),
         updated_at = NOW()
        WHERE id = $1 RETURNING id`,
       [
@@ -540,6 +676,7 @@ export async function upsertAppointment(existingId, data) {
         healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
         JSON.stringify(healthrayPreviousMedications || []),
         healthrayFollowUpWith || null,
+        familyMemberId || null,
       ],
     );
     return rows[0].id;
@@ -552,8 +689,8 @@ export async function upsertAppointment(existingId, data) {
         age, sex, notes, healthray_id, opd_vitals, biomarkers, compliance,
         healthray_clinical_notes, healthray_diagnoses, healthray_medications,
         healthray_labs, healthray_advice, healthray_investigations, healthray_follow_up,
-        healthray_previous_medications, follow_up_with)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26)
+        healthray_previous_medications, follow_up_with, family_member_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26,$27)
      RETURNING id`,
     [
       patientId,
@@ -582,6 +719,7 @@ export async function upsertAppointment(existingId, data) {
       healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
       JSON.stringify(healthrayPreviousMedications || []),
       healthrayFollowUpWith || null,
+      familyMemberId || null,
     ],
   );
   return rows[0].id;

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS patients (
   sex           TEXT CHECK (sex IN ('Male','Female','Other')),
   file_no       TEXT,              -- Gini hospital file number
   abha_id       TEXT,              -- ABHA health ID (XX-XXXX-XXXX-XXXX)
-  health_id     TEXT,              -- MyHealth Genie ID (future)
+  health_id     TEXT,              -- HealthRay family_member id (stable per-person key); NULL for non-HealthRay rows
   aadhaar       TEXT,              -- Aadhaar number (encrypted in production)
   govt_id       TEXT,              -- Passport, DL, Voter ID, PAN
   govt_id_type  TEXT,              -- 'Passport','DrivingLicense','VoterID','PAN'
@@ -43,14 +43,22 @@ CREATE TABLE IF NOT EXISTS patients (
   notes         TEXT,              -- Any general notes about patient
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW(),
-  -- phone is NOT unique: family members may share a contact number
-  UNIQUE(file_no),                 -- File number is unique
+  -- phone is NOT unique: family members may share a contact number.
   UNIQUE(abha_id)
 );
 CREATE INDEX idx_patients_phone ON patients(phone);
-CREATE INDEX idx_patients_file ON patients(file_no);
+-- file_no (HealthRay UHID) is unique among CURRENT owners, but HealthRay
+-- reuses/reassigns a UHID to a different person over time. So identity is keyed
+-- on health_id (below), and when a UHID is reassigned the previous owner's
+-- file_no is set to NULL before the new owner claims it — one live owner per
+-- UHID, any number of former owners at NULL. A partial unique index enforces
+-- exactly that (NULLs are excluded, so multiple former owners coexist).
+CREATE UNIQUE INDEX idx_patients_file ON patients(file_no) WHERE file_no IS NOT NULL;
 CREATE INDEX idx_patients_abha ON patients(abha_id);
 CREATE INDEX idx_patients_name ON patients(name);
+-- Person identity for HealthRay-synced patients = family_member.healthray_id.
+-- Partial: health_id is NULL for legacy / sheet / Genie / manual rows.
+CREATE UNIQUE INDEX idx_patients_health_id_uniq ON patients(health_id) WHERE health_id IS NOT NULL;
 
 -- ============ DOCTORS ============
 CREATE TABLE IF NOT EXISTS doctors (
