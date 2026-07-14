@@ -101,15 +101,34 @@ export async function parseBillingPdfWithAi(pdfBuffer, mimeType = "application/p
 
 // Map HealthRay get_transactions rows → { billing, steps }. This is the primary
 // path (structured JSON, no PDF/AI): each billing_item's category_type tells us
-// the journey step. Prefers the transaction(s) for `appointmentId`; else the
-// most recent. PATHOLOGY → one "Blood Sample" step (tests listed); RADIOLOGY →
-// one step per imaging item; OPD → consultation (no step, the consult exists).
-export function transactionsToBilling(rows, { appointmentId } = {}) {
+// the journey step. Uses the transaction(s) for `appointmentId`; if none match,
+// falls back to same-day (`date`) bills only, else returns null — never an older
+// visit's bill (that would auto-add stale tests). PATHOLOGY → one "Blood Sample"
+// step (tests listed); RADIOLOGY → one step per imaging item; OPD → consultation.
+
+// Normalise a date-ish value to "YYYY-MM-DD" for same-day comparison. Handles
+// ISO instants ("2025-08-22T…") and HealthRay's day-first display dates
+// ("22-08-2025" / "22/08/2025"); returns "" if it can't parse a calendar day.
+function ymd(v) {
+  const s = String(v || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+}
+
+export function transactionsToBilling(rows, { appointmentId, date } = {}) {
   if (!Array.isArray(rows) || !rows.length) return null;
   let txns = appointmentId
     ? rows.filter((r) => String(r.appointment_id) === String(appointmentId))
     : [];
-  if (!txns.length) txns = [rows[0]]; // rows are newest-first
+  // No transaction linked to this appointment (the normal state at check-in,
+  // before today's bill is generated). Fall back ONLY to same-day bills — never
+  // a prior visit's bill, which would auto-add stale tests (e.g. an old 2D Echo).
+  if (!txns.length && date) {
+    const day = ymd(date);
+    txns = day ? rows.filter((r) => ymd(r.billing_date) === day) : [];
+  }
+  if (!txns.length) return null;
 
   const num = (v) => Number(v) || 0;
   const items = [];

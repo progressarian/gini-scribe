@@ -1723,7 +1723,7 @@ router.get("/flow/patient-billing", async (req, res) => {
     if (!appt?.healthray_patient_id) return res.json({ billing: null, steps: [] });
 
     const rows = await fetchPatientTransactions(appt.healthray_patient_id);
-    const out = transactionsToBilling(rows, { appointmentId: appt.healthray_id });
+    const out = transactionsToBilling(rows, { appointmentId: appt.healthray_id, date });
     res.json(out || { billing: null, steps: [] });
   } catch (e) {
     // Don't fail check-in over billing — log and return empty.

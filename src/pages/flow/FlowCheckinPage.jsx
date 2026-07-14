@@ -148,6 +148,9 @@ export default function FlowCheckinPage() {
   // plus suggested journey steps (lab → Blood Sample, imaging) to auto-inject.
   const [billing, setBilling] = useState(null);
   const [billingSteps, setBillingSteps] = useState([]);
+  // Billing-step keys the coordinator ✕-removed — so the auto-inject effect
+  // doesn't re-add them. Cleared when a new patient is picked.
+  const [dismissedBilling, setDismissedBilling] = useState(() => new Set());
   const [pendingMo, setPendingMo] = useState(null); // {id,name} to assign to the MO step on (re)load
   const [errors, setErrors] = useState([]);
   const [touched, setTouched] = useState({});
@@ -287,23 +290,37 @@ export default function FlowCheckinPage() {
     );
   }, [sd, chief]);
 
-  // Auto-inject billing-derived steps (Blood Sample for lab items, imaging) as
-  // REMOVABLE suggestions — the coordinator keeps or ✕-removes them like any
-  // other step. Skips ones already in the journey; re-applies if the template
-  // reset wiped them. Returns the same array ref when nothing's added (no loop).
+  // Sync billing-derived steps (Blood Sample for lab items, imaging) into the
+  // journey as REMOVABLE suggestions — the coordinator keeps or ✕-removes them
+  // like any other step. The set of `from_billing` steps is a pure function of
+  // the current `billingSteps`: missing ones are appended, and stale ones (from a
+  // prior patient/fetch, no longer in `billingSteps`) are dropped so they never
+  // leak. Non-billing (template/manual) steps and edits are untouched. Returns
+  // the same array ref when nothing changes (no render loop).
   useEffect(() => {
-    if (!billingSteps.length || !steps.length) return;
+    if (!steps.length) return;
     setSteps((arr) => {
-      const have = new Set(arr.map((s) => s.step_catalog_id || s.step_name));
-      const additions = billingSteps
-        .filter((sg) => !have.has(sg.step_catalog_id || sg.step_name))
+      const key = (s) => s.step_catalog_id || s.step_name;
+      // Desired billing steps keyed for lookup (step_name carries the count
+      // suffix). Skip any the coordinator has already ✕-removed this session.
+      const desired = new Map(
+        billingSteps
+          .filter((sg) => !dismissedBilling.has(sg.step_catalog_id || sg.step_name))
+          .map((sg) => {
+            const tn = sg.tests?.length ? ` (${sg.tests.length})` : "";
+            return [sg.step_catalog_id || sg.step_name, { ...sg, step_name: sg.step_name + tn }];
+          }),
+      );
+      const kept = arr.filter((s) => !s.from_billing || desired.has(key(s)));
+      const present = new Set(kept.map(key));
+      const additions = [...desired.values()]
+        .filter((sg) => !present.has(sg.step_catalog_id || sg.step_name))
         .map((sg) => {
           const c = sg.step_catalog_id ? catalog.find((x) => x.id === sg.step_catalog_id) : null;
-          const tn = sg.tests?.length ? ` (${sg.tests.length})` : "";
           return {
             uid: uid(),
             step_catalog_id: sg.step_catalog_id || null,
-            step_name: sg.step_name + tn,
+            step_name: sg.step_name,
             planned_duration_min: c?.default_duration_min ?? 10,
             station: c?.station || "Lab",
             assigned_role: c?.assigned_role || "lab_tech",
@@ -313,10 +330,11 @@ export default function FlowCheckinPage() {
             tests: sg.tests || undefined,
           };
         });
-      return additions.length ? [...arr, ...additions] : arr;
+      const removed = kept.length !== arr.length;
+      return additions.length || removed ? [...kept, ...additions] : arr;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [billingSteps, steps.length, catalog]);
+  }, [billingSteps, steps.length, catalog, dismissedBilling]);
 
   const total = steps.reduce((a, s) => a + (parseInt(s.planned_duration_min) || 0), 0);
   const buffer = maxTime - total;
@@ -351,6 +369,12 @@ export default function FlowCheckinPage() {
     setContext(null);
     setAppointmentId(null);
     setPendingMo(null);
+    // Drop the previous patient's billing + any dismissed/injected bill steps so
+    // they can't leak into this patient's journey (the reconcile effect prunes
+    // stale from_billing steps once the new billing arrives).
+    setBilling(null);
+    setBillingSteps([]);
+    setDismissedBilling(new Set());
     // Best-effort: pull the patient record (care team + last vitals) and today's
     // appointment (time / type / doctor) in parallel to pre-fill the form.
     try {
@@ -429,7 +453,13 @@ export default function FlowCheckinPage() {
 
   const updateStep = (u, patch) =>
     setSteps((arr) => arr.map((s) => (s.uid === u ? { ...s, ...patch } : s)));
-  const removeStep = (u) => setSteps((arr) => arr.filter((s) => s.uid !== u));
+  const removeStep = (u) => {
+    // Remember dismissed billing steps so the auto-inject effect won't re-add them.
+    const gone = steps.find((s) => s.uid === u);
+    if (gone?.from_billing)
+      setDismissedBilling((d) => new Set(d).add(gone.step_catalog_id || gone.step_name));
+    setSteps((arr) => arr.filter((s) => s.uid !== u));
+  };
   // Reorder by index (used by both native drag and the up/down buttons).
   const moveStep = (from, to) =>
     setSteps((arr) => {
