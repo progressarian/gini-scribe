@@ -15,6 +15,7 @@ const { log, error } = createLogger("Today's Show Sync");
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 let intervalId = null;
+let syncInFlight = false;
 
 // Only accept file_nos that look real (e.g. P_177330). Reject placeholders
 // like ".", ";", "1", "FU." that appear in the sheet for unregistered patients.
@@ -65,16 +66,22 @@ function pickTimeSlot(row) {
 }
 
 export async function syncTodaysShow() {
+  if (syncInFlight) {
+    return { flipped: 0, inserted: 0, skipped: 0, noShow: 0, skippedBecauseRunning: true };
+  }
+
+  syncInFlight = true;
   const startTime = Date.now();
-  // Per-family advisory lock — prevents the 5-min cron from racing itself or
-  // an overlapping sheets-sync run when both try to insert the same no-show
-  // placeholder.
-  const releaseLock = await tryAcquireCronLock(
-    "Today's Show Sync",
-    CRON_LOCK_KEYS.TODAYS_SHOW_SYNC,
-  );
-  if (!releaseLock) return { flipped: 0, inserted: 0, skipped: 0, noShow: 0 };
+  let releaseLock = null;
   try {
+    // Per-family advisory lock — prevents the 5-min cron from racing itself or
+    // an overlapping sheets-sync run when both try to insert the same no-show
+    // placeholder.
+    releaseLock = await tryAcquireCronLock(
+      "Today's Show Sync",
+      CRON_LOCK_KEYS.TODAYS_SHOW_SYNC,
+    );
+    if (!releaseLock) return { flipped: 0, inserted: 0, skipped: 0, noShow: 0 };
     const { patients = [] } = await readTodaysAppt();
 
     const noShowRows = [];
@@ -236,7 +243,8 @@ export async function syncTodaysShow() {
     error("Sync", `Fatal: ${e.message}`);
     throw e;
   } finally {
-    await releaseLock();
+    if (releaseLock) await releaseLock();
+    syncInFlight = false;
   }
 }
 

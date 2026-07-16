@@ -1,5 +1,8 @@
 import { cronPool } from "../../config/db.js";
 
+const lastSkipLogAt = new Map();
+const SKIP_LOG_COOLDOWN_MS = 5 * 60 * 1000;
+
 // Per-family Postgres advisory-lock keys. Each background job family has its
 // own key so jobs of *different* families never block each other — only a job
 // of the same family (e.g. a still-running HealthRay sync) blocks the next
@@ -33,7 +36,12 @@ export async function tryAcquireCronLock(label = "cron", key) {
     const { rows } = await client.query("SELECT pg_try_advisory_lock($1) AS got", [key]);
     if (!rows[0]?.got) {
       client.release();
-      console.log(`[Cron] ${label} skipped — previous ${label} run still holds its lock`);
+      const now = Date.now();
+      const lastLogged = lastSkipLogAt.get(label) || 0;
+      if (now - lastLogged >= SKIP_LOG_COOLDOWN_MS) {
+        lastSkipLogAt.set(label, now);
+        console.log(`[Cron] ${label} skipped — previous ${label} run still holds its lock`);
+      }
       return null;
     }
     return async () => {
