@@ -12,6 +12,24 @@ const needsSsl = !!dbUrl && !isInternal && !isLocal;
 const cleanDbUrl = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
 const finalDbUrl = cleanDbUrl || undefined;
 
+// ── Cron connection — MUST be SESSION mode ──────────────────────────────────
+// Cron families coordinate via session-scoped advisory locks (see
+// lowPriority.js tryAcquireCronLock → pg_try_advisory_lock). Those locks belong
+// to a backend SESSION, so they only work if a checked-out client stays pinned
+// to one backend for its whole lifetime. Supavisor's TRANSACTION mode (port
+// 6543) multiplexes clients across backends: the lock lands on backend A, the
+// later pg_advisory_unlock runs on backend B and silently no-ops (returns
+// false), and the lock is stranded on A. Every later run then logs "skipped —
+// previous run still holds its lock" and does nothing, forever. It survives app
+// restarts too, because A lives in the POOLER's pool, not ours.
+// Fix: point cron at a SESSION-mode connection (Supavisor port 5432), which
+// pins the backend so lock/unlock always hit the same session.
+const cronDbUrl = process.env.CRON_DATABASE_URL || dbUrl;
+const cronIsInternal = cronDbUrl.includes(".railway.internal");
+const cronIsLocal = cronDbUrl.includes("localhost") || cronDbUrl.includes("127.0.0.1");
+const cronNeedsSsl = !!cronDbUrl && !cronIsInternal && !cronIsLocal;
+const finalCronDbUrl = cronDbUrl.replace(/[?&]sslmode=[^&]*/g, "") || undefined;
+
 const pool = new pg.Pool({
   connectionString: finalDbUrl,
   ssl: needsSsl ? { rejectUnauthorized: false } : false,
@@ -31,9 +49,11 @@ const pool = new pg.Pool({
 
 // Dedicated low-priority pool for background cron/sync jobs.
 // Kept small so background sync can never starve user-facing requests on the main pool.
+// Uses the SESSION-mode connection (CRON_DATABASE_URL) — advisory locks require
+// a pinned backend; see the cronDbUrl note above.
 const cronPool = new pg.Pool({
-  connectionString: finalDbUrl,
-  ssl: needsSsl ? { rejectUnauthorized: false } : false,
+  connectionString: finalCronDbUrl,
+  ssl: cronNeedsSsl ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 20000,
   idleTimeoutMillis: 20000,
   statement_timeout: 60000, // see pool above — no background query may hang forever
@@ -137,6 +157,19 @@ wrapQueryWithRetry(pool, "DB");
 wrapQueryWithRetry(cronPool, "cron DB");
 
 console.log("DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
+
+// Guard the advisory-lock invariant. A transaction-mode pooler (Supavisor port
+// 6543 / pgbouncer) silently strands cron locks and wedges every job family with
+// only a "skipped — previous run still holds its lock" line to show for it, so
+// make the misconfiguration loud instead of letting it fail silently.
+if (/:6543\b/.test(cronDbUrl) || /pgbouncer=true/.test(cronDbUrl)) {
+  console.warn(
+    "⚠️  cron DB is on a TRANSACTION-mode pooler (port 6543) — advisory locks will leak and " +
+      "cron families will wedge. Set CRON_DATABASE_URL to the SESSION-mode connection (port 5432).",
+  );
+} else if (process.env.CRON_DATABASE_URL) {
+  console.log("✓ cron DB: separate session-mode connection (advisory locks safe)");
+}
 
 export default pool;
 export { dbUrl, needsSsl, cronPool };
