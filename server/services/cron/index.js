@@ -50,18 +50,26 @@ const HEALTHRAY_LOOP_MAX_BREAK_MS = 180 * 1000;
 const STATUS_LOOP_MIN_BREAK_MS = 30 * 1000;
 const STATUS_LOOP_MAX_BREAK_MS = 45 * 1000;
 
-// Lab sync runs the same continuous-loop pattern, with a slightly longer
-// 30–40s break between runs (lab cases trickle in less aggressively than
-// appointments, and each run does more I/O — fetch list + per-case detail +
-// PDF download + Supabase upload).
-const LAB_LOOP_MIN_BREAK_MS = 30 * 1000;
-const LAB_LOOP_MAX_BREAK_MS = 40 * 1000;
+// Lab sync runs the same continuous-loop pattern, on a 2–3 min break. Lab cases
+// trickle in over the day (not second-by-second), and each run does real I/O —
+// fetch list + per-case detail + PDF download + Supabase upload. The old 30–40s
+// cadence meant near-continuous traffic to labapi.healthray.com from the
+// server's own IP, which reads as bot/scrape volume and repeatedly trips
+// HealthRay's WAF into a 403 IP-block (see the Lab Auth breaker). A few-minute
+// cadence keeps data fresh at a fraction of the request volume. Env-tunable so
+// ops can dial it further without a redeploy while there's no static-IP proxy
+// (the permanent fix — HEALTHRAY_PROXY_URL — is not yet provisioned).
+const LAB_LOOP_MIN_BREAK_MS = Number(process.env.LAB_LOOP_MIN_BREAK_MS) || 120 * 1000;
+const LAB_LOOP_MAX_BREAK_MS = Number(process.env.LAB_LOOP_MAX_BREAK_MS) || 180 * 1000;
 
-// Partial-results recovery: same continuous-loop pattern (30–40s break) so
-// "Gini Lab Partial" cases pick up newly-finalised panels in near real-time
-// instead of waiting for a fixed 5-min tick.
-const PARTIAL_LOOP_MIN_BREAK_MS = 30 * 1000;
-const PARTIAL_LOOP_MAX_BREAK_MS = 40 * 1000;
+// Partial-results recovery: same continuous-loop pattern, on a 3–4 min break.
+// This loop re-polls a whole batch of "Gini Lab Partial" cases (one case_detail
+// fetch each) every tick, so it was the single largest driver of WAF-tripping
+// request volume at the old 30–40s cadence. Partial panels finalise over
+// hours/minutes, not seconds, so a few-minute cadence still surfaces newly-ready
+// panels promptly while slashing traffic. Env-tunable (same rationale as above).
+const PARTIAL_LOOP_MIN_BREAK_MS = Number(process.env.PARTIAL_LOOP_MIN_BREAK_MS) || 180 * 1000;
+const PARTIAL_LOOP_MAX_BREAK_MS = Number(process.env.PARTIAL_LOOP_MAX_BREAK_MS) || 240 * 1000;
 
 let healthrayLoopRunning = false;
 let healthrayLoopTimeoutId = null;

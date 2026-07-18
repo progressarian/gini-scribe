@@ -623,7 +623,7 @@ export async function getPartialLabCases({ limit = 50 } = {}) {
         AND COALESCE(pdf_unavailable, FALSE) = FALSE
         AND raw_detail_json->>'reported_on' IS NULL
         AND case_date >= CURRENT_DATE - INTERVAL '7 days'
-        AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '30 seconds')
+        AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '5 minutes')
       ORDER BY last_retry_at ASC NULLS FIRST, case_date DESC
       LIMIT $1`,
     [limit],
@@ -640,8 +640,8 @@ export async function clearLabCasePdfBackoff(caseNo) {
 }
 
 // Touch last_retry_at without bumping retry_count. The partial-results loop
-// re-polls every ~30s, which would burn through the shared RETRY_CAP (used by
-// the slow recovery path) in a few hours and falsely mark the row abandoned.
+// re-polls a case every few minutes, which would still burn through the shared
+// RETRY_CAP (used by the slow recovery path) and falsely mark the row abandoned.
 // Partial cases self-bound by the 7-day case_date filter in getPartialLabCases,
 // so we don't need a separate counter — just record when we last touched it.
 export async function touchLabCaseRetryAt(caseNo) {

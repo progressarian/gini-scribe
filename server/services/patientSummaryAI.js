@@ -137,6 +137,9 @@ function buildContext(data) {
     appt_plan?.investigations_to_order ||
     [];
 
+  const safeLatestVitals = latestVitals && typeof latestVitals === "object" ? latestVitals : {};
+  const safePrevVitals = prevVitals && typeof prevVitals === "object" ? prevVitals : {};
+
   return {
     patient: { name: patient.name, age: patient.age, sex: patient.sex },
     diagnoses: activeDx.slice(0, 4).map((d) => ({
@@ -145,9 +148,9 @@ function buildContext(data) {
     })),
     medicineChanges: newOrChanged,
     vitals: {
-      bp: latestVitals.bp_sys ? `${latestVitals.bp_sys}/${latestVitals.bp_dia}` : null,
-      weight: latestVitals.weight,
-      prevWeight: prevVitals.weight,
+      bp: safeLatestVitals.bp_sys ? `${safeLatestVitals.bp_sys}/${safeLatestVitals.bp_dia}` : null,
+      weight: safeLatestVitals.weight ?? null,
+      prevWeight: safePrevVitals.weight ?? null,
     },
     labs: {
       hba1c: hba1cLatest && {
@@ -276,8 +279,8 @@ export async function generatePatientSummary(data) {
     typeof parsed?.body === "string" && parsed.body.trim()
       ? parsed.body.trim()
       : // If the model ignored the JSON contract, keep the raw text as the body
-        // so we never block a visit on a heading parse error.
-        text;
+      // so we never block a visit on a heading parse error.
+      text;
   const heading_greeting =
     typeof parsed?.heading_greeting === "string" && parsed.heading_greeting.trim()
       ? parsed.heading_greeting.trim()
