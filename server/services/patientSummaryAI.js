@@ -279,8 +279,8 @@ export async function generatePatientSummary(data) {
     typeof parsed?.body === "string" && parsed.body.trim()
       ? parsed.body.trim()
       : // If the model ignored the JSON contract, keep the raw text as the body
-      // so we never block a visit on a heading parse error.
-      text;
+        // so we never block a visit on a heading parse error.
+        text;
   const heading_greeting =
     typeof parsed?.heading_greeting === "string" && parsed.heading_greeting.trim()
       ? parsed.heading_greeting.trim()

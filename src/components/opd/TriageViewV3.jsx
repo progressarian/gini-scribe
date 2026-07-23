@@ -420,11 +420,11 @@ function derivePipeline(appts) {
     const pending = Number(a.pending_labs) || 0;
     const partial = Number(a.partial_labs) || 0;
     const recent = Number(a.recent_labs) || 0;
-    // Lab received: only counts a report that landed in our system **between
-    // the previous visit and today's visit** — the freshness flag is computed
-    // upstream in `enriched`. This keeps the pill aligned with the freshness
-    // rule that decides whether a patient moves out of No Reports.
-    if (a.__freshReport) buckets.labReceived.push(a);
+    // Lab received: only patients whose results came via Gini-Lab with at
+    // least one canonical value extracted — the same condition as the
+    // "🧪 Gini-Lab received" card badge, so pill count and badge always agree.
+    // (Fresh manual uploads live in the "Uploaded" pill instead.)
+    if (a.__giniReceived) buckets.labReceived.push(a);
     // Lab processing: orders pending / partial AND no results received yet.
     if (recent === 0 && (pending > 0 || partial > 0)) buckets.labProcessing.push(a);
     if (isUploadedReport(a)) buckets.uploaded.push(a);
@@ -442,7 +442,7 @@ function derivePipeline(appts) {
 // filters the board to (see derivePipeline); "total" is the reset (show all).
 const PIPELINE_PILLS = [
   { key: "total", label: "Total", sub: "Appointments today", tone: "dim" },
-  { key: "labReceived", label: "Lab received", sub: "From Gini Lab or uploaded", tone: "warn" },
+  { key: "labReceived", label: "Lab received", sub: "Results via Gini-Lab", tone: "warn" },
   {
     key: "labProcessing",
     label: "Lab processing",
@@ -2059,6 +2059,7 @@ export default function TriageViewV3({
           __bucket: bucket,
           __conditionBucket: conditionBucket,
           __freshReport: fresh,
+          __giniReceived: giniReceived,
         };
       });
   }, [appointments, date]);
