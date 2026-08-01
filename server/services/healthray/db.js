@@ -5,7 +5,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
-import { parseLabDate } from "../../utils/labDate.js";
+import { parseLabDate, collectNoteDates } from "../../utils/labDate.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
 import { enrichMedWithDays } from "../medication/daysOfWeek.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
@@ -739,9 +739,42 @@ function normalizeCanonicalName(name) {
   return normalizeTestName(name);
 }
 
+// Vitals and demographics that the extractor occasionally lists among "labs".
+// They belong in appointments.opd_vitals, never in lab_results — a stray "BP 122"
+// row renders as a lab result and pollutes the biomarker trend charts.
+const NON_LAB_CANONICALS = new Set(
+  [
+    "BP",
+    "Blood Pressure",
+    "Systolic BP",
+    "Diastolic BP",
+    "Height",
+    "Weight",
+    "BMI",
+    "W.C",
+    "WC",
+    "Waist",
+    "BF",
+    "Body Fat",
+    "PULSE",
+    "Pulse",
+    "SpO2",
+    "age",
+    "AGE",
+    "Age",
+  ].map((s) => s.toLowerCase()),
+);
+
 // ── Sync parsed labs → lab_results table ────────────────────────────────────
-export async function syncLabResults(patientId, apptId, apptDate, labs) {
+// rawText is the clinical note the labs were extracted from. When supplied, every
+// lab date must be either the appointment date or a full calendar date that
+// literally appears in that note — anything else was assembled by the extractor
+// rather than read, and must not become a stored measurement.
+export async function syncLabResults(patientId, apptId, apptDate, labs, rawText = null) {
   if (!patientId || labs.length === 0) return;
+
+  const allowedDates = rawText ? collectNoteDates(rawText) : null;
+  if (allowedDates && apptDate) allowedDates.add(apptDate);
 
   await pool.query(`DELETE FROM lab_results WHERE appointment_id = $1 AND source = 'healthray'`, [
     apptId,
@@ -769,10 +802,27 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     // If prev already has a specific date, keep it (skip current)
   }
 
+  // Resolve each lab to its final (canonical, date) slot before touching the DB.
+  // Two entries can collide on that slot when a cumulative note carries a stale
+  // block: the doctor keeps ONE note and appends a dated block per visit, so the
+  // enrollment-time OBSERVATION values sit above the genuine current ones. If the
+  // parser mis-dates that baseline to the visit date, both land on the same slot.
+  // Document order in these notes is chronological, so the LAST occurrence is the
+  // newer measurement — it must win. (Before this, first-writer-won and the
+  // baseline buried the real reading: P_179877 appt 41538 stored FBS 171.4 from
+  // the May baseline while the genuine 29/7 value of 82.3 was silently dropped.)
+  const bySlot = new Map();
   for (const lab of dedupedLabs) {
     const val = parseFloat(lab.value);
     if (isNaN(val)) continue;
     const canonicalName = normalizeCanonicalName(lab.test);
+    if (NON_LAB_CANONICALS.has(String(canonicalName).toLowerCase())) {
+      log(
+        "syncLabResults",
+        `Patient ${patientId} appt ${apptId}: dropping "${lab.test}" — vital/demographic, not a lab result`,
+      );
+      continue;
+    }
     // Only accept labs with an explicit date in the notes. Clinical notes often
     // carry forward historical sections (e.g. "PATIENT VISITED TODAY HBA1C: 11.5"
     // copied from an earlier visit) — anchoring those undated values to the
@@ -783,17 +833,65 @@ export async function syncLabResults(patientId, apptId, apptDate, labs) {
     if (!lab.date) continue;
     const labDate = parseLabDate(lab.date, apptDate);
     if (!labDate) continue;
+    if (allowedDates && !allowedDates.has(labDate)) {
+      error(
+        "syncLabResults",
+        `Patient ${patientId} appt ${apptId}: dropping ${canonicalName}=${val} — date ${labDate} ` +
+          `does not appear in the note (extractor fabricated it)`,
+      );
+      continue;
+    }
 
-    // One reading per (patient, canonical test, date). Whichever source got
-    // there first wins — skip if anything already exists for this combination.
-    // IS NOT DISTINCT FROM handles the null-date case (undated OBSERVATION labs).
+    const slot = `${canonicalName}|${labDate}`;
+    const prev = bySlot.get(slot);
+    if (prev && prev.val !== val) {
+      log(
+        "syncLabResults",
+        `Patient ${patientId} appt ${apptId}: two values for ${canonicalName} on ${labDate} ` +
+          `(${prev.val} then ${val}) — keeping ${val} (later block in the note wins)`,
+      );
+    }
+    bySlot.set(slot, { lab, val, canonicalName, labDate });
+  }
+
+  for (const { lab, val, canonicalName, labDate } of bySlot.values()) {
+    // One reading per (patient, canonical test, date). Higher-priority sources
+    // (opd, report_extract, lab_healthray, …) always win — never overwrite them.
+    // A pre-existing 'healthray' row for the same slot IS corrected, though: it
+    // came from an earlier parse of this same cumulative note, so when the value
+    // now differs the newer parse is the better witness and a stale reading left
+    // by the old first-writer-wins behaviour gets healed on the next sync.
     const existing = await pool.query(
-      `SELECT id FROM lab_results
+      `SELECT id, source, result FROM lab_results
        WHERE patient_id = $1 AND canonical_name = $2 AND test_date IS NOT DISTINCT FROM $3::date
        LIMIT 1`,
       [patientId, canonicalName, labDate],
     );
-    if (existing.rows[0]) continue;
+    const row = existing.rows[0];
+    if (row) {
+      if (row.source !== "healthray") continue;
+      if (Number(row.result) === val) continue;
+      await pool
+        .query(`UPDATE lab_results SET test_name = $1, result = $2, unit = $3 WHERE id = $4`, [
+          lab.test,
+          val,
+          lab.unit || null,
+          row.id,
+        ])
+        .then(() =>
+          log(
+            "syncLabResults",
+            `Patient ${patientId}: corrected ${canonicalName} on ${labDate} ${row.result} → ${val} (row ${row.id})`,
+          ),
+        )
+        .catch((e) =>
+          error(
+            "syncLabResults",
+            `UPDATE failed for patient=${patientId} appt=${apptId} row=${row.id} canonical="${canonicalName}": ${e.message}`,
+          ),
+        );
+      continue;
+    }
 
     await pool
       .query(

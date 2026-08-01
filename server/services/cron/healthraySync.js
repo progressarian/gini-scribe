@@ -722,7 +722,9 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   // Propagate "vitals taken" into the Flow board so /flow/checkin and
   // /flow/coordinator auto-advance past the Vitals step without a manual click.
   await syncFlowVitalsFromAppointment(localApptId, opdVitals);
-  await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs);
+  // Pass the note so syncLabResults can reject lab dates the extractor invented
+  // rather than read out of it (see collectNoteDates).
+  await syncLabResults(patientId, localApptId, apptDate, clinical.healthrayLabs, rawText);
   await syncBiomarkersFromLatestLabs(patientId, localApptId);
   await syncMedications(patientId, healthrayId, apptDate, clinical.healthrayMedications);
   await syncStoppedMedications(

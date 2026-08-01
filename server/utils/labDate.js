@@ -43,6 +43,38 @@ function resolveISO(raw) {
   return null;
 }
 
+// Collect every FULL calendar date that literally appears in a clinical note,
+// as a Set of ISO strings. Used to verify that a lab date the extractor emitted
+// was actually read out of the note rather than assembled from prose.
+//
+// Deliberately requires a day AND month AND year. A month-year fragment like
+// "TYPE 2 DM ( SINCE JULY 2025 )" is NOT a date header, and treating it as one
+// is how P_177621 acquired a dozen labs dated 2025-07-03 — the extractor took
+// the day from the visit date (2026-07-03) and the year from that prose.
+export function collectNoteDates(rawText) {
+  const found = new Set();
+  if (!rawText) return found;
+  const text = String(rawText);
+
+  // 9/11/25, 06-04-2026, 31.07.2026
+  for (const m of text.matchAll(/\b(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})\b/g)) {
+    const iso = resolveISO(`${m[1]}/${m[2]}/${m[3]}`);
+    if (iso) found.add(iso);
+  }
+  // 24th DECEMBER 2024, 6 Nov 2023
+  const MONTHS =
+    "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+  const re = new RegExp(
+    `\\b(\\d{1,2})\\s*(?:st|nd|rd|th)?\\s+(${MONTHS})\\.?,?\\s+(\\d{4})\\b`,
+    "gi",
+  );
+  for (const m of text.matchAll(re)) {
+    const iso = resolveISO(`${m[1]} ${m[2]} ${m[3]}`);
+    if (iso) found.add(iso);
+  }
+  return found;
+}
+
 // Normalises lab-result date strings (whatever the AI emits, or whatever the
 // upstream extractor wrote) into a YYYY-MM-DD ISO date. Falls back to a
 // caller-supplied date for "today" / blank / future inputs so every lab row ends
