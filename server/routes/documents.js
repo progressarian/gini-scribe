@@ -1563,7 +1563,7 @@ router.post("/documents/:id/retry-extract", async (req, res) => {
   res.json(result);
 });
 
-export { runServerExtraction };
+export { runServerExtraction, resolveDocumentUrl };
 
 // ── Extract medicines from a HealthRay prescription PDF/image using Claude vision
 // Shared core used by the HTTP route and one-off scripts. Uses the unified

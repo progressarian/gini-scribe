@@ -109,6 +109,8 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
     "tmt",
     "ncs",
     "eye",
+    "abi",
+    "vpt",
   ];
   const prescriptions = visibleDocuments.filter((d) => d.doc_type === "prescription");
   const labReports = visibleDocuments.filter((d) => d.doc_type === "lab_report");

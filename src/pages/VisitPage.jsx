@@ -1413,6 +1413,8 @@ export default function VisitPage() {
       "tmt",
       "ncs",
       "eye",
+      "abi",
+      "vpt",
     ]);
     return {
       labs:

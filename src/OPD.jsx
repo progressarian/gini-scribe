@@ -1619,6 +1619,9 @@ const REPORT_TYPES = [
   { id: "ecg", label: "ECG", icon: "📈", accept: ".pdf,.jpg,.jpeg,.png" },
   { id: "echo", label: "Echo", icon: "❤️", accept: ".pdf,.jpg,.jpeg,.png" },
   { id: "tmt", label: "TMT", icon: "🏃", accept: ".pdf,.jpg,.jpeg,.png" },
+  // Diabetic retinopathy / fundus screening. Id matches the existing "eye"
+  // used by companion/constants.js and the RADIOLOGY_DOC_TYPES lists.
+  { id: "eye", label: "Eye", icon: "👁️", accept: ".pdf,.jpg,.jpeg,.png" },
   { id: "other", label: "Other", icon: "📄", accept: ".pdf,.jpg,.jpeg,.png" },
 ];
 

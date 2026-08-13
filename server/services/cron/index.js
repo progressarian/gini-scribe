@@ -21,6 +21,7 @@ import {
   backfillLabPdfs,
 } from "./labSync.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
+import { runDocumentClassification } from "./documentClassification.js";
 import { getLoginCooldownMs } from "../healthray/client.js";
 import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
@@ -28,6 +29,7 @@ import { BATCH_HANDLERS } from "../batch/handlers.js";
 // ── Sync intervals ─────────────────────────────────────────────────────────
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
 const DOC_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
+const DOC_CLASSIFY_INTERVAL_MS = 10 * 60 * 1000;
 
 // HealthRay has no webhook, so we run a continuous loop: each iteration waits
 // for the previous sync to finish, then sleeps a short random break (10–15s)
@@ -225,6 +227,7 @@ let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
 let docRecoveryIntervalId = null;
+let docClassifyIntervalId = null;
 let missingMedsIntervalId = null;
 let pdfRetryIntervalId = null;
 let blankSweepIntervalId = null;
@@ -397,6 +400,29 @@ export function startCronJobs() {
     }, DOC_RECOVERY_INTERVAL_MS);
   }, 90 * 1000);
 
+  // ── Document classification: re-type HealthRay 'other' docs ──────────
+  // Every 10 min. HealthRay files ABI/VPT/echo reports under record_type
+  // "Other" with an auto-generated filename, so mapRecordType() can't tell
+  // them apart and they land in the Labs tab's catch-all bucket. This reads
+  // the file itself and moves them to the right tab. Small batches — each
+  // doc costs one Claude call — and every row it looks at is marked so it
+  // is never re-billed. First run delayed by 3 min to stay clear of the
+  // startup sync burst.
+  console.log("[Cron] Starting document classification (every 10 min)...");
+  setTimeout(
+    () => {
+      runDocumentClassification().catch((e) =>
+        console.error("[Cron] Document classification failed:", e.message),
+      );
+      docClassifyIntervalId = setInterval(() => {
+        runDocumentClassification().catch((e) =>
+          console.error("[Cron] Document classification failed:", e.message),
+        );
+      }, DOC_CLASSIFY_INTERVAL_MS);
+    },
+    3 * 60 * 1000,
+  );
+
   // ── AI batch queue: submit pending + poll/apply results ──────────────────
   // Only when AI_BATCH_ENABLED=true. Submits queued med-side-effects and
   // OPD-parse requests to Anthropic's Message Batches API (50% cheaper, async)
@@ -471,6 +497,11 @@ export function stopCronJobs() {
     docRecoveryIntervalId = null;
     console.log("[Cron] Document recovery stopped");
   }
+  if (docClassifyIntervalId) {
+    clearInterval(docClassifyIntervalId);
+    docClassifyIntervalId = null;
+    console.log("[Cron] Document classification stopped");
+  }
   if (missingMedsIntervalId) {
     clearInterval(missingMedsIntervalId);
     missingMedsIntervalId = null;
@@ -514,6 +545,7 @@ export {
   runStuckStatusRecovery,
   runMissingMedsRecovery,
   runDocumentRecovery,
+  runDocumentClassification,
   forceResyncDate,
   syncAppointmentStatuses,
 };

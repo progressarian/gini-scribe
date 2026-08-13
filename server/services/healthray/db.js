@@ -2105,13 +2105,21 @@ export async function syncDocuments(patientId, records, fallbackDate, healthrayA
       const needsNoteUpdate =
         !existingNotes.includes("healthray_mrid:") || !existingNotes.includes("healthray_appt:");
       if (freshUrl || needsNoteUpdate) {
+        // `notes` is rebuilt from scratch here, so anything else living in the
+        // column has to be carried over explicitly. The document classifier
+        // (services/cron/documentClassification.js) stores its `autoclass:`
+        // marker here, and that marker is what stops it re-classifying — and
+        // re-billing — the same document on every sweep. Dropping it made the
+        // sweep re-process docs forever, since this sync runs every 2-3 min.
+        const carried = existingNotes.match(/autoclass:[^|]*/)?.[0];
+        const mergedNotes = carried ? `${notes}|${carried}` : notes;
         await pool
           .query(
             `UPDATE documents SET
                file_url = COALESCE($1, file_url),
                notes = $2
              WHERE id = $3`,
-            [freshUrl, notes, dup.rows[0].id],
+            [freshUrl, mergedNotes, dup.rows[0].id],
           )
           .catch(() => {});
       }

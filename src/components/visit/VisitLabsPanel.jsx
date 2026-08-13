@@ -857,6 +857,8 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
     "tmt",
     "ncs",
     "eye",
+    "abi",
+    "vpt",
   ]);
   const labDocs = documents.filter(
     (d) => d.doc_type !== "prescription" && !RADIOLOGY_DOC_TYPES.has(d.doc_type),
