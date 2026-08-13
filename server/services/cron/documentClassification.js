@@ -219,7 +219,10 @@ async function releaseClaim(doc) {
 async function parkUnavailable(doc) {
   const marker = `autoclass:unavail:${new Date().toISOString()}`;
   await pool
-    .query(`UPDATE documents SET notes = $1 WHERE id = $2`, [markedNotes(doc.notes, marker), doc.id])
+    .query(`UPDATE documents SET notes = $1 WHERE id = $2`, [
+      markedNotes(doc.notes, marker),
+      doc.id,
+    ])
     .catch(() => {});
 }
 

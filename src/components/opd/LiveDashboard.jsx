@@ -299,6 +299,133 @@ const BIO_CHIP_LABEL = {
   egfr: "eGFR",
 };
 
+// ── Expanded outcome description ─────────────────────────────────────────
+// classifyComposite emits a terse reason ("SBP worsening", "TG, HDL outside
+// target despite SBP improving"). That reads fine to whoever wrote the rules
+// and poorly to everyone else, so on the row we spell it out: full test names
+// plus the actual prev → cur values and where the reading now sits relative
+// to its clinical target.
+//   "SBP worsening"  →  "Systolic BP worsening — 118 → 144 mmHg, now above target"
+
+const BIO_FULL_LABEL = {
+  hba1c: "HbA1c",
+  sbp: "Systolic BP",
+  dbp: "Diastolic BP",
+  tsh: "TSH",
+  fg: "Fasting sugar",
+  ppbs: "Post-meal sugar",
+  ldl: "LDL",
+  tg: "Triglycerides",
+  hdl: "HDL",
+  uacr: "Urine ACR",
+  egfr: "eGFR",
+};
+
+const BIO_UNIT = {
+  hba1c: "%",
+  sbp: " mmHg",
+  dbp: " mmHg",
+  tsh: "",
+  fg: " mg/dL",
+  ppbs: " mg/dL",
+  ldl: " mg/dL",
+  tg: " mg/dL",
+  hdl: " mg/dL",
+  uacr: " mg/g",
+  egfr: " mL/min",
+};
+
+// Markers where a HIGHER value is the healthy direction — changes how an
+// off-target reading is worded ("below target" rather than "above target").
+const HIGHER_IS_BETTER = new Set(["hdl", "egfr"]);
+
+function bandPhrase(key, value) {
+  const status = targetStatus(key, value);
+  if (status === "unknown") return "";
+  // TSH is a range marker, so "above/below target" doesn't apply.
+  if (key === "tsh") {
+    return status === "good" ? "in range" : status === "warn" ? "borderline" : "outside range";
+  }
+  if (status === "good") return "at target";
+  if (status === "warn") return "borderline";
+  return HIGHER_IS_BETTER.has(key) ? "below target" : "above target";
+}
+
+// Uppercase tokens as they appear in the composite reason → biomarker key.
+// Sorted longest-first at use so HBA1C is consumed before shorter tokens.
+const REASON_TOKEN_TO_KEY = {
+  HBA1C: "hba1c",
+  PPBS: "ppbs",
+  UACR: "uacr",
+  EGFR: "egfr",
+  SBP: "sbp",
+  DBP: "dbp",
+  TSH: "tsh",
+  LDL: "ldl",
+  HDL: "hdl",
+  TG: "tg",
+  FG: "fg",
+};
+
+const fmtVal = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
+
+// Build the "118 → 144 mmHg, now above target" tail for one marker.
+// `withLabel` is false when the sentence already names the only marker in
+// play, so we don't render "Systolic BP worsening — Systolic BP 118 → 144".
+function markerDetail(r, key, withLabel) {
+  const cur = r[key];
+  if (cur == null || isNaN(cur)) return null;
+  const prev = r["prev" + key.charAt(0).toUpperCase() + key.slice(1)];
+  const unit = BIO_UNIT[key] ?? "";
+  const phrase = bandPhrase(key, cur);
+  const hasPrev = prev != null && !isNaN(prev) && prev !== cur;
+  const values = hasPrev ? `${fmtVal(prev)} → ${fmtVal(cur)}${unit}` : `${fmtVal(cur)}${unit}`;
+  const head = withLabel ? `${BIO_FULL_LABEL[key] || key.toUpperCase()} ${values}` : values;
+  return phrase ? `${head}, ${hasPrev ? "now " : ""}${phrase}` : head;
+}
+
+// Full sentence shown under the patient's name on every trend card.
+export function expandReason(r) {
+  if (!r || !r.outcomeReason) return "";
+  let text = String(r.outcomeReason)
+    .replace(/Tier-1/g, "Main tests")
+    // The card is already titled "Flag for review" — the trailing "— review"
+    // would otherwise collide with the em dash we add before the values.
+    .replace(/\s*—\s*review\s*$/i, "");
+  // Swap the abbreviations for full test names, longest token first so that
+  // e.g. HBA1C is never partially matched by a shorter token.
+  for (const token of Object.keys(REASON_TOKEN_TO_KEY).sort((a, b) => b.length - a.length)) {
+    const key = REASON_TOKEN_TO_KEY[token];
+    text = text.replace(new RegExp(`\\b${token}\\b`, "g"), BIO_FULL_LABEL[key] || token);
+  }
+  // Append the numbers behind the verdict — capped at two markers so the row
+  // stays one or two lines even when several biomarkers triggered.
+  const keys = (r.triggerKeys || []).filter((key) => r[key] != null && !isNaN(r[key])).slice(0, 2);
+  const details = keys.map((key) => markerDetail(r, key, keys.length > 1)).filter(Boolean);
+  return details.length ? `${text} — ${details.join(" · ")}` : text;
+}
+
+// ── Standalone risk flags ────────────────────────────────────────────────
+// These used to drive a separate "Needs extra attention" card. That card
+// overlapped heavily with the trend columns (the same patient appeared under
+// both "Getting better" and "Needs extra attention"), so the flags are now
+// folded into "Getting worse" — a patient who needs escalating shows up in
+// exactly one place, whatever their trend happens to be doing.
+const atRisk = (r) =>
+  !!r.hba1c &&
+  (r.hba1c > 9 ||
+    (r.prevHba1c && r.hba1c > r.prevHba1c && r.hba1c > 8) ||
+    (r.medPct != null && r.medPct < 60));
+
+// Plain-English list of which risk flags fired, for the row's reason line.
+function riskReasons(r) {
+  const out = [];
+  if (r.hba1c > 9) out.push(`HbA1c ${r.hba1c}% — severely uncontrolled`);
+  if (r.prevHba1c && r.hba1c > r.prevHba1c && r.hba1c > 8) out.push(`rising from ${r.prevHba1c}%`);
+  if (r.medPct != null && r.medPct < 60) out.push(`only ${r.medPct}% medicine compliance`);
+  return out;
+}
+
 // Render the standard set of Tier-1/Tier-2 chips for a patient row.
 // HbA1c + SBP are always shown if present; FBS/LDL/TG show when recorded.
 // When the row has trigger biomarkers (parsed from the composite outcome
@@ -1047,59 +1174,81 @@ export default function LiveDashboard({
     const pctCoverage = total ? Math.round((withHba1c / total) * 100) : 0;
     const pctControlled = withHba1c ? Math.round((controlled / withHba1c) * 100) : 0;
 
-    const needsAttention = rows
-      .filter(
-        (r) =>
-          r.hba1c &&
-          (r.hba1c > 9 ||
-            (r.prevHba1c && r.hba1c > r.prevHba1c && r.hba1c > 8) ||
-            (r.medPct != null && r.medPct < 60)),
-      )
-      .sort((a, b) => b.hba1c - a.hba1c);
+    // ── Single-section assignment ────────────────────────────────────────
+    // Every patient lands in exactly ONE section. Previously the three action
+    // lists (needs-attention / on-track / missing-biomarkers) ran their own
+    // independent rules on top of the composite outcome, so the same patient
+    // could appear in three places at once — most damagingly, a patient could
+    // sit under a red "Flag for review" heading and a green "On track today"
+    // heading simultaneously.
+    //
+    // Predicates below are evaluated top-down and the FIRST match wins, so the
+    // most urgent framing of a patient is the one that gets shown. Order is a
+    // clinical decision, not an implementation detail — don't reorder without
+    // agreeing the priority:
+    //   1. can't be judged at all (no HbA1c)  → fix the data first
+    //   2. needs action today                 → beats any trend narrative
+    //   3-6. the composite verdict            → worse before mixed before stable
+    //   7. first-ever reading                 → nothing to compare against
+    //   8. genuinely at target                → the reassurance list
+    const SECTION_RULES = [
+      ["no_biomarkers", (r) => !r.hba1c && r.status !== "cancelled" && r.status !== "no_show"],
+      // "Getting worse" absorbs what used to be a separate "Needs extra
+      // attention" card: a Tier-1 marker deteriorating, OR severe/rising
+      // HbA1c, OR poor adherence. One red column instead of two overlapping
+      // ones — a patient only ever needs escalating once.
+      ["getting_worse", (r) => r.outcome === "worse" || atRisk(r)],
+      ["flag_review", (r) => r.outcome === "mixed"],
+      ["stable", (r) => r.outcome === "stable"],
+      ["getting_better", (r) => r.outcome === "better"],
+      ["first_reading", (r) => r.outcome === "single"],
+      ["on_track", (r) => r.hba1c && r.hba1c <= 7.5 && (!r.prevHba1c || r.hba1c <= r.prevHba1c)],
+    ];
+    for (const r of rows) {
+      const hit = SECTION_RULES.find(([, test]) => test(r));
+      // "unclassified" catches the composite's `partial` outcome — a patient
+      // with a prior reading on a Tier-2 marker only, so no Tier-1 trend can
+      // be resolved. Surfaced as a count so the sections always reconcile
+      // against the day's total instead of silently losing people.
+      r.section = hit ? hit[0] : "unclassified";
+    }
+    const inSection = (name) => rows.filter((r) => r.section === name);
 
-    const missingBio = rows.filter(
-      (r) => !r.hba1c && r.status !== "cancelled" && r.status !== "no_show",
+    const missingBio = inSection("no_biomarkers");
+
+    const onTrack = inSection("on_track").sort((a, b) => a.hba1c - b.hba1c);
+
+    const gettingBetter = inSection("getting_better").sort(
+      (a, b) => (b.prevHba1c || 0) - (b.hba1c || 0) - ((a.prevHba1c || 0) - (a.hba1c || 0)),
     );
 
-    const onTrack = rows
-      .filter((r) => r.hba1c && r.hba1c <= 7.5 && (!r.prevHba1c || r.hba1c <= r.prevHba1c))
-      .sort((a, b) => a.hba1c - b.hba1c);
+    // Severely uncontrolled patients (HbA1c > 9) head the column regardless of
+    // how far they moved — an HbA1c of 10.9 with no prior outranks a 0.4 rise.
+    // Everyone else follows, biggest deterioration first.
+    const gettingWorse = inSection("getting_worse").sort((a, b) => {
+      const severe = (r) => (r.hba1c > 9 ? 0 : 1);
+      const delta = (r) => (r.hba1c || 0) - (r.prevHba1c || 0);
+      return severe(a) - severe(b) || (b.hba1c || 0) - (a.hba1c || 0) || delta(b) - delta(a);
+    });
 
-    // Tier-1 composite outcome (HbA1c + SBP). Mixed = HbA1c improving but
-    // SBP worsening (or vice-versa). Partial = no prior reading on either.
-    // Trend buckets use the same composite-across-all-biomarkers classifier
-    // as the period report, so the five tiles (worse/mixed/stable/better/single)
-    // partition exactly `total` and match the report's "Getting Better /
-    // Stable / Flag for review / Getting Worse / Single Visit" totals.
-    const gettingBetter = rows
-      .filter((r) => r.outcome === "better")
-      .sort((a, b) => (b.prevHba1c || 0) - (b.hba1c || 0) - ((a.prevHba1c || 0) - (a.hba1c || 0)));
+    const mixedSignals = inSection("flag_review");
 
-    const gettingWorse = rows
-      .filter((r) => r.outcome === "worse")
-      .sort((a, b) => (b.hba1c || 0) - (b.prevHba1c || 0) - ((a.hba1c || 0) - (a.prevHba1c || 0)));
+    const stablePatients = inSection("stable");
+    const unclassified = inSection("unclassified");
 
-    const mixedSignals = rows.filter((r) => r.outcome === "mixed");
-
-    // "trendable" = rows where the composite outcome could resolve a direction
-    // (better/worse/mixed/stable). Single = at least one reading but no prior
-    // to compare against (matches the report's "Single Visit" bucket).
-    const trendable = rows.filter(
-      (r) =>
-        r.outcome === "better" ||
-        r.outcome === "worse" ||
-        r.outcome === "mixed" ||
-        r.outcome === "stable",
-    ).length;
-    const singleVisit = rows.filter((r) => r.outcome === "single").length;
-    // newHba1c kept for downstream label "First reading — no prior" — mirrors
-    // the report's single-visit count rather than HbA1c-only.
-    const newHba1c = singleVisit;
-    const stablePatients = rows.filter((r) => r.outcome === "stable");
+    // "trendable" = the four sections that resolved a direction. Percentages
+    // are each computed from their own count — the Stable slice used to be
+    // derived as `100 - better - worse`, which silently absorbed every mixed
+    // patient and reported 7 patients as 58%.
+    const trendable =
+      gettingWorse.length + mixedSignals.length + stablePatients.length + gettingBetter.length;
+    const pctOf = (n) => (trendable ? Math.round((n / trendable) * 100) : 0);
+    const newHba1c = inSection("first_reading").length;
     const stableTrend = stablePatients.length;
-    const pctBetter = trendable ? Math.round((gettingBetter.length / trendable) * 100) : 0;
-    const pctWorse = trendable ? Math.round((gettingWorse.length / trendable) * 100) : 0;
-    const pctStable = trendable ? Math.max(0, 100 - pctBetter - pctWorse) : 0;
+    const pctBetter = pctOf(gettingBetter.length);
+    const pctWorse = pctOf(gettingWorse.length);
+    const pctStable = pctOf(stablePatients.length);
+    const pctMixed = pctOf(mixedSignals.length);
     const avgDeltaBetter = gettingBetter.length
       ? gettingBetter.reduce((s, r) => s + (r.hba1c - r.prevHba1c), 0) / gettingBetter.length
       : 0;
@@ -1133,7 +1282,6 @@ export default function LiveDashboard({
       othersTotal: total - seen - checkedin - in_visit - pending - no_show - cancelled,
       pctCoverage,
       pctControlled,
-      needsAttention,
       missingBio,
       onTrack,
       gettingBetter,
@@ -1146,6 +1294,8 @@ export default function LiveDashboard({
       pctBetter,
       pctWorse,
       pctStable,
+      pctMixed,
+      unclassified,
       avgDeltaBetter,
       avgDeltaWorse,
       buckets,
@@ -1582,6 +1732,18 @@ export default function LiveDashboard({
             />
           </div>
 
+          {/* Every patient now sits in exactly one section, so the section
+              counts must add back up to the day's total. This line only
+              appears when someone couldn't be placed at all — a prior reading
+              on a supporting marker but nothing on HbA1c / SBP / TSH. */}
+          {m.unclassified.length > 0 && (
+            <div style={{ fontSize: 10, color: INK3, marginTop: -4 }}>
+              {m.unclassified.length} patient{m.unclassified.length === 1 ? "" : "s"} not shown in
+              any section — a prior reading exists only for a supporting test, so no trend can be
+              worked out for HbA1c, BP or TSH.
+            </div>
+          )}
+
           {/* ── Middle row: rings + flow ──────────────────────────── */}
           <div
             style={{
@@ -1616,7 +1778,8 @@ export default function LiveDashboard({
               <StackedRing
                 segments={[
                   { pct: m.pctWorse, color: RE, label: "Worse", count: m.gettingWorse.length },
-                  { pct: m.pctStable, color: AM, label: "Stable", count: m.stableTrend },
+                  { pct: m.pctMixed, color: AM, label: "Flagged", count: m.mixedSignals.length },
+                  { pct: m.pctStable, color: INK3, label: "Stable", count: m.stableTrend },
                   { pct: m.pctBetter, color: GN, label: "Better", count: m.gettingBetter.length },
                 ]}
                 centerValue={m.trendable}
@@ -1636,8 +1799,14 @@ export default function LiveDashboard({
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                    <span style={{ color: AM, fontWeight: 600 }}>→ Stable</span>
+                    <span style={{ color: AM, fontWeight: 600 }}>⚠ Flagged</span>
                     <span style={{ fontFamily: FM, color: AM, fontWeight: 600 }}>
+                      {m.mixedSignals.length} · {m.pctMixed}%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: INK3, fontWeight: 600 }}>→ Stable</span>
+                    <span style={{ fontFamily: FM, color: INK3, fontWeight: 600 }}>
                       {m.stableTrend} · {m.pctStable}%
                     </span>
                   </div>
@@ -1665,7 +1834,7 @@ export default function LiveDashboard({
             </Card>
           </div>
 
-          {/* ── Six trend cards: worse · mixed · stable · better · attention · on-track · missing-bio ── */}
+          {/* ── Six trend cards: worse · mixed · stable · better · on-track · missing-bio ── */}
           <div style={{ display: "grid", gridTemplateColumns: gridTrend, gap: 10 }}>
             <Card>
               <SectionTitle
@@ -1675,8 +1844,12 @@ export default function LiveDashboard({
                   </span>
                 }
               >
-                📉 Getting worse — Tier 1 (HbA1c / SBP)
+                📉 Getting worse &amp; at risk
               </SectionTitle>
+              <div style={{ fontSize: 10, color: INK3, marginBottom: 8 }}>
+                A main test is deteriorating, or HbA1c is above 9 / rising above 8, or medicine
+                compliance is under 60%.
+              </div>
               <div
                 style={{
                   display: "flex",
@@ -1709,7 +1882,7 @@ export default function LiveDashboard({
               <div style={{ height: 8 }} />
               {m.gettingWorse.length === 0 ? (
                 <div style={{ fontSize: 12, color: INK3, padding: "4px 0" }}>
-                  No Tier-1 deterioration today
+                  ✓ Nobody deteriorating or at risk today
                 </div>
               ) : (
                 <div
@@ -1721,6 +1894,16 @@ export default function LiveDashboard({
                 >
                   {m.gettingWorse.map((r) => {
                     const td = triggerDelta(r);
+                    // Patients pulled in by a risk flag rather than a Tier-1
+                    // trend (e.g. HbA1c 10.9 with no prior) have no composite
+                    // reason to show, so fall back to naming the flags.
+                    const risks = riskReasons(r);
+                    const worsening = r.outcome === "worse";
+                    const line = worsening
+                      ? [expandReason(r), risks.length ? `also ${risks.join(" · ")}` : ""]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : risks.join(" · ");
                     return (
                       <div
                         key={r.id}
@@ -1748,19 +1931,27 @@ export default function LiveDashboard({
                                 fontWeight: 800,
                                 padding: "1px 5px",
                                 borderRadius: 6,
-                                background: GNL,
-                                color: GN,
-                                border: `1px solid ${GN}`,
+                                background: worsening ? GNL : REL,
+                                color: worsening ? GN : RE,
+                                border: `1px solid ${worsening ? GN : RE}`,
                                 letterSpacing: ".04em",
                               }}
                             >
-                              T1
+                              {worsening ? "T1" : "⚠ RISK"}
                             </span>
                           </div>
                           <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                          {r.outcomeReason && (
-                            <div style={{ fontSize: 9, color: RE, marginTop: 2, fontWeight: 600 }}>
-                              {r.outcomeReason}
+                          {line && (
+                            <div
+                              style={{
+                                fontSize: 9,
+                                color: RE,
+                                marginTop: 2,
+                                fontWeight: 600,
+                                lineHeight: 1.35,
+                              }}
+                            >
+                              {line}
                             </div>
                           )}
                           <ParamChips r={r} />
@@ -1874,8 +2065,16 @@ export default function LiveDashboard({
                           </div>
                           <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
                           {r.outcomeReason && (
-                            <div style={{ fontSize: 9, color: GN, marginTop: 2, fontWeight: 600 }}>
-                              {r.outcomeReason}
+                            <div
+                              style={{
+                                fontSize: 9,
+                                color: GN,
+                                marginTop: 2,
+                                fontWeight: 600,
+                                lineHeight: 1.35,
+                              }}
+                            >
+                              {expandReason(r)}
                             </div>
                           )}
                           <ParamChips r={r} />
@@ -1966,9 +2165,15 @@ export default function LiveDashboard({
                             </div>
                             {r.outcomeReason && (
                               <div
-                                style={{ fontSize: 10, color: AM, marginTop: 2, fontWeight: 600 }}
+                                style={{
+                                  fontSize: 10,
+                                  color: AM,
+                                  marginTop: 2,
+                                  fontWeight: 600,
+                                  lineHeight: 1.35,
+                                }}
                               >
-                                {r.outcomeReason}
+                                {expandReason(r)}
                               </div>
                             )}
                             <ParamChips r={r} />
@@ -2075,76 +2280,6 @@ export default function LiveDashboard({
                 )}
               </Card>
             }
-
-            {/* ── Needs extra attention ─────────────────────────────── */}
-            <Card>
-              <SectionTitle
-                right={
-                  <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-                    {m.needsAttention.length} patients
-                  </span>
-                }
-              >
-                ⚠ Needs extra attention
-              </SectionTitle>
-              {m.needsAttention.length === 0 ? (
-                <div style={{ fontSize: 12, color: GN, padding: "8px 0" }}>
-                  ✓ All controlled patients today
-                </div>
-              ) : (
-                <div
-                  style={{
-                    maxHeight: TREND_BODY_HEIGHT_EXPANDED,
-                    overflowY: "auto",
-                    paddingRight: 4,
-                  }}
-                >
-                  {m.needsAttention.map((r) => {
-                    const trend =
-                      r.prevHba1c && r.hba1c > r.prevHba1c
-                        ? "↑"
-                        : r.prevHba1c && r.hba1c < r.prevHba1c
-                          ? "↓"
-                          : "";
-                    const reasons = [];
-                    if (r.hba1c > 9) reasons.push("HbA1c " + r.hba1c + "%");
-                    if (r.prevHba1c && r.hba1c > r.prevHba1c)
-                      reasons.push("Rising from " + r.prevHba1c + "%");
-                    if (r.medPct != null && r.medPct < 60) reasons.push(r.medPct + "% compliance");
-                    return (
-                      <div
-                        key={r.id}
-                        className="ld-row"
-                        onClick={(e) => select(r, e)}
-                        onAuxClick={(e) => select(r, e)}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          padding: "8px 10px",
-                          background: REL,
-                          border: `1px solid ${RE}22`,
-                          borderRadius: 7,
-                          marginBottom: 6,
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 12, color: INK }}>{r.name}</div>
-                          <div style={{ fontSize: 10, color: RE }}>{reasons.join(" · ")}</div>
-                          <ParamChips r={r} />
-                        </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div style={{ fontFamily: FM, fontSize: 13, color: RE, fontWeight: 600 }}>
-                            <span style={{ color: trend === "↑" ? RE : GN }}>{trend}</span>
-                          </div>
-                          <div style={{ fontSize: 10, color: INK3 }}>{r.time}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Card>
 
             {/* ── On track today ────────────────────────────────────── */}
             <Card>

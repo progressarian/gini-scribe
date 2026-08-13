@@ -265,6 +265,19 @@ function hasAnyTier1Biomarker(appt) {
 const LAB_ONLY_DOCTOR = "Dr. Hospital Admin";
 const isLabOnly = (a) => (a.doctor_name || "") === LAB_ONLY_DOCTOR;
 
+// First-ever *consultation* for this patient — a genuine doctor visit, not a
+// walk-in for bloodwork. `visit_count` is computed server-side as consultations
+// UNION HealthRay appointments (deduped by date) with "Dr. Hospital Admin"
+// registrations excluded and counted separately in `lab_visit_count`. So a
+// patient who has come in five times to give samples but is meeting a
+// consultant for the first time today still counts as new here — which is
+// exactly the distinction the New Patients column exists to make.
+const isNewPatient = (a) => Number(a.visit_count) === 1;
+
+// Prior lab-only walk-ins for a new patient — shown on the column hint so the
+// coordinator can tell "never been here before" from "known to the lab only".
+const labOnlyVisits = (a) => Number(a.lab_visit_count) || 0;
+
 // A report was uploaded (manually, or a document exists for the patient).
 // Shared by the "Uploaded" funnel pill and its click-to-filter so the count
 // and the filtered card set always agree.
@@ -413,6 +426,7 @@ function derivePipeline(appts) {
     categorised: [],
     assigned: [],
     checkedIn: [],
+    newPatients: [],
     noShowCancel: [],
   };
   for (const a of appts) {
@@ -431,6 +445,9 @@ function derivePipeline(appts) {
     if (hasAnyTier1Biomarker(a)) buckets.dataComplete.push(a);
     if (a.category) buckets.categorised.push(a);
     if (a.doctor_name) buckets.assigned.push(a);
+    // Same rule as the New Patients column: first real consultation. Lab-only
+    // walk-ins never reach this list, so the pill counts genuine first visits.
+    if (isNewPatient(a)) buckets.newPatients.push(a);
     const s = a.status || "";
     if (["checkedin", "in_visit", "seen", "completed"].includes(s)) buckets.checkedIn.push(a);
     if (["no_show", "cancelled"].includes(s)) buckets.noShowCancel.push(a);
@@ -453,6 +470,7 @@ const PIPELINE_PILLS = [
   { key: "dataComplete", label: "Data complete", sub: "Can be categorised", tone: "ok" },
   { key: "assigned", label: "Assigned", sub: "To a doctor", tone: "ok" },
   { key: "checkedIn", label: "Checked in", sub: "In clinic", tone: "lv" },
+  { key: "newPatients", label: "New patients", sub: "First consultation", tone: "lv" },
   { key: "noShowCancel", label: "No-show / Cancel", sub: "Did not attend", tone: "crit" },
 ];
 
@@ -2163,6 +2181,19 @@ export default function TriageViewV3({
       })
       .sort((x, y) => x.rank - y.rank || visitRank(x.a) - visitRank(y.a) || x.i - y.i)
       .map((x) => x.a);
+    // New Patients is deliberately ADDITIVE, not one of the exclusive
+    // __bucket columns: a first-visit patient who is out of range still has to
+    // appear under "Getting Worse" so triage doesn't lose them. This column is
+    // a second lens over the same board — expect the same card in both places.
+    out.new_patients = visible
+      .filter(isNewPatient)
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => {
+        const xa = x.a.doctor_name ? 0 : 1;
+        const ya = y.a.doctor_name ? 0 : 1;
+        return xa - ya || visitRank(x.a) - visitRank(y.a) || x.i - y.i;
+      })
+      .map((x) => x.a);
     return out;
   }, [visible]);
 
@@ -2620,7 +2651,9 @@ export default function TriageViewV3({
         {/* Pipeline funnel */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {isPending ? (
-            Array.from({ length: 8 }).map((_, i) => <SkeletonPipelinePill key={i} />)
+            Array.from({ length: PIPELINE_PILLS.length }).map((_, i) => (
+              <SkeletonPipelinePill key={i} />
+            ))
           ) : (
             <>
               {PIPELINE_PILLS.map((p) => {
@@ -2678,6 +2711,7 @@ export default function TriageViewV3({
               <SkeletonColumn accent={SK} />
               <SkeletonColumn accent={AM} />
               <SkeletonColumn accent={LV} />
+              <SkeletonColumn accent={SK} />
             </>
           )
         ) : view === "assign" ? (
@@ -2771,6 +2805,20 @@ export default function TriageViewV3({
               title="No Reports"
               hint="Chase reports · send phlebotomist"
               items={buckets.no_reports}
+              onAssign={(a) => setAssignAppt(a)}
+              onOpen={onSelectAppt}
+              onUpload={openUploadForAppt}
+            />
+            <Column
+              accent={SK}
+              icon="🆕"
+              title="New Patients"
+              hint={(() => {
+                const labKnown = buckets.new_patients.filter((a) => labOnlyVisits(a) > 0).length;
+                const base = "First consultation · lab-only walk-ins excluded";
+                return labKnown ? `${base} · ${labKnown} known to lab already` : base;
+              })()}
+              items={buckets.new_patients}
               onAssign={(a) => setAssignAppt(a)}
               onOpen={onSelectAppt}
               onUpload={openUploadForAppt}
