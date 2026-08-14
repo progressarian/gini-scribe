@@ -1,7 +1,4 @@
 import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import api from "../../services/api";
-import { qk } from "../../queries/keys";
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import {
@@ -47,26 +44,6 @@ export default function FlowAdminPage() {
     () => [...new Set(catalog.map((c) => c.assigned_role).filter(Boolean))].sort(),
     [catalog],
   );
-
-  const qc = useQueryClient();
-  const [demoBusy, setDemoBusy] = useState(false);
-  const runDemo = async (action) => {
-    setDemoBusy(true);
-    try {
-      const { data } = await api.post(`/api/flow/demo/${action}`);
-      qc.invalidateQueries({ queryKey: qk.flow.all });
-      toast(
-        action === "seed"
-          ? `Seeded ${data.count} demo patients — open Flow Coordinator`
-          : `Cleared ${data.removed} demo patients`,
-        "success",
-      );
-    } catch (e) {
-      toast(e?.response?.data?.error || "Demo action failed", "error");
-    } finally {
-      setDemoBusy(false);
-    }
-  };
 
   const saveType = async (id, patch, okMsg) => {
     try {
@@ -158,35 +135,6 @@ export default function FlowAdminPage() {
               Edit visit-time benchmarks and manage journey steps · changes apply to new check-ins
             </div>
           </div>
-        </div>
-
-        {/* Demo data — for testing the dashboard/queues without real check-ins */}
-        <div
-          className="flow-card"
-          style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700 }}>🌱 Demo data (testing)</div>
-            <div className="flow-muted">
-              Seeds ~8 sample patients across stations (VIP, breach, with-SD, with-Chief, live lab
-              queue, completed) so you can try the Coordinator, stations and lab queue. All are
-              labelled DEMO and removed by “Clear demo”.
-            </div>
-          </div>
-          <button
-            className="flow-btn flow-btn-primary"
-            disabled={demoBusy}
-            onClick={() => runDemo("seed")}
-          >
-            🌱 Seed demo
-          </button>
-          <button
-            className="flow-btn flow-btn-ghost"
-            disabled={demoBusy}
-            onClick={() => runDemo("clean")}
-          >
-            🧹 Clear demo
-          </button>
         </div>
 
         <div

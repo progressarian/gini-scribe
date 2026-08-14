@@ -2120,13 +2120,28 @@ router.get("/flow/reports", async (req, res) => {
         `SELECT s.step_name,
                 ROUND(AVG(s.planned_duration_min)::numeric,1) AS avg_budget,
                 ROUND(AVG(s.actual_duration_min)::numeric,1) AS avg_actual,
+                -- Median alongside the mean: a handful of steps left open for
+                -- hours drags AVG far above what a typical patient experiences,
+                -- which makes an outlier problem look like a systemic one.
+                ROUND(
+                  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.actual_duration_min)::numeric, 1
+                ) AS median_actual,
                 COUNT(*) FILTER (WHERE s.actual_duration_min > s.planned_duration_min)::int AS exceeded_count,
                 COUNT(*)::int AS total_count
            FROM flow_visit_steps s
            JOIN flow_visits v ON v.id = s.visit_id
           WHERE v.visit_date BETWEEN $1 AND $2 AND s.status='completed' AND s.actual_duration_min IS NOT NULL
           GROUP BY s.step_name
-          ORDER BY (AVG(s.actual_duration_min) - AVG(s.planned_duration_min)) DESC NULLS LAST`,
+          -- Rank by the TYPICAL case (median − budget), not the mean. A step
+          -- left open a few times sends AVG through the roof and pushes a
+          -- step whose median is comfortably inside budget to the top of the
+          -- bottleneck list. Aggregates are repeated rather than referenced by
+          -- alias — Postgres resolves names inside ORDER BY expressions
+          -- against input columns, not output aliases.
+          ORDER BY (
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.actual_duration_min)
+            - AVG(s.planned_duration_min)
+          ) DESC NULLS LAST`,
         [start, end],
       )
     ).rows;

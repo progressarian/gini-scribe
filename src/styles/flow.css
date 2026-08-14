@@ -41,6 +41,7 @@
   margin: 0 auto;
 }
 .flow-header {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -724,4 +725,258 @@
   padding: 28px;
   color: var(--fink3);
   font-size: 12px;
+}
+
+/* ── Date-range toolbar (Flow Reports header) ──────────────────────────
+   Replaces stacked label+field boxes with one horizontal control strip:
+   a styled preset dropdown, a single capsule holding both date inputs,
+   and a live day-count badge. Native <select>/<input type=date> are kept
+   so the OS date picker and keyboard behaviour still work. */
+.flow-toolbar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flow-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 30px 8px 32px;
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+  background-color: var(--fwhite);
+  /* calendar glyph on the left, chevron on the right */
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236b7d90' stroke-width='1.4'%3E%3Crect x='2' y='3.2' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.6h12M5.5 1.8v2.6M10.5 1.8v2.6' stroke-linecap='round'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%236b7d90' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-position:
+    left 10px center,
+    right 11px center;
+  background-size: 14px, 9px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fink);
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.flow-select:hover {
+  border-color: var(--fbd2);
+}
+.flow-select:focus-visible {
+  border-color: var(--ftl);
+  box-shadow: 0 0 0 3px rgba(0, 158, 140, 0.15);
+}
+
+.flow-daterange {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+}
+.flow-daterange input[type="date"] {
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fink);
+  padding: 5px 8px;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.flow-daterange input[type="date"]:hover {
+  background: var(--fbg);
+}
+.flow-daterange input[type="date"]:focus-visible {
+  background: var(--ftll);
+  box-shadow: inset 0 0 0 1px var(--ftl);
+}
+.flow-daterange-sep {
+  font-size: 11px;
+  color: var(--fink3);
+  padding: 0 2px;
+  user-select: none;
+}
+
+.flow-daybadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ftl);
+  background: var(--ftll);
+  border: 1px solid rgba(0, 158, 140, 0.25);
+  padding: 5px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.flow-btn-mini {
+  padding: 6px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  background: var(--fwhite);
+  color: var(--fink2);
+  border: 1px solid var(--fbd);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.flow-btn-mini:hover {
+  border-color: var(--ftl);
+  color: var(--ftl);
+  background: var(--ftll);
+}
+
+/* ── Bottleneck rows ───────────────────────────────────────────────────
+   Reads as a sentence + a picture rather than a stats line: two bars on a
+   shared scale make "planned vs actual" obvious without reading numbers. */
+.fbn-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid;
+  margin-bottom: 7px;
+}
+.fbn-rank {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fbn-body {
+  flex: 1;
+  min-width: 0;
+}
+.fbn-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.fbn-name {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--fink);
+}
+.fbn-verdict {
+  font-size: 11px;
+  font-weight: 700;
+}
+.fbn-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+}
+.fbn-bar-lbl {
+  width: 46px;
+  flex-shrink: 0;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fink3);
+}
+.fbn-track {
+  flex: 1;
+  height: 9px;
+  background: var(--fwhite);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--fbd);
+}
+.fbn-fill {
+  height: 100%;
+  border-radius: 5px;
+  min-width: 2px;
+  transition: width 0.4s;
+}
+.fbn-fill-plan {
+  background: var(--fbd2);
+}
+.fbn-bar-val {
+  width: 44px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fink2);
+}
+.fbn-foot {
+  font-size: 10px;
+  color: var(--fink3);
+  margin-top: 5px;
+  line-height: 1.45;
+}
+.fbn-extra {
+  flex-shrink: 0;
+  text-align: right;
+  font-weight: 700;
+  line-height: 1;
+}
+.fbn-extra-num {
+  font-size: 19px;
+}
+.fbn-extra-unit {
+  font-size: 9px;
+  font-weight: 700;
+  display: block;
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+/* ── Coordinator: plain-language helpers ──────────────────────────────── */
+.cp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--fink3);
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-radius: 7px;
+  padding: 7px 11px;
+  margin-bottom: 9px;
+}
+.cp-legend b {
+  color: var(--fink2);
+}
+.cp-legend .j-step {
+  margin-left: 4px;
+  cursor: default;
+}
+.cp-plain {
+  font-size: 10.5px;
+  font-weight: 700;
+  margin-top: 5px;
+  line-height: 1.4;
+}
+.cp-cardsub {
+  font-size: 10.5px;
+  color: var(--fink3);
+  margin-top: -5px;
+  margin-bottom: 9px;
+  line-height: 1.5;
 }

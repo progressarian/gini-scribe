@@ -22,6 +22,12 @@ const STAGE_LABEL = {
   cancelled: "Cancelled",
 };
 
+// Mirrors VISIT_ATRISK_PCT / STEP_AMBER_OVER in server/services/flow/journey.js.
+// Named here only so the UI can spell the rule out to the user; the server
+// stays the source of truth for the actual classification.
+const ATRISK_PCT = 80;
+const STEP_OVER_MIN = 5;
+
 const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const initials = (name) =>
   (name || "")
@@ -322,6 +328,23 @@ export default function FlowCoordinatorPage() {
             )}
           </div>
         </div>
+        {/* Spell the colour rules out rather than expecting people to learn
+            them. Two different clocks run per patient and the difference is
+            the single most misread thing on this page. */}
+        <div className="cp-legend">
+          <span>
+            <b>Row colour</b> = whole visit against its promised time —
+            <span className="f-grn"> green on track</span> ·
+            <span className="f-amb"> amber {ATRISK_PCT}% used</span> ·
+            <span className="f-red"> red over</span>
+          </span>
+          <span>
+            <b>Step pills</b> = one station each — <span className="j-step j-done">done ✓</span>
+            <span className="j-step j-now">🔸 now</span>
+            <span className="j-step j-over">⚠ over budget</span>
+            <span className="j-step j-next">not started</span>
+          </span>
+        </div>
         {isLoading ? (
           <div className="flow-card flow-empty">Loading…</div>
         ) : visits.length === 0 ? (
@@ -352,6 +375,24 @@ export default function FlowCoordinatorPage() {
                   : v.status === "completed"
                     ? "f-grn"
                     : "";
+            // One sentence saying where this patient stands, so nobody has to
+            // decode "87m / 120m" or work out what amber means.
+            const promise = v.max_time_min;
+            const overBy = (t.elapsed_min || 0) - promise;
+            let plainStatus = "";
+            if (v.status === "waiting") plainStatus = "Clock not started yet — press ▶ Start";
+            else if (v.status === "paused")
+              plainStatus = `Paused at ${t.elapsed_min} min — press ▶ Resume to continue`;
+            else if (v.status === "completed")
+              plainStatus =
+                overBy > 0
+                  ? `Finished in ${t.elapsed_min} min — ${overBy} min over the ${promise} min promise`
+                  : `Finished in ${t.elapsed_min} min, inside the ${promise} min promise`;
+            else if (t.urgency === "breach")
+              plainStatus = `${overBy} min past the ${promise} min promise`;
+            else if (t.urgency === "atrisk")
+              plainStatus = `Only ${t.remaining_min} min left of ${promise} — ${t.pct_elapsed}% used`;
+            else plainStatus = `${t.remaining_min} min left of ${promise}`;
             return (
               <div key={v.id} className={`cp-row ${cls}`} onClick={() => setOpenId(v.id)}>
                 <div className="cp-left">
@@ -392,12 +433,14 @@ export default function FlowCoordinatorPage() {
                       style={{ width: `${Math.min(100, t.pct_elapsed || 0)}%` }}
                     />
                   </div>
+                  <div className={`cp-plain ${numColour}`}>{plainStatus}</div>
                   {v.bottleneck && (
                     <div
-                      style={{ fontSize: 10, color: "var(--fre)", marginTop: 4, fontWeight: 700 }}
+                      style={{ fontSize: 10, color: "var(--fre)", marginTop: 3, fontWeight: 700 }}
                     >
-                      ⚠ {shorten(v.bottleneck.step_name)} — {v.bottleneck.at_station_min}m on{" "}
-                      {v.bottleneck.planned_duration_min}m budget
+                      ⚠ Stuck at {shorten(v.bottleneck.step_name)} — {v.bottleneck.at_station_min}{" "}
+                      min so far, {v.bottleneck.over_min} min over its{" "}
+                      {v.bottleneck.planned_duration_min} min budget
                     </div>
                   )}
                 </div>
@@ -493,7 +536,11 @@ export default function FlowCoordinatorPage() {
         {/* Station occupancy */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
           <div className="flow-card">
-            <div className="flow-sec-title">Station occupancy · live</div>
+            <div className="flow-sec-title">Who is where, right now</div>
+            <div className="cp-cardsub">
+              Patients currently at each station. A station with several people is where the queue
+              is building. Waiting and paused patients are not counted.
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {Object.keys(occupancy).length === 0 && (
                 <div className="flow-muted">All stations idle.</div>
@@ -518,7 +565,12 @@ export default function FlowCoordinatorPage() {
             </div>
           </div>
           <div className="flow-card">
-            <div className="flow-sec-title">Doctor load · live</div>
+            <div className="flow-sec-title">How busy is each doctor</div>
+            <div className="cp-cardsub">
+              <span className="f-grn">Green = free</span>, send the next patient here ·
+              <span className="f-amb"> amber = with a patient</span> ·
+              <span className="f-red"> red = someone is more than {STEP_OVER_MIN} min over</span>
+            </div>
             {doctorLoad.length === 0 ? (
               <div className="flow-muted">No doctors assigned in today's flow yet.</div>
             ) : (
@@ -527,10 +579,10 @@ export default function FlowCoordinatorPage() {
                   const idle = d.withPatient === 0;
                   const colour = d.overdue ? "var(--fre)" : idle ? "var(--fgn)" : "var(--fam)";
                   const note = d.overdue
-                    ? `${d.overdue} overdue`
+                    ? `${d.overdue} running over — don't add more`
                     : idle
-                      ? "IDLE ← can reassign here"
-                      : `${d.withPatient} with patient`;
+                      ? "free now — send the next patient here"
+                      : `${d.withPatient} with them now`;
                   return (
                     <div key={d.name}>
                       <div
@@ -543,7 +595,7 @@ export default function FlowCoordinatorPage() {
                       >
                         <span style={{ fontWeight: 700 }}>{d.name}</span>
                         <span style={{ color: colour }}>
-                          {d.assigned} assigned · {note}
+                          {d.assigned} patients today · {note}
                         </span>
                       </div>
                       <div
