@@ -8,6 +8,7 @@ import { invalidateAppointmentSummaries } from "../services/summaryCache.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
 import { markAppointmentAsSeen } from "../services/healthray/db.js";
 import { getCanonical } from "../utils/labCanonical.js";
+import { getCohort, viewFor, MARKERS } from "../services/cohortOutcomes.js";
 import {
   stripFormPrefix,
   canonicalMedKey,
@@ -1834,6 +1835,212 @@ router.post("/opd/backfill", async (req, res) => {
   } catch (e) {
     console.error("OPD backfill error:", e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── All-time cohort outcomes ─────────────────────────────────────────────
+// Whole patient base, no date filter: latest reading vs the one before it for
+// every marker. Powers the "All-Time Outcomes" OPD tab and the generated
+// patient-outcome document. Rows are paged because the cohort is ~16k people.
+router.get("/opd/cohort", async (req, res) => {
+  try {
+    const raw = await getCohort({ force: req.query.refresh === "1" });
+    const {
+      group = "all",
+      q = "",
+      limit = "100",
+      offset = "0",
+      sort = "worst",
+      basis = "last",
+    } = req.query;
+    // basis=last  → latest vs the reading before it (matches the Live Dashboard)
+    // basis=first → latest vs their earliest reading (treatment journey)
+    const data = viewFor(raw, basis);
+
+    let list = data.patients;
+    if (group !== "all") list = list.filter((p) => p.group === group);
+    const needle = String(q).trim().toLowerCase();
+    if (needle)
+      list = list.filter(
+        (p) =>
+          String(p.name || "")
+            .toLowerCase()
+            .includes(needle) ||
+          String(p.file_no || "")
+            .toLowerCase()
+            .includes(needle),
+      );
+
+    // Worst first: deteriorating before conflicting before off-target, then by
+    // how many markers are outside their safe range.
+    const rank = { worse: 0, mixed: 1, offtarget: 2, stable: 3, single: 4, better: 5 };
+    if (sort === "worst")
+      list = [...list].sort(
+        (a, b) => rank[a.group] - rank[b.group] || b.offTarget.length - a.offTarget.length,
+      );
+    else if (sort === "recent")
+      list = [...list].sort((a, b) =>
+        String(b.lastSeen || "").localeCompare(String(a.lastSeen || "")),
+      );
+
+    const off = Math.max(0, parseInt(offset, 10) || 0);
+    const lim = Math.min(500, Math.max(1, parseInt(limit, 10) || 100));
+
+    res.json({
+      basis: data.basis,
+      generated_at: data.generated_at,
+      total: data.total,
+      fine: data.fine,
+      notFine: data.notFine,
+      counts: data.counts,
+      coverage: data.coverage,
+      markers: MARKERS,
+      matched: list.length,
+      offset: off,
+      limit: lim,
+      rows: list.slice(off, off + lim),
+    });
+  } catch (e) {
+    handleError(res, e, "OPD cohort");
+  }
+});
+
+// Excel export of the cohort — same filters as the table above, so "export"
+// always means "what I am currently looking at". Two sheets: a Summary the
+// reader can quote directly, and one row per patient with every marker.
+router.get("/opd/cohort/export", async (req, res) => {
+  try {
+    const XLSX = await import("xlsx");
+    const raw = await getCohort();
+    const { group = "all", q = "", basis = "last" } = req.query;
+    const data = viewFor(raw, basis);
+
+    let list = data.patients;
+    if (group !== "all") list = list.filter((p) => p.group === group);
+    const needle = String(q).trim().toLowerCase();
+    if (needle)
+      list = list.filter(
+        (p) =>
+          String(p.name || "")
+            .toLowerCase()
+            .includes(needle) ||
+          String(p.file_no || "")
+            .toLowerCase()
+            .includes(needle),
+      );
+    const rank = { worse: 0, mixed: 1, offtarget: 2, stable: 3, single: 4, better: 5 };
+    list = [...list].sort(
+      (a, b) => rank[a.group] - rank[b.group] || b.offTarget.length - a.offTarget.length,
+    );
+
+    const LABEL = {
+      worse: "Getting worse",
+      mixed: "Mixed signals",
+      offtarget: "Off target",
+      better: "Getting better",
+      stable: "Stable",
+      single: "One reading only",
+    };
+    const pct = (n) => (data.total ? Math.round((n / data.total) * 100) : 0);
+
+    const summary = [
+      ["All-Time Patient Outcomes"],
+      ["Generated", new Date(data.generated_at).toLocaleString("en-IN")],
+      ["Scope", "Every patient on record — no date filter"],
+      [
+        "Compared against",
+        data.basis === "first"
+          ? "Their FIRST ever reading (treatment journey)"
+          : "Their PREVIOUS reading (since last visit)",
+      ],
+      [],
+      ["Patients on record", data.total],
+      ["Doing fine", data.fine, `${pct(data.fine)}%`],
+      ["Need attention", data.notFine, `${pct(data.notFine)}%`],
+      [],
+      ["Group", "Patients", "Share"],
+      ...Object.keys(LABEL).map((k) => [
+        LABEL[k],
+        data.counts[k] || 0,
+        `${pct(data.counts[k] || 0)}%`,
+      ]),
+      [],
+      ["Test", "On file", "Comparable", "Off target now"],
+      ...MARKERS.map((m) => {
+        const cv = data.coverage[m.key] || {};
+        return [
+          m.label,
+          cv.withValue || 0,
+          cv.withTrend || 0,
+          m.key === "weight" ? "n/a" : cv.offTarget || 0,
+        ];
+      }),
+      [],
+      ["Note", "Weight is tracked but never changes a patient's verdict."],
+      ["Note", "Comparisons have no time limit — a trend may span years."],
+    ];
+
+    const header = [
+      "File no",
+      "Patient",
+      "Verdict",
+      "Why",
+      "Off target",
+      "Last reading",
+      ...MARKERS.flatMap((m) => [
+        `${m.label} (${data.basis === "first" ? "first" : "prev"})`,
+        `${m.label} (latest)`,
+      ]),
+    ];
+    const body = list.map((p) => [
+      p.file_no || "",
+      p.name || "",
+      LABEL[p.group] || p.group,
+      p.reason || "",
+      p.offTarget.map((k) => k.toUpperCase()).join(", "),
+      p.lastSeen || "",
+      ...MARKERS.flatMap((m) => [p.prev[m.key] ?? "", p.cur[m.key] ?? ""]),
+    ]);
+
+    const wb = XLSX.utils.book_new();
+    const wsSummary = XLSX.utils.aoa_to_sheet(summary);
+    wsSummary["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+    const wsRows = XLSX.utils.aoa_to_sheet([header, ...body]);
+    wsRows["!cols"] = [
+      { wch: 12 },
+      { wch: 26 },
+      { wch: 16 },
+      { wch: 44 },
+      { wch: 16 },
+      { wch: 13 },
+      ...MARKERS.flatMap(() => [{ wch: 11 }, { wch: 11 }]),
+    ];
+    wsRows["!autofilter"] = {
+      ref: XLSX.utils.encode_range({
+        s: { r: 0, c: 0 },
+        e: { r: body.length, c: header.length - 1 },
+      }),
+    };
+    wsRows["!freeze"] = { xSplit: 2, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, wsRows, "Patients");
+
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const tag = `${group === "all" ? "all" : group}-since-${data.basis}`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="patient-outcomes-${tag}-${stamp}.xlsx"`,
+    );
+    res.setHeader("Content-Length", buf.length);
+    res.send(buf);
+  } catch (e) {
+    handleError(res, e, "OPD cohort export");
   }
 });
 

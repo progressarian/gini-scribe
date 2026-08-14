@@ -8,6 +8,7 @@ import { SLOT_CATALOG, SLOT_REASON, isClinicalDoctor } from "./lib/slotAvailabil
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
+import CohortDashboard from "./components/opd/CohortDashboard.jsx";
 import OpdRangeReport from "./components/opd/OpdRangeReport.jsx";
 import TriageView from "./components/opd/TriageView.jsx";
 import TriageViewV3 from "./components/opd/TriageViewV3.jsx";
@@ -6920,6 +6921,7 @@ export default function OPD() {
   const TAB_TO_VIEW = {
     schedule: "list",
     dashboard: "dashboard",
+    cohort: "cohort",
     triage: "triage",
     "triage-v3": "triage-v3",
     "new-appt": "new-appt",
@@ -6928,6 +6930,7 @@ export default function OPD() {
   const VIEW_TO_TAB = {
     list: "schedule",
     dashboard: "dashboard",
+    cohort: "cohort",
     triage: "triage",
     "triage-v3": "triage-v3",
     "new-appt": "new-appt",
@@ -7288,6 +7291,7 @@ export default function OPD() {
           {[
             ["list", "📋 Schedule"],
             ["dashboard", "📊 Live Dashboard"],
+            ["cohort", "🧭 All-Time Outcomes"],
             // ["triage", "🔴🟡✅ Triage"],
             ["triage-v3", "🧪 Triage v3"],
             ["new-appt", "➕ New Appointment"],
@@ -7615,6 +7619,8 @@ export default function OPD() {
               showToast("✓ Appointment created");
             }}
           />
+        ) : view === "cohort" ? (
+          <CohortDashboard />
         ) : view === "dashboard" ? (
           <div
             style={{
