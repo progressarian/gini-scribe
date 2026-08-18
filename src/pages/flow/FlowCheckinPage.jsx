@@ -5,6 +5,9 @@ import useAuthStore from "../../stores/authStore";
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import VisitDetailModal from "../../components/flow/VisitDetailModal";
+import AppointmentPicker from "../../components/flow/AppointmentPicker";
+import NewPatientModal from "../../components/flow/NewPatientModal";
+import { classifyAppointment } from "../../lib/flowAppointmentType";
 import {
   useFlowVisitTypes,
   useFlowTemplate,
@@ -80,6 +83,20 @@ const normalizeMobile = (local) => `91${local}`;
 // keep just the last 10 digits to fit the +91-prefixed field.
 const toLocal10 = (raw) => (raw || "").replace(/\D/g, "").slice(-10);
 
+// GHM rows carry free-text sex ("M", "male", "FEMALE"); patientCreateSchema is
+// a strict Male|Female|Other enum, so anything else must be dropped rather than
+// posted — an unmapped value 400s the whole check-in.
+const normalizeSex = (raw) => {
+  const v = String(raw || "")
+    .trim()
+    .toLowerCase();
+  if (!v) return "";
+  if (v.startsWith("m")) return "Male";
+  if (v.startsWith("f")) return "Female";
+  if (v.startsWith("o")) return "Other";
+  return "";
+};
+
 const ageSex = (p) => (p ? `${p.age ?? ""}${(p.sex || "").charAt(0).toUpperCase()}`.trim() : "");
 
 // Parse the start time out of an appointment slot ("9:30 AM to 10 AM",
@@ -130,6 +147,7 @@ export default function FlowCheckinPage() {
     notes: "",
     age: "",
     sex: "",
+    token_number: "",
   });
   const [patientDbId, setPatientDbId] = useState(null);
   const [sd, setSd] = useState({ id: null, name: "" });
@@ -144,6 +162,10 @@ export default function FlowCheckinPage() {
   const [ageSexVal, setAgeSexVal] = useState(null); // "71M" — carried into the visit
   const [context, setContext] = useState(null); // { lastVisit, conName, moName, vitals, appt }
   const [appointmentId, setAppointmentId] = useState(null); // linked OPD/GHM appointment
+  const [newPatientOpen, setNewPatientOpen] = useState(false);
+  // The picker is pinned to today: flow_visits.visit_date defaults to
+  // CURRENT_DATE server-side, so a back-dated check-in isn't a thing.
+  const todayStr = new Date().toISOString().split("T")[0];
   // Billing extracted from HealthRay (get_transactions) for the picked patient,
   // plus suggested journey steps (lab → Blood Sample, imaging) to auto-inject.
   const [billing, setBilling] = useState(null);
@@ -353,7 +375,9 @@ export default function FlowCheckinPage() {
     });
   };
 
-  const pickPatient = async (p) => {
+  // Fill the identity fields from a patients-table row (or an appointment row
+  // shaped like one) and drop everything that belonged to the previous patient.
+  const applyPatient = (p) => {
     setForm((f) => ({
       ...f,
       name: p.name || "",
@@ -361,6 +385,9 @@ export default function FlowCheckinPage() {
       phone: toLocal10(p.phone),
       age: p.age ?? "",
       sex: p.sex || "",
+      // Cleared, not spread through: a token typed for the previous patient
+      // would otherwise ride along and be checked in against this one.
+      token_number: "",
     }));
     setPatientDbId(p.id || null);
     setAgeSexVal(ageSex(p) || null);
@@ -375,34 +402,42 @@ export default function FlowCheckinPage() {
     setBilling(null);
     setBillingSteps([]);
     setDismissedBilling(new Set());
-    // Best-effort: pull the patient record (care team + last vitals) and today's
-    // appointment (time / type / doctor) in parallel to pre-fill the form.
+  };
+
+  // Best-effort enrichment: patient record (care team + last vitals), today's
+  // appointment (time / type / doctor), and HealthRay billing → journey steps.
+  // `apptOverride` pins the appointment the coordinator actually clicked — a
+  // patient with two bookings today would otherwise be linked to whichever one
+  // /flow/patient-appointment returns (ORDER BY id DESC LIMIT 1).
+  const loadContext = async ({ patientDbId: dbId, fileNo, apptOverride = null }) => {
+    if (!dbId) return;
     try {
       const [detailRes, apptRes, billRes] = await Promise.all([
-        api.get(`/api/patients/${p.id}`),
+        api.get(`/api/patients/${dbId}`),
         api
           .get(
-            `/api/flow/patient-appointment?patient_db_id=${p.id}&file_no=${encodeURIComponent(p.file_no || "")}`,
+            `/api/flow/patient-appointment?patient_db_id=${dbId}&file_no=${encodeURIComponent(fileNo || "")}`,
           )
           .catch(() => ({ data: null })),
         api
           .get(
-            `/api/flow/patient-billing?patient_db_id=${p.id}&file_no=${encodeURIComponent(p.file_no || "")}`,
+            `/api/flow/patient-billing?patient_db_id=${dbId}&file_no=${encodeURIComponent(fileNo || "")}`,
           )
           .catch(() => ({ data: { billing: null, steps: [] } })),
       ]);
       const data = detailRes.data;
-      const appt = apptRes.data;
+      const appt = apptOverride || apptRes.data;
       // Billing → display + step suggestions to auto-inject (removable).
       setBilling(billRes.data?.billing || null);
       setBillingSteps(billRes.data?.steps || []);
 
-      if (!ageSex(p) && (data.age || data.sex)) setAgeSexVal(ageSex(data) || null);
+      if (!ageSexVal && (data.age || data.sex)) setAgeSexVal(ageSex(data) || null);
       const lastConsult = (data.consultations || []).find((c) => c.con_name || c.mo_name);
       const vitals = (data.vitals || [])[0] || null;
 
-      // Today's appointment → visit type, time, linked id.
-      if (appt) {
+      // Today's appointment → visit type, time, linked id. Skipped when the
+      // caller already set these from the row it was picked from.
+      if (appt && !apptOverride) {
         setAppointmentId(appt.id);
         const isFollowUp = /follow|f\/?u|review/i.test(appt.visit_type || "");
         setTypeKey(isFollowUp ? "fu_appt" : "new_appt"); // has an appointment → appointment type
@@ -446,9 +481,105 @@ export default function FlowCheckinPage() {
       if (!chiefDoc && chiefs.length === 1) chiefDoc = chiefs[0]; // sensible default when only one
       if (chiefDoc)
         setChief({ id: String(chiefDoc.id), name: chiefDoc.short_name || chiefDoc.name });
+      return data;
     } catch {
       /* context is best-effort — check-in still works without it */
+      return null;
     }
+  };
+
+  // Everything patient-specific, back to blank. Keeps the visit-type selection:
+  // reception checks in runs of similar patients, and re-picking the type for
+  // every one of them was never the old behaviour.
+  const resetForm = () => {
+    setForm({
+      name: "",
+      file_no: "",
+      phone: "",
+      appt_time: "",
+      notes: "",
+      age: "",
+      sex: "",
+      token_number: "",
+    });
+    setPatientDbId(null);
+    setTouched({});
+    setAttempted(false);
+    setAgeSexVal(null);
+    setContext(null);
+    setAppointmentId(null);
+    setPendingMo(null);
+    setBilling(null);
+    setBillingSteps([]);
+    setDismissedBilling(new Set());
+    setSd({ id: null, name: "" });
+    setChief({ id: null, name: "" });
+  };
+
+  const pickPatient = async (p) => {
+    applyPatient(p);
+    await loadContext({ patientDbId: p.id, fileNo: p.file_no });
+  };
+
+  // Pick a row off today's GHM list. The appointment carries enough to fill the
+  // form on its own, so a booked patient with no patients record still works —
+  // submit() mints the record and the GNI file number as it always has.
+  const pickAppointment = async (a) => {
+    if (a.flow_visit_id) return setDetailId(a.flow_visit_id); // already checked in
+    applyPatient({
+      id: a.patient_db_id,
+      name: a.patient_name,
+      file_no: a.file_no,
+      phone: a.phone,
+      age: a.age,
+      sex: normalizeSex(a.sex),
+    });
+    setAppointmentId(a.id);
+    const cls = classifyAppointment(a);
+    setTypeKey(cls.typeKey);
+    setTestsAvailable(cls.testsAvailable);
+    const hhmm = parseSlotToHHMM(a.reporting_time_slot || a.time_slot);
+    setForm((f) => ({ ...f, appt_time: hhmm || "" }));
+    if (a.patient_db_id) {
+      const data = await loadContext({
+        patientDbId: a.patient_db_id,
+        fileNo: a.file_no,
+        apptOverride: a,
+      });
+      // "OPD" (the generic HealthRay type) says nothing about new-vs-follow-up.
+      // A patient with consultations behind them is a follow-up; only someone
+      // with no history at all gets the new-patient journey.
+      if (cls.ambiguous && data) {
+        setTypeKey((data.consultations || []).length > 0 ? "fu_appt" : "new_appt");
+      }
+    } else {
+      // No patients row yet — show what the booking knows and match the doctor.
+      setContext({
+        lastVisit: null,
+        conName: null,
+        moName: null,
+        vitals: null,
+        appt: {
+          time_slot: a.time_slot,
+          visit_type: a.visit_type,
+          doctor_name: a.doctor_name,
+          status: a.status,
+        },
+      });
+      const sdDoc = matchDoctor(a.doctor_name);
+      if (sdDoc) setSd({ id: String(sdDoc.id), name: sdDoc.short_name || sdDoc.name });
+      // No patients row means no history anywhere — treat an ambiguous type as new.
+      if (cls.ambiguous) setTypeKey("new_appt");
+    }
+  };
+
+  // A freshly registered patient arrives with a real id, so submit() skips its
+  // own upsert; default to a new-patient visit type and let reception adjust.
+  const onPatientCreated = (p) => {
+    setNewPatientOpen(false);
+    applyPatient(p);
+    setTypeKey((k) => (TYPE_BUTTONS.find((t) => t.key === k)?.walk ? "new_walk" : "new_appt"));
+    setTouched({});
   };
 
   const updateStep = (u, patch) =>
@@ -573,7 +704,9 @@ export default function FlowCheckinPage() {
           phone: form.phone || null,
           file_no: fileNo || undefined,
           age: form.age ? parseInt(form.age) : undefined,
-          sex: form.sex || undefined,
+          // patientCreateSchema takes a strict Male|Female|Other enum; a GHM
+          // row's "M"/"male" would 400 the whole check-in.
+          sex: normalizeSex(form.sex) || undefined,
         });
         dbId = pt.id;
         fileNo = pt.file_no;
@@ -598,6 +731,7 @@ export default function FlowCheckinPage() {
         patient_status: selected?.followUp ? fuStatus : "new_patient",
         is_vip: isVip,
         notes: form.notes.trim() || null,
+        token_number: form.token_number.trim() || null,
         assigned_sd: sd.id,
         assigned_sd_name: sd.name || null,
         assigned_chief: chief.id,
@@ -615,25 +749,17 @@ export default function FlowCheckinPage() {
         start_mode: startMode,
       };
       const res = await checkin.mutateAsync(payload);
+      const tokenSuffix = form.token_number.trim() ? ` · Token ${form.token_number.trim()}` : "";
       toast(
         startMode === "later"
-          ? `Added ${form.name} to queue · File ${fileNo} · timer not started`
-          : `Checked in ${form.name} · File ${fileNo}`,
+          ? `Added ${form.name} to queue · File ${fileNo}${tokenSuffix} · timer not started`
+          : `Checked in ${form.name} · File ${fileNo}${tokenSuffix}`,
         "success",
       );
       // reset patient-specific fields + touched state, keep type selection
-      setForm({ name: "", file_no: "", phone: "", appt_time: "", notes: "", age: "", sex: "" });
-      setPatientDbId(null);
+      resetForm();
       setIsVip(false);
       setStartMode("now"); // default back to immediate start for the next patient
-      setTouched({});
-      setAttempted(false);
-      setAgeSexVal(null);
-      setContext(null);
-      setAppointmentId(null);
-      setPendingMo(null);
-      setSd({ id: null, name: "" });
-      setChief({ id: null, name: "" });
     } catch (e) {
       toast(e?.response?.data?.error || e.message, "error");
     }
@@ -659,14 +785,33 @@ export default function FlowCheckinPage() {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          {/* LEFT — form */}
+        <div className="flow-checkin-3col">
+          {/* LEFT — today's GHM list; picking a row fills the form */}
+          <AppointmentPicker
+            date={todayStr}
+            selectedAppointmentId={appointmentId}
+            onPick={pickAppointment}
+            onOpenVisit={(id) => {
+              if (todays.find((v) => v.id === id)) setDetailId(id);
+              else toast("That visit isn't in today's feed yet — refresh in a moment.", "warn");
+            }}
+          />
+
+          {/* MIDDLE — form */}
           <div className="flow-card">
             <div className="flow-sec-title">Check-in patient</div>
 
-            <label className="flow-stat-lbl" style={{ display: "block", marginBottom: 6 }}>
-              Patient type & visit
-            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <label className="flow-stat-lbl">Patient type & visit</label>
+              <button
+                className="flow-btn flow-btn-ghost flow-btn-mini"
+                style={{ marginLeft: "auto" }}
+                title="Clear every field and unlink the picked appointment"
+                onClick={resetForm}
+              >
+                ✕ Clear form
+              </button>
+            </div>
             <div className="flow-type-grid" style={{ marginBottom: 12 }}>
               {TYPE_BUTTONS.map((t) => (
                 <div
@@ -819,26 +964,8 @@ export default function FlowCheckinPage() {
                   />
                   <button
                     className="flow-btn flow-btn-ghost"
-                    title="Clear the form to register a brand-new patient"
-                    onClick={() => {
-                      setForm({
-                        name: "",
-                        file_no: "",
-                        phone: "",
-                        appt_time: "",
-                        notes: "",
-                        age: "",
-                        sex: "",
-                      });
-                      setPatientDbId(null);
-                      setTouched({});
-                      setAgeSexVal(null);
-                      setContext(null);
-                      setAppointmentId(null);
-                      setPendingMo(null);
-                      setSd({ id: null, name: "" });
-                      setChief({ id: null, name: "" });
-                    }}
+                    title="Register a brand-new patient (full record)"
+                    onClick={() => setNewPatientOpen(true)}
                   >
                     New patient
                   </button>
@@ -887,6 +1014,14 @@ export default function FlowCheckinPage() {
                   />
                 </div>
                 {showErr("phone") && <FieldErr>{fieldErrors.phone}</FieldErr>}
+              </div>
+              <div className="flow-field">
+                <label>Token number</label>
+                <input
+                  value={form.token_number}
+                  onChange={(e) => setForm({ ...form, token_number: e.target.value.slice(0, 16) })}
+                  placeholder="e.g. 27 or A-14"
+                />
               </div>
               <div className="flow-field">
                 <label>Appointment time {selected?.walk ? "" : "*"}</label>
@@ -1430,6 +1565,7 @@ export default function FlowCheckinPage() {
             <table className="flow-table">
               <thead>
                 <tr>
+                  <th>Token</th>
                   <th>Patient</th>
                   <th>Type</th>
                   <th>Steps</th>
@@ -1447,6 +1583,13 @@ export default function FlowCheckinPage() {
                     style={{ cursor: "pointer" }}
                     title="Click to edit journey / step times"
                   >
+                    <td>
+                      {v.token_number ? (
+                        <span className="flow-badge fb-ink">#{v.token_number}</span>
+                      ) : (
+                        <span className="flow-muted">—</span>
+                      )}
+                    </td>
                     <td>
                       <b>{v.patient_name}</b>
                       {v.is_vip ? " ⭐" : ""}
@@ -1555,6 +1698,19 @@ export default function FlowCheckinPage() {
         <VisitDetailModal
           visit={todays.find((v) => v.id === detailId)}
           onClose={() => setDetailId(null)}
+        />
+      )}
+
+      {newPatientOpen && (
+        <NewPatientModal
+          onClose={() => setNewPatientOpen(false)}
+          onCreated={onPatientCreated}
+          initial={{
+            name: form.name,
+            phone: form.phone,
+            age: form.age,
+            sex: normalizeSex(form.sex),
+          }}
         />
       )}
 

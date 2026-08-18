@@ -68,6 +68,13 @@ export default function PatientJourneyPage() {
               <div style={{ fontSize: 22, fontWeight: 700, margin: "2px 0 10px" }}>
                 {data.first_name || "there"} ji 🙏
               </div>
+              {/* The counter token off their physical slip — confirms this page
+                  is about them before they read any of the timings. */}
+              {data.token_number && (
+                <div className="flow-badge fb-ink" style={{ marginBottom: 10, fontSize: 12 }}>
+                  Token #{data.token_number}
+                </div>
+              )}
               {data.status === "completed" ? (
                 <div className="flow-badge fb-grn" style={{ fontSize: 13, padding: "6px 14px" }}>
                   ✓ Visit complete — thank you!

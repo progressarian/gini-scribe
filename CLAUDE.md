@@ -33,11 +33,12 @@ npm run smoke:doctors
 npm run smoke:med-collection
 ```
 
-There is no test suite and no linter. `server/scripts/` and the repo root hold ~100
-ad-hoc `.mjs`/`.js` diagnostic and backfill scripts — one-off tools, not runtime code.
-To exercise one feature, run its script directly (`node server/scripts/<name>.js`) rather
-than looking for a test runner. Put any new one-off in `server/scripts/`; the ~50 loose
-scripts at the repo root are historical clutter, not a pattern to follow.
+There is no test suite and no linter. `server/scripts/` holds ~50 ad-hoc `.mjs`/`.js`
+diagnostic and backfill scripts — one-off tools, not runtime code. To exercise one
+feature, run its script directly (`node server/scripts/<name>.js`) rather than looking
+for a test runner. Put any new one-off in `server/scripts/` (or `scripts/` for the few
+report/utility ones); the repo root was cleared of ~50 loose scripts on 2026-08-18 and
+should stay clear.
 
 `server/` has its **own `package.json` and `node_modules`** — the API/worker deps are
 declared there, the root manifest carries the client plus a duplicate copy for local

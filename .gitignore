@@ -2,6 +2,14 @@ node_modules/
 dist/
 *.env
 .vite/
-server/gini-ai-8fc66116e12e.json
-server/*.json
+
+# Google service-account key. This was the reason for the old blanket
+# `server/*.json` rule, which also swallowed server/package.json and
+# server/railway.json — both needed by the Docker build. Keep it narrow.
 gini-ai-8fc66116e12e.json
+server/gini-ai-*.json
+
+# Ad-hoc debug output. One-off scripts belong in server/scripts/, and their
+# dumps/logs should not come back to the repo root.
+*.log
+/*_debug.json

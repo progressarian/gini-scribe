@@ -7,6 +7,7 @@ import {
   useFlowAddStep,
   useFlowStepCatalog,
   useFlowReorderSteps,
+  useFlowSetToken,
 } from "../../queries/hooks/useFlow";
 import "../../styles/flow.css";
 
@@ -37,6 +38,7 @@ const fmtSkipTime = (t) => {
 // `steps` + `_timing` (the shape returned by GET /api/flow/visits).
 export default function VisitDetailModal({ visit, onClose }) {
   const advance = useFlowAdvance();
+  const setToken = useFlowSetToken();
   const editDur = useFlowEditDuration();
   const removeStep = useFlowRemoveStep();
   const addStep = useFlowAddStep();
@@ -153,6 +155,11 @@ export default function VisitDetailModal({ visit, onClose }) {
           >
             <div>
               <div className="flow-title" style={{ fontSize: 16 }}>
+                {visit.token_number ? (
+                  <span className="flow-badge fb-ink" style={{ marginRight: 6, fontSize: 12 }}>
+                    #{visit.token_number}
+                  </span>
+                ) : null}
                 {visit.patient_name} {visit.is_vip ? "⭐" : ""}
               </div>
               <div className="flow-sub">
@@ -163,6 +170,27 @@ export default function VisitDetailModal({ visit, onClose }) {
             <button className="flow-btn flow-btn-ghost" onClick={onClose}>
               ✕ Close
             </button>
+          </div>
+
+          <div className="flow-field" style={{ marginBottom: 10, maxWidth: 200 }}>
+            <label>Token number</label>
+            <input
+              defaultValue={visit.token_number || ""}
+              placeholder="e.g. 27 or A-14"
+              disabled={setToken.isPending}
+              // Blur-to-save, matching how step durations are edited here.
+              onBlur={async (e) => {
+                const next = e.target.value.trim().slice(0, 16);
+                if (next === (visit.token_number || "")) return;
+                try {
+                  await setToken.mutateAsync({ visitId: visit.id, token_number: next });
+                  toast(next ? `Token set to ${next}` : "Token cleared", "success");
+                } catch (err) {
+                  e.target.value = visit.token_number || "";
+                  toast(err.message, "error");
+                }
+              }}
+            />
           </div>
 
           <div className="flow-muted" style={{ marginBottom: 8 }}>

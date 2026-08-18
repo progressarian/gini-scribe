@@ -212,6 +212,9 @@ const ROUTE_CAPABILITIES = [
   // which runs after this check.
   ["/api/flow", [CAP.FLOW_RECEPTION, CAP.FLOW_COORDINATOR, CAP.FLOW_STATION, CAP.FLOW_PHARMACY]],
   ["/api/flow/checkin", CAP.FLOW_RECEPTION],
+  // Today's booking list behind the check-in screen. Its own row (not the
+  // any-of base) so station/pharmacy roles can't read the day's bookings.
+  ["/api/flow/appointments", CAP.FLOW_RECEPTION],
   ["/api/flow/from-appointment", CAP.FLOW_RECEPTION],
   ["/api/flow/by-appointments", CAP.FLOW_RECEPTION],
   ["/api/flow/patient-appointment", CAP.FLOW_RECEPTION],

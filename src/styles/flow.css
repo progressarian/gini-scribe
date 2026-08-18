@@ -980,3 +980,163 @@
   margin-bottom: 9px;
   line-height: 1.5;
 }
+
+/* ── Check-in: today's-appointments picker ──────────────────────────────────
+   The check-in screen was already two columns (form | journey builder); the
+   picker adds a third on the left. Below 1280px it drops to its own full-width
+   row above the two originals (a 3-up split starves the journey builder, whose
+   step rows are a 5-column grid of their own), and below 800px everything
+   stacks for the reception tablet. */
+.flow-checkin-3col {
+  display: grid;
+  grid-template-columns: minmax(290px, 330px) 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1280px) {
+  .flow-checkin-3col {
+    grid-template-columns: 1fr 1fr;
+  }
+  .flow-checkin-3col > .ap-card {
+    grid-column: 1 / -1;
+    position: static;
+    max-height: 320px;
+  }
+}
+@media (max-width: 800px) {
+  .flow-checkin-3col {
+    grid-template-columns: 1fr;
+  }
+}
+.ap-card {
+  padding: 12px;
+  /* Sticks alongside a long form; capped so the list itself scrolls, not the
+     page, when a heavy clinic day fills it. */
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+.ap-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ap-head .flow-btn-mini {
+  margin-left: auto;
+}
+.ap-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.ap-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fink3);
+  background: var(--fbg);
+  border: 1px solid var(--fbd);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ap-tab:hover {
+  border-color: var(--fbd2);
+}
+.ap-tab.on {
+  color: var(--ftl);
+  background: var(--ftll);
+  border-color: var(--ftl);
+}
+/* The count is the point of the tab — keep it legible when unselected. */
+.ap-tab-n {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  color: var(--fink2);
+}
+.ap-tab.on .ap-tab-n {
+  background: var(--fwhite);
+  border-color: var(--ftl);
+  color: var(--ftl);
+}
+.ap-search {
+  margin-bottom: 8px;
+}
+.ap-list {
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.ap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--fbd);
+  border-radius: 7px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  background: var(--fwhite);
+}
+.ap-row:hover {
+  border-color: var(--ftl);
+  background: var(--ftll);
+}
+.ap-row.sel {
+  border-color: var(--ftl);
+  box-shadow: inset 3px 0 0 var(--ftl);
+}
+.ap-row.taken {
+  background: var(--fgnl);
+}
+.ap-row.done {
+  background: var(--fbg);
+  opacity: 0.65;
+}
+.ap-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fink2);
+  width: 58px;
+  flex-shrink: 0;
+}
+.ap-main {
+  flex: 1;
+  min-width: 0;
+}
+.ap-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fink);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-meta {
+  font-size: 10px;
+  color: var(--fink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}

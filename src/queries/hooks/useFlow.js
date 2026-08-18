@@ -55,6 +55,25 @@ export function useFlowVisits(date = today(), status, options = {}) {
     ...options,
   });
 }
+// Today's booked patients (the GHM list) for the check-in picker, annotated
+// with each one's existing flow visit. Polled at half the rate of the visit
+// feed: the day's bookings change far more slowly than the queue does, and this
+// screen sits open all day at reception.
+// Invalidation on check-in is free — useFlowMutation invalidates qk.flow.all.
+export function useFlowAppointments(date = today(), { q, doctor } = {}, options = {}) {
+  return useQuery({
+    queryKey: qk.flow.appointments(date, q, doctor),
+    queryFn: async () => {
+      const params = new URLSearchParams({ date });
+      if (q) params.set("q", q);
+      if (doctor) params.set("doctor", doctor);
+      return (await api.get(`/api/flow/appointments?${params}`)).data;
+    },
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+    ...options,
+  });
+}
 export function useFlowVisit(id, options = {}) {
   return useQuery({
     queryKey: qk.flow.visit(id),
@@ -163,6 +182,16 @@ export function useFlowCancel() {
       return (await api.post(`/api/flow/visits/${visitId}/cancel`, { reason })).data;
     } catch (err) {
       throw new Error(errMsg(err, "Could not cancel check-in"));
+    }
+  });
+}
+// Set / correct the reception token number on an existing visit.
+export function useFlowSetToken() {
+  return useFlowMutation(async ({ visitId, token_number }) => {
+    try {
+      return (await api.patch(`/api/flow/visits/${visitId}/token`, { token_number })).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not update token number"));
     }
   });
 }

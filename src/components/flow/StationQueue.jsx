@@ -112,6 +112,7 @@ export default function StationQueue({ role, form, freeMove = false }) {
           <div className="station-head">
             <div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>
+                {boxPatient.token_number ? `#${boxPatient.token_number} · ` : ""}
                 {boxPatient.patient_name} · Step {boxPatient.step_order} of {boxPatient.total_steps}
               </div>
               <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
@@ -176,6 +177,9 @@ export default function StationQueue({ role, form, freeMove = false }) {
           >
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>
+                {s.token_number ? (
+                  <span className="flow-badge fb-ink">#{s.token_number}</span>
+                ) : null}{" "}
                 {s.patient_name} {s.is_vip ? "⭐" : ""}
               </div>
               <div className="flow-muted">

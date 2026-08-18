@@ -1,6 +1,6 @@
-// Builds an HTML document that exactly matches gini-examples.html "Printed
-// Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS in
-// sync with gini-examples.html (lines 9-115) when the design changes.
+// Builds an HTML document that exactly matches docs/archive/gini-examples.html
+// "Printed Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS
+// in sync with that file (lines 9-115) when the design changes.
 
 import { detectMedCategory } from "../config/medicationCategories.js";
 

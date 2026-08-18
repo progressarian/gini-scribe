@@ -326,7 +326,7 @@ npm run smoke:doctors
 npm run smoke:med-collection
 ```
 
-There is no test suite and no linter. `server/scripts/` and the repo root hold ~100 ad-hoc `.mjs`/`.js` diagnostic and backfill scripts; run one directly with `node`.
+There is no test suite and no linter. `server/scripts/` holds ~50 ad-hoc `.mjs`/`.js` diagnostic and backfill scripts; run one directly with `node`. Keep new one-offs there — the repo root is not a scratch directory.
 
 > ⚠️ The `DATABASE_URL` in `.env` points at **production**. Any script you run against it touches live patient data.
 

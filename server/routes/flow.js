@@ -635,6 +635,7 @@ router.post("/flow/checkin", async (req, res) => {
       patient_status = null,
       is_vip = false,
       notes = null,
+      token_number = null,
       assigned_sd = null,
       assigned_sd_name = null,
       assigned_chief = null,
@@ -648,6 +649,13 @@ router.post("/flow/checkin", async (req, res) => {
     // timer, no auto-started step) until reception presses ▶ Start. Used when a
     // patient is registered but still waiting for the doctor / a slot change.
     const deferred = start_mode === "later";
+
+    // Free text typed by reception off the physical token slip — trim and cap
+    // it rather than validating a format; every counter numbers differently.
+    const tokenNumber =
+      String(token_number ?? "")
+        .trim()
+        .slice(0, 32) || null;
 
     if (!patient_id || !patient_name || !visit_type_id) {
       return res.status(400).json({ error: "patient_id, patient_name, visit_type_id required" });
@@ -723,11 +731,11 @@ router.post("/flow/checkin", async (req, res) => {
         (patient_id, patient_db_id, appointment_id, patient_name, patient_phone, patient_age_sex,
          visit_type_id, appointment_time, has_tests_available, patient_status, max_time_min,
          suggested_wait_min, estimated_completion, is_vip, notes, visit_token, checked_in_by,
-         assigned_sd, assigned_sd_name, assigned_chief, assigned_chief_name,
+         assigned_sd, assigned_sd_name, assigned_chief, assigned_chief_name, token_number,
          status, timer_started_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
          CASE WHEN $21 THEN NOW() + make_interval(mins => $12) ELSE NULL END,
-         $13,$14,$15,$16,$17,$18,$19,$20,
+         $13,$14,$15,$16,$17,$18,$19,$20,$22,
          CASE WHEN $21 THEN 'in_progress' ELSE 'waiting' END,
          CASE WHEN $21 THEN NOW() ELSE NULL END)
        RETURNING *`,
@@ -753,6 +761,7 @@ router.post("/flow/checkin", async (req, res) => {
         assigned_chief,
         assigned_chief_name,
         startNow,
+        tokenNumber,
       ],
     );
     const visit = visitRes.rows[0];
@@ -808,7 +817,7 @@ router.post("/flow/checkin", async (req, res) => {
       visit.id,
       deferred ? "checkin_deferred" : "checkin",
       first.step_order,
-      { visit_type_id, totalPlanned, start_mode },
+      { visit_type_id, totalPlanned, start_mode, token_number: tokenNumber },
       ACTOR(req),
     );
 
@@ -860,6 +869,7 @@ router.post("/flow/checkin", async (req, res) => {
     res.status(201).json({
       visit_id: visit.id,
       visit_token: token,
+      token_number: tokenNumber,
       suggested_wait_min: totalPlanned,
       whatsapp_sent: whatsappSent,
     });
@@ -1006,6 +1016,41 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
     client.release();
   }
 });
+
+// Edit the reception-typed token number on an existing visit. Tokens get
+// re-issued at the counter and mistyped; without this the only fix would be a
+// cancel + fresh check-in, which loses the visit's timing history.
+// requireCapability here because the prefix matcher can't reach past
+// /api/flow/visits (ids are dynamic), so the route table would leave this on the
+// base any-of row and let a station role renumber the queue.
+router.patch(
+  "/flow/visits/:id/token",
+  requireCapability([CAP.FLOW_RECEPTION, CAP.FLOW_COORDINATOR]),
+  async (req, res) => {
+    try {
+      const tokenNumber =
+        String(req.body?.token_number ?? "")
+          .trim()
+          .slice(0, 32) || null;
+      const r = await pool.query(
+        "UPDATE flow_visits SET token_number=$2, updated_at=NOW() WHERE id=$1 RETURNING id, token_number",
+        [req.params.id, tokenNumber],
+      );
+      if (!r.rows.length) return res.status(404).json({ error: "Visit not found" });
+      await logEvent(
+        pool,
+        req.params.id,
+        "token_number_set",
+        null,
+        { token_number: tokenNumber },
+        ACTOR(req),
+      );
+      res.json(r.rows[0]);
+    } catch (e) {
+      handleError(res, e, "Flow set token number");
+    }
+  },
+);
 
 // Cancel a check-in (e.g. started by mistake for a patient not present). Marks
 // the visit cancelled. If the linked appointment was created BY the flow
@@ -1663,6 +1708,75 @@ router.get("/flow/active-visit", async (req, res) => {
 // Today's OPD/GHM appointment for a patient — read-only, used to pre-fill the
 // flow check-in (time, visit type, doctor) and to link flow_visits.appointment_id.
 // Never writes to appointments (their INSERT trigger drives OPD backfill).
+// Today's booked patients (the GHM list) for the reception check-in screen,
+// annotated with whatever flow visit already exists for each one.
+//
+// Why not just call /api/ghm-appointments from the page: that endpoint is gated
+// on [RECEPTION_OPS, OBT_OPS] while /flow/checkin is FLOW_RECEPTION — the two
+// only overlap by accident of today's role matrix — and it returns ~45 columns
+// plus correlated follow-up-date subqueries. This one is the ten columns the
+// picker draws, cheap enough to poll all day.
+router.get("/flow/appointments", async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    const params = [date];
+
+    // Same day-membership rule as the GHM list: booked on the date, OR asked to
+    // come on the date (preferred_date) while booked for another one.
+    let where = "WHERE (a.appointment_date = $1 OR a.preferred_date = $1)";
+    if (req.query.doctor) {
+      params.push(`%${req.query.doctor}%`);
+      where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;
+    }
+    // Tokenised AND search — the same robust matching ghm-appointments uses,
+    // because real names carry double spaces and arrive in either word order.
+    const q = (req.query.q || "").trim();
+    if (q.length >= 2) {
+      for (const t of q.split(/\s+/).filter(Boolean).slice(0, 6)) {
+        params.push(`%${t}%`);
+        where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length})`;
+      }
+    }
+
+    // The LATERAL join excludes only 'cancelled': a 'completed' visit still has
+    // to badge the row, because idx_flow_visits_one_per_patient_day blocks a
+    // re-check-in and a 409 toast is poor feedback for an already-seen patient.
+    // Matching on appointment_id OR file number catches visits checked in
+    // manually before the booking was linked.
+    const r = await pool.query(
+      `SELECT a.id, a.patient_name, a.file_no, a.phone, a.time_slot,
+              a.reporting_time_slot, a.visit_type, a.appointment_type,
+              a.doctor_name, a.status, a.is_walkin, a.condition, a.chief_complaint,
+              COALESCE(a.age, p.age) AS age,
+              COALESCE(a.sex, p.sex) AS sex,
+              p.id AS patient_db_id,
+              (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
+              fv.id AS flow_visit_id,
+              fv.status AS flow_status,
+              fv.token_number AS flow_token_number
+         FROM appointments a
+         LEFT JOIN patients p ON p.file_no = a.file_no
+         LEFT JOIN LATERAL (
+           SELECT id, status, token_number
+             FROM flow_visits
+            WHERE visit_date = $1
+              AND status <> 'cancelled'
+              AND (appointment_id = a.id
+                   OR (a.file_no IS NOT NULL AND patient_id = a.file_no)
+                   OR (p.id IS NOT NULL AND patient_db_id = p.id))
+            ORDER BY checkin_time DESC
+            LIMIT 1
+         ) fv ON TRUE
+        ${where}
+        ORDER BY a.time_slot ASC NULLS LAST, a.id ASC`,
+      params,
+    );
+    res.json(r.rows);
+  } catch (e) {
+    handleError(res, e, "Flow appointments");
+  }
+});
+
 router.get("/flow/patient-appointment", async (req, res) => {
   try {
     const { patient_db_id, file_no } = req.query;
@@ -1742,6 +1856,11 @@ router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
   let fileNo = null;
   try {
     const apptId = req.params.appointmentId;
+    // Optional — this bridge is also called from screens with no token field.
+    const tokenNumber =
+      String(req.body?.token_number ?? "")
+        .trim()
+        .slice(0, 32) || null;
     const appt = (await client.query("SELECT * FROM appointments WHERE id=$1", [apptId])).rows[0];
     if (!appt) {
       return res.status(404).json({ error: "Appointment not found" });
@@ -1818,8 +1937,8 @@ router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
         `INSERT INTO flow_visits
            (patient_id, patient_db_id, appointment_id, patient_name, patient_phone, visit_type_id,
             appointment_time, max_time_min, suggested_wait_min, estimated_completion,
-            visit_token, checked_in_by, assigned_sd, assigned_sd_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW() + make_interval(mins => $9), $10,$11,$12,$13)
+            visit_token, checked_in_by, assigned_sd, assigned_sd_name, token_number)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW() + make_interval(mins => $9), $10,$11,$12,$13,$14)
          RETURNING *`,
         [
           fileNo,
@@ -1835,6 +1954,7 @@ router.post("/flow/from-appointment/:appointmentId", async (req, res) => {
           ACTOR(req),
           sdId,
           sdName,
+          tokenNumber,
         ],
       )
     ).rows[0];
@@ -1956,6 +2076,7 @@ router.get("/flow/queue/:role", async (req, res) => {
     const date = req.query.date || new Date().toISOString().split("T")[0];
     const r = await pool.query(
       `SELECT s.*, v.patient_name, v.patient_age_sex, v.patient_id AS file_no, v.is_vip,
+              v.token_number,
               v.visit_type_id, v.max_time_min, v.checkin_time, v.actual_completion, v.status AS visit_status,
               v.patient_db_id,
               (SELECT COUNT(*)::int FROM flow_visit_steps x WHERE x.visit_id=v.id) AS total_steps
@@ -2009,7 +2130,7 @@ router.get("/flow/track/:token", async (req, res) => {
   try {
     const v = (
       await pool.query(
-        "SELECT id, patient_name, status, checkin_time, max_time_min, actual_completion FROM flow_visits WHERE visit_token=$1",
+        "SELECT id, patient_name, status, checkin_time, max_time_min, actual_completion, token_number FROM flow_visits WHERE visit_token=$1",
         [req.params.token],
       )
     ).rows[0];
@@ -2024,6 +2145,10 @@ router.get("/flow/track/:token", async (req, res) => {
     const current = steps.find((s) => s.status === "in_progress") || null;
     res.json({
       first_name: (v.patient_name || "").split(" ")[0],
+      // The counter token from the patient's physical slip — lets them confirm
+      // this page is really about them. Not sensitive on its own, and the
+      // payload is already token-scoped and sanitized.
+      token_number: v.token_number || null,
       status: v.status,
       current_step: current ? current.step_name : null,
       step_index: current

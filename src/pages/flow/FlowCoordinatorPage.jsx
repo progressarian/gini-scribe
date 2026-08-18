@@ -399,6 +399,9 @@ export default function FlowCoordinatorPage() {
                   <div className="cp-avatar">{initials(v.patient_name)}</div>
                   <div style={{ minWidth: 0 }}>
                     <div className="cp-name">
+                      {v.token_number ? (
+                        <span className="flow-badge fb-ink">#{v.token_number}</span>
+                      ) : null}{" "}
                       {v.patient_name}{" "}
                       {v.is_vip ? <span className="flow-badge fb-amb">⭐ VIP</span> : null}
                     </div>
