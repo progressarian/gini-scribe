@@ -701,7 +701,11 @@ router.get("/opd/appointments", async (req, res) => {
           [patientIds],
         );
         for (const r of vR) {
-          const bucket = r.rn === 1 ? vitalsByPt : prevVitalsByPt;
+          // ROW_NUMBER() is bigint and node-pg hands bigints back as strings,
+          // so a strict `r.rn === 1` never matched and every row landed in the
+          // "previous" bucket — leaving vitalsByPt empty and the weight/BMI
+          // fallback below dead. Coerce before comparing.
+          const bucket = Number(r.rn) === 1 ? vitalsByPt : prevVitalsByPt;
           bucket[r.patient_id] = {
             sbp: r.bp_sys != null ? Number(r.bp_sys) : null,
             dbp: r.bp_dia != null ? Number(r.bp_dia) : null,

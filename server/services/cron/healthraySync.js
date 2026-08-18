@@ -489,10 +489,15 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     healthrayFollowUpWith: null,
   };
 
+  // Declared out here (not inside the `if (doctorId)` block) because the
+  // normalized-table sync below passes it to syncLabResults() — a block-scoped
+  // const threw ReferenceError there and killed the whole sync tail.
+  let rawText = null;
+
   if (doctorId) {
     try {
       const clinicalResult = await fetchClinicalText(appt, healthrayId, doctorId);
-      const rawText = clinicalResult?.text || null;
+      rawText = clinicalResult?.text || null;
       const clinicalRawData = clinicalResult?.raw || null;
 
       // Deterministic vitals extraction from structured answers[] —
