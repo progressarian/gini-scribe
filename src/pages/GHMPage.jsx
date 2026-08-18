@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import "./GHMPage.css";
 import useAuthStore from "../stores/authStore";
 import { SLOT_REASON, slotOptions } from "../lib/slotAvailability.js";
+import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 const getToken = () => localStorage.getItem("gini_auth_token") || "";
@@ -32,12 +33,15 @@ const prettyDate = (s) => {
 };
 
 // The day-view tabs
+// `cap` gates the tab per role (omitted = visible to anyone who can open /ghm).
+// Reassigning appointments between doctors is scheduling-desk work, so it is
+// RECEPTION_OPS — the OBT call team reaches /ghm via OBT_OPS and doesn't get it.
 const VIEW_TABS = [
   { id: "by_date", label: "📅 By Date", offset: null },
   { id: "tomorrow", label: "🌅 Tomorrow", offset: 1 },
   { id: "fu3", label: "📞 Follow-up in 3 Days", offset: 3 },
   { id: "lookup", label: "🔎 Patient Lookup", offset: null },
-  { id: "reassign", label: "🔄 Reassign Needed", offset: null },
+  { id: "reassign", label: "🔄 Reassign Needed", offset: null, cap: CAP.RECEPTION_OPS },
 ];
 
 // ─── Call status options ───────────────────────────────────────────────────
@@ -1005,6 +1009,10 @@ function ReassignNeededView({ date }) {
 export default function GHMPage() {
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
   const loggedInName = currentDoctor?.short_name || currentDoctor?.name || "";
+  const visibleTabs = VIEW_TABS.filter(
+    (t) => !t.cap || hasAnyCapability(currentDoctor?.role, t.cap),
+  );
+  const canReassign = visibleTabs.some((t) => t.id === "reassign");
   const [view, setView] = useState("by_date"); // by_date | tomorrow | fu3
   const [date, setDate] = useState(todayStr());
   const [showNew, setShowNew] = useState(false);
@@ -1258,7 +1266,7 @@ export default function GHMPage() {
 
       {/* ── View tabs ── */}
       <div className="ghm__tabs">
-        {VIEW_TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             className={`ghm__tab ${view === t.id ? "ghm__tab--active" : ""}`}
@@ -1293,7 +1301,10 @@ export default function GHMPage() {
         />
       )}
 
-      {view === "reassign" ? (
+      {/* canReassign re-checks the capability here, not just on the tab: hiding a
+          tab is presentation, and the body must not render if the view is ever
+          reached another way (deep link, persisted view state). */}
+      {view === "reassign" && canReassign ? (
         <ReassignNeededView date={date} />
       ) : (
         <>

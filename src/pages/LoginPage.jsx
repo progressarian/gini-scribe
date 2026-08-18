@@ -13,6 +13,7 @@ const ROLE_GROUPS = [
   { role: "tech", label: "Technicians", showSpecialty: false },
   { role: "pharmacy", label: "Pharmacy", showSpecialty: false },
   { role: "reception", label: "Reception", showSpecialty: false },
+  { role: "obt", label: "OBT Team", showSpecialty: false },
 ];
 
 export default function LoginPage() {

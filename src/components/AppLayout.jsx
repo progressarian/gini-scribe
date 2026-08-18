@@ -10,20 +10,20 @@ import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
 import { PAGE_CAPABILITIES } from "../config/routes";
-import { hasCapability } from "../../shared/permissions";
+import { hasAnyCapability } from "../../shared/permissions";
 import "../styles/App.css";
 
 // Each item's `cap` is the capability required to see it (from the shared
 // PAGE_CAPABILITIES map; paths without one are always visible). The `show`
 // predicates carry only CONTEXTUAL gating (active visit, loaded patient,
-// follow-up vs new). Role gating now flows entirely through `cap` + the matrix
-// in shared/permissions.js — while its master switch is on, every role sees
-// every item (subject to context).
+// follow-up vs new). Role gating flows entirely through `cap` + the matrix in
+// shared/permissions.js, and is ENFORCED. Note this only hides the tab —
+// RequireCapability is what actually blocks the route.
 const C = PAGE_CAPABILITIES;
 
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: () => true },
-  { path: "/find", label: "🔍 Find", show: () => true },
+  { path: "/find", label: "🔍 Find", cap: C["/find"], show: () => true },
   { path: "/opd", label: "🏥 OPD", cap: C["/opd"], show: () => true },
   { path: "/dashboard", label: "📋 Patient", cap: C["/dashboard"], show: (s) => s.hasPatient },
   { path: "/visit", label: "👁 Visit", cap: C["/visit"], show: (s) => s.hasPatient },
@@ -250,6 +250,29 @@ export default function AppLayout() {
               {patient.phone && <span className="patient-bar__phone">📱 {patient.phone}</span>}
             </div>
             {dbPatientId && <span className="patient-bar__db-id">DB #{dbPatientId}</span>}
+            <button
+              type="button"
+              className="patient-bar__clear"
+              title="Deselect this patient"
+              aria-label={`Deselect ${patient.name}`}
+              onClick={() => {
+                // newPatient() resets every clinical store and drops the local
+                // session, so mid-visit it discards in-progress work (the visit
+                // row itself survives in the DB). Ask first in that case only.
+                if (
+                  visitActive &&
+                  !window.confirm(
+                    `A visit is in progress for ${patient.name}. Deselect anyway? Unsaved consultation work will be cleared.`,
+                  )
+                ) {
+                  return;
+                }
+                newPatient();
+                toast("Patient deselected", "success", 2000);
+              }}
+            >
+              ✕
+            </button>
           </div>
         )}
         <div className="header__spacer" />
@@ -344,7 +367,8 @@ export default function AppLayout() {
         <div className="tabs">
           {(() => {
             const visible = NAV_ITEMS.filter(
-              (t) => (!t.cap || hasCapability(navState.role, t.cap)) && t.show(navState),
+              // t.cap may be one capability or an array (any-of).
+              (t) => (!t.cap || hasAnyCapability(navState.role, t.cap)) && t.show(navState),
             );
             const rendered = [];
             let lastSection = null;

@@ -18,6 +18,8 @@ import {
 } from "../lib/slotAvailability.js";
 import useMessagingStore from "../stores/messagingStore";
 import { cleanNote } from "../utils/cleanNote.js";
+import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions";
+import { PAGE_CAPABILITIES } from "../config/routes";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -41,6 +43,20 @@ const findLab = (labs, name) =>
     return aliases.some((a) => l.test_name === a || l.canonical_name === a);
   });
 
+// Destinations offered by the "GO TO" launcher. Filtered per role at render
+// against PAGE_CAPABILITIES — the same map RequireCapability enforces — so the
+// grid can never offer a page that immediately bounces back to Home.
+const GO_TO = [
+  { path: "/quick", icon: "⚡", label: "Quick Dictation", color: "#dc2626", bg: "#fef2f2" },
+  { path: "/patient", icon: "👤", label: "Patient Details", color: "#1e40af", bg: "#eff6ff" },
+  { path: "/mo", icon: "🎤", label: "MO Entry", color: "#ea580c", bg: "#fff7ed" },
+  { path: "/consultant", icon: "👨‍⚕️", label: "Consultant", color: "#0d9488", bg: "#f0fdfa" },
+  { path: "/plan", icon: "📄", label: "Plan / Print", color: "#1e293b", bg: "#f1f5f9" },
+  { path: "/docs", icon: "📎", label: "Documents", color: "#6366f1", bg: "#eef2ff" },
+  { path: "/history", icon: "📜", label: "History", color: "#b45309", bg: "#fffbeb" },
+  { path: "/outcomes", icon: "📊", label: "Outcomes", color: "#059669", bg: "#f0fdf4" },
+];
+
 const bookingSchema = z.object({
   dt: z
     .string()
@@ -58,6 +74,20 @@ export default function DashboardPage() {
   const vitals = useVitalsStore((s) => s.vitals);
   const doctorsList = useAuthStore((s) => s.doctorsList);
   const fetchDoctorsList = useAuthStore((s) => s.fetchDoctorsList);
+  // This page mixes patient IDENTITY (reachable with PATIENT_READ, so /find can
+  // navigate here) with the CLINICAL RECORD and the visit-workflow launcher.
+  // Those last two are gated separately below — without this, a non-clinical
+  // role like the OBT call team saw every lab result, the active medication
+  // list, and a "Start Visit" button on a page they are allowed to open.
+  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const canSeeChart = hasAnyCapability(role, CAP.PATIENT_CHART);
+  const canWriteClinical = hasAnyCapability(role, CAP.CLINICAL_WRITE);
+  // Booking needs appointment access, which OBT has via OBT_OPS without holding
+  // the rest of RECEPTION_OPS — mirrors the /api/appointments any-of gate.
+  const canBookAppt = hasAnyCapability(role, [CAP.RECEPTION_OPS, CAP.OBT_OPS]);
+  const goToTargets = GO_TO.filter(
+    (n) => !PAGE_CAPABILITIES[n.path] || hasAnyCapability(role, PAGE_CAPABILITIES[n.path]),
+  );
   const appointments = useVisitStore((s) => s.appointments);
   const setAppointments = useVisitStore((s) => s.setAppointments);
   const showBooking = useVisitStore((s) => s.showBooking);
@@ -129,7 +159,8 @@ export default function DashboardPage() {
       </div>
 
       {/* ═══ PATIENT BRIEF (v2 style) ═══ */}
-      {dbPatientId && pfd && (
+      {/* Clinical record: biomarkers, conditions, labs, medications, documents. */}
+      {canSeeChart && dbPatientId && pfd && (
         <div
           style={{
             background: "linear-gradient(135deg,#f0f9ff,#faf5ff)",
@@ -651,8 +682,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Quick Stats */}
-      {dbPatientId && (
+      {/* Quick Stats — includes last HbA1c, so chart-gated too. */}
+      {canSeeChart && dbPatientId && (
         <div className="dashboard__stats" style={{ gap: 8, marginBottom: 12 }}>
           <div
             style={{ background: "#eff6ff", borderRadius: 10, padding: 12, textAlign: "center" }}
@@ -688,63 +719,71 @@ export default function DashboardPage() {
       )}
 
       {/* ═══ START VISIT ═══ */}
+      {/* Starting a visit is CLINICAL_WRITE; booking only needs appointment
+          access, so the two are gated separately rather than as one block. */}
       <div style={{ marginBottom: 12 }}>
-        <button
-          onClick={() => startVisit(null, { dbPatientId })}
-          style={{
-            width: "100%",
-            padding: "14px",
-            background: "linear-gradient(135deg,#059669,#10b981)",
-            color: "white",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 15,
-            fontWeight: 800,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            boxShadow: "0 2px 8px rgba(5,150,105,.25)",
-          }}
-        >
-          🩺 Start Visit
-        </button>
+        {canWriteClinical && (
+          <button
+            onClick={() => startVisit(null, { dbPatientId })}
+            style={{
+              width: "100%",
+              padding: "14px",
+              background: "linear-gradient(135deg,#059669,#10b981)",
+              color: "white",
+              border: "none",
+              borderRadius: 10,
+              fontSize: 15,
+              fontWeight: 800,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              boxShadow: "0 2px 8px rgba(5,150,105,.25)",
+            }}
+          >
+            🩺 Start Visit
+          </button>
+        )}
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-          <button
-            onClick={() => openBooking(null)}
-            style={{
-              flex: 1,
-              padding: "10px",
-              background: "#eff6ff",
-              border: "1.5px solid #bfdbfe",
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              color: "#1e40af",
-            }}
-          >
-            📅 Book Appointment
-          </button>
-          <button
-            onClick={() => {
-              startVisit(null, { dbPatientId });
-            }}
-            style={{
-              flex: 1,
-              padding: "10px",
-              background: "#fef3c7",
-              border: "1.5px solid #fde68a",
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              color: "#92400e",
-            }}
-          >
-            🚶 Walk-in Visit
-          </button>
+          {canBookAppt && (
+            <button
+              onClick={() => openBooking(null)}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: "#eff6ff",
+                border: "1.5px solid #bfdbfe",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                color: "#1e40af",
+              }}
+            >
+              📅 Book Appointment
+            </button>
+          )}
+          {canWriteClinical && (
+            <button
+              onClick={() => {
+                startVisit(null, { dbPatientId });
+              }}
+              style={{
+                flex: 1,
+                padding: "10px",
+                background: "#fef3c7",
+                border: "1.5px solid #fde68a",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                color: "#92400e",
+              }}
+            >
+              🚶 Walk-in Visit
+            </button>
+          )}
         </div>
       </div>
 
@@ -1373,27 +1412,15 @@ export default function DashboardPage() {
           color: "#94a3b8",
           marginBottom: 8,
           letterSpacing: ".5px",
+          // Every destination can be filtered out by capability; don't leave a
+          // bare "GO TO" heading floating above an empty grid.
+          display: goToTargets.length ? undefined : "none",
         }}
       >
         GO TO
       </div>
       <div className="dashboard__workflow-grid" style={{ gap: 8 }}>
-        {[
-          { path: "/quick", icon: "⚡", label: "Quick Dictation", color: "#dc2626", bg: "#fef2f2" },
-          {
-            path: "/patient",
-            icon: "👤",
-            label: "Patient Details",
-            color: "#1e40af",
-            bg: "#eff6ff",
-          },
-          { path: "/mo", icon: "🎤", label: "MO Entry", color: "#ea580c", bg: "#fff7ed" },
-          { path: "/consultant", icon: "👨‍⚕️", label: "Consultant", color: "#0d9488", bg: "#f0fdfa" },
-          { path: "/plan", icon: "📄", label: "Plan / Print", color: "#1e293b", bg: "#f1f5f9" },
-          { path: "/docs", icon: "📎", label: "Documents", color: "#6366f1", bg: "#eef2ff" },
-          { path: "/history", icon: "📜", label: "History", color: "#b45309", bg: "#fffbeb" },
-          { path: "/outcomes", icon: "📊", label: "Outcomes", color: "#059669", bg: "#f0fdf4" },
-        ].map((n) => (
+        {goToTargets.map((n) => (
           <button
             key={n.path}
             onClick={navClick(n.path)}
@@ -1518,8 +1545,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Recent Visits */}
-      {pfd?.consultations?.length > 0 && (
+      {/* Recent Visits — lists each visit's prescribed medications. */}
+      {canSeeChart && pfd?.consultations?.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div
             style={{

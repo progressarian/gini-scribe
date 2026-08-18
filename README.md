@@ -1,6 +1,6 @@
 # Gini Clinical Scribe
 
-AI-powered clinical documentation system for **Gini Advanced Care Hospital, Mohali, India**. Converts doctor-patient voice conversations into structured prescriptions, tracks patient outcomes over time, and syncs data to the MyHealth Genie patient app.
+Clinical documentation and patient-flow system for **Gini Advanced Care Hospital, Mohali, India**. Turns doctor–patient voice consultations into structured prescriptions, tracks the patient's journey through the OPD floor, ingests labs and documents from the hospital's HIS (HealthRay), and syncs everything to the MyHealth Genie patient app.
 
 ## Table of Contents
 
@@ -8,88 +8,87 @@ AI-powered clinical documentation system for **Gini Advanced Care Hospital, Moha
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
-- [File-by-File Breakdown](#file-by-file-breakdown)
-- [Features](#features)
-- [Database Schema](#database-schema)
-- [API Endpoints](#api-endpoints)
+- [How a Consultation Works](#how-a-consultation-works)
+- [Patient Flow Management](#patient-flow-management)
+- [External Systems](#external-systems)
+- [Auth & Roles](#auth--roles)
+- [Database](#database)
+- [API](#api)
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [Deployment (Railway)](#deployment-railway)
-- [How It Works](#how-it-works)
+- [Medicine Matching](#medicine-matching)
 
 ---
 
 ## Overview
 
-Gini Scribe is a full-stack clinical documentation assistant. During a patient consultation, a Medical Officer (MO) and/or Consultant speaks naturally while examining the patient. The system:
+During a consultation, a Medical Officer (MO) and/or Consultant speaks naturally while examining the patient. The system:
 
-1. **Transcribes** the voice in real-time (Deepgram streaming or OpenAI Whisper batch)
-2. **Extracts** structured medical data using AI (Anthropic Claude) — diagnoses, medications, labs, complaints, history
-3. **Matches** prescribed medicines to Gini's pharmacy formulary using fuzzy matching (Levenshtein distance)
-4. **Saves** the structured consultation to PostgreSQL with full audit trail
-5. **Syncs** visit data to the MyHealth Genie patient-facing app (non-blocking)
-6. **Tracks** biomarker outcomes (HbA1c, BP, lipids, renal function, etc.) over time with trend charts
+1. **Transcribes** the voice (Deepgram streaming or OpenAI Whisper batch)
+2. **Extracts** structured medical data with Anthropic Claude — diagnoses, medications, labs, complaints, history
+3. **Matches** prescribed medicines to Gini's pharmacy formulary via fuzzy matching
+4. **Saves** the consultation to PostgreSQL in a single transaction
+5. **Syncs** the visit to the MyHealth Genie patient app (non-blocking)
+6. **Tracks** biomarker outcomes (HbA1c, BP, lipids, renal function, …) over time with trend charts
+
+Around that core sit the OPD queue, the patient-flow (station) module, lab and document ingestion from HealthRay, appointment/GHM operations, pharmacy medicine collection, and a set of patient-facing request inboxes (refills, dose changes, lab requests, side effects).
 
 ---
 
 ## Architecture
 
+Three processes share one PostgreSQL database:
+
+| Process | Entry point | Role |
+|---|---|---|
+| **Client** | `src/main.jsx` → `src/router.jsx` | React 18 + Vite SPA. react-router, TanStack Query, Zustand |
+| **API** | `server/index.js` | Express. Mounts every `server/routes/*.js` under `/api`, and serves the built SPA from `dist/` |
+| **Worker** | `server/worker.js` | All cron/sync loops — HealthRay, lab, Genie, Google Sheets |
+
 ```
-+---------------------------------------------------------------+
-|                  Frontend (React + Vite)                       |
-|                                                                |
-|  App.jsx ........... Main clinical interface (11,960 lines)    |
-|  Companion.jsx ..... Mobile document capture app               |
-|  medmatch.js ....... Fuzzy medicine matcher                    |
-|  medicine_db.json .. 6,931 pharmacy brands                     |
-|                                                                |
-|  External APIs (called from browser):                          |
-|    - Deepgram (streaming speech-to-text)                       |
-|    - OpenAI Whisper (batch speech-to-text)                     |
-|    - Anthropic Claude (structured extraction, Rx review, CI)   |
-+---------------------------------------------------------------+
-                           |
-                    REST API calls
-                           |
-+---------------------------------------------------------------+
-|                 Backend (Express + Node.js)                     |
-|                                                                |
-|  server/index.js ..... REST API (1,537 lines)                  |
-|  server/genie-sync.cjs MyHealth Genie bi-directional sync      |
-|  server/schema.sql ... PostgreSQL table definitions             |
-|  server/db-init.js ... Schema bootstrap script                  |
-+---------------------------------------------------------------+
-                     |              |
-              +------+------+  +---+-------------+
-              | PostgreSQL  |  | Supabase        |
-              | (Railway)   |  | Storage (files) |
-              |             |  |                 |
-              | patients    |  | Lab images      |
-              | consults    |  | Prescriptions   |
-              | vitals      |  | X-rays, MRIs    |
-              | medications |  | Audio recordings|
-              | lab_results |  +-----------------+
-              | diagnoses   |
-              | documents   |
-              | goals       |
-              | complications|
-              +-------------+
+        Browser (React SPA)
+   Deepgram / Whisper / Claude  <-- called directly from the browser for
+              |                     transcription + extraction
+              |  /api  (axios, x-auth-token)
+              v
+   +---------------------------+          +---------------------------+
+   |  API  (server/index.js)   |          | Worker (server/worker.js) |
+   |  routes/ -> services/     |          |  services/cron/*          |
+   |  pool: max 15             |          |  cronPool: max 4          |
+   +------------+--------------+          +-------------+-------------+
+                |                                       |
+                +------------------+--------------------+
+                                   v
+                          PostgreSQL (Railway)
+                                   |
+        +--------------------------+--------------------------+
+        |                |                  |                 |
+   Supabase Storage   HealthRay        MyHealth Genie     Google Sheets
+   (PDFs, images,     (hospital HIS:   (patient app,      (appointment
+    audio; signed     appointments,     Supabase RPC)      imports)
+    URLs)             labs, docs)
 ```
+
+Cron runs in the **worker**, not the API, so a heavy HealthRay sync can't starve the API's connection pool or event loop. `RUN_CRON_IN_API=1` collapses both back into one process for local work. `server/config/db.js` exports two pools accordingly: `pool` (user requests) and `cronPool` (background jobs).
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | React 18, Vite 5, Recharts (charts) |
-| Backend | Node.js, Express 4 |
+|---|---|
+| Frontend | React 18, Vite 5, react-router 7, TanStack Query 5, Zustand 5, Recharts |
+| Backend | Node.js 20, Express 4, Zod (validation), pg |
 | Database | PostgreSQL (Railway) |
-| File Storage | Supabase Storage (signed URLs, 1-hour expiry) |
-| Speech-to-Text | Deepgram (streaming), OpenAI Whisper (batch) |
-| AI Extraction | Anthropic Claude (structured JSON, vision for images) |
-| Deployment | Railway (Docker), Vite dev server |
-| Sync | MyHealth Genie (Supabase RPC) |
+| File storage | Supabase Storage (signed URLs) |
+| Speech-to-text | Deepgram (streaming), OpenAI Whisper (batch) |
+| AI | Anthropic Claude — extraction, vision OCR, Rx review, summaries, SQL agent |
+| Scraping / PDF | Puppeteer (HealthRay report rendering), pdfkit, pdfjs-dist |
+| Messaging | MSG91 (WhatsApp), Firebase (push) |
+| Deployment | Railway (Docker) |
+
+No TypeScript, no test runner, no linter. Prettier is the only formatter.
 
 ---
 
@@ -97,108 +96,277 @@ Gini Scribe is a full-stack clinical documentation assistant. During a patient c
 
 ```
 gini-scribe/
-+-- index.html              # HTML entry point (loads Inter font)
-+-- package.json             # Frontend dependencies
-+-- vite.config.js           # Vite config (host 0.0.0.0, port from $PORT)
-|
-+-- src/
-|   +-- main.jsx             # Entry point — path-based routing (/ -> App, /companion -> Companion)
-|   +-- App.jsx              # Main clinical interface (11,960 lines)
-|   +-- Companion.jsx        # Mobile document capture companion app (621 lines)
-|   +-- medmatch.js          # Fuzzy medicine name matcher (155 lines)
-|   +-- medicine_db.json     # Gini pharmacy formulary database (6,931 medicines)
-|
-+-- server/
-|   +-- index.js             # Express REST API server (1,537 lines)
-|   +-- schema.sql           # PostgreSQL schema (10 tables, 4 views, triggers)
-|   +-- db-init.js           # Database initialization script
-|   +-- genie-sync.cjs       # MyHealth Genie sync module (196 lines)
-|   +-- package.json         # Server dependencies (express, pg, cors, sharp)
-|   +-- Dockerfile           # Docker image for Railway deployment
-|   +-- railway.json         # Railway deployment config
-|   +-- SETUP.md             # Detailed deployment guide
-|   +-- .gitignore           # Server-specific ignores
-|
-+-- *.py                     # One-off patch/migration scripts (not part of runtime)
+├── src/                       # React SPA
+│   ├── main.jsx               # entry — mounts router
+│   ├── router.jsx             # every route, lazy-loaded via lazyWithRetry
+│   ├── pages/                 # one file per route (+ a sibling .css each)
+│   │   └── flow/              # patient-flow screens (checkin, coordinator, station, …)
+│   ├── companion/             # mobile document-capture screens
+│   ├── components/            # shared UI + AppLayout / ProtectedRoute / RequireCapability
+│   ├── stores/                # Zustand, one store per domain (visit, patient, lab, plan, …)
+│   ├── queries/               # TanStack Query client + key factory
+│   ├── services/api.js        # the single axios instance (auth header, 401 -> /login)
+│   ├── config/                # clinical constants: lab ranges, drug DB, prompts, route map
+│   ├── medmatch.js            # fuzzy medicine matcher
+│   ├── medicine_db.json       # Gini pharmacy formulary (~6,900 brands)
+│   ├── OPD.jsx, Companion.jsx # the two remaining large legacy screens
+│   └── styles/, hooks/, utils/, lib/
+│
+├── server/                    # API + worker (its own package.json / node_modules)
+│   ├── index.js               # Express app; mounts routes/*, serves ../dist
+│   ├── worker.js              # starts the cron loops
+│   ├── routes/                # HTTP layer only (~44 files)
+│   ├── services/              # domain logic
+│   │   ├── healthray/         # hospital HIS scraping + parsing
+│   │   ├── lab/               # labapi.healthray.com ingestion
+│   │   ├── cron/              # every scheduled loop
+│   │   ├── flow/              # patient-flow state machine
+│   │   ├── agent/             # SQL-tool AI agent (with sqlGuard.js)
+│   │   └── medication/        # reconciliation, auto-stop, refills
+│   ├── middleware/auth.js     # JWT + capability enforcement
+│   ├── schemas/index.js       # Zod request schemas
+│   ├── config/db.js           # pool + cronPool
+│   ├── schema.sql             # base schema
+│   ├── migrations/            # dated incremental SQL (+ _runOne.mjs runner)
+│   └── scripts/               # ~70 one-off diagnostic / backfill scripts
+│
+├── shared/permissions.js      # RBAC source of truth — imported by BOTH sides
+├── docs/                      # design docs for flow, appointments, billing, MSG91
+└── *.mjs, *.js (repo root)    # more one-off scripts; not runtime code
 ```
 
 ---
 
-## File-by-File Breakdown
+## How a Consultation Works
 
-### `src/App.jsx` (11,960 lines) — Main Clinical Interface
+```
+Doctor speaks during examination
+         |
+  [Deepgram / Whisper]        real-time or batch transcription
+         |
+  [Anthropic Claude]          structured extraction against a JSON schema
+         |
+  Diagnoses / medications / investigations / complaints / history
+         |
+  [medmatch.js]               fuzzy match to Gini pharmacy brands
+         |
+  Doctor reviews & edits across the wizard steps
+         |
+  [POST /api/consultations]   atomic save (BEGIN … COMMIT)
+         |
+    +----+----+
+    |         |
+  PostgreSQL  Genie sync (non-blocking — failures log, never fail the save)
+```
 
-The core of the application. A single large React component implementing the entire clinical workflow.
+A consultation is **not a single page**. It is a sequence of routes that each navigate to the next:
 
-**Key Sections:**
+- **Follow-up:** `/fu-load` → `/fu-review` → `/fu-edit` → `/fu-symptoms` → `/fu-gen`
+- **New patient:** `/intake` → `/history-clinical` → `/exam` → `/assess` → `/plan`
 
-| Section | What It Does |
-|---------|-------------|
-| **Authentication** | PIN-based doctor login, JWT token stored in localStorage |
-| **Patient Setup** | Create/search patients with deduplication (phone, file_no, name+age+sex) |
-| **MO Tab** | Medical Officer records voice -> Deepgram/Whisper transcribes -> Claude extracts diagnoses, complaints, history, medications, investigations |
-| **Consultant Tab** | Consultant dictates treatment plan -> Claude extracts assessment, medications, diet/lifestyle, goals, monitoring |
-| **Quick Mode** | Single-step voice input that outputs both MO + Consultant data at once |
-| **Lab Portal** | Upload lab report images -> Claude vision OCR extracts test values, flags, reference ranges |
-| **Imaging Portal** | Upload X-ray/ultrasound/CT/MRI documents with metadata |
-| **History Entry** | Bulk import of previous consultations from scanned prescriptions |
-| **Outcomes Tab** | Biomarker trend charts (HbA1c, FBS, PPBS, LDL, HDL, creatinine, eGFR, TSH, BP, weight, BMI) using Recharts |
-| **Clinical Reasoning** | Audio recording of doctor's clinical decision-making rationale |
-| **Rx Review** | AI analysis of prescription for drug interactions, dosage appropriateness, severity flagging |
-| **Clinical Intelligence** | Aggregate analytics — diagnoses distribution, top medications, outcomes by doctor/period |
-| **Appointments** | Schedule/track patient appointments, mark completed |
-| **Print View** | Professional formatted prescription document (CSS print styles) |
+In-progress state lives in `src/stores/visitStore.js` (with `vitalsStore`, `examStore`, `labStore`, `planStore` alongside it). The URL carries no visit id — continuity across reloads and devices comes from the `active_visits` table, which the store updates fire-and-forget with the current `route`, `status`, and a `step_data` JSONB blob it hydrates back on load. Several patients can have concurrent in-progress visits, so reads are scoped by `patient_id`.
 
-**Key Algorithms:**
-
-- **Audio Transcription:** Dual-engine support — Deepgram for real-time streaming with medical keyword boosting (HbA1c, eGFR, metformin, etc.), OpenAI Whisper for batch processing with language selection (English, Hindi, multilingual)
-- **AI Extraction:** Sends transcript to Claude with structured JSON schema prompts, validates response format, falls back gracefully on parse errors
-- **Medicine Matching:** Calls `medmatch.js` to fuzzy-match extracted drug names against pharmacy formulary with confidence scoring (threshold > 65)
-- **Medication Auto-Stop:** When saving a new consultation, previous active meds from the same doctor are automatically stopped if not present in the new plan
-- **Biomarker Filtering:** Maps specific drugs to relevant lab tests (e.g., SGLT2i -> eGFR monitoring) for clinical intelligence
+Also on the clinical side: **Quick mode** (one voice pass producing both MO and Consultant data), **Lab Portal** (upload a report image, Claude vision OCR extracts values and flags), **Rx Review** (AI check for interactions and dosing), **Clinical Reasoning** (audio-recorded decision rationale), **Outcomes** (biomarker trend charts), and **Clinical Intelligence** (aggregate analytics by doctor, diagnosis, and period).
 
 ---
 
-### `src/Companion.jsx` (621 lines) — Mobile Document Capture
+## Patient Flow Management
 
-A separate mobile-friendly interface accessible at `/companion` for patients/staff to capture and upload medical documents.
+Tracks a patient physically moving through the OPD, from check-in to pharmacy exit. Screens under `/flow/*`:
 
-**Capabilities:**
-- Browse patients (searchable, limit 50)
-- Camera capture or file upload
-- Document categorization (prescription, blood_test, thyroid, lipid, kidney, hba1c, urine, x-ray, ultrasound, MRI, DEXA, ECG, NCS, eye, other)
-- AI extraction via Claude vision API — extracts structured data from prescription/lab images
-- Patient name mismatch warning
-- Saves history entries, individual lab values, and document records to the backend
-- Retry logic with exponential backoff on API rate limits (3 retries, 529 status)
+| Route | Who uses it |
+|---|---|
+| `/flow/checkin` | Reception — check the patient in and build their journey |
+| `/flow/coordinator` | Floor coordinator — live dashboard of everyone in the building |
+| `/flow/station/:role` | Station queues — vitals, MO, lab, dietitian, Rx |
+| `/flow/reports` | Wait-time and bottleneck analytics |
+| `/flow/admin` | Journey templates and station configuration |
+| `/visit/:token` | **Public** — the patient's own journey tracker (opaque token, no login) |
 
----
-
-### `src/medmatch.js` (155 lines) — Fuzzy Medicine Matcher
-
-Matches AI-extracted medicine names to the official Gini pharmacy formulary.
-
-**Algorithm:**
-1. **Normalize** input: uppercase, strip special characters, remove form abbreviations (TAB, CAP, INJ, SYP)
-2. **Score** each pharmacy entry:
-   - Exact match = 100
-   - First-word exact match = +20 bonus + Levenshtein similarity
-   - Token overlap (tokens > 2 chars) = +10 per token + similarity
-   - Full-string Levenshtein = baseline score
-3. **Return** best match if confidence > 60
-
-**Exports:**
-- `matchMedicine(name)` — Returns `{matched, brand, form, dose, confidence}`
-- `fixMoMedicines(moData)` — Enhance MO-extracted medications
-- `fixConMedicines(conData)` — Enhance consultant-extracted medications
-- `fixQuickMedicines(data)` — Fix medications in quick mode
-- `searchPharmacy(query, limit)` — Search pharmacy DB with scoring
+Server side lives in `server/services/flow/` and `server/routes/flow.js`. The design rationale is in `docs/FLOW_MANAGEMENT_PLAN.md` and `docs/FLOW_INTEGRATION_PLAN.md`.
 
 ---
 
-### `src/medicine_db.json` — Pharmacy Formulary
+## External Systems
 
-JSON array of **6,931 medicines** available at Gini Hospital pharmacy. Each entry:
+**HealthRay** — the hospital's HIS, and the authoritative source for appointments, visit completion, labs, and scanned documents. It has no webhooks, so sync is a set of self-rescheduling loops in `server/services/cron/`. The cadences are deliberately slow (roughly 2–3 minutes): tighter polling repeatedly tripped HealthRay's WAF into a 403 IP-block. `HEALTHRAY_PROXY_URL` points all HealthRay traffic through a static-IP proxy so the IP can be allowlisted — that is the permanent fix. `labapi.healthray.com` is a **separate** system from `node.healthray.com` with its own credentials and its own loop.
+
+**MyHealth Genie** — the patient-facing app, on Supabase. Sync is bi-directional (`server/genie-sync.cjs`, `server/services/genieImport.js`) and always non-blocking: patient profile, care team, medications, labs, diagnoses, goals, lifestyle advice, self-monitoring. Patients raise refill, dose-change, lab and side-effect requests there; those land in the corresponding inbox pages here.
+
+**Supabase Storage** — lab PDFs, document images, and audio, served as signed URLs.
+
+**Google Sheets** — appointment imports, on its own cron loop.
+
+**MSG91 / Firebase** — WhatsApp templates and push notifications (see `docs/MSG91_SETUP.md`).
+
+---
+
+## Auth & Roles
+
+`shared/permissions.js` is the single source of truth for RBAC, imported by **both** the frontend (`src/config/routes.js` → `RequireCapability`) and the backend (`server/middleware/auth.js`). Roles — admin, consultant, mo, nurse, lab, tech, reception, coordinator, pharmacy, guest — map to coarse capabilities (`CLINICAL_WRITE`, `LAB_PORTAL`, `RECEPTION_OPS`, `FLOW_STATION`, …). Adding a page or endpoint means updating the map on both sides.
+
+> Note: `GRANT_ALL_CAPABILITIES` is currently `true`, which short-circuits every capability check. The `ROLE_CAPABILITIES` matrix is maintained but not yet enforced; set the flag to `false` to turn it on.
+
+JWTs come in two kinds — doctor and patient, distinguished by a `kind` claim — and are validated against the `auth_sessions` table, so logout and expiry are real revocation. A token is accepted as `x-auth-token`, `Authorization: Bearer`, or `?token=` (the query form exists so image and PDF URLs are self-authenticating). The unauthenticated surface is listed explicitly as `PUBLIC_PATHS` / `PUBLIC_PREFIXES` / `PUBLIC_PATTERNS` in `server/middleware/auth.js`.
+
+On the client, only `/login` and `/visit/:token` sit outside `ProtectedRoute`; everything else renders inside `ProtectedRoute` → `AppLayout` → `RequireCapability`.
+
+---
+
+## Database
+
+`server/schema.sql` holds the base schema — `patients`, `doctors`, `consultations`, `vitals`, `diagnoses`, `medications`, `lab_results`, `lab_test_requests`, `documents`, `goals`, `complications`, `active_visits`, and the patient-app log tables (`patient_vitals_log`, `patient_activity_log`, `patient_symptom_log`, `patient_med_log`, `patient_meal_log`), plus the views `v_latest_vitals`, `v_latest_hba1c`, `v_active_meds`, `v_patient_summary`.
+
+Everything since — appointments, auth sessions, flow tables, doctor scheduling, medicine collection — arrives as dated files in `server/migrations/`. **`schema.sql` alone is not a current database**; it is the starting point that the migrations build on.
+
+```bash
+# from server/ — apply one migration
+node migrations/_runOne.mjs migrations/2026-07-14_patient_identity_health_id.sql
+```
+
+Two things worth knowing before writing queries:
+
+- DATE columns are parsed as **strings** (configured in `config/db.js`) to avoid timezone off-by-one errors.
+- Patient identity keys on `health_id`, not `file_no` — HealthRay reassigns UHIDs to different people over time.
+
+---
+
+## API
+
+Every file in `server/routes/` is mounted under `/api`, so paths are flat rather than nested by router. A representative slice:
+
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /api/auth/login`, `/api/auth/logout`, `GET /api/auth/me`, plus patient-side `/api/patient/auth/*` |
+| Patients | `GET/POST /api/patients`, `GET /api/patients/:id`, `/api/patients/check-duplicate` |
+| Consultations | `POST /api/consultations` (transactional), `GET /api/consultations/:id`, `/:id/prescription` |
+| Clinical data | `/api/patients/:id/vitals`, `/labs`, `/medications`, `/documents`, `/history` |
+| Active visit | `GET/POST/PUT/DELETE /api/active-visit`, `GET /api/active-visits` |
+| Flow | `/api/flow/*` — check-in, stations, journeys, active visits, reports |
+| OPD & appointments | `/api/opd/*`, `/api/appointments`, `/api/appointment-slots`, `/api/walkins`, `/api/ghm-appointments` |
+| Patient requests | `/api/refills`, `/api/dose-change-requests`, `/api/lab-requests`, `/api/side-effects` |
+| Analytics | `/api/outcomes/*`, `/api/reports/*`, `/api/dashboard/*` |
+| AI | `/api/ai/*`, `/api/extract/*`, `/api/reasoning/*`, `/api/genie-chat/*`, `/api/summary/*` |
+| Sync | `/api/sync/*` — HealthRay/Genie sync triggers and backfills |
+
+Request bodies are validated with Zod schemas from `server/schemas/index.js` via `middleware/validate.js`.
+
+---
+
+## Environment Variables
+
+Both the API and the worker load the **repo-root `.env`** (`server/loadEnv.js` resolves it relative to `server/`, not the working directory). There is no separate `server/.env`. `VITE_*` variables are inlined into the browser bundle at build time. See `.env.example` for the full annotated list.
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `PORT` | No | API port (default 3001); also the Vite dev port (default 3000) |
+| `JWT_SECRET` / `JWT_EXPIRES_IN` | Yes | Session token signing |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Yes | File storage |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY` | Yes | Server-side AI and transcription |
+| `VITE_ANTHROPIC_KEY`, `VITE_DEEPGRAM_KEY`, `VITE_OPENAI_KEY` | Yes | Browser-side extraction and transcription |
+| `GENIE_SUPABASE_URL` / `GENIE_SUPABASE_SERVICE_KEY` | No | Genie sync; disabled with a warning if unset |
+| `VITE_GENIE_SUPABASE_URL` / `VITE_GENIE_SUPABASE_ANON_KEY` | No | Browser Supabase client for the realtime lab/reception inboxes |
+| `HEALTHRAY_MOBILE` / `_PASSWORD` / `_CAPTCHA` / `_ORG_ID` | No | HealthRay HIS login |
+| `HEALTHRAY_PROXY_URL` | No | Static-IP egress proxy — the permanent fix for WAF 403 blocks |
+| `LAB_HEALTHRAY_*` | No | Credentials and rate limits for the separate lab API |
+| `GOOGLE_CREDENTIALS` | No | Service-account JSON for Sheets appointment import |
+| `MSG91_*`, `FIREBASE_SERVICE_ACCOUNT` | No | WhatsApp and push notifications |
+| `HOSPITAL_PHONE` / `HOSPITAL_NAME` | No | Shown on the patient chat's "call clinic" card |
+| `RUN_CRON_IN_API` | No | `1` runs cron inside the API process instead of the worker |
+| `AADHAAR_ENCRYPTION_KEY` | No | Encrypts stored Aadhaar numbers |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+Node.js >= 20, a PostgreSQL instance, and API keys for Anthropic, Deepgram, and (optionally) OpenAI.
+
+### Install
+
+```bash
+npm install                    # client + dev tooling
+cd server && npm install       # API/worker deps live in their own manifest
+```
+
+### Configure
+
+Copy `.env.example` to `.env` in the repo root and fill it in. One file serves the client, API, and worker.
+
+### Initialize the database
+
+```bash
+node server/db-init.js         # applies server/schema.sql
+# then apply each file in server/migrations/ in date order:
+cd server && node migrations/_runOne.mjs migrations/<file>.sql
+```
+
+### Run
+
+```bash
+npm run dev          # formats, then runs Vite (:3000) + API (:3001) together
+npm run dev:client   # Vite only
+npm run dev:server   # API only (nodemon, no cron)
+npm run dev:worker   # cron/sync loops only
+```
+
+Vite proxies `/api` to `http://localhost:3001` (override with `VITE_DEV_API_URL`).
+
+### Other commands
+
+```bash
+npm run build          # vite build -> dist/
+npm run format         # prettier --write  (run before committing)
+npm run format:check
+
+# from server/ — the only scripted checks in the repo
+npm run smoke:doctors
+npm run smoke:med-collection
+```
+
+There is no test suite and no linter. `server/scripts/` and the repo root hold ~100 ad-hoc `.mjs`/`.js` diagnostic and backfill scripts; run one directly with `node`.
+
+> ⚠️ The `DATABASE_URL` in `.env` points at **production**. Any script you run against it touches live patient data.
+
+---
+
+## Deployment (Railway)
+
+The API and the worker deploy as **two Railway services built from the same image** (`server/Dockerfile`, `server/railway.json`), differing only in start command: `node index.js` and `node worker.js`. Running two workers would double every sync loop.
+
+The frontend is a Vite static build; the API serves `dist/` for any non-`/api` path, so it does not need a separate service.
+
+1. Create the PostgreSQL instance and copy its `DATABASE_URL`.
+2. Deploy the API service with root directory `server`; Railway builds the Dockerfile.
+3. Deploy the worker service from the same repo, start command `node worker.js`.
+4. Set the environment variables on both services.
+5. Build the frontend (`npm run build`) so `dist/` ships with the image.
+
+---
+
+## Medicine Matching
+
+`src/medmatch.js` maps AI-extracted drug names onto the Gini pharmacy formulary in `src/medicine_db.json` (~6,900 brands).
+
+```
+AI extracts: "Tab Metformin 500mg BD"
+      |
+  Normalize    uppercase, strip punctuation, drop form words (TAB/CAP/INJ/SYP)
+      |
+  Score every formulary entry
+      exact match            = 100
+      first-word exact       = +20 bonus + Levenshtein similarity
+      token overlap (>2 chr) = +10 per token + similarity
+      full-string Levenshtein= baseline
+      |
+  Best score above threshold?
+      yes -> {brand: "METFORMIN", form: "tablet", dose: "500mg", confidence}
+      no  -> unmatched; the doctor picks manually
+```
+
+Each formulary entry looks like:
 
 ```json
 {
@@ -210,410 +378,9 @@ JSON array of **6,931 medicines** available at Gini Hospital pharmacy. Each entr
 }
 ```
 
----
+Exports: `matchMedicine(name)`, `fixMoMedicines(moData)`, `fixConMedicines(conData)`, `fixQuickMedicines(data)`, `searchPharmacy(query, limit)`.
 
-### `src/main.jsx` (12 lines) — Entry Point
-
-Simple path-based router (no react-router dependency):
-- `/` renders `<App />` (main clinical interface)
-- `/companion` renders `<Companion />` (mobile document capture)
-
----
-
-### `server/index.js` (1,537 lines) — Express REST API
-
-The backend server handling all data persistence, authentication, and analytics.
-
-**Key Design Decisions:**
-- **Connection Pool:** pg.Pool with 10 max connections, 20s connect timeout, 30s idle timeout
-- **SSL:** Auto-enabled for Railway (non-internal) PostgreSQL connections
-- **Transactions:** Full consultation save is ACID-compliant (BEGIN → multiple inserts → COMMIT/ROLLBACK)
-- **Deduplication:** Uses PostgreSQL `DISTINCT ON` for medications, labs, and diagnoses
-- **Audit Logging:** Logs doctor actions (login, consultation save)
-- **Non-Blocking Sync:** Genie integration runs after commit, errors don't fail the save
-
-**Helper Functions:**
-- `n(v)` — Null-safe string trim
-- `num(v)` / `int(v)` — Safe number parsing
-- `safeJson(v)` — JSON stringify with error protection
-- `t(v, max)` — Truncate to max length
-
----
-
-### `server/schema.sql` (263 lines) — Database Schema
-
-Defines 10 tables, 4 views, and auto-update triggers.
-
-**Tables:**
-
-| Table | Key Fields | Purpose |
-|-------|-----------|---------|
-| `patients` | name, age, sex, phone, file_no, abha_id, aadhaar | Patient demographics with unique constraints |
-| `doctors` | name, speciality, pin, role (MO/Consultant/Surgeon) | Doctor accounts with PIN auth |
-| `consultations` | patient_id, doctor_id, mo_data (JSONB), con_data (JSONB), status | Full visit records with transcripts |
-| `vitals` | bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, rbs | Per-visit vital signs |
-| `diagnoses` | diagnosis_id (dm2/htn/cad/ckd/...), status (Controlled/Uncontrolled/New/Resolved) | Active conditions tracking |
-| `medications` | brand, composition, dose, frequency, timing, route, for_diagnosis[], is_active | Prescription history with active tracking |
-| `lab_results` | test_name, value, unit, flag (HIGH/LOW), reference_range, source | Lab values with dedup by test+date |
-| `documents` | doc_type, storage_path, extracted_data (JSONB) | Uploaded files (images, PDFs) |
-| `goals` | metric, current_value, target_value, status | Health targets with progress |
-| `complications` | name (Nephropathy/Retinopathy/...), status (+/-/screening), severity | DM/HTN complication tracking |
-
-**Views:**
-- `v_latest_vitals` — Most recent vitals per patient
-- `v_latest_hba1c` — Most recent HbA1c per patient
-- `v_active_meds` — Currently active medications per patient
-- `v_patient_summary` — Patient + visit count + diagnoses summary
-
----
-
-### `server/genie-sync.cjs` (196 lines) — MyHealth Genie Integration
-
-Bi-directional sync with the MyHealth Genie patient app via Supabase RPC functions.
-
-**Syncs:** Patient profile, care team, medications, lab results, diagnoses, goals, lifestyle advice, self-monitoring instructions.
-
-Requires `GENIE_SUPABASE_URL` and `GENIE_SUPABASE_SERVICE_KEY` environment variables. Non-blocking — errors are logged but don't fail the consultation save.
-
----
-
-### `server/db-init.js` (24 lines) — Schema Bootstrap
-
-Reads `schema.sql` and executes it against the database. Run once after creating the PostgreSQL instance:
-
-```bash
-DATABASE_URL="postgres://..." node server/db-init.js
-```
-
----
-
-### `server/Dockerfile`
-
-```dockerfile
-FROM node:20-slim
-WORKDIR /app
-COPY package.json ./
-RUN npm install --production
-COPY . .
-EXPOSE 3001
-CMD ["node", "index.js"]
-```
-
----
-
-### `vite.config.js`
-
-Vite build configuration:
-- React plugin enabled
-- Server listens on `0.0.0.0` (all interfaces) for container compatibility
-- Port from `$PORT` env var (default 3000)
-- All hosts allowed (Railway requirement)
-
----
-
-### Patch Scripts (`*.py`)
-
-One-off Python scripts used during development for code modifications. **Not part of the runtime** — they were used to apply patches to `App.jsx` and `server/index.js` during iterative development.
-
----
-
-## Features
-
-### Clinical Workflow
-- **Voice transcription** with real-time streaming (Deepgram) or batch (Whisper)
-- **Multi-language support** — English, Hindi, multilingual
-- **AI-powered extraction** of diagnoses, medications, investigations, history, complaints
-- **Pharmacy formulary matching** with fuzzy search (6,931+ medicines)
-- **Medication reconciliation** — continue / hold / stop with reasons
-- **Automatic medication auto-stop** when treatment plan changes
-- **Print-ready prescriptions** with professional formatting
-
-### Lab & Imaging
-- **Lab Portal** — upload lab report images, AI OCR extracts test values
-- **Imaging Portal** — upload X-ray, ultrasound, CT, MRI documents
-- **Abnormal lab detection** with action item flagging
-
-### Analytics & Outcomes
-- **Biomarker trend charts** — HbA1c, FBS, PPBS, LDL, HDL, TG, creatinine, eGFR, TSH, BP, weight, BMI (25+ biomarkers)
-- **Clinical Intelligence** — aggregate analytics by doctor, diagnosis distribution, medication patterns
-- **Outcomes dashboard** — treatment effectiveness visualization over time
-
-### Advanced AI
-- **Clinical Reasoning** — audio-record doctor's decision rationale with transcription
-- **Rx Review** — AI analysis of prescriptions for drug interactions, dosage appropriateness
-- **Shadow AI** — consultant recommendation comparison
-
-### Companion Mobile App
-- Accessible at `/companion` — mobile-optimized document capture
-- Camera capture or file upload with AI extraction
-- Auto-categorization of document types
-
----
-
-## API Endpoints
-
-### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/login` | PIN-based login (returns token) |
-| POST | `/api/auth/logout` | Revoke session |
-| GET | `/api/auth/me` | Check authentication |
-
-### Patients
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/patients?q=search` | Search/list patients |
-| GET | `/api/patients/:id` | Full patient record + history |
-| POST | `/api/patients` | Create or update patient |
-| GET | `/api/patients/check-duplicate` | Deduplication check |
-
-### Consultations
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/consultations` | Save full consultation (transactional) |
-| GET | `/api/consultations/:id` | Consultation detail |
-| GET | `/api/consultations/:id/prescription` | Reconstructed Rx |
-
-### Vitals, Labs & Medications
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/patients/:id/vitals` | Vital signs history |
-| GET | `/api/patients/:id/labs` | Lab results (deduplicated) |
-| POST | `/api/patients/:id/labs` | Add lab result |
-| GET | `/api/patients/:id/medications?active=true` | Medication list |
-
-### Documents
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/patients/:id/documents` | Create document record |
-| POST | `/api/documents/:id/upload-file` | Upload file to Supabase |
-| GET | `/api/documents/:id/file-url` | Signed download URL (1-hour) |
-| POST | `/api/patients/:id/history` | Save historical consultation |
-
-### Outcomes & Analytics
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/patients/:id/outcomes` | Biomarker trends (25+ markers) |
-| GET | `/api/reports/today` | Today's consultation summary |
-| GET | `/api/reports/diagnoses` | Diagnosis frequency by doctor |
-| GET | `/api/reports/doctors` | Top doctors by patient volume |
-| GET | `/api/reports/clinical-intelligence` | Aggregate clinical analytics |
-| GET | `/api/analytics/outcomes` | Aggregate biomarker analytics |
-
-### AI Features
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/consultations/:id/reasoning` | Save clinical reasoning |
-| POST | `/api/reasoning/:id/audio` | Upload reasoning audio |
-| GET | `/api/reasoning/:id/audio-url` | Audio signed URL |
-| POST | `/api/consultations/:id/rx-feedback` | Save Rx review feedback |
-
-### Appointments & Messages
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET/POST | `/api/appointments` | List/create appointments |
-| PUT/DELETE | `/api/appointments/:id` | Update/cancel appointment |
-| GET | `/api/messages/inbox` | Message list |
-| PUT | `/api/messages/:id/read` | Mark message read |
-
----
-
-## Environment Variables
-
-### Frontend (`.env` file in project root)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_API_URL` | Yes | Backend API URL (e.g., `https://gini-api.up.railway.app`) |
-| `VITE_DEEPGRAM_KEY` | Yes | Deepgram API key for streaming transcription |
-| `VITE_OPENAI_KEY` | Optional | OpenAI API key for Whisper batch transcription |
-| `VITE_ANTHROPIC_KEY` | Yes | Anthropic API key for Claude (extraction, Rx review, CI) |
-| `PORT` | Optional | Dev server port (default: 3000) |
-
-### Backend (`server/.env` or Railway environment)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `PORT` | Optional | Server port (default: 3001) |
-| `SUPABASE_URL` | Yes | Supabase project URL (for file storage) |
-| `SUPABASE_SERVICE_KEY` | Yes | Supabase service role key |
-| `GENIE_SUPABASE_URL` | Optional | MyHealth Genie Supabase URL (for sync) |
-| `GENIE_SUPABASE_SERVICE_KEY` | Optional | MyHealth Genie service key |
-| `HOSPITAL_PHONE` | Optional | Hospital phone for Genie care team sync |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Node.js** >= 20
-- **PostgreSQL** (local or hosted — Railway, Supabase, etc.)
-- API keys for: **Deepgram**, **Anthropic Claude**, and optionally **OpenAI**
-
-### 1. Clone the repository
-
-```bash
-git clone <your-repo-url>
-cd gini-scribe
-```
-
-### 2. Install dependencies
-
-```bash
-# Frontend
-npm install
-
-# Backend
-cd server && npm install && cd ..
-```
-
-### 3. Set up environment variables
-
-Create `.env` in the project root:
-
-```env
-VITE_API_URL=http://localhost:3001
-VITE_DEEPGRAM_KEY=your_deepgram_api_key
-VITE_ANTHROPIC_KEY=your_anthropic_api_key
-VITE_OPENAI_KEY=your_openai_api_key          # optional
-```
-
-Set backend environment variables (export or create `server/.env`):
-
-```env
-DATABASE_URL=postgres://user:pass@localhost:5432/gini_scribe
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your_supabase_service_key
-```
-
-### 4. Initialize the database
-
-```bash
-DATABASE_URL="postgres://user:pass@localhost:5432/gini_scribe" node server/db-init.js
-```
-
-This creates all tables, views, and triggers from `server/schema.sql`.
-
-### 5. Start the development servers
-
-```bash
-# Terminal 1 — Backend API
-cd server && node index.js
-
-# Terminal 2 — Frontend dev server
-npm run dev
-```
-
-The frontend runs at `http://localhost:3000` and the API at `http://localhost:3001`.
-
-### 6. Open the app
-
-- **Main clinical interface:** `http://localhost:3000`
-- **Mobile companion app:** `http://localhost:3000/companion`
-
----
-
-## Deployment (Railway)
-
-### Step 1: Create PostgreSQL
-
-1. Railway dashboard -> New -> Database -> PostgreSQL
-2. Copy the `DATABASE_URL` from the Variables tab
-
-### Step 2: Deploy the API server
-
-1. Railway -> New -> GitHub Repo -> select this repo
-2. Set root directory to `server`
-3. Add environment variables: `DATABASE_URL`, `PORT=3001`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`
-4. Railway builds from `server/Dockerfile` automatically
-
-### Step 3: Initialize the database
-
-```bash
-# From Railway shell or locally:
-DATABASE_URL="your-railway-postgres-url" node server/db-init.js
-```
-
-### Step 4: Deploy the frontend
-
-1. Railway -> New -> GitHub Repo -> select this repo (root directory: `/`)
-2. Add environment variables: `VITE_API_URL=https://your-api.up.railway.app`, `VITE_DEEPGRAM_KEY`, `VITE_ANTHROPIC_KEY`
-3. Build command: `npm run build`, Start command: `npx vite preview`
-
-### Step 5: Verify
-
-- API health check: `GET https://your-api.up.railway.app/` should return `{"status":"ok"}`
-- Open the frontend URL, log in, and create a test consultation
-
-### Estimated Cost
-
-- Railway PostgreSQL: **Free** (first 500MB, ~10,000 patients)
-- API server: **~$5/month** (Railway Starter)
-- Frontend: **~$5/month** (Railway Starter)
-
----
-
-## How It Works
-
-### Consultation Flow
-
-```
-Doctor speaks during examination
-         |
-         v
-  [Deepgram / Whisper]  -- real-time or batch transcription
-         |
-         v
-  Raw transcript text
-         |
-         v
-  [Anthropic Claude]  -- structured extraction with JSON schema
-         |
-         v
-  Structured data:
-    - Diagnoses (dm2, htn, cad, ckd, ...)
-    - Medications (name, dose, frequency, timing)
-    - Investigations ordered
-    - Chief complaints
-    - History / complications
-         |
-         v
-  [medmatch.js]  -- fuzzy match to Gini pharmacy brands
-         |
-         v
-  Doctor reviews & edits on screen
-         |
-         v
-  [POST /api/consultations]  -- atomic save (transaction)
-         |
-    +----+----+
-    |         |
-    v         v
-  PostgreSQL   Genie Sync (non-blocking)
-  (all structured data)   (patient app)
-```
-
-### Medicine Matching Flow
-
-```
-AI extracts: "Tab Metformin 500mg BD"
-         |
-         v
-  Normalize: "METFORMIN 500MG"
-         |
-         v
-  Score against 6,931 pharmacy entries:
-    - Exact match = 100
-    - First-word match + Levenshtein = ~85
-    - Token overlap = ~70
-         |
-         v
-  Best match > 65 confidence?
-    Yes -> Return: {brand: "METFORMIN", form: "tablet", dose: "500mg"}
-    No  -> Return unmatched (doctor manually selects)
-```
+A related rule lives on the server: when a new consultation is saved, previously active medications from the same doctor that are absent from the new plan are automatically stopped (`server/services/medication/`).
 
 ---
 

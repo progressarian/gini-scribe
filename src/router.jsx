@@ -126,15 +126,22 @@ const router = createBrowserRouter([
   {
     element: <ProtectedRoute />,
     children: [
-      // Companion — own layout, no AppLayout
+      // Companion — own layout, no AppLayout. Still wrapped in RequireCapability
+      // (which renders a bare <Outlet/>, not chrome) so it isn't the one clinical
+      // screen any logged-in role can open by URL.
       {
-        path: "/companion",
-        element: lazyEl(Companion),
+        element: <RequireCapability />,
         children: [
-          { index: true, element: lazyEl(HomeScreen) },
-          { path: "record/:id", element: lazyEl(PatientScreen) },
-          { path: "capture/:id", element: lazyEl(CaptureScreen) },
-          { path: "multi-capture/:id", element: lazyEl(MultiCaptureScreen) },
+          {
+            path: "/companion",
+            element: lazyEl(Companion),
+            children: [
+              { index: true, element: lazyEl(HomeScreen) },
+              { path: "record/:id", element: lazyEl(PatientScreen) },
+              { path: "capture/:id", element: lazyEl(CaptureScreen) },
+              { path: "multi-capture/:id", element: lazyEl(MultiCaptureScreen) },
+            ],
+          },
         ],
       },
       {

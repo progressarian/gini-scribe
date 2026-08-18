@@ -348,6 +348,42 @@
   border-radius: 4px;
 }
 
+/* Deselect the loaded patient. flex-shrink:0 keeps it from being squeezed out
+   when the info strip overflows — it is the bar's only affordance for clearing
+   the selection, so it has to survive every breakpoint below. */
+.patient-bar__clear {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.patient-bar__clear:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+.patient-bar__clear:focus-visible {
+  outline: 2px solid #94a3b8;
+  outline-offset: 1px;
+}
+
 /* ============ SEARCH OVERLAY ============ */
 .search-overlay {
   position: fixed;
@@ -1180,6 +1216,11 @@
   .patient-bar--inline .patient-bar__avatar {
     width: 20px;
     height: 20px;
+  }
+  .patient-bar__clear {
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
   }
   .header__find-btn,
   .header__save-btn,

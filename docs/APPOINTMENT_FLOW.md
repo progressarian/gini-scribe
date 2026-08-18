@@ -33,8 +33,9 @@ to book / reassign:
 | Admin | ✅ Yes (and can bulk-reassign) |
 | Nurse / Lab / Pharmacy | ❌ No (not for booking) |
 
-> Note: right now a setting called `GRANT_ALL_CAPABILITIES` is **ON**, so effectively
-> anyone logged in can book. Turn it off to enforce the table above.
+> Note: `GRANT_ALL_CAPABILITIES` was turned **OFF** on 2026-08-18, so the table above is
+> now actually enforced — nurse/lab/pharmacy/OBT get a 403 and don't see the GHM tab.
+> The gate is the `RECEPTION_OPS` capability in `shared/permissions.js`.
 
 ---
 
