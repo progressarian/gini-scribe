@@ -311,14 +311,14 @@ router.post("/ghm-appointments/last-mo", async (req, res) => {
     if (!ids.length) return res.json({});
 
     const r = await pool.query(
-      `SELECT DISTINCT ON (patient_id) patient_id, mo_name, seen_date
-       FROM (
-         SELECT c.patient_id, TRIM(c.mo_name) AS mo_name, c.visit_date AS seen_date, 0 AS src_rank
+      `WITH seen AS (
+         SELECT c.patient_id, TRIM(c.mo_name) AS name, c.visit_date AS seen_date,
+                'mo' AS kind, 0 AS src_rank
            FROM consultations c
           WHERE c.patient_id = ANY($1::int[])
             AND NULLIF(TRIM(c.mo_name), '') IS NOT NULL
          UNION ALL
-         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name), v.visit_date, 1
+         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name), v.visit_date, 'mo', 1
            FROM flow_visit_steps fs
            JOIN flow_visits v ON v.id = fs.visit_id
           WHERE v.patient_db_id = ANY($1::int[])
@@ -326,18 +326,48 @@ router.post("/ghm-appointments/last-mo", async (req, res) => {
             AND fs.status = 'completed'
             AND NULLIF(TRIM(fs.assigned_staff_name), '') IS NOT NULL
          UNION ALL
-         SELECT a.patient_id, TRIM(a.assigned_mo), a.appointment_date, 2
+         SELECT a.patient_id, TRIM(a.assigned_mo), a.appointment_date, 'mo', 2
            FROM appointments a
           WHERE a.patient_id = ANY($1::int[])
             AND NULLIF(TRIM(a.assigned_mo), '') IS NOT NULL
-       ) s
-       ORDER BY patient_id, seen_date DESC NULLS LAST, src_rank`,
+         UNION ALL
+         SELECT c.patient_id, TRIM(c.con_name), c.visit_date, 'doctor', 0
+           FROM consultations c
+          WHERE c.patient_id = ANY($1::int[])
+            AND NULLIF(TRIM(c.con_name), '') IS NOT NULL
+         UNION ALL
+         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name), v.visit_date, 'doctor', 1
+           FROM flow_visit_steps fs
+           JOIN flow_visits v ON v.id = fs.visit_id
+          WHERE v.patient_db_id = ANY($1::int[])
+            AND fs.assigned_role IN ('sd', 'chief', 'consultant', 'doctor')
+            AND fs.status = 'completed'
+            AND NULLIF(TRIM(fs.assigned_staff_name), '') IS NOT NULL
+         UNION ALL
+         SELECT a.patient_id, TRIM(a.doctor_name), a.appointment_date, 'doctor', 2
+           FROM appointments a
+          WHERE a.patient_id = ANY($1::int[])
+            AND NULLIF(TRIM(a.doctor_name), '') IS NOT NULL
+            AND TRIM(a.doctor_name) NOT IN ('N/A', 'Dr. Hospital Admin')
+       )
+       SELECT DISTINCT ON (patient_id, kind) patient_id, kind, name, seen_date
+         FROM seen
+        ORDER BY patient_id, kind, seen_date DESC NULLS LAST, src_rank`,
       [ids],
     );
 
     const out = {};
-    for (const row of r.rows) out[row.patient_id] = { name: row.mo_name, date: row.seen_date };
-    res.json(out);
+    for (const row of r.rows) {
+      const slot = (out[row.patient_id] = out[row.patient_id] || {});
+      slot[row.kind] = { name: row.name, date: row.seen_date };
+    }
+
+    const merged = {};
+    for (const [pid, slot] of Object.entries(out)) {
+      if (slot.mo) merged[pid] = { ...slot.mo, kind: "mo" };
+      else if (slot.doctor) merged[pid] = { ...slot.doctor, kind: "doctor" };
+    }
+    res.json(merged);
   } catch (e) {
     handleError(res, e, "GHM last MO");
   }
@@ -533,7 +563,37 @@ router.get("/ghm-appointments", async (req, res) => {
                )
              )`;
     } else {
-      where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
+      // Default (by-date) view = everything the desk has to handle that day:
+      // appointments BOOKED on the date, patients whose preferred date is the
+      // date, and — because a day can carry due follow-ups with no booking yet
+      // (2026-08-26 had 43 due and 0 booked) — patients whose advised follow-up
+      // falls due on it, under the same "latest follow-up visit only" rule the
+      // followup mode uses. Same two-group shape as above so the cheap $1
+      // predicates filter first and the correlated subquery runs on the rest.
+      // The final group drops a follow-up-only row when that patient already
+      // appears through a booking on this date, so nobody is listed twice.
+      where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1 OR ${ownFu("a")} = $1)
+             AND (
+               a.appointment_date = $1
+               OR a.preferred_date = $1
+               OR a.file_no IS NULL
+               OR a.appointment_date = (
+                 SELECT MAX(prev.appointment_date)
+                 FROM appointments prev
+                 WHERE prev.file_no = a.file_no
+                   AND ${ownFu("prev")} IS NOT NULL
+               )
+             )
+             AND (
+               a.appointment_date = $1
+               OR a.preferred_date = $1
+               OR a.file_no IS NULL
+               OR NOT EXISTS (
+                 SELECT 1 FROM appointments booked
+                 WHERE booked.file_no = a.file_no
+                   AND (booked.appointment_date = $1 OR booked.preferred_date = $1)
+               )
+             )`;
     }
     where += homeCond;
     if (doctor) {

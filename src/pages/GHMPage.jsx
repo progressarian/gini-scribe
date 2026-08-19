@@ -1851,18 +1851,30 @@ export default function GHMPage() {
                           <td>
                             {(() => {
                               const lm = lastMo[row.patient_id];
-                              if (!lm?.name) return <span className="muted">No MO recorded</span>;
+                              if (!lm?.name)
+                                return <span className="muted">No MO or doctor recorded</span>;
                               const age = daysAgo(lm.date);
                               const stale = age != null && age > STALE_MO_DAYS;
+                              const isDoctor = lm.kind === "doctor";
                               return (
                                 <div className="lastmo-cell">
-                                  <span className="lastmo-name">{lm.name}</span>
+                                  <span className="lastmo-name">
+                                    {lm.name}
+                                    {isDoctor && (
+                                      <span
+                                        className="lastmo-tag"
+                                        title="No MO recorded — showing the doctor seen on the last visit."
+                                      >
+                                        Doctor
+                                      </span>
+                                    )}
+                                  </span>
                                   {lm.date && (
                                     <span
                                       className={`lastmo-date ${stale ? "lastmo-date--stale" : ""}`}
                                       title={
                                         stale
-                                          ? "This is the last visit that named an MO — more recent visits recorded none."
+                                          ? `This is the last visit that named ${isDoctor ? "a doctor" : "an MO"} — more recent visits recorded none.`
                                           : undefined
                                       }
                                     >

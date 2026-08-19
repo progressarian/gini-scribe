@@ -1625,3 +1625,14 @@ a.pcell__ph:hover {
   border: 1px solid #f1c9c4;
   color: #b5392b;
 }
+
+.lastmo-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #3730a3;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 4px;
+  padding: 0 5px;
+}
