@@ -1,0 +1,2 @@
+ALTER TABLE appointments
+  ADD COLUMN IF NOT EXISTS home_collection BOOLEAN DEFAULT FALSE;

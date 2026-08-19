@@ -9,7 +9,11 @@
     "dev:worker": "nodemon worker.js",
     "db:init": "node db-init.js",
     "smoke:doctors": "node scripts/smoke-doctor-management.mjs",
-    "smoke:med-collection": "node scripts/smoke-med-collection.mjs"
+    "smoke:med-collection": "node scripts/smoke-med-collection.mjs",
+    "smoke:obt-dashboard": "node scripts/smoke-obt-dashboard.mjs",
+    "smoke:ghm-sheet": "node scripts/smoke-ghm-sheet.mjs",
+    "smoke:ghm-record": "node scripts/smoke-ghm-patient-record.mjs",
+    "smoke:ghm-last-mo": "node scripts/smoke-ghm-last-mo.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

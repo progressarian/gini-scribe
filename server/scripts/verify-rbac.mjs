@@ -56,6 +56,11 @@ const ROUTE_CASES = [
   // OBT is scoped to its call list, and doctors are kept out of it.
   ["/api/obt-status", "obt", true],
   ["/api/obt-status", "consultant", false],
+  ["/api/obt-dashboard", "obt", true],
+  ["/api/obt-dashboard", "reception", true],
+  ["/api/obt-dashboard", "coordinator", true],
+  ["/api/obt-dashboard", "consultant", false],
+  ["/api/obt-dashboard", "guest", false],
   // OBT was additionally given /find and /ghm, so it reaches what those pages
   // call — appointments, the GHM sheet, availability and call logging...
   ["/api/appointments", "obt", true],
@@ -65,6 +70,10 @@ const ROUTE_CASES = [
   ["/api/availability/day", "obt", true],
   ["/api/call-attempts", "obt", true],
   ["/api/cc-calling/agents", "obt", true],
+  ["/api/ghm-patient-record/55", "obt", true],
+  ["/api/ghm-patient-record/55", "reception", true],
+  ["/api/ghm-patient-record/document/9/stream", "obt", true],
+  ["/api/ghm-patient-record/55", "guest", false],
   // ...but NOT the rest of the reception surface. These must stay closed, or
   // the grant has silently become RECEPTION_OPS by another name.
   ["/api/opd/appointments", "obt", false],

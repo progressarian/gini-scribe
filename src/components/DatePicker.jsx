@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AnchoredPopover from "./ui/AnchoredPopover.jsx";
+import useDismissOnOutside from "../hooks/useDismissOnOutside.js";
 
 // Lightweight custom calendar popover. value/onChange use ISO "YYYY-MM-DD".
 // minDate / maxDate are also "YYYY-MM-DD" (inclusive) and disable everything
@@ -51,6 +53,7 @@ export default function DatePicker({
   maxDate,
   placeholder = "Select date",
   disabled = false,
+  clearable = true,
   style,
   activeStyle,
   label,
@@ -58,21 +61,21 @@ export default function DatePicker({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => startOfMonth(parseIso(value) || new Date()));
   const wrapperRef = useRef(null);
+  const calRef = useRef(null);
+
+  useDismissOnOutside(
+    [wrapperRef, calRef],
+    useCallback(() => setOpen(false), []),
+    open,
+  );
 
   useEffect(() => {
     if (!open) return;
-    const onDocClick = (e) => {
-      if (!wrapperRef.current?.contains(e.target)) setOpen(false);
-    };
     const onEsc = (e) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onEsc);
-    };
+    return () => document.removeEventListener("keydown", onEsc);
   }, [open]);
 
   useEffect(() => {
@@ -132,6 +135,9 @@ export default function DatePicker({
     boxSizing: "border-box",
     cursor: disabled ? "not-allowed" : "pointer",
     textAlign: "left",
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 400,
     transition: "border-color 0.15s, box-shadow 0.15s, background 0.15s",
     ...style,
   };
@@ -153,18 +159,12 @@ export default function DatePicker({
         </label>
       )}
       <div style={{ position: "relative" }}>
-        <div
-          role="button"
-          tabIndex={disabled ? -1 : 0}
-          aria-disabled={disabled}
-          onClick={() => !disabled && setOpen((o) => !o)}
-          onKeyDown={(e) => {
-            if (disabled) return;
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              setOpen((o) => !o);
-            }
-          }}
+        <button
+          type="button"
+          disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
           style={baseStyle}
         >
           <span
@@ -182,8 +182,8 @@ export default function DatePicker({
             📅
           </span>
           {value ? fmtDisplay(value) : placeholder}
-        </div>
-        {value && !disabled && (
+        </button>
+        {value && !disabled && clearable && (
           <button
             type="button"
             onClick={(e) => {
@@ -232,175 +232,183 @@ export default function DatePicker({
       </div>
 
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            left: 0,
-            zIndex: 50,
-            background: "#fff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 12,
-            boxShadow: "0 10px 30px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06)",
-            padding: 12,
-            width: 280,
-          }}
-        >
+        <AnchoredPopover anchorRef={wrapperRef} popoverRef={calRef} width={280} gap={6}>
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 10,
+              background: "#fff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 12,
+              boxShadow: "0 10px 30px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06)",
+              padding: 12,
+              width: 280,
+              boxSizing: "border-box",
             }}
           >
-            <button
-              type="button"
-              onClick={goPrevMonth}
-              disabled={!canPrev}
-              style={navBtnStyle(canPrev)}
-              aria-label="Previous month"
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 10,
+              }}
             >
-              ‹
-            </button>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>
-              {MONTH_NAMES[view.getMonth()]} {view.getFullYear()}
-            </div>
-            <button
-              type="button"
-              onClick={goNextMonth}
-              disabled={!canNext}
-              style={navBtnStyle(canNext)}
-              aria-label="Next month"
-            >
-              ›
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(7,1fr)",
-              gap: 2,
-              marginBottom: 4,
-            }}
-          >
-            {WEEK_DAYS.map((w, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  color: "#94a3b8",
-                  textAlign: "center",
-                  padding: "4px 0",
-                  letterSpacing: 0.4,
-                }}
+              <button
+                type="button"
+                onClick={goPrevMonth}
+                disabled={!canPrev}
+                style={navBtnStyle(canPrev)}
+                aria-label="Previous month"
               >
-                {w}
+                ‹
+              </button>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>
+                {MONTH_NAMES[view.getMonth()]} {view.getFullYear()}
               </div>
-            ))}
-          </div>
+              <button
+                type="button"
+                onClick={goNextMonth}
+                disabled={!canNext}
+                style={navBtnStyle(canNext)}
+                aria-label="Next month"
+              >
+                ›
+              </button>
+            </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
-            {days.map((d, i) => {
-              if (!d) return <div key={i} style={{ height: 32 }} />;
-              const iso = toIso(d);
-              const isSelected = iso === selectedIso;
-              const isToday = iso === todayIso;
-              const dis = isDisabled(d);
-              return (
-                <button
-                  type="button"
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(7,1fr)",
+                gap: 2,
+                marginBottom: 4,
+              }}
+            >
+              {WEEK_DAYS.map((w, i) => (
+                <div
                   key={i}
-                  disabled={dis}
-                  onClick={() => {
-                    onChange(iso);
-                    setOpen(false);
-                  }}
                   style={{
-                    height: 32,
-                    border: isToday && !isSelected ? "1px solid #c7d2fe" : "1px solid transparent",
-                    borderRadius: 8,
-                    background: isSelected ? "#7c3aed" : dis ? "transparent" : "#fff",
-                    color: isSelected ? "#fff" : dis ? "#cbd5e1" : isToday ? "#4338ca" : "#0f172a",
-                    fontSize: 12,
-                    fontWeight: isSelected || isToday ? 800 : 600,
-                    cursor: dis ? "not-allowed" : "pointer",
-                    padding: 0,
-                    transition: "background 0.12s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!dis && !isSelected) e.currentTarget.style.background = "#f5f3ff";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!dis && !isSelected) e.currentTarget.style.background = "#fff";
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: "#94a3b8",
+                    textAlign: "center",
+                    padding: "4px 0",
+                    letterSpacing: 0.4,
                   }}
                 >
-                  {d.getDate()}
-                </button>
-              );
-            })}
-          </div>
+                  {w}
+                </div>
+              ))}
+            </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginTop: 10,
-              paddingTop: 10,
-              borderTop: "1px solid #f1f5f9",
-            }}
-          >
-            {(() => {
-              const now = new Date();
-              const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-              const todayDisabled = (!!min && today < min) || (!!max && today > max);
-              return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
+              {days.map((d, i) => {
+                if (!d) return <div key={i} style={{ height: 32 }} />;
+                const iso = toIso(d);
+                const isSelected = iso === selectedIso;
+                const isToday = iso === todayIso;
+                const dis = isDisabled(d);
+                return (
+                  <button
+                    type="button"
+                    key={i}
+                    disabled={dis}
+                    onClick={() => {
+                      onChange(iso);
+                      setOpen(false);
+                    }}
+                    style={{
+                      height: 32,
+                      border:
+                        isToday && !isSelected ? "1px solid #c7d2fe" : "1px solid transparent",
+                      borderRadius: 8,
+                      background: isSelected ? "#7c3aed" : dis ? "transparent" : "#fff",
+                      color: isSelected
+                        ? "#fff"
+                        : dis
+                          ? "#cbd5e1"
+                          : isToday
+                            ? "#4338ca"
+                            : "#0f172a",
+                      fontSize: 12,
+                      fontWeight: isSelected || isToday ? 800 : 600,
+                      cursor: dis ? "not-allowed" : "pointer",
+                      padding: 0,
+                      transition: "background 0.12s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!dis && !isSelected) e.currentTarget.style.background = "#f5f3ff";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!dis && !isSelected) e.currentTarget.style.background = "#fff";
+                    }}
+                  >
+                    {d.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: "1px solid #f1f5f9",
+              }}
+            >
+              {(() => {
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const todayDisabled = (!!min && today < min) || (!!max && today > max);
+                return (
+                  <button
+                    type="button"
+                    disabled={todayDisabled}
+                    onClick={() => {
+                      if (todayDisabled) return;
+                      onChange(toIso(today));
+                      setOpen(false);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: todayDisabled ? "#cbd5e1" : "#7c3aed",
+                      background: "transparent",
+                      border: "none",
+                      cursor: todayDisabled ? "not-allowed" : "pointer",
+                      padding: "4px 6px",
+                    }}
+                    title={todayDisabled ? "Today is outside the allowed range" : "Jump to today"}
+                  >
+                    Today
+                  </button>
+                );
+              })()}
+              {clearable && (
                 <button
                   type="button"
-                  disabled={todayDisabled}
                   onClick={() => {
-                    if (todayDisabled) return;
-                    onChange(toIso(today));
+                    onChange("");
                     setOpen(false);
                   }}
                   style={{
                     fontSize: 11,
                     fontWeight: 700,
-                    color: todayDisabled ? "#cbd5e1" : "#7c3aed",
+                    color: "#475569",
                     background: "transparent",
                     border: "none",
-                    cursor: todayDisabled ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                     padding: "4px 6px",
                   }}
-                  title={todayDisabled ? "Today is outside the allowed range" : "Jump to today"}
                 >
-                  Today
+                  Clear
                 </button>
-              );
-            })()}
-            <button
-              type="button"
-              onClick={() => {
-                onChange("");
-                setOpen(false);
-              }}
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: "#475569",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px 6px",
-              }}
-            >
-              Clear
-            </button>
+              )}
+            </div>
           </div>
-        </div>
+        </AnchoredPopover>
       )}
     </div>
   );

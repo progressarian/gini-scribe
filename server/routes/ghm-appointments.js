@@ -305,6 +305,62 @@ router.post("/ghm-appointments/biomarkers", async (req, res) => {
   }
 });
 
+router.post("/ghm-appointments/last-mo", async (req, res) => {
+  try {
+    const ids = (req.body?.patient_ids || []).filter((x) => Number.isInteger(x));
+    if (!ids.length) return res.json({});
+
+    const r = await pool.query(
+      `SELECT DISTINCT ON (patient_id) patient_id, mo_name, seen_date
+       FROM (
+         SELECT c.patient_id, TRIM(c.mo_name) AS mo_name, c.visit_date AS seen_date, 0 AS src_rank
+           FROM consultations c
+          WHERE c.patient_id = ANY($1::int[])
+            AND NULLIF(TRIM(c.mo_name), '') IS NOT NULL
+         UNION ALL
+         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name), v.visit_date, 1
+           FROM flow_visit_steps fs
+           JOIN flow_visits v ON v.id = fs.visit_id
+          WHERE v.patient_db_id = ANY($1::int[])
+            AND fs.assigned_role = 'mo'
+            AND fs.status = 'completed'
+            AND NULLIF(TRIM(fs.assigned_staff_name), '') IS NOT NULL
+         UNION ALL
+         SELECT a.patient_id, TRIM(a.assigned_mo), a.appointment_date, 2
+           FROM appointments a
+          WHERE a.patient_id = ANY($1::int[])
+            AND NULLIF(TRIM(a.assigned_mo), '') IS NOT NULL
+       ) s
+       ORDER BY patient_id, seen_date DESC NULLS LAST, src_rank`,
+      [ids],
+    );
+
+    const out = {};
+    for (const row of r.rows) out[row.patient_id] = { name: row.mo_name, date: row.seen_date };
+    res.json(out);
+  } catch (e) {
+    handleError(res, e, "GHM last MO");
+  }
+});
+
+const summaryCols = (a) => `
+  COUNT(*)::int                                                       AS total,
+  COUNT(*) FILTER (WHERE ${a}.show_no_show = 'Show')::int             AS came,
+  COUNT(*) FILTER (WHERE ${a}.show_no_show = 'No Show')::int          AS no_show,
+  COUNT(*) FILTER (
+    WHERE ${a}.show_no_show IS NULL OR ${a}.show_no_show = ''
+  )::int                                                              AS pending_show,
+  COUNT(*) FILTER (WHERE ${a}.call_status = 'called')::int            AS called,
+  COUNT(*) FILTER (WHERE ${a}.call_status = 'not_picked')::int        AS not_picked,
+  COUNT(*) FILTER (WHERE ${a}.call_status = 'rescheduled')::int       AS rescheduled,
+  COUNT(*) FILTER (
+    WHERE ${a}.call_status IS NULL OR ${a}.call_status IN ('', 'pending')
+  )::int                                                              AS not_called,
+  COUNT(*) FILTER (
+    WHERE ${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%'
+  )::int                                                              AS follow_up,
+  COUNT(*) FILTER (WHERE ${a}.home_collection)::int                   AS home_collection`;
+
 // GET /api/ghm-appointments — list by date + optional doctor
 router.get("/ghm-appointments", async (req, res) => {
   try {
@@ -314,6 +370,11 @@ router.get("/ghm-appointments", async (req, res) => {
     const offset = (Math.max(1, +page) - 1) * effLimit;
 
     const params = [d];
+
+    const homeOnly = ["1", "true", "yes"].includes(
+      String(req.query.home_collection || "").toLowerCase(),
+    );
+    const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
 
     // A visit's OWN effective follow-up date, from whichever source has it, in
     // priority order: the follow_up_date column → the synced HealthRay
@@ -342,7 +403,9 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.whatsapp_message, a.additional_whatsapp_msg,
                 a.notes, a.is_walkin, a.age, a.sex,
                 a.call_status, a.call_made_by, a.call_date,
-                a.call_notes, a.call_reschedule_date, a.pt_recovery, a.preferred_date, a.preferred_doctor,
+                a.call_notes, a.call_reschedule_date, a.pt_recovery,
+                a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
+                COALESCE(a.home_collection, FALSE) AS home_collection,
                 p.id AS patient_id, p.address, p.email,
                 COALESCE(a.age, p.age) AS disp_age,
                 COALESCE(a.sex, p.sex) AS disp_sex,
@@ -364,7 +427,14 @@ router.get("/ghm-appointments", async (req, res) => {
     if (mode === "lookup") {
       const q = (req.query.q || "").trim();
       if (q.length < 2) {
-        return res.json({ data: [], total: 0, page: +page, limit: effLimit, totalPages: 0 });
+        return res.json({
+          data: [],
+          total: 0,
+          summary: {},
+          page: +page,
+          limit: effLimit,
+          totalPages: 0,
+        });
       }
       // Tokenise on whitespace and require EVERY word to match (in name, file no,
       // or phone). A single `ILIKE '%surinder jit%'` fails on real data where the
@@ -377,7 +447,7 @@ router.get("/ghm-appointments", async (req, res) => {
             `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1})`,
         )
         .join(" AND ");
-      const searchWhere = `WHERE (${tokenConds})`;
+      const searchWhere = `WHERE (${tokenConds})${homeCond}`;
       const likeParams = tokens.map((t) => `%${t}%`);
       // Param slots after the token params: date (for "upcoming" status), limit, offset.
       const dIdx = tokens.length + 1;
@@ -392,8 +462,11 @@ router.get("/ghm-appointments", async (req, res) => {
       )`;
       const [countR, dataR] = await Promise.all([
         pool.query(
-          `SELECT COUNT(*)::int AS total FROM (
-             SELECT DISTINCT COALESCE(a.file_no, a.id::text) FROM appointments a ${searchWhere}
+          `SELECT ${summaryCols("z")} FROM (
+             SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
+                    a.call_status, a.show_no_show, a.visit_type, a.home_collection
+             FROM appointments a ${searchWhere}
+             ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
            ) z`,
           likeParams,
         ),
@@ -415,10 +488,12 @@ router.get("/ghm-appointments", async (req, res) => {
           [...likeParams, d, effLimit, offset],
         ),
       ]);
-      const total = countR.rows[0]?.total || 0;
+      const summary = countR.rows[0] || {};
+      const total = summary.total || 0;
       return res.json({
         data: dataR.rows,
         total,
+        summary,
         page: +page,
         limit: effLimit,
         totalPages: Math.ceil(total / effLimit),
@@ -460,6 +535,7 @@ router.get("/ghm-appointments", async (req, res) => {
     } else {
       where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
     }
+    where += homeCond;
     if (doctor) {
       // Filter by doctor matches EITHER the appointment's doctor OR the patient's
       // preferred doctor — so re-assigning a preferred doctor surfaces the patient
@@ -484,7 +560,7 @@ router.get("/ghm-appointments", async (req, res) => {
     }
 
     const [countR, dataR] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS total FROM appointments a ${where}`, params),
+      pool.query(`SELECT ${summaryCols("a")} FROM appointments a ${where}`, params),
       pool.query(
         `SELECT ${baseCols},
                 (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
@@ -518,10 +594,12 @@ router.get("/ghm-appointments", async (req, res) => {
       ),
     ]);
 
-    const total = countR.rows[0]?.total || 0;
+    const summary = countR.rows[0] || {};
+    const total = summary.total || 0;
     res.json({
       data: dataR.rows,
       total,
+      summary,
       page: +page,
       limit: effLimit,
       totalPages: Math.ceil(total / effLimit),
@@ -559,6 +637,7 @@ router.post("/ghm-appointments", async (req, res) => {
       cc_remark_date,
       notes,
       is_walkin = false,
+      home_collection = false,
     } = req.body;
 
     if (!patient_name || !appointment_date || !doctor_name)
@@ -641,10 +720,10 @@ router.post("/ghm-appointments", async (req, res) => {
         earlier_slot_given, condition, chief_complaint,
         misc_notes, reports_uploaded, will_get_test_at_gini,
         requested_by_cc, cc_remark_date, notes, is_walkin,
-        whatsapp_message, additional_whatsapp_msg, status
+        whatsapp_message, additional_whatsapp_msg, home_collection, status
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,'scheduled'
+        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,'scheduled'
       ) RETURNING *`,
       [
         patient_id,
@@ -675,6 +754,7 @@ router.post("/ghm-appointments", async (req, res) => {
         is_walkin,
         whatsapp_message,
         additional_whatsapp_msg,
+        home_collection,
       ],
     );
 
@@ -736,6 +816,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "pt_recovery",
       "preferred_date",
       "preferred_doctor",
+      "preferred_time_slot",
+      "home_collection",
       "assigned_mo",
       "prescription_explained_by",
     ];
@@ -756,6 +838,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       doctor_name: "Assigned Doctor",
       preferred_doctor: "Preferred Doctor",
       preferred_date: "Preferred Date",
+      preferred_time_slot: "Preferred Time",
       call_made_by: "Called By",
     };
     const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
@@ -816,6 +899,7 @@ const REVERTIBLE_FIELDS = new Set([
   "doctor_name",
   "preferred_doctor",
   "preferred_date",
+  "preferred_time_slot",
   "call_made_by",
 ]);
 

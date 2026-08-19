@@ -48,6 +48,19 @@ export const qk = {
     reports: (start, end) => ["flow", "reports", start, end],
     appointments: (date, q, doctor) => ["flow", "appointments", date, q || null, doctor || null],
   },
+  ghm: {
+    all: ["ghm"],
+    doctors: () => ["ghm", "doctors"],
+    ccAgents: () => ["ghm", "cc-agents"],
+    list: (params) => ["ghm", "list", params],
+    biomarkers: (patientIds) => ["ghm", "biomarkers", patientIds],
+    lastMo: (patientIds) => ["ghm", "last-mo", patientIds],
+    attemptCounts: (appointmentIds) => ["ghm", "attempt-counts", appointmentIds],
+    callAttempts: (appointmentId) => ["ghm", "call-attempts", String(appointmentId)],
+    changes: (appointmentId) => ["ghm", "changes", String(appointmentId)],
+    availability: (doctor, date) => ["ghm", "availability", doctor || null, date || null],
+    conflicts: (date) => ["ghm", "conflicts", date],
+  },
   messages: {
     all: ["messages"],
     thread: (patientId, role = null, doctor = null) => [

@@ -159,6 +159,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/appointment-slots", CAP.RECEPTION_OPS],
   ["/api/appointment-changes", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/ghm-appointments", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
+  ["/api/ghm-patient-record", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/walkins", CAP.RECEPTION_OPS],
   ["/api/cancellations", CAP.RECEPTION_OPS],
   ["/api/station-tracking", CAP.RECEPTION_OPS],
@@ -167,6 +168,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/call-attempts", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/clinic-holidays", CAP.RECEPTION_OPS],
   ["/api/obt-status", CAP.OBT_OPS],
+  ["/api/obt-dashboard", CAP.OBT_OPS],
   ["/api/diabetes-champions", CAP.RECEPTION_OPS],
   // ⚠️ PATIENT_READ here is identity-level by intent, but this row is coarser
   // than that: the matcher is literal-prefix and patient ids are dynamic, so
