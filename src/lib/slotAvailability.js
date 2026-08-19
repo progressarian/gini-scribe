@@ -35,6 +35,21 @@ export const SLOT_CATALOG = [
   "9 AM to 9:30 AM",
 ];
 
+export const ARRIVAL_TIME_RANGES = [
+  "8 AM to 9 AM",
+  "9 AM to 10 AM",
+  "10 AM to 11 AM",
+  "11 AM to 12 PM",
+  "12 PM to 1 PM",
+  "1 PM to 2 PM",
+  "2 PM to 3 PM",
+  "3 PM to 4 PM",
+  "4 PM to 5 PM",
+  "5 PM to 6 PM",
+  "6 PM to 7 PM",
+  "7 PM to 8 PM",
+];
+
 // Why a slot is unavailable (from the doctor-availability resolver).
 export const SLOT_REASON = {
   day_off: "Day off",

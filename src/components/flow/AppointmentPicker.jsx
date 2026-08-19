@@ -30,7 +30,11 @@ const TABS = [
   // Reception's working set is `pending`, so that's where the picker opens.
   { key: "pending", label: "Pending", hint: "Booked, not yet checked in" },
   { key: "ongoing", label: "Ongoing", hint: "Checked in, journey running" },
-  { key: "done", label: "Done", hint: "Seen / completed today" },
+  {
+    key: "done",
+    label: "Done",
+    hint: "Finished today — includes patients HealthRay closed without a flow check-in",
+  },
   { key: "all", label: "All", hint: "Every booking for today" },
 ];
 
@@ -144,7 +148,7 @@ export default function AppointmentPicker({ date, selectedAppointmentId, onPick,
                 a.flow_visit_id
                   ? "Already checked in — open the visit"
                   : done
-                    ? "Visit already finished"
+                    ? "Marked complete in OPD/HealthRay — this patient never went through the flow, so there is no journey to open"
                     : "Fill the check-in form from this appointment"
               }
             >
@@ -169,7 +173,19 @@ export default function AppointmentPicker({ date, selectedAppointmentId, onPick,
                     ✅ {a.flow_token_number ? `#${a.flow_token_number}` : "In"}
                   </span>
                 )}
-                {done && <span className="flow-badge fb-ink">Done</span>}
+                {done &&
+                  (a.flow_visit_id ? (
+                    <span className="flow-badge fb-grn" title="Flow journey completed">
+                      ✅ Done
+                    </span>
+                  ) : (
+                    <span
+                      className="flow-badge fb-ink"
+                      title="Completed in OPD/HealthRay without a flow check-in"
+                    >
+                      Seen · no flow
+                    </span>
+                  ))}
               </div>
             </div>
           );

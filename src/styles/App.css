@@ -16,6 +16,7 @@
   padding: var(--pad-y) var(--pad-x);
   background: #fff;
   min-height: 100vh;
+  box-sizing: border-box;
 }
 
 /* ============ HEADER ============ */

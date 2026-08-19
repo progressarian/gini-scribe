@@ -3,6 +3,7 @@ import { createBrowserRouter } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import RequireCapability from "./components/RequireCapability";
+import RoleHome from "./components/RoleHome";
 import LoginPage from "./pages/LoginPage";
 
 // After a deploy, the user's already-loaded index-*.js still references the
@@ -83,6 +84,7 @@ const SideEffectsPage = lazyWithRetry(() => import("./pages/SideEffectsPage"));
 const OPD = lazyWithRetry(() => import("./OPD"));
 const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
 const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
+const OBTDashboardPage = lazyWithRetry(() => import("./pages/OBTDashboardPage"));
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
@@ -151,7 +153,7 @@ const router = createBrowserRouter([
             // RBAC guard — blocks direct-URL access to pages the role can't open
             element: <RequireCapability />,
             children: [
-              { path: "/", element: lazyEl(HomePage) },
+              { path: "/", element: <RoleHome>{lazyEl(HomePage)}</RoleHome> },
               { path: "/find", element: lazyEl(FindPage) },
               { path: "/refills", element: lazyEl(RefillsPage) },
               { path: "/dose-change-requests", element: lazyEl(DoseChangeRequestsPage) },
@@ -196,6 +198,7 @@ const router = createBrowserRouter([
               { path: "/visit", element: lazyEl(VisitPage) },
               // GHM Operations — single unified page
               { path: "/ghm", element: lazyEl(GHMPage) },
+              { path: "/obt-dashboard", element: lazyEl(OBTDashboardPage) },
               // Doctor availability / leave / reassignment management
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
               // Pharmacy: mark which medicines each patient collected

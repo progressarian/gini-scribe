@@ -9,7 +9,7 @@ import useVisitStore from "../stores/visitStore";
 import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
-import { PAGE_CAPABILITIES } from "../config/routes";
+import { PAGE_CAPABILITIES, navAllowlistForRole } from "../config/routes";
 import { hasAnyCapability } from "../../shared/permissions";
 import "../styles/App.css";
 
@@ -119,6 +119,12 @@ const NAV_ITEMS = [
   { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page
   { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
+  {
+    path: "/obt-dashboard",
+    label: "📞 OBT Dashboard",
+    cap: C["/obt-dashboard"],
+    show: () => true,
+  },
   // Doctor availability / leave / reassignment
   {
     path: "/doctor-management",
@@ -173,6 +179,7 @@ export default function AppLayout() {
     },
     staleTime: 30_000,
     refetchInterval: 60_000,
+    enabled: hasAnyCapability(currentDoctor?.role, C["/lab-requests"]),
   });
   const labRequestCount = labRequestCountQuery.data || 0;
 
@@ -187,6 +194,7 @@ export default function AppLayout() {
     },
     staleTime: 15_000,
     refetchInterval: 30_000,
+    enabled: hasAnyCapability(currentDoctor?.role, C["/reception-inbox"]),
   });
   const receptionCount = receptionCountQuery.data || 0;
 
@@ -202,6 +210,7 @@ export default function AppLayout() {
   const isFollowUp = usePatientStore((s) => s.getIsFollowUp());
   const role = currentDoctor?.role;
   const hasPatient = !!dbPatientId || !!patient.name;
+  const navAllowlist = navAllowlistForRole(role);
 
   const navState = {
     role,
@@ -323,12 +332,14 @@ export default function AppLayout() {
           </div>
         )}
         <div className="header__actions">
-          <button
-            onClick={navClick("/find")}
-            className={`header__find-btn ${location.pathname === "/find" ? "header__find-btn--active" : "header__find-btn--inactive"}`}
-          >
-            🔍 Find
-          </button>
+          {!navAllowlist && (
+            <button
+              onClick={navClick("/find")}
+              className={`header__find-btn ${location.pathname === "/find" ? "header__find-btn--active" : "header__find-btn--inactive"}`}
+            >
+              🔍 Find
+            </button>
+          )}
           {patient.name && (
             <button
               onClick={() => {
@@ -366,10 +377,13 @@ export default function AppLayout() {
       {!(duplicateWarning && !dbPatientId) && (
         <div className="tabs">
           {(() => {
-            const visible = NAV_ITEMS.filter(
+            const capable = NAV_ITEMS.filter(
               // t.cap may be one capability or an array (any-of).
               (t) => (!t.cap || hasAnyCapability(navState.role, t.cap)) && t.show(navState),
             );
+            const visible = navAllowlist
+              ? navAllowlist.map((p) => capable.find((t) => t.path === p)).filter(Boolean)
+              : capable;
             const rendered = [];
             let lastSection = null;
             for (const t of visible) {

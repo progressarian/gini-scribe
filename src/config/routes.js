@@ -25,6 +25,7 @@ export const ROUTE_MAP = {
   reports: "/reports",
   ci: "/ci",
   visit: "/visit",
+  obt_dashboard: "/obt-dashboard",
 };
 
 // RBAC: maps a frontend path to the capability required to open it. Used by
@@ -37,7 +38,7 @@ export const ROUTE_MAP = {
 // Gate a page on the capability its OWN API calls need. A page listed more
 // loosely than its endpoints renders for a role that then 403s on every fetch;
 // listed more tightly, the API stays reachable to roles the UI hides it from.
-import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { CAPABILITIES as CAP, ROLES, normalizeRole } from "../../shared/permissions.js";
 
 export const PAGE_CAPABILITIES = {
   // Patient identity — reachable with lookup alone, because clicking a result in
@@ -92,6 +93,7 @@ export const PAGE_CAPABILITIES = {
   // done by giving `obt` RECEPTION_OPS, which would also open /opd and
   // /reception-inbox. /opd above stays reception-only.
   "/ghm": [CAP.RECEPTION_OPS, CAP.OBT_OPS],
+  "/obt-dashboard": CAP.OBT_OPS,
   "/doctor-management": CAP.ADMIN,
   "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
@@ -108,3 +110,19 @@ export const PAGE_CAPABILITIES = {
   "/flow/reports": CAP.FLOW_REPORTS,
   "/flow/admin": CAP.ADMIN,
 };
+
+export const ROLE_NAV_ALLOWLIST = {
+  [ROLES.OBT]: ["/obt-dashboard", "/ghm"],
+};
+
+export const ROLE_HOME = {
+  [ROLES.OBT]: "/obt-dashboard",
+};
+
+export function navAllowlistForRole(role) {
+  return ROLE_NAV_ALLOWLIST[normalizeRole(role)] || null;
+}
+
+export function homeForRole(role) {
+  return ROLE_HOME[normalizeRole(role)] || null;
+}
