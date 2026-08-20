@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
+import { ownFu, dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
 
 const router = Router();
 
@@ -373,23 +374,26 @@ router.post("/ghm-appointments/last-mo", async (req, res) => {
   }
 });
 
-const summaryCols = (a) => `
+const summaryCols = (a, callStat = null) => {
+  const cs = callStat || `${a}.call_status`;
+  return `
   COUNT(*)::int                                                       AS total,
   COUNT(*) FILTER (WHERE ${a}.show_no_show = 'Show')::int             AS came,
   COUNT(*) FILTER (WHERE ${a}.show_no_show = 'No Show')::int          AS no_show,
   COUNT(*) FILTER (
     WHERE ${a}.show_no_show IS NULL OR ${a}.show_no_show = ''
   )::int                                                              AS pending_show,
-  COUNT(*) FILTER (WHERE ${a}.call_status = 'called')::int            AS called,
-  COUNT(*) FILTER (WHERE ${a}.call_status = 'not_picked')::int        AS not_picked,
-  COUNT(*) FILTER (WHERE ${a}.call_status = 'rescheduled')::int       AS rescheduled,
+  COUNT(*) FILTER (WHERE ${cs} = 'called')::int                       AS called,
+  COUNT(*) FILTER (WHERE ${cs} = 'not_picked')::int                   AS not_picked,
+  COUNT(*) FILTER (WHERE ${cs} = 'rescheduled')::int                  AS rescheduled,
   COUNT(*) FILTER (
-    WHERE ${a}.call_status IS NULL OR ${a}.call_status IN ('', 'pending')
+    WHERE ${cs} IS NULL OR ${cs} IN ('', 'pending')
   )::int                                                              AS not_called,
   COUNT(*) FILTER (
     WHERE ${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%'
   )::int                                                              AS follow_up,
   COUNT(*) FILTER (WHERE ${a}.home_collection)::int                   AS home_collection`;
+};
 
 // GET /api/ghm-appointments — list by date + optional doctor
 router.get("/ghm-appointments", async (req, res) => {
@@ -406,13 +410,6 @@ router.get("/ghm-appointments", async (req, res) => {
     );
     const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
 
-    const ownFu = (a) => `COALESCE(
-      ${a}.follow_up_date,
-      NULLIF(${a}.biomarkers->>'followup', '')::date,
-      CASE WHEN ${a}.healthray_follow_up->>'date' ~ '^\\d{4}-\\d{2}-\\d{2}$'
-           THEN (${a}.healthray_follow_up->>'date')::date END
-    )`;
-
     const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
                 a.doctor_name, a.patient_name, a.file_no, a.phone,
                 a.visit_type, a.appointment_type, a.booking_source,
@@ -423,7 +420,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.reports_uploaded, a.will_get_test_at_gini,
                 a.whatsapp_message, a.additional_whatsapp_msg,
                 a.notes, a.is_walkin, a.age, a.sex,
-                a.call_status, a.call_made_by, a.call_date,
+                a.call_made_by, a.call_date,
                 a.call_notes, a.call_reschedule_date, a.pt_recovery,
                 a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
@@ -484,7 +481,8 @@ router.get("/ghm-appointments", async (req, res) => {
           `WITH ${upcomingCte}
            SELECT ${summaryCols("z")} FROM (
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
-                    a.call_status, a.show_no_show, a.visit_type, a.home_collection
+                    ${callStatusToday("a")} AS call_status,
+                    a.show_no_show, a.visit_type, a.home_collection
              FROM appointments a
              JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}
@@ -498,6 +496,8 @@ router.get("/ghm-appointments", async (req, res) => {
              SELECT * FROM (
                SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                       ${baseCols},
+                      a.call_status AS call_status_any,
+                      ${callStatusToday("a")} AS call_status,
                       FALSE AS via_preferred,
                       u.next_date AS follow_up_date
                ${joins}
@@ -543,28 +543,7 @@ router.get("/ghm-appointments", async (req, res) => {
     //            )
     //          )`;
     // } else {
-    where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1 OR ${ownFu("a")} = $1)
-             AND (
-               a.appointment_date = $1
-               OR a.preferred_date = $1
-               OR a.file_no IS NULL
-               OR a.appointment_date = (
-                 SELECT MAX(prev.appointment_date)
-                 FROM appointments prev
-                 WHERE prev.file_no = a.file_no
-                   AND ${ownFu("prev")} IS NOT NULL
-               )
-             )
-             AND (
-               a.appointment_date = $1
-               OR a.preferred_date = $1
-               OR a.file_no IS NULL
-               OR NOT EXISTS (
-                 SELECT 1 FROM appointments booked
-                 WHERE booked.file_no = a.file_no
-                   AND (booked.appointment_date = $1 OR booked.preferred_date = $1)
-               )
-             )`;
+    where = dayWindowWhere("a");
     // }
     where += homeCond;
     if (doctor) {
@@ -584,9 +563,14 @@ router.get("/ghm-appointments", async (req, res) => {
     }
 
     const [countR, dataR] = await Promise.all([
-      pool.query(`SELECT ${summaryCols("a")} FROM appointments a ${where}`, params),
+      pool.query(
+        `SELECT ${summaryCols("a", callStatusToday("a"))} FROM appointments a ${where}`,
+        params,
+      ),
       pool.query(
         `SELECT ${baseCols},
+                a.call_status AS call_status_any,
+                ${callStatusToday("a")} AS call_status,
                 (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced

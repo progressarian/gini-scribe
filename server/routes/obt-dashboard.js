@@ -1,12 +1,15 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
 
 const router = Router();
 
 const OPEN_CALL_SQL = `'{pending,not_picked,call_later,busy,switched_off}'::text[]`;
 
-const CALL_STAT = `COALESCE(NULLIF(a.call_status, ''), 'pending')`;
+// Scoped to today, matching the GHM sheet: the tiles report the calling done
+// today for this date's patients, and reset with each new round.
+const CALL_STAT = callStatusToday("a");
 const OPEN_CALL = `${CALL_STAT} = ANY(${OPEN_CALL_SQL})`;
 
 const VISIT_TYPE = `COALESCE(NULLIF(TRIM(a.visit_type), ''), 'Not set')`;
@@ -16,7 +19,9 @@ const isoDate = (d) => d.toISOString().split("T")[0];
 router.get("/obt-dashboard", async (req, res) => {
   try {
     const date = req.query.date || isoDate(new Date());
-    const where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1)`;
+    // Same window as the GHM sheet's day tabs, so every tile counts exactly the
+    // rows the OBT team sees when they open that date.
+    const where = dayWindowWhere("a");
 
     const r = await pool.query(
       `SELECT COUNT(*)::int                                                    AS total,

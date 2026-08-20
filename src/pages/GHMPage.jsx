@@ -1232,22 +1232,32 @@ export default function GHMPage() {
   const handleCallStatus = useCallback(
     (row, value) => {
       patch(row.id, "call_status", value);
-      // any real call action auto-stamps date + who made the call (if empty)
+      // call_date is the day the call was actually made, so the status is tied
+      // to that day and no other: a patient rung on the 20th for a visit on the
+      // 21st counts as called on the 20th, and the 21st reads "not called"
+      // again. Overwritten, not filled-in-if-empty — a date left by an earlier
+      // day's call would otherwise file today's call under that older day.
       if (value && value !== "pending") {
-        if (!row.call_date) patch(row.id, "call_date", todayStr());
-        if (!row.call_made_by && loggedInName) patch(row.id, "call_made_by", loggedInName);
+        const today = todayStr();
+        if (row.call_date !== today) patch(row.id, "call_date", today);
+        if (loggedInName && row.call_made_by !== loggedInName)
+          patch(row.id, "call_made_by", loggedInName);
       }
     },
     [patch, loggedInName],
   );
 
   const isToday = date === todayStr();
+  // A By Date view of a future date is a calling list too — those patients still
+  // have to be rung to confirm — so it gets the call columns. On today or a past
+  // date the calling is done or moot, and they would only add noise.
+  const callingDay = view !== "by_date" || date > todayStr();
   // Per-tab column visibility
   const showShowNoShow = false; // Show/No-Show column hidden on all tabs
-  const showCallStatus = view !== "by_date"; // on Tomorrow & Follow-up tabs
+  const showCallStatus = callingDay;
   const showRecovery = false; // Recovery column hidden on all tabs
-  const showCalledBy = view !== "by_date"; // hide Called By on By Date tab
-  const showCallDate = view !== "by_date"; // on Tomorrow & Follow-up tabs
+  const showCalledBy = callingDay;
+  const showCallDate = callingDay;
   // On the Tomorrow tab every row's follow-up is due tomorrow, so the Follow-up
   // Date column is redundant there — hide it.
   const showFollowUpDate = view !== "tomorrow";
