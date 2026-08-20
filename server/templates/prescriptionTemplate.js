@@ -3,6 +3,7 @@
 // in sync with that file (lines 9-115) when the design changes.
 
 import { detectMedCategory } from "../config/medicationCategories.js";
+import { pickNextVisit } from "../../shared/followUp.js";
 
 // Strip "healthray:<id>" markers (and any trailing dash separator) from notes
 // so the printed Rx doesn't leak the upstream healthray reference. Mirrors
@@ -354,14 +355,7 @@ function buildPrescriptionHtml(data = {}) {
 
   const today = new Date().toISOString().split("T")[0];
   const latestCon = consultations?.[0]?.con_data || {};
-  // Mirror VisitPlan.jsx: only use the consultation follow_up when it actually
-  // carries a date — otherwise fall through to the appointment-level follow_up
-  // (sourced from biomarkers.followup) so the printed Rx matches the UI chip.
-  const followUp =
-    (latestCon.follow_up?.date ? latestCon.follow_up : null) ||
-    appt_plan?.follow_up ||
-    latestCon.follow_up ||
-    {};
+  const followUp = pickNextVisit([latestCon.follow_up, appt_plan?.follow_up]) || {};
   const _notEmpty = (arr) => (Array.isArray(arr) && arr.length > 0 ? arr : null);
   const tests =
     _notEmpty(latestCon.investigations_to_order) ||

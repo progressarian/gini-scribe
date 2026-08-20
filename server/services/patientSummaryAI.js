@@ -3,6 +3,7 @@
 // what gets printed on the prescription's "Visit summary" block. Persistence
 // is the caller's responsibility — store the returned text as a new version.
 
+import { pickNextVisit } from "../../shared/followUp.js";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-sonnet-4-6";
 
@@ -122,10 +123,7 @@ function buildContext(data) {
     }));
 
   const conFollowUp = consultations?.[0]?.con_data?.follow_up || {};
-  const resolvedFollowUp =
-    (conFollowUp.date ? conFollowUp : null) ||
-    (appt_plan?.follow_up?.date ? appt_plan.follow_up : null) ||
-    null;
+  const resolvedFollowUp = pickNextVisit([conFollowUp, appt_plan?.follow_up]);
   const followUpRelative = resolvedFollowUp?.date ? relativeFollowUp(resolvedFollowUp.date) : null;
   const followUpNotes =
     resolvedFollowUp?.notes || appt_plan?.follow_up_with || conFollowUp.notes || null;

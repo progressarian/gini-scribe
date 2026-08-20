@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDocumentUrl } from "./documents.js";
+import { fetchVisitHistory } from "../services/visitHistory.js";
 
 const router = Router();
 
@@ -35,15 +36,7 @@ router.get(`${BASE}/:patientId`, async (req, res) => {
           ORDER BY visit_date DESC, id DESC`,
         [id],
       ),
-      pool.query(
-        `SELECT id, appointment_date, time_slot, doctor_name, visit_type, status,
-                assigned_mo, healthray_clinical_notes IS NOT NULL AS has_notes
-           FROM appointments
-          WHERE patient_id=$1
-          ORDER BY appointment_date DESC, id DESC
-          LIMIT 60`,
-        [id],
-      ),
+      fetchVisitHistory(id),
       pool.query(
         `SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date)
                 id, COALESCE(canonical_name, test_name) AS test_name, result, result_text,
@@ -74,7 +67,7 @@ router.get(`${BASE}/:patientId`, async (req, res) => {
       patient: patientQ.rows[0],
       documents: docs.rows,
       consultations: consultations.rows,
-      visits: visits.rows,
+      visits,
       labs: labs.rows.sort((a, b) => String(b.test_date).localeCompare(String(a.test_date))),
       medications: meds.rows,
     });
