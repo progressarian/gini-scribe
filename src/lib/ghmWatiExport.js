@@ -174,12 +174,12 @@ export const buildWatiSheet = (XLSX, rows, date) => {
   return { ws, counts: { fresh: fresh.length, followUp: followUp.length } };
 };
 
-export const exportWatiWorkbook = async (rows, date) => {
+export const exportWatiWorkbook = async (rows, date, fileLabel = "wati-appt-confirmation") => {
   const XLSX = (await import("xlsx-js-style")).default;
   const { ws, counts } = buildWatiSheet(XLSX, rows, date);
   if (!counts.fresh && !counts.followUp) return counts;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
-  XLSX.writeFile(wb, `wati-appt-confirmation_${String(date).slice(0, 10)}.xlsx`);
+  XLSX.writeFile(wb, `${fileLabel}_${String(date).slice(0, 10)}.xlsx`);
   return counts;
 };

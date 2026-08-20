@@ -98,8 +98,15 @@ const prettyDate = (s) => {
 // `cap` gates the tab per role (omitted = visible to anyone who can open /ghm).
 // Reassigning appointments between doctors is scheduling-desk work, so it is
 // RECEPTION_OPS — the OBT call team reaches /ghm via OBT_OPS and doesn't get it.
+const EXPORT_LABELS = {
+  by_date: "ghm-by-date",
+  tomorrow: "ghm-tomorrow",
+  fu3: "wati-appt-confirmation",
+  lookup: "ghm-patient-lookup",
+};
+
 const VIEW_TABS = [
-  { id: "by_date", label: "Today", Icon: CalendarDays, offset: null },
+  { id: "by_date", label: "Today", Icon: CalendarDays, offset: 0 },
   { id: "tomorrow", label: "Tomorrow", Icon: Sunrise, offset: 1 },
   { id: "fu3", label: "Follow-up in 3 Days", Icon: Phone, offset: 3 },
   { id: "lookup", label: "Patient Lookup", Icon: Search, offset: null },
@@ -1179,16 +1186,20 @@ export default function GHMPage() {
   const exportMutation = useExportPages(buildQuery, EXPORT_PAGE_SIZE);
   const exporting = exportMutation.isPending;
 
+  // Exports whatever the current tab is showing, filters included — the file is
+  // named after the tab and its date so a By Date and a Follow-up export of the
+  // same day do not overwrite each other in the downloads folder.
   const exportWati = useCallback(async () => {
     const all = await exportMutation.mutateAsync();
     if (!all.length) {
-      window.alert("No patients to export for this date.");
+      window.alert("Nothing to export for this view.");
       return;
     }
-    const counts = await exportWatiWorkbook(all, date);
+    const label = EXPORT_LABELS[view] || "ghm-export";
+    const counts = await exportWatiWorkbook(all, view === "lookup" ? todayStr() : date, label);
     if (!counts.fresh && !counts.followUp)
       window.alert("No patients with a phone number to export.");
-  }, [exportMutation, date]);
+  }, [exportMutation, date, view]);
 
   // Debounce the search box so the Patient Lookup fetch fires after typing stops.
   useEffect(() => {
@@ -1340,12 +1351,15 @@ export default function GHMPage() {
                 setCollectionFilter(next.collectionFilter);
               }}
             />
-            {view === "fu3" && (
+            {view !== "reassign" && (
               <button
                 type="button"
                 className="btn btn--ghost"
                 onClick={exportWati}
-                disabled={exporting}
+                disabled={exporting || !listEnabled || total === 0}
+                title={
+                  total === 0 ? "Nothing to export in this view" : "Download this list as Excel"
+                }
               >
                 <Download size={14} aria-hidden="true" />
                 {exporting ? "Exporting…" : "Export Excel"}
@@ -1375,7 +1389,10 @@ export default function GHMPage() {
               onClick={() => switchView(t)}
             >
               <t.Icon size={14} aria-hidden="true" />
-              {t.label}
+              {/* The By Date tab is "Today" until another date is picked — then
+                  it says so, with the date underneath, rather than still
+                  claiming to show today. */}
+              {t.id === "by_date" && view === t.id && date !== todayStr() ? "By Date" : t.label}
               {t.offset !== null && (
                 <span className="ghm__tab-date">
                   {prettyDate(view === t.id ? date : addDaysStr(t.offset))}

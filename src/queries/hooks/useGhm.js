@@ -202,21 +202,22 @@ export function useReassignAppointment() {
   });
 }
 
+// One request for the whole list: `export=1` tells the API to ignore paging and
+// return every row the current filters match. Walking pages could also miss or
+// repeat rows when the data shifted mid-export.
 export function useExportPages(buildQuery, exportPageSize) {
   return useMutation({
     mutationFn: async () => {
-      const all = [];
-      let pageNum = 1;
-      let pages = 1;
-      do {
-        const { data } = await api.get(
-          `/api/ghm-appointments?${buildQuery(pageNum, exportPageSize)}`,
+      const params = buildQuery(1, exportPageSize);
+      params.set("export", "1");
+      const { data } = await api.get(`/api/ghm-appointments?${params}`);
+      if (data?.truncated) {
+        window.alert(
+          `This view has ${data.total} rows and the export is capped at ${data.exported}. ` +
+            `Narrow it with a filter to get the rest.`,
         );
-        all.push(...arr(data?.data));
-        pages = data?.totalPages || 1;
-        pageNum += 1;
-      } while (pageNum <= pages);
-      return all;
+      }
+      return arr(data?.data);
     },
   });
 }

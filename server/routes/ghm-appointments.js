@@ -395,13 +395,23 @@ const summaryCols = (a, callStat = null) => {
   COUNT(*) FILTER (WHERE ${a}.home_collection)::int                   AS home_collection`;
 };
 
+// Hard ceiling for an export=1 response. Well above a real day's list (the
+// busiest date in the table is a few hundred) and above every lookup result
+// seen so far, so it only ever trips on a runaway query.
+const EXPORT_MAX = 5000;
+
 // GET /api/ghm-appointments — list by date + optional doctor
 router.get("/ghm-appointments", async (req, res) => {
   try {
     const { date, doctor, status, mode, page = 1, limit = 50 } = req.query;
     const d = date || new Date().toISOString().split("T")[0];
-    const effLimit = Math.min(100, Math.max(1, +limit || 50));
-    const offset = (Math.max(1, +page) - 1) * effLimit;
+    // export=1 returns the WHOLE list for the query in one response — the sheet
+    // exports need every row of the date, and paging them out 100 at a time was
+    // both slow and a chance to miss rows if the data shifted between pages. The
+    // cap is a runaway guard, not a page size; the response says whether it hit.
+    const exportAll = ["1", "true", "yes"].includes(String(req.query.export || "").toLowerCase());
+    const effLimit = exportAll ? EXPORT_MAX : Math.min(100, Math.max(1, +limit || 50));
+    const offset = exportAll ? 0 : (Math.max(1, +page) - 1) * effLimit;
 
     const params = [d];
 
@@ -522,9 +532,10 @@ router.get("/ghm-appointments", async (req, res) => {
         data: dataR.rows,
         total,
         summary,
-        page: +page,
+        page: exportAll ? 1 : +page,
         limit: effLimit,
-        totalPages: Math.ceil(total / effLimit),
+        totalPages: exportAll ? 1 : Math.ceil(total / effLimit),
+        ...(exportAll ? { exported: dataR.rows.length, truncated: total > EXPORT_MAX } : null),
       });
     }
 
@@ -608,9 +619,10 @@ router.get("/ghm-appointments", async (req, res) => {
       data: dataR.rows,
       total,
       summary,
-      page: +page,
+      page: exportAll ? 1 : +page,
       limit: effLimit,
-      totalPages: Math.ceil(total / effLimit),
+      totalPages: exportAll ? 1 : Math.ceil(total / effLimit),
+      ...(exportAll ? { exported: dataR.rows.length, truncated: total > EXPORT_MAX } : null),
     });
   } catch (e) {
     handleError(res, e, "GHM appointments list");
