@@ -30,6 +30,7 @@ import {
   ensureSyncColumns,
   findAppointment,
   findAppointmentWithNotes,
+  syncFollowUpDate,
   getAppointmentEnrichmentCounts,
   upsertPatient,
   syncDoctors,
@@ -431,6 +432,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   const fileNo = appt.patient_case_id || null;
   const existing = await findAppointment(healthrayId, fileNo, apptDate);
   const isNewAppointment = !existing;
+  const followUpDate = appt.followup_days ? toISTDate(appt.followup_days) : null;
   const status = mapStatus(appt.status);
   const isCompleted = status === "completed";
 
@@ -466,6 +468,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         await syncFlowFromAppointment(existing.id, "completed");
       }
     }
+    await syncFollowUpDate(existing.id, followUpDate);
     return { skipped: true, id: existing.id };
   }
 
@@ -557,6 +560,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           if (status && !["completed", "cancelled", "no_show"].includes(status)) {
             await syncFlowVitalsFromOpdColumn(existing.id);
           }
+          await syncFollowUpDate(existing.id, followUpDate);
           return { skipped: true, id: existing.id };
         }
 

@@ -308,6 +308,20 @@ export async function getAppointmentEnrichmentCounts(appointmentId) {
   return rows[0] || null;
 }
 
+// ── Persist ONLY the HealthRay follow-up date onto an appointment ───────────
+export async function syncFollowUpDate(appointmentId, followUpDate) {
+  if (!appointmentId || !followUpDate) return false;
+  const { rowCount } = await pool.query(
+    `UPDATE appointments
+        SET biomarkers = jsonb_set(COALESCE(biomarkers, '{}'::jsonb), '{followup}', to_jsonb($2::text), true),
+            updated_at = NOW()
+      WHERE id = $1
+        AND COALESCE(biomarkers->>'followup', '') <> $2`,
+    [appointmentId, followUpDate],
+  );
+  return rowCount > 0;
+}
+
 // ── Find existing appointment by healthray_id, or by file_no + date (sheet import) ──
 export async function findAppointment(healthrayId, fileNo, apptDate) {
   // First try exact healthray_id match
