@@ -111,6 +111,10 @@ const ROUTE_CASES = [
   ["/api/messages/unread-count", "guest", false],
   // Unknown roles normalize to guest and hold nothing.
   ["/api/patients/55/labs", "guest", false],
+  ["/api/home-stats", "consultant", true],
+  ["/api/home-stats", "obt", true],
+  ["/api/home-stats", "pharmacy", true],
+  ["/api/home-stats", "guest", true],
 ];
 
 // [path, doctorSession, expected] — "allow" means next() was called.

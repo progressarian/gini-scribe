@@ -10,6 +10,8 @@ import useAlertStore from "../stores/alertStore.js";
 import useRefillStore from "../stores/refillStore.js";
 import useDoseChangeStore from "../stores/doseChangeStore.js";
 import Shimmer from "../components/Shimmer.jsx";
+import useHomeStats from "../queries/hooks/useHomeStats.js";
+import { hasOwnPatientList } from "../../shared/permissions";
 import "./HomePage.css";
 
 export default function HomePage() {
@@ -43,13 +45,34 @@ export default function HomePage() {
     fetchPending: fetchDoseRequests,
   } = useDoseChangeStore();
 
+  const { data: homeStats } = useHomeStats();
+  const stats = homeStats?.stats || {};
+  const mine = homeStats?.scope === "mine";
+
+  const { todayApptDoctor, setTodayApptDoctor } = useVisitStore();
+  const scopeToMe = hasOwnPatientList(currentDoctor?.role);
+
   useEffect(() => {
+    if (scopeToMe && !todayApptDoctor) {
+      setTodayApptDoctor(currentDoctor?.name || currentDoctor?.short_name || "");
+      return;
+    }
     fetchTodayAppointments();
     fetchInbox();
     fetchAlerts();
     fetchRefills();
     fetchDoseRequests();
-  }, [fetchTodayAppointments, fetchInbox, fetchAlerts, fetchRefills, fetchDoseRequests]);
+  }, [
+    scopeToMe,
+    todayApptDoctor,
+    setTodayApptDoctor,
+    currentDoctor,
+    fetchTodayAppointments,
+    fetchInbox,
+    fetchAlerts,
+    fetchRefills,
+    fetchDoseRequests,
+  ]);
 
   return (
     <div className="home">
@@ -70,6 +93,11 @@ export default function HomePage() {
               month: "long",
               year: "numeric",
             })}
+            {homeStats && (
+              <span className="home__scope">
+                {mine ? `Your list · ${homeStats.doctor || "you"}` : "All doctors"}
+              </span>
+            )}
           </div>
         </div>
         <button
@@ -90,16 +118,18 @@ export default function HomePage() {
       <div className="home__stats">
         {[
           {
-            label: "Seen Today",
-            value: todayAppointments.filter((a) => a.status === "completed").length,
+            label: mine ? "You've Seen Today" : "Seen Today",
+            value: stats.seen ?? 0,
+            hint: stats.waiting ? `${stats.waiting} waiting now` : null,
             icon: "\u2705",
             color: "#059669",
             bg: "#f0fdf4",
             border: "#bbf7d0",
           },
           {
-            label: "Total Appointments",
-            value: todayApptTotal,
+            label: mine ? "Your Appointments" : "Total Appointments",
+            value: stats.total ?? 0,
+            hint: stats.upcoming ? `${stats.upcoming} still to come` : null,
             icon: "\ud83d\udcc5",
             color: "#2563eb",
             bg: "#eff6ff",
@@ -132,6 +162,7 @@ export default function HomePage() {
               {s.value}
             </div>
             <div className="home__stat-label">{s.label}</div>
+            {s.hint && <div className="home__stat-hint">{s.hint}</div>}
           </div>
         ))}
       </div>

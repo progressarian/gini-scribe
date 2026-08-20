@@ -48,6 +48,10 @@ export const qk = {
     reports: (start, end) => ["flow", "reports", start, end],
     appointments: (date, q, doctor) => ["flow", "appointments", date, q || null, doctor || null],
   },
+  home: {
+    all: ["home"],
+    stats: (date) => ["home", "stats", date],
+  },
   ghm: {
     all: ["ghm"],
     doctors: () => ["ghm", "doctors"],

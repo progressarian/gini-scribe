@@ -13,7 +13,8 @@
     "smoke:obt-dashboard": "node scripts/smoke-obt-dashboard.mjs",
     "smoke:ghm-sheet": "node scripts/smoke-ghm-sheet.mjs",
     "smoke:ghm-record": "node scripts/smoke-ghm-patient-record.mjs",
-    "smoke:ghm-last-mo": "node scripts/smoke-ghm-last-mo.mjs"
+    "smoke:ghm-last-mo": "node scripts/smoke-ghm-last-mo.mjs",
+    "smoke:home-stats": "node scripts/smoke-home-stats.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

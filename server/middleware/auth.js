@@ -122,6 +122,7 @@ const DOCTOR_ONLY_PREFIXES = [
 // including a role that normalized to `guest`. Treat an unmapped prefix as a
 // hole, not a default: add the row when you add the route.
 const ROUTE_CAPABILITIES = [
+  ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
   ["/api/dashboard", CAP.ANALYTICS],
   ["/api/stats", CAP.ANALYTICS],

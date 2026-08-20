@@ -189,6 +189,12 @@ export function normalizeRole(role) {
   return Object.prototype.hasOwnProperty.call(ROLE_CAPABILITIES, lower) ? lower : ROLES.GUEST;
 }
 
+const OWN_LIST_ROLES = [ROLES.CONSULTANT, ROLES.MO];
+
+export function hasOwnPatientList(role) {
+  return OWN_LIST_ROLES.includes(normalizeRole(role));
+}
+
 // True if the given role holds the capability. Admin / ALL short-circuits true.
 // (If the master switch is ever flipped back on, everyone is granted everything.)
 export function hasCapability(role, capability) {
