@@ -9,14 +9,20 @@
 // A visit's OWN effective follow-up date, from whichever source has it, in
 // priority order: the follow_up_date column → the synced HealthRay appointment
 // value (biomarkers.followup) → the date extracted from the prescription
-// (healthray_follow_up.date). The last one is AI-extracted and dirty (can hold
-// "4 weeks", "today", "09/10/2025", "null", …), so it is ONLY cast when it is a
-// clean YYYY-MM-DD — an unguarded ::date would throw and break the whole query.
+// (healthray_follow_up.date) → the prescription's relative interval
+// (healthray_follow_up.timing) counted from the visit date. The last two are
+// AI-extracted and dirty (can hold "4 weeks", "today", "09/10/2025", "null", …),
+// so each is ONLY cast when it matches its expected shape — an unguarded ::date
+// or ::interval would throw and break the whole query.
 export const ownFu = (a) => `COALESCE(
   ${a}.follow_up_date,
   NULLIF(${a}.biomarkers->>'followup', '')::date,
   CASE WHEN ${a}.healthray_follow_up->>'date' ~ '^\\d{4}-\\d{2}-\\d{2}$'
-       THEN (${a}.healthray_follow_up->>'date')::date END
+       THEN (${a}.healthray_follow_up->>'date')::date END,
+  CASE WHEN ${a}.appointment_date IS NOT NULL
+        AND btrim(lower(${a}.healthray_follow_up->>'timing')) ~ '^[0-9]{1,2} *(day|week|month|year)s?$'
+       THEN (${a}.appointment_date
+             + btrim(lower(${a}.healthray_follow_up->>'timing'))::interval)::date END
 )`;
 
 // Everyone the day's list covers: booked that date, asked for that date, or
