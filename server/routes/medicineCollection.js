@@ -20,12 +20,16 @@ const canMark = requireCapability(CAPABILITIES.MED_COLLECTION);
 const today = () => new Date().toISOString().split("T")[0];
 
 // Best-effort appointment for a patient on a date (med.appointment_id is
-// unreliable, so we look it up from appointments instead).
+// unreliable, so we look it up from appointments instead). A patient can hold
+// several rows for one date (a lab-only registration beside a consultation, or
+// a cancelled booking that was rebooked), so pick exactly one and never a
+// cancelled row — matching the worklist's choice above.
 async function appointmentFor(client, patientId, date) {
   const r = await client.query(
     `SELECT id FROM appointments
       WHERE patient_id=$1 AND appointment_date=$2::date
-      ORDER BY created_at DESC LIMIT 1`,
+      ORDER BY (LOWER(COALESCE(status, '')) = 'cancelled'), created_at DESC
+      LIMIT 1`,
     [patientId, date],
   );
   return r.rows[0]?.id || null;
@@ -87,8 +91,13 @@ router.get("/pharmacy/collection/today", async (req, res) => {
               COUNT(m.*) FILTER (WHERE mc.id IS NULL)::int          AS pending
          FROM medications m
          JOIN patients p ON p.id = m.patient_id
-         LEFT JOIN appointments a
-           ON a.patient_id = p.id AND a.appointment_date = $1::date
+         LEFT JOIN LATERAL (
+           SELECT a2.id, a2.doctor_name
+             FROM appointments a2
+            WHERE a2.patient_id = p.id AND a2.appointment_date = $1::date
+            ORDER BY (LOWER(COALESCE(a2.status, '')) = 'cancelled'), a2.created_at DESC
+            LIMIT 1
+         ) a ON TRUE
          LEFT JOIN medicine_collections mc
            ON mc.medication_id = m.id AND mc.collected_date = $1::date
         WHERE m.is_active AND m.visit_status = 'current'
