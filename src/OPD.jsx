@@ -20,6 +20,8 @@ import { useIsMobile } from "./hooks/useIsMobile.js";
 import { classifyComposite } from "./utils/biomarkerClassify.js";
 import { cleanNote } from "./utils/cleanNote.js";
 import "./OPD.css";
+import { effectiveFollowUpDate } from "./lib/followUp.js";
+import { visitStatus } from "./lib/visitStatus.js";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -249,15 +251,20 @@ function isReady(a) {
   return !!(ps.biomarkers && ps.compliance && ps.categorized && ps.assigned);
 }
 
+// Labels come from the shared map so the GHM sheet cannot drift from this board;
+// the colours stay here because they are this screen's palette.
+const STATUS_COLORS = {
+  seen: { dot: "#22c55e", bg: GNL, color: GN },
+  in_visit: { dot: "#8b5cf6", bg: "#f5f3ff", color: "#7c3aed" },
+  checkedin: { dot: SK, bg: SKL, color: SK },
+  prepped: { dot: T, bg: TL, color: T },
+  no_show: { dot: BD2, bg: BG, color: INK3 },
+  pending: { dot: BD2, bg: BG, color: INK3 },
+};
+
 function statusSty(s) {
-  if (s === "seen" || s === "completed")
-    return { dot: "#22c55e", label: "Seen", bg: GNL, color: GN };
-  if (s === "in_visit")
-    return { dot: "#8b5cf6", label: "In Visit", bg: "#f5f3ff", color: "#7c3aed" };
-  if (s === "checkedin") return { dot: SK, label: "Checked In", bg: SKL, color: SK };
-  if (s === "prepped") return { dot: T, label: "Ready", bg: TL, color: T };
-  if (s === "no_show") return { dot: BD2, label: "No Show", bg: BG, color: INK3 };
-  return { dot: BD2, label: "Pending", bg: BG, color: INK3 };
+  const { key, label } = visitStatus(s);
+  return { ...STATUS_COLORS[key], label };
 }
 
 // ── Wait timer: minutes since check-in ──
@@ -1056,6 +1063,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
     bio = appt.biomarkers || {},
     comp = appt.compliance || {},
     vitals = appt.opd_vitals || {};
+  const followUpDate = effectiveFollowUpDate(appt);
 
   // Check if this appointment has HealthRay synced data
   const hasRayData = !!appt.healthray_id;
@@ -1236,7 +1244,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
         {dxChips}
 
         {/* Follow-up */}
-        {bio.followup && (
+        {followUpDate && (
           <div
             style={{
               background: WH,
@@ -1262,7 +1270,7 @@ function OverviewTab({ appt, setTab, onCheckIn }) {
                 border: "1px solid #ffcc80",
               }}
             >
-              {bio.followup}
+              {followUpDate}
             </span>
           </div>
         )}

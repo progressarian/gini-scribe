@@ -10,6 +10,7 @@ import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
 import { requireDoctor } from "../middleware/auth.js";
 import { getGenieDb } from "../services/genieImport.js";
+import { ownFu } from "../services/ghmDayWindow.js";
 import {
   lookupGeniePatientsByPhone,
   convertGeniePatientByPhone,
@@ -231,10 +232,20 @@ router.get("/patients/:id", async (req, res) => {
     const patient = await pool.query("SELECT * FROM patients WHERE id=$1", [id]);
     if (!patient.rows[0]) return res.status(404).json({ error: "Not found" });
 
-    const [consultations, vitals, meds, labs, diagnoses, docs, consultRx, goals, latestAppt] =
-      await Promise.all([
-        pool.query(
-          `WITH cons AS (
+    const [
+      consultations,
+      vitals,
+      meds,
+      labs,
+      diagnoses,
+      docs,
+      consultRx,
+      goals,
+      latestAppt,
+      latestFollowUp,
+    ] = await Promise.all([
+      pool.query(
+        `WITH cons AS (
              SELECT id, visit_date, visit_type, mo_name, con_name, status, created_at, con_data,
                     'consultation' AS source_type
              FROM consultations WHERE patient_id=$1
@@ -252,11 +263,11 @@ router.get("/patients/:id", async (req, res) => {
              WHERE NOT EXISTS (SELECT 1 FROM cons c WHERE c.visit_date::date = a.visit_date::date)
            )
            SELECT * FROM deduped ORDER BY visit_date DESC, created_at DESC`,
-          [id],
-        ),
-        pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
-        pool.query(
-          `WITH latest_cons AS (
+        [id],
+      ),
+      pool.query("SELECT * FROM vitals WHERE patient_id=$1 ORDER BY recorded_at DESC", [id]),
+      pool.query(
+        `WITH latest_cons AS (
         SELECT DISTINCT ON (COALESCE(con_name, mo_name, 'unknown')) id, con_name, mo_name, visit_date
         FROM consultations WHERE patient_id=$1
         ORDER BY COALESCE(con_name, mo_name, 'unknown'), visit_date DESC, created_at DESC
@@ -270,36 +281,44 @@ router.get("/patients/:id", async (req, res) => {
             OR m.consultation_id IS NULL
           )
         ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,
-          [id],
-        ),
-        pool.query(
-          `SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date) * FROM lab_results
+        [id],
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (COALESCE(canonical_name, test_name), test_date::date) * FROM lab_results
         WHERE patient_id=$1 ORDER BY COALESCE(canonical_name, test_name), test_date::date DESC, created_at DESC`,
-          [id],
-        ),
-        pool.query(
-          `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
+        [id],
+      ),
+      pool.query(
+        `SELECT DISTINCT ON (diagnosis_id) * FROM diagnoses
         WHERE patient_id=$1 ORDER BY diagnosis_id, is_active DESC, updated_at DESC`,
-          [id],
-        ),
-        pool.query(
-          "SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, consultation_id, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC",
-          [id],
-        ),
-        pool.query(
-          `SELECT id, visit_date, con_name, mo_name, con_data FROM consultations WHERE patient_id=$1 AND con_data IS NOT NULL AND id NOT IN (SELECT consultation_id FROM documents WHERE patient_id=$1 AND consultation_id IS NOT NULL) ORDER BY visit_date DESC`,
-          [id],
-        ),
-        pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [
-          id,
-        ]),
-        pool.query(
-          `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers
+        [id],
+      ),
+      pool.query(
+        "SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, consultation_id, created_at FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC",
+        [id],
+      ),
+      pool.query(
+        `SELECT id, visit_date, con_name, mo_name, con_data FROM consultations WHERE patient_id=$1 AND con_data IS NOT NULL AND id NOT IN (SELECT consultation_id FROM documents WHERE patient_id=$1 AND consultation_id IS NOT NULL) ORDER BY visit_date DESC`,
+        [id],
+      ),
+      pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [id]),
+      pool.query(
+        `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers
            FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
            ORDER BY appointment_date DESC LIMIT 1`,
-          [id],
-        ),
-      ]);
+        [id],
+      ),
+      pool.query(
+        `SELECT ${ownFu("a")} AS date,
+                  a.healthray_follow_up->>'notes' AS notes,
+                  a.healthray_follow_up->>'timing' AS timing
+             FROM appointments a
+            WHERE a.patient_id = $1 AND ${ownFu("a")} IS NOT NULL
+            ORDER BY a.appointment_date DESC, a.created_at DESC
+            LIMIT 1`,
+        [id],
+      ),
+    ]);
 
     // Deduplicate consultations by visit_date+status
     const seenVisits = new Set();
@@ -373,11 +392,13 @@ router.get("/patients/:id", async (req, res) => {
     const apptPlan = latestAppt.rows[0] || null;
     const apptCompliance = apptPlan?.compliance || {};
     const apptBiomarkers = apptPlan?.biomarkers || {};
-    const followUpDate =
-      apptPlan?.healthray_follow_up ||
-      (apptBiomarkers.followup
-        ? { date: apptBiomarkers.followup, notes: null, timing: null }
-        : null);
+    const resolvedFu = latestFollowUp.rows[0] || null;
+    const followUpDate = resolvedFu
+      ? { date: resolvedFu.date, notes: resolvedFu.notes, timing: resolvedFu.timing }
+      : apptPlan?.healthray_follow_up ||
+        (apptBiomarkers.followup
+          ? { date: apptBiomarkers.followup, notes: null, timing: null }
+          : null);
 
     res.json({
       ...patientData,
@@ -388,19 +409,20 @@ router.get("/patients/:id", async (req, res) => {
       diagnoses: sortDiagnoses(diagnoses.rows),
       documents: allDocs,
       goals: goals.rows,
-      appt_plan: apptPlan
-        ? {
-            investigations_to_order: (apptPlan.healthray_investigations || []).map((t) =>
-              typeof t === "string" ? { name: t, urgency: "routine" } : t,
-            ),
-            follow_up: followUpDate,
-            diet_lifestyle: [
-              apptCompliance.diet,
-              apptCompliance.exercise,
-              apptCompliance.stress,
-            ].filter(Boolean),
-          }
-        : null,
+      appt_plan:
+        apptPlan || followUpDate
+          ? {
+              investigations_to_order: (apptPlan?.healthray_investigations || []).map((t) =>
+                typeof t === "string" ? { name: t, urgency: "routine" } : t,
+              ),
+              follow_up: followUpDate,
+              diet_lifestyle: [
+                apptCompliance.diet,
+                apptCompliance.exercise,
+                apptCompliance.stress,
+              ].filter(Boolean),
+            }
+          : null,
     });
 
     // Note: the per-patient sync from Genie is handled by GET /api/visit/:id

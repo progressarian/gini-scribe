@@ -56,6 +56,7 @@ import {
   useReassignAppointment,
 } from "../queries/hooks/useGhm";
 import { qk } from "../queries/keys";
+import { visitStatus } from "../lib/visitStatus.js";
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 
@@ -1248,25 +1249,24 @@ export default function GHMPage() {
   );
 
   const isToday = date === todayStr();
-  // A By Date view of a future date is a calling list too — those patients still
-  // have to be rung to confirm — so it gets the call columns. On today or a past
-  // date the calling is done or moot, and they would only add noise.
-  const callingDay = view !== "by_date" || date > todayStr();
   // Per-tab column visibility
   const showShowNoShow = false; // Show/No-Show column hidden on all tabs
-  const showCallStatus = callingDay;
   const showRecovery = false; // Recovery column hidden on all tabs
-  const showCalledBy = callingDay;
-  const showCallDate = callingDay;
-  // On the Tomorrow tab every row's follow-up is due tomorrow, so the Follow-up
-  // Date column is redundant there — hide it.
-  const showFollowUpDate = view !== "tomorrow";
+  const showCallStatus = true;
+  const showCalledBy = true;
+  const showCallDate = true;
+  const showFollowUpDate = true;
   // Lookup spans every date, so each row needs to say which visit it is showing.
   // The other tabs are pinned to one date and would just repeat it 50 times.
   const showApptDate = view === "lookup";
+  // Where the patient is in the day — the same states the OPD board shows.
+  // Only once the day has arrived: on a future date nobody has checked in yet,
+  // so every row would read "Pending".
+  const showVisitStatus = view === "by_date" && date <= todayStr();
   const colSpan =
     15 +
     (showApptDate ? 1 : 0) +
+    (showVisitStatus ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
     (showCallStatus ? 1 : 0) +
     (showRecovery ? 1 : 0) +
@@ -1477,6 +1477,7 @@ export default function GHMPage() {
                     <th style={{ width: 30 }}></th>
                     <th style={{ width: 36 }}>#</th>
                     {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
+                    {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                     <th style={{ minWidth: 170 }}>Patient</th>
                     <th style={{ width: 155 }}>Biomarkers (auto)</th>
                     <th style={{ width: 100 }}>Visit Type</th>
@@ -1556,6 +1557,17 @@ export default function GHMPage() {
                               ) : (
                                 <span className="muted">—</span>
                               )}
+                            </td>
+                          )}
+
+                          {showVisitStatus && (
+                            <td>
+                              {(() => {
+                                const st = visitStatus(row.status);
+                                return (
+                                  <span className={`badge badge--${st.tone}`}>{st.label}</span>
+                                );
+                              })()}
                             </td>
                           )}
 

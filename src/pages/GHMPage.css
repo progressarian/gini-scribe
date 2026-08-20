@@ -547,6 +547,31 @@ a.pcell__ph:hover {
   color: #92400e;
 }
 
+.badge--green {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.badge--purple {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.badge--sky {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.badge--teal {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.badge--gray {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 /* Colored dropdown */
 .csel {
   padding: 5px 7px;

@@ -5,6 +5,7 @@ import { TIME_SLOTS, getTimeSlots, buildMedCardPrintHTML } from "./VisitMedCard"
 import { formatWhenToTake } from "../../config/medicationTimings";
 import { LAB_ORDER_CHIPS } from "../../config/chips";
 import VisitGoals from "./VisitGoals";
+import { pickNextVisit } from "../../lib/followUp.js";
 
 function buildRxHTML(
   patient,
@@ -23,7 +24,7 @@ function buildRxHTML(
   });
   const latestCon = consultations[0]?.con_data;
   const tests = latestCon?.investigations_to_order || latestCon?.tests_ordered || [];
-  const followUp = latestCon?.follow_up;
+  const followUp = pickNextVisit([latestCon?.follow_up]);
   const lifestyle = latestCon?.diet_lifestyle || [];
 
   let medsHTML = "";
@@ -200,10 +201,7 @@ const VisitPlan = memo(function VisitPlan({
     : latestCon?.tests_ordered?.length
       ? latestCon.tests_ordered
       : apptPlan?.investigations_to_order || [];
-  const followUp =
-    (latestCon?.follow_up?.date ? latestCon.follow_up : null) ||
-    apptPlan?.follow_up ||
-    latestCon?.follow_up;
+  const followUp = pickNextVisit([latestCon?.follow_up, apptPlan?.follow_up]);
   const today = new Date().toISOString().split("T")[0];
   const hba1c = getLabVal(labResults, "HbA1c");
   const fbs = getLabVal(labResults, "FBS");

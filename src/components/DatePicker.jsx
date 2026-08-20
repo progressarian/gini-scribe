@@ -136,8 +136,10 @@ export default function DatePicker({
     cursor: disabled ? "not-allowed" : "pointer",
     textAlign: "left",
     fontFamily: "inherit",
-    fontSize: 13,
     fontWeight: 400,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
     transition: "border-color 0.15s, box-shadow 0.15s, background 0.15s",
     ...style,
   };
