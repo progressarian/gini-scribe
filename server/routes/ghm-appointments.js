@@ -456,7 +456,7 @@ router.get("/ghm-appointments", async (req, res) => {
     // soonest upcoming booking or advised follow-up; NULL = nothing booked.
     if (mode === "lookup") {
       const q = (req.query.q || "").trim();
-      if (q.length < 2) {
+      if (!q) {
         return res.json({
           data: [],
           total: 0,
@@ -484,10 +484,10 @@ router.get("/ghm-appointments", async (req, res) => {
       const statusExpr = `(
         SELECT MIN(x) FROM (
           SELECT up.appointment_date AS x FROM appointments up
-            WHERE up.file_no = a.file_no AND a.file_no IS NOT NULL AND up.appointment_date >= $${dIdx}
+            WHERE up.file_no = pg.file_no AND pg.file_no IS NOT NULL AND up.appointment_date >= $${dIdx}
           UNION ALL
           SELECT ${ownFu("fu")} AS x FROM appointments fu
-            WHERE fu.file_no = a.file_no AND a.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
+            WHERE fu.file_no = pg.file_no AND pg.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
         ) s
       )`;
       const [countR, dataR] = await Promise.all([
@@ -501,20 +501,29 @@ router.get("/ghm-appointments", async (req, res) => {
           likeParams,
         ),
         pool.query(
-          `SELECT * FROM (
-             SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
-                    ${baseCols},
-                    FALSE AS via_preferred,
-                    ${statusExpr} AS follow_up_date
-             ${joins}
-             ${searchWhere}
-             ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
-           ) t
-           -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
-           -- stable — many patients share an identical name, and ordering by name
-           -- alone lets rows repeat or be skipped across pages.
-           ORDER BY t.patient_name ASC, t.file_no ASC NULLS LAST, t.id ASC
-           LIMIT $${dIdx + 1} OFFSET $${dIdx + 2}`,
+          `WITH page AS MATERIALIZED (
+             SELECT * FROM (
+               SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
+                      ${baseCols},
+                      FALSE AS via_preferred
+               ${joins}
+               ${searchWhere}
+               ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
+             ) t
+             -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
+             -- stable — many patients share an identical name, and ordering by name
+             -- alone lets rows repeat or be skipped across pages.
+             ORDER BY t.patient_name ASC, t.file_no ASC NULLS LAST, t.id ASC
+             LIMIT $${dIdx + 1} OFFSET $${dIdx + 2}
+           )
+           -- The upcoming-booking lookup runs AFTER the page is cut, so it costs
+           -- 50 index probes instead of one per candidate patient. Inside the
+           -- paging query it was evaluated for every match (~1.8k for "singh")
+           -- and blew past the pool's read timeout. MATERIALIZED is load-bearing:
+           -- without it Postgres inlines the CTE and folds the subquery back in.
+           SELECT pg.*, ${statusExpr} AS follow_up_date
+           FROM page pg
+           ORDER BY pg.patient_name ASC, pg.file_no ASC NULLS LAST, pg.id ASC`,
           [...likeParams, d, effLimit, offset],
         ),
       ]);
@@ -612,7 +621,7 @@ router.get("/ghm-appointments", async (req, res) => {
     // so it survives odd spacing and word order. Filtering server-side means the
     // search spans the WHOLE date — not just the rows already paged into the UI.
     const q = (req.query.q || "").trim();
-    if (q.length >= 2) {
+    if (q) {
       for (const t of q.split(/\s+/).filter(Boolean).slice(0, 6)) {
         params.push(`%${t}%`);
         where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.condition ILIKE $${params.length})`;

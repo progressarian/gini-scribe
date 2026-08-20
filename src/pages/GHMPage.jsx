@@ -520,12 +520,6 @@ function FilterPanel({ view, date, doctor, doctors, collectionFilter, onApply, o
             />
           </div>
         </div>
-
-        <p className="modal__hint">
-          <MapPin size={13} aria-hidden="true" />
-          Filters run on the server, so they cover the whole date — not just the rows already
-          loaded.
-        </p>
       </div>
 
       <div className="modal__foot">
@@ -1277,7 +1271,7 @@ export default function GHMPage() {
     );
   };
 
-  const searchQ = debouncedSearch.trim().length >= 2 ? debouncedSearch.trim() : "";
+  const searchQ = debouncedSearch.trim();
   const lookupQ = view === "lookup" ? searchQ : "";
 
   const buildQuery = useCallback(
@@ -1301,9 +1295,13 @@ export default function GHMPage() {
     [date, dateExplicit, doctor, collectionFilter, view, lookupQ, searchQ],
   );
 
-  const listEnabled = view !== "lookup" || lookupQ.length >= 2;
+  const listEnabled = view !== "lookup" || lookupQ.length > 0;
   const listKey = qk.ghm.list(buildQuery(1, PAGE_SIZE).toString());
-  const listQuery = useGhmList({ buildQuery, enabled: listEnabled });
+  const listQuery = useGhmList({
+    buildQuery,
+    enabled: listEnabled,
+    keepPrevious: view !== "lookup",
+  });
 
   const pages = listEnabled ? listQuery.data?.pages || [] : [];
   const rows = useMemo(() => pages.flatMap((pg) => safeArr(pg?.data)), [pages]);
@@ -1315,9 +1313,21 @@ export default function GHMPage() {
 
   const patientIds = useMemo(() => rows.map((r) => r.patient_id).filter(Boolean), [rows]);
   const appointmentIds = useMemo(() => rows.map((r) => r.id).filter(Boolean), [rows]);
-  const biomarkers = useGhmBiomarkers(patientIds).data || {};
-  const lastMo = useGhmLastMo(patientIds).data || {};
-  const attemptCounts = useCallAttemptCounts(appointmentIds).data || {};
+  const biomarkerQuery = useGhmBiomarkers(patientIds);
+  const lastMoQuery = useGhmLastMo(patientIds);
+  const attemptQuery = useCallAttemptCounts(appointmentIds);
+  const biomarkers = biomarkerQuery.data || {};
+  const lastMo = lastMoQuery.data || {};
+  const attemptCounts = attemptQuery.data || {};
+  // Any request still in flight while rows are already on screen — a refetch on
+  // focus, a stale-time refresh or the per-page batches catching up. The rows
+  // shown are the previous answer until it lands, so the header says so.
+  const refreshing =
+    !listQuery.isPending &&
+    (listQuery.isFetching ||
+      biomarkerQuery.isFetching ||
+      lastMoQuery.isFetching ||
+      attemptQuery.isFetching);
 
   const exportMutation = useExportPages(buildQuery, EXPORT_PAGE_SIZE);
   const exporting = exportMutation.isPending;
@@ -1416,10 +1426,13 @@ export default function GHMPage() {
     (collectionFilter !== "all" ? 1 : 0) +
     (view === "lookup" && dateExplicit ? 1 : 0);
 
-  const busy = loading && rows.length > 0;
-  const coldLoading = loading && rows.length === 0;
+  const typing = view === "lookup" && search.trim() !== debouncedSearch.trim();
+  const searching = view === "lookup" && (typing || (listEnabled && loading));
+  const busy = ((loading && rows.length > 0) || refreshing) && !searching;
+  const coldLoading = (loading && rows.length === 0) || searching;
+  const showRows = rows.length > 0 && !searching;
 
-  const canFit = view !== "reassign" && rows.length > 0;
+  const canFit = view !== "reassign" && showRows;
   const { ref: pageRef, height: pageHeight, fitted } = useViewportFill(canFit);
 
   return (
@@ -1441,13 +1454,18 @@ export default function GHMPage() {
           <div className="ghm__title">
             <h1>Daily Patient Sheet</h1>
             <span className="ghm__datelab">{isToday ? "Today" : prettyDate(date)}</span>
-            {rows.length > 0 && (
+            {showRows && (
               <span className="ghm__count">
                 {rows.length} of {total}
                 {searchQ ? " matching" : ""}
               </span>
             )}
-            {busy && <span className="ghm__busy">Searching…</span>}
+            {busy && (
+              <span className="ghm__busy">
+                <span className="ghm__busy-dot" aria-hidden="true" />
+                {searchQ || typing ? "Searching…" : "Updating…"}
+              </span>
+            )}
           </div>
           <div className="ghm__controls">
             <SearchBox
@@ -1455,7 +1473,7 @@ export default function GHMPage() {
               onChange={setSearch}
               placeholder={
                 view === "lookup"
-                  ? "Search any patient — name, file no, phone (ignores date)"
+                  ? "Search any patient — name, file no, phone"
                   : "Search this date — name, file no, phone, condition"
               }
             />
@@ -1568,33 +1586,33 @@ export default function GHMPage() {
       ) : (
         <>
           {/* ── Summary ── */}
-          {rows.length > 0 && <Summary summary={summary} />}
+          {showRows && <Summary summary={summary} />}
 
           {/* ── Loading ── */}
           {coldLoading && (
             <div className="ghm__loading">
               <div className="spinner" />
-              Loading…
+              {searching ? "Searching…" : "Loading…"}
             </div>
           )}
 
           {/* ── Empty ── */}
-          {!loading && rows.length === 0 && view === "lookup" && (
+          {!coldLoading && !loading && rows.length === 0 && view === "lookup" && (
             <div className="ghm__empty">
               <div className="ghm__empty-icon">
                 <Search size={34} aria-hidden="true" />
               </div>
               <div className="ghm__empty-title">
-                {lookupQ.length < 2 ? "Search a patient to begin" : "No patient found"}
+                {lookupQ ? "No patient found" : "Search a patient to begin"}
               </div>
               <div className="ghm__empty-sub">
-                {lookupQ.length < 2
-                  ? "Type a name, file number, or phone. Results aren't filtered by date — any patient appears with their current follow-up/booking status."
-                  : "No patient matches that name, file number, or phone."}
+                {lookupQ
+                  ? "No patient matches that name, file number, or phone. Clearing the filters may widen the search."
+                  : "Type a name, file number, or phone. Every patient is searched, on any date — add a date or home collection in Filters to narrow it."}
               </div>
             </div>
           )}
-          {!loading && rows.length === 0 && view !== "lookup" && (
+          {!coldLoading && !loading && rows.length === 0 && view !== "lookup" && (
             <div className="ghm__empty">
               <div className="ghm__empty-icon">
                 {searchQ ? (
@@ -1617,7 +1635,7 @@ export default function GHMPage() {
           )}
 
           {/* ── Table ── */}
-          {rows.length > 0 && (
+          {showRows && (
             <div className={`tbl-wrap ${busy ? "tbl-wrap--busy" : ""}`}>
               <table className="tbl">
                 <thead>
@@ -2091,7 +2109,7 @@ export default function GHMPage() {
           )}
 
           {/* ── Load more (pagination) ── */}
-          {rows.length > 0 && (
+          {showRows && (
             <div className="ghm__load-more">
               {listQuery.hasNextPage ? (
                 <button

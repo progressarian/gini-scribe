@@ -36,7 +36,7 @@ export function useCcAgents() {
   });
 }
 
-export function useGhmList({ buildQuery, enabled = true }) {
+export function useGhmList({ buildQuery, enabled = true, keepPrevious = true }) {
   return useInfiniteQuery({
     queryKey: qk.ghm.list(buildQuery(1, PAGE_SIZE).toString()),
     queryFn: async ({ pageParam }) => {
@@ -49,7 +49,7 @@ export function useGhmList({ buildQuery, enabled = true }) {
         ? (last?.page || pages.length) + 1
         : undefined,
     enabled,
-    placeholderData: keepPreviousData,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
     staleTime: 15_000,
   });
 }
