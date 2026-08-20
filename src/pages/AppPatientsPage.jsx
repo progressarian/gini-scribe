@@ -1,5 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import api from "../services/api.js";
+import Dropdown from "../components/ui/Dropdown.jsx";
+import FilterPopover from "../components/ui/FilterPopover.jsx";
+import SearchBox from "../components/ui/SearchBox.jsx";
 
 // Admin list of mobile-app users who are NOT real Gini hospital patients —
 // fresh self-signups (no scribe link) and app-created GNI- shells. Served by
@@ -179,13 +182,172 @@ const headStyle = {
   whiteSpace: "nowrap",
 };
 
+const PAGE_SIZE = 25;
+
+const PROFILE_OPTIONS = [
+  { value: "all", label: "All profiles" },
+  { value: "complete", label: "✓ Complete only" },
+  { value: "incomplete", label: "Incomplete only" },
+];
+
+const SORT_OPTIONS = [
+  { value: "created_at", label: "Registered" },
+  { value: "name", label: "Name" },
+  { value: "dob", label: "Date of birth" },
+  { value: "phone", label: "Phone" },
+  { value: "profile_complete", label: "Profile status" },
+];
+
+const DIR_OPTIONS = [
+  { value: "desc", label: "↓ Newest / Z–A" },
+  { value: "asc", label: "↑ Oldest / A–Z" },
+];
+
+const ctrlStyle = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1.5px solid #e2e8f0",
+  fontSize: 13,
+  outline: "none",
+  background: "#fff",
+};
+
+function AppPatientFilters({
+  profile,
+  condition,
+  conditionOptions,
+  sort,
+  dir,
+  activeCount,
+  onApply,
+}) {
+  const [draft, setDraft] = useState({ profile, condition, sort, dir });
+
+  useEffect(() => {
+    setDraft({ profile, condition, sort, dir });
+  }, [profile, condition, sort, dir]);
+
+  const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+
+  return (
+    <FilterPopover
+      activeCount={activeCount}
+      onApply={() => onApply(draft)}
+      onReset={() => setDraft({ profile: "all", condition: "", sort: "created_at", dir: "desc" })}
+    >
+      <div className="fpop__fld">
+        <span>Profile status</span>
+        <Dropdown
+          value={draft.profile}
+          options={PROFILE_OPTIONS}
+          onChange={(v) => set("profile", v)}
+          ariaLabel="Filter by profile status"
+        />
+      </div>
+      <div className="fpop__fld">
+        <span>Condition</span>
+        <Dropdown
+          value={draft.condition}
+          options={conditionOptions}
+          onChange={(v) => set("condition", v)}
+          ariaLabel="Filter by condition"
+        />
+      </div>
+      <div className="fpop__fld">
+        <span>Sort by</span>
+        <Dropdown
+          value={draft.sort}
+          options={SORT_OPTIONS}
+          onChange={(v) => set("sort", v)}
+          ariaLabel="Sort by"
+        />
+      </div>
+      <div className="fpop__fld">
+        <span>Order</span>
+        <Dropdown
+          value={draft.dir}
+          options={DIR_OPTIONS}
+          onChange={(v) => set("dir", v)}
+          ariaLabel="Sort direction"
+        />
+      </div>
+    </FilterPopover>
+  );
+}
+
 export default function AppPatientsPage() {
   const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState(null); // genie_id of the open row
-  const [logsById, setLogsById] = useState({}); // genie_id -> logs payload
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [profile, setProfile] = useState("all");
+  const [condition, setCondition] = useState("");
+  const [conditions, setConditions] = useState([]);
+  const [sort, setSort] = useState("created_at");
+  const [dir, setDir] = useState("desc");
+  const [expanded, setExpanded] = useState(null);
+  const [logsById, setLogsById] = useState({});
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .get("/api/app-patients/conditions")
+      .then((res) => alive && setConditions(res.data?.data || []))
+      .catch(() => alive && setConditions([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Every filter is a server query, so it spans all patients rather than the
+  // page on screen. Changing one resets to page 1 — staying on page 4 of a
+  // narrower result set lands on an empty table.
+  const query = useMemo(() => {
+    const p = new URLSearchParams({ page, limit: PAGE_SIZE, sort, dir });
+    if (debouncedSearch.trim()) p.set("q", debouncedSearch.trim());
+    if (profile !== "all") p.set("profile", profile);
+    if (condition) p.set("condition", condition);
+    return p.toString();
+  }, [page, sort, dir, debouncedSearch, profile, condition]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, profile, condition, sort, dir]);
+
+  useEffect(() => {
+    let alive = true;
+    setRefreshing(true);
+    api
+      .get(`/api/app-patients/non-gini?${query}`)
+      .then((res) => {
+        if (!alive) return;
+        setRows(res.data?.data || []);
+        setTotal(res.data?.total || 0);
+        setTotalPages(res.data?.totalPages || 1);
+        setError("");
+      })
+      .catch((e) => {
+        if (alive) setError(e?.response?.data?.error || e.message || "Failed to load");
+      })
+      .finally(() => {
+        if (!alive) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [query]);
 
   const toggleExpand = (genieId) => {
     const next = expanded === genieId ? null : genieId;
@@ -198,29 +360,18 @@ export default function AppPatientsPage() {
     }
   };
 
-  useEffect(() => {
-    let alive = true;
-    api
-      .get("/api/app-patients/non-gini")
-      .then((res) => {
-        if (alive) setRows(res.data?.data || []);
-      })
-      .catch((e) => {
-        if (alive) setError(e?.response?.data?.error || e.message || "Failed to load");
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const conditionOptions = useMemo(
+    () => [
+      { value: "", label: "All conditions" },
+      ...conditions.map((c) => ({ value: c.name, label: `${c.name} (${c.patients})` })),
+    ],
+    [conditions],
+  );
 
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => r.name?.toLowerCase().includes(q) || r.phone?.includes(q));
-  }, [rows, search]);
+  const filtered = debouncedSearch.trim() || profile !== "all" || condition;
+  const activeFilters = (profile !== "all" ? 1 : 0) + (condition ? 1 : 0);
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, total);
 
   return (
     <div style={{ padding: 20, margin: "0 auto" }}>
@@ -231,7 +382,7 @@ export default function AppPatientsPage() {
           justifyContent: "space-between",
           flexWrap: "wrap",
           gap: 12,
-          marginBottom: 16,
+          marginBottom: 12,
         }}
       >
         <div>
@@ -240,41 +391,68 @@ export default function AppPatientsPage() {
           </h1>
           <p style={{ fontSize: 12, color: "#64748b", margin: "4px 0 0" }}>
             Registered on the MyHealth Genie app but not (yet) Gini Hospital patients —{" "}
-            {loading ? "…" : `${rows.length} total`}
+            {loading ? "…" : `${total} ${filtered ? "matching" : "total"}`}
+            {refreshing && !loading && (
+              <span style={{ color: "#2563eb", fontWeight: 600 }}> · updating…</span>
+            )}
           </p>
         </div>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 Search name, phone, file no…"
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1.5px solid #e2e8f0",
-            fontSize: 13,
-            minWidth: 240,
-            outline: "none",
-          }}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Search any app patient — name or phone"
+            label="Search app patients"
+          />
+          <AppPatientFilters
+            profile={profile}
+            condition={condition}
+            conditionOptions={conditionOptions}
+            sort={sort}
+            dir={dir}
+            activeCount={activeFilters}
+            onApply={(next) => {
+              setProfile(next.profile);
+              setCondition(next.condition);
+              setSort(next.sort);
+              setDir(next.dir);
+            }}
+          />
+          {filtered && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setProfile("all");
+                setCondition("");
+              }}
+              style={{ ...ctrlStyle, cursor: "pointer", color: "#2563eb", fontWeight: 600 }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       </div>
 
       {loading && <div style={{ color: "#64748b", fontSize: 14, padding: 30 }}>Loading…</div>}
       {!!error && !loading && (
         <div style={{ color: "#dc2626", fontSize: 14, padding: 20 }}>⚠️ {error}</div>
       )}
-      {!loading && !error && visible.length === 0 && (
+      {!loading && !error && rows.length === 0 && (
         <div style={{ color: "#64748b", fontSize: 14, padding: 30, textAlign: "center" }}>
-          {rows.length === 0 ? "No app-only patients yet." : "No patients match this search."}
+          {filtered ? "No patients match these filters." : "No app-only patients yet."}
         </div>
       )}
 
-      {!loading && !error && visible.length > 0 && (
+      {!loading && !error && rows.length > 0 && (
         <div
           style={{
             background: "#fff",
             border: "1px solid #e2e8f0",
             borderRadius: 14,
             overflow: "auto",
+            opacity: refreshing ? 0.6 : 1,
+            transition: "opacity 0.15s",
           }}
         >
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -291,7 +469,7 @@ export default function AppPatientsPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((r, i) => (
+              {rows.map((r, i) => (
                 <Fragment key={r.genie_id}>
                   <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
                     <td style={cellStyle}>
@@ -311,7 +489,7 @@ export default function AppPatientsPage() {
                         ▸
                       </button>
                     </td>
-                    <td style={{ ...cellStyle, color: "#94a3b8" }}>{i + 1}</td>
+                    <td style={{ ...cellStyle, color: "#94a3b8" }}>{from + i}</td>
                     <td style={{ ...cellStyle, fontWeight: 600 }}>{r.name || "—"}</td>
                     <td style={cellStyle}>{r.phone || "—"}</td>
                     <td style={cellStyle}>
@@ -340,6 +518,52 @@ export default function AppPatientsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && !error && total > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginTop: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "#64748b" }}>
+            Showing {from}–{to} of {total}
+          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setPage((n) => Math.max(1, n - 1))}
+              disabled={page <= 1 || refreshing}
+              style={{
+                ...ctrlStyle,
+                cursor: page <= 1 ? "not-allowed" : "pointer",
+                opacity: page <= 1 ? 0.5 : 1,
+              }}
+            >
+              ‹ Previous
+            </button>
+            <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
+              Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
+              disabled={page >= totalPages || refreshing}
+              style={{
+                ...ctrlStyle,
+                cursor: page >= totalPages ? "not-allowed" : "pointer",
+                opacity: page >= totalPages ? 0.5 : 1,
+              }}
+            >
+              Next ›
+            </button>
+          </div>
         </div>
       )}
     </div>

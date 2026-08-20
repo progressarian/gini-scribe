@@ -15,18 +15,78 @@ import { getGenieDb } from "../services/genieImport.js";
 
 const router = Router();
 
+const SORTS = {
+  created_at: (a, b) => cmpDate(a.created_at, b.created_at),
+  name: (a, b) => cmpText(a.name, b.name),
+  phone: (a, b) => cmpText(a.phone, b.phone),
+  dob: (a, b) => cmpDate(a.dob, b.dob),
+  profile_complete: (a, b) => Number(a.profile_complete) - Number(b.profile_complete),
+};
+
+const cmpText = (a, b) =>
+  String(a || "").localeCompare(String(b || ""), "en", { sensitivity: "base" });
+const cmpDate = (a, b) => (a ? Date.parse(a) : 0) - (b ? Date.parse(b) : 0);
+
+// GET /api/app-patients/conditions — the distinct condition names in the app DB,
+// for the list page's filter. Names are free text, so they are de-duplicated
+// case-insensitively and returned with the patient count behind each.
+router.get("/app-patients/conditions", async (req, res) => {
+  try {
+    if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
+    const db = getGenieDb();
+    if (!db) return res.status(503).json({ error: "App DB not configured" });
+    const { data, error } = await db.from("conditions").select("name, patient_id").limit(20000);
+    if (error) return res.status(502).json({ error: error.message });
+    const byName = new Map();
+    for (const r of data || []) {
+      const name = String(r.name || "").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!byName.has(key)) byName.set(key, { name, patients: new Set() });
+      byName.get(key).patients.add(r.patient_id);
+    }
+    res.json({
+      data: [...byName.values()]
+        .map((c) => ({ name: c.name, patients: c.patients.size }))
+        .sort((a, b) => b.patients - a.patients || cmpText(a.name, b.name)),
+    });
+  } catch (e) {
+    handleError(res, e, "App patient conditions");
+  }
+});
+
 router.get("/app-patients/non-gini", async (req, res) => {
   try {
     if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
     const db = getGenieDb();
     if (!db) return res.status(503).json({ error: "App DB not configured" });
 
-    const { data: patients, error } = await db
+    const q = String(req.query.q || "").trim();
+    const profile = String(req.query.profile || "all");
+    const condition = String(req.query.condition || "").trim();
+    const sort = SORTS[req.query.sort] ? String(req.query.sort) : "created_at";
+    const dir = String(req.query.dir || "desc").toLowerCase() === "asc" ? 1 : -1;
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
+    const page = Math.max(1, Number(req.query.page) || 1);
+
+    // The app-only test needs a file_no lookup in the scribe DB, so it cannot be
+    // pushed into the app-DB query — the row set has to be classified here and
+    // paged afterwards. Only the columns the list renders are fetched, and the
+    // expensive per-patient counts run on the page alone (see below).
+    let sel = db
       .from("patients")
       .select(
         "id, name, phone, dob, sex, blood_group, created_at, profile_complete, gini_patient_id, migrated_to_gini",
-      )
-      .order("created_at", { ascending: false });
+      );
+    // Server-side text match, so it spans every patient rather than the page.
+    if (q)
+      sel = sel.or(
+        `name.ilike.%${q.replace(/[%,()]/g, "")}%,phone.ilike.%${q.replace(/[%,()]/g, "")}%`,
+      );
+    if (profile === "complete") sel = sel.eq("profile_complete", true);
+    if (profile === "incomplete")
+      sel = sel.or("profile_complete.is.null,profile_complete.eq.false");
+    const { data: patients, error } = await sel.order("created_at", { ascending: false });
     if (error) return res.status(502).json({ error: error.message });
 
     // Resolve numeric scribe links in one query so GNI- shells can be told
@@ -59,7 +119,7 @@ router.get("/app-patients/non-gini", async (req, res) => {
       return false; // legacy file_no-style link (P_xxx) → hospital patient
     };
 
-    const out = (patients || []).filter(isAppOnly).map((p) => ({
+    let out = (patients || []).filter(isAppOnly).map((p) => ({
       genie_id: p.id,
       name: p.name,
       phone: p.phone,
@@ -70,8 +130,33 @@ router.get("/app-patients/non-gini", async (req, res) => {
       counts: {},
     }));
 
+    // Condition filter: resolve the name to the patients carrying it, then keep
+    // only those. Matched case-insensitively because the names are free text.
+    if (condition) {
+      const { data: withCond } = await db
+        .from("conditions")
+        .select("patient_id, name")
+        .ilike("name", condition)
+        .limit(20000)
+        .then(
+          (r) => r,
+          () => ({ data: [] }),
+        );
+      const ok = new Set((withCond || []).map((r) => r.patient_id));
+      out = out.filter((p) => ok.has(p.genie_id));
+    }
+
+    out.sort((a, b) => SORTS[sort](a, b) * dir || cmpText(a.name, b.name));
+
+    const total = out.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const offset = (page - 1) * limit;
+    out = out.slice(offset, offset + limit);
+
     // Per-patient data counts — one batched query per table (not per patient),
-    // tallied here. Missing tables resolve to empty defensively.
+    // tallied here. Missing tables resolve to empty defensively. Scoped to the
+    // page: these are ten scans of the log tables, and running them for every
+    // patient made the whole list wait on data most of it never showed.
     const ids = out.map((p) => p.genie_id);
     if (ids.length) {
       const TABLES = {
@@ -106,7 +191,7 @@ router.get("/app-patients/non-gini", async (req, res) => {
       );
     }
 
-    res.json({ data: out, total: out.length });
+    res.json({ data: out, total, page, limit, totalPages });
   } catch (e) {
     handleError(res, e, "App patients list");
   }

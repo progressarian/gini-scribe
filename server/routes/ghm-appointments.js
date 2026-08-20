@@ -406,13 +406,6 @@ router.get("/ghm-appointments", async (req, res) => {
     );
     const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
 
-    // A visit's OWN effective follow-up date, from whichever source has it, in
-    // priority order: the follow_up_date column → the synced HealthRay
-    // appointment value (biomarkers.followup) → the date extracted from the
-    // prescription (healthray_follow_up.date). The last one is AI-extracted and
-    // dirty (can hold "4 weeks", "today", "09/10/2025", "null", …), so it is
-    // ONLY cast when it is a clean YYYY-MM-DD — an unguarded ::date would throw
-    // and break the whole query.
     const ownFu = (a) => `COALESCE(
       ${a}.follow_up_date,
       NULLIF(${a}.biomarkers->>'followup', '')::date,
@@ -420,8 +413,6 @@ router.get("/ghm-appointments", async (req, res) => {
            THEN (${a}.healthray_follow_up->>'date')::date END
     )`;
 
-    // Column list shared by every listing query. via_preferred and the per-row
-    // follow-up/status date differ per mode, so each query appends its own.
     const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
                 a.doctor_name, a.patient_name, a.file_no, a.phone,
                 a.visit_type, a.appointment_type, a.booking_source,
@@ -448,12 +439,6 @@ router.get("/ghm-appointments", async (req, res) => {
          LEFT JOIN consultations c ON c.id = a.consultation_id
          LEFT JOIN station_tracking st ON st.appointment_id = a.id`;
 
-    // lookup: a date-INDEPENDENT patient search. Type a name / file no / phone and
-    // every matching patient shows up (one row each — their latest visit) with their
-    // current follow-up/booking status, regardless of which date is selected. This is
-    // how a patient who forgot to book a follow-up is found: they appear here even
-    // though they are on no date's calling list. follow_up_date here = the patient's
-    // soonest upcoming booking or advised follow-up; NULL = nothing booked.
     if (mode === "lookup") {
       const q = (req.query.q || "").trim();
       if (!q) {
@@ -466,10 +451,7 @@ router.get("/ghm-appointments", async (req, res) => {
           totalPages: 0,
         });
       }
-      // Tokenise on whitespace and require EVERY word to match (in name, file no,
-      // or phone). A single `ILIKE '%surinder jit%'` fails on real data where the
-      // name is stored as "Surinder  jit" (double space) or in another word order;
-      // matching each word independently is robust to spacing and ordering.
+
       const tokens = q.split(/\s+/).filter(Boolean).slice(0, 6);
       const tokenConds = tokens
         .map(
@@ -479,36 +461,49 @@ router.get("/ghm-appointments", async (req, res) => {
         .join(" AND ");
       const searchWhere = `WHERE (${tokenConds})${homeCond}`;
       const likeParams = tokens.map((t) => `%${t}%`);
-      // Param slots after the token params: date (for "upcoming" status), limit, offset.
       const dIdx = tokens.length + 1;
-      const statusExpr = `(
-        SELECT MIN(x) FROM (
-          SELECT up.appointment_date AS x FROM appointments up
-            WHERE up.file_no = pg.file_no AND pg.file_no IS NOT NULL AND up.appointment_date >= $${dIdx}
+
+      const upcomingCte = `upcoming AS (
+        SELECT file_no, MIN(x) AS next_date FROM (
+          SELECT up.file_no, up.appointment_date AS x
+            FROM appointments up
+           WHERE up.file_no IS NOT NULL AND up.appointment_date >= $${dIdx}
           UNION ALL
-          SELECT ${ownFu("fu")} AS x FROM appointments fu
-            WHERE fu.file_no = pg.file_no AND pg.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
-        ) s
+          SELECT fu.file_no, ${ownFu("fu")} AS x
+            FROM appointments fu
+           WHERE fu.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
+        ) s GROUP BY file_no
       )`;
+
+      const pickUpcoming = `ORDER BY COALESCE(a.file_no, a.id::text),
+                 (a.appointment_date >= $${dIdx}) DESC,
+                 CASE WHEN a.appointment_date >= $${dIdx} THEN a.appointment_date END ASC,
+                 a.appointment_date DESC, a.created_at DESC`;
       const [countR, dataR] = await Promise.all([
         pool.query(
-          `SELECT ${summaryCols("z")} FROM (
+          `WITH ${upcomingCte}
+           SELECT ${summaryCols("z")} FROM (
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     a.call_status, a.show_no_show, a.visit_type, a.home_collection
-             FROM appointments a ${searchWhere}
-             ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
+             FROM appointments a
+             JOIN upcoming u ON u.file_no = a.file_no
+             ${searchWhere}
+             ${pickUpcoming}
            ) z`,
-          likeParams,
+          [...likeParams, d],
         ),
         pool.query(
-          `WITH page AS MATERIALIZED (
+          `WITH ${upcomingCte},
+           page AS MATERIALIZED (
              SELECT * FROM (
                SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                       ${baseCols},
-                      FALSE AS via_preferred
+                      FALSE AS via_preferred,
+                      u.next_date AS follow_up_date
                ${joins}
+               JOIN upcoming u ON u.file_no = a.file_no
                ${searchWhere}
-               ORDER BY COALESCE(a.file_no, a.id::text), a.appointment_date DESC, a.created_at DESC
+               ${pickUpcoming}
              ) t
              -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
              -- stable — many patients share an identical name, and ordering by name
@@ -516,14 +511,8 @@ router.get("/ghm-appointments", async (req, res) => {
              ORDER BY t.patient_name ASC, t.file_no ASC NULLS LAST, t.id ASC
              LIMIT $${dIdx + 1} OFFSET $${dIdx + 2}
            )
-           -- The upcoming-booking lookup runs AFTER the page is cut, so it costs
-           -- 50 index probes instead of one per candidate patient. Inside the
-           -- paging query it was evaluated for every match (~1.8k for "singh")
-           -- and blew past the pool's read timeout. MATERIALIZED is load-bearing:
-           -- without it Postgres inlines the CTE and folds the subquery back in.
-           SELECT pg.*, ${statusExpr} AS follow_up_date
-           FROM page pg
-           ORDER BY pg.patient_name ASC, pg.file_no ASC NULLS LAST, pg.id ASC`,
+           SELECT * FROM page
+           ORDER BY patient_name ASC, file_no ASC NULLS LAST, id ASC`,
           [...likeParams, d, effLimit, offset],
         ),
       ]);
@@ -539,49 +528,22 @@ router.get("/ghm-appointments", async (req, res) => {
       });
     }
 
-    // Two date-based listing modes:
-    //  - followup: patients whose CURRENT advised follow-up date is this date
-    //    (the follow-up calling list), matched on the visit's effective follow-up
-    //    date (any source). Only the patient's LATEST follow-up-bearing visit
-    //    counts, so a stale follow-up from an earlier visit can't drag the
-    //    patient onto a date a more recent visit has already superseded.
-    //    PLUS any visit whose preferred_date is this date — if the patient asked
-    //    to come on the 13th while their advised follow-up is the 18th, they need
-    //    to show on the 13th's calling list too.
-    //  - default: appointments booked on this date OR patients whose preferred
-    //    date is this date.
     let where;
-    // a.id tiebreaker keeps OFFSET paging stable when time_slot/created_at tie.
     const orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC, a.id ASC`;
-    if (mode === "followup") {
-      // Logically: (follow-up due on $1 AND it's the latest follow-up visit)
-      //            OR (preferred_date is $1).
-      // Written as two ANDed OR-groups so the planner filters to the small set of
-      // rows matching $1 FIRST (both predicates are cheap, non-subquery), and only
-      // then evaluates the correlated "latest visit" subquery for that handful —
-      // an `(… OR preferred_date)` at the top level made it scan the whole table.
-      where = `WHERE (${ownFu("a")} = $1 OR a.preferred_date = $1)
-             AND (
-               a.preferred_date = $1
-               OR a.file_no IS NULL
-               OR a.appointment_date = (
-                 SELECT MAX(prev.appointment_date)
-                 FROM appointments prev
-                 WHERE prev.file_no = a.file_no
-                   AND ${ownFu("prev")} IS NOT NULL
-               )
-             )`;
-    } else {
-      // Default (by-date) view = everything the desk has to handle that day:
-      // appointments BOOKED on the date, patients whose preferred date is the
-      // date, and — because a day can carry due follow-ups with no booking yet
-      // (2026-08-26 had 43 due and 0 booked) — patients whose advised follow-up
-      // falls due on it, under the same "latest follow-up visit only" rule the
-      // followup mode uses. Same two-group shape as above so the cheap $1
-      // predicates filter first and the correlated subquery runs on the rest.
-      // The final group drops a follow-up-only row when that patient already
-      // appears through a booking on this date, so nobody is listed twice.
-      where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1 OR ${ownFu("a")} = $1)
+    // if (mode === "followup") {
+    //   where = `WHERE (${ownFu("a")} = $1 OR a.preferred_date = $1)
+    //          AND (
+    //            a.preferred_date = $1
+    //            OR a.file_no IS NULL
+    //            OR a.appointment_date = (
+    //              SELECT MAX(prev.appointment_date)
+    //              FROM appointments prev
+    //              WHERE prev.file_no = a.file_no
+    //                AND ${ownFu("prev")} IS NOT NULL
+    //            )
+    //          )`;
+    // } else {
+    where = `WHERE (a.appointment_date = $1 OR a.preferred_date = $1 OR ${ownFu("a")} = $1)
              AND (
                a.appointment_date = $1
                OR a.preferred_date = $1
@@ -603,12 +565,9 @@ router.get("/ghm-appointments", async (req, res) => {
                    AND (booked.appointment_date = $1 OR booked.preferred_date = $1)
                )
              )`;
-    }
+    // }
     where += homeCond;
     if (doctor) {
-      // Filter by doctor matches EITHER the appointment's doctor OR the patient's
-      // preferred doctor — so re-assigning a preferred doctor surfaces the patient
-      // under that doctor's filter.
       params.push(`%${doctor}%`);
       where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;
     }
@@ -616,10 +575,6 @@ router.get("/ghm-appointments", async (req, res) => {
       params.push(status);
       where += ` AND a.status = $${params.length}`;
     }
-    // Free-text search across name / file no / phone / condition. Tokenised on
-    // whitespace with every word required (same robust matching as lookup mode),
-    // so it survives odd spacing and word order. Filtering server-side means the
-    // search spans the WHOLE date — not just the rows already paged into the UI.
     const q = (req.query.q || "").trim();
     if (q) {
       for (const t of q.split(/\s+/).filter(Boolean).slice(0, 6)) {

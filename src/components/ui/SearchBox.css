@@ -1,0 +1,67 @@
+/* Collapsible search — an icon until used, and it stays open while it holds a
+   query so a filtered list always shows what filtered it. */
+.sbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sbox__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 33px;
+  padding: 7px;
+  border: 1.5px solid #d1d9e0;
+  border-radius: 7px;
+  background: #fff;
+  color: #475569;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sbox__toggle:hover {
+  background: #f8fafc;
+}
+
+.sbox__icon {
+  position: absolute;
+  left: 10px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.sbox__input {
+  min-width: 200px;
+  padding: 7px 30px 7px 32px;
+  border: 1.5px solid #d1d9e0;
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.sbox__input:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.sbox__clear {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.sbox__clear:hover {
+  background: #f1f5f9;
+  color: #475569;
+}

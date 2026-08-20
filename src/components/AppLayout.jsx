@@ -118,13 +118,13 @@ const NAV_ITEMS = [
   { path: "/reports", label: "📊 Reports", cap: C["/reports"], show: () => true },
   { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page
-  { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
   {
     path: "/obt-dashboard",
     label: "📞 OBT Dashboard",
     cap: C["/obt-dashboard"],
     show: () => true,
   },
+  { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
   // Doctor availability / leave / reassignment
   {
     path: "/doctor-management",

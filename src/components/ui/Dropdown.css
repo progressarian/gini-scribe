@@ -1,0 +1,97 @@
+/* Custom dropdown — a trigger button plus an option list portalled out of
+   any scroll container. Shared by the GHM filters, the GHM table cells and the
+   App Patients list. */
+.doc-dd {
+  position: relative;
+}
+
+.doc-dd__btn {
+  padding: 7px 11px;
+  border: 1.5px solid #d1d9e0;
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 190px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.doc-dd__btn--cell {
+  min-width: 0;
+  width: 100%;
+  padding: 5px 7px;
+  font-size: 12px;
+}
+
+.csel.doc-dd__btn {
+  min-width: 0;
+  gap: 4px;
+}
+
+.doc-dd__btn:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.doc-dd__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-dd__arrow {
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.doc-dd__arrow--up {
+  transform: rotate(180deg);
+}
+
+.doc-dd__list {
+  background: #fff;
+  border: 1.5px solid #d1d9e0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  max-height: calc(7 * 36px);
+  overflow-y: auto;
+}
+
+.doc-dd__item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-dd__item:hover {
+  background: #f1f5f9;
+}
+
+.doc-dd__item--active {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+
+.doc-dd__item--active:hover {
+  background: #1d4ed8;
+}

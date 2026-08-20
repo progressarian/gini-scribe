@@ -4,7 +4,6 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
   ClipboardList,
   Download,
   FileText,
@@ -16,9 +15,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
-  RotateCcw,
   Search,
-  SlidersHorizontal,
   Smartphone,
   Star,
   Sunrise,
@@ -32,11 +29,12 @@ import { SLOT_REASON, slotOptions, ARRIVAL_TIME_RANGES } from "../lib/slotAvaila
 import { exportWatiWorkbook } from "../lib/ghmWatiExport.js";
 import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions";
 import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
-import AnchoredPopover from "../components/ui/AnchoredPopover.jsx";
+import Dropdown from "../components/ui/Dropdown.jsx";
+import FilterPopover from "../components/ui/FilterPopover.jsx";
+import SearchBox from "../components/ui/SearchBox.jsx";
 import DatePicker from "../components/DatePicker.jsx";
 import useBodyScrollLock from "../hooks/useBodyScrollLock.js";
 import useViewportFill from "../hooks/useViewportFill.js";
-import useDismissOnOutside from "../hooks/useDismissOnOutside.js";
 import {
   PAGE_SIZE,
   useAppointmentChanges,
@@ -183,70 +181,10 @@ const callColor = (v) => CALL_STATUSES.find((s) => s.value === v)?.color || "gra
 const showColor = (v) => SHOW_STATUSES.find((s) => s.value === v)?.color || "gray";
 
 // ─── Custom dropdown — shows max 7 items then scrolls ────────────────────
-function Dropdown({ value, options, onChange, ariaLabel, variant, placeholder }) {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef(null);
-  const listRef = useRef(null);
-
-  useDismissOnOutside(
-    [anchorRef, listRef],
-    useCallback(() => setOpen(false), []),
-    open,
-  );
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  const select = (val) => {
-    onChange(val);
-    setOpen(false);
-  };
-  const current = options.find((o) => o.value === value);
-  const color = current?.color;
-  const label = current?.label || placeholder || options[0]?.label;
-
-  return (
-    <div className="doc-dd" ref={anchorRef}>
-      <button
-        type="button"
-        className={
-          variant === "color"
-            ? `csel csel--${color || "gray"} doc-dd__btn`
-            : `doc-dd__btn ctrl ${variant === "cell" ? "doc-dd__btn--cell" : ""}`
-        }
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-      >
-        <span className="doc-dd__label">{label}</span>
-        <ChevronDown className={`doc-dd__arrow ${open ? "doc-dd__arrow--up" : ""}`} size={13} />
-      </button>
-      {open && (
-        <AnchoredPopover anchorRef={anchorRef} popoverRef={listRef} matchWidth gap={4}>
-          <div className="doc-dd__list" role="listbox">
-            {options.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                role="option"
-                aria-selected={value === o.value}
-                className={`doc-dd__item ${value === o.value ? "doc-dd__item--active" : ""}`}
-                onClick={() => select(o.value)}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </AnchoredPopover>
-      )}
-    </div>
-  );
-}
+const doctorOptions = (doctors) => [
+  { value: "All", label: "All Doctors" },
+  ...doctors.map((d) => ({ value: d, label: d })),
+];
 
 const CELL_DATE_STYLE = {
   padding: "5px 26px 5px 26px",
@@ -257,11 +195,6 @@ const CELL_DATE_STYLE = {
 const MODE_OPTIONS = [
   { value: "", label: "—" },
   ...["Physical", "Digital", "Online"].map((m) => ({ value: m, label: m })),
-];
-
-const doctorOptions = (doctors) => [
-  { value: "All", label: "All Doctors" },
-  ...doctors.map((d) => ({ value: d, label: d })),
 ];
 
 const COLLECTION_OPTIONS = [
@@ -446,158 +379,74 @@ function Summary({ summary }) {
   );
 }
 
-function FilterPanel({ view, date, doctor, doctors, collectionFilter, onApply, onClose }) {
+function GhmFilters({ view, date, doctor, doctors, collectionFilter, activeCount, onApply }) {
   const [draft, setDraft] = useState({ date, doctor, collectionFilter });
 
   useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    setDraft({ date, doctor, collectionFilter });
+  }, [date, doctor, collectionFilter]);
 
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
-  const showDate = view !== "tomorrow";
+  // Lookup ignores the date entirely — it searches every patient on every date,
+  // so offering one there only invited the question of what it filtered.
+  const showDate = view !== "tomorrow" && view !== "lookup";
   const showDoctor = view !== "lookup";
 
-  const apply = () => {
-    onApply(draft);
-    onClose();
-  };
-
   return (
-    <div className="fpop" role="dialog" aria-label="Filters">
-      <div className="modal__hdr">
-        <span className="modal__title">
-          <SlidersHorizontal size={16} aria-hidden="true" />
-          Filters
-        </span>
-        <button type="button" className="modal__x" onClick={onClose} aria-label="Close">
-          <X size={16} aria-hidden="true" />
-        </button>
-      </div>
-
-      <div className="modal__body">
-        <div className="fgrid">
-          {showDate && (
-            <div className="fld fld--wide">
-              <span>{view === "lookup" ? "Date (optional)" : "Date"}</span>
-              <DatePicker
-                value={draft.date}
-                onChange={(v) => set("date", v)}
-                minDate={view === "fu3" ? todayStr() : undefined}
-                placeholder={view === "lookup" ? "Any date" : "Select date"}
-                clearable={view === "lookup"}
-              />
-            </div>
-          )}
-          {view === "tomorrow" && (
-            <div className="fld fld--wide">
-              <span>Date</span>
-              <span className="ctrl ctrl--readonly">{prettyDate(date)}</span>
-            </div>
-          )}
-
-          {showDoctor && (
-            <div className="fld fld--wide">
-              <span>Doctor</span>
-              <Dropdown
-                value={draft.doctor}
-                options={doctorOptions(doctors)}
-                onChange={(v) => set("doctor", v)}
-                ariaLabel="Doctor"
-              />
-            </div>
-          )}
-
-          <div className="fld fld--wide">
-            <span>Home collection</span>
-            <Dropdown
-              value={draft.collectionFilter}
-              options={COLLECTION_OPTIONS}
-              onChange={(v) => set("collectionFilter", v)}
-              ariaLabel="Home collection"
-            />
-          </div>
+    <FilterPopover
+      activeCount={activeCount}
+      onApply={() => onApply(draft)}
+      onReset={() =>
+        setDraft({ date: view === "lookup" ? "" : date, doctor: "All", collectionFilter: "all" })
+      }
+      hint={
+        view === "lookup"
+          ? "Patient Lookup searches every patient on every date, so it has no date filter — each row shows that patient's most recent appointment."
+          : "Filters run on the server, so they cover the whole date — not just the rows already loaded."
+      }
+    >
+      {showDate && (
+        <div className="fpop__fld">
+          <span>{view === "lookup" ? "Upcoming from (optional)" : "Date"}</span>
+          <DatePicker
+            value={draft.date}
+            onChange={(v) => set("date", v)}
+            minDate={view === "fu3" ? todayStr() : undefined}
+            placeholder={view === "lookup" ? "Today" : "Select date"}
+            clearable={view === "lookup"}
+          />
         </div>
-      </div>
-
-      <div className="modal__foot">
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() =>
-            setDraft({
-              date: view === "lookup" ? "" : date,
-              doctor: "All",
-              collectionFilter: "all",
-            })
-          }
-        >
-          <RotateCcw size={14} aria-hidden="true" />
-          Reset
-        </button>
-        <button type="button" className="btn btn--primary" onClick={apply}>
-          <Check size={15} aria-hidden="true" />
-          Apply filters
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SearchBox({ value, onChange, placeholder }) {
-  const [open, setOpen] = useState(false);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
-
-  if (!open && !value) {
-    return (
-      <button
-        type="button"
-        className="btn btn--icon"
-        onClick={() => setOpen(true)}
-        aria-label="Search patients"
-        title="Search patients"
-      >
-        <Search size={16} aria-hidden="true" />
-      </button>
-    );
-  }
-
-  return (
-    <div className="ctrl-search">
-      <Search className="ctrl-search__icon" size={15} aria-hidden="true" />
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={() => !value && setOpen(false)}
-        onKeyDown={(e) => {
-          if (e.key !== "Escape") return;
-          onChange("");
-          setOpen(false);
-        }}
-        placeholder={placeholder}
-        className="ctrl ctrl--search"
-      />
-      {value && (
-        <button
-          type="button"
-          className="ctrl-search__clear"
-          onClick={() => {
-            onChange("");
-            setOpen(false);
-          }}
-          aria-label="Clear search"
-        >
-          <X size={14} aria-hidden="true" />
-        </button>
       )}
-    </div>
+      {view === "tomorrow" && (
+        <div className="fpop__fld">
+          <span>Date</span>
+          <span className="ctrl ctrl--readonly">{prettyDate(date)}</span>
+        </div>
+      )}
+
+      {showDoctor && (
+        <div className="fpop__fld">
+          <span>Doctor</span>
+          <Dropdown
+            value={draft.doctor}
+            options={doctorOptions(doctors)}
+            onChange={(v) => set("doctor", v)}
+            ariaLabel="Doctor"
+          />
+        </div>
+      )}
+
+      <div className="fpop__fld">
+        <span>Home collection</span>
+        <Dropdown
+          value={draft.collectionFilter}
+          options={COLLECTION_OPTIONS}
+          onChange={(v) => set("collectionFilter", v)}
+          ariaLabel="Home collection"
+        />
+      </div>
+    </FilterPopover>
   );
 }
 
@@ -1236,7 +1085,6 @@ export default function GHMPage() {
   const [date, setDate] = useState(
     initialTab.offset !== null ? addDaysStr(initialTab.offset) : todayStr(),
   );
-  const [dateExplicit, setDateExplicit] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [newPrefill, setNewPrefill] = useState(null);
   const [doctor, setDoctor] = useState("All");
@@ -1244,9 +1092,6 @@ export default function GHMPage() {
   // Debounced copy of `search` — drives the date-independent Patient Lookup fetch
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [search, setSearch] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
-  const filtersRef = useRef(null);
-  const closeFilters = useCallback(() => setShowFilters(false), []);
   const [recordFor, setRecordFor] = useState(null);
   const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const EXPORT_PAGE_SIZE = 100;
@@ -1258,7 +1103,6 @@ export default function GHMPage() {
   const switchView = (tab) => {
     setView(tab.id);
     setExpanded(null);
-    setDateExplicit(false);
     if (tab.offset !== null) setDate(addDaysStr(tab.offset));
     else setDate(todayStr());
     setSearchParams(
@@ -1277,7 +1121,9 @@ export default function GHMPage() {
   const buildQuery = useCallback(
     (pageNum, limit) => {
       const p = new URLSearchParams({ limit, page: pageNum });
-      if (view !== "lookup" || dateExplicit) p.set("date", date);
+      // Lookup is date-independent: it has no date filter, and the backend falls
+      // back to today for the "upcoming booking" cutoff.
+      if (view !== "lookup") p.set("date", date);
       if (doctor !== "All") p.set("doctor", doctor);
       if (collectionFilter === "home") p.set("home_collection", "1");
       // The Tomorrow and Follow-up tabs are follow-up calling lists: patients
@@ -1292,7 +1138,7 @@ export default function GHMPage() {
       }
       return p;
     },
-    [date, dateExplicit, doctor, collectionFilter, view, lookupQ, searchQ],
+    [date, doctor, collectionFilter, view, lookupQ, searchQ],
   );
 
   const listEnabled = view !== "lookup" || lookupQ.length > 0;
@@ -1397,10 +1243,6 @@ export default function GHMPage() {
 
   const isToday = date === todayStr();
   // Per-tab column visibility
-  // Time Slot only makes sense for booked appointments (By Date). On the
-  // follow-up calling lists (Tomorrow, Follow-up) the matched row is a PAST
-  // visit, so its time slot is stale — hide it.
-  const showTime = view === "by_date";
   const showShowNoShow = false; // Show/No-Show column hidden on all tabs
   const showCallStatus = view !== "by_date"; // on Tomorrow & Follow-up tabs
   const showRecovery = false; // Recovery column hidden on all tabs
@@ -1409,9 +1251,12 @@ export default function GHMPage() {
   // On the Tomorrow tab every row's follow-up is due tomorrow, so the Follow-up
   // Date column is redundant there — hide it.
   const showFollowUpDate = view !== "tomorrow";
+  // Lookup spans every date, so each row needs to say which visit it is showing.
+  // The other tabs are pinned to one date and would just repeat it 50 times.
+  const showApptDate = view === "lookup";
   const colSpan =
     15 +
-    (showTime ? 1 : 0) +
+    (showApptDate ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
     (showCallStatus ? 1 : 0) +
     (showRecovery ? 1 : 0) +
@@ -1419,12 +1264,7 @@ export default function GHMPage() {
     (showCallDate ? 1 : 0) +
     (showFollowUpDate ? 1 : 0);
 
-  useDismissOnOutside(filtersRef, closeFilters, showFilters);
-
-  const activeFilters =
-    (doctor !== "All" ? 1 : 0) +
-    (collectionFilter !== "all" ? 1 : 0) +
-    (view === "lookup" && dateExplicit ? 1 : 0);
+  const activeFilters = (doctor !== "All" ? 1 : 0) + (collectionFilter !== "all" ? 1 : 0);
 
   const typing = view === "lookup" && search.trim() !== debouncedSearch.trim();
   const searching = view === "lookup" && (typing || (listEnabled && loading));
@@ -1477,35 +1317,19 @@ export default function GHMPage() {
                   : "Search this date — name, file no, phone, condition"
               }
             />
-            <div className="fpop-wrap" ref={filtersRef}>
-              <button
-                type="button"
-                className={`btn btn--ghost ${activeFilters ? "btn--ghost-on" : ""}`}
-                onClick={() => setShowFilters((o) => !o)}
-                aria-haspopup="dialog"
-                aria-expanded={showFilters}
-              >
-                <SlidersHorizontal size={15} aria-hidden="true" />
-                Filters
-                {activeFilters > 0 && <span className="btn__badge">{activeFilters}</span>}
-              </button>
-              {showFilters && (
-                <FilterPanel
-                  view={view}
-                  date={view === "lookup" && !dateExplicit ? "" : date}
-                  doctor={doctor}
-                  doctors={doctors}
-                  collectionFilter={collectionFilter}
-                  onApply={(next) => {
-                    setDate(next.date || todayStr());
-                    setDateExplicit(Boolean(next.date));
-                    setDoctor(next.doctor);
-                    setCollectionFilter(next.collectionFilter);
-                  }}
-                  onClose={closeFilters}
-                />
-              )}
-            </div>
+            <GhmFilters
+              view={view}
+              date={date}
+              doctor={doctor}
+              doctors={doctors}
+              collectionFilter={collectionFilter}
+              activeCount={activeFilters}
+              onApply={(next) => {
+                setDate(next.date || todayStr());
+                setDoctor(next.doctor);
+                setCollectionFilter(next.collectionFilter);
+              }}
+            />
             {view === "fu3" && (
               <button
                 type="button"
@@ -1608,7 +1432,7 @@ export default function GHMPage() {
               <div className="ghm__empty-sub">
                 {lookupQ
                   ? "No patient matches that name, file number, or phone. Clearing the filters may widen the search."
-                  : "Type a name, file number, or phone. Every patient is searched, on any date — add a date or home collection in Filters to narrow it."}
+                  : "Type a name, file number, or phone. Every patient is searched, whatever date is selected — the date only sets the point the Follow-up column counts forward from."}
               </div>
             </div>
           )}
@@ -1642,7 +1466,7 @@ export default function GHMPage() {
                   <tr>
                     <th style={{ width: 30 }}></th>
                     <th style={{ width: 36 }}>#</th>
-                    {showTime && <th style={{ width: 115 }}>Check-in</th>}
+                    {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
                     <th style={{ minWidth: 170 }}>Patient</th>
                     <th style={{ width: 155 }}>Biomarkers (auto)</th>
                     <th style={{ width: 100 }}>Visit Type</th>
@@ -1708,11 +1532,20 @@ export default function GHMPage() {
                           </td>
 
                           {/* Time */}
-                          {showTime && (
+                          {showApptDate && (
                             <td>
-                              <span className="fw7 fs12 nowrap">
-                                {row.reporting_time_slot || row.time_slot || "—"}
-                              </span>
+                              {row.appointment_date ? (
+                                <div className="fu-cell">
+                                  <span className="fu-date">
+                                    {prettyDate(row.appointment_date)}
+                                  </span>
+                                  {/* {row.time_slot && (
+                                    <span className="fu-time">{row.time_slot}</span>
+                                  )} */}
+                                </div>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
                             </td>
                           )}
 
