@@ -1,5 +1,6 @@
 import { Router } from "express";
 import pool from "../config/db.js";
+import { doctorScope, latestDoctorIs, scopeParams } from "../services/patientScope.js";
 import { handleError } from "../utils/errorHandler.js";
 
 const router = Router();
@@ -42,6 +43,12 @@ const SELECT_WITH_ITEMS = `
 function buildFilters(req, { includeStatus }) {
   const params = [];
   const where = [];
+
+  const scope = doctorScope(req);
+  if (scope.mine) {
+    where.push(latestDoctorIs("r.patient_id", params.length + 1));
+    params.push(...scopeParams(scope));
+  }
 
   if (includeStatus) {
     const status = typeof req.query.status === "string" ? req.query.status : "pending";

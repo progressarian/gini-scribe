@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
+import { doctorScope, myPatientIds } from "../services/patientScope.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import {
@@ -770,11 +771,26 @@ router.post("/patients/:patientId/chat-attachments/sign-url", async (req, res) =
 
 // Legacy inbox — latest message per patient. Used by the old MessagesPage.jsx
 // before the care-team refactor lands.
+// Genie holds no doctor ownership, so its lists cannot be filtered in SQL.
+// Resolve which of these patients are the caller's and drop the rest. Returns
+// the list untouched for roles that see the whole floor.
+async function filterToMyPatients(req, rows) {
+  const scope = doctorScope(req);
+  if (!scope.mine) return rows;
+  const mine = await myPatientIds(
+    scope,
+    rows.map((r) => r.patient_id),
+  );
+  if (!mine) return rows;
+  return rows.filter((r) => mine.has(Number(r.patient_id)));
+}
+
 router.get("/messages/from-genie", async (req, res) => {
   try {
     if (!genie?.getMessagesFromGenie) return res.json({ data: [], total: 0 });
     const role = req.query.role || null;
-    const messages = await genie.getMessagesFromGenie(null, role);
+    const all = await genie.getMessagesFromGenie(null, role);
+    const messages = await filterToMyPatients(req, all);
     const grouped = {};
     for (const m of messages) {
       if (!grouped[m.patient_id]) grouped[m.patient_id] = [];
@@ -837,7 +853,8 @@ router.get("/messages/inbox", async (req, res) => {
 router.get("/messages/unread-count", async (req, res) => {
   try {
     if (!genie?.getMessagesFromGenie) return res.json({ count: 0 });
-    const messages = await genie.getMessagesFromGenie(null);
+    const all = await genie.getMessagesFromGenie(null);
+    const messages = await filterToMyPatients(req, all);
     const count = messages.filter((m) => !m.is_read).length;
     res.json({ count });
   } catch (e) {

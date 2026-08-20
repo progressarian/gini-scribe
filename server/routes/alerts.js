@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createRequire } from "module";
 import { handleError } from "../utils/errorHandler.js";
+import { doctorScope, myPatientIds } from "../services/patientScope.js";
 
 const require = createRequire(import.meta.url);
 let sendAlertToGenie = null;
@@ -20,8 +21,14 @@ router.get("/alerts/from-genie", async (req, res) => {
   try {
     if (!getAlertsFromGenie) return res.json([]);
     const { patient_id } = req.query;
-    const alerts = await getAlertsFromGenie(patient_id || null);
-    res.json(alerts || []);
+    const alerts = (await getAlertsFromGenie(patient_id || null)) || [];
+    const scope = doctorScope(req);
+    if (!scope.mine) return res.json(alerts);
+    const mine = await myPatientIds(
+      scope,
+      alerts.map((a) => a.patient_id),
+    );
+    res.json(mine ? alerts.filter((a) => mine.has(Number(a.patient_id))) : alerts);
   } catch (e) {
     handleError(res, e, "Get Genie alerts");
   }

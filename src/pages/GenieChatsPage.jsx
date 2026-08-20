@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
+import MessageText from "../components/ui/MessageText.jsx";
 
 // Read-only doctor view of a patient's conversation with the "Genie" AI
 // assistant (the patient app's chat_messages). Scoped to gini-program
@@ -331,7 +332,7 @@ function Bubble({ m }) {
             <div style={styles.imgNote}>📎 Image attachment</div>
           )
         ) : null}
-        {m.content ? <div style={styles.bubbleText}>{m.content}</div> : null}
+        {m.content ? <MessageText text={m.content} style={styles.bubbleText} /> : null}
         {labels.length > 0 && (
           <div style={styles.actionsRow}>
             {labels.map((l, i) => (
@@ -503,7 +504,7 @@ const styles = {
     borderRadius: "14px 14px 14px 4px",
     padding: "8px 12px",
   },
-  bubbleText: { fontSize: 14, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" },
+  bubbleText: { fontSize: 14, lineHeight: 1.45, wordBreak: "break-word" },
   bubbleImg: { maxWidth: "100%", borderRadius: 8, marginBottom: 6, display: "block" },
   imgNote: { fontSize: 12, opacity: 0.85, marginBottom: 4 },
   bubbleMeta: { fontSize: 10, opacity: 0.7, marginTop: 4 },

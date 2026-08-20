@@ -1,0 +1,60 @@
+/* Markdown inside a chat bubble. Colours are inherited so the same markup works
+   on the white Genie bubble and the purple patient one. */
+.msgmd {
+  font-size: 14px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.msgmd__p {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+}
+
+.msgmd > *:last-child {
+  margin-bottom: 0;
+}
+
+.msgmd__list {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.msgmd__list li {
+  margin-bottom: 2px;
+}
+
+/* Tables can be wider than the bubble — scroll them rather than letting the
+   bubble stretch across the thread. */
+.msgmd__tablewrap {
+  margin: 0 0 6px;
+  overflow-x: auto;
+}
+
+.msgmd__table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  min-width: 100%;
+}
+
+.msgmd__table th,
+.msgmd__table td {
+  border: 1px solid currentColor;
+  border-color: color-mix(in srgb, currentColor 18%, transparent);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.msgmd__table th {
+  font-weight: 700;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.msgmd code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}

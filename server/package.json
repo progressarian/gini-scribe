@@ -14,7 +14,8 @@
     "smoke:ghm-sheet": "node scripts/smoke-ghm-sheet.mjs",
     "smoke:ghm-record": "node scripts/smoke-ghm-patient-record.mjs",
     "smoke:ghm-last-mo": "node scripts/smoke-ghm-last-mo.mjs",
-    "smoke:home-stats": "node scripts/smoke-home-stats.mjs"
+    "smoke:home-stats": "node scripts/smoke-home-stats.mjs",
+    "smoke:panel-scope": "node scripts/smoke-panel-scope.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
