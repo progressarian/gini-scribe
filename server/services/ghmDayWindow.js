@@ -45,12 +45,11 @@ export const dayWindowWhere = (a = "a") => `WHERE (
   )
   AND (
     ${a}.appointment_date = $1
-    OR ${a}.preferred_date = $1
     OR ${a}.file_no IS NULL
     OR NOT EXISTS (
       SELECT 1 FROM appointments booked
       WHERE booked.file_no = ${a}.file_no
-        AND (booked.appointment_date = $1 OR booked.preferred_date = $1)
+        AND booked.appointment_date = $1
     )
   )`;
 
