@@ -65,6 +65,11 @@ export const qk = {
     availability: (doctor, date) => ["ghm", "availability", doctor || null, date || null],
     conflicts: (date) => ["ghm", "conflicts", date],
   },
+  // analytics: {
+  //   all: ["analytics"],
+  //   meta: () => ["analytics", "meta"],
+  //   section: (id) => ["analytics", "section", String(id)],
+  // },
   messages: {
     all: ["messages"],
     thread: (patientId, role = null, doctor = null) => [

@@ -1,0 +1,145 @@
+.an-page {
+  --an-surface: #ffffff;
+  --an-plane: #f7f7f5;
+  --an-ink: #0b0b0b;
+  --an-ink-secondary: #52514e;
+  --an-muted: #898781;
+  --an-grid: #ecece6;
+  --an-axis: #c3c2b7;
+  --an-border: rgba(11, 11, 11, 0.1);
+  --an-series-1: #2a78d6;
+  --an-series-2: #eb6834;
+  --an-series-3: #1baf7a;
+  --an-good: #0ca30c;
+  --an-warning: #fab219;
+  --an-critical: #d03b3b;
+
+  padding: 20px 22px 72px;
+  max-width: 1240px;
+  margin: 0 auto;
+  color: var(--an-ink);
+}
+
+.an-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--an-border);
+}
+
+.an-head h1 {
+  font-size: 24px;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.an-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--an-ink-secondary);
+}
+
+.an-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.an-actions button {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--an-border);
+  background: var(--an-surface);
+  color: var(--an-ink);
+  cursor: pointer;
+}
+
+.an-actions button:hover:not(:disabled) {
+  background: var(--an-plane);
+}
+
+.an-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.an-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0 22px;
+}
+
+.an-nav button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--an-border);
+  background: transparent;
+  color: var(--an-ink-secondary);
+  cursor: pointer;
+}
+
+.an-nav button:hover {
+  background: var(--an-plane);
+  color: var(--an-ink);
+}
+
+.an-nav button.is-active {
+  background: var(--an-ink);
+  border-color: var(--an-ink);
+  color: #fff;
+}
+
+.an-body h3 {
+  font-size: 15px;
+  margin: 28px 0 10px;
+}
+
+.an-lede {
+  font-size: 13px;
+  color: var(--an-ink-secondary);
+  margin: 0 0 12px;
+  max-width: 78ch;
+}
+
+.an-card {
+  background: var(--an-surface);
+  border: 1px solid var(--an-border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.an-cap {
+  font-size: 12px;
+  color: var(--an-muted);
+  margin: 10px 0 0;
+}
+
+.an-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.an-filters label {
+  font-size: 13px;
+  color: var(--an-ink-secondary);
+}
+
+.an-filters select {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--an-border);
+  background: var(--an-surface);
+  color: var(--an-ink);
+}

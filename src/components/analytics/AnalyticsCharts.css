@@ -1,0 +1,249 @@
+.an-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.an-tile {
+  background: var(--an-surface);
+  border: 1px solid var(--an-border);
+  border-radius: 12px;
+  padding: 13px 15px;
+}
+
+.an-tile__v {
+  display: block;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--an-ink);
+}
+
+.an-tile__k {
+  display: block;
+  font-size: 12px;
+  color: var(--an-ink-secondary);
+  margin-top: 2px;
+}
+
+.an-tile__n {
+  display: block;
+  font-size: 11px;
+  color: var(--an-muted);
+  margin-top: 4px;
+}
+
+.an-tile--good .an-tile__v {
+  color: var(--an-good);
+}
+.an-tile--bad .an-tile__v {
+  color: var(--an-critical);
+}
+
+.an-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.an-bars__row {
+  display: grid;
+  grid-template-columns: minmax(140px, 260px) 1fr 84px;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.an-bars__label {
+  font-size: 12.5px;
+  color: var(--an-ink-secondary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.an-bars__track {
+  display: block;
+  height: 20px;
+  border-left: 1px solid var(--an-axis);
+  padding-left: 1px;
+}
+
+.an-bars__fill {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+}
+
+.an-bars__value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--an-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.an-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.an-stack__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 210px) 1fr 66px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+}
+
+.an-stack__label {
+  font-size: 12.5px;
+  color: var(--an-ink-secondary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.an-stack__track {
+  display: flex;
+  height: 20px;
+  border-radius: 4px;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.an-stack__seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  min-width: 2px;
+}
+
+.an-stack__n {
+  font-size: 11.5px;
+  color: var(--an-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.an-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.an-tablewrap {
+  overflow-x: auto;
+  border: 1px solid var(--an-border);
+  border-radius: 12px;
+  background: var(--an-surface);
+}
+
+.an-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.an-table caption {
+  text-align: left;
+  padding: 10px 12px 0;
+  font-size: 12px;
+  color: var(--an-ink-secondary);
+}
+
+.an-table th,
+.an-table td {
+  text-align: right;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--an-grid);
+  white-space: nowrap;
+}
+
+.an-table th:first-child,
+.an-table td:first-child {
+  text-align: left;
+  white-space: normal;
+  min-width: 170px;
+}
+
+.an-table thead th {
+  color: var(--an-ink-secondary);
+  font-weight: 600;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  background: var(--an-surface);
+}
+
+.an-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.an-table td.pos {
+  color: var(--an-good);
+}
+.an-table td.neg {
+  color: var(--an-critical);
+}
+
+.an-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--an-ink-secondary);
+  margin: 6px 0 10px;
+}
+
+.an-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.an-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.an-notes {
+  margin: 12px 0 0;
+  padding: 11px 15px;
+  background: var(--an-plane);
+  border-left: 3px solid var(--an-axis);
+  border-radius: 0 8px 8px 0;
+}
+
+.an-notes--warn {
+  border-left-color: var(--an-warning);
+}
+
+.an-notes ul {
+  margin: 0;
+  padding-left: 17px;
+}
+
+.an-notes li {
+  font-size: 12.5px;
+  color: var(--an-ink-secondary);
+  margin-bottom: 5px;
+}
+
+.an-notes li:last-child {
+  margin-bottom: 0;
+}
+
+.an-empty {
+  font-size: 12.5px;
+  color: var(--an-muted);
+  margin: 8px 0;
+}

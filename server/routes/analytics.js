@@ -1,0 +1,159 @@
+import { Router } from "express";
+import pool, { cronPool } from "../config/db.js";
+import { handleError } from "../utils/errorHandler.js";
+import { requireCapability } from "../middleware/auth.js";
+import { CAPABILITIES } from "../../shared/permissions.js";
+import { buildFullReport } from "../services/analytics/index.js";
+import {
+  latestSnapshotMeta,
+  readSnapshot,
+  rebuildSnapshot,
+} from "../services/analytics/snapshot.js";
+import { buildWorkbook } from "../services/analytics/render/xlsx.js";
+import { renderHtmlReport } from "../services/analytics/render/html.js";
+import { SECTION_KEYS } from "../services/analytics/snapshot.js";
+
+const router = Router();
+
+const SECTION_ALIASES = {
+  overview: ["meta", "s1_registry", "s3_retention"],
+  registry: ["meta", "s1_registry"],
+  conditions: ["meta", "s2_conditions"],
+  retention: ["meta", "s3_retention"],
+  biomarkers: ["meta", "s4_biomarkers"],
+  treatment: ["meta", "s5_treatment"],
+  "drug-outcomes": ["meta", "s6_drug_outcomes"],
+  "data-quality": ["meta", "s7_data_quality"],
+  worklists: ["meta", "s8_worklists"],
+};
+
+// A full build scans 540k lab rows and takes ~90s. Before the first nightly
+// snapshot exists every section request would trigger its own build, so the
+// seven requests one page load makes would each pay that cost. Collapse them:
+// concurrent callers await the same in-flight promise, and the result is held
+// briefly so the rest of the page load is served from memory. This is a
+// stopgap for the cold-start case only — the snapshot is the real mechanism.
+const LIVE_CACHE_MS = 10 * 60 * 1000;
+let liveCache = { at: 0, report: null };
+let liveInFlight = null;
+
+async function buildLive(asOf) {
+  if (liveCache.report && Date.now() - liveCache.at < LIVE_CACHE_MS) return liveCache.report;
+  if (liveInFlight) return liveInFlight;
+  liveInFlight = buildFullReport(pool, { asOf })
+    .then((report) => {
+      liveCache = { at: Date.now(), report };
+      return report;
+    })
+    .finally(() => {
+      liveInFlight = null;
+    });
+  return liveInFlight;
+}
+
+async function loadReport({ sections, refresh, asOf }) {
+  if (refresh) {
+    liveCache = { at: 0, report: null };
+    return { report: await buildLive(asOf), source: "live" };
+  }
+  const snapshot = await readSnapshot(pool, { sectionIds: sections });
+  if (snapshot) return { report: snapshot, source: "snapshot" };
+  return { report: await buildLive(asOf), source: "live-fallback" };
+}
+
+router.get("/analytics/meta", async (req, res) => {
+  try {
+    const meta = await latestSnapshotMeta(pool);
+    res.json({
+      snapshot: meta,
+      stale: !meta || (Date.now() - new Date(meta.generated_at).getTime()) / 3600000 > 36,
+      sections: Object.keys(SECTION_ALIASES),
+      section_keys: SECTION_KEYS,
+    });
+  } catch (e) {
+    handleError(res, e, "Analytics meta");
+  }
+});
+
+router.get("/analytics/report", async (req, res) => {
+  try {
+    const refresh = req.query.refresh === "1";
+    const asOf = req.query.as_of || undefined;
+    const { report, source } = await loadReport({ refresh, asOf });
+    res.json({ source, ...report });
+  } catch (e) {
+    handleError(res, e, "Analytics report");
+  }
+});
+
+router.get("/analytics/sections/:id", async (req, res) => {
+  try {
+    const sections = SECTION_ALIASES[req.params.id];
+    if (!sections) return res.status(404).json({ error: "Unknown analytics section" });
+    const refresh = req.query.refresh === "1";
+    const { report, source } = await loadReport({ sections, refresh, asOf: req.query.as_of });
+    const payload = { source, meta: report.meta, snapshot: report.snapshot };
+    for (const key of sections) {
+      if (key !== "meta") payload[key] = report[key];
+    }
+    res.json(payload);
+  } catch (e) {
+    handleError(res, e, "Analytics section");
+  }
+});
+
+router.get("/analytics/export.xlsx", async (req, res) => {
+  try {
+    const { report } = await loadReport({
+      refresh: req.query.refresh === "1",
+      asOf: req.query.as_of,
+    });
+    const buffer = await buildWorkbook(report);
+    const stamp = report.meta?.as_of || new Date().toISOString().slice(0, 10);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="gini-outcomes-data-${stamp}.xlsx"`);
+    res.send(buffer);
+  } catch (e) {
+    handleError(res, e, "Analytics export");
+  }
+});
+
+router.get("/analytics/export.html", async (req, res) => {
+  try {
+    const { report } = await loadReport({
+      refresh: req.query.refresh === "1",
+      asOf: req.query.as_of,
+    });
+    const stamp = report.meta?.as_of || new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="gini-outcomes-report-${stamp}.html"`,
+    );
+    res.send(
+      `<!doctype html><html><head><meta charset="utf-8">${renderHtmlReport(report)}</head></html>`,
+    );
+  } catch (e) {
+    handleError(res, e, "Analytics html export");
+  }
+});
+
+router.post(
+  "/analytics/snapshot/refresh",
+  requireCapability(CAPABILITIES.ADMIN),
+  async (req, res) => {
+    try {
+      res.status(202).json({ started: true });
+      rebuildSnapshot(cronPool, { asOf: req.body?.as_of })
+        .then((r) => console.log(`[Analytics] snapshot ${r.id} rebuilt on demand`))
+        .catch((e) => console.error("[Analytics] on-demand rebuild failed:", e.message));
+    } catch (e) {
+      handleError(res, e, "Analytics refresh");
+    }
+  },
+);
+
+export default router;

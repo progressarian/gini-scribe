@@ -45,10 +45,20 @@ async function main() {
 
   // 2. Slot catalog ----------------------------------------------------------
   section("2. Slot catalog");
-  const sc = await pool.query("SELECT label FROM slot_catalog ORDER BY sort_order");
-  sc.rows.length === 28
-    ? ok("slot_catalog seeded with 28 slots (full 24h)")
-    : bad(`expected 28, found ${sc.rows.length}`);
+  // 32 active slots: 09:00–17:00 in 30-minute steps (16), then 17:00–09:00
+  // hourly (16). Retired labels stay in the table with is_active=false.
+  const sc = await pool.query("SELECT label FROM slot_catalog WHERE is_active ORDER BY sort_order");
+  sc.rows.length === 32
+    ? ok("slot_catalog seeded with 32 active slots (full 24h)")
+    : bad(`expected 32 active, found ${sc.rows.length}`);
+  const halfHour = await pool.query(
+    `SELECT count(*)::int AS n FROM slot_catalog
+      WHERE is_active AND start_time >= '09:00' AND start_time < '17:00'
+        AND end_time - start_time = INTERVAL '30 minutes'`,
+  );
+  halfHour.rows[0].n === 16
+    ? ok("clinic day 09:00–17:00 is 16 × 30-minute slots")
+    : bad(`expected 16 half-hour clinic slots, found ${halfHour.rows[0].n}`);
 
   // 3. Pick a doctor ---------------------------------------------------------
   section("3. Doctor + name resolution");
@@ -71,9 +81,9 @@ async function main() {
   const wd = (await pool.query("SELECT EXTRACT(DOW FROM CURRENT_DATE)::int AS w")).rows[0].w;
   const isSunday = wd === 0;
   const day = await getDoctorDayAvailability(d.id, date);
-  day.length === 28
-    ? ok(`getDoctorDayAvailability → all 28 catalog slots returned`)
-    : bad(`expected 28 slots, got ${day.length}`);
+  day.length === sc.rows.length
+    ? ok(`getDoctorDayAvailability → all ${sc.rows.length} catalog slots returned`)
+    : bad(`expected ${sc.rows.length} slots, got ${day.length}`);
   const freeCount = day.filter((s) => s.available).length;
   if (isSunday) {
     day.every((s) => s.blocked_by === "day_off")
@@ -143,7 +153,7 @@ async function main() {
     nightOpen.available === true
       ? ok("overnight shift covers past-midnight slot (12 AM–1 AM available)")
       : bad(`expected 12 AM slot available in overnight shift, got ${JSON.stringify(nightOpen)}`);
-    const dayGap = await isSlotAvailable(d.id, date, "10 AM to 11 AM", { client });
+    const dayGap = await isSlotAvailable(d.id, date, "10 AM to 10:30 AM", { client });
     dayGap.reason === "not_working"
       ? ok("overnight shift → daytime 10 AM slot is not_working")
       : bad(`expected not_working for 10 AM, got ${JSON.stringify(dayGap)}`);

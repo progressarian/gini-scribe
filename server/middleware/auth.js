@@ -96,6 +96,7 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/sync",
   "/api/opd",
   "/api/dashboard",
+  "/api/analytics",
   "/api/alerts",
   "/api/reasoning",
   "/api/dose-change-requests",
@@ -124,6 +125,7 @@ const DOCTOR_ONLY_PREFIXES = [
 const ROUTE_CAPABILITIES = [
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
+  ["/api/analytics", CAP.ANALYTICS],
   ["/api/dashboard", CAP.ANALYTICS],
   ["/api/stats", CAP.ANALYTICS],
   ["/api/consultations", CAP.CLINICAL_WRITE],

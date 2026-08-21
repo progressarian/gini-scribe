@@ -23,6 +23,7 @@ export const ROUTE_MAP = {
   outcomes: "/outcomes",
   ai: "/ai",
   reports: "/reports",
+  // analytics: "/analytics",
   ci: "/ci",
   visit: "/visit",
   obt_dashboard: "/obt-dashboard",
@@ -102,6 +103,7 @@ export const PAGE_CAPABILITIES = {
   "/find": [CAP.RECEPTION_OPS, CAP.OBT_OPS],
   // Analytics
   "/reports": CAP.ANALYTICS,
+  "/analytics": CAP.ANALYTICS,
   "/ci": CAP.ANALYTICS,
   // Patient Flow Management
   "/flow/checkin": CAP.FLOW_RECEPTION,

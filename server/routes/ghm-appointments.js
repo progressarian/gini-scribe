@@ -6,17 +6,33 @@ import { ownFu, dayWindowWhere, callStatusToday } from "../services/ghmDayWindow
 
 const router = Router();
 
-// Slot → reporting time mapping (from Slotsday sheet)
+// Slot → reporting time mapping (from Slotsday sheet). Report 2 hours after
+// the booked slot, except late afternoon where the sheet tapers it (3 PM and
+// 3:30 PM) and the last two slots, which carry no entry and fall through to
+// the slot's own time.
+//
+// The four hour-long midday labels were retired on 2026-08-21 when the clinic
+// day moved to 30-minute slots. They stay listed because whatsapp-preview is
+// also called for appointments booked before that change.
 const REPORTING_MAP = {
   "9:30 AM to 10 AM": "11:30 AM to 12 PM",
-  "10 AM to 11 AM": "12 PM to 1 PM",
-  "11 AM to 12 PM": "1 PM to 2 PM",
-  "12 PM to 1 PM": "2 PM to 3 PM",
-  "1 PM to 2 PM": "3 PM to 4 PM",
+  "10 AM to 10:30 AM": "12 PM to 12:30 PM",
+  "10:30 AM to 11 AM": "12:30 PM to 1 PM",
+  "11 AM to 11:30 AM": "1 PM to 1:30 PM",
+  "11:30 AM to 12 PM": "1:30 PM to 2 PM",
+  "12 PM to 12:30 PM": "2 PM to 2:30 PM",
+  "12:30 PM to 1 PM": "2:30 PM to 3 PM",
+  "1 PM to 1:30 PM": "3 PM to 3:30 PM",
+  "1:30 PM to 2 PM": "3:30 PM to 4 PM",
   "2 PM to 2:30 PM": "4 PM to 4:30 PM",
   "2:30 PM to 3 PM": "4:30 PM to 5 PM",
   "3 PM to 3:30 PM": "4:30 PM to 5 PM",
   "3:30 PM to 4 PM": "5 PM to 5:30 PM",
+  // Retired slots — kept so older bookings still render.
+  "10 AM to 11 AM": "12 PM to 1 PM",
+  "11 AM to 12 PM": "1 PM to 2 PM",
+  "12 PM to 1 PM": "2 PM to 3 PM",
+  "1 PM to 2 PM": "3 PM to 4 PM",
 };
 
 const FEES = {
@@ -25,6 +41,18 @@ const FEES = {
   "Dr Simran": 1000,
   "Dr Saniya": 1000,
 };
+
+// Visit types the hospital does not charge for. "FU within 3 days" is the
+// booking side of the standing policy already quoted in every WhatsApp
+// message — a review inside 3 days of the paid visit carries no fee.
+const FREE_VISIT_TYPES = new Set(["fu within 3 days"]);
+
+const isFreeVisitType = (visit_type) =>
+  FREE_VISIT_TYPES.has(
+    String(visit_type || "")
+      .trim()
+      .toLowerCase(),
+  );
 
 function buildWhatsappMessage({
   patient_name,
@@ -36,18 +64,20 @@ function buildWhatsappMessage({
   const reporting = REPORTING_MAP[time_slot] || time_slot;
   const dateStr = appointment_date;
   const isNew = !visit_type || visit_type.toLowerCase().includes("new");
-  const fee = FEES[doctor_name] || 1500;
+  const isFree = isFreeVisitType(visit_type);
   const feeLines = Object.entries(FEES)
     .map(([d, f]) => `${d}: Rs ${f}`)
     .join("; ");
+  const feeBlock = isFree
+    ? `*Consultation Fee:* \nNo charge — this is a free follow up within 3 days of your last visit;\n\n`
+    : `*Consultation Fee:* \n${feeLines};\n*Follow up within 3 days is free*\n\n`;
 
   const base =
     `Hello ${patient_name},\n\n` +
     `Greetings from Gini Health!\n\n` +
     `Your visit to Gini Hospital Mohali has been booked in the department of Endocrinology. ` +
     `Your *reporting time* at the reception is on ${dateStr} between ${reporting}; \n` +
-    `*Consultation Fee:* \n${feeLines};\n` +
-    `*Follow up within 3 days is free*\n\n` +
+    feeBlock +
     `Please do not have any commitments for the next 2-3 hours from the reporting time.\n\n` +
     `If you cannot visit as per this reporting time due to any reason, kindly revert with *Not coming* to this message so that someone in need can be given this slot.\n\n` +
     `Now you can avail benefit of *SUNDAY OPD* across few specialty available now at Gini Hospital Mohali.\n\n` +

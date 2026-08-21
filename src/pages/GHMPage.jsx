@@ -183,6 +183,7 @@ const VISIT_TYPES = [
   "48 weeks",
   "56 weeks",
   "FU within week",
+  "FU within 3 days",
 ];
 
 const callColor = (v) => CALL_STATUSES.find((s) => s.value === v)?.color || "gray";

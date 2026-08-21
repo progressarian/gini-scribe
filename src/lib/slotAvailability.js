@@ -4,12 +4,20 @@ import { useEffect, useState } from "react";
 import api from "../services/api.js";
 
 // The 24h catalog labels — fallback when a doctor's availability isn't loaded.
+// Must stay in sync with the slot_catalog table (server/migrations/
+// 2026-08-21_slot_catalog_30min.sql) and TIME_SLOTS in
+// server/routes/appointment-slots.js. The clinic day (09:00–17:00) runs in
+// 30-minute slots; evening/overnight stays hourly for night-shift doctors.
 export const SLOT_CATALOG = [
   "9:30 AM to 10 AM",
-  "10 AM to 11 AM",
-  "11 AM to 12 PM",
-  "12 PM to 1 PM",
-  "1 PM to 2 PM",
+  "10 AM to 10:30 AM",
+  "10:30 AM to 11 AM",
+  "11 AM to 11:30 AM",
+  "11:30 AM to 12 PM",
+  "12 PM to 12:30 PM",
+  "12:30 PM to 1 PM",
+  "1 PM to 1:30 PM",
+  "1:30 PM to 2 PM",
   "2 PM to 2:30 PM",
   "2:30 PM to 3 PM",
   "3 PM to 3:30 PM",

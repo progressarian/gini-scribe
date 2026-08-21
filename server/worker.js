@@ -4,6 +4,10 @@ import { startSheetsCron, stopSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron, stopTodaysShowCron } from "./services/cron/todaysShowSync.js";
 import { startGenieSyncCron, stopGenieSyncCron } from "./services/cron/genieSync.js";
 import {
+  startAnalyticsSnapshotCron,
+  stopAnalyticsSnapshotCron,
+} from "./services/cron/analyticsSnapshot.js";
+import {
   startAppointmentInsertListener,
   stopAppointmentInsertListener,
 } from "./services/cron/appointmentInsertListener.js";
@@ -15,6 +19,7 @@ startCronJobs();
 startSheetsCron();
 startTodaysShowCron();
 startGenieSyncCron();
+startAnalyticsSnapshotCron();
 startAppointmentInsertListener().catch((e) =>
   console.error("[Worker] appointment-insert listener failed to start:", e.message),
 );
@@ -31,6 +36,7 @@ async function shutdown(signal) {
     stopSheetsCron();
     stopTodaysShowCron();
     stopGenieSyncCron();
+    stopAnalyticsSnapshotCron();
     await stopAppointmentInsertListener();
   } catch (e) {
     console.error("[Worker] error stopping cron:", e.message);

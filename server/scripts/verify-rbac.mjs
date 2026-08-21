@@ -56,6 +56,13 @@ const ROUTE_CASES = [
   // OBT is scoped to its call list, and doctors are kept out of it.
   ["/api/obt-status", "obt", true],
   ["/api/obt-status", "consultant", false],
+  ["/api/analytics/report", "admin", true],
+  ["/api/analytics/report", "consultant", true],
+  ["/api/analytics/report", "mo", false],
+  ["/api/analytics/report", "reception", false],
+  ["/api/analytics/report", "obt", false],
+  ["/api/analytics/export.xlsx", "guest", false],
+  ["/api/reports/today", "consultant", true],
   ["/api/obt-dashboard", "obt", true],
   ["/api/obt-dashboard", "reception", true],
   ["/api/obt-dashboard", "coordinator", true],
