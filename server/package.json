@@ -19,6 +19,7 @@
     "smoke:ghm-categories": "node scripts/smoke-ghm-categories.mjs",
     "smoke:ghm-tabs": "node scripts/smoke-ghm-tabs.mjs",
     "smoke:ghm-tab-export": "node scripts/smoke-ghm-tab-export.mjs",
+    "smoke:ghm-export-sheets": "node scripts/smoke-ghm-export-sheets.mjs",
     "smoke:home-stats": "node scripts/smoke-home-stats.mjs",
     "smoke:panel-scope": "node scripts/smoke-panel-scope.mjs",
     "analytics:report": "node scripts/build-gini-report.mjs",

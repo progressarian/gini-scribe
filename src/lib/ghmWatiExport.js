@@ -208,6 +208,43 @@ const downloadWorkbook = (XLSX, wb, filename) => {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 };
 
+// The workbook's extra sheets. The first one stays the untouched two-block WATI
+// sheet; these are one list each, so the desk can send a campaign straight from
+// the tab it needs instead of filtering the combined sheet by hand.
+//
+// Cancelled and Rescheduled are taken out of the New / Follow Up tabs on
+// purpose: a patient who cancelled or moved their visit must not land in an
+// appointment-confirmation campaign for this date.
+const isCancelled = (row) => row?.call_status_any === "cancelled";
+const isRescheduled = (row) => row?.call_status_any === "rescheduled";
+
+export const LIST_SHEETS = [
+  { name: "New Patients", pick: (r) => isNewVisit(r.visit_type) },
+  { name: "Follow Up", pick: (r) => !isNewVisit(r.visit_type) },
+  { name: "Cancelled", pick: isCancelled, includeInactive: true },
+  { name: "Rescheduled", pick: isRescheduled, includeInactive: true },
+];
+
+// One list, one flat block — no New/FU split, because the sheet IS the split.
+export const buildListSheet = (XLSX, rows, date, title) => {
+  const body = (rows || []).filter((r) => r?.phone).map((r) => toSheetRow(r, date));
+
+  const titleRow = new Array(BLOCK_WIDTH).fill("");
+  titleRow[0] = title;
+  titleRow[3] = `${body.length} patient${body.length === 1 ? "" : "s"}`;
+  titleRow[5] = fmtSheetDate(date);
+
+  const ws = XLSX.utils.aoa_to_sheet([titleRow, [...HEADERS], ...body]);
+  ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
+
+  styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
+  styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
+  styleCell(XLSX, ws, 0, 5, DATE_STYLE);
+  HEADERS.forEach((_, i) => styleCell(XLSX, ws, 1, i, HEADER_STYLE));
+
+  return { ws, count: body.length };
+};
+
 export const exportWatiWorkbook = async (
   rows,
   date,
@@ -224,6 +261,17 @@ export const exportWatiWorkbook = async (
   if (!counts.fresh && !counts.followUp) return counts;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName(title));
+
+  // One tab per list, always present so the file has the same shape every day
+  // — an empty tab says "nobody in this list", which a missing tab does not.
+  const active = (rows || []).filter((r) => !isCancelled(r) && !isRescheduled(r));
+  counts.lists = {};
+  for (const list of LIST_SHEETS) {
+    const source = list.includeInactive ? rows || [] : active;
+    const sheet = buildListSheet(XLSX, source.filter(list.pick), date, list.name);
+    XLSX.utils.book_append_sheet(wb, sheet.ws, list.name);
+    counts.lists[list.name] = sheet.count;
+  }
   downloadWorkbook(XLSX, wb, `${fileLabel}_${String(date).slice(0, 10)}.xlsx`);
   return counts;
 };
