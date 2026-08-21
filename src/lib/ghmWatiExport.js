@@ -1,15 +1,8 @@
+import { LIST_PREDICATES, isNewVisitType } from "../../shared/patientLists.js";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const SHEET_NAME = "For Wati_Appt confirmation";
-
-// Excel caps a sheet name at 31 characters and rejects : \ / ? * [ ]
-const sheetName = (title) =>
-  (title ? `For Wati_${title}` : SHEET_NAME).replace(/[:\\/?*[\]]/g, " ").slice(0, 31);
-
-const NEW_BLOCK_COL = 0;
-const FU_BLOCK_COL = 12;
 const BLOCK_WIDTH = 8;
-const TOTAL_COLS = FU_BLOCK_COL + BLOCK_WIDTH;
 
 const COL_WIDTHS = [22, 12, 14, 14, 12, 14, 12, 12];
 
@@ -50,8 +43,7 @@ export const splitSlot = (slot) => {
   return { start: (parts[0] || "").trim(), end: (parts[1] || "").trim() };
 };
 
-export const isNewVisit = (visitType) =>
-  !visitType || String(visitType).toLowerCase().includes("new");
+export const isNewVisit = isNewVisitType;
 
 const toSheetRow = (row, fallbackDate) => {
   const { code, number } = splitCountryCode(row.phone);
@@ -66,16 +58,6 @@ const toSheetRow = (row, fallbackDate) => {
     start,
     end,
   ];
-};
-
-export const buildWatiBlocks = (rows, fallbackDate) => {
-  const fresh = [];
-  const followUp = [];
-  (rows || []).forEach((row) => {
-    if (!row?.phone) return;
-    (isNewVisit(row.visit_type) ? fresh : followUp).push(toSheetRow(row, fallbackDate));
-  });
-  return { fresh, followUp };
 };
 
 const BORDER = {
@@ -104,13 +86,6 @@ const BLOCK_STYLE = {
   border: BORDER,
 };
 
-const DUPLICATE_STYLE = {
-  font: { bold: true, color: { rgb: "FFFFFF" } },
-  fill: { patternType: "solid", fgColor: { rgb: "FF0000" } },
-  alignment: { horizontal: "center" },
-  border: BORDER,
-};
-
 const HEADER_STYLE = {
   font: { bold: true, color: { rgb: "000000" } },
   fill: { patternType: "solid", fgColor: { rgb: "D9D9D9" } },
@@ -124,64 +99,33 @@ const styleCell = (XLSX, ws, r, c, style) => {
   ws[ref].s = style;
 };
 
-const blankRow = () => new Array(TOTAL_COLS).fill("");
+// One tab per WATI list. Which patient belongs where is decided in
+// shared/patientLists.js, the same rules the page's tabs query by.
+export const LIST_SHEETS = [
+  { name: "New Patients", pick: LIST_PREDICATES.new },
+  { name: "Follow Up", pick: LIST_PREDICATES.followup },
+  { name: "Cancelled", pick: LIST_PREDICATES.cancelled },
+  { name: "Rescheduled", pick: LIST_PREDICATES.rescheduled },
+];
 
-const place = (target, values, startCol) => {
-  values.forEach((value, i) => {
-    target[startCol + i] = value;
-  });
-};
+// One list, one flat block — no New/FU split, because the sheet IS the split.
+export const buildListSheet = (XLSX, rows, date, title) => {
+  const body = (rows || []).filter((r) => r?.phone).map((r) => toSheetRow(r, date));
 
-export const buildWatiSheet = (XLSX, rows, date, title) => {
-  const { fresh, followUp } = buildWatiBlocks(rows, date);
+  const titleRow = new Array(BLOCK_WIDTH).fill("");
+  titleRow[0] = title;
+  titleRow[3] = `${body.length} patient${body.length === 1 ? "" : "s"}`;
+  titleRow[5] = fmtSheetDate(date);
 
-  const titleRow = blankRow();
-  titleRow[0] = "Enter Date--->";
-  titleRow[1] = fmtSheetDate(date);
-  // Which list this is — an export of the Cancelled tab and one of the day's
-  // full sheet are otherwise identical once the file is open. Parked in the gap
-  // between the New and FU blocks so neither block's columns shift.
-  if (title) titleRow[BLOCK_WIDTH + 1] = title;
-  titleRow[NEW_BLOCK_COL + 3] = "New";
-  titleRow[NEW_BLOCK_COL + 6] = "Duplicate Phone Number";
-  titleRow[FU_BLOCK_COL] = "FU";
-  titleRow[FU_BLOCK_COL + 3] = "Duplicate Phone Number";
+  const ws = XLSX.utils.aoa_to_sheet([titleRow, [...HEADERS], ...body]);
+  ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
 
-  const headerRow = blankRow();
-  place(headerRow, HEADERS, NEW_BLOCK_COL);
-  place(headerRow, HEADERS, FU_BLOCK_COL);
+  styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
+  styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
+  styleCell(XLSX, ws, 0, 5, DATE_STYLE);
+  HEADERS.forEach((_, i) => styleCell(XLSX, ws, 1, i, HEADER_STYLE));
 
-  const body = [];
-  for (let i = 0; i < Math.max(fresh.length, followUp.length); i += 1) {
-    const line = blankRow();
-    if (fresh[i]) place(line, fresh[i], NEW_BLOCK_COL);
-    if (followUp[i]) place(line, followUp[i], FU_BLOCK_COL);
-    body.push(line);
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet([titleRow, headerRow, ...body]);
-  ws["!cols"] = new Array(TOTAL_COLS).fill(null).map((_, i) => {
-    const inNew = i >= NEW_BLOCK_COL && i < NEW_BLOCK_COL + BLOCK_WIDTH;
-    const inFu = i >= FU_BLOCK_COL && i < FU_BLOCK_COL + BLOCK_WIDTH;
-    if (inNew) return { wch: COL_WIDTHS[i - NEW_BLOCK_COL] };
-    if (inFu) return { wch: COL_WIDTHS[i - FU_BLOCK_COL] };
-    return { wch: 4 };
-  });
-
-  styleCell(XLSX, ws, 0, 0, TITLE_STYLE);
-  styleCell(XLSX, ws, 0, 1, DATE_STYLE);
-  styleCell(XLSX, ws, 0, NEW_BLOCK_COL + 3, BLOCK_STYLE);
-  styleCell(XLSX, ws, 0, NEW_BLOCK_COL + 6, DUPLICATE_STYLE);
-  styleCell(XLSX, ws, 0, FU_BLOCK_COL, BLOCK_STYLE);
-  styleCell(XLSX, ws, 0, FU_BLOCK_COL + 3, DUPLICATE_STYLE);
-  HEADERS.forEach((_, i) => {
-    styleCell(XLSX, ws, 1, NEW_BLOCK_COL + i, HEADER_STYLE);
-    styleCell(XLSX, ws, 1, FU_BLOCK_COL + i, HEADER_STYLE);
-  });
-
-  if (title) styleCell(XLSX, ws, 0, BLOCK_WIDTH + 1, TITLE_STYLE);
-
-  return { ws, counts: { fresh: fresh.length, followUp: followUp.length } };
+  return { ws, count: body.length };
 };
 
 // Hands the finished workbook to the browser. writeFile is the library's own
@@ -208,70 +152,29 @@ const downloadWorkbook = (XLSX, wb, filename) => {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 };
 
-// The workbook's extra sheets. The first one stays the untouched two-block WATI
-// sheet; these are one list each, so the desk can send a campaign straight from
-// the tab it needs instead of filtering the combined sheet by hand.
-//
-// Cancelled and Rescheduled are taken out of the New / Follow Up tabs on
-// purpose: a patient who cancelled or moved their visit must not land in an
-// appointment-confirmation campaign for this date.
-const isCancelled = (row) => row?.call_status_any === "cancelled";
-const isRescheduled = (row) => row?.call_status_any === "rescheduled";
-
-export const LIST_SHEETS = [
-  { name: "New Patients", pick: (r) => isNewVisit(r.visit_type) },
-  { name: "Follow Up", pick: (r) => !isNewVisit(r.visit_type) },
-  { name: "Cancelled", pick: isCancelled, includeInactive: true },
-  { name: "Rescheduled", pick: isRescheduled, includeInactive: true },
-];
-
-// One list, one flat block — no New/FU split, because the sheet IS the split.
-export const buildListSheet = (XLSX, rows, date, title) => {
-  const body = (rows || []).filter((r) => r?.phone).map((r) => toSheetRow(r, date));
-
-  const titleRow = new Array(BLOCK_WIDTH).fill("");
-  titleRow[0] = title;
-  titleRow[3] = `${body.length} patient${body.length === 1 ? "" : "s"}`;
-  titleRow[5] = fmtSheetDate(date);
-
-  const ws = XLSX.utils.aoa_to_sheet([titleRow, [...HEADERS], ...body]);
-  ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
-
-  styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
-  styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
-  styleCell(XLSX, ws, 0, 5, DATE_STYLE);
-  HEADERS.forEach((_, i) => styleCell(XLSX, ws, 1, i, HEADER_STYLE));
-
-  return { ws, count: body.length };
-};
-
-export const exportWatiWorkbook = async (
-  rows,
-  date,
-  fileLabel = "wati-appt-confirmation",
-  title = "",
-) => {
+export const exportWatiWorkbook = async (rows, date, fileLabel = "wati-appt-confirmation") => {
   const mod = await import("xlsx-js-style");
   // Interop: the CJS build lands on `default` through Vite, on the namespace
   // itself elsewhere. Reading only one of them is how the button dies silently.
   const XLSX = mod?.default?.utils ? mod.default : mod;
   if (!XLSX?.utils) throw new Error("Excel library failed to load — check the network tab");
 
-  const { ws, counts } = buildWatiSheet(XLSX, rows, date, title);
-  if (!counts.fresh && !counts.followUp) return counts;
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName(title));
+  // One tab per list, always present so the file has the same shape every day —
+  // an empty tab says "nobody in this list", which a missing tab does not.
+  const built = LIST_SHEETS.map((list) => ({
+    name: list.name,
+    ...buildListSheet(XLSX, (rows || []).filter(list.pick), date, list.name),
+  }));
 
-  // One tab per list, always present so the file has the same shape every day
-  // — an empty tab says "nobody in this list", which a missing tab does not.
-  const active = (rows || []).filter((r) => !isCancelled(r) && !isRescheduled(r));
-  counts.lists = {};
-  for (const list of LIST_SHEETS) {
-    const source = list.includeInactive ? rows || [] : active;
-    const sheet = buildListSheet(XLSX, source.filter(list.pick), date, list.name);
-    XLSX.utils.book_append_sheet(wb, sheet.ws, list.name);
-    counts.lists[list.name] = sheet.count;
+  const counts = { total: 0, lists: {} };
+  for (const sheet of built) {
+    counts.lists[sheet.name] = sheet.count;
+    counts.total += sheet.count;
   }
+  if (!counts.total) return counts;
+
+  const wb = XLSX.utils.book_new();
+  for (const sheet of built) XLSX.utils.book_append_sheet(wb, sheet.ws, sheet.name);
   downloadWorkbook(XLSX, wb, `${fileLabel}_${String(date).slice(0, 10)}.xlsx`);
   return counts;
 };

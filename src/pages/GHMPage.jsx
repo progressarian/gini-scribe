@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import {
   ArrowRight,
-  Ban,
-  CalendarClock,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -19,12 +17,10 @@ import {
   PhoneCall,
   Plus,
   RefreshCw,
-  Repeat,
   Search,
   Smartphone,
   Star,
   Sunrise,
-  UserPlus,
   Trash2,
   X,
 } from "lucide-react";
@@ -143,49 +139,12 @@ const EXPORT_LABELS = {
   tomorrow: "ghm-tomorrow",
   fu3: "wati-appt-confirmation",
   lookup: "ghm-patient-lookup",
-  new_patients: "wati-new-patients",
-  followups: "wati-follow-up-patients",
-  cancelled: "wati-cancelled",
-  rescheduled: "wati-rescheduled",
 };
 
-// Written into the exported sheet so an open file says which list it is.
-const EXPORT_TITLES = {
-  new_patients: "New patients",
-  followups: "Follow-up patients",
-  cancelled: "Cancelled",
-  rescheduled: "Rescheduled",
-};
-
-// `query` narrows the day's list further — the New / Follow-up / Cancelled /
-// Rescheduled tabs are the same day window the other tabs use, filtered by the
-// API rather than by a second fetch or client-side slicing.
 const VIEW_TABS = [
   { id: "by_date", label: "Today", Icon: CalendarDays, offset: 0 },
   { id: "tomorrow", label: "Tomorrow", Icon: Sunrise, offset: 1 },
   { id: "fu3", label: "Follow-up in 3 Days", Icon: Phone, offset: 3 },
-  { id: "new_patients", label: "New Patients", Icon: UserPlus, offset: 0, query: { visit: "new" } },
-  {
-    id: "followups",
-    label: "Follow-Up Patients",
-    Icon: Repeat,
-    offset: 0,
-    query: { visit: "followup" },
-  },
-  {
-    id: "cancelled",
-    label: "Cancelled",
-    Icon: Ban,
-    offset: 0,
-    query: { call_status: "cancelled" },
-  },
-  {
-    id: "rescheduled",
-    label: "Rescheduled",
-    Icon: CalendarClock,
-    offset: 0,
-    query: { call_status: "rescheduled" },
-  },
   { id: "lookup", label: "Patient Lookup", Icon: Search, offset: null },
   {
     id: "reassign",
@@ -1332,8 +1291,6 @@ export default function GHMPage() {
       } else if (searchQ) {
         p.set("q", searchQ);
       }
-      for (const [k, v] of Object.entries(VIEW_TABS.find((t) => t.id === view)?.query || {}))
-        p.set(k, v);
       return p;
     },
     [date, doctor, collectionFilter, view, lookupQ, searchQ],
@@ -1416,14 +1373,8 @@ export default function GHMPage() {
         return;
       }
       const label = EXPORT_LABELS[view] || "ghm-export";
-      const counts = await exportWatiWorkbook(
-        all,
-        view === "lookup" ? todayStr() : date,
-        label,
-        EXPORT_TITLES[view] || "",
-      );
-      if (!counts.fresh && !counts.followUp)
-        window.alert("No patients with a phone number to export.");
+      const counts = await exportWatiWorkbook(all, view === "lookup" ? todayStr() : date, label);
+      if (!counts.total) window.alert("No patients with a phone number to export.");
     } catch (e) {
       // Without this the whole export failed into an unhandled rejection and
       // the button just looked broken.
@@ -1504,7 +1455,7 @@ export default function GHMPage() {
   // Where the patient is in the day — the same states the OPD board shows.
   // Only once the day has arrived: on a future date nobody has checked in yet,
   // so every row would read "Pending".
-  const showVisitStatus = view !== "lookup" && date <= todayStr();
+  const showVisitStatus = view === "by_date" && date <= todayStr();
   const colSpan =
     16 +
     (showApptDate ? 1 : 0) +

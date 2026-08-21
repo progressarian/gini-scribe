@@ -5,7 +5,6 @@ import { resolveDoctorIdByName, checkBookingAvailability } from "../services/boo
 import { ownFu, dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
 import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 import { CATEGORY_VALUES, isValidCategory } from "../../shared/patientCategories.js";
-import { CALL_STATUSES } from "../../shared/callStatuses.js";
 import { slotStartHour } from "../../shared/slotHour.js";
 
 const router = Router();
@@ -798,24 +797,6 @@ router.get("/ghm-appointments", async (req, res) => {
     if (status) {
       params.push(status);
       where += ` AND a.status = $${params.length}`;
-    }
-    // The New / Follow-up tabs. "New" is what the whole sheet already means by
-    // it (a visit type starting with "new"); everything else that HAS a visit
-    // type is a follow-up, matching the summary's own follow-up count.
-    const visit = String(req.query.visit || "").toLowerCase();
-    if (visit === "new") where += ` AND LOWER(COALESCE(a.visit_type, '')) LIKE 'new%'`;
-    else if (visit === "followup")
-      where += ` AND a.visit_type IS NOT NULL AND LOWER(a.visit_type) NOT LIKE 'new%'`;
-
-    // The Cancelled / Rescheduled tabs read the STORED call status, not the
-    // today-scoped one: a patient who cancelled yesterday for today's visit is
-    // still cancelled today.
-    const callStatus = String(req.query.call_status || "").trim();
-    if (callStatus) {
-      if (!CALL_STATUSES.some((c) => c.value === callStatus))
-        return res.status(400).json({ error: `Unknown call status: ${callStatus}` });
-      params.push(callStatus);
-      where += ` AND COALESCE(NULLIF(a.call_status, ''), 'pending') = $${params.length}`;
     }
     const q = (req.query.q || "").trim();
     if (q) {
