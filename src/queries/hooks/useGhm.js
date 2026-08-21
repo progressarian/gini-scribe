@@ -54,7 +54,7 @@ export function useGhmList({ buildQuery, enabled = true, keepPrevious = true }) 
   });
 }
 
-function useIdBatch(keyFn, url, ids, field) {
+function useIdBatch(keyFn, url, ids, field, options = {}) {
   const key = idKey(ids);
   return useQuery({
     queryKey: keyFn(key),
@@ -65,6 +65,7 @@ function useIdBatch(keyFn, url, ids, field) {
     enabled: key.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+    ...options,
   });
 }
 
@@ -81,6 +82,37 @@ export function useGhmLastMo(patientIds) {
   return useIdBatch(qk.ghm.lastMo, "/api/ghm-appointments/last-mo", patientIds, "patient_ids");
 }
 
+export function useGhmSlotCounts(dates) {
+  const key = [...new Set((dates || []).filter(Boolean))].sort().join(",");
+  return useQuery({
+    queryKey: qk.ghm.slotCounts(key),
+    queryFn: async () => {
+      const { data } = await api.get(
+        `/api/ghm-appointments/slot-counts?dates=${encodeURIComponent(key)}`,
+      );
+      return data || {};
+    },
+    enabled: key.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+// Day-scoped discount-category tallies. Not taken from the list summary, which
+// counts only the rows the current filters match — this is the whole day's mix.
+export function useCategoryCounts(date) {
+  return useQuery({
+    queryKey: qk.ghm.categoryCounts(date),
+    queryFn: async () => {
+      const { data } = await api.get(`/api/ghm-appointments/category-counts?date=${date}`);
+      return data?.categories || {};
+    },
+    enabled: !!date,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
 export function useCallAttemptCounts(appointmentIds) {
   return useIdBatch(
     qk.ghm.attemptCounts,
@@ -88,6 +120,39 @@ export function useCallAttemptCounts(appointmentIds) {
     appointmentIds,
     "appointment_ids",
   );
+}
+
+// Who is on a call with which patient right now. Polled, not pushed: the flag
+// only has to be fresh enough that a second agent sees it before dialling, and
+// it expires server-side, so a short interval is enough.
+export function useActiveCalls(appointmentIds) {
+  return useIdBatch(
+    qk.ghm.activeCalls,
+    "/api/ghm-appointments/active-calls",
+    appointmentIds,
+    "appointment_ids",
+    { staleTime: 5_000, refetchInterval: 15_000, refetchOnWindowFocus: true },
+  );
+}
+
+export function useCallClaim() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["ghm", "active-calls"] });
+  const claim = useMutation({
+    mutationFn: async (appointmentId) => {
+      const { data } = await api.post(`/api/ghm-appointments/${appointmentId}/calling`);
+      return data;
+    },
+    onSettled: invalidate,
+  });
+  const release = useMutation({
+    mutationFn: async (appointmentId) => {
+      const { data } = await api.delete(`/api/ghm-appointments/${appointmentId}/calling`);
+      return data;
+    },
+    onSettled: invalidate,
+  });
+  return { claim, release };
 }
 
 export function useCallAttempts(appointmentId) {
@@ -120,6 +185,20 @@ export function useDayAvailability(doctor, date) {
       return data?.resolved ? data.slots || [] : null;
     },
     enabled: !!doctor && !!date,
+    staleTime: 60_000,
+  });
+}
+
+export function usePatientByFileNo(fileNo) {
+  const trimmed = String(fileNo || "").trim();
+  return useQuery({
+    queryKey: qk.ghm.patientByFileNo(trimmed),
+    queryFn: async () => {
+      const { data } = await api.get(`/api/patients?q=${encodeURIComponent(trimmed)}&limit=1`);
+      const hit = arr(data?.data)[0];
+      return hit && String(hit.file_no || "").toLowerCase() === trimmed.toLowerCase() ? hit : null;
+    },
+    enabled: trimmed.length >= 3,
     staleTime: 60_000,
   });
 }
@@ -160,10 +239,17 @@ export function usePatchAppointment(listKey, applyOptimistic) {
       queryClient.setQueryData(listKey, (old) => applyOptimistic(old, id, field, value));
       return { previous };
     },
-    onError: (_e, _vars, ctx) => {
+    onError: (e, _vars, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(listKey, ctx.previous);
+      // A rejected edit must say why — the optimistic cell has just snapped
+      // back on its own otherwise.
+      const message = e?.response?.data?.error;
+      if (message) window.alert(message);
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: qk.ghm.all, refetchType: "none" }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: qk.ghm.all, refetchType: "none" });
+      queryClient.invalidateQueries({ queryKey: ["ghm", "category-counts"] });
+    },
   });
 }
 

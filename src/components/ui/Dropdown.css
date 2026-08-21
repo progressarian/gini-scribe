@@ -66,7 +66,10 @@
 }
 
 .doc-dd__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   width: 100%;
   border: none;
   background: none;
@@ -78,8 +81,52 @@
   cursor: pointer;
   color: #334155;
   white-space: nowrap;
+}
+
+/* Label shrinks (ellipsised) before the badge does — the count stays readable
+   in a narrow table cell. */
+.doc-dd__item-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Load badge — how full the option already is. Tinted by load so a crowded
+   window reads at a glance; never shrinks, so the count survives a narrow cell. */
+.doc-dd__badge {
+  flex-shrink: 0;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.doc-dd__badge--low {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.doc-dd__badge--mid {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.doc-dd__badge--high {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.doc-dd__item--active .doc-dd__badge {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
 }
 
 .doc-dd__item:hover {

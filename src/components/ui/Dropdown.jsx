@@ -45,6 +45,14 @@ export default function Dropdown({ value, options, onChange, ariaLabel, variant,
         aria-label={ariaLabel}
       >
         <span className="doc-dd__label">{label}</span>
+        {current?.badge ? (
+          <span
+            className={`doc-dd__badge doc-dd__badge--${current.badgeTone || "low"}`}
+            title={current.badgeTitle}
+          >
+            {current.badge}
+          </span>
+        ) : null}
         <ChevronDown className={`doc-dd__arrow ${open ? "doc-dd__arrow--up" : ""}`} size={13} />
       </button>
       {open && (
@@ -59,7 +67,15 @@ export default function Dropdown({ value, options, onChange, ariaLabel, variant,
                 className={`doc-dd__item ${value === o.value ? "doc-dd__item--active" : ""}`}
                 onClick={() => select(o.value)}
               >
-                {o.label}
+                <span className="doc-dd__item-label">{o.label}</span>
+                {o.badge ? (
+                  <span
+                    className={`doc-dd__badge doc-dd__badge--${o.badgeTone || "low"}`}
+                    title={o.badgeTitle}
+                  >
+                    {o.badge}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>

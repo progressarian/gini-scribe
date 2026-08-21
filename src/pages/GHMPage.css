@@ -392,6 +392,13 @@
   background: #fff7ed !important;
 }
 
+.tbl__row--calling td {
+  background: #fef2f2 !important;
+}
+.tbl__row--calling td:first-child {
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
 .tbl__row--saving td {
   opacity: 0.6;
 }
@@ -545,6 +552,11 @@ a.pcell__ph:hover {
 .badge--amber {
   background: #fef3c7;
   color: #92400e;
+}
+
+.badge--red {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .badge--green {
@@ -968,27 +980,57 @@ a.pcell__ph:hover {
   margin-left: 4px;
 }
 
+.fld__ok {
+  font-style: normal;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #059669;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
 /* ── Chevron expand toggle ── */
 .chev {
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 7px 3px 4px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
   cursor: pointer;
-  font-size: 13px;
-  color: #94a3b8;
-  padding: 2px 4px;
-  border-radius: 5px;
   transition:
-    transform 0.15s,
-    color 0.15s;
-  display: inline-block;
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s;
 }
 .chev:hover {
   color: #2563eb;
   background: #eff6ff;
+  border-color: #93c5fd;
+}
+.chev:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+/* The arrow turns down when the history panel is open — only the icon rotates,
+   so the button itself keeps its shape. */
+.chev svg {
+  flex-shrink: 0;
+  transition: transform 0.15s;
 }
 .chev--open {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.chev--open svg {
   transform: rotate(90deg);
-  color: #2563eb;
 }
 
 .tbl__row--open td {
@@ -1021,6 +1063,85 @@ a.pcell__ph:hover {
 }
 .attempt-badge:hover {
   background: #ffedd5;
+}
+
+/* ── "Calling now" flag — one caller per patient ── */
+.callcol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.calling-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: 88px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.calling-flag svg {
+  flex: none;
+}
+.calling-flag__who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calling-flag__mins {
+  font-weight: 600;
+  opacity: 0.8;
+}
+.calling-flag--btn {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  cursor: pointer;
+}
+.calling-flag--btn:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #60a5fa;
+}
+.calling-flag--btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.calling-flag--mine {
+  color: #fff;
+  background: #16a34a;
+  border-color: #15803d;
+}
+.calling-flag--mine:hover:not(:disabled) {
+  background: #15803d;
+  border-color: #166534;
+}
+.calling-flag--other {
+  color: #fff;
+  background: #dc2626;
+  border: 1px solid #b91c1c;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+  animation: calling-pulse 1.6s ease-in-out infinite;
+}
+.calling-flag__err {
+  font-size: 10px;
+  color: #b91c1c;
+  max-width: 88px;
+  white-space: normal;
+}
+@keyframes calling-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .calling-flag--other {
+    animation: none;
+  }
 }
 
 /* ── Call history panel (expanded row) ── */

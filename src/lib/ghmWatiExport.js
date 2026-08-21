@@ -2,6 +2,10 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 const SHEET_NAME = "For Wati_Appt confirmation";
 
+// Excel caps a sheet name at 31 characters and rejects : \ / ? * [ ]
+const sheetName = (title) =>
+  (title ? `For Wati_${title}` : SHEET_NAME).replace(/[:\\/?*[\]]/g, " ").slice(0, 31);
+
 const NEW_BLOCK_COL = 0;
 const FU_BLOCK_COL = 12;
 const BLOCK_WIDTH = 8;
@@ -128,12 +132,16 @@ const place = (target, values, startCol) => {
   });
 };
 
-export const buildWatiSheet = (XLSX, rows, date) => {
+export const buildWatiSheet = (XLSX, rows, date, title) => {
   const { fresh, followUp } = buildWatiBlocks(rows, date);
 
   const titleRow = blankRow();
   titleRow[0] = "Enter Date--->";
   titleRow[1] = fmtSheetDate(date);
+  // Which list this is — an export of the Cancelled tab and one of the day's
+  // full sheet are otherwise identical once the file is open. Parked in the gap
+  // between the New and FU blocks so neither block's columns shift.
+  if (title) titleRow[BLOCK_WIDTH + 1] = title;
   titleRow[NEW_BLOCK_COL + 3] = "New";
   titleRow[NEW_BLOCK_COL + 6] = "Duplicate Phone Number";
   titleRow[FU_BLOCK_COL] = "FU";
@@ -171,15 +179,51 @@ export const buildWatiSheet = (XLSX, rows, date) => {
     styleCell(XLSX, ws, 1, FU_BLOCK_COL + i, HEADER_STYLE);
   });
 
+  if (title) styleCell(XLSX, ws, 0, BLOCK_WIDTH + 1, TITLE_STYLE);
+
   return { ws, counts: { fresh: fresh.length, followUp: followUp.length } };
 };
 
-export const exportWatiWorkbook = async (rows, date, fileLabel = "wati-appt-confirmation") => {
-  const XLSX = (await import("xlsx-js-style")).default;
-  const { ws, counts } = buildWatiSheet(XLSX, rows, date);
+// Hands the finished workbook to the browser. writeFile is the library's own
+// one-liner, but it is the part that silently does nothing when a browser
+// refuses its synthetic click, so a failure there falls back to a Blob download
+// we drive ourselves rather than leaving the button looking dead.
+const downloadWorkbook = (XLSX, wb, filename) => {
+  try {
+    XLSX.writeFile(wb, filename);
+    return;
+  } catch (err) {
+    console.error("[GHM export] writeFile failed, falling back to Blob download", err);
+  }
+  const data = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const url = URL.createObjectURL(
+    new Blob([data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+};
+
+export const exportWatiWorkbook = async (
+  rows,
+  date,
+  fileLabel = "wati-appt-confirmation",
+  title = "",
+) => {
+  const mod = await import("xlsx-js-style");
+  // Interop: the CJS build lands on `default` through Vite, on the namespace
+  // itself elsewhere. Reading only one of them is how the button dies silently.
+  const XLSX = mod?.default?.utils ? mod.default : mod;
+  if (!XLSX?.utils) throw new Error("Excel library failed to load — check the network tab");
+
+  const { ws, counts } = buildWatiSheet(XLSX, rows, date, title);
   if (!counts.fresh && !counts.followUp) return counts;
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
-  XLSX.writeFile(wb, `${fileLabel}_${String(date).slice(0, 10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, sheetName(title));
+  downloadWorkbook(XLSX, wb, `${fileLabel}_${String(date).slice(0, 10)}.xlsx`);
   return counts;
 };

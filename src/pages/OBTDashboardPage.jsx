@@ -103,7 +103,7 @@ export default function OBTDashboardPage() {
             />
             <Tile label="Spoke" value={summary.spoke} tone="green" />
             <Tile label="No answer" value={summary.not_picked} tone="red" />
-            <Tile label="Busy / switched off" value={summary.unreachable} tone="amber" />
+            <Tile label="Unreachable" value={summary.unreachable} tone="amber" />
             <Tile label="Will call later" value={summary.call_later} tone="amber" />
             <Tile label="Rescheduled" value={summary.rescheduled} tone="blue" />
             <Tile label="No call needed" value={summary.no_call_needed} tone="slate" />

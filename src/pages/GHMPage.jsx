@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import {
   ArrowRight,
+  Ban,
+  CalendarClock,
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronRight,
   ClipboardList,
   Download,
   FileText,
@@ -13,12 +16,15 @@ import {
   MoveRight,
   MoveUp,
   Phone,
+  PhoneCall,
   Plus,
   RefreshCw,
+  Repeat,
   Search,
   Smartphone,
   Star,
   Sunrise,
+  UserPlus,
   Trash2,
   X,
 } from "lucide-react";
@@ -28,6 +34,15 @@ import useAuthStore from "../stores/authStore";
 import { SLOT_REASON, slotOptions, ARRIVAL_TIME_RANGES } from "../lib/slotAvailability.js";
 import { exportWatiWorkbook } from "../lib/ghmWatiExport.js";
 import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions";
+import { PATIENT_CATEGORIES } from "../../shared/patientCategories.js";
+import {
+  ATTEMPT_OUTCOMES,
+  CALL_STATUSES,
+  UNREACHABLE_STATUSES,
+  callColor,
+  callLabel,
+} from "../../shared/callStatuses.js";
+import { slotStartHour } from "../../shared/slotHour.js";
 import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
 import Dropdown from "../components/ui/Dropdown.jsx";
 import FilterPopover from "../components/ui/FilterPopover.jsx";
@@ -37,9 +52,12 @@ import useBodyScrollLock from "../hooks/useBodyScrollLock.js";
 import useViewportFill from "../hooks/useViewportFill.js";
 import {
   PAGE_SIZE,
+  useActiveCalls,
   useAppointmentChanges,
   useCallAttemptCounts,
+  useCategoryCounts,
   useCallAttempts,
+  useCallClaim,
   useCcAgents,
   useCreateAppointment,
   useDayAvailability,
@@ -50,9 +68,11 @@ import {
   useGhmBiomarkers,
   useGhmDoctors,
   useGhmLastMo,
+  useGhmSlotCounts,
   useGhmList,
   useLogCallAttempt,
   usePatchAppointment,
+  usePatientByFileNo,
   useReassignAppointment,
 } from "../queries/hooks/useGhm";
 import { qk } from "../queries/keys";
@@ -61,6 +81,26 @@ import { visitStatus } from "../lib/visitStatus.js";
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 
 const STALE_MO_DAYS = 90;
+
+// How loaded an arrival window already is on a row's date: booked appointments
+// in that hour plus the patients whose preferred time is that window. Shown as
+// a badge so a narrow cell truncates the time text, never the number.
+const slotCountDate = (row) =>
+  String(row?.preferred_date || row?.appointment_date || "").slice(0, 10) || null;
+
+const slotBooked = (slot, counts, row) => {
+  const hour = slotStartHour(slot);
+  if (hour === null) return 0;
+  return counts?.[slotCountDate(row)]?.[hour] || 0;
+};
+
+// Colour of the load badge. A clinic hour runs comfortably up to about a dozen
+// patients; past that the window is crowded and past twenty it is effectively
+// full, so the badge warns before the slot is promised.
+const SLOT_BUSY = 12;
+const SLOT_FULL = 20;
+
+const slotTone = (n) => (n >= SLOT_FULL ? "high" : n >= SLOT_BUSY ? "mid" : "low");
 
 const daysAgo = (d) => {
   if (!d) return null;
@@ -103,12 +143,49 @@ const EXPORT_LABELS = {
   tomorrow: "ghm-tomorrow",
   fu3: "wati-appt-confirmation",
   lookup: "ghm-patient-lookup",
+  new_patients: "wati-new-patients",
+  followups: "wati-follow-up-patients",
+  cancelled: "wati-cancelled",
+  rescheduled: "wati-rescheduled",
 };
 
+// Written into the exported sheet so an open file says which list it is.
+const EXPORT_TITLES = {
+  new_patients: "New patients",
+  followups: "Follow-up patients",
+  cancelled: "Cancelled",
+  rescheduled: "Rescheduled",
+};
+
+// `query` narrows the day's list further — the New / Follow-up / Cancelled /
+// Rescheduled tabs are the same day window the other tabs use, filtered by the
+// API rather than by a second fetch or client-side slicing.
 const VIEW_TABS = [
   { id: "by_date", label: "Today", Icon: CalendarDays, offset: 0 },
   { id: "tomorrow", label: "Tomorrow", Icon: Sunrise, offset: 1 },
   { id: "fu3", label: "Follow-up in 3 Days", Icon: Phone, offset: 3 },
+  { id: "new_patients", label: "New Patients", Icon: UserPlus, offset: 0, query: { visit: "new" } },
+  {
+    id: "followups",
+    label: "Follow-Up Patients",
+    Icon: Repeat,
+    offset: 0,
+    query: { visit: "followup" },
+  },
+  {
+    id: "cancelled",
+    label: "Cancelled",
+    Icon: Ban,
+    offset: 0,
+    query: { call_status: "cancelled" },
+  },
+  {
+    id: "rescheduled",
+    label: "Rescheduled",
+    Icon: CalendarClock,
+    offset: 0,
+    query: { call_status: "rescheduled" },
+  },
   { id: "lookup", label: "Patient Lookup", Icon: Search, offset: null },
   {
     id: "reassign",
@@ -120,15 +197,6 @@ const VIEW_TABS = [
 ];
 
 // ─── Call status options ───────────────────────────────────────────────────
-const CALL_STATUSES = [
-  { value: "pending", label: "Not Called Yet", color: "gray" },
-  { value: "called", label: "Called / Spoke", color: "green" },
-  { value: "not_picked", label: "Not Picked Up", color: "red" },
-  { value: "rescheduled", label: "Rescheduled", color: "blue" },
-  { value: "call_later", label: "Will Call Later", color: "amber" },
-  { value: "no_call_needed", label: "No Call Needed", color: "gray" },
-];
-
 const SHOW_STATUSES = [
   { value: "", label: "— Not Marked", color: "gray" },
   { value: "Show", label: "Patient Came", color: "green" },
@@ -147,17 +215,6 @@ const RECOVERY_STATUSES = [
 ];
 
 // Outcomes for an individual call attempt (richer than the row summary)
-const ATTEMPT_OUTCOMES = [
-  { value: "called", label: "Called / Spoke", color: "green" },
-  { value: "not_picked", label: "Not Picked Up", color: "red" },
-  { value: "busy", label: "Busy", color: "amber" },
-  { value: "switched_off", label: "Switched Off", color: "amber" },
-  { value: "wrong_number", label: "Wrong Number", color: "red" },
-  { value: "rescheduled", label: "Rescheduled", color: "blue" },
-  { value: "call_later", label: "Will Call Later", color: "amber" },
-];
-const attemptLabel = (v) => ATTEMPT_OUTCOMES.find((o) => o.value === v)?.label || v;
-const attemptColor = (v) => ATTEMPT_OUTCOMES.find((o) => o.value === v)?.color || "gray";
 
 function fmtDateTime(ts) {
   if (!ts) return "";
@@ -173,20 +230,8 @@ function fmtDateTime(ts) {
 
 // Slot catalog + unavailability-reason labels come from ../lib/slotAvailability.
 
-const VISIT_TYPES = [
-  "New",
-  "Follow Up",
-  "6 weeks",
-  "12 weeks",
-  "18 weeks",
-  "24 weeks",
-  "48 weeks",
-  "56 weeks",
-  "FU within week",
-  "FU within 3 days",
-];
+const APPOINTMENT_MODES = ["Physical", "Online"];
 
-const callColor = (v) => CALL_STATUSES.find((s) => s.value === v)?.color || "gray";
 const showColor = (v) => SHOW_STATUSES.find((s) => s.value === v)?.color || "gray";
 
 // ─── Custom dropdown — shows max 7 items then scrolls ────────────────────
@@ -203,8 +248,16 @@ const CELL_DATE_STYLE = {
 
 const MODE_OPTIONS = [
   { value: "", label: "—" },
-  ...["Physical", "Digital", "Online"].map((m) => ({ value: m, label: m })),
+  ...APPOINTMENT_MODES.map((m) => ({ value: m, label: m })),
 ];
+
+// A cell whose stored value is no longer offered (a retired mode, a doctor who
+// left) still has to show it — a dropdown that renders blank reads as "not set"
+// and the next edit would wipe the real value.
+const withCurrent = (options, value) =>
+  !value || options.some((o) => o.value === value)
+    ? options
+    : [...options, { value, label: `${value} (retired)` }];
 
 const COLLECTION_OPTIONS = [
   { value: "all", label: "All patients" },
@@ -346,17 +399,43 @@ const SUMMARY_BUCKET = {
   home_collection: (v) => (v ? "home_collection" : null),
   call_status: (v) =>
     ({ called: "called", not_picked: "not_picked", rescheduled: "rescheduled" })[v] ||
+    (UNREACHABLE_STATUSES.includes(v) ? "unreachable" : null) ||
     (!v || v === "pending" ? "not_called" : null),
   show_no_show: (v) => (v === "Show" ? "came" : v === "No Show" ? "no_show" : "pending_show"),
 };
 
-function Summary({ summary }) {
+// Discount-category tallies for the whole day, so the desk sees the day's mix
+// without counting rows.
+function CategoryTallies({ categories }) {
+  return (
+    <>
+      <div className="summary__sep" />
+      <div className="summary__group">
+        <div className="summary__label">Categories (whole day)</div>
+        <div className="summary__pills">
+          {PATIENT_CATEGORIES.filter((c) => c.value).map((c) => (
+            <span
+              key={c.value}
+              className={`spill spill--${c.color}`}
+              title={`${categories?.[c.value]?.count || 0} ${c.label} patient(s) today`}
+            >
+              {categories?.[c.value]?.count || 0} {c.label}
+            </span>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Summary({ summary, categories }) {
   const total = summary.total || 0;
   const came = summary.came || 0;
   const noShow = summary.no_show || 0;
   const pendingShow = summary.pending_show || 0;
   const called = summary.called || 0;
   const notPicked = summary.not_picked || 0;
+  const unreachable = summary.unreachable || 0;
   const rescheduled = summary.rescheduled || 0;
   const notCalled = summary.not_called || 0;
   const fu = summary.follow_up || 0;
@@ -381,9 +460,11 @@ function Summary({ summary }) {
           <span className="spill spill--orange">{notCalled} Need to Call</span>
           <span className="spill spill--green">{called} Spoke</span>
           <span className="spill spill--red">{notPicked} Not Picked</span>
+          <span className="spill spill--amber">{unreachable} Unreachable</span>
           <span className="spill spill--blue">{rescheduled} Rescheduled</span>
         </div>
       </div>
+      {categories && <CategoryTallies categories={categories} />}
     </div>
   );
 }
@@ -471,6 +552,8 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     time_slot: "",
     // A repeat booking for a known patient is almost always a follow-up
     visit_type: isPrefilled ? "Follow Up" : "New",
+    appointment_type: "Physical",
+    address: prefill?.address || "",
     condition: prefill?.condition || "",
     booked_by_name: "",
     notes: "",
@@ -481,6 +564,31 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   useBodyScrollLock();
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const [fileNoQuery, setFileNoQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setFileNoQuery(form.file_no.trim()), 350);
+    return () => clearTimeout(t);
+  }, [form.file_no]);
+
+  const { data: lookedUpPatient, isFetching: lookingUp } = usePatientByFileNo(fileNoQuery);
+  const filledFromRef = useRef("");
+
+  useEffect(() => {
+    if (!lookedUpPatient) return;
+    const key = String(lookedUpPatient.file_no || "");
+    if (filledFromRef.current === key) return;
+    filledFromRef.current = key;
+    setForm((f) => ({
+      ...f,
+      patient_name: lookedUpPatient.name || f.patient_name,
+      phone: String(lookedUpPatient.phone || f.phone || "")
+        .replace(/\D/g, "")
+        .slice(0, 10),
+      address: lookedUpPatient.address || f.address,
+      visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
+    }));
+  }, [lookedUpPatient]);
 
   const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
   const availSlots = availData ?? null;
@@ -558,6 +666,13 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
             <label className="fld">
               <span>
                 File No <em className="fld__opt">(blank = new patient)</em>
+                {lookingUp && <em className="fld__opt"> — searching…</em>}
+                {!lookingUp && lookedUpPatient && (
+                  <em className="fld__ok"> — {lookedUpPatient.name} found</em>
+                )}
+                {!lookingUp && fileNoQuery.length >= 3 && !lookedUpPatient && (
+                  <em className="fld__warn"> — no match</em>
+                )}
               </span>
               <input
                 value={form.file_no}
@@ -614,8 +729,11 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
             </label>
             <label className="fld">
               <span>Visit Type</span>
-              <select value={form.visit_type} onChange={(e) => set("visit_type", e.target.value)}>
-                {VISIT_TYPES.map((v) => (
+              <select
+                value={form.appointment_type}
+                onChange={(e) => set("appointment_type", e.target.value)}
+              >
+                {APPOINTMENT_MODES.map((v) => (
                   <option key={v} value={v}>
                     {v}
                   </option>
@@ -628,6 +746,14 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 value={form.condition}
                 onChange={(e) => set("condition", e.target.value)}
                 placeholder="Diabetes / Thyroid…"
+              />
+            </label>
+            <label className="fld fld--wide">
+              <span>Address</span>
+              <input
+                value={form.address}
+                onChange={(e) => set("address", e.target.value)}
+                placeholder="House / street, area, city, pincode"
               />
             </label>
             <label className="fld">
@@ -752,8 +878,8 @@ function CallHistoryPanel({ row, ccAgents, colSpan }) {
                 <div key={h.id} className="hist-item">
                   <span className="hist-no">#{h.attempt_no}</span>
                   <span className="hist-when">{fmtDateTime(h.called_at)}</span>
-                  <span className={`badge badge--${attemptColor(h.outcome)}`}>
-                    {attemptLabel(h.outcome)}
+                  <span className={`badge badge--${callColor(h.outcome)}`}>
+                    {callLabel(h.outcome)}
                   </span>
                   {h.called_by && <span className="hist-by">— {h.called_by}</span>}
                   {h.reschedule_date && (
@@ -810,7 +936,7 @@ function CallHistoryPanel({ row, ccAgents, colSpan }) {
             <select
               value={outcome}
               onChange={(e) => setOutcome(e.target.value)}
-              className={`csel csel--${attemptColor(outcome)}`}
+              className={`csel csel--${callColor(outcome)}`}
             >
               {ATTEMPT_OUTCOMES.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -864,8 +990,8 @@ function CallHistoryPanel({ row, ccAgents, colSpan }) {
                 <div className="cdlg__line">
                   <strong>#{confirmDel.attempt_no}</strong> · {fmtDateTime(confirmDel.called_at)}
                 </div>
-                <span className={`badge badge--${attemptColor(confirmDel.outcome)}`}>
-                  {attemptLabel(confirmDel.outcome)}
+                <span className={`badge badge--${callColor(confirmDel.outcome)}`}>
+                  {callLabel(confirmDel.outcome)}
                 </span>
                 {confirmDel.called_by && <span className="cdlg__by">— {confirmDel.called_by}</span>}
                 {confirmDel.notes && <div className="cdlg__notes">“{confirmDel.notes}”</div>}
@@ -1080,6 +1206,67 @@ function ReassignNeededView({ date }) {
   );
 }
 
+// ─── "Calling now" flag ────────────────────────────────────────────────────
+// One patient, one caller: an OBT agent marks the row before dialling so the
+// rest of the team sees the call in progress instead of ringing the patient a
+// second time. The claim expires server-side, so a closed tab never leaves a
+// row locked.
+function callMinsAgo(ts) {
+  if (!ts) return 0;
+  return Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 60000));
+}
+
+function CallingFlag({ row, active, mine, claim, release }) {
+  const [error, setError] = useState("");
+  const busy =
+    (claim.isPending && claim.variables === row.id) ||
+    (release.isPending && release.variables === row.id);
+
+  const toggle = async () => {
+    setError("");
+    try {
+      if (mine) await release.mutateAsync(row.id);
+      else await claim.mutateAsync(row.id);
+    } catch (e) {
+      setError(e?.response?.data?.error || "Could not update the calling flag");
+    }
+  };
+
+  if (active && !mine) {
+    const mins = callMinsAgo(active.calling_since);
+    return (
+      <span
+        className="calling-flag calling-flag--other"
+        title={`${active.calling_by} is calling this patient — started ${mins} min ago`}
+      >
+        <PhoneCall size={11} aria-hidden="true" />
+        <span className="calling-flag__who">{active.calling_by}</span>
+        {mins > 0 && <span className="calling-flag__mins">{mins}m</span>}
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className={`calling-flag calling-flag--btn${mine ? " calling-flag--mine" : ""}`}
+        onClick={toggle}
+        disabled={busy}
+        aria-pressed={mine}
+        title={
+          mine
+            ? "You marked this call in progress — click to clear it"
+            : "Tell the team you are calling this patient now"
+        }
+      >
+        <PhoneCall size={11} aria-hidden="true" />
+        {mine ? "You" : "Calling"}
+      </button>
+      {error && <span className="calling-flag__err">{error}</span>}
+    </>
+  );
+}
+
 // ─── Main page ─────────────────────────────────────────────────────────────
 export default function GHMPage() {
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
@@ -1145,6 +1332,8 @@ export default function GHMPage() {
       } else if (searchQ) {
         p.set("q", searchQ);
       }
+      for (const [k, v] of Object.entries(VIEW_TABS.find((t) => t.id === view)?.query || {}))
+        p.set(k, v);
       return p;
     },
     [date, doctor, collectionFilter, view, lookupQ, searchQ],
@@ -1171,9 +1360,37 @@ export default function GHMPage() {
   const biomarkerQuery = useGhmBiomarkers(patientIds);
   const lastMoQuery = useGhmLastMo(patientIds);
   const attemptQuery = useCallAttemptCounts(appointmentIds);
+  const activeCallQuery = useActiveCalls(appointmentIds);
+  const categoryQuery = useCategoryCounts(view === "lookup" ? null : date);
+  const { claim: claimCall, release: releaseCall } = useCallClaim();
+  // The date a row's preferred time applies to: the preferred date once one is
+  // set, otherwise the appointment's own date.
+  const preferredDates = useMemo(() => rows.map(slotCountDate), [rows]);
+  const slotCountQuery = useGhmSlotCounts(preferredDates);
+  const slotCounts = slotCountQuery.data || {};
   const biomarkers = biomarkerQuery.data || {};
   const lastMo = lastMoQuery.data || {};
   const attemptCounts = attemptQuery.data || {};
+  const activeCalls = activeCallQuery.data || {};
+  const categoryCounts = categoryQuery.data || null;
+
+  // Category options carry the day's headcount as a badge, the same way the
+  // preferred-time options show how full a slot already is — the OBT agent sees
+  // the mix while choosing, not only in the summary bar.
+  const categoryOptions = useMemo(
+    () =>
+      PATIENT_CATEGORIES.map((c) => {
+        const count = c.value ? categoryCounts?.[c.value]?.count || 0 : 0;
+        return {
+          ...c,
+          badge: count || undefined,
+          badgeTitle: count
+            ? `${count} patient${count > 1 ? "s" : ""} in this category today`
+            : undefined,
+        };
+      }),
+    [categoryCounts],
+  );
   // Any request still in flight while rows are already on screen — a refetch on
   // focus, a stale-time refresh or the per-page batches catching up. The rows
   // shown are the previous answer until it lands, so the header says so.
@@ -1182,6 +1399,7 @@ export default function GHMPage() {
     (listQuery.isFetching ||
       biomarkerQuery.isFetching ||
       lastMoQuery.isFetching ||
+      slotCountQuery.isFetching ||
       attemptQuery.isFetching);
 
   const exportMutation = useExportPages(buildQuery, EXPORT_PAGE_SIZE);
@@ -1191,15 +1409,27 @@ export default function GHMPage() {
   // named after the tab and its date so a By Date and a Follow-up export of the
   // same day do not overwrite each other in the downloads folder.
   const exportWati = useCallback(async () => {
-    const all = await exportMutation.mutateAsync();
-    if (!all.length) {
-      window.alert("Nothing to export for this view.");
-      return;
+    try {
+      const all = await exportMutation.mutateAsync();
+      if (!all.length) {
+        window.alert("Nothing to export for this view.");
+        return;
+      }
+      const label = EXPORT_LABELS[view] || "ghm-export";
+      const counts = await exportWatiWorkbook(
+        all,
+        view === "lookup" ? todayStr() : date,
+        label,
+        EXPORT_TITLES[view] || "",
+      );
+      if (!counts.fresh && !counts.followUp)
+        window.alert("No patients with a phone number to export.");
+    } catch (e) {
+      // Without this the whole export failed into an unhandled rejection and
+      // the button just looked broken.
+      console.error("[GHM export] failed", e);
+      window.alert(`Export failed: ${e?.response?.data?.error || e?.message || e}`);
     }
-    const label = EXPORT_LABELS[view] || "ghm-export";
-    const counts = await exportWatiWorkbook(all, view === "lookup" ? todayStr() : date, label);
-    if (!counts.fresh && !counts.followUp)
-      window.alert("No patients with a phone number to export.");
   }, [exportMutation, date, view]);
 
   // Debounce the search box so the Patient Lookup fetch fires after typing stops.
@@ -1274,9 +1504,9 @@ export default function GHMPage() {
   // Where the patient is in the day — the same states the OPD board shows.
   // Only once the day has arrived: on a future date nobody has checked in yet,
   // so every row would read "Pending".
-  const showVisitStatus = view === "by_date" && date <= todayStr();
+  const showVisitStatus = view !== "lookup" && date <= todayStr();
   const colSpan =
-    15 +
+    16 +
     (showApptDate ? 1 : 0) +
     (showVisitStatus ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
@@ -1438,7 +1668,7 @@ export default function GHMPage() {
       ) : (
         <>
           {/* ── Summary ── */}
-          {showRows && <Summary summary={summary} />}
+          {showRows && <Summary summary={summary} categories={categoryCounts} />}
 
           {/* ── Loading ── */}
           {coldLoading && (
@@ -1492,17 +1722,18 @@ export default function GHMPage() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th style={{ width: 30 }}></th>
+                    <th style={{ width: 96 }}>Calling</th>
                     <th style={{ width: 36 }}>#</th>
                     {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
                     {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                     <th style={{ minWidth: 170 }}>Patient</th>
                     <th style={{ width: 155 }}>Biomarkers (auto)</th>
                     <th style={{ width: 100 }}>Visit Type</th>
+                    <th style={{ width: 165 }}>Category</th>
                     <th style={{ width: 110 }}>Mode</th>
                     <th style={{ width: 220 }}>Doctor</th>
                     <th style={{ width: 150 }}>Assigned MO</th>
-                    <th style={{ width: 140 }}>Last MO Seen</th>
+                    <th style={{ width: 140 }}>Last Consultant Seen</th>
                     <th style={{ width: 160 }}>Prescription Explained By</th>
                     {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
                     {showCallStatus && (
@@ -1516,7 +1747,7 @@ export default function GHMPage() {
                     {showFollowUpDate && <th style={{ width: 130 }}>Follow-up Date</th>}
                     <th style={{ width: 180 }}>Preferred Doctor</th>
                     <th style={{ width: 150 }}>Preferred Date</th>
-                    <th style={{ width: 150 }}>Preferred Time</th>
+                    <th style={{ width: 195 }}>Preferred Time</th>
                     <th style={{ width: 130 }}>Home Collection</th>
                     <th style={{ minWidth: 210 }}>Notes / Reason</th>
                   </tr>
@@ -1529,6 +1760,11 @@ export default function GHMPage() {
 
                     const isOpen = expanded === row.id;
                     const attempts = attemptCounts[row.id] || 0;
+                    const activeCall = activeCalls[row.id] || null;
+                    const callingIsMine =
+                      !!activeCall &&
+                      (activeCall.calling_by_id === currentDoctor?.id ||
+                        (!activeCall.calling_by_id && activeCall.calling_by === loggedInName));
 
                     return (
                       <Fragment key={row.id}>
@@ -1538,21 +1774,36 @@ export default function GHMPage() {
                             showStat === "Show" ? "tbl__row--came" : "",
                             showStat === "No Show" ? "tbl__row--noshow" : "",
                             callStat === "not_picked" ? "tbl__row--notpicked" : "",
+                            activeCall && !callingIsMine ? "tbl__row--calling" : "",
                             isSaving ? "tbl__row--saving" : "",
                             isOpen ? "tbl__row--open" : "",
                           ]
                             .filter(Boolean)
                             .join(" ")}
                         >
-                          {/* Chevron toggle */}
+                          {/* Chevron toggle + the team-wide "calling now" flag.
+                              First column so a call in progress is the first
+                              thing any OBT agent sees on the row. */}
                           <td className="tc">
-                            <button
-                              className={`chev ${isOpen ? "chev--open" : ""}`}
-                              title="Show call history"
-                              onClick={() => setExpanded(isOpen ? null : row.id)}
-                            >
-                              ▸
-                            </button>
+                            <div className="callcol">
+                              <button
+                                className={`chev ${isOpen ? "chev--open" : ""}`}
+                                title={isOpen ? "Hide call history" : "Show call history"}
+                                aria-label={isOpen ? "Hide call history" : "Show call history"}
+                                aria-expanded={isOpen}
+                                onClick={() => setExpanded(isOpen ? null : row.id)}
+                              >
+                                <ChevronRight size={16} aria-hidden="true" />
+                                <span className="chev__txt">History</span>
+                              </button>
+                              <CallingFlag
+                                row={row}
+                                active={activeCall}
+                                mine={callingIsMine}
+                                claim={claimCall}
+                                release={releaseCall}
+                              />
+                            </div>
                           </td>
 
                           {/* # */}
@@ -1648,6 +1899,7 @@ export default function GHMPage() {
                                     file_no: row.file_no,
                                     phone: row.phone,
                                     condition: row.condition,
+                                    address: row.address,
                                     doctor_name: row.doctor_name,
                                   });
                                   setShowNew(true);
@@ -1690,11 +1942,20 @@ export default function GHMPage() {
                             )}
                           </td>
 
+                          {/* Discount category — editable */}
+                          <td>
+                            <ColorSelect
+                              value={row.patient_category || ""}
+                              options={categoryOptions}
+                              onChange={(v) => patch(row.id, "patient_category", v)}
+                            />
+                          </td>
+
                           {/* Mode of appointment — editable */}
                           <td>
                             <Dropdown
                               value={row.mode_of_appointment || ""}
-                              options={MODE_OPTIONS}
+                              options={withCurrent(MODE_OPTIONS, row.mode_of_appointment)}
                               onChange={(v) => patch(row.id, "appointment_type", v)}
                               variant="cell"
                               ariaLabel="Mode of appointment"
@@ -1943,7 +2204,18 @@ export default function GHMPage() {
                                 !ARRIVAL_TIME_RANGES.includes(row.preferred_time_slot)
                                   ? [row.preferred_time_slot, ...ARRIVAL_TIME_RANGES]
                                   : ARRIVAL_TIME_RANGES
-                                ).map((t) => ({ value: t, label: t })),
+                                ).map((t) => {
+                                  const booked = slotBooked(t, slotCounts, row);
+                                  return {
+                                    value: t,
+                                    label: t,
+                                    badge: booked || undefined,
+                                    badgeTone: slotTone(booked),
+                                    badgeTitle: booked
+                                      ? `${booked} patient${booked > 1 ? "s" : ""} already in this slot`
+                                      : undefined,
+                                  };
+                                }),
                               ]}
                               onChange={(v) => patch(row.id, "preferred_time_slot", v)}
                               variant="cell"

@@ -2,10 +2,11 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
+import { OPEN_CALL_STATUSES, UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 
 const router = Router();
 
-const OPEN_CALL_SQL = `'{pending,not_picked,call_later,busy,switched_off}'::text[]`;
+const OPEN_CALL_SQL = pgArray(OPEN_CALL_STATUSES);
 
 // Scoped to today, matching the GHM sheet: the tiles report the calling done
 // today for this date's patients, and reset with each new round.
@@ -32,7 +33,7 @@ router.get("/obt-dashboard", async (req, res) => {
               COUNT(*) FILTER (WHERE ${CALL_STAT} = 'rescheduled')::int        AS rescheduled,
               COUNT(*) FILTER (WHERE ${CALL_STAT} = 'call_later')::int         AS call_later,
               COUNT(*) FILTER (
-                WHERE ${CALL_STAT} = ANY('{busy,switched_off}'::text[])
+                WHERE ${CALL_STAT} = ANY(${pgArray(UNREACHABLE_STATUSES)})
               )::int                                                           AS unreachable,
               COUNT(*) FILTER (WHERE ${CALL_STAT} = 'no_call_needed')::int     AS no_call_needed,
               COUNT(*) FILTER (WHERE a.home_collection)::int                   AS home_collection

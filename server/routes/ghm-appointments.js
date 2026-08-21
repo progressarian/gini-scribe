@@ -3,6 +3,10 @@ import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
 import { ownFu, dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
+import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
+import { CATEGORY_VALUES, isValidCategory } from "../../shared/patientCategories.js";
+import { CALL_STATUSES } from "../../shared/callStatuses.js";
+import { slotStartHour } from "../../shared/slotHour.js";
 
 const router = Router();
 
@@ -94,6 +98,113 @@ function buildWhatsappMessage({
   return { whatsapp_message: base, additional_whatsapp_msg: additional };
 }
 
+// ─── Live "on call now" claim ───────────────────────────────────────────────
+
+// A claim marks a row as being called RIGHT NOW so a second OBT agent does not
+// ring the same patient. It expires on its own after this window — an agent who
+// closes the tab mid-call must never leave a row locked forever.
+const CALL_CLAIM_TTL = "10 minutes";
+
+const claimActive = (a = "a") =>
+  `(${a}.calling_since IS NOT NULL AND ${a}.calling_since > NOW() - INTERVAL '${CALL_CLAIM_TTL}')`;
+
+const claimCols = (a = "a") => `
+  CASE WHEN ${claimActive(a)} THEN ${a}.calling_by END    AS calling_by,
+  CASE WHEN ${claimActive(a)} THEN ${a}.calling_by_id END AS calling_by_id,
+  CASE WHEN ${claimActive(a)} THEN ${a}.calling_since END AS calling_since`;
+
+const claimant = (req) => ({
+  id: req.doctor?.doctor_id || null,
+  name: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim(),
+});
+
+const releaseClaim = (client, appointmentId) =>
+  client.query(
+    `UPDATE appointments SET calling_by=NULL, calling_by_id=NULL, calling_since=NULL WHERE id=$1`,
+    [appointmentId],
+  );
+
+// POST /api/ghm-appointments/active-calls — { appointment_ids:[...] }
+// → { id: { calling_by, calling_by_id, calling_since } } for rows claimed now
+router.post("/ghm-appointments/active-calls", async (req, res) => {
+  try {
+    const ids = (req.body?.appointment_ids || []).filter((x) => Number.isInteger(x));
+    if (!ids.length) return res.json({});
+    const r = await pool.query(
+      `SELECT a.id, ${claimCols("a")}
+         FROM appointments a
+        WHERE a.id = ANY($1::int[]) AND ${claimActive("a")}`,
+      [ids],
+    );
+    const out = {};
+    for (const row of r.rows) {
+      out[row.id] = {
+        calling_by: row.calling_by,
+        calling_by_id: row.calling_by_id,
+        calling_since: row.calling_since,
+      };
+    }
+    res.json(out);
+  } catch (e) {
+    handleError(res, e, "GHM active calls");
+  }
+});
+
+// POST /api/ghm-appointments/:id/calling — take the claim
+router.post("/ghm-appointments/:id/calling", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid appointment id" });
+    const me = claimant(req);
+    if (!me.name) return res.status(401).json({ error: "Sign in to mark a call in progress" });
+
+    const r = await pool.query(
+      `UPDATE appointments
+          SET calling_by=$2, calling_by_id=$3, calling_since=NOW()
+        WHERE id=$1
+          AND (NOT ${claimActive("appointments")} OR calling_by_id IS NOT DISTINCT FROM $3)
+        RETURNING id, calling_by, calling_by_id, calling_since`,
+      [id, me.name, me.id],
+    );
+    if (r.rows.length) return res.json(r.rows[0]);
+
+    const held = await pool.query(
+      `SELECT a.id, ${claimCols("a")} FROM appointments a WHERE a.id=$1`,
+      [id],
+    );
+    if (!held.rows.length) return res.status(404).json({ error: "Appointment not found" });
+    return res.status(409).json({
+      error: `${held.rows[0].calling_by} is already calling this patient`,
+      holder: held.rows[0],
+    });
+  } catch (e) {
+    handleError(res, e, "GHM call claim");
+  }
+});
+
+// DELETE /api/ghm-appointments/:id/calling — drop your own claim
+router.delete("/ghm-appointments/:id/calling", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid appointment id" });
+    const me = claimant(req);
+
+    const r = await pool.query(
+      `UPDATE appointments
+          SET calling_by=NULL, calling_by_id=NULL, calling_since=NULL
+        WHERE id=$1
+          AND (calling_by_id IS NOT DISTINCT FROM $2 OR NOT ${claimActive("appointments")})
+        RETURNING id`,
+      [id, me.id],
+    );
+    if (!r.rows.length)
+      return res.status(403).json({ error: "This call is marked by another team member" });
+    res.json({ ok: true, id });
+  } catch (e) {
+    handleError(res, e, "GHM call release");
+  }
+});
+
 // ─── Call attempt history ──────────────────────────────────────────────────
 
 // GET /api/call-attempts?appointment_id=X — full history, newest first
@@ -183,6 +294,9 @@ router.post("/call-attempts", async (req, res) => {
        WHERE id = $5`,
       [outcome, called_by || null, notes || null, reschedule_date || null, appointment_id],
     );
+
+    // The call just happened, so the "calling now" flag has served its purpose.
+    await releaseClaim(client, appointment_id);
 
     await client.query("COMMIT");
     res.status(201).json(ins.rows[0]);
@@ -404,6 +518,88 @@ router.post("/ghm-appointments/last-mo", async (req, res) => {
   }
 });
 
+// GET /api/ghm-appointments/slot-counts?dates=YYYY-MM-DD,... — how loaded each
+// arrival hour of those dates already is: appointments booked into that hour
+// (by reporting time, falling back to the booked slot) plus the patients whose
+// preferred time is that window, so the OBT team sees the load on a slot before
+// promising it. Counts are keyed by the window's start hour.
+router.get("/ghm-appointments/slot-counts", async (req, res) => {
+  try {
+    const dates = [
+      ...new Set(
+        String(req.query.dates || "")
+          .split(",")
+          .map((d) => d.trim())
+          .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)),
+      ),
+    ];
+    if (!dates.length) return res.json({});
+
+    const [booked, preferred] = await Promise.all([
+      pool.query(
+        `SELECT a.appointment_date::text                        AS date,
+                COALESCE(a.reporting_time_slot, a.time_slot)    AS slot,
+                COUNT(*)::int                                   AS count
+           FROM appointments a
+          WHERE a.appointment_date = ANY($1::date[])
+            AND COALESCE(a.status, '') <> 'cancelled'
+          GROUP BY 1, 2`,
+        [dates],
+      ),
+      pool.query(
+        `SELECT a.preferred_date::text       AS date,
+                TRIM(a.preferred_time_slot)  AS slot,
+                COUNT(*)::int                AS count
+           FROM appointments a
+          WHERE a.preferred_date = ANY($1::date[])
+            AND NULLIF(TRIM(a.preferred_time_slot), '') IS NOT NULL
+            AND COALESCE(a.status, '') <> 'cancelled'
+          GROUP BY 1, 2`,
+        [dates],
+      ),
+    ]);
+
+    const out = {};
+    for (const row of [...booked.rows, ...preferred.rows]) {
+      const hour = slotStartHour(row.slot);
+      if (hour === null) continue;
+      out[row.date] = out[row.date] || {};
+      out[row.date][hour] = (out[row.date][hour] || 0) + row.count;
+    }
+    res.json(out);
+  } catch (e) {
+    handleError(res, e, "GHM slot counts");
+  }
+});
+
+// GET /api/ghm-appointments/category-counts?date=YYYY-MM-DD
+// How many of the DAY's visits sit in each discount category. Day-scoped on
+// purpose: it is the day's mix, so it must not move when the sheet is filtered
+// to one doctor.
+router.get("/ghm-appointments/category-counts", async (req, res) => {
+  try {
+    const date = req.query.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || "")))
+      return res.status(400).json({ error: "date=YYYY-MM-DD required" });
+
+    const r = await pool.query(
+      `SELECT patient_category AS category, COUNT(*)::int AS count
+         FROM appointments
+        WHERE appointment_date = $1
+          AND patient_category = ANY($2::text[])
+        GROUP BY 1`,
+      [date, CATEGORY_VALUES],
+    );
+
+    const out = {};
+    for (const v of CATEGORY_VALUES) out[v] = { count: 0 };
+    for (const row of r.rows) out[row.category].count = row.count;
+    res.json({ date, categories: out });
+  } catch (e) {
+    handleError(res, e, "GHM category counts");
+  }
+});
+
 const summaryCols = (a, callStat = null) => {
   const cs = callStat || `${a}.call_status`;
   return `
@@ -417,12 +613,18 @@ const summaryCols = (a, callStat = null) => {
   COUNT(*) FILTER (WHERE ${cs} = 'not_picked')::int                   AS not_picked,
   COUNT(*) FILTER (WHERE ${cs} = 'rescheduled')::int                  AS rescheduled,
   COUNT(*) FILTER (
+    WHERE ${cs} = ANY(${pgArray(UNREACHABLE_STATUSES)})
+  )::int                                                              AS unreachable,
+  COUNT(*) FILTER (
     WHERE ${cs} IS NULL OR ${cs} IN ('', 'pending')
   )::int                                                              AS not_called,
   COUNT(*) FILTER (
     WHERE ${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%'
   )::int                                                              AS follow_up,
-  COUNT(*) FILTER (WHERE ${a}.home_collection)::int                   AS home_collection`;
+  COUNT(*) FILTER (WHERE ${a}.home_collection)::int                   AS home_collection,
+  ${CATEGORY_VALUES.map(
+    (v) => `COUNT(*) FILTER (WHERE ${a}.patient_category = '${v}')::int AS cat_${v}`,
+  ).join(",\n  ")}`;
 };
 
 // Hard ceiling for an export=1 response. Well above a real day's list (the
@@ -461,9 +663,11 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.whatsapp_message, a.additional_whatsapp_msg,
                 a.notes, a.is_walkin, a.age, a.sex,
                 a.call_made_by, a.call_date,
+                ${claimCols("a")},
                 a.call_notes, a.call_reschedule_date, a.pt_recovery,
                 a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
+                a.patient_category,
                 p.id AS patient_id, p.address, p.email,
                 COALESCE(a.age, p.age) AS disp_age,
                 COALESCE(a.sex, p.sex) AS disp_sex,
@@ -522,7 +726,7 @@ router.get("/ghm-appointments", async (req, res) => {
            SELECT ${summaryCols("z")} FROM (
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     ${callStatusToday("a")} AS call_status,
-                    a.show_no_show, a.visit_type, a.home_collection
+                    a.show_no_show, a.visit_type, a.home_collection, a.patient_category
              FROM appointments a
              JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}
@@ -594,6 +798,24 @@ router.get("/ghm-appointments", async (req, res) => {
     if (status) {
       params.push(status);
       where += ` AND a.status = $${params.length}`;
+    }
+    // The New / Follow-up tabs. "New" is what the whole sheet already means by
+    // it (a visit type starting with "new"); everything else that HAS a visit
+    // type is a follow-up, matching the summary's own follow-up count.
+    const visit = String(req.query.visit || "").toLowerCase();
+    if (visit === "new") where += ` AND LOWER(COALESCE(a.visit_type, '')) LIKE 'new%'`;
+    else if (visit === "followup")
+      where += ` AND a.visit_type IS NOT NULL AND LOWER(a.visit_type) NOT LIKE 'new%'`;
+
+    // The Cancelled / Rescheduled tabs read the STORED call status, not the
+    // today-scoped one: a patient who cancelled yesterday for today's visit is
+    // still cancelled today.
+    const callStatus = String(req.query.call_status || "").trim();
+    if (callStatus) {
+      if (!CALL_STATUSES.some((c) => c.value === callStatus))
+        return res.status(400).json({ error: `Unknown call status: ${callStatus}` });
+      params.push(callStatus);
+      where += ` AND COALESCE(NULLIF(a.call_status, ''), 'pending') = $${params.length}`;
     }
     const q = (req.query.q || "").trim();
     if (q) {
@@ -688,6 +910,7 @@ router.post("/ghm-appointments", async (req, res) => {
       notes,
       is_walkin = false,
       home_collection = false,
+      address,
     } = req.body;
 
     if (!patient_name || !appointment_date || !doctor_name)
@@ -699,6 +922,7 @@ router.post("/ghm-appointments", async (req, res) => {
     // brand-new patient (auto-generates a GNI-xxxxx file_no).
     let patient_id = null;
     let resolved_file_no = file_no || null;
+    const cleanAddress = String(address || "").trim() || null;
 
     if (file_no) {
       const pr = await pool.query("SELECT id FROM patients WHERE file_no=$1 LIMIT 1", [file_no]);
@@ -724,12 +948,14 @@ router.post("/ghm-appointments", async (req, res) => {
         newFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
       }
       const created = await pool.query(
-        `INSERT INTO patients (name, phone, file_no)
-         VALUES ($1, $2, $3) RETURNING id, file_no`,
-        [patient_name, phone || null, newFileNo],
+        `INSERT INTO patients (name, phone, file_no, address)
+         VALUES ($1, $2, $3, $4) RETURNING id, file_no`,
+        [patient_name, phone || null, newFileNo, cleanAddress],
       );
       patient_id = created.rows[0].id;
       resolved_file_no = created.rows[0].file_no;
+    } else if (cleanAddress) {
+      await pool.query("UPDATE patients SET address=$1 WHERE id=$2", [cleanAddress, patient_id]);
     }
 
     // Availability gate (no-op unless SCHEDULE_ENFORCEMENT=warn|strict). Only
@@ -870,7 +1096,12 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "home_collection",
       "assigned_mo",
       "prescription_explained_by",
+      "patient_category",
     ];
+
+    if ("patient_category" in req.body && !isValidCategory(req.body.patient_category || null))
+      return res.status(400).json({ error: `Unknown category: ${req.body.patient_category}` });
+
     const sets = [];
     const vals = [];
     for (const key of allowed) {
