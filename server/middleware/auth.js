@@ -79,6 +79,11 @@ const PUBLIC_PATTERNS = [
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-symptoms$/,
   /^\/api\/patients\/[^/]+\/appointments\/[^/]+\/pre-visit-compliance$/,
   /^\/api\/patients\/[^/]+\/side-effects\/notify$/,
+  // Corporate health-checkup booking page — public by design: an employee
+  // opens scribe.geniehealth.com/checkup/:slug from an HR email with no login.
+  // Read-only company/package lookup and slot availability.
+  /^\/api\/corporate\/[^/]+$/,
+  /^\/api\/corporate\/[^/]+\/availability$/,
   // Patient flow tracking page — read-only, by opaque visit token, no login.
   // Plus the file-gated verify/assessment posts on the same public page.
   /^\/api\/flow\/track\/[^/]+$/,

@@ -13,3 +13,4 @@ server/gini-ai-*.json
 # dumps/logs should not come back to the repo root.
 *.log
 /*_debug.json
+config.bat
