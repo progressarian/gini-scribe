@@ -49,16 +49,18 @@ router.get("/patients", async (req, res) => {
       // Exact-match short-circuit: file_no/phone/abha_id are unique identifiers,
       // so a full paste of one should return only that patient (not substring matches).
       const exactHit = await pool.query(
-        `SELECT 1 FROM patients WHERE file_no = $1 OR phone = $1 OR abha_id = $1 LIMIT 1`,
+        `SELECT 1 FROM patients WHERE file_no = $1 OR phone = $1 OR alt_phone = $1 OR abha_id = $1 LIMIT 1`,
         [trimmed],
       );
       if (exactHit.rowCount > 0) {
-        conditions.push(`(p.file_no = $${idx} OR p.phone = $${idx} OR p.abha_id = $${idx})`);
+        conditions.push(
+          `(p.file_no = $${idx} OR p.phone = $${idx} OR p.alt_phone = $${idx} OR p.abha_id = $${idx})`,
+        );
         params.push(trimmed);
         idx++;
       } else {
         conditions.push(
-          `(p.name ILIKE $${idx} OR p.phone LIKE $${idx} OR p.file_no ILIKE $${idx} OR p.abha_id ILIKE $${idx}
+          `(p.name ILIKE $${idx} OR p.phone LIKE $${idx} OR p.alt_phone LIKE $${idx} OR p.file_no ILIKE $${idx} OR p.abha_id ILIKE $${idx}
             OR EXISTS (
               SELECT 1 FROM appointments a
                WHERE a.patient_id = p.id

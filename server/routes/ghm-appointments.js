@@ -631,6 +631,16 @@ const summaryCols = (a, callStat = null) => {
 // seen so far, so it only ever trips on a runaway query.
 const EXPORT_MAX = 5000;
 
+const ATTENDED_STATUSES = `'{"seen","completed","checkedin","in_visit","in-progress"}'::text[]`;
+
+const LAST_VISIT_SQL = `(
+  SELECT MAX(prev.appointment_date)
+    FROM appointments prev
+   WHERE prev.patient_id = a.patient_id
+     AND prev.appointment_date < a.appointment_date
+     AND prev.status = ANY(${ATTENDED_STATUSES})
+)`;
+
 // GET /api/ghm-appointments — list by date + optional doctor
 router.get("/ghm-appointments", async (req, res) => {
   try {
@@ -652,7 +662,7 @@ router.get("/ghm-appointments", async (req, res) => {
     const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
 
     const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
-                a.doctor_name, a.patient_name, a.file_no, a.phone,
+                a.doctor_name, a.patient_name, a.file_no, a.phone, a.alt_phone,
                 a.visit_type, a.appointment_type, a.booking_source,
                 a.booked_by_name, a.booking_date, a.condition, a.chief_complaint,
                 a.insurance_taken, a.how_did_you_know, a.referred_by_doctor_name,
@@ -667,6 +677,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
                 a.patient_category,
+                ${LAST_VISIT_SQL} AS last_visit_date,
                 p.id AS patient_id, p.address, p.email,
                 COALESCE(a.age, p.age) AS disp_age,
                 COALESCE(a.sex, p.sex) AS disp_sex,
@@ -696,7 +707,7 @@ router.get("/ghm-appointments", async (req, res) => {
       const tokenConds = tokens
         .map(
           (_, i) =>
-            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1})`,
+            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1} OR a.alt_phone ILIKE $${i + 1})`,
         )
         .join(" AND ");
       const searchWhere = `WHERE (${tokenConds})${homeCond}`;
@@ -727,7 +738,7 @@ router.get("/ghm-appointments", async (req, res) => {
                     ${callStatusToday("a")} AS call_status,
                     a.show_no_show, a.visit_type, a.home_collection, a.patient_category
              FROM appointments a
-             JOIN upcoming u ON u.file_no = a.file_no
+             LEFT JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}
              ${pickUpcoming}
            ) z`,
@@ -744,7 +755,7 @@ router.get("/ghm-appointments", async (req, res) => {
                       FALSE AS via_preferred,
                       u.next_date AS follow_up_date
                ${joins}
-               JOIN upcoming u ON u.file_no = a.file_no
+               LEFT JOIN upcoming u ON u.file_no = a.file_no
                ${searchWhere}
                ${pickUpcoming}
              ) t
@@ -802,7 +813,7 @@ router.get("/ghm-appointments", async (req, res) => {
     if (q) {
       for (const t of q.split(/\s+/).filter(Boolean).slice(0, 6)) {
         params.push(`%${t}%`);
-        where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.condition ILIKE $${params.length})`;
+        where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.alt_phone ILIKE $${params.length} OR a.condition ILIKE $${params.length})`;
       }
     }
 
@@ -892,12 +903,22 @@ router.post("/ghm-appointments", async (req, res) => {
       is_walkin = false,
       home_collection = false,
       address,
+      status,
+      alt_phone,
     } = req.body;
 
     if (!patient_name || !appointment_date || !doctor_name)
       return res
         .status(400)
         .json({ error: "patient_name, appointment_date, doctor_name required" });
+
+    const bookingStatus = status === "cancelled" ? "cancelled" : "scheduled";
+    const cleanAltPhone =
+      String(alt_phone || "")
+        .replace(/\D/g, "")
+        .slice(0, 10) || null;
+    if (cleanAltPhone && cleanAltPhone.length !== 10)
+      return res.status(400).json({ error: "alt_phone must be a 10-digit number" });
 
     // Resolve patient_id — by file_no, then phone. If still none, register a
     // brand-new patient (auto-generates a GNI-xxxxx file_no).
@@ -910,9 +931,10 @@ router.post("/ghm-appointments", async (req, res) => {
       patient_id = pr.rows[0]?.id || null;
     }
     if (!patient_id && phone) {
-      const pr = await pool.query("SELECT id, file_no FROM patients WHERE phone=$1 LIMIT 1", [
-        phone,
-      ]);
+      const pr = await pool.query(
+        "SELECT id, file_no FROM patients WHERE phone=$1 OR alt_phone=$1 LIMIT 1",
+        [phone],
+      );
       if (pr.rows[0]) {
         patient_id = pr.rows[0].id;
         resolved_file_no = resolved_file_no || pr.rows[0].file_no;
@@ -929,31 +951,67 @@ router.post("/ghm-appointments", async (req, res) => {
         newFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
       }
       const created = await pool.query(
-        `INSERT INTO patients (name, phone, file_no, address)
-         VALUES ($1, $2, $3, $4) RETURNING id, file_no`,
-        [patient_name, phone || null, newFileNo, cleanAddress],
+        `INSERT INTO patients (name, phone, file_no, address, alt_phone)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id, file_no`,
+        [patient_name, phone || null, newFileNo, cleanAddress, cleanAltPhone],
       );
       patient_id = created.rows[0].id;
       resolved_file_no = created.rows[0].file_no;
-    } else if (cleanAddress) {
-      await pool.query("UPDATE patients SET address=$1 WHERE id=$2", [cleanAddress, patient_id]);
+    } else if (cleanAddress || cleanAltPhone) {
+      await pool.query(
+        `UPDATE patients
+            SET address = COALESCE($1, address),
+                alt_phone = COALESCE($2, alt_phone)
+          WHERE id = $3`,
+        [cleanAddress, cleanAltPhone, patient_id],
+      );
     }
 
     // Availability gate (no-op unless SCHEDULE_ENFORCEMENT=warn|strict). Only
     // catalog slots are enforced; unknown doctor/slot passes through.
     const gateDoctorId = await resolveDoctorIdByName(doctor_name);
-    const avail = await checkBookingAvailability({
-      doctorId: gateDoctorId,
-      date: appointment_date,
-      slot: time_slot,
-      force: req.body.force,
-      role: req.doctor?.role,
-    });
+    const avail =
+      bookingStatus === "cancelled"
+        ? null
+        : await checkBookingAvailability({
+            doctorId: gateDoctorId,
+            date: appointment_date,
+            slot: time_slot,
+            force: req.body.force,
+            role: req.doctor?.role,
+          });
     if (avail?.blocked) {
       return res.status(409).json({
         error: "doctor_unavailable",
         reason: avail.reason,
         detail: avail.detail || null,
+      });
+    }
+
+    const existing =
+      resolved_file_no && bookingStatus !== "cancelled"
+        ? await pool.query(
+            `SELECT id, doctor_name, time_slot, booked_by_name, source
+             FROM appointments
+            WHERE file_no = $1 AND appointment_date = $2
+              AND status NOT IN ('cancelled', 'no_show')
+            ORDER BY doctor_name NULLS FIRST, created_at
+            LIMIT 1`,
+            [resolved_file_no, appointment_date],
+          )
+        : { rows: [] };
+    const priorRow = existing.rows[0] || null;
+    const placeholder = priorRow && !priorRow.doctor_name;
+
+    if (priorRow && !placeholder && !req.body.allow_duplicate) {
+      return res.status(409).json({
+        error: "duplicate_booking",
+        detail: {
+          id: priorRow.id,
+          doctor_name: priorRow.doctor_name,
+          time_slot: priorRow.time_slot,
+          booked_by_name: priorRow.booked_by_name,
+        },
       });
     }
 
@@ -967,8 +1025,55 @@ router.post("/ghm-appointments", async (req, res) => {
       visit_type,
     });
 
-    const r = await pool.query(
-      `INSERT INTO appointments (
+    const r = placeholder
+      ? await pool.query(
+          `UPDATE appointments SET
+             patient_id=COALESCE($1, patient_id), patient_name=$2, phone=COALESCE($3, phone),
+             doctor_name=$4, time_slot=$5, reporting_time_slot=$6,
+             visit_type=$7, appointment_type=$8, booking_source=$9,
+             booked_by_name=$10, booking_date=$11, insurance_taken=$12,
+             how_did_you_know=$13, referred_by_doctor_name=$14,
+             earlier_slot_given=$15, condition=$16, chief_complaint=$17,
+             misc_notes=$18, reports_uploaded=$19, will_get_test_at_gini=$20,
+             requested_by_cc=$21, cc_remark_date=$22, notes=$23, is_walkin=$24,
+             whatsapp_message=$25, additional_whatsapp_msg=$26, home_collection=$27,
+             status=$28, alt_phone=COALESCE($29, alt_phone)
+           WHERE id=$30 RETURNING *`,
+          [
+            patient_id,
+            patient_name,
+            phone,
+            doctor_name,
+            time_slot,
+            reporting_time_slot,
+            visit_type,
+            appointment_type,
+            booking_source,
+            booked_by_name,
+            booking_date || appointment_date,
+            insurance_taken,
+            how_did_you_know,
+            referred_by_doctor_name,
+            earlier_slot_given,
+            condition,
+            chief_complaint,
+            misc_notes,
+            reports_uploaded,
+            will_get_test_at_gini,
+            requested_by_cc,
+            cc_remark_date,
+            notes,
+            is_walkin,
+            whatsapp_message,
+            additional_whatsapp_msg,
+            home_collection,
+            bookingStatus,
+            cleanAltPhone,
+            priorRow.id,
+          ],
+        )
+      : await pool.query(
+          `INSERT INTO appointments (
         patient_id, patient_name, file_no, phone, doctor_name,
         appointment_date, time_slot, reporting_time_slot,
         visit_type, appointment_type, booking_source,
@@ -977,46 +1082,48 @@ router.post("/ghm-appointments", async (req, res) => {
         earlier_slot_given, condition, chief_complaint,
         misc_notes, reports_uploaded, will_get_test_at_gini,
         requested_by_cc, cc_remark_date, notes, is_walkin,
-        whatsapp_message, additional_whatsapp_msg, home_collection, status
+        whatsapp_message, additional_whatsapp_msg, home_collection, status, alt_phone
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,'scheduled'
+        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
       ) RETURNING *`,
-      [
-        patient_id,
-        patient_name,
-        resolved_file_no,
-        phone,
-        doctor_name,
-        appointment_date,
-        time_slot,
-        reporting_time_slot,
-        visit_type,
-        appointment_type,
-        booking_source,
-        booked_by_name,
-        booking_date || appointment_date,
-        insurance_taken,
-        how_did_you_know,
-        referred_by_doctor_name,
-        earlier_slot_given,
-        condition,
-        chief_complaint,
-        misc_notes,
-        reports_uploaded,
-        will_get_test_at_gini,
-        requested_by_cc,
-        cc_remark_date,
-        notes,
-        is_walkin,
-        whatsapp_message,
-        additional_whatsapp_msg,
-        home_collection,
-      ],
-    );
+          [
+            patient_id,
+            patient_name,
+            resolved_file_no,
+            phone,
+            doctor_name,
+            appointment_date,
+            time_slot,
+            reporting_time_slot,
+            visit_type,
+            appointment_type,
+            booking_source,
+            booked_by_name,
+            booking_date || appointment_date,
+            insurance_taken,
+            how_did_you_know,
+            referred_by_doctor_name,
+            earlier_slot_given,
+            condition,
+            chief_complaint,
+            misc_notes,
+            reports_uploaded,
+            will_get_test_at_gini,
+            requested_by_cc,
+            cc_remark_date,
+            notes,
+            is_walkin,
+            whatsapp_message,
+            additional_whatsapp_msg,
+            home_collection,
+            bookingStatus,
+            cleanAltPhone,
+          ],
+        );
 
     // Increment slot booked_count
-    if (time_slot && doctor_name) {
+    if (time_slot && doctor_name && bookingStatus !== "cancelled") {
       await pool.query(
         `UPDATE appointment_slots
          SET booked_count = booked_count + 1
@@ -1078,6 +1185,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "assigned_mo",
       "prescription_explained_by",
       "patient_category",
+      "alt_phone",
     ];
 
     if ("patient_category" in req.body && !isValidCategory(req.body.patient_category || null))

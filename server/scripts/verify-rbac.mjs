@@ -34,6 +34,9 @@ const ROUTE_CASES = [
   ["/api/flow/queue/vitals", "nurse", true],
   ["/api/flow/queue/vitals", "reception", true], // holds FLOW_COORDINATOR
   ["/api/flow/queue/vitals", "obt", false],
+  ["/api/flow/queue/vitals_associate", "coordinator", true],
+  ["/api/flow/queue/vitals_associate", "reception", true],
+  ["/api/flow/queue/vitals_associate", "obt", false],
   ["/api/flow/reports", "coordinator", true],
   ["/api/flow/reports", "reception", false],
   ["/api/flow/demo/seed", "coordinator", false],

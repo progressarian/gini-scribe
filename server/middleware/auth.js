@@ -215,7 +215,16 @@ const ROUTE_CAPABILITIES = [
   // below narrow the surfaces one role owns. Admin-only writes (visit-types,
   // step-catalog, demo) additionally carry requireCapability(ADMIN) per route,
   // which runs after this check.
-  ["/api/flow", [CAP.FLOW_RECEPTION, CAP.FLOW_COORDINATOR, CAP.FLOW_STATION, CAP.FLOW_PHARMACY]],
+  [
+    "/api/flow",
+    [
+      CAP.FLOW_RECEPTION,
+      CAP.FLOW_COORDINATOR,
+      CAP.FLOW_FLOOR_VIEW,
+      CAP.FLOW_STATION,
+      CAP.FLOW_PHARMACY,
+    ],
+  ],
   ["/api/flow/checkin", CAP.FLOW_RECEPTION],
   // Today's booking list behind the check-in screen. Its own row (not the
   // any-of base) so station/pharmacy roles can't read the day's bookings.

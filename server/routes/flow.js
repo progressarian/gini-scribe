@@ -7,7 +7,12 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { requireCapability } from "../middleware/auth.js";
-import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import {
+  CAPABILITIES as CAP,
+  hasAnyCapability,
+  canWorkStationRole,
+  ownsStationRole,
+} from "../../shared/permissions.js";
 import { sendFlowCheckin } from "../services/msg91.js";
 import { seedFlowDemo, cleanFlowDemo } from "../services/flow/demo.js";
 import {
@@ -24,8 +29,13 @@ import { transactionsToBilling } from "../services/healthray/billingExtractor.js
 
 const router = Router();
 
+// The JWT carries doctor_name / doctor_id (see auth.js login), not name / id —
+// without those fallbacks every doctor with no short_name logged as null.
 const ACTOR = (req) =>
-  req.doctor?.short_name || req.doctor?.name || (req.doctor?.id ? String(req.doctor.id) : null);
+  req.doctor?.short_name ||
+  req.doctor?.doctor_name ||
+  req.doctor?.name ||
+  (req.doctor?.doctor_id ? String(req.doctor.doctor_id) : null);
 
 async function logEvent(client, visitId, type, stepOrder, details, by) {
   await client.query(
@@ -935,6 +945,21 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(409).json({ error: "No open step to advance" });
     }
+    if (
+      !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) &&
+      !canWorkStationRole(req.doctor?.role, current.assigned_role)
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "This step belongs to another station" });
+    }
+    const currentHeldBy = claimBlocks(current, req);
+    if (currentHeldBy) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: `${currentHeldBy.by} is already working this patient — ask them to release first`,
+        claimed_by: currentHeldBy.by,
+      });
+    }
 
     const actualDur = current.started_at
       ? Math.max(0, Math.round((Date.now() - new Date(current.started_at).getTime()) / 60000))
@@ -1056,53 +1081,58 @@ router.patch(
 // the visit cancelled. If the linked appointment was created BY the flow
 // (booking_source='flow'), cancel that too so it doesn't linger in OPD/GHM; a
 // real OPD/GHM appointment is left untouched (the booking still stands).
-router.post("/flow/visits/:id/cancel", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const visitId = req.params.id;
-    const { reason = null } = req.body || {};
-    await client.query("BEGIN");
-    const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
-      .rows[0];
-    if (!v) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Visit not found" });
-    }
-    if (v.status === "completed") {
-      await client.query("ROLLBACK");
-      return res.status(409).json({ error: "Cannot cancel a completed visit" });
-    }
-    await client.query("UPDATE flow_visits SET status='cancelled', updated_at=NOW() WHERE id=$1", [
-      visitId,
-    ]);
-    await logEvent(client, visitId, "visit_cancelled", null, { reason }, ACTOR(req));
-    await client.query("COMMIT");
-
-    // Only roll back appointments the flow itself created.
-    if (v.appointment_id) {
-      try {
-        const appt = (
-          await pool.query("SELECT booking_source FROM appointments WHERE id=$1", [
-            v.appointment_id,
-          ])
-        ).rows[0];
-        if (appt && appt.booking_source === "flow") {
-          await pool.query("UPDATE appointments SET status='cancelled' WHERE id=$1", [
-            v.appointment_id,
-          ]);
-        }
-      } catch (e) {
-        console.error("Flow cancel appointment cleanup failed:", e.message);
+router.post(
+  "/flow/visits/:id/cancel",
+  requireCapability(CAP.FLOW_COORDINATOR),
+  async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const visitId = req.params.id;
+      const { reason = null } = req.body || {};
+      await client.query("BEGIN");
+      const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
+        .rows[0];
+      if (!v) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Visit not found" });
       }
+      if (v.status === "completed") {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "Cannot cancel a completed visit" });
+      }
+      await client.query(
+        "UPDATE flow_visits SET status='cancelled', updated_at=NOW() WHERE id=$1",
+        [visitId],
+      );
+      await logEvent(client, visitId, "visit_cancelled", null, { reason }, ACTOR(req));
+      await client.query("COMMIT");
+
+      // Only roll back appointments the flow itself created.
+      if (v.appointment_id) {
+        try {
+          const appt = (
+            await pool.query("SELECT booking_source FROM appointments WHERE id=$1", [
+              v.appointment_id,
+            ])
+          ).rows[0];
+          if (appt && appt.booking_source === "flow") {
+            await pool.query("UPDATE appointments SET status='cancelled' WHERE id=$1", [
+              v.appointment_id,
+            ]);
+          }
+        } catch (e) {
+          console.error("Flow cancel appointment cleanup failed:", e.message);
+        }
+      }
+      res.json({ status: "cancelled" });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Flow cancel");
+    } finally {
+      client.release();
     }
-    res.json({ status: "cancelled" });
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    handleError(res, e, "Flow cancel");
-  } finally {
-    client.release();
-  }
-});
+  },
+);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Start / Resume timer — for a parked ('waiting') visit: start the clock fresh
@@ -1111,94 +1141,98 @@ router.post("/flow/visits/:id/cancel", async (req, res) => {
 // active step's started_at forward by the paused duration so elapsed continues
 // seamlessly from where it froze.
 // ─────────────────────────────────────────────────────────────────────────
-router.post("/flow/visits/:id/start-timer", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const visitId = req.params.id;
-    await client.query("BEGIN");
-    const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
-      .rows[0];
-    if (!v) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Visit not found" });
-    }
-    if (v.status !== "waiting" && v.status !== "paused") {
-      await client.query("ROLLBACK");
-      return res.status(409).json({
-        error:
-          v.status === "in_progress"
-            ? "Timer is already running for this visit"
-            : `Cannot start a ${v.status} visit`,
-      });
-    }
+router.post(
+  "/flow/visits/:id/start-timer",
+  requireCapability(CAP.FLOW_COORDINATOR),
+  async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const visitId = req.params.id;
+      await client.query("BEGIN");
+      const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
+        .rows[0];
+      if (!v) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Visit not found" });
+      }
+      if (v.status !== "waiting" && v.status !== "paused") {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error:
+            v.status === "in_progress"
+              ? "Timer is already running for this visit"
+              : `Cannot start a ${v.status} visit`,
+        });
+      }
 
-    // ── Resume a paused visit ── shift every live timestamp forward by the
-    // time spent paused, so elapsed picks up exactly where it left off.
-    if (v.status === "paused") {
-      await client.query(
-        `UPDATE flow_visit_steps
+      // ── Resume a paused visit ── shift every live timestamp forward by the
+      // time spent paused, so elapsed picks up exactly where it left off.
+      if (v.status === "paused") {
+        await client.query(
+          `UPDATE flow_visit_steps
            SET started_at = started_at + (NOW() - $2::timestamptz)
          WHERE visit_id=$1 AND status='in_progress' AND started_at IS NOT NULL`,
-        [visitId, v.paused_at],
-      );
-      await client.query(
-        `UPDATE flow_visits
+          [visitId, v.paused_at],
+        );
+        await client.query(
+          `UPDATE flow_visits
            SET status='in_progress',
                timer_started_at = timer_started_at + (NOW() - $2::timestamptz),
                estimated_completion = estimated_completion + (NOW() - $2::timestamptz),
                paused_at = NULL, updated_at = NOW()
          WHERE id=$1`,
-        [visitId, v.paused_at],
-      );
-      await logEvent(client, visitId, "timer_resumed", null, {}, ACTOR(req));
-      await client.query("COMMIT");
-      return res.json({ status: "in_progress" });
-    }
+          [visitId, v.paused_at],
+        );
+        await logEvent(client, visitId, "timer_resumed", null, {}, ACTOR(req));
+        await client.query("COMMIT");
+        return res.json({ status: "in_progress" });
+      }
 
-    // ── Fresh start of a parked (waiting) visit ──
-    // Clock starts now; ETA = now + the planned journey length.
-    await client.query(
-      `UPDATE flow_visits
+      // ── Fresh start of a parked (waiting) visit ──
+      // Clock starts now; ETA = now + the planned journey length.
+      await client.query(
+        `UPDATE flow_visits
          SET status='in_progress', timer_started_at=NOW(),
              estimated_completion = NOW() + make_interval(mins => COALESCE(suggested_wait_min, 0)),
              updated_at=NOW()
        WHERE id=$1`,
-      [visitId],
-    );
-
-    // Auto-start the first step (in_progress if its station is free, else ready) —
-    // mirrors the non-deferred check-in path.
-    const first = (
-      await client.query(
-        "SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC LIMIT 1",
         [visitId],
-      )
-    ).rows[0];
-    if (first) {
-      const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
-      const firstStatus = busy ? "ready" : "in_progress";
-      await client.query(
-        `UPDATE flow_visit_steps
+      );
+
+      // Auto-start the first step (in_progress if its station is free, else ready) —
+      // mirrors the non-deferred check-in path.
+      const first = (
+        await client.query(
+          "SELECT * FROM flow_visit_steps WHERE visit_id=$1 ORDER BY step_order ASC LIMIT 1",
+          [visitId],
+        )
+      ).rows[0];
+      if (first) {
+        const busy = await stationBusy(client, first.assigned_role, first.assigned_staff_id);
+        const firstStatus = busy ? "ready" : "in_progress";
+        await client.query(
+          `UPDATE flow_visit_steps
            SET status=$2, started_at = CASE WHEN $2='in_progress' THEN NOW() ELSE NULL END
          WHERE id=$1`,
-        [first.id, firstStatus],
-      );
-      await client.query(
-        "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3 WHERE id=$1",
-        [visitId, first.id, first.step_order],
-      );
-    }
+          [first.id, firstStatus],
+        );
+        await client.query(
+          "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3 WHERE id=$1",
+          [visitId, first.id, first.step_order],
+        );
+      }
 
-    await logEvent(client, visitId, "timer_started", first?.step_order ?? null, {}, ACTOR(req));
-    await client.query("COMMIT");
-    res.json({ status: "in_progress" });
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    handleError(res, e, "Flow start timer");
-  } finally {
-    client.release();
-  }
-});
+      await logEvent(client, visitId, "timer_started", first?.step_order ?? null, {}, ACTOR(req));
+      await client.query("COMMIT");
+      res.json({ status: "in_progress" });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Flow start timer");
+    } finally {
+      client.release();
+    }
+  },
+);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Stop timer — conditional:
@@ -1207,64 +1241,469 @@ router.post("/flow/visits/:id/start-timer", async (req, res) => {
 //   • Journey begun (a step is in_progress or completed) → PAUSE: freeze the
 //     clock at now (preserving elapsed) so reception can ▶ Resume later.
 // ─────────────────────────────────────────────────────────────────────────
-router.post("/flow/visits/:id/stop-timer", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const visitId = req.params.id;
-    await client.query("BEGIN");
-    const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
-      .rows[0];
-    if (!v) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Visit not found" });
-    }
-    if (v.status !== "in_progress") {
-      await client.query("ROLLBACK");
-      return res.status(409).json({ error: "Timer is not running for this visit" });
-    }
+router.post(
+  "/flow/visits/:id/stop-timer",
+  requireCapability(CAP.FLOW_COORDINATOR),
+  async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const visitId = req.params.id;
+      await client.query("BEGIN");
+      const v = (await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId]))
+        .rows[0];
+      if (!v) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Visit not found" });
+      }
+      if (v.status !== "in_progress") {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "Timer is not running for this visit" });
+      }
 
-    // Has the journey actually begun? Any step started (in_progress) or completed.
-    const progressed =
-      (
-        await client.query(
-          `SELECT COUNT(*)::int AS n FROM flow_visit_steps
+      // Has the journey actually begun? Any step started (in_progress) or completed.
+      const progressed =
+        (
+          await client.query(
+            `SELECT COUNT(*)::int AS n FROM flow_visit_steps
             WHERE visit_id=$1 AND status IN ('in_progress','completed')`,
+            [visitId],
+          )
+        ).rows[0].n > 0;
+
+      if (progressed) {
+        // Pause: freeze the clock; leave steps/ETA intact so Resume continues.
+        await client.query(
+          "UPDATE flow_visits SET status='paused', paused_at=NOW(), updated_at=NOW() WHERE id=$1",
           [visitId],
-        )
-      ).rows[0].n > 0;
+        );
+        await logEvent(client, visitId, "timer_paused", null, {}, ACTOR(req));
+        await client.query("COMMIT");
+        return res.json({ status: "paused" });
+      }
 
-    if (progressed) {
-      // Pause: freeze the clock; leave steps/ETA intact so Resume continues.
+      // Not begun yet: park it again — clock cleared, ETA cleared, steps pending.
       await client.query(
-        "UPDATE flow_visits SET status='paused', paused_at=NOW(), updated_at=NOW() WHERE id=$1",
-        [visitId],
-      );
-      await logEvent(client, visitId, "timer_paused", null, {}, ACTOR(req));
-      await client.query("COMMIT");
-      return res.json({ status: "paused" });
-    }
-
-    // Not begun yet: park it again — clock cleared, ETA cleared, steps pending.
-    await client.query(
-      `UPDATE flow_visits
+        `UPDATE flow_visits
          SET status='waiting', timer_started_at=NULL, estimated_completion=NULL,
              current_step_id=NULL, current_step_order=0, updated_at=NOW()
        WHERE id=$1`,
-      [visitId],
-    );
-    await client.query(
-      `UPDATE flow_visit_steps
+        [visitId],
+      );
+      await client.query(
+        `UPDATE flow_visit_steps
          SET status='pending', started_at=NULL, actual_duration_min=NULL
        WHERE visit_id=$1 AND status IN ('in_progress','ready')`,
-      [visitId],
-    );
+        [visitId],
+      );
 
-    await logEvent(client, visitId, "timer_stopped", null, {}, ACTOR(req));
+      await logEvent(client, visitId, "timer_stopped", null, {}, ACTOR(req));
+      await client.query("COMMIT");
+      res.json({ status: "waiting" });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Flow stop timer");
+    } finally {
+      client.release();
+    }
+  },
+);
+
+// ── Step claims ─────────────────────────────────────────────────────────────
+// Who is currently working a step, held in data.claim (same pattern as
+// data.skip). Deliberately NOT assigned_staff_id: that column feeds
+// stationBusy(), and writing it would quietly turn the station's one-at-a-time
+// rule into a per-person one. A claim is display + collision guard only.
+//
+// Claims go stale so a desk can never deadlock because someone walked away
+// mid-patient without releasing.
+const CLAIM_STALE_MIN = 15;
+const claimOf = (step) => {
+  const c = step.data?.claim;
+  if (!c || !c.at) return null;
+  const ageMin = (Date.now() - new Date(c.at).getTime()) / 60000;
+  return ageMin > CLAIM_STALE_MIN ? null : c;
+};
+const claimBlocks = (step, req) => {
+  const c = claimOf(step);
+  return c && String(c.by_id) !== String(req.doctor?.doctor_id) ? c : null;
+};
+const withClaim = (step, req) => ({
+  ...(step.data || {}),
+  claim: {
+    by: ACTOR(req),
+    by_id: req.doctor?.doctor_id ?? null,
+    at: new Date().toISOString(),
+  },
+});
+
+// Take a step for yourself — the guard against two people at the same desk
+// working the same patient. 409 names who already has it.
+router.post("/flow/steps/:stepId/claim", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const step = (
+      await client.query("SELECT * FROM flow_visit_steps WHERE id=$1 FOR UPDATE", [
+        req.params.stepId,
+      ])
+    ).rows[0];
+    if (!step) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Step not found" });
+    }
+    if (
+      !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) &&
+      !canWorkStationRole(req.doctor?.role, step.assigned_role)
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "This step belongs to another station" });
+    }
+    if (["completed", "skipped"].includes(step.status)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `This step is already ${step.status}` });
+    }
+    const held = claimBlocks(step, req);
+    if (held) {
+      await client.query("ROLLBACK");
+      return res
+        .status(409)
+        .json({ error: `${held.by} is already working this patient`, claimed_by: held.by });
+    }
+    await client.query("UPDATE flow_visit_steps SET data=$2 WHERE id=$1", [
+      step.id,
+      JSON.stringify(withClaim(step, req)),
+    ]);
+    await logEvent(client, step.visit_id, "claimed", step.step_order, {}, ACTOR(req));
     await client.query("COMMIT");
-    res.json({ status: "waiting" });
+    res.json({ ok: true, claimed_by: ACTOR(req) });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
-    handleError(res, e, "Flow stop timer");
+    handleError(res, e, "Flow claim step");
+  } finally {
+    client.release();
+  }
+});
+
+// Hand a step back. Yours to release, or a floor manager clearing a stuck one.
+router.post("/flow/steps/:stepId/release", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const step = (
+      await client.query("SELECT * FROM flow_visit_steps WHERE id=$1 FOR UPDATE", [
+        req.params.stepId,
+      ])
+    ).rows[0];
+    if (!step) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Step not found" });
+    }
+    const held = claimBlocks(step, req);
+    if (held && !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Held by ${held.by} — only they can release it` });
+    }
+    const next = { ...(step.data || {}) };
+    delete next.claim;
+    await client.query("UPDATE flow_visit_steps SET data=$2 WHERE id=$1", [
+      step.id,
+      JSON.stringify(next),
+    ]);
+    await logEvent(client, step.visit_id, "released", step.step_order, {}, ACTOR(req));
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow release step");
+  } finally {
+    client.release();
+  }
+});
+
+// Patients still in the building. reconcileFromAppointments() can flip a visit
+// to 'completed' mid-request, so the list is filtered again after it runs.
+const PRESENT_VISIT_STATUSES = ["waiting", "paused", "in_progress"];
+
+// A consultant's own worklist: patients assigned to them today, plus any
+// hand-over offers waiting on their decision. Matched on assigned_sd (the id)
+// with a name fallback, because pre-flow rows and imported visits carry only
+// the name.
+router.get("/flow/my-patients", async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    const me = req.doctor?.doctor_id ?? null;
+    const myName = req.doctor?.doctor_name || "";
+    const myShort = req.doctor?.short_name || "";
+    if (!me) return res.status(403).json({ error: "Doctor account required" });
+
+    const visits = (
+      await pool.query(
+        `SELECT * FROM flow_visits
+          WHERE visit_date=$1 AND status = ANY($2::text[])`,
+        [date, PRESENT_VISIT_STATUSES],
+      )
+    ).rows;
+    const stepMap = await stepsByVisit(visits.map((v) => v.id));
+    // Same reconciliation the Flow Floor does on every read: HealthRay may have
+    // marked the appointment seen/completed since the last cron pass, and a
+    // consultant should not be shown a patient who has already left.
+    await reconcileFromAppointments(visits, stepMap);
+    const now = Date.now();
+    const mine = [];
+    const offers = [];
+    for (const v of visits.filter((v) => PRESENT_VISIT_STATUSES.includes(v.status))) {
+      v.steps = stepMap.get(v.id) || [];
+      v._timing = classifyVisit(v, now);
+      v.stage = deriveStage(v, v.steps);
+      const sd = v.steps.find((s) => s.assigned_role === "sd");
+      v.sd_step = sd
+        ? { id: sd.id, status: sd.status, step_order: sd.step_order, step_name: sd.step_name }
+        : null;
+      const offer = offerOf(sd);
+      if (offer && String(offer.to_id) === String(me)) {
+        offers.push({ ...v, offer });
+        continue;
+      }
+      const isMine =
+        (v.assigned_sd != null && String(v.assigned_sd) === String(me)) ||
+        (!v.assigned_sd &&
+          v.assigned_sd_name &&
+          [myName, myShort]
+            .filter(Boolean)
+            .some((n) => n.toLowerCase() === v.assigned_sd_name.toLowerCase()));
+      if (isMine) mine.push({ ...v, offer: offer || null });
+    }
+    const byWait = (a, b) =>
+      Number(!!b.is_vip) - Number(!!a.is_vip) ||
+      new Date(a.checkin_time) - new Date(b.checkin_time);
+    mine.sort(byWait);
+    offers.sort(byWait);
+    res.json({ date, mine, offers });
+  } catch (e) {
+    handleError(res, e, "Flow my patients");
+  }
+});
+
+// ── Consultant hand-over (offer → accept) ───────────────────────────────────
+// Admin offers an overloaded consultant's patient to a freer one; the receiving
+// consultant accepts before it lands in their list. The pending offer lives in
+// the SD step's data.offer (same pattern as data.claim / data.skip), so nothing
+// about the visit changes until acceptance.
+//
+// Offers expire so a patient is never left in limbo because the offered doctor
+// never looked at their screen — there is no doctor-facing notification.
+const OFFER_STALE_MIN = 5;
+const offerOf = (step) => {
+  const o = step?.data?.offer;
+  if (!o || !o.at) return null;
+  return (Date.now() - new Date(o.at).getTime()) / 60000 > OFFER_STALE_MIN ? null : o;
+};
+
+// The step a consultant hand-over is about. Chief stays with its own doctor.
+async function sdStepFor(client, visitId) {
+  return (
+    await client.query(
+      `SELECT * FROM flow_visit_steps
+        WHERE visit_id=$1 AND assigned_role='sd'
+        ORDER BY step_order ASC LIMIT 1
+        FOR UPDATE`,
+      [visitId],
+    )
+  ).rows[0];
+}
+
+router.post("/flow/visits/:id/offer", requireCapability(CAP.FLOW_COORDINATOR), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const toId = parseInt(req.body?.to_doctor_id, 10);
+    const toName = (req.body?.to_doctor_name || "").toString().trim();
+    if (!Number.isInteger(toId) || !toName)
+      return res.status(400).json({ error: "to_doctor_id and to_doctor_name are required" });
+
+    await client.query("BEGIN");
+    const visit = (
+      await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [req.params.id])
+    ).rows[0];
+    if (!visit) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit not found" });
+    }
+    if (visit.assigned_sd === toId) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `${toName} is already this patient's consultant` });
+    }
+    const step = await sdStepFor(client, visit.id);
+    if (!step) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "This visit has no SD consultation step" });
+    }
+    if (["completed", "skipped"].includes(step.status)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `The consultation is already ${step.status}` });
+    }
+    // Mid-consultation hand-over would pull the patient away from a doctor who
+    // is with them right now.
+    if (step.status === "in_progress") {
+      await client.query("ROLLBACK");
+      return res
+        .status(409)
+        .json({ error: "This consultation has already started — it cannot be handed over" });
+    }
+    const pending = offerOf(step);
+    if (pending) {
+      await client.query("ROLLBACK");
+      return res
+        .status(409)
+        .json({ error: `Already offered to ${pending.to_name}`, offered_to: pending.to_name });
+    }
+
+    const offer = {
+      to_id: toId,
+      to_name: toName,
+      from_id: visit.assigned_sd ?? null,
+      from_name: visit.assigned_sd_name || null,
+      reason: (req.body?.reason || "").toString().trim().slice(0, 200) || null,
+      by: ACTOR(req),
+      at: new Date().toISOString(),
+    };
+    await client.query("UPDATE flow_visit_steps SET data=$2 WHERE id=$1", [
+      step.id,
+      JSON.stringify({ ...(step.data || {}), offer }),
+    ]);
+    await logEvent(client, visit.id, "offered", step.step_order, offer, ACTOR(req));
+    await client.query("COMMIT");
+    res.json({ ok: true, offer });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow offer visit");
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/flow/visits/:id/offer/accept", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const visit = (
+      await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [req.params.id])
+    ).rows[0];
+    if (!visit) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit not found" });
+    }
+    const step = await sdStepFor(client, visit.id);
+    const offer = offerOf(step);
+    if (!offer) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "That offer has expired or was withdrawn" });
+    }
+    const me = req.doctor?.doctor_id;
+    if (String(offer.to_id) !== String(me)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: `This patient was offered to ${offer.to_name}` });
+    }
+
+    // All three records move together. appointments is the one that decides
+    // whose patient list this shows up in (see services/patientScope.js) — the
+    // other two only drive the flow board.
+    const name = ACTOR(req) || offer.to_name;
+    const nextData = { ...(step.data || {}) };
+    delete nextData.offer;
+    await client.query(
+      `UPDATE flow_visit_steps
+          SET assigned_staff_id=$2, assigned_staff_name=$3, data=$4
+        WHERE id=$1`,
+      [step.id, String(me), name, JSON.stringify(nextData)],
+    );
+    await client.query(
+      "UPDATE flow_visits SET assigned_sd=$2, assigned_sd_name=$3, updated_at=NOW() WHERE id=$1",
+      [visit.id, me, name],
+    );
+    if (visit.appointment_id) {
+      await client.query("UPDATE appointments SET doctor_id=$2, doctor_name=$3 WHERE id=$1", [
+        visit.appointment_id,
+        me,
+        name,
+      ]);
+      await client
+        .query(
+          `INSERT INTO appointment_reassignments
+             (appointment_id, patient_id, file_no, appointment_date,
+              from_doctor_id, from_doctor_name, to_doctor_id, to_doctor_name,
+              trigger, reason, reassigned_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'flow_handover',$9,$10)`,
+          [
+            visit.appointment_id,
+            visit.patient_db_id,
+            visit.patient_id,
+            visit.visit_date,
+            offer.from_id,
+            offer.from_name,
+            me,
+            name,
+            offer.reason,
+            offer.by,
+          ],
+        )
+        .catch((err) => console.error("Handover audit row failed:", err.message));
+    }
+    await logEvent(
+      client,
+      visit.id,
+      "reassigned",
+      step.step_order,
+      { from: offer.from_name, to: name, via: "handover_accept", reason: offer.reason },
+      name,
+    );
+    await client.query("COMMIT");
+    res.json({ ok: true, assigned_sd_name: name, no_appointment: !visit.appointment_id });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow accept offer");
+  } finally {
+    client.release();
+  }
+});
+
+// Decline — the offered consultant, or an admin withdrawing it.
+router.post("/flow/visits/:id/offer/decline", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const step = await sdStepFor(client, req.params.id);
+    const offer = offerOf(step);
+    if (!offer) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "That offer has expired or was withdrawn" });
+    }
+    const me = req.doctor?.doctor_id;
+    if (
+      String(offer.to_id) !== String(me) &&
+      !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR)
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: `This patient was offered to ${offer.to_name}` });
+    }
+    const nextData = { ...(step.data || {}) };
+    delete nextData.offer;
+    await client.query("UPDATE flow_visit_steps SET data=$2 WHERE id=$1", [
+      step.id,
+      JSON.stringify(nextData),
+    ]);
+    await logEvent(
+      client,
+      step.visit_id,
+      "offer_declined",
+      step.step_order,
+      { reason: (req.body?.reason || "").toString().trim().slice(0, 200) || null },
+      ACTOR(req),
+    );
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow decline offer");
   } finally {
     client.release();
   }
@@ -1286,6 +1725,13 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Step not found" });
     }
+    if (
+      !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) &&
+      !canWorkStationRole(req.doctor?.role, step.assigned_role)
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "This step belongs to another station" });
+    }
     if (step.status === "in_progress") {
       await client.query("ROLLBACK");
       return res.json({ status: "already_in_progress" });
@@ -1294,14 +1740,22 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(409).json({ error: `Cannot start a ${step.status} step` });
     }
+    const heldBy = claimBlocks(step, req);
+    if (heldBy) {
+      await client.query("ROLLBACK");
+      return res
+        .status(409)
+        .json({ error: `${heldBy.by} is already working this patient`, claimed_by: heldBy.by });
+    }
     if (await stationBusy(client, step.assigned_role, step.assigned_staff_id)) {
       await client.query("ROLLBACK");
       return res.status(409).json({ error: "Station busy — complete the current patient first" });
     }
 
+    // Calling a patient in also takes them, so the row shows who has them.
     await client.query(
-      "UPDATE flow_visit_steps SET status='in_progress', started_at=NOW() WHERE id=$1",
-      [stepId],
+      "UPDATE flow_visit_steps SET status='in_progress', started_at=NOW(), data=$2 WHERE id=$1",
+      [stepId, JSON.stringify(withClaim(step, req))],
     );
 
     // Auto-complete an immediately-preceding wait_* step still open.
@@ -1356,79 +1810,87 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────
 // Coordinator: edit duration / reassign / add / remove
 // ─────────────────────────────────────────────────────────────────────────
-router.patch("/flow/steps/:stepId/duration", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { new_duration_min } = req.body || {};
-    const dur = parseInt(new_duration_min);
-    if (!Number.isInteger(dur) || dur < 0)
-      return res.status(400).json({ error: "new_duration_min must be a non-negative integer" });
-    await client.query("BEGIN");
-    const step = (
-      await client.query(
-        "UPDATE flow_visit_steps SET planned_duration_min=$2 WHERE id=$1 RETURNING *",
-        [req.params.stepId, dur],
-      )
-    ).rows[0];
-    if (!step) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Step not found" });
+router.patch(
+  "/flow/steps/:stepId/duration",
+  requireCapability(CAP.FLOW_COORDINATOR),
+  async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { new_duration_min } = req.body || {};
+      const dur = parseInt(new_duration_min);
+      if (!Number.isInteger(dur) || dur < 0)
+        return res.status(400).json({ error: "new_duration_min must be a non-negative integer" });
+      await client.query("BEGIN");
+      const step = (
+        await client.query(
+          "UPDATE flow_visit_steps SET planned_duration_min=$2 WHERE id=$1 RETURNING *",
+          [req.params.stepId, dur],
+        )
+      ).rows[0];
+      if (!step) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Step not found" });
+      }
+      await recalcEstimate(client, step.visit_id);
+      await logEvent(
+        client,
+        step.visit_id,
+        "duration_edited",
+        step.step_order,
+        { new_duration_min: dur },
+        ACTOR(req),
+      );
+      await client.query("COMMIT");
+      res.json({ status: "updated" });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Flow edit duration");
+    } finally {
+      client.release();
     }
-    await recalcEstimate(client, step.visit_id);
-    await logEvent(
-      client,
-      step.visit_id,
-      "duration_edited",
-      step.step_order,
-      { new_duration_min: dur },
-      ACTOR(req),
-    );
-    await client.query("COMMIT");
-    res.json({ status: "updated" });
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    handleError(res, e, "Flow edit duration");
-  } finally {
-    client.release();
-  }
-});
+  },
+);
 
-router.patch("/flow/steps/:stepId/reassign", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { new_staff_id = null, new_staff_name = null, new_role = null } = req.body || {};
-    await client.query("BEGIN");
-    const step = (
-      await client.query(
-        `UPDATE flow_visit_steps
+router.patch(
+  "/flow/steps/:stepId/reassign",
+  requireCapability(CAP.FLOW_COORDINATOR),
+  async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { new_staff_id = null, new_staff_name = null, new_role = null } = req.body || {};
+      await client.query("BEGIN");
+      const step = (
+        await client.query(
+          `UPDATE flow_visit_steps
             SET assigned_staff_id = COALESCE($2, assigned_staff_id),
                 assigned_staff_name = COALESCE($3, assigned_staff_name),
                 assigned_role = COALESCE($4, assigned_role)
           WHERE id=$1 RETURNING *`,
-        [req.params.stepId, new_staff_id ? String(new_staff_id) : null, new_staff_name, new_role],
-      )
-    ).rows[0];
-    if (!step) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Step not found" });
+          [req.params.stepId, new_staff_id ? String(new_staff_id) : null, new_staff_name, new_role],
+        )
+      ).rows[0];
+      if (!step) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Step not found" });
+      }
+      await logEvent(
+        client,
+        step.visit_id,
+        "reassigned",
+        step.step_order,
+        { new_staff_name, new_role },
+        ACTOR(req),
+      );
+      await client.query("COMMIT");
+      res.json({ status: "reassigned" });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Flow reassign");
+    } finally {
+      client.release();
     }
-    await logEvent(
-      client,
-      step.visit_id,
-      "reassigned",
-      step.step_order,
-      { new_staff_name, new_role },
-      ACTOR(req),
-    );
-    await client.query("COMMIT");
-    res.json({ status: "reassigned" });
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    handleError(res, e, "Flow reassign");
-  } finally {
-    client.release();
-  }
-});
+  },
+);
 
 // Add a step after a given order; shift subsequent steps down by one.
 router.post("/flow/visits/:id/steps", async (req, res) => {
@@ -1447,6 +1909,13 @@ router.post("/flow/visits/:id/steps", async (req, res) => {
     } = req.body || {};
     if (!step_name || planned_duration_min == null)
       return res.status(400).json({ error: "step_name and planned_duration_min required" });
+    // Floor managers add anything; station staff only a step for their own desk.
+    if (
+      !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) &&
+      !ownsStationRole(req.doctor?.role, assigned_role)
+    ) {
+      return res.status(403).json({ error: "You can only add a step for your own station" });
+    }
 
     await client.query("BEGIN");
     const newOrder = parseInt(insert_after_order) + 1;
@@ -1489,48 +1958,51 @@ router.post("/flow/visits/:id/steps", async (req, res) => {
 // visit's step ids in their new order. Rewrites step_order 1..N. Safe because
 // the UNIQUE(visit_id, step_order) constraint is DEFERRABLE INITIALLY DEFERRED,
 // so transient collisions inside the txn are fine (checked only at COMMIT).
-router.post("/flow/visits/:id/reorder", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const visitId = req.params.id;
-    const order = Array.isArray(req.body?.order) ? req.body.order.map(String) : [];
-    if (!order.length) return res.status(400).json({ error: "order[] required" });
+router.post(
+  "/flow/visits/:id/reorder",
+  requireCapability(CAP.FLOW_COORDINATOR),
+  async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const visitId = req.params.id;
+      const order = Array.isArray(req.body?.order) ? req.body.order.map(String) : [];
+      if (!order.length) return res.status(400).json({ error: "order[] required" });
 
-    const cur = (
-      await client.query("SELECT id FROM flow_visit_steps WHERE visit_id=$1", [visitId])
-    ).rows.map((r) => String(r.id));
-    const curSet = new Set(cur);
-    // Must list EXACTLY the visit's current steps (no adds/drops here).
-    if (order.length !== cur.length || !order.every((id) => curSet.has(id))) {
-      return res.status(400).json({ error: "order must list exactly the visit's current steps" });
-    }
+      const cur = (
+        await client.query("SELECT id FROM flow_visit_steps WHERE visit_id=$1", [visitId])
+      ).rows.map((r) => String(r.id));
+      const curSet = new Set(cur);
+      // Must list EXACTLY the visit's current steps (no adds/drops here).
+      if (order.length !== cur.length || !order.every((id) => curSet.has(id))) {
+        return res.status(400).json({ error: "order must list exactly the visit's current steps" });
+      }
 
-    await client.query("BEGIN");
-    for (let i = 0; i < order.length; i++) {
-      await client.query("UPDATE flow_visit_steps SET step_order=$2 WHERE id=$1 AND visit_id=$3", [
-        order[i],
-        i + 1,
-        visitId,
-      ]);
-    }
-    // Keep the visit's cached current_step_order in sync with the moved step.
-    await client.query(
-      `UPDATE flow_visits
+      await client.query("BEGIN");
+      for (let i = 0; i < order.length; i++) {
+        await client.query(
+          "UPDATE flow_visit_steps SET step_order=$2 WHERE id=$1 AND visit_id=$3",
+          [order[i], i + 1, visitId],
+        );
+      }
+      // Keep the visit's cached current_step_order in sync with the moved step.
+      await client.query(
+        `UPDATE flow_visits
           SET current_step_order = (SELECT step_order FROM flow_visit_steps WHERE id=current_step_id),
               updated_at=NOW()
         WHERE id=$1`,
-      [visitId],
-    );
-    await logEvent(client, visitId, "reordered", null, { order }, ACTOR(req));
-    await client.query("COMMIT");
-    res.json({ ok: true });
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    handleError(res, e, "Flow reorder steps");
-  } finally {
-    client.release();
-  }
-});
+        [visitId],
+      );
+      await logEvent(client, visitId, "reordered", null, { order }, ACTOR(req));
+      await client.query("COMMIT");
+      res.json({ ok: true });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Flow reorder steps");
+    } finally {
+      client.release();
+    }
+  },
+);
 
 // Remove a step: skip if already started/active, else hard-delete; reorder.
 router.delete("/flow/steps/:stepId", async (req, res) => {
@@ -1547,6 +2019,23 @@ router.delete("/flow/steps/:stepId", async (req, res) => {
     if (!step) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Step not found" });
+    }
+    if (
+      !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) &&
+      !ownsStationRole(req.doctor?.role, step.assigned_role)
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "You can only remove a step at your own station" });
+    }
+    // Someone is mid-patient on this step — don't pull it out from under them.
+    // A floor manager still can, since they can also force a release.
+    const removeHeldBy = claimBlocks(step, req);
+    if (removeHeldBy && !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: `${removeHeldBy.by} is working this patient — ask them to release first`,
+        claimed_by: removeHeldBy.by,
+      });
     }
     if (step.status === "completed") {
       await client.query("ROLLBACK");
@@ -1619,6 +2108,17 @@ router.get("/flow/visits", async (req, res) => {
     if (req.query.status) {
       params.push(req.query.status);
       where += ` AND status=$${params.length}`;
+    }
+    // Server-side search across the day's floor: name, file number, phone or
+    // token. Matched in SQL, not on a preloaded array, so a station desk can
+    // find any patient without the whole day's feed being shipped to it first.
+    const q = (req.query.q || "").toString().trim();
+    if (q) {
+      params.push(`%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`);
+      const i = params.length;
+      where +=
+        ` AND (patient_name ILIKE $${i} OR patient_id ILIKE $${i}` +
+        ` OR patient_phone ILIKE $${i} OR token_number ILIKE $${i})`;
     }
     const visits = (await pool.query(`SELECT * FROM flow_visits ${where}`, params)).rows;
     const stepMap = await stepsByVisit(visits.map((v) => v.id));
@@ -2073,6 +2573,9 @@ router.get("/flow/by-appointments", async (req, res) => {
 router.get("/flow/queue/:role", async (req, res) => {
   try {
     const role = req.params.role;
+    if (!canWorkStationRole(req.doctor?.role, role)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
     const date = req.query.date || new Date().toISOString().split("T")[0];
     const r = await pool.query(
       `SELECT s.*, v.patient_name, v.patient_age_sex, v.patient_id AS file_no, v.is_vip,
@@ -2104,6 +2607,9 @@ router.get("/flow/queue/:role", async (req, res) => {
         visit_remaining_min: t.remaining_min,
         visit_urgency: t.urgency,
         step_timing: sc,
+        // Expired claims are dropped here too, so the row never shows a name
+        // the API would no longer enforce.
+        claim: claimOf(s),
       };
     });
     const doneToday = (
