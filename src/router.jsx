@@ -91,6 +91,7 @@ const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
 const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
 const PatientJourneyPage = lazyWithRetry(() => import("./pages/PatientJourneyPage"));
+const CorporateBookingPage = lazyWithRetry(() => import("./pages/CorporateBookingPage"));
 const FlowReportsPage = lazyWithRetry(() => import("./pages/flow/FlowReportsPage"));
 const FlowAdminPage = lazyWithRetry(() => import("./pages/flow/FlowAdminPage"));
 
@@ -123,6 +124,7 @@ const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   // Public patient visit tracker — no login (opaque token, sanitized data)
   { path: "/visit/:token", element: lazyEl(PatientJourneyPage) },
+  { path: "/checkup/:slug", element: lazyEl(CorporateBookingPage) },
 
   // Protected routes (require login)
   {

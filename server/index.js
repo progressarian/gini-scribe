@@ -53,6 +53,7 @@ import appInstallRoutes from "./routes/app-installs.js";
 import doctorScheduleRoutes from "./routes/doctorSchedule.js";
 import medicineCollectionRoutes from "./routes/medicineCollection.js";
 import flowRoutes from "./routes/flow.js";
+import corporateRoutes from "./routes/corporate.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
@@ -168,6 +169,7 @@ app.use("/api", appInstallRoutes);
 app.use("/api", doctorScheduleRoutes);
 app.use("/api", medicineCollectionRoutes);
 app.use("/api", flowRoutes);
+app.use("/api", corporateRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
