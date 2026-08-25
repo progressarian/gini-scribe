@@ -4,6 +4,8 @@ import { toast } from "../../stores/uiStore";
 import { useFlowOfferVisit, useFlowDeclineOffer } from "../../queries/hooks/useFlow";
 
 const OFFER_STALE_MIN = 5;
+const UNASSIGNED = "__unassigned";
+const LIVE = ["waiting", "paused", "in_progress"];
 const waitedMin = (t) => Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
 const offerAgeMin = (o) => (o?.at ? waitedMin(o.at) : null);
 
@@ -50,12 +52,17 @@ export default function ConsultantLoadBoard({ visits }) {
   const load = useMemo(() => {
     const m = new Map();
     for (const d of consultants) m.set(String(d.id), { doctor: d, patients: [] });
-    for (const v of visits.filter((v) => v.status === "in_progress")) {
-      const key = String(v.assigned_sd ?? "");
+    // Everyone still in the building, not just those mid-consultation — a
+    // patient whose timer has not started is exactly who you might hand over.
+    for (const v of visits.filter((v) => LIVE.includes(v.status))) {
+      // Nobody assigned: their own bucket, so they can never be invisible here.
+      const key = v.assigned_sd_name ? String(v.assigned_sd ?? v.assigned_sd_name) : UNASSIGNED;
       if (!m.has(key)) {
-        if (!v.assigned_sd_name) continue;
         m.set(key, {
-          doctor: { id: v.assigned_sd, name: v.assigned_sd_name, role: "unknown" },
+          doctor:
+            key === UNASSIGNED
+              ? { id: UNASSIGNED, name: "No consultant" }
+              : { id: v.assigned_sd, name: v.assigned_sd_name },
           patients: [],
         });
       }
@@ -72,11 +79,20 @@ export default function ConsultantLoadBoard({ visits }) {
       }))
       .sort(
         (a, b) =>
-          b.patients.length - a.patients.length || a.doctor.name.localeCompare(b.doctor.name),
+          // Unassigned first: nobody is coming for them.
+          Number(b.doctor.id === UNASSIGNED) - Number(a.doctor.id === UNASSIGNED) ||
+          b.patients.length - a.patients.length ||
+          a.doctor.name.localeCompare(b.doctor.name),
       );
   }, [consultants, visits]);
 
+  // Consultants with nobody get one summary line instead of a row each — with
+  // 40 on the roster, a row each buries the one person who is overloaded.
+  const busy = load.filter((l) => l.patients.length > 0);
+  const free = load.filter((l) => l.patients.length === 0);
+
   const maxLoad = Math.max(1, ...load.map((l) => l.patients.length));
+  const [showFree, setShowFree] = useState(false);
 
   const sendOffer = async (visit, toDoctor) => {
     setBusyId(visit.id);
@@ -110,7 +126,8 @@ export default function ConsultantLoadBoard({ visits }) {
     }
   };
 
-  if (!load.length) return <div className="flow-muted">No consultants on today's flow yet.</div>;
+  if (!busy.length && !free.length)
+    return <div className="flow-muted">No consultants on today's flow yet.</div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -119,7 +136,7 @@ export default function ConsultantLoadBoard({ visits }) {
         only once that colleague accepts, and an unanswered offer lapses after {OFFER_STALE_MIN}{" "}
         min.
       </div>
-      {load.map(({ doctor, patients }) => {
+      {busy.map(({ doctor, patients }) => {
         const open = openDoctor === String(doctor.id);
         const n = patients.length;
         const pending = patients.filter((v) => offerOf(v)).length;
@@ -216,6 +233,9 @@ export default function ConsultantLoadBoard({ visits }) {
                                 .filter((l) =>
                                   consultants.some((c) => String(c.id) === String(l.doctor.id)),
                                 )
+                                // Freest first — the whole point is finding
+                                // someone with capacity.
+                                .sort((a, b) => a.patients.length - b.patients.length)
                                 .map((l) => (
                                   <option key={l.doctor.id} value={l.doctor.id}>
                                     {l.doctor.name} · {l.patients.length}
@@ -234,6 +254,42 @@ export default function ConsultantLoadBoard({ visits }) {
           </div>
         );
       })}
+
+      {free.length > 0 && (
+        <div className="clb-card">
+          <button
+            className="clb-head"
+            aria-expanded={showFree}
+            onClick={() => setShowFree((v) => !v)}
+          >
+            <span className="clb-caret">{showFree ? "▾" : "▸"}</span>
+            <span className="clb-name">
+              {free.length} consultant{free.length > 1 ? "s" : ""} free
+            </span>
+            <span className="clb-bar" aria-hidden="true">
+              <span style={{ width: "0%", background: "var(--fgn)" }} />
+            </span>
+            <span className="flow-badge fb-grn">nobody with them</span>
+          </button>
+          {showFree && (
+            <div className="clb-body">
+              <div className="flow-muted">
+                All available to receive a hand-over — they are listed in every “Offer to…” picker.
+              </div>
+              <ul className="clb-free-grid">
+                {free.map((l) => (
+                  <li key={l.doctor.id} className="clb-free-item">
+                    <span className="clb-free-name">{l.doctor.name}</span>
+                    {l.doctor.specialty && (
+                      <span className="clb-free-spec">{l.doctor.specialty}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

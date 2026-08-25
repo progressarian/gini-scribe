@@ -121,8 +121,9 @@ export const ROLE_CAPABILITIES = {
     // consultant, and putting them on the MO desk only invited confusion
     // between the MO workup and their own consultation.
     C.FLOW_FLOOR_VIEW,
+    // My Patients only. The floor-wide roll-call is folded into that page as a
+    // second column, so a consultant has one desk, not two.
     C.FLOW_MY_PATIENTS,
-    C.FLOW_CONSULTANTS,
     C.FLOW_REPORTS,
   ],
   [ROLES.MO]: [

@@ -1446,6 +1446,35 @@ a.pcell__ph:hover {
   font-size: 12px;
 }
 
+.booked-tag,
+.cancel-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 0 7px;
+  vertical-align: middle;
+}
+
+.booked-tag {
+  color: #15803d;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+}
+
+.cancel-tag {
+  color: #b91c1c;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+}
+
+.chg-by {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #64748b;
+}
+
 .pref-tag {
   display: inline-block;
   margin-left: 6px;
@@ -1624,12 +1653,6 @@ a.pcell__ph:hover {
   color: #14532d;
 }
 
-.booked--cancelled {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #7f1d1d;
-}
-
 .booked__date {
   font-size: 15px;
 }
@@ -1637,4 +1660,21 @@ a.pcell__ph:hover {
 .booked__line--muted {
   font-size: 12.5px;
   opacity: 0.75;
+}
+
+.pcell__ph--alt {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #6d28d9;
+  font-size: 12.5px;
+}
+
+.pcell__phtag {
+  margin-left: 5px;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
 }

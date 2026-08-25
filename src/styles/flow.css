@@ -705,6 +705,45 @@
   box-shadow: var(--fsh);
   margin-bottom: 6px;
 }
+/* My Patients — my queue beside the rest of the floor */
+.mp-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .mp-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mp-group {
+  margin-bottom: 10px;
+}
+.mp-group-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px 2px 6px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--fbd);
+  margin-bottom: 6px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fink2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.mp-group-head:hover {
+  color: var(--fink);
+  border-bottom-color: var(--fbd2);
+}
+
 /* Consultant station — admin load board + all-patients table */
 .clb-card {
   border: 1px solid var(--fbd);
@@ -765,6 +804,35 @@
   gap: 8px;
   background: var(--fbg);
 }
+.clb-free-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+.clb-free-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 9px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-left: 3px solid var(--fgn);
+  border-radius: 6px;
+  min-width: 0;
+}
+.clb-free-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fink);
+}
+.clb-free-spec {
+  font-size: 10px;
+  color: var(--fink3);
+}
+
 .clb-row {
   display: flex;
   align-items: center;

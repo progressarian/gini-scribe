@@ -663,6 +663,7 @@ router.get("/ghm-appointments", async (req, res) => {
 
     const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
                 a.doctor_name, a.patient_name, a.file_no, a.phone, a.alt_phone,
+                a.booking_status,
                 a.visit_type, a.appointment_type, a.booking_source,
                 a.booked_by_name, a.booking_date, a.condition, a.chief_complaint,
                 a.insurance_taken, a.how_did_you_know, a.referred_by_doctor_name,
@@ -903,7 +904,6 @@ router.post("/ghm-appointments", async (req, res) => {
       is_walkin = false,
       home_collection = false,
       address,
-      status,
       alt_phone,
     } = req.body;
 
@@ -912,7 +912,6 @@ router.post("/ghm-appointments", async (req, res) => {
         .status(400)
         .json({ error: "patient_name, appointment_date, doctor_name required" });
 
-    const bookingStatus = status === "cancelled" ? "cancelled" : "scheduled";
     const cleanAltPhone =
       String(alt_phone || "")
         .replace(/\D/g, "")
@@ -970,16 +969,13 @@ router.post("/ghm-appointments", async (req, res) => {
     // Availability gate (no-op unless SCHEDULE_ENFORCEMENT=warn|strict). Only
     // catalog slots are enforced; unknown doctor/slot passes through.
     const gateDoctorId = await resolveDoctorIdByName(doctor_name);
-    const avail =
-      bookingStatus === "cancelled"
-        ? null
-        : await checkBookingAvailability({
-            doctorId: gateDoctorId,
-            date: appointment_date,
-            slot: time_slot,
-            force: req.body.force,
-            role: req.doctor?.role,
-          });
+    const avail = await checkBookingAvailability({
+      doctorId: gateDoctorId,
+      date: appointment_date,
+      slot: time_slot,
+      force: req.body.force,
+      role: req.doctor?.role,
+    });
     if (avail?.blocked) {
       return res.status(409).json({
         error: "doctor_unavailable",
@@ -988,18 +984,17 @@ router.post("/ghm-appointments", async (req, res) => {
       });
     }
 
-    const existing =
-      resolved_file_no && bookingStatus !== "cancelled"
-        ? await pool.query(
-            `SELECT id, doctor_name, time_slot, booked_by_name, source
+    const existing = resolved_file_no
+      ? await pool.query(
+          `SELECT id, doctor_name, time_slot, booked_by_name, source
              FROM appointments
             WHERE file_no = $1 AND appointment_date = $2
               AND status NOT IN ('cancelled', 'no_show')
             ORDER BY doctor_name NULLS FIRST, created_at
             LIMIT 1`,
-            [resolved_file_no, appointment_date],
-          )
-        : { rows: [] };
+          [resolved_file_no, appointment_date],
+        )
+      : { rows: [] };
     const priorRow = existing.rows[0] || null;
     const placeholder = priorRow && !priorRow.doctor_name;
 
@@ -1037,8 +1032,8 @@ router.post("/ghm-appointments", async (req, res) => {
              misc_notes=$18, reports_uploaded=$19, will_get_test_at_gini=$20,
              requested_by_cc=$21, cc_remark_date=$22, notes=$23, is_walkin=$24,
              whatsapp_message=$25, additional_whatsapp_msg=$26, home_collection=$27,
-             status=$28, alt_phone=COALESCE($29, alt_phone)
-           WHERE id=$30 RETURNING *`,
+             status='scheduled', alt_phone=COALESCE($28, alt_phone)
+           WHERE id=$29 RETURNING *`,
           [
             patient_id,
             patient_name,
@@ -1067,7 +1062,6 @@ router.post("/ghm-appointments", async (req, res) => {
             whatsapp_message,
             additional_whatsapp_msg,
             home_collection,
-            bookingStatus,
             cleanAltPhone,
             priorRow.id,
           ],
@@ -1082,10 +1076,10 @@ router.post("/ghm-appointments", async (req, res) => {
         earlier_slot_given, condition, chief_complaint,
         misc_notes, reports_uploaded, will_get_test_at_gini,
         requested_by_cc, cc_remark_date, notes, is_walkin,
-        whatsapp_message, additional_whatsapp_msg, home_collection, status, alt_phone
+        whatsapp_message, additional_whatsapp_msg, home_collection, alt_phone, status
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
+        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,'scheduled'
       ) RETURNING *`,
           [
             patient_id,
@@ -1117,13 +1111,12 @@ router.post("/ghm-appointments", async (req, res) => {
             whatsapp_message,
             additional_whatsapp_msg,
             home_collection,
-            bookingStatus,
             cleanAltPhone,
           ],
         );
 
     // Increment slot booked_count
-    if (time_slot && doctor_name && bookingStatus !== "cancelled") {
+    if (time_slot && doctor_name) {
       await pool.query(
         `UPDATE appointment_slots
          SET booked_count = booked_count + 1
@@ -1186,6 +1179,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "prescription_explained_by",
       "patient_category",
       "alt_phone",
+      "booking_status",
     ];
 
     if ("patient_category" in req.body && !isValidCategory(req.body.patient_category || null))
@@ -1210,6 +1204,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       preferred_date: "Preferred Date",
       preferred_time_slot: "Preferred Time",
       call_made_by: "Called By",
+      booking_status: "Booking Status",
     };
     const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
     let before = {};
@@ -1229,14 +1224,16 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
 
     // Log doctor changes
+    const actor = claimant(req);
     for (const k of trackingNow) {
       const oldV = before[k] || "";
       const newV = req.body[k] || "";
       if (oldV !== newV) {
         await pool.query(
-          `INSERT INTO appointment_change_log (appointment_id, field, field_label, old_value, new_value)
-           VALUES ($1,$2,$3,$4,$5)`,
-          [id, k, TRACK[k], oldV || null, newV || null],
+          `INSERT INTO appointment_change_log
+             (appointment_id, field, field_label, old_value, new_value, changed_by, changed_by_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [id, k, TRACK[k], oldV || null, newV || null, actor.name || null, actor.id],
         );
       }
     }

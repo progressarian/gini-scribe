@@ -503,8 +503,9 @@ function GhmFilters({ view, date, doctor, doctors, collectionFilter, activeCount
 }
 
 const BOOKING_STATUSES = [
-  { value: "scheduled", label: "Booked" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "", label: "—", color: "gray" },
+  { value: "booked", label: "Booked", color: "green" },
+  { value: "cancelled", label: "Cancelled", color: "red" },
 ];
 
 // ─── New Appointment modal ─────────────────────────────────────────────────
@@ -526,7 +527,6 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     booked_by_name: "",
     notes: "",
     home_collection: false,
-    status: "scheduled",
   });
   const [err, setErr] = useState("");
   const [dup, setDup] = useState(null);
@@ -645,7 +645,6 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
         appointment_date: form.appointment_date,
         time_slot: form.time_slot,
         reporting_time_slot: created?.reporting_time_slot || "",
-        status: form.status,
       });
     } catch (e) {
       const data = e?.response?.data;
@@ -657,44 +656,40 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   const done = () => onCreated(booked?.appointment_date || form.appointment_date);
 
   if (booked) {
-    const cancelled = booked.status === "cancelled";
     return (
       <div className="modal-overlay" onClick={done}>
         <div className="modal modal--sm" onClick={(e) => e.stopPropagation()}>
           <div className="modal__hdr">
             <span className="modal__title">
               <Check size={16} aria-hidden="true" />
-              {cancelled ? "Saved as Cancelled" : "Appointment Booked"}
+              Appointment Booked
             </span>
             <button className="modal__x" onClick={done} aria-label="Close">
               <X size={16} aria-hidden="true" />
             </button>
           </div>
           <div className="modal__body">
-            <div className={`booked ${cancelled ? "booked--cancelled" : ""}`}>
+            <div className="booked">
               <div className="booked__line">
                 <strong>{booked.patient_name}</strong>
                 {booked.file_no ? ` · ${booked.file_no}` : ""}
                 {booked.phone ? ` · ${booked.phone}` : ""}
               </div>
               <div className="booked__date">
-                {cancelled ? "Marked cancelled for " : "Booked for "}
-                <strong>{prettyDate(booked.appointment_date)}</strong>
+                Booked for <strong>{prettyDate(booked.appointment_date)}</strong>
                 {booked.time_slot ? ` · ${booked.time_slot}` : ""}
               </div>
               <div className="booked__line">
                 With <strong>{booked.doctor_name}</strong>
               </div>
-              {!cancelled && booked.reporting_time_slot && (
+              {booked.reporting_time_slot && (
                 <div className="booked__line booked__line--muted">
                   Reporting time: {booked.reporting_time_slot}
                 </div>
               )}
-              {!cancelled && (
-                <div className="booked__line booked__line--muted">
-                  Tell the patient this date and slot before ending the call.
-                </div>
-              )}
+              <div className="booked__line booked__line--muted">
+                Tell the patient this date and slot before ending the call.
+              </div>
             </div>
           </div>
           <div className="modal__foot">
@@ -846,16 +841,6 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 {APPOINTMENT_MODES.map((v) => (
                   <option key={v} value={v}>
                     {v}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld">
-              <span>Status</span>
-              <select value={form.status} onChange={(e) => set("status", e.target.value)}>
-                {BOOKING_STATUSES.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
                   </option>
                 ))}
               </select>
@@ -1026,7 +1011,7 @@ function CallHistoryPanel({ row, ccAgents, colSpan }) {
             <div className="chg-section">
               <div className="chg-title">
                 <FileText size={13} aria-hidden="true" />
-                Change History (Doctor / Preferred Date / Called By)
+                Change History (Doctor / Preferred Date / Called By / Booking Status)
               </div>
               <div className="hist-list">
                 {changes.map((c) => (
@@ -1038,6 +1023,7 @@ function CallHistoryPanel({ row, ccAgents, colSpan }) {
                       <ArrowRight size={12} aria-hidden="true" />
                     </span>
                     <span className="chg-new">{c.new_value || "—"}</span>
+                    {c.changed_by && <span className="chg-by">by {c.changed_by}</span>}
                     <button
                       className="hist-del"
                       title="Delete this change log"
@@ -1653,7 +1639,7 @@ export default function GHMPage() {
   // so every row would read "Pending".
   const showVisitStatus = view === "by_date" && date <= todayStr();
   const colSpan =
-    16 +
+    17 +
     (showApptDate ? 1 : 0) +
     (showVisitStatus ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
@@ -1886,6 +1872,7 @@ export default function GHMPage() {
                     {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                     <th style={{ minWidth: 170 }}>Patient</th>
                     <th style={{ width: 155 }}>Biomarkers (auto)</th>
+                    <th style={{ width: 140 }}>Booking Status</th>
                     <th style={{ width: 100 }}>Visit Type</th>
                     <th style={{ width: 165 }}>Category</th>
                     <th style={{ width: 110 }}>Mode</th>
@@ -2013,6 +2000,12 @@ export default function GHMPage() {
                                     Preferred
                                   </span>
                                 )}
+                                {row.booking_status === "booked" && (
+                                  <span className="booked-tag">Booked</span>
+                                )}
+                                {row.booking_status === "cancelled" && (
+                                  <span className="cancel-tag">Cancelled</span>
+                                )}
                               </span>
                               {row.phone ? (
                                 <a
@@ -2028,6 +2021,17 @@ export default function GHMPage() {
                                   <Phone size={12} aria-hidden="true" />
                                   No phone number
                                 </span>
+                              )}
+                              {row.alt_phone && (
+                                <a
+                                  className="pcell__ph pcell__ph--alt"
+                                  href={`tel:${String(row.alt_phone).replace(/\D/g, "")}`}
+                                  title="Call this patient on the alternate number"
+                                >
+                                  <Phone size={12} aria-hidden="true" />
+                                  {fmtPhone(row.alt_phone)}
+                                  <em className="pcell__phtag">Alt</em>
+                                </a>
                               )}
                               {row.file_no && <span className="pcell__file">{row.file_no}</span>}
                               {(row.disp_sex || row.disp_age != null) && (
@@ -2089,6 +2093,15 @@ export default function GHMPage() {
                           {/* Biomarkers — auto from lab data */}
                           <td>
                             <BiomarkerCell bio={biomarkers[row.patient_id]} />
+                          </td>
+
+                          {/* Booking status — OBT marks a cancellation from the call */}
+                          <td>
+                            <ColorSelect
+                              value={row.booking_status || ""}
+                              options={BOOKING_STATUSES}
+                              onChange={(v) => patch(row.id, "booking_status", v)}
+                            />
                           </td>
 
                           {/* Visit type */}
