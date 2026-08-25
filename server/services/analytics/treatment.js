@@ -276,9 +276,10 @@ export function buildGuidelineGaps(medRows, byMarker, conditionIndex, patients) 
   });
 }
 
-export function buildPersistence(medRows, { asOf }) {
+export function buildPersistence(medRows, { asOf, patientIds = null }) {
   const byClass = new Map();
   for (const row of medRows) {
+    if (patientIds && !patientIds.has(row.patient_id)) continue;
     for (const cls of row.resolved.classes) {
       const list = byClass.get(cls) || [];
       list.push(row);

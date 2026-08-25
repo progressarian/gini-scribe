@@ -50,6 +50,39 @@ try {
     check(`${id} returns a payload`, payloadKeys.length > 0, JSON.stringify(Object.keys(body)));
   }
 
+  console.log("cohort filter");
+  const COHORT_SECTIONS = [
+    ["conditions", "s2_conditions", (x) => x.prevalence.find((r) => r.key === "diabetes").patients],
+    [
+      "biomarkers",
+      "s4_biomarkers",
+      (x) => x.control.find((r) => r.marker === "hba1c").patients_current,
+    ],
+    ["treatment", "s5_treatment", (x) => x.landscape.classes[0].patients_ever],
+  ];
+  for (const [id, key, measure] of COHORT_SECTIONS) {
+    const all = await get(`/api/analytics/sections/${id}`);
+    const options = all[key].cohort_options;
+    check(`${id} offers cohort options`, Array.isArray(options) && options.length > 0);
+    check(`${id} defaults to the whole panel`, all[key].cohort === "all");
+    for (const opt of options || []) {
+      const body = await get(`/api/analytics/sections/${id}?cohort=${opt.key}`);
+      const section = body[key];
+      check(`${id}?cohort=${opt.key} echoes the cohort`, section.cohort === opt.key);
+      check(
+        `${id}?cohort=${opt.key} narrows the population`,
+        measure(section) <= measure(all[key]),
+        `${measure(section)} vs ${measure(all[key])}`,
+      );
+      check(
+        `${id}?cohort=${opt.key} withholds the other cohorts`,
+        !JSON.stringify(section).includes('"cohorts"'),
+      );
+    }
+    const bogus = await get(`/api/analytics/sections/${id}?cohort=nope`);
+    check(`${id} falls back to the whole panel on an unknown cohort`, bogus[key].cohort === "all");
+  }
+
   console.log("denominators");
   const bio = await get("/api/analytics/sections/biomarkers");
   const cascade = bio.s4_biomarkers.cascade;
@@ -91,7 +124,11 @@ try {
 
   console.log("exports");
   const xlsx = await get("/api/analytics/export.xlsx", { raw: true });
-  check("xlsx is a real zip archive", xlsx[0] === 0x50 && xlsx[1] === 0x4b, `magic ${xlsx[0]},${xlsx[1]}`);
+  check(
+    "xlsx is a real zip archive",
+    xlsx[0] === 0x50 && xlsx[1] === 0x4b,
+    `magic ${xlsx[0]},${xlsx[1]}`,
+  );
   check("xlsx is non-trivial in size", xlsx.length > 20000, `${xlsx.length} bytes`);
 
   const html = await get("/api/analytics/export.html", { raw: true });

@@ -4,6 +4,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES } from "../../shared/permissions.js";
 import { buildFullReport } from "../services/analytics/index.js";
+import { describeTargetBands } from "../services/analytics/biomarkerTargets.js";
 import {
   latestSnapshotMeta,
   readSnapshot,
@@ -51,14 +52,58 @@ async function buildLive(asOf) {
   return liveInFlight;
 }
 
+// The band thresholds are static config, not measured data, so they are
+// attached on read rather than baked into the snapshot — a snapshot built
+// before a threshold changed still renders the current bands, and no rebuild
+// is needed to publish an edit to BIO_TARGET.
+function withBandLabels(report) {
+  const section = report?.s4_biomarkers;
+  if (!section?.control) return report;
+  return {
+    ...report,
+    s4_biomarkers: {
+      ...section,
+      control: section.control.map((row) => ({
+        ...row,
+        bands: describeTargetBands(row.marker, row.unit),
+      })),
+    },
+  };
+}
+
+// Applies the patient-cohort filter server-side: the selected variant is merged
+// over its section and every variant is then dropped from the payload, so the
+// client receives one cohort's figures plus the list of options — never the
+// other cohorts' data. An unknown or absent key returns the unfiltered section.
+function withCohort(report, cohortKey) {
+  const out = { ...report };
+  for (const [key, section] of Object.entries(report)) {
+    if (!section || !Array.isArray(section.cohorts)) continue;
+    const active = cohortKey ? section.cohorts.find((c) => c.key === cohortKey) : null;
+    const { cohorts, ...rest } = section;
+    out[key] = {
+      ...rest,
+      ...(active || {}),
+      cohort_options: cohorts.map((c) => ({
+        key: c.key,
+        label: c.label,
+        note: c.note,
+        patients: c.patients,
+      })),
+      cohort: active ? active.key : "all",
+    };
+  }
+  return out;
+}
+
 async function loadReport({ sections, refresh, asOf }) {
   if (refresh) {
     liveCache = { at: 0, report: null };
-    return { report: await buildLive(asOf), source: "live" };
+    return { report: withBandLabels(await buildLive(asOf)), source: "live" };
   }
   const snapshot = await readSnapshot(pool, { sectionIds: sections });
-  if (snapshot) return { report: snapshot, source: "snapshot" };
-  return { report: await buildLive(asOf), source: "live-fallback" };
+  if (snapshot) return { report: withBandLabels(snapshot), source: "snapshot" };
+  return { report: withBandLabels(await buildLive(asOf)), source: "live-fallback" };
 }
 
 router.get("/analytics/meta", async (req, res) => {
@@ -91,7 +136,9 @@ router.get("/analytics/sections/:id", async (req, res) => {
     const sections = SECTION_ALIASES[req.params.id];
     if (!sections) return res.status(404).json({ error: "Unknown analytics section" });
     const refresh = req.query.refresh === "1";
-    const { report, source } = await loadReport({ sections, refresh, asOf: req.query.as_of });
+    const loaded = await loadReport({ sections, refresh, asOf: req.query.as_of });
+    const { source } = loaded;
+    const report = withCohort(loaded.report, req.query.cohort);
     const payload = { source, meta: report.meta, snapshot: report.snapshot };
     for (const key of sections) {
       if (key !== "meta") payload[key] = report[key];

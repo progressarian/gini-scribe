@@ -3,7 +3,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import { toast } from "../stores/uiStore";
 import { PAGE_CAPABILITIES } from "../config/routes";
-import { hasAnyCapability } from "../../shared/permissions";
+import { hasAnyCapability, canViewAnalytics } from "../../shared/permissions";
 
 // Route guard: blocks direct-URL access to pages the current role can't open.
 // Looks up the required capability for the current path in PAGE_CAPABILITIES;
@@ -28,11 +28,16 @@ function capForPath(pathname) {
 
 export default function RequireCapability() {
   const location = useLocation();
-  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const currentDoctor = useAuthStore((s) => s.currentDoctor);
+  const role = currentDoctor?.role;
   const requiredCap = capForPath(location.pathname);
   // requiredCap may be one capability or an array (any-of), matching the
   // backend's ROUTE_CAPABILITIES — e.g. /ghm is reachable by reception and OBT.
-  const allowed = !requiredCap || hasAnyCapability(role, requiredCap);
+  // /analytics carries an extra identity-level gate on top of its capability,
+  // mirroring the same check on /api/analytics.
+  const allowed =
+    (!requiredCap || hasAnyCapability(role, requiredCap)) &&
+    (location.pathname !== "/analytics" || canViewAnalytics(currentDoctor));
 
   useEffect(() => {
     if (!allowed) toast("You don't have access to this page", "warn");

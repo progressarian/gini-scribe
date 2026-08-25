@@ -323,3 +323,28 @@ export function ownsStationRole(role, assignedRole) {
   const cap = STATION_ROLE_CAPABILITY[assignedRole];
   return cap ? hasCapability(role, cap) : false;
 }
+
+// ── Analytics: per-person gate ───────────────────────────────────────────────
+// /analytics (the Population page) and its /api/analytics endpoints are narrower
+// than CAP.ANALYTICS, which several roles hold for /reports and /ci. This page
+// is restricted to one named admin, so the check is identity-level, not
+// role-level: admin role AND a name on the allowlist.
+//
+// Matched on name because doctors.id is environment-specific. Names are
+// compared lowercase as a substring, so "Dr. Gurjot Singh" and a bare short_name
+// both match. Add an entry here to widen access.
+export const ANALYTICS_ALLOWED_NAMES = ["gurjot"];
+
+// Accepts either shape of the session object: the frontend's currentDoctor
+// (doctors row — name/short_name) or the server's req.doctor (JWT claims —
+// doctor_name/short_name).
+export function canViewAnalytics(doctor) {
+  if (!doctor) return false;
+  if (normalizeRole(doctor.role) !== ROLES.ADMIN) return false;
+  const names = [doctor.name, doctor.doctor_name, doctor.short_name];
+  return names.some(
+    (n) =>
+      typeof n === "string" &&
+      ANALYTICS_ALLOWED_NAMES.some((allowed) => n.toLowerCase().includes(allowed)),
+  );
+}

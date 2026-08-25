@@ -45,6 +45,15 @@ export async function getPatientBase(db, { asOf } = {}) {
     visit_agg AS (
       SELECT patient_id, MIN(d) AS first_visit, MAX(d) AS last_visit, COUNT(*) AS visit_days
         FROM visit_days GROUP BY patient_id
+    ),
+    visit_triples AS (
+      SELECT patient_id, d, LEAD(d, 2) OVER (PARTITION BY patient_id ORDER BY d) AS third_next
+        FROM visit_days
+    ),
+    dense_year AS (
+      SELECT patient_id,
+             bool_or(third_next IS NOT NULL AND third_next - d <= 365) AS dense_year
+        FROM visit_triples GROUP BY patient_id
     )
     SELECT p.id AS patient_id,
            p.file_no,
@@ -56,9 +65,11 @@ export async function getPatientBase(db, { asOf } = {}) {
                 ELSE p.age END AS age,
            v.first_visit,
            v.last_visit,
-           COALESCE(v.visit_days, 0) AS visit_days
+           COALESCE(v.visit_days, 0) AS visit_days,
+           COALESCE(dy.dense_year, false) AS dense_year
       FROM patients p
-      LEFT JOIN visit_agg v ON v.patient_id = p.id`;
+      LEFT JOIN visit_agg v ON v.patient_id = p.id
+      LEFT JOIN dense_year dy ON dy.patient_id = p.id`;
   const { rows } = await db.query(sql, [asOf, VISIT_STATUSES_COUNTED]);
   return rows.map((r) => {
     const daysSince = daysBetween(r.last_visit, asOf);
@@ -74,6 +85,7 @@ export async function getPatientBase(db, { asOf } = {}) {
       first_visit: r.first_visit,
       last_visit: r.last_visit,
       visit_days: Number(r.visit_days),
+      dense_year: r.dense_year === true,
       days_since_visit: daysSince,
       recency: recencyBand(daysSince),
       continuing: daysSince != null && daysSince <= CONTINUITY_DAYS,

@@ -92,7 +92,7 @@
 
 .an-stack__row {
   display: grid;
-  grid-template-columns: minmax(120px, 210px) 1fr 66px;
+  grid-template-columns: minmax(120px, 230px) 1fr 66px;
   align-items: center;
   gap: 12px;
   padding: 5px 0;
@@ -105,6 +105,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.an-stack__hint {
+  display: block;
+  font-size: 10.5px;
+  font-style: normal;
+  line-height: 1.35;
+  color: var(--an-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .an-stack__track {
@@ -131,10 +142,55 @@
   font-variant-numeric: tabular-nums;
 }
 
+.an-svgwrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
 .an-svg {
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+/* Narrow screens: the SVG scales with its box, and because the type is drawn in
+   user units it shrinks with everything else — at phone widths the axis labels
+   render below 6px and the 40-odd x-positions collide. Hold a legible drawing
+   width and let the card scroll sideways instead, the same trade the tables and
+   the tab bar already make. */
+@media (max-width: 720px) {
+  .an-svg {
+    min-width: 560px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .an-bars__row {
+    grid-template-columns: minmax(90px, 150px) 1fr 62px;
+    gap: 8px;
+  }
+
+  .an-stack__row {
+    grid-template-columns: minmax(90px, 150px) 1fr 54px;
+    gap: 8px;
+  }
+
+  .an-bars__label,
+  .an-stack__label,
+  .an-bars__value {
+    font-size: 11.5px;
+  }
+
+  .an-tiles {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 9px;
+  }
+
+  .an-tile__v {
+    font-size: 21px;
+  }
 }
 
 .an-tablewrap {

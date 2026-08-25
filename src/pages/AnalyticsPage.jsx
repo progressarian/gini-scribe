@@ -27,9 +27,64 @@ const SECTIONS = [
 ];
 
 const CONTROL_SEGMENTS = [
-  { key: "at_goal", label: "At goal", color: "var(--an-good)" },
-  { key: "borderline", label: "Borderline", color: "var(--an-warning)" },
-  { key: "off_goal", label: "Off goal", color: "var(--an-critical)" },
+  { key: "at_goal", label: "At goal", color: "var(--an-good)", band: "good" },
+  { key: "borderline", label: "Borderline", color: "var(--an-warning)", band: "warn" },
+  { key: "off_goal", label: "Off goal", color: "var(--an-critical)", band: "bad" },
+];
+
+// Bands always arrive in good/warn/bad order; the positional fallback keeps the
+// colours right on a snapshot built before `status` was added to the payload.
+const RETENTION_NOTES = [
+  "3+ visits in a 12-month span counts a patient if any 365-day window of their history holds three or more visit days, at any point since they joined. It is not restricted to their first year or to the last 12 months.",
+  "Because the window can fall anywhere in a patient's history, older cohorts have had more opportunity to qualify. Read the column down the table as a floor for the newest quarters, not as a like-for-like comparison.",
+];
+
+// Sections that support the patient-cohort filter ship a `cohorts` array whose
+// entries override only the blocks they recompute. Merging the active entry over
+// the section therefore leaves every unfiltered block untouched.
+function CohortFilter({ id, section, value, onChange, scopeNote }) {
+  const cohorts = section.cohort_options || [];
+  if (!cohorts.length) return null;
+  const active = cohorts.find((c) => c.key === section.cohort) || null;
+  return (
+    <>
+      <div className="an-filters">
+        <label htmlFor={`an-cohort-${id}`}>Patients</label>
+        <select id={`an-cohort-${id}`} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="all">All patients</option>
+          {cohorts.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.label} ({fmt(c.patients)})
+            </option>
+          ))}
+        </select>
+      </div>
+      {active && (
+        <p className="an-lede">
+          {active.note} {scopeNote}
+        </p>
+      )}
+    </>
+  );
+}
+
+const BAND_ORDER = ["good", "warn", "bad"];
+const CASCADE_TONE = { good: "good", warn: undefined, bad: "bad" };
+
+const controlBandHint = (row) => row.bands?.compact || null;
+const goalBandHint = (row) => (row.goal ? `goal ${row.goal}` : null);
+const controlSegmentHint = (row, segment) => row.bands?.[segment.band] || null;
+
+const CONTROL_BAND_NOTES = [
+  "Each marker is banded on its own thresholds, shown in grey beside the marker name in the order At goal · Borderline · Off goal. Hover a segment for the exact range.",
+  "Borderline means the value has missed the goal but has not crossed the off-goal threshold — the group to pull back before it becomes poor control.",
+  "Bands use each patient's latest value, counted only if that test was in the last 12 months. Patients with no classifiable value are excluded from the percentages.",
+];
+
+const GOAL_SEGMENTS = [
+  { key: "reached_goal", label: "Reached goal", color: "var(--an-good)" },
+  { key: "improved_band", label: "Improved but not at goal", color: "var(--an-warning)" },
+  { key: "unchanged_band", label: "Still off goal", color: "var(--an-critical)" },
 ];
 
 const TRAJECTORY_SEGMENTS = [
@@ -44,11 +99,20 @@ const signed = (v, d = 2) => {
   return `${n > 0 ? "+" : ""}${n.toFixed(d)}`;
 };
 
-function useSection(id) {
+// `cohort` is sent to the API, not applied here — the server merges the selected
+// variant and strips the others, so a section response only ever carries the
+// cohort that was asked for. Changing it refetches under its own query key.
+function useSection(id, cohort = null) {
   return useQuery({
-    queryKey: qk.analytics.section(id),
-    queryFn: async () => (await api.get(`/api/analytics/sections/${id}`)).data,
+    queryKey: qk.analytics.section(id, cohort),
+    queryFn: async () =>
+      (
+        await api.get(`/api/analytics/sections/${id}`, {
+          params: cohort && cohort !== "all" ? { cohort } : undefined,
+        })
+      ).data,
     staleTime: 10 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -99,6 +163,11 @@ function Overview() {
           tone="bad"
         />
         <StatTile
+          value={fmt(k.dense_year_patients)}
+          label="3+ visits in a 12-month span"
+          note={`${pctText(k.dense_year_share_pct)} of those with a visit`}
+        />
+        <StatTile
           value={pctText(ret.attendance.no_show_rate_pct)}
           label="No-show rate"
           note="booked appointments"
@@ -138,23 +207,33 @@ function Overview() {
           { label: "Cohort size", get: (r) => fmt(r.size) },
           { label: "Returned within 180 days", get: (r) => pctText(r.retained_180d_pct) },
           { label: "Returned within a year", get: (r) => pctText(r.retained_365d_pct) },
+          { label: "3+ visits in a 12-month span", get: (r) => pctText(r.dense_year_pct) },
           { label: "Still attending", get: (r) => pctText(r.still_active_pct) },
         ]}
         rows={ret.retention_curve}
       />
-      <Notes items={reg.notes} />
+      <Notes items={[...reg.notes, ...RETENTION_NOTES]} />
     </>
   );
 }
 
 function Conditions() {
-  const { data, isLoading, isError, error } = useSection("conditions");
+  const [cohort, setCohort] = useState("all");
+  const { data, isLoading, isError, error } = useSection("conditions", cohort);
   if (isLoading) return <Loading />;
   if (isError) return <Failed error={error} />;
   const s = data.s2_conditions;
 
   return (
     <>
+      <CohortFilter
+        id="conditions"
+        section={data.s2_conditions}
+        value={cohort}
+        onChange={setCohort}
+        scopeNote="Prevalence, comorbidity, age split and complications are all recomputed for them. Unmapped diagnoses stay panel-wide, since that list is about coding coverage rather than any one group."
+      />
+
       <h3>Patients per condition</h3>
       <div className="an-card">
         <BarList
@@ -208,7 +287,8 @@ function Conditions() {
 }
 
 function Biomarkers() {
-  const { data, isLoading, isError, error } = useSection("biomarkers");
+  const [cohort, setCohort] = useState("all");
+  const { data, isLoading, isError, error } = useSection("biomarkers", cohort);
   if (isLoading) return <Loading />;
   if (isError) return <Failed error={error} />;
   const s = data.s4_biomarkers;
@@ -217,7 +297,19 @@ function Biomarkers() {
 
   return (
     <>
+      <CohortFilter
+        id="biomarkers"
+        section={data.s4_biomarkers}
+        value={cohort}
+        onChange={setCohort}
+        scopeNote="The cascade, target bands and continuity tables are recomputed for them. The goal-attainment section keeps its own fixed denominator and does not follow this filter."
+      />
+
       <h3>The diabetes control cascade</h3>
+      <p className="an-lede">
+        Patients on the diabetes register only. Every figure in this section, including the three
+        tiles below, is a share of that register.
+      </p>
       <div className="an-card">
         <BarList
           rows={s.cascade.steps.map((st) => ({ label: st.step, value: st.patients }))}
@@ -226,25 +318,97 @@ function Biomarkers() {
         <p className="an-cap">Each step is a subset of the one above it</p>
       </div>
       <StatRow>
-        {s.cascade.control_bands.map((b) => (
+        {s.cascade.control_bands.map((b, i) => (
           <StatTile
             key={b.band}
             value={pctText(b.share_pct)}
             label={b.band}
-            note={`${fmt(b.patients)} of ${fmt(s.cascade.current_denominator)} recently tested`}
-            tone={
-              b.band.startsWith("Under 7") ? "good" : b.band.startsWith("9%") ? "bad" : undefined
-            }
+            note={`${fmt(b.patients)} of ${fmt(s.cascade.current_denominator)} diabetics tested in the last 12 months`}
+            tone={CASCADE_TONE[b.status ?? BAND_ORDER[i]]}
           />
         ))}
       </StatRow>
       <Notes items={s.cascade.notes} />
 
+      {s.goal_attainment?.markers?.length ? (
+        <>
+          <h3>Patients who started off goal and are now at goal</h3>
+          <p className="an-lede">
+            Followed patients only — {fmt(s.goal_attainment.engaged_patients)} people with{" "}
+            {s.goal_attainment.min_visits} or more recorded visit days. Each marker counts those
+            whose first recorded value missed goal, then asks where their latest value sits.
+          </p>
+          <StatRow>
+            {s.goal_attainment.markers.map((m) => (
+              <StatTile
+                key={m.marker}
+                value={fmt(m.reached_goal)}
+                label={`${m.label} back to goal`}
+                note={`${pctText(m.reached_goal_pct)} of ${fmt(m.started_off_goal)} who started off goal${m.goal ? ` · goal ${m.goal}` : ""}`}
+                tone="good"
+              />
+            ))}
+          </StatRow>
+          <div className="an-card">
+            <Legend items={GOAL_SEGMENTS} />
+            <StackedShare
+              rows={s.goal_attainment.markers}
+              segments={GOAL_SEGMENTS}
+              rowHint={goalBandHint}
+            />
+            <p className="an-cap">Each bar is the patients who started off goal for that marker</p>
+          </div>
+          <DataTable
+            columns={[
+              { label: "Marker", key: "label" },
+              { label: "Goal", get: (r) => r.goal || "—" },
+              { label: "Started off goal", get: (r) => fmt(r.started_off_goal) },
+              { label: "Now at goal", get: (r) => fmt(r.reached_goal) },
+              { label: "Now at goal %", get: (r) => pctText(r.reached_goal_pct) },
+              { label: "Of those, tested in 12m", get: (r) => fmt(r.reached_goal_current) },
+              { label: "Still off goal", get: (r) => fmt(r.still_off_goal) },
+            ]}
+            rows={s.goal_attainment.markers}
+          />
+
+          <h4>Which way everyone who started off goal is heading</h4>
+          <p className="an-lede">
+            The same patients as the table above, split by the direction their latest value has
+            moved. Those moving toward goal include the ones who reached it, so this is the wider
+            picture of who is responding.
+          </p>
+          <DataTable
+            columns={[
+              { label: "Marker", key: "label" },
+              { label: "Goal", get: (r) => r.goal || "—" },
+              { label: "Started off goal", get: (r) => fmt(r.started_off_goal) },
+              { label: "Moving toward goal", get: (r) => fmt(r.toward_goal) },
+              { label: "Moving toward goal %", get: (r) => pctText(r.toward_goal_pct) },
+              { label: "Holding steady", get: (r) => fmt(r.holding_steady) },
+              { label: "Moving away", get: (r) => fmt(r.moving_away) },
+            ]}
+            rows={s.goal_attainment.markers}
+          />
+          <Notes items={s.goal_attainment.notes} />
+        </>
+      ) : null}
+
       <h3>Where patients stand against target</h3>
+      <p className="an-lede">
+        Every patient with a recent result for the marker, not only diabetics — so these
+        denominators are wider than the cascade above and the two sets of percentages are not
+        comparable.
+      </p>
       <div className="an-card">
         <Legend items={CONTROL_SEGMENTS} />
-        <StackedShare rows={controlRows} segments={CONTROL_SEGMENTS} />
+        <StackedShare
+          rows={controlRows}
+          segments={CONTROL_SEGMENTS}
+          rowHint={controlBandHint}
+          segmentHint={controlSegmentHint}
+        />
       </div>
+      <Notes items={CONTROL_BAND_NOTES} />
 
       <h3>Direction of travel</h3>
       <div className="an-card">
@@ -256,6 +420,7 @@ function Biomarkers() {
       <DataTable
         columns={[
           { label: "Marker", key: "label" },
+          { label: "Bands (goal · borderline · off)", get: (r) => r.bands?.compact || "—" },
           { label: "Ever tested", get: (r) => fmt(r.patients_any) },
           { label: "Tested in 12m", get: (r) => fmt(r.patients_current) },
           { label: "At goal", get: (r) => pctText(r.at_goal_pct) },
@@ -287,13 +452,22 @@ function Biomarkers() {
 }
 
 function Treatment() {
-  const { data, isLoading, isError, error } = useSection("treatment");
+  const [cohort, setCohort] = useState("all");
+  const { data, isLoading, isError, error } = useSection("treatment", cohort);
   if (isLoading) return <Loading />;
   if (isError) return <Failed error={error} />;
   const s = data.s5_treatment;
 
   return (
     <>
+      <CohortFilter
+        id="treatment"
+        section={data.s5_treatment}
+        value={cohort}
+        onChange={setCohort}
+        scopeNote="Drug landscape, regimen mix, persistence and guideline gaps are all recomputed for them."
+      />
+
       <h3>Prescribing across the panel</h3>
       <div className="an-card">
         <BarList
@@ -539,6 +713,28 @@ function Worklists() {
         These lists identify patients by internal ID and file number only. No names or contact
         details are shown here.
       </p>
+
+      <h3>Previously engaged, now lapsed ({fmt(s.previously_engaged_lapsed_total ?? 0)})</h3>
+      <p className="an-lede">
+        Patients who once reached three or more visits inside a 12-month window and have not been
+        seen in the last six months. They have already shown they will attend, which makes this a
+        warmer recall list than the lapsed panel as a whole. Sorted by least time since the last
+        visit, so the easiest to bring back are at the top.
+      </p>
+      <DataTable
+        columns={[
+          { label: "Patient ID", key: "patient_id" },
+          { label: "File no", key: "file_no" },
+          { label: "Age", get: (r) => fmt(r.age) },
+          { label: "Visits", get: (r) => fmt(r.visit_days) },
+          { label: "Diabetic", get: (r) => (r.is_diabetic ? "Yes" : "No") },
+          { label: "Last HbA1c", get: (r) => r.last_hba1c ?? "—" },
+          { label: "Last visit", key: "last_visit" },
+          { label: "Days since", get: (r) => fmt(r.days_since_visit) },
+        ]}
+        rows={s.previously_engaged_lapsed || []}
+        maxRows={50}
+      />
 
       <h3>
         Lapsed patients with uncontrolled diabetes ({fmt(s.lapsed_uncontrolled_diabetics.length)})

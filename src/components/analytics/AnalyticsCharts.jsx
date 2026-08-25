@@ -51,17 +51,19 @@ export function BarList({ rows, valueFormat = fmt, color = "var(--an-series-1)",
   );
 }
 
-export function StackedShare({ rows, segments }) {
+export function StackedShare({ rows, segments, rowHint, segmentHint }) {
   if (!rows || !rows.length) return <p className="an-empty">No data.</p>;
   return (
     <ul className="an-stack">
       {rows.map((row) => {
         const total = segments.reduce((sum, s) => sum + (Number(row[s.key]) || 0), 0);
         if (!total) return null;
+        const hint = rowHint ? rowHint(row) : null;
         return (
           <li key={row.label} className="an-stack__row">
-            <span className="an-stack__label" title={row.label}>
+            <span className="an-stack__label" title={hint ? `${row.label} — ${hint}` : row.label}>
               {row.label}
+              {hint && <em className="an-stack__hint">{hint}</em>}
             </span>
             <span className="an-stack__track">
               {segments.map((s) => {
@@ -73,7 +75,9 @@ export function StackedShare({ rows, segments }) {
                     key={s.key}
                     className="an-stack__seg"
                     style={{ width: `${share}%`, background: s.color }}
-                    title={`${row.label} — ${s.label}: ${fmt(v)} (${share.toFixed(1)}%)`}
+                    title={`${row.label} — ${s.label}${
+                      segmentHint ? ` (${segmentHint(row, s)})` : ""
+                    }: ${fmt(v)} (${share.toFixed(1)}%)`}
                   >
                     {share > 9 ? `${share.toFixed(0)}%` : ""}
                   </span>
@@ -113,67 +117,69 @@ export function Sparkline({
     .join(" ");
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="an-svg" role="img" aria-label="Trend">
-      {[0, 1, 2, 3].map((i) => {
-        const v = lo + ((hi - lo) / 3) * i;
-        return (
-          <g key={i}>
-            <line
-              x1={padL}
-              y1={yAt(v)}
-              x2={width - 10}
-              y2={yAt(v)}
-              stroke="var(--an-grid)"
-              strokeWidth="1"
-            />
-            <text
-              x={padL - 8}
-              y={yAt(v)}
-              textAnchor="end"
-              dominantBaseline="central"
-              fontSize="11"
-              fill="var(--an-muted)"
-            >
-              {valueFormat(Math.round(v))}
-            </text>
-          </g>
-        );
-      })}
-      <polyline
-        points={path}
-        fill="none"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      {points.map((v, i) =>
-        v == null ? null : (
-          <circle key={i} cx={xAt(i)} cy={yAt(v)} r="8" fill="transparent">
-            <title>{`${labels ? labels[i] : i}: ${valueFormat(v)}`}</title>
-          </circle>
-        ),
-      )}
-      {labels
-        ? labels.map((l, i) => {
-            const every = Math.ceil(labels.length / 6);
-            const isLast = i === labels.length - 1;
-            if (i % every !== 0 && !isLast) return null;
-            return (
+    <div className="an-svgwrap">
+      <svg viewBox={`0 0 ${width} ${height}`} className="an-svg" role="img" aria-label="Trend">
+        {[0, 1, 2, 3].map((i) => {
+          const v = lo + ((hi - lo) / 3) * i;
+          return (
+            <g key={i}>
+              <line
+                x1={padL}
+                y1={yAt(v)}
+                x2={width - 10}
+                y2={yAt(v)}
+                stroke="var(--an-grid)"
+                strokeWidth="1"
+              />
               <text
-                key={l}
-                x={isLast ? width - 10 : xAt(i)}
-                y={height - 8}
-                textAnchor={isLast ? "end" : i === 0 ? "start" : "middle"}
+                x={padL - 8}
+                y={yAt(v)}
+                textAnchor="end"
+                dominantBaseline="central"
                 fontSize="11"
                 fill="var(--an-muted)"
               >
-                {l}
+                {valueFormat(Math.round(v))}
               </text>
-            );
-          })
-        : null}
-    </svg>
+            </g>
+          );
+        })}
+        <polyline
+          points={path}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {points.map((v, i) =>
+          v == null ? null : (
+            <circle key={i} cx={xAt(i)} cy={yAt(v)} r="8" fill="transparent">
+              <title>{`${labels ? labels[i] : i}: ${valueFormat(v)}`}</title>
+            </circle>
+          ),
+        )}
+        {labels
+          ? labels.map((l, i) => {
+              const every = Math.ceil(labels.length / 6);
+              const isLast = i === labels.length - 1;
+              if (i % every !== 0 && !isLast) return null;
+              return (
+                <text
+                  key={l}
+                  x={isLast ? width - 10 : xAt(i)}
+                  y={height - 8}
+                  textAnchor={isLast ? "end" : i === 0 ? "start" : "middle"}
+                  fontSize="11"
+                  fill="var(--an-muted)"
+                >
+                  {l}
+                </text>
+              );
+            })
+          : null}
+      </svg>
+    </div>
   );
 }
 

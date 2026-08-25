@@ -10,6 +10,8 @@ import {
   FileText,
   FolderOpen,
   MapPin,
+  Maximize2,
+  Minimize2,
   MoveDown,
   MoveRight,
   MoveUp,
@@ -17,6 +19,7 @@ import {
   PhoneCall,
   Plus,
   RefreshCw,
+  Rows3,
   Search,
   Smartphone,
   Star,
@@ -366,67 +369,124 @@ const SUMMARY_BUCKET = {
   show_no_show: (v) => (v === "Show" ? "came" : v === "No Show" ? "no_show" : "pending_show"),
 };
 
-// Discount-category tallies for the whole day, so the desk sees the day's mix
-// without counting rows.
-function CategoryTallies({ categories }) {
+// Compact mode cuts the Patient cell down to the name and the number people
+// dial. What it drops has no column of its own, so it is read back here in the
+// row's expander — nothing compact hides becomes unreachable.
+const compactDetails = (row) =>
+  [
+    [
+      "Sex / age",
+      [row.disp_sex, row.disp_age != null ? `${row.disp_age} yrs` : null]
+        .filter(Boolean)
+        .join(" · "),
+    ],
+    ["Address", row.address],
+    ["Condition", row.condition],
+    ["Alternate mobile", altList(row.alt_phone).map(fmtPhone).join(", ")],
+  ].map(([label, value]) => ({ label, value: value || "—" }));
+
+// Every pill is a filter for its own bucket: clicking one asks the server for
+// exactly the rows it counts, clicking it again clears it. `bucket` is the name
+// the API takes and `key` the summary column it counts — both are the same word
+// on the server (SUMMARY_BUCKETS), so a pill can never open rows it did not
+// count. Total is the cleared state rather than a bucket of its own.
+const APPT_PILLS = [
+  { bucket: "", key: "total", label: "Total", color: "" },
+  { bucket: "pending_show", key: "pending_show", label: "Pending", color: "gray" },
+  { bucket: "follow_up", key: "follow_up", label: "Follow-up", color: "amber" },
+  { bucket: "home_collection", key: "home_collection", label: "Home Collection", color: "purple" },
+];
+
+const CALL_PILLS = [
+  { bucket: "not_called", key: "not_called", label: "Need to Call", color: "orange" },
+  { bucket: "called", key: "called", label: "Spoke", color: "green" },
+  { bucket: "not_picked", key: "not_picked", label: "Not Picked", color: "red" },
+  { bucket: "unreachable", key: "unreachable", label: "Unreachable", color: "amber" },
+  { bucket: "rescheduled", key: "rescheduled", label: "Rescheduled", color: "blue" },
+];
+
+const CATEGORY_PILLS = PATIENT_CATEGORIES.filter((c) => c.value).map((c) => ({
+  bucket: `cat_${c.value}`,
+  key: `cat_${c.value}`,
+  label: c.label,
+  color: c.color,
+  category: c.value,
+}));
+
+function Pill({ pill, count, active, onSelect, title }) {
   return (
-    <>
-      <div className="summary__sep" />
-      <div className="summary__group">
-        <div className="summary__label">Categories (whole day)</div>
-        <div className="summary__pills">
-          {PATIENT_CATEGORIES.filter((c) => c.value).map((c) => (
-            <span
-              key={c.value}
-              className={`spill spill--${c.color}`}
-              title={`${categories?.[c.value]?.count || 0} ${c.label} patient(s) today`}
-            >
-              {categories?.[c.value]?.count || 0} {c.label}
-            </span>
-          ))}
-        </div>
-      </div>
-    </>
+    <button
+      type="button"
+      className={`spill${pill.color ? ` spill--${pill.color}` : ""} spill--btn${active ? " is-on" : ""}`}
+      aria-pressed={active}
+      title={title}
+      onClick={() => onSelect(active ? "" : pill.bucket)}
+    >
+      {count} {pill.label}
+    </button>
   );
 }
 
-function Summary({ summary, categories }) {
-  const total = summary.total || 0;
-  const came = summary.came || 0;
-  const noShow = summary.no_show || 0;
-  const pendingShow = summary.pending_show || 0;
-  const called = summary.called || 0;
-  const notPicked = summary.not_picked || 0;
-  const unreachable = summary.unreachable || 0;
-  const rescheduled = summary.rescheduled || 0;
-  const notCalled = summary.not_called || 0;
-  const fu = summary.follow_up || 0;
+function PillGroup({ label, pills, summary, filter, onFilter, titleFor }) {
+  return (
+    <div className="summary__group">
+      <div className="summary__label">{label}</div>
+      <div className="summary__pills">
+        {pills.map((p) => (
+          <Pill
+            key={p.key}
+            pill={p}
+            count={summary[p.key] || 0}
+            active={filter === p.bucket}
+            onSelect={onFilter}
+            title={titleFor ? titleFor(p) : undefined}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Summary({ summary, categories, filter, onFilter }) {
+  // The category pill counts the same rows the list holds, so clicking it lands
+  // on that many rows. The day-wide tally — every appointment booked on the
+  // date, filters ignored — stays available on hover.
+  const categoryTitle = (p) => {
+    const day = categories?.[p.category]?.count;
+    const scope = day == null ? "" : ` · ${day} across the whole day`;
+    return `${summary[p.key] || 0} ${p.label} in this list${scope}`;
+  };
 
   return (
     <div className="summary">
-      <div className="summary__group">
-        <div className="summary__label">Appointments</div>
-        <div className="summary__pills">
-          <span className="spill">{total} Total</span>
-          <span className="spill spill--gray">{pendingShow} Pending</span>
-          <span className="spill spill--amber">{fu} Follow-up</span>
-          <span className="spill spill--purple">
-            {summary.home_collection || 0} Home Collection
-          </span>
-        </div>
-      </div>
+      <PillGroup
+        label="Appointments"
+        pills={APPT_PILLS}
+        summary={summary}
+        filter={filter}
+        onFilter={onFilter}
+      />
       <div className="summary__sep" />
-      <div className="summary__group">
-        <div className="summary__label">Calling</div>
-        <div className="summary__pills">
-          <span className="spill spill--orange">{notCalled} Need to Call</span>
-          <span className="spill spill--green">{called} Spoke</span>
-          <span className="spill spill--red">{notPicked} Not Picked</span>
-          <span className="spill spill--amber">{unreachable} Unreachable</span>
-          <span className="spill spill--blue">{rescheduled} Rescheduled</span>
-        </div>
-      </div>
-      {categories && <CategoryTallies categories={categories} />}
+      <PillGroup
+        label="Calling"
+        pills={CALL_PILLS}
+        summary={summary}
+        filter={filter}
+        onFilter={onFilter}
+      />
+      {categories && (
+        <>
+          <div className="summary__sep" />
+          <PillGroup
+            label="Categories"
+            pills={CATEGORY_PILLS}
+            summary={summary}
+            filter={filter}
+            onFilter={onFilter}
+            titleFor={categoryTitle}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -940,7 +1000,35 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
 }
 
 // ─── Call history expandable row content ───────────────────────────────────
-function CallHistoryPanel({ row, ccAgents, colSpan }) {
+// The two per-patient actions. They live in the Patient cell normally and move
+// into the row's expander in compact mode, where that cell is cut down to the
+// name and number — so compact never costs the desk an action.
+function RowActions({ row, onBookNext, onRecords }) {
+  return (
+    <>
+      <button
+        className="book-next-btn"
+        title="Book next appointment for this patient"
+        onClick={() => onBookNext(row)}
+      >
+        <Plus size={12} aria-hidden="true" />
+        Book next
+      </button>
+      {row.patient_id && (
+        <button
+          className="records-btn"
+          title="View all documents, prescriptions, labs and past visits"
+          onClick={() => onRecords({ id: row.patient_id, name: row.patient_name })}
+        >
+          <FolderOpen size={12} aria-hidden="true" />
+          All records
+        </button>
+      )}
+    </>
+  );
+}
+
+function CallHistoryPanel({ row, ccAgents, colSpan, details, actions }) {
   const [outcome, setOutcome] = useState("not_picked");
   const [calledBy, setCalledBy] = useState("");
   const [notes, setNotes] = useState("");
@@ -998,6 +1086,20 @@ function CallHistoryPanel({ row, ccAgents, colSpan }) {
     <tr className="hist-row">
       <td colSpan={colSpan} className="hist-cell">
         <div className="hist-wrap">
+          {details && (
+            <div className="rowdet">
+              {details.map((d) => (
+                <div className="rowdet__item" key={d.label}>
+                  <span className="rowdet__lab">{d.label}</span>
+                  <span className="rowdet__val">{d.value}</span>
+                </div>
+              ))}
+              {actions && <div className="rowdet__actions">{actions}</div>}
+              <div className="rowdet__hint">
+                Shown in the Patient column when Compact rows is off.
+              </div>
+            </div>
+          )}
           <div className="hist-title">
             <Phone size={14} aria-hidden="true" />
             Call History — {row.patient_name}
@@ -1422,6 +1524,9 @@ export default function GHMPage() {
   const [newPrefill, setNewPrefill] = useState(null);
   const [doctor, setDoctor] = useState(searchParams.get("doctor") || "All");
   const [collectionFilter, setCollectionFilter] = useState(searchParams.get("collection") || "all");
+  const [pillFilter, setPillFilter] = useState(searchParams.get("pill") || "");
+  const [compact, setCompact] = useState(searchParams.get("rows") === "compact");
+  const [fullscreen, setFullscreen] = useState(false);
   // Debounced copy of `search` — drives the date-independent Patient Lookup fetch
   const [debouncedSearch, setDebouncedSearch] = useState(searchParams.get("q") || "");
   const [search, setSearch] = useState(searchParams.get("q") || "");
@@ -1463,23 +1568,27 @@ export default function GHMPage() {
         const put = (k, v, def) => (v && v !== def ? next.set(k, v) : next.delete(k));
         put("doctor", doctor, "All");
         put("collection", collectionFilter, "all");
+        put("pill", pillFilter, "");
+        put("rows", compact ? "compact" : "", "");
         put("q", searchQ, "");
         put("date", date, tabDefaultDate(view));
         return next;
       },
       { replace: true },
     );
-  }, [doctor, collectionFilter, searchQ, date, view, setSearchParams]);
+  }, [doctor, collectionFilter, pillFilter, compact, searchQ, date, view, setSearchParams]);
 
   const filtersActive =
     doctor !== "All" ||
     collectionFilter !== "all" ||
+    pillFilter !== "" ||
     searchQ !== "" ||
     date !== tabDefaultDate(view);
 
   const resetFilters = () => {
     setDoctor("All");
     setCollectionFilter("all");
+    setPillFilter("");
     setSearch("");
     setDebouncedSearch("");
     setDate(tabDefaultDate(view));
@@ -1493,6 +1602,7 @@ export default function GHMPage() {
       if (view !== "lookup") p.set("date", date);
       if (doctor !== "All") p.set("doctor", doctor);
       if (collectionFilter === "home") p.set("home_collection", "1");
+      if (pillFilter) p.set("bucket", pillFilter);
       // The Tomorrow and Follow-up tabs are follow-up calling lists: patients
       // whose follow-up is DUE on this date (matched on follow_up_date), not
       // appointments booked that day. Only "By Date" lists booked appointments.
@@ -1505,7 +1615,7 @@ export default function GHMPage() {
       }
       return p;
     },
-    [date, doctor, collectionFilter, view, lookupQ, searchQ],
+    [date, doctor, collectionFilter, pillFilter, view, lookupQ, searchQ],
   );
 
   const listEnabled = view !== "lookup" || lookupQ.length > 0;
@@ -1629,6 +1739,19 @@ export default function GHMPage() {
     [patchMutation],
   );
 
+  const bookNext = useCallback((row) => {
+    setNewPrefill({
+      patient_name: row.patient_name,
+      file_no: row.file_no,
+      phone: row.phone,
+      condition: row.condition,
+      address: row.address,
+      doctor_name: row.doctor_name,
+      alt_phone: row.alt_phone,
+    });
+    setShowNew(true);
+  }, []);
+
   const saving = useMemo(() => {
     const v = patchMutation.variables;
     return patchMutation.isPending && v ? { [v.id]: true } : {};
@@ -1668,18 +1791,56 @@ export default function GHMPage() {
   // Only once the day has arrived: on a future date nobody has checked in yet,
   // so every row would read "Pending".
   const showVisitStatus = view === "by_date" && date <= todayStr();
-  const colSpan =
-    18 +
-    (showApptDate ? 1 : 0) +
-    (showVisitStatus ? 1 : 0) +
-    (showShowNoShow ? 1 : 0) +
-    (showCallStatus ? 1 : 0) +
-    (showRecovery ? 1 : 0) +
-    (showCalledBy ? 1 : 0) +
-    (showCallDate ? 1 : 0) +
-    (showFollowUpDate ? 1 : 0);
+  // The table's columns in render order — the same order as the <thead> cells
+  // and the row's <td>s below. Compact mode hides columns by position, and the
+  // expander spans them, so both read this list instead of counting by hand.
+  const columnKeys = useMemo(
+    () =>
+      [
+        "calling",
+        "num",
+        showApptDate && "appt_date",
+        showVisitStatus && "visit_status",
+        "patient",
+        "alt_phone",
+        "biomarkers",
+        "booking_status",
+        "visit_type",
+        "category",
+        "mode",
+        "doctor",
+        "assigned_mo",
+        "last_mo",
+        "last_visit",
+        "rx_by",
+        showShowNoShow && "show_no_show",
+        showCallStatus && "call_status",
+        showRecovery && "recovery",
+        showCalledBy && "called_by",
+        showCallDate && "call_date",
+        showFollowUpDate && "follow_up",
+        "preferred_doctor",
+        "preferred_date",
+        "preferred_time",
+        "home_collection",
+        "notes",
+      ].filter(Boolean),
+    [
+      showApptDate,
+      showVisitStatus,
+      showShowNoShow,
+      showCallStatus,
+      showRecovery,
+      showCalledBy,
+      showCallDate,
+      showFollowUpDate,
+    ],
+  );
 
-  const activeFilters = (doctor !== "All" ? 1 : 0) + (collectionFilter !== "all" ? 1 : 0);
+  const colSpan = columnKeys.length;
+
+  const activeFilters =
+    (doctor !== "All" ? 1 : 0) + (collectionFilter !== "all" ? 1 : 0) + (pillFilter ? 1 : 0);
 
   const typing = view === "lookup" && search.trim() !== debouncedSearch.trim();
   const searching = view === "lookup" && (typing || (listEnabled && loading));
@@ -1690,11 +1851,43 @@ export default function GHMPage() {
   const canFit = view !== "reassign" && showRows;
   const { ref: pageRef, height: pageHeight, fitted } = useViewportFill(canFit);
 
+  // Full screen drops the header chrome so the list itself gets the whole
+  // screen. It asks the browser for real fullscreen too, but the layout does
+  // not depend on that being granted — the page covers the viewport either way,
+  // and Escape leaves in both cases.
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+      setFullscreen(false);
+      return;
+    }
+    setFullscreen(true);
+    pageRef.current?.requestFullscreen?.().catch(() => {});
+  }, [pageRef]);
+
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement) setFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape" || document.fullscreenElement) return;
+      setFullscreen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
+
   return (
     <div
-      className={`ghm ${fitted ? "ghm--fit" : ""}`}
+      className={`ghm ${fitted ? "ghm--fit" : ""} ${fullscreen ? "ghm--full" : ""}`}
       ref={pageRef}
-      style={fitted ? { height: pageHeight } : undefined}
+      style={fitted && !fullscreen ? { height: pageHeight } : undefined}
     >
       {/* CC agents datalist — used by all "Called By" inputs */}
       <datalist id="cc-agents-list">
@@ -1756,6 +1949,38 @@ export default function GHMPage() {
                 Reset filters
               </button>
             )}
+            <button
+              type="button"
+              className={`btn btn--ghost ${compact ? "btn--on" : ""}`}
+              aria-pressed={compact}
+              onClick={() => setCompact((v) => !v)}
+              title={
+                compact
+                  ? "Back to the roomier row height"
+                  : "Smaller text and tighter rows — every column stays, so more patients fit a screen"
+              }
+            >
+              <Rows3 size={14} aria-hidden="true" />
+              Compact rows
+            </button>
+            <button
+              type="button"
+              className={`btn btn--ghost ${fullscreen ? "btn--on" : ""}`}
+              aria-pressed={fullscreen}
+              onClick={toggleFullscreen}
+              title={
+                fullscreen
+                  ? "Leave full screen (Esc)"
+                  : "Hide the header and tabs so the list fills the screen"
+              }
+            >
+              {fullscreen ? (
+                <Minimize2 size={14} aria-hidden="true" />
+              ) : (
+                <Maximize2 size={14} aria-hidden="true" />
+              )}
+              {fullscreen ? "Exit full screen" : "Full screen"}
+            </button>
             {view !== "reassign" && (
               <button
                 type="button"
@@ -1842,7 +2067,14 @@ export default function GHMPage() {
       ) : (
         <>
           {/* ── Summary ── */}
-          {showRows && <Summary summary={summary} categories={categoryCounts} />}
+          {(showRows || pillFilter) && (
+            <Summary
+              summary={summary}
+              categories={categoryCounts}
+              filter={pillFilter}
+              onFilter={setPillFilter}
+            />
+          )}
 
           {/* ── Loading ── */}
           {coldLoading && (
@@ -1893,7 +2125,7 @@ export default function GHMPage() {
           {/* ── Table ── */}
           {showRows && (
             <div className={`tbl-wrap ${busy ? "tbl-wrap--busy" : ""}`}>
-              <table className="tbl">
+              <table className={`tbl ${compact ? "tbl--compact" : ""}`}>
                 <thead>
                   <tr>
                     <th style={{ width: 96 }}>Calling</th>
@@ -2085,39 +2317,12 @@ export default function GHMPage() {
                               {row.condition && (
                                 <span className="pcell__cond">{row.condition}</span>
                               )}
-                              <button
-                                className="book-next-btn"
-                                title="Book next appointment for this patient"
-                                onClick={() => {
-                                  setNewPrefill({
-                                    patient_name: row.patient_name,
-                                    file_no: row.file_no,
-                                    phone: row.phone,
-                                    condition: row.condition,
-                                    address: row.address,
-                                    doctor_name: row.doctor_name,
-                                    alt_phone: row.alt_phone,
-                                  });
-                                  setShowNew(true);
-                                }}
-                              >
-                                <Plus size={12} aria-hidden="true" />
-                                Book next
-                              </button>
-                              {row.patient_id && (
-                                <button
-                                  className="records-btn"
-                                  title="View all documents, prescriptions, labs and past visits"
-                                  onClick={() =>
-                                    setRecordFor({
-                                      id: row.patient_id,
-                                      name: row.patient_name,
-                                    })
-                                  }
-                                >
-                                  <FolderOpen size={12} aria-hidden="true" />
-                                  All records
-                                </button>
+                              {!compact && (
+                                <RowActions
+                                  row={row}
+                                  onBookNext={bookNext}
+                                  onRecords={setRecordFor}
+                                />
                               )}
                             </div>
                           </td>
@@ -2472,7 +2677,21 @@ export default function GHMPage() {
                         </tr>
 
                         {isOpen && (
-                          <CallHistoryPanel row={row} ccAgents={ccAgents} colSpan={colSpan} />
+                          <CallHistoryPanel
+                            row={row}
+                            ccAgents={ccAgents}
+                            colSpan={colSpan}
+                            details={compact ? compactDetails(row) : null}
+                            actions={
+                              compact ? (
+                                <RowActions
+                                  row={row}
+                                  onBookNext={bookNext}
+                                  onRecords={setRecordFor}
+                                />
+                              ) : null
+                            }
+                          />
                         )}
                       </Fragment>
                     );

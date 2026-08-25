@@ -616,31 +616,42 @@ router.get("/ghm-appointments/category-counts", async (req, res) => {
   }
 });
 
+// Every pill on the /ghm summary bar is also a filter: clicking one narrows
+// the list to exactly the rows it counts. Both sides come from this one
+// registry — the key is the summary column the pill reads AND the bucket name
+// the list accepts — so a pill's number and the rows it opens cannot drift
+// apart. Each entry takes the row alias and the call-status expression to
+// count against, because the list scopes call status to today (callStatusToday)
+// while the raw column holds the last call whenever it was made.
+const SUMMARY_BUCKETS = {
+  came: (a) => `${a}.show_no_show = 'Show'`,
+  no_show: (a) => `${a}.show_no_show = 'No Show'`,
+  pending_show: (a) => `(${a}.show_no_show IS NULL OR ${a}.show_no_show = '')`,
+  not_called: (a, cs) => `(${cs} IS NULL OR ${cs} IN ('', 'pending'))`,
+  called: (a, cs) => `${cs} = 'called'`,
+  not_picked: (a, cs) => `${cs} = 'not_picked'`,
+  unreachable: (a, cs) => `${cs} = ANY(${pgArray(UNREACHABLE_STATUSES)})`,
+  rescheduled: (a, cs) => `${cs} = 'rescheduled'`,
+  follow_up: (a) => `(${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%')`,
+  home_collection: (a) => `${a}.home_collection`,
+  ...Object.fromEntries(
+    CATEGORY_VALUES.map((v) => [`cat_${v}`, (a) => `${a}.patient_category = '${v}'`]),
+  ),
+};
+
+// "Total" is the cleared state, not a bucket, so it filters nothing.
+const summaryBucket = (v) => (Object.hasOwn(SUMMARY_BUCKETS, String(v)) ? String(v) : null);
+
+const bucketWhere = (name, a, callStat = null) =>
+  SUMMARY_BUCKETS[name](a, callStat || `${a}.call_status`);
+
 const summaryCols = (a, callStat = null) => {
   const cs = callStat || `${a}.call_status`;
   return `
-  COUNT(*)::int                                                       AS total,
-  COUNT(*) FILTER (WHERE ${a}.show_no_show = 'Show')::int             AS came,
-  COUNT(*) FILTER (WHERE ${a}.show_no_show = 'No Show')::int          AS no_show,
-  COUNT(*) FILTER (
-    WHERE ${a}.show_no_show IS NULL OR ${a}.show_no_show = ''
-  )::int                                                              AS pending_show,
-  COUNT(*) FILTER (WHERE ${cs} = 'called')::int                       AS called,
-  COUNT(*) FILTER (WHERE ${cs} = 'not_picked')::int                   AS not_picked,
-  COUNT(*) FILTER (WHERE ${cs} = 'rescheduled')::int                  AS rescheduled,
-  COUNT(*) FILTER (
-    WHERE ${cs} = ANY(${pgArray(UNREACHABLE_STATUSES)})
-  )::int                                                              AS unreachable,
-  COUNT(*) FILTER (
-    WHERE ${cs} IS NULL OR ${cs} IN ('', 'pending')
-  )::int                                                              AS not_called,
-  COUNT(*) FILTER (
-    WHERE ${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%'
-  )::int                                                              AS follow_up,
-  COUNT(*) FILTER (WHERE ${a}.home_collection)::int                   AS home_collection,
-  ${CATEGORY_VALUES.map(
-    (v) => `COUNT(*) FILTER (WHERE ${a}.patient_category = '${v}')::int AS cat_${v}`,
-  ).join(",\n  ")}`;
+  COUNT(*)::int AS total,
+  ${Object.entries(SUMMARY_BUCKETS)
+    .map(([name, cond]) => `COUNT(*) FILTER (WHERE ${cond(a, cs)})::int AS ${name}`)
+    .join(",\n  ")}`;
 };
 
 // Hard ceiling for an export=1 response. Well above a real day's list (the
@@ -677,6 +688,11 @@ router.get("/ghm-appointments", async (req, res) => {
       String(req.query.home_collection || "").toLowerCase(),
     );
     const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
+
+    // Summary-pill filter. It narrows the ROWS only — the summary keeps counting
+    // the whole date so the pills still show the day's real split while one of
+    // them is active, and `total` reports that bucket's own count.
+    const bucket = summaryBucket(req.query.bucket);
 
     const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
                 a.doctor_name, a.patient_name, a.file_no, a.phone, a.alt_phone,
@@ -777,6 +793,7 @@ router.get("/ghm-appointments", async (req, res) => {
                ${searchWhere}
                ${pickUpcoming}
              ) t
+             ${bucket ? `WHERE ${bucketWhere(bucket, "t")}` : ""}
              -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
              -- stable — many patients share an identical name, and ordering by name
              -- alone lets rows repeat or be skipped across pages.
@@ -789,7 +806,7 @@ router.get("/ghm-appointments", async (req, res) => {
         ),
       ]);
       const summary = countR.rows[0] || {};
-      const total = summary.total || 0;
+      const total = (bucket ? summary[bucket] : summary.total) || 0;
       return res.json({
         data: dataR.rows,
         total,
@@ -835,6 +852,10 @@ router.get("/ghm-appointments", async (req, res) => {
       }
     }
 
+    const rowWhere = bucket
+      ? `${where} AND ${bucketWhere(bucket, "a", callStatusToday("a"))}`
+      : where;
+
     const [countR, dataR] = await Promise.all([
       pool.query(
         `SELECT ${summaryCols("a", callStatusToday("a"))} FROM appointments a ${where}`,
@@ -868,7 +889,7 @@ router.get("/ghm-appointments", async (req, res) => {
                    LIMIT 1)
                 ) AS follow_up_date
          ${joins}
-         ${where}
+         ${rowWhere}
          ${orderBy}
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, effLimit, offset],
@@ -876,7 +897,7 @@ router.get("/ghm-appointments", async (req, res) => {
     ]);
 
     const summary = countR.rows[0] || {};
-    const total = summary.total || 0;
+    const total = (bucket ? summary[bucket] : summary.total) || 0;
     res.json({
       data: dataR.rows,
       total,

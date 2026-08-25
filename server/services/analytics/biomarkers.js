@@ -1,12 +1,20 @@
-import { MARKERS, MARKER_KEYS } from "./constants.js";
+import {
+  MARKERS,
+  MARKER_KEYS,
+  GOAL_ATTAINMENT_MARKERS,
+  GOAL_ATTAINMENT_MIN_VISITS,
+} from "./constants.js";
 import {
   classifyBiomarker,
+  describeTargetBands,
+  gapToGoal,
   targetStatus,
   CONTROL_LABELS,
   TRAJECTORY_LABELS,
 } from "./biomarkerTargets.js";
 import { describe, histogram, pct, round } from "./stats.js";
 import { conditionMembers } from "./conditions.js";
+import { daysBetween } from "./patientBase.js";
 
 export function indexSummary(summaryRows) {
   const byMarker = new Map();
@@ -174,12 +182,8 @@ export function buildControlCascade(byMarker, conditionIndex, patients, { asOf }
   const measured = list.length;
   const current = list.filter((r) => currentWithin(r, asOf));
 
-  const bands = { lt7: 0, b7_9: 0, ge9: 0 };
-  for (const r of current) {
-    if (r.last_val < 7) bands.lt7 += 1;
-    else if (r.last_val < 9) bands.b7_9 += 1;
-    else bands.ge9 += 1;
-  }
+  const bands = { good: 0, warn: 0, bad: 0, unknown: 0 };
+  for (const r of current) bands[targetStatus("hba1c", r.last_val)] += 1;
 
   return {
     steps: [
@@ -195,26 +199,29 @@ export function buildControlCascade(byMarker, conditionIndex, patients, { asOf }
         share_pct: pct(current.length, diabetics.size),
       },
       {
-        step: "At goal (HbA1c under 7%)",
-        patients: bands.lt7,
-        share_pct: pct(bands.lt7, diabetics.size),
+        step: "At goal (HbA1c 7% or below)",
+        patients: bands.good,
+        share_pct: pct(bands.good, diabetics.size),
       },
     ],
     control_bands: [
       {
-        band: "Under 7% (at goal)",
-        patients: bands.lt7,
-        share_pct: pct(bands.lt7, current.length),
+        band: "7% or below (at goal)",
+        status: "good",
+        patients: bands.good,
+        share_pct: pct(bands.good, current.length),
       },
       {
-        band: "7 to 9% (above goal)",
-        patients: bands.b7_9,
-        share_pct: pct(bands.b7_9, current.length),
+        band: "Over 7 to 9% (borderline)",
+        status: "warn",
+        patients: bands.warn,
+        share_pct: pct(bands.warn, current.length),
       },
       {
-        band: "9% or above (poor control)",
-        patients: bands.ge9,
-        share_pct: pct(bands.ge9, current.length),
+        band: "Over 9% (poor control)",
+        status: "bad",
+        patients: bands.bad,
+        share_pct: pct(bands.bad, current.length),
       },
     ],
     denominator: diabetics.size,
@@ -222,6 +229,7 @@ export function buildControlCascade(byMarker, conditionIndex, patients, { asOf }
     notes: [
       "Each step is a subset of the one above it, so the drop between steps is the measurement gap rather than a treatment failure.",
       "Control bands use only patients with an HbA1c in the last 12 months; patients not recently tested are not counted as controlled or uncontrolled.",
+      "Bands are the same HbA1c thresholds used everywhere else in this report (7% or below at goal, over 7 up to 9% borderline, over 9% poor control), so a value of exactly 7.0 or 9.0 falls in the same band on every chart.",
     ],
   };
 }
@@ -257,6 +265,124 @@ export function buildControlByContinuity(byMarker, patients, { asOf, markers }) 
     }
   }
   return rows;
+}
+
+export function buildGoalAttainment(
+  byMarker,
+  patients,
+  { asOf, markers = GOAL_ATTAINMENT_MARKERS, minVisits = GOAL_ATTAINMENT_MIN_VISITS } = {},
+) {
+  const engaged = patients.filter((p) => p.visit_days >= minVisits);
+  const eligible = new Set(engaged.map((p) => p.patient_id));
+
+  const rows = [];
+  for (const key of markers) {
+    const spec = MARKERS[key];
+    if (!spec) continue;
+
+    const paired = (byMarker.get(key) || []).filter(
+      (r) => eligible.has(r.patient_id) && r.n >= 2 && r.first_val != null && r.last_val != null,
+    );
+    const startedOff = paired.filter((r) => {
+      const status = targetStatus(key, r.first_val);
+      return status === "warn" || status === "bad";
+    });
+    if (!startedOff.length) continue;
+
+    const reached = startedOff.filter((r) => targetStatus(key, r.last_val) === "good");
+    const improved = startedOff.filter(
+      (r) => targetStatus(key, r.first_val) === "bad" && targetStatus(key, r.last_val) === "warn",
+    );
+
+    // Which way is everyone who started off goal heading? Uses the same
+    // classifier as the trajectory charts, so "moving toward goal" here and
+    // "improving" there mean the same thing on the same tolerances. Patients who
+    // reached goal are included — arriving is the strongest form of moving
+    // toward it — so this splits the same denominator the table above reports.
+    const notReached = startedOff.filter((r) => targetStatus(key, r.last_val) !== "good");
+    const moves = { better: [], stable: [], worse: [], unknown: [] };
+    for (const r of startedOff) moves[classifyBiomarker(key, r.last_val, r.first_val)].push(r);
+    const current = reached.filter((r) => currentWithin(r, asOf));
+    const bands = describeTargetBands(key, spec.unit);
+
+    rows.push({
+      marker: key,
+      label: spec.label,
+      unit: spec.unit,
+      goal: bands?.good || null,
+      patients_paired: paired.length,
+      started_off_goal: startedOff.length,
+      reached_goal: reached.length,
+      reached_goal_pct: pct(reached.length, startedOff.length),
+      reached_goal_current: current.length,
+      improved_band: improved.length,
+      improved_band_pct: pct(improved.length, startedOff.length),
+      still_off_goal: notReached.length,
+      unchanged_band: startedOff.length - reached.length - improved.length,
+      toward_goal: moves.better.length,
+      toward_goal_pct: pct(moves.better.length, startedOff.length),
+      holding_steady: moves.stable.length,
+      holding_steady_pct: pct(moves.stable.length, startedOff.length),
+      moving_away: moves.worse.length,
+      moving_away_pct: pct(moves.worse.length, startedOff.length),
+      median_gap_toward: round(
+        describe(
+          moves.better.map((r) => gapToGoal(key, r.last_val)),
+          spec.decimals,
+        ).median,
+        spec.decimals,
+      ),
+      median_closed_toward: round(
+        describe(
+          moves.better.map((r) => gapToGoal(key, r.first_val) - gapToGoal(key, r.last_val)),
+          spec.decimals,
+        ).median,
+        spec.decimals,
+      ),
+      median_first: round(
+        describe(
+          startedOff.map((r) => r.first_val),
+          spec.decimals,
+        ).median,
+        spec.decimals,
+      ),
+      median_last_reached: round(
+        describe(
+          reached.map((r) => r.last_val),
+          spec.decimals,
+        ).median,
+        spec.decimals,
+      ),
+      median_change_reached: round(
+        describe(
+          reached.map((r) => r.last_val - r.first_val),
+          spec.decimals,
+        ).median,
+        spec.decimals,
+      ),
+      median_days_to_goal: round(
+        describe(
+          reached.map((r) => daysBetween(r.first_date, r.last_date)).filter((d) => d != null),
+          0,
+        ).median,
+        0,
+      ),
+    });
+  }
+
+  return {
+    min_visits: minVisits,
+    engaged_patients: engaged.length,
+    markers: rows,
+    notes: [
+      `Counts only patients with ${minVisits} or more recorded visit days, so every patient here has been followed rather than seen once.`,
+      "The denominator is patients whose first recorded value for the marker missed goal. Patients already at goal on their first reading are excluded — they had no goal to reach.",
+      "Reached goal compares that first reading with the patient's latest reading, whenever it was taken. The tested-in-12m column narrows it to patients whose latest reading is recent enough to still stand.",
+      "Blood pressure is counted as systolic and diastolic separately, on the same thresholds used everywhere else in this report.",
+      "The direction-of-travel split covers everyone who started off goal, including those who reached it — arriving counts as moving toward goal. Holding steady means the change is within the marker's noise tolerance, so it is not read as movement either way.",
+      "First and latest readings can be years apart and are not tied to any treatment. This measures where the panel ended up, not what moved it.",
+    ],
+  };
 }
 
 export { CONTROL_LABELS, TRAJECTORY_LABELS };

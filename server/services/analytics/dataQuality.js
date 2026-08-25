@@ -241,6 +241,26 @@ export function buildWorklists(patients, conditionIndex, byMarker, cohorts, { as
   }
   worsening.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
 
+  const previouslyEngaged = [];
+  for (const p of patients) {
+    if (!p.first_visit || p.continuing || !p.dense_year) continue;
+    const a1c = markerIndex.get("hba1c")?.get(p.patient_id);
+    previouslyEngaged.push({
+      patient_id: p.patient_id,
+      file_no: p.file_no,
+      age: p.age,
+      sex: p.sex,
+      visit_days: p.visit_days,
+      first_visit: p.first_visit,
+      last_visit: p.last_visit,
+      days_since_visit: p.days_since_visit,
+      is_diabetic: diabetics.has(p.patient_id),
+      last_hba1c: a1c && a1c.last_val != null ? round(a1c.last_val, 1) : null,
+      last_hba1c_date: a1c ? a1c.last_date : null,
+    });
+  }
+  previouslyEngaged.sort((a, b) => a.days_since_visit - b.days_since_visit);
+
   const gapRows = [];
   for (const gap of gaps || []) {
     for (const s of gap.sample) {
@@ -257,6 +277,8 @@ export function buildWorklists(patients, conditionIndex, byMarker, cohorts, { as
 
   return {
     lapsed_uncontrolled_diabetics: lapsedUncontrolled,
+    previously_engaged_lapsed: previouslyEngaged.slice(0, 2000),
+    previously_engaged_lapsed_total: previouslyEngaged.length,
     glp1_without_followup: noFollowup,
     worsening_tier1: worsening.slice(0, 2000),
     guideline_gaps: gapRows,

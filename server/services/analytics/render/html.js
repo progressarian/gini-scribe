@@ -59,6 +59,18 @@ const CONTROL_SEGMENTS = [
   { key: "off_goal", label: "Off goal", color: CONTROL_COLORS.bad },
 ];
 
+const GOAL_SEGMENTS = [
+  { key: "reached_goal", label: "Reached goal", color: CONTROL_COLORS.good },
+  { key: "improved_band", label: "Improved but not at goal", color: CONTROL_COLORS.warn },
+  { key: "unchanged_band", label: "Still off goal", color: CONTROL_COLORS.bad },
+];
+
+const CONTROL_BAND_NOTES = [
+  "Each marker is banded on its own thresholds, printed beside the marker name in the order At goal \u00b7 Borderline \u00b7 Off goal.",
+  "Borderline means the value has missed the goal but has not crossed the off-goal threshold \u2014 the group to pull back before it becomes poor control.",
+  "Bands use each patient's latest value, counted only if that test was in the last 12 months. Patients with no classifiable value are excluded from the percentages.",
+];
+
 const TRAJECTORY_SEGMENTS = [
   { key: "improving", label: "Improving", color: TRAJECTORY_COLORS.better },
   { key: "stable", label: "Stable", color: TRAJECTORY_COLORS.stable },
@@ -70,6 +82,7 @@ function renderRegistry(s) {
   const kpis = `<div class="kpis">
     ${kpi(num(k.registered_patients), "Registered patients", "all records in the system")}
     ${kpi(num(k.patients_with_visit), "With a recorded visit", `${num(k.patients_without_visit)} have none`)}
+    ${kpi(num(k.dense_year_patients), "3+ visits in a 12-month span", `${pctText(k.dense_year_share_pct)} of those with a visit`)}
     ${kpi(num(k.continuing_patients), "Continuing", `${pctText(k.continuing_share_pct)} of those with a visit`)}
     ${kpi(num(k.lapsed_patients), "Lapsed", "no visit in the last 6 months")}
     ${kpi(dec(k.median_visits_per_patient, 1), "Median visits per patient", "distinct visit days")}
@@ -243,6 +256,11 @@ function renderRetention(s) {
         color: "var(--series-2)",
         points: s.retention_curve.map((r) => ({ y: r.retained_180d_pct })),
       },
+      {
+        name: "3+ visits in a 12-month span",
+        color: "var(--series-3)",
+        points: s.retention_curve.map((r) => ({ y: r.dense_year_pct })),
+      },
     ],
     {
       xLabels: s.retention_curve.map((r) => r.cohort),
@@ -292,7 +310,8 @@ function renderRetention(s) {
     <div class="card">${legend([
       { label: "Still attending", color: "var(--series-1)" },
       { label: "Returned within 180 days", color: "var(--series-2)" },
-    ])}<figure><figcaption>Each point is a quarter's intake, followed forward</figcaption>${curve}</figure></div>
+      { label: "3+ visits in a 12-month span", color: "var(--series-3)" },
+    ])}<figure><figcaption>Each point is a quarter's intake, followed forward. A patient counts towards the last series if any 365-day window of their history holds three or more visit days, so a cohort's figure can still rise after the quarter shown.</figcaption>${curve}</figure></div>
     <h3>Appointment attendance</h3>
     <div class="card"><figure><figcaption>Monthly no-show rate</figcaption>${attendance}</figure></div>` +
     notes(s.attendance.notes)
@@ -305,7 +324,7 @@ function renderBiomarkers(s) {
   const controlRows = s.control
     .filter((r) => r.at_goal_pct != null)
     .sort((a, b) => a.tier - b.tier || b.patients_current - a.patients_current)
-    .map((r) => ({ ...r, label: `${r.label}` }));
+    .map((r) => ({ ...r, label: r.bands ? `${r.label} (${r.bands.compact})` : r.label }));
 
   const controlChart = stackedShareChart(controlRows, CONTROL_SEGMENTS, {
     label: "Share of patients at goal by marker",
@@ -331,6 +350,7 @@ function renderBiomarkers(s) {
   const controlTable = table(
     [
       { label: "Marker", key: "label" },
+      { label: "Bands (goal · borderline · off)", get: (r) => r.bands?.compact || "—" },
       { label: "Patients ever tested", get: (r) => num(r.patients_any) },
       { label: "Tested in last 12m", get: (r) => num(r.patients_current) },
       { label: "At goal", get: (r) => pctText(r.at_goal_pct) },
@@ -374,8 +394,57 @@ function renderBiomarkers(s) {
     s.trajectory_by_condition,
   );
 
+  const goal = s.goal_attainment;
+  const goalBlock = goal?.markers?.length
+    ? `<h3>Patients who started off goal and are now at goal</h3>
+     <p class="small">Followed patients only \u2014 ${num(goal.engaged_patients)} people with ${goal.min_visits} or more recorded visit days. Each marker counts those whose first recorded value missed goal, then asks where their latest value sits.</p>
+     <div class="kpis">
+       ${goal.markers
+         .map((m) =>
+           kpi(
+             num(m.reached_goal),
+             `${m.label} back to goal`,
+             `${pctText(m.reached_goal_pct)} of ${num(m.started_off_goal)} who started off goal${m.goal ? ` \u00b7 goal ${m.goal}` : ""}`,
+           ),
+         )
+         .join("")}
+     </div>
+     <div class="card">${legend(GOAL_SEGMENTS.map((c) => ({ label: c.label, color: c.color })))}<figure><figcaption>Each bar is the patients who started off goal for that marker</figcaption>${stackedShareChart(
+       goal.markers.map((m) => ({ ...m, label: m.goal ? `${m.label} (goal ${m.goal})` : m.label })),
+       GOAL_SEGMENTS,
+       { label: "Goal attainment by marker" },
+     )}</figure></div>
+     ${table(
+       [
+         { label: "Marker", key: "label" },
+         { label: "Goal", get: (r) => r.goal || "\u2014" },
+         { label: "Started off goal", get: (r) => num(r.started_off_goal) },
+         { label: "Now at goal", get: (r) => num(r.reached_goal) },
+         { label: "Now at goal %", get: (r) => pctText(r.reached_goal_pct) },
+         { label: "Of those, tested in 12m", get: (r) => num(r.reached_goal_current) },
+         { label: "Still off goal", get: (r) => num(r.still_off_goal) },
+       ],
+       goal.markers,
+     )}
+     <h4>Which way everyone who started off goal is heading</h4>
+     <p class="small">The same patients as the table above, split by the direction their latest value has moved. Those moving toward goal include the ones who reached it, so this is the wider picture of who is responding.</p>
+     ${table(
+       [
+         { label: "Marker", key: "label" },
+         { label: "Goal", get: (r) => r.goal || "\u2014" },
+         { label: "Started off goal", get: (r) => num(r.started_off_goal) },
+         { label: "Moving toward goal", get: (r) => num(r.toward_goal) },
+         { label: "Moving toward goal %", get: (r) => pctText(r.toward_goal_pct) },
+         { label: "Holding steady", get: (r) => num(r.holding_steady) },
+         { label: "Moving away", get: (r) => num(r.moving_away) },
+       ],
+       goal.markers,
+     )}
+     ${notes(goal.notes)}`
+    : "";
+
   return `<h3>The diabetes control cascade</h3>
-     <p class="small">The clearest single view of whether diabetes care is working. Each bar is a subset of the one above it.</p>
+     <p class="small">The clearest single view of whether diabetes care is working. Patients on the diabetes register only \u2014 every figure in this section, including the three tiles below, is a share of that register. Each bar is a subset of the one above it.</p>
      <div class="card">${cascade}</div>
      <div class="kpis">
        ${s.cascade.control_bands
@@ -383,14 +452,17 @@ function renderBiomarkers(s) {
            kpi(
              pctText(b.share_pct),
              b.band,
-             `${num(b.patients)} of ${num(s.cascade.current_denominator)} recently tested`,
+             `${num(b.patients)} of ${num(s.cascade.current_denominator)} diabetics tested in the last 12 months`,
            ),
          )
          .join("")}
      </div>
      ${notes(s.cascade.notes)}
+     ${goalBlock}
      <h3>Where patients stand against target</h3>
-     <div class="card">${legend(CONTROL_SEGMENTS.map((c) => ({ label: c.label, color: c.color })))}<figure><figcaption>Most recent value per patient, tested within the last 12 months</figcaption>${controlChart}</figure></div>
+     <p class="small">Every patient with a recent result for the marker, not only diabetics \u2014 so these denominators are wider than the cascade above and the two sets of percentages are not comparable.</p>
+     <div class="card">${legend(CONTROL_SEGMENTS.map((c) => ({ label: c.label, color: c.color })))}<figure><figcaption>Most recent value per patient, tested within the last 12 months. The three thresholds beside each marker are its At goal · Borderline · Off goal bands.</figcaption>${controlChart}</figure></div>
+     ${notes(CONTROL_BAND_NOTES)}
      <h3>Direction of travel</h3>
      <div class="card">${legend(TRAJECTORY_SEGMENTS.map((c) => ({ label: c.label, color: c.color })))}<figure><figcaption>First recorded value compared with the most recent, for patients with at least two readings</figcaption>${trajChart}</figure></div>
      <h3>All markers</h3>
@@ -718,6 +790,23 @@ function renderDataQuality(s) {
 
 function renderWorklists(s) {
   const blocks = [
+    {
+      title: "Previously engaged, now lapsed",
+      lede: "Once reached three or more visits inside a 12-month window and has not been seen in six months. Already proven to attend, so a warmer recall list than the lapsed panel as a whole. Sorted by least time since the last visit.",
+      rows: (s.previously_engaged_lapsed || []).slice(0, 60),
+      columns: [
+        { label: "Patient ID", key: "patient_id" },
+        { label: "File no", key: "file_no" },
+        { label: "Age", get: (r) => num(r.age) },
+        { label: "Sex", key: "sex" },
+        { label: "Visits", get: (r) => num(r.visit_days) },
+        { label: "Diabetic", get: (r) => (r.is_diabetic ? "Yes" : "No") },
+        { label: "Last HbA1c", get: (r) => dec(r.last_hba1c, 1) },
+        { label: "Last visit", key: "last_visit" },
+        { label: "Days since", get: (r) => num(r.days_since_visit) },
+      ],
+      total: s.previously_engaged_lapsed_total ?? 0,
+    },
     {
       title: "Lapsed patients with uncontrolled diabetes",
       lede: "Last HbA1c at or above 9% and no visit in the last six months. Highest clinical priority for recall.",

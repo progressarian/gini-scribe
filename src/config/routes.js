@@ -23,7 +23,7 @@ export const ROUTE_MAP = {
   outcomes: "/outcomes",
   ai: "/ai",
   reports: "/reports",
-  // analytics: "/analytics",
+  analytics: "/analytics",
   ci: "/ci",
   visit: "/visit",
   obt_dashboard: "/obt-dashboard",

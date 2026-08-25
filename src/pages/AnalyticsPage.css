@@ -101,6 +101,13 @@
   margin: 28px 0 10px;
 }
 
+.an-body h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--an-ink-secondary);
+  margin: 22px 0 8px;
+}
+
 .an-lede {
   font-size: 13px;
   color: var(--an-ink-secondary);
@@ -132,6 +139,36 @@
 .an-filters label {
   font-size: 13px;
   color: var(--an-ink-secondary);
+}
+
+@media (max-width: 720px) {
+  .an-page {
+    padding: 14px 12px 56px;
+  }
+
+  .an-head {
+    align-items: flex-start;
+  }
+
+  .an-head h1 {
+    font-size: 20px;
+  }
+
+  .an-actions {
+    width: 100%;
+  }
+
+  .an-actions button {
+    flex: 1;
+  }
+
+  .an-card {
+    padding: 12px 12px;
+  }
+
+  .an-nav {
+    margin: 12px 0 16px;
+  }
 }
 
 .an-filters select {

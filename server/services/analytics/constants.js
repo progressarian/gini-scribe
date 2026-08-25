@@ -380,3 +380,7 @@ export const WEIGHT_RESPONSE_THRESHOLDS = [5, 10, 15];
 
 export const AUTOMATED_STOP_REASON =
   /(not in latest prescription|healthray:|report_extract:|dedup|superseded)/i;
+
+export const GOAL_ATTAINMENT_MIN_VISITS = 3;
+
+export const GOAL_ATTAINMENT_MARKERS = ["hba1c", "ldl", "sbp", "dbp"];

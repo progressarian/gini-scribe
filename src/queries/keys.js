@@ -70,11 +70,11 @@ export const qk = {
     patientByFileNo: (fileNo) => ["ghm", "patient-by-file-no", fileNo || null],
     patientByPhone: (phone) => ["ghm", "patient-by-phone", phone || null],
   },
-  // analytics: {
-  //   all: ["analytics"],
-  //   meta: () => ["analytics", "meta"],
-  //   section: (id) => ["analytics", "section", String(id)],
-  // },
+  analytics: {
+    all: ["analytics"],
+    meta: () => ["analytics", "meta"],
+    section: (id, cohort = null) => ["analytics", "section", String(id), cohort || "all"],
+  },
   messages: {
     all: ["messages"],
     thread: (patientId, role = null, doctor = null) => [

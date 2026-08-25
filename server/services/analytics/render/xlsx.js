@@ -49,6 +49,8 @@ export async function buildWorkbook(report) {
     ["Continuing (visit within 6 months)", k.continuing_patients],
     ["Continuing share %", k.continuing_share_pct],
     ["Lapsed", k.lapsed_patients],
+    ["3+ visits in a 12-month span", k.dense_year_patients],
+    ["3+ visits in a 12-month span %", k.dense_year_share_pct],
     ["Median visits per patient", k.median_visits_per_patient],
     [],
     ["Diabetes control cascade", "Patients", "Share %"],
@@ -136,6 +138,7 @@ export async function buildWorkbook(report) {
       { label: "Cohort size", key: "size" },
       { label: "Returned within 180 days %", key: "retained_180d_pct" },
       { label: "Returned within 365 days %", key: "retained_365d_pct" },
+      { label: "3+ visits in a 12-month span %", key: "dense_year_pct" },
       { label: "Still attending %", key: "still_active_pct" },
     ]),
   );
@@ -156,6 +159,7 @@ export async function buildWorkbook(report) {
     sheetFrom(report.s4_biomarkers.control, [
       { label: "Marker", key: "label" },
       { label: "Unit", key: "unit" },
+      { label: "Band thresholds", get: (r) => r.bands?.summary || "" },
       { label: "Patients ever tested", key: "patients_any" },
       { label: "Tested in last 12 months", key: "patients_current" },
       { label: "Trendable patients", key: "patients_paired" },
@@ -167,6 +171,31 @@ export async function buildWorkbook(report) {
       { label: "Worsening %", key: "worsening_pct" },
       { label: "Median latest value", get: (r) => r.latest_values.median },
       { label: "Mean change first to latest", get: (r) => r.change_first_to_last.mean },
+    ]),
+  );
+
+  add(
+    "Reached goal",
+    sheetFrom(report.s4_biomarkers.goal_attainment?.markers || [], [
+      { label: "Marker", key: "label" },
+      { label: "Unit", key: "unit" },
+      { label: "Goal", key: "goal" },
+      { label: "Started off goal", key: "started_off_goal" },
+      { label: "Now at goal", key: "reached_goal" },
+      { label: "Now at goal %", key: "reached_goal_pct" },
+      { label: "Of those, tested in last 12 months", key: "reached_goal_current" },
+      { label: "Improved but not at goal", key: "improved_band" },
+      { label: "Still off goal", key: "still_off_goal" },
+      { label: "Median first value", key: "median_first" },
+      { label: "Median latest value (reached)", key: "median_last_reached" },
+      { label: "Median change (reached)", key: "median_change_reached" },
+      { label: "Median days first to latest (reached)", key: "median_days_to_goal" },
+      { label: "Moving toward goal", key: "toward_goal" },
+      { label: "Moving toward goal %", key: "toward_goal_pct" },
+      { label: "Median gap left (toward)", key: "median_gap_toward" },
+      { label: "Median gap already closed (toward)", key: "median_closed_toward" },
+      { label: "Holding steady", key: "holding_steady" },
+      { label: "Moving away", key: "moving_away" },
     ]),
   );
 
@@ -337,6 +366,23 @@ export async function buildWorkbook(report) {
       { label: "Rows", key: "rows" },
       { label: "Patients", key: "patients" },
       { label: "Map to condition (fill in)", get: () => "" },
+    ]),
+  );
+
+  add(
+    "LL previously engaged",
+    sheetFrom(report.s8_worklists.previously_engaged_lapsed || [], [
+      { label: "Patient ID", key: "patient_id" },
+      { label: "File no", key: "file_no" },
+      { label: "Age", key: "age" },
+      { label: "Sex", key: "sex" },
+      { label: "Visit days", key: "visit_days" },
+      { label: "Diabetic", get: (r) => (r.is_diabetic ? "Yes" : "No") },
+      { label: "Last HbA1c", key: "last_hba1c" },
+      { label: "Measured on", key: "last_hba1c_date" },
+      { label: "First visit", key: "first_visit" },
+      { label: "Last visit", key: "last_visit" },
+      { label: "Days since visit", key: "days_since_visit" },
     ]),
   );
 

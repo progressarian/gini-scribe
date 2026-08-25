@@ -94,6 +94,23 @@ export function targetStatus(key, value) {
   return "bad";
 }
 
+// How far a value still sits from the goal band, in the marker's own units.
+// Zero once the value is at goal, so it doubles as an "is this patient there
+// yet" test. Reads the same BIO_TARGET entry as targetStatus, so the distance
+// can never disagree with the band the value was sorted into.
+export function gapToGoal(key, value) {
+  if (value == null || isNaN(value)) return null;
+  const t = BIO_TARGET[key];
+  if (!t) return null;
+  if (t.range) {
+    if (value < t.low) return t.low - value;
+    if (value > t.high) return value - t.high;
+    return 0;
+  }
+  if (t.lowerBetter) return Math.max(0, value - t.good);
+  return Math.max(0, t.good - value);
+}
+
 const ZONE_RANK = { good: 0, warn: 1, bad: 2 };
 
 export function classifyBiomarker(key, cur, prev) {
@@ -141,3 +158,48 @@ export const CONTROL_LABELS = {
   bad: "Off goal",
   unknown: "Not classifiable",
 };
+
+// Human-readable form of the three bands targetStatus() sorts a value into, so
+// the charts can state what "Borderline" actually means for each marker instead
+// of leaving the reader to guess. Derived from BIO_TARGET — the same numbers the
+// classifier uses — so the two can never drift apart.
+export function describeTargetBands(key, unit = "") {
+  const t = BIO_TARGET[key];
+  if (!t) return null;
+  const u = unit === "%" ? "%" : unit ? ` ${unit}` : "";
+  const n = (v) => `${v}${u}`;
+
+  let good, warn, bad, compact;
+  if (t.range) {
+    const buf = (t.high - t.low) * 0.5;
+    const lowEdge = t.low - buf;
+    good = `${t.low} to ${n(t.high)}`;
+    warn =
+      lowEdge <= 0
+        ? `under ${t.low}, or over ${t.high} up to ${n(t.high + buf)}`
+        : `${lowEdge} to under ${t.low}, or over ${t.high} up to ${n(t.high + buf)}`;
+    bad = `over ${n(t.high + buf)}`;
+    compact =
+      lowEdge <= 0
+        ? `${t.low}–${t.high} · <${t.low} or ≤${t.high + buf} · >${t.high + buf}${u}`
+        : `${t.low}–${t.high} · ${lowEdge}–${t.high + buf} · outside${u}`;
+  } else if (t.lowerBetter) {
+    good = `${n(t.good)} or below`;
+    warn = `over ${t.good}, up to ${n(t.warn)}`;
+    bad = `over ${n(t.warn)}`;
+    compact = `≤${t.good} · ${t.good}–${t.warn} · >${t.warn}${u}`;
+  } else {
+    good = `${n(t.good)} or above`;
+    warn = `${t.warn} to under ${n(t.good)}`;
+    bad = `under ${n(t.warn)}`;
+    compact = `≥${t.good} · ${t.warn}–${t.good} · <${t.warn}${u}`;
+  }
+
+  return {
+    good,
+    warn,
+    bad,
+    compact,
+    summary: `At goal ${good} · Borderline ${warn} · Off goal ${bad}`,
+  };
+}

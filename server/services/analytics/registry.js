@@ -11,6 +11,7 @@ export function buildRegistry(patients, { asOf }) {
   const total = patients.length;
   const withVisit = patients.filter((p) => p.first_visit);
   const continuing = withVisit.filter((p) => p.continuing);
+  const denseYear = withVisit.filter((p) => p.dense_year);
 
   const cohortCounts = countBy(
     withVisit.filter((p) => p.first_visit >= HISTORY_START_DATE),
@@ -74,6 +75,8 @@ export function buildRegistry(patients, { asOf }) {
       continuing_patients: continuing.length,
       continuing_share_pct: pct(continuing.length, withVisit.length),
       lapsed_patients: withVisit.length - continuing.length,
+      dense_year_patients: denseYear.length,
+      dense_year_share_pct: pct(denseYear.length, withVisit.length),
       median_visits_per_patient: round(median(withVisit.map((p) => p.visit_days)), 1),
       median_tenure_days: round(median(withVisit.map((p) => p.tenure_days)), 0),
     },
@@ -193,6 +196,7 @@ export function buildRetentionCurve(patients, { asOf }) {
       size: 0,
       retained_180d: 0,
       retained_365d: 0,
+      dense_year: 0,
       still_active: 0,
     };
     entry.size += 1;
@@ -201,6 +205,7 @@ export function buildRetentionCurve(patients, { asOf }) {
       p.last_visit && p.first_visit ? daysBetweenSafe(p.first_visit, p.last_visit) : 0;
     if (span >= 180 && lifespan >= 180) entry.retained_180d += 1;
     if (span >= 365 && lifespan >= 365) entry.retained_365d += 1;
+    if (p.dense_year) entry.dense_year += 1;
     if (p.continuing) entry.still_active += 1;
     cohorts.set(key, entry);
   }
@@ -210,6 +215,7 @@ export function buildRetentionCurve(patients, { asOf }) {
       ...c,
       retained_180d_pct: pct(c.retained_180d, c.size),
       retained_365d_pct: pct(c.retained_365d, c.size),
+      dense_year_pct: pct(c.dense_year, c.size),
       still_active_pct: pct(c.still_active, c.size),
     }));
 }

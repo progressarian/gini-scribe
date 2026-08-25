@@ -75,7 +75,7 @@ const HistoryPage = lazyWithRetry(() => import("./pages/HistoryPage"));
 const OutcomesPage = lazyWithRetry(() => import("./pages/OutcomesPage"));
 const AIPage = lazyWithRetry(() => import("./pages/AIPage"));
 const ReportsPage = lazyWithRetry(() => import("./pages/ReportsPage"));
-// const AnalyticsPage = lazyWithRetry(() => import("./pages/AnalyticsPage"));
+const AnalyticsPage = lazyWithRetry(() => import("./pages/AnalyticsPage"));
 const CIPage = lazyWithRetry(() => import("./pages/CIPage"));
 const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
 const RefillsPage = lazyWithRetry(() => import("./pages/RefillsPage"));
@@ -194,7 +194,7 @@ const router = createBrowserRouter([
               { path: "/outcomes", element: lazyEl(OutcomesPage) },
               { path: "/ai", element: lazyEl(AIPage) },
               { path: "/reports", element: lazyEl(ReportsPage) },
-              // { path: "/analytics", element: lazyEl(AnalyticsPage) },
+              { path: "/analytics", element: lazyEl(AnalyticsPage) },
               { path: "/ci", element: lazyEl(CIPage) },
               // OPD Manager
               { path: "/opd", element: lazyEl(OPD) },

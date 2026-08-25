@@ -10,7 +10,7 @@ import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
 import { PAGE_CAPABILITIES, navAllowlistForRole } from "../config/routes";
-import { hasAnyCapability } from "../../shared/permissions";
+import { hasAnyCapability, canViewAnalytics } from "../../shared/permissions";
 
 import "../styles/App.css";
 
@@ -117,7 +117,12 @@ const NAV_ITEMS = [
   { path: "/genie-chats", label: "🧞 Genie Chats", cap: C["/genie-chats"], show: () => true },
   { path: "/app-patients", label: "📱 App Patients", cap: C["/genie-chats"], show: () => true },
   { path: "/reports", label: "📊 Reports", cap: C["/reports"], show: () => true },
-  // { path: "/analytics", label: "📈 Population", cap: C["/analytics"], show: () => true },
+  {
+    path: "/analytics",
+    label: "📈 Population",
+    cap: C["/analytics"],
+    show: (s) => canViewAnalytics(s.doctor),
+  },
   { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page
   {
@@ -219,6 +224,7 @@ export default function AppLayout() {
 
   const navState = {
     role,
+    doctor: currentDoctor,
     hasPatient,
     visitActive,
     isFollowUp,

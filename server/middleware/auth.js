@@ -1,7 +1,11 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
-import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions.js";
+import {
+  CAPABILITIES as CAP,
+  hasAnyCapability,
+  canViewAnalytics,
+} from "../../shared/permissions.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 
@@ -279,6 +283,15 @@ export const requireAuth = (req, res, next) => {
   if (req.doctor) {
     const requiredCap = capabilityForPath(req.path);
     if (requiredCap && !hasAnyCapability(req.doctor.role, requiredCap)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    // Narrower than the capability above: the Population analytics surface is
+    // restricted to one named admin (see canViewAnalytics). /api/reports,
+    // /api/dashboard and /api/stats keep the plain CAP.ANALYTICS gate.
+    if (
+      (req.path === "/api/analytics" || req.path.startsWith("/api/analytics/")) &&
+      !canViewAnalytics(req.doctor)
+    ) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
   }
