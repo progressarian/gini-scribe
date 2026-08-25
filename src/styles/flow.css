@@ -744,6 +744,187 @@
   border-bottom-color: var(--fbd2);
 }
 
+/* Tests belonging to one patient at a station — one card per patient, the
+   tests listed inside it rather than as separate queue rows. */
+.qtests {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+.qtest {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--fbg);
+  border-radius: 5px;
+}
+.qtest--done {
+  opacity: 0.72;
+}
+.qtest--done .qtest-name {
+  text-decoration: none;
+}
+.qtest-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qtest .flow-btn-mini {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+/* The four lab stages, as a progress line on the patient's row */
+.labstages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.labstage {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--fbd);
+  border-radius: 999px;
+  background: var(--fwhite);
+  font-size: 11px;
+  color: var(--fink3);
+}
+.labstage-dot {
+  font-size: 10px;
+  line-height: 1;
+}
+.labstage-name {
+  font-weight: 600;
+}
+.labstage--done {
+  border-color: var(--fgn);
+  color: var(--fgn);
+  background: var(--fgnl);
+}
+.labstage--next {
+  border-color: var(--fam);
+  color: var(--fam);
+  background: var(--faml);
+}
+.labstage--skip {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+/* Lab & tests panel — derived from HealthRay, never clicked */
+.lab-panel {
+  margin-top: 12px;
+}
+.lab-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  margin-bottom: 4px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-left: 3px solid var(--ftl);
+  border-radius: 6px;
+}
+.lab-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+.lab-main {
+  flex: 1;
+  min-width: 0;
+}
+.lab-names {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fink);
+  word-break: break-word;
+}
+
+.lab-manual {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 9px 12px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-left: 3px solid var(--fam);
+  border-radius: 6px;
+}
+.lab-manual > div {
+  flex: 1;
+  min-width: 180px;
+}
+
+.lab-values {
+  margin-top: 6px;
+}
+.lab-values-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fink2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.lab-values-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 3px;
+}
+.lab-values-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--fbg);
+  border-radius: 4px;
+  font-size: 11px;
+}
+.lab-v-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--fink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lab-v-result {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fink);
+  white-space: nowrap;
+}
+.lab-v-flag {
+  color: var(--fam);
+}
+.lab-v-crit {
+  color: var(--fre);
+}
+
 /* Consultant station — admin load board + all-patients table */
 .clb-card {
   border: 1px solid var(--fbd);
@@ -1443,4 +1624,19 @@
   align-items: flex-end;
   gap: 3px;
   flex-shrink: 0;
+}
+
+.station-tests {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 14px 0;
+}
+
+.station-tests .station-test.is-on,
+.station-tests .station-test.is-on:hover {
+  background: var(--ftl);
+  color: #fff;
+  border-color: var(--ftl);
 }

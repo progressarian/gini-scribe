@@ -112,6 +112,23 @@ const claimCols = (a = "a") => `
   CASE WHEN ${claimActive(a)} THEN ${a}.calling_by_id END AS calling_by_id,
   CASE WHEN ${claimActive(a)} THEN ${a}.calling_since END AS calling_since`;
 
+// alt_phone is a list. Accepts an array or a comma/space separated string,
+// keeps only clean 10-digit numbers, drops duplicates and anything equal to the
+// primary number, and returns null when nothing is left (so the column clears).
+const normalizeAltPhones = (value, primary) => {
+  const raw = Array.isArray(value) ? value : String(value ?? "").split(/[,;/\s]+/);
+  const primaryDigits = String(primary || "").replace(/\D/g, "");
+  const out = [];
+  for (const item of raw) {
+    const digits = String(item ?? "").replace(/\D/g, "");
+    if (!digits) continue;
+    if (digits.length !== 10) return { error: "Each alternate number must be exactly 10 digits" };
+    if (digits === primaryDigits || out.includes(digits)) continue;
+    out.push(digits);
+  }
+  return { value: out.length ? out : null };
+};
+
 const claimant = (req) => ({
   id: req.doctor?.doctor_id || null,
   name: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim(),
@@ -708,7 +725,7 @@ router.get("/ghm-appointments", async (req, res) => {
       const tokenConds = tokens
         .map(
           (_, i) =>
-            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1} OR a.alt_phone ILIKE $${i + 1})`,
+            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1} OR EXISTS (SELECT 1 FROM unnest(COALESCE(a.alt_phone, '{}')) alt WHERE alt ILIKE $${i + 1}))`,
         )
         .join(" AND ");
       const searchWhere = `WHERE (${tokenConds})${homeCond}`;
@@ -814,7 +831,7 @@ router.get("/ghm-appointments", async (req, res) => {
     if (q) {
       for (const t of q.split(/\s+/).filter(Boolean).slice(0, 6)) {
         params.push(`%${t}%`);
-        where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.alt_phone ILIKE $${params.length} OR a.condition ILIKE $${params.length})`;
+        where += ` AND (a.patient_name ILIKE $${params.length} OR a.file_no ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.condition ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(COALESCE(a.alt_phone, '{}')) alt WHERE alt ILIKE $${params.length}))`;
       }
     }
 
@@ -912,12 +929,9 @@ router.post("/ghm-appointments", async (req, res) => {
         .status(400)
         .json({ error: "patient_name, appointment_date, doctor_name required" });
 
-    const cleanAltPhone =
-      String(alt_phone || "")
-        .replace(/\D/g, "")
-        .slice(0, 10) || null;
-    if (cleanAltPhone && cleanAltPhone.length !== 10)
-      return res.status(400).json({ error: "alt_phone must be a 10-digit number" });
+    const altPhones = normalizeAltPhones(alt_phone, phone);
+    if (altPhones.error) return res.status(400).json({ error: altPhones.error });
+    const cleanAltPhone = altPhones.value;
 
     // Resolve patient_id — by file_no, then phone. If still none, register a
     // brand-new patient (auto-generates a GNI-xxxxx file_no).
@@ -931,7 +945,7 @@ router.post("/ghm-appointments", async (req, res) => {
     }
     if (!patient_id && phone) {
       const pr = await pool.query(
-        "SELECT id, file_no FROM patients WHERE phone=$1 OR alt_phone=$1 LIMIT 1",
+        "SELECT id, file_no FROM patients WHERE phone=$1 OR $1 = ANY(alt_phone) LIMIT 1",
         [phone],
       );
       if (pr.rows[0]) {
@@ -1185,6 +1199,13 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     if ("patient_category" in req.body && !isValidCategory(req.body.patient_category || null))
       return res.status(400).json({ error: `Unknown category: ${req.body.patient_category}` });
 
+    if ("alt_phone" in req.body) {
+      const current = await pool.query("SELECT phone FROM appointments WHERE id=$1", [id]);
+      const alts = normalizeAltPhones(req.body.alt_phone, current.rows[0]?.phone);
+      if (alts.error) return res.status(400).json({ error: alts.error });
+      req.body.alt_phone = alts.value;
+    }
+
     const sets = [];
     const vals = [];
     for (const key of allowed) {
@@ -1222,6 +1243,15 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       vals,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
+
+    // Keep the patient's master record in step, so the number is there for the
+    // next booking and for the phone lookup in the New Appointment form.
+    if ("alt_phone" in req.body && r.rows[0].patient_id) {
+      await pool.query("UPDATE patients SET alt_phone=$1 WHERE id=$2", [
+        req.body.alt_phone,
+        r.rows[0].patient_id,
+      ]);
+    }
 
     // Log doctor changes
     const actor = claimant(req);

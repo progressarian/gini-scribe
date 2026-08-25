@@ -349,6 +349,28 @@ const usePatientStore = create((set, get) => ({
     if (setTab) setTab("dashboard");
   },
 
+  // Wipe every trace of the patient currently in memory. Called on logout: the
+  // app never reloads between sessions, so without this the next person to sign
+  // in on the same browser inherits the previous doctor's open chart.
+  resetPatientContext: () => {
+    set({
+      patient: { ...EMPTY_PATIENT },
+      dbPatientId: null,
+      patientFullData: null,
+      duplicateWarning: null,
+    });
+    useVitalsStore.getState().resetVitals();
+    useClinicalStore.getState().resetClinical();
+    usePlanStore.getState().resetPlanEdits();
+    useExamStore.getState().resetExam();
+    useLabStore.getState().resetLab();
+    useRxReviewStore.getState().resetRxReview();
+    useHistoryStore.getState().setHistoryList([]);
+    useChatStore.getState().resetChat();
+    useVisitStore.getState().resetVisit();
+    sessionStorage.removeItem("gini_active_patient");
+  },
+
   // ── init: load saved patients from localStorage ──
   loadSavedPatients: () => {
     try {

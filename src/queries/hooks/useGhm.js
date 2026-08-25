@@ -210,7 +210,7 @@ export function usePatientByPhone(phone) {
     queryFn: async () => {
       const { data } = await api.get(`/api/patients?q=${encodeURIComponent(digits)}&limit=1`);
       const hit = arr(data?.data)[0];
-      const match = [hit?.phone, hit?.alt_phone].some(
+      const match = [hit?.phone, ...(Array.isArray(hit?.alt_phone) ? hit.alt_phone : [])].some(
         (v) =>
           String(v || "")
             .replace(/\D/g, "")

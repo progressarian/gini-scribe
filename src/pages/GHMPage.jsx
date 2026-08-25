@@ -502,6 +502,15 @@ function GhmFilters({ view, date, doctor, doctors, collectionFilter, activeCount
   );
 }
 
+const toAltList = (v) => {
+  const list = (Array.isArray(v) ? v : String(v ?? "").split(/[,;/\s]+/))
+    .map((x) => String(x ?? "").replace(/\D/g, ""))
+    .filter(Boolean);
+  return list.length ? list : [""];
+};
+
+const altList = (v) => (Array.isArray(v) ? v.filter(Boolean) : v ? [String(v)] : []);
+
 const BOOKING_STATUSES = [
   { value: "", label: "—", color: "gray" },
   { value: "booked", label: "Booked", color: "green" },
@@ -515,7 +524,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     patient_name: prefill?.patient_name || "",
     file_no: prefill?.file_no || "",
     phone: prefill?.phone || "",
-    alt_phone: prefill?.alt_phone || "",
+    alt_phone: toAltList(prefill?.alt_phone),
     doctor_name: prefill?.doctor_name || doctors[0] || "",
     appointment_date: defaultDate,
     time_slot: "",
@@ -556,11 +565,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
       phone: String(lookedUpPatient.phone || f.phone || "")
         .replace(/\D/g, "")
         .slice(0, 10),
-      alt_phone:
-        f.alt_phone.trim() ||
-        String(lookedUpPatient.alt_phone || "")
-          .replace(/\D/g, "")
-          .slice(0, 10),
+      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(lookedUpPatient.alt_phone),
       address: lookedUpPatient.address || f.address,
       visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
     }));
@@ -585,11 +590,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
       patient_name: f.patient_name.trim() || phonePatient.name || "",
       file_no: f.file_no.trim() || String(phonePatient.file_no || ""),
       address: f.address.trim() || phonePatient.address || "",
-      alt_phone:
-        f.alt_phone.trim() ||
-        String(phonePatient.alt_phone || "")
-          .replace(/\D/g, "")
-          .slice(0, 10),
+      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(phonePatient.alt_phone),
       visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
     }));
   }, [phonePatient]);
@@ -610,7 +611,17 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
 
   // Phone: keep digits only, cap at 10
   const setPhone = (v) => set("phone", v.replace(/\D/g, "").slice(0, 10));
-  const setAltPhone = (v) => set("alt_phone", v.replace(/\D/g, "").slice(0, 10));
+  const setAltPhone = (i, v) =>
+    setForm((f) => ({
+      ...f,
+      alt_phone: f.alt_phone.map((x, j) => (j === i ? v.replace(/\D/g, "").slice(0, 10) : x)),
+    }));
+  const addAltPhone = () => setForm((f) => ({ ...f, alt_phone: [...f.alt_phone, ""] }));
+  const removeAltPhone = (i) =>
+    setForm((f) => {
+      const next = f.alt_phone.filter((_, j) => j !== i);
+      return { ...f, alt_phone: next.length ? next : [""] };
+    });
 
   const save = async (allowDuplicate = false) => {
     const name = form.patient_name.trim();
@@ -621,10 +632,13 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     // Phone is optional, but if entered must be exactly 10 digits
     if (form.phone && !/^\d{10}$/.test(form.phone))
       return setErr("Mobile number must be exactly 10 digits");
-    if (form.alt_phone && !/^\d{10}$/.test(form.alt_phone))
-      return setErr("Alternate number must be exactly 10 digits");
-    if (form.alt_phone && form.alt_phone === form.phone)
-      return setErr("Alternate number must be different from the mobile number");
+    const alts = form.alt_phone.map((v) => v.trim()).filter(Boolean);
+    if (alts.some((v) => !/^\d{10}$/.test(v)))
+      return setErr("Each alternate number must be exactly 10 digits");
+    if (alts.some((v) => v === form.phone))
+      return setErr("An alternate number must be different from the mobile number");
+    if (new Set(alts).size !== alts.length)
+      return setErr("The same alternate number is entered twice");
     // A brand-new patient (no file no) needs a phone to be reachable
     if (!form.file_no.trim() && !form.phone)
       return setErr("Mobile number is required for a new patient");
@@ -785,22 +799,38 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 placeholder="10-digit number"
               />
             </label>
-            <label className="fld">
+            <div className="fld">
               <span>
-                Alternate Number <em className="fld__opt">(optional)</em>
-                {form.alt_phone && form.alt_phone.length !== 10 && (
-                  <em className="fld__warn"> {form.alt_phone.length}/10</em>
-                )}
+                Alternate Numbers <em className="fld__opt">(optional)</em>
               </span>
-              <input
-                type="tel"
-                inputMode="numeric"
-                maxLength={10}
-                value={form.alt_phone}
-                onChange={(e) => setAltPhone(e.target.value)}
-                placeholder="10-digit number"
-              />
-            </label>
+              {form.alt_phone.map((v, i) => (
+                <div className="altrow" key={i}>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={v}
+                    onChange={(e) => setAltPhone(i, e.target.value)}
+                    placeholder="10-digit number"
+                    aria-label={`Alternate number ${i + 1}`}
+                  />
+                  {(v || form.alt_phone.length > 1) && (
+                    <button
+                      type="button"
+                      className="altrow__x"
+                      onClick={() => removeAltPhone(i)}
+                      aria-label={`Remove alternate number ${i + 1}`}
+                    >
+                      <X size={13} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button" className="altrow__add" onClick={addAltPhone}>
+                <Plus size={12} aria-hidden="true" />
+                Add another number
+              </button>
+            </div>
             <label className="fld">
               <span>Date *</span>
               <input
@@ -1639,7 +1669,7 @@ export default function GHMPage() {
   // so every row would read "Pending".
   const showVisitStatus = view === "by_date" && date <= todayStr();
   const colSpan =
-    17 +
+    18 +
     (showApptDate ? 1 : 0) +
     (showVisitStatus ? 1 : 0) +
     (showShowNoShow ? 1 : 0) +
@@ -1871,6 +1901,7 @@ export default function GHMPage() {
                     {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
                     {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                     <th style={{ minWidth: 170 }}>Patient</th>
+                    <th style={{ width: 140 }}>Alternate Mobile</th>
                     <th style={{ width: 155 }}>Biomarkers (auto)</th>
                     <th style={{ width: 140 }}>Booking Status</th>
                     <th style={{ width: 100 }}>Visit Type</th>
@@ -2022,17 +2053,18 @@ export default function GHMPage() {
                                   No phone number
                                 </span>
                               )}
-                              {row.alt_phone && (
+                              {altList(row.alt_phone).map((alt) => (
                                 <a
+                                  key={alt}
                                   className="pcell__ph pcell__ph--alt"
-                                  href={`tel:${String(row.alt_phone).replace(/\D/g, "")}`}
+                                  href={`tel:${String(alt).replace(/\D/g, "")}`}
                                   title="Call this patient on the alternate number"
                                 >
                                   <Phone size={12} aria-hidden="true" />
-                                  {fmtPhone(row.alt_phone)}
+                                  {fmtPhone(alt)}
                                   <em className="pcell__phtag">Alt</em>
                                 </a>
-                              )}
+                              ))}
                               {row.file_no && <span className="pcell__file">{row.file_no}</span>}
                               {(row.disp_sex || row.disp_age != null) && (
                                 <span className="pcell__ageSex">
@@ -2088,6 +2120,15 @@ export default function GHMPage() {
                                 </button>
                               )}
                             </div>
+                          </td>
+
+                          {/* Alternate mobile — editable, so old patients can be filled in */}
+                          <td>
+                            <InlineEdit
+                              value={altList(row.alt_phone).join(", ")}
+                              onChange={(v) => patch(row.id, "alt_phone", v)}
+                              placeholder="Add alt numbers"
+                            />
                           </td>
 
                           {/* Biomarkers — auto from lab data */}

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import api from "../services/api.js";
+import queryClient from "../queries/client.js";
 import { normalizeRole } from "../../shared/permissions.js";
 
 // Return a shallow copy of the doctor with its role normalized to a canonical
@@ -116,9 +117,15 @@ const useAuthStore = create((set, get) => ({
   // ── logout handler ──
   handleLogout: () => {
     api.post("/api/auth/logout").catch(() => {});
-    set({ authToken: "", currentDoctor: null });
+    set({ authToken: "", currentDoctor: null, doctorsList: [] });
     localStorage.removeItem("gini_auth_token");
     sessionStorage.removeItem("gini_active_patient");
+    // The app never reloads between sessions, so cached queries (gcTime 30min)
+    // and the in-memory patient context would otherwise survive into the next
+    // person's session on this browser. Lazy import mirrors api.js — importing
+    // patientStore statically would close a cycle through clinicalStore.
+    queryClient.clear();
+    import("./patientStore.js").then((m) => m.default.getState().resetPatientContext());
   },
 
   // ── init: fetch doctors list ──

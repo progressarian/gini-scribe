@@ -876,12 +876,25 @@ async function syncFlowFromAppointment(appointmentId, newStatus) {
                 `UPDATE flow_visit_steps
                    SET status='completed', completed_at=COALESCE(completed_at, NOW()),
                        data = COALESCE(data,'{}'::jsonb) || '{"auto_completed":"opd"}'::jsonb
-                 WHERE visit_id=$1 AND step_order < $2 AND status IN ('ready','pending')`,
+                 WHERE visit_id=$1 AND step_order < $2 AND status IN ('ready','pending')
+                   AND NOT is_background`,
                 [v.id, doc.step_order],
               );
+              // The doctor can only see one patient at a time. HealthRay
+              // reporting a patient at the doctor stage means they reached the
+              // queue, not that they are in the room — so when that doctor is
+              // already mid-consultation this step waits at `ready`, exactly as
+              // syncFlowVitalsFromAppointment and the advance/start endpoints do.
+              // Without this, one doctor showed four consultations at once.
+              const docBusy = await flowStationBusy(doc.assigned_role, doc.assigned_staff_id);
+              const docStatus = docBusy ? "ready" : "in_progress";
               await pool.query(
-                `UPDATE flow_visit_steps SET status='in_progress', started_at=COALESCE(started_at, NOW()) WHERE id=$1`,
-                [doc.id],
+                `UPDATE flow_visit_steps
+                    SET status=$2,
+                        started_at = CASE WHEN $2='in_progress' AND started_at IS NULL
+                                          THEN NOW() ELSE started_at END
+                  WHERE id=$1`,
+                [doc.id, docStatus],
               );
               await pool.query(
                 "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3, updated_at=NOW() WHERE id=$1",
@@ -942,7 +955,7 @@ async function flowStationBusy(role, staffId) {
   const params = [role];
   let sql = `SELECT 1 FROM flow_visit_steps s
              JOIN flow_visits v ON v.id = s.visit_id
-             WHERE s.status='in_progress' AND s.assigned_role=$1
+             WHERE s.status='in_progress' AND s.assigned_role=$1 AND NOT s.is_background
                AND v.status='in_progress' AND v.visit_date=CURRENT_DATE`;
   if (staffId) {
     params.push(staffId);
@@ -1000,10 +1013,12 @@ export async function syncFlowVitalsFromAppointment(appointmentId, opdVitals) {
 
         // 2) Pull the flow forward to the next open step (mirrors the advance
         //    endpoint: in_progress if the station is free, else ready).
+        // Never a background step — see the same guard in the advance endpoint.
         const next = (
           await pool.query(
             `SELECT * FROM flow_visit_steps
                WHERE visit_id=$1 AND step_order > $2 AND status IN ('pending','ready')
+                 AND NOT is_background
                ORDER BY step_order ASC LIMIT 1`,
             [v.id, vital.step_order],
           )

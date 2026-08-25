@@ -258,6 +258,15 @@ export function useFlowDeclineOffer() {
     }
   });
 }
+export function useFlowResultsIn() {
+  return useFlowMutation(async (stepId) => {
+    try {
+      return (await api.post(`/api/flow/steps/${stepId}/results-in`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not mark results received"));
+    }
+  });
+}
 export function useFlowClaimStep() {
   return useFlowMutation(async (stepId) => {
     try {

@@ -1678,3 +1678,52 @@ a.pcell__ph:hover {
   text-transform: uppercase;
   opacity: 0.8;
 }
+
+.altrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.altrow input {
+  flex: 1;
+}
+
+.altrow__x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.altrow__x:hover {
+  background: #fee2e2;
+}
+
+.altrow__add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.altrow__add:hover {
+  background: #dbeafe;
+}

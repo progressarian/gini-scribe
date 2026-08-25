@@ -112,7 +112,10 @@ export function deriveStage(visit, steps = []) {
   // Parked (deferred-start): they've registered but the journey hasn't begun.
   // Maps to OPD's "checkedin" so appointment-status mirroring stays valid.
   if (visit.status === "waiting") return "checkedin";
-  const live = steps.filter((s) => s.status !== "skipped");
+  // Background steps (lab delivery/processing/reporting) run alongside the
+  // patient rather than being where the patient is, so they never define the
+  // stage shown on the board.
+  const live = steps.filter((s) => s.status !== "skipped" && !s.is_background);
   // The step they're at now, else the next one they're queued for.
   const current =
     live.find((s) => s.status === "in_progress") ||

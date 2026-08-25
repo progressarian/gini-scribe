@@ -13,6 +13,43 @@ import { genVisitToken } from "./journey.js";
 // readyAt = which step is 'ready' (queued/callable; prior completed). completed = whole visit done.
 // stepMin = minutes the in_progress step has been running (drives bottleneck colour).
 // addAbi = insert an ABI lab step after Blood Sample (shows sequential lab dependency).
+// Walkthrough set — for testing the lab role end to end by hand. Every patient
+// is parked at step 1 with the rest pending, and NO HealthRay lab data is
+// seeded, so the reports stage never auto-completes: you drive Vitals → Doctor
+// Assessment → the tests → "Results received" (or Skip) → SD → Rx → Billing →
+// Pharmacy yourself. Seed with POST /api/flow/demo/seed?set=lab.
+const LAB_WALKTHROUGH = [
+  {
+    id: "DEMO_L1",
+    name: "Walkthrough One (all tests)",
+    age_sex: "58M",
+    type: "FU_APPT_TESTS",
+    sd: 0,
+    readyAt: "vitals",
+    back: 4,
+    addAbi: true,
+    addXray: true,
+  },
+  {
+    id: "DEMO_L2",
+    name: "Walkthrough Two (bloods)",
+    age_sex: "46F",
+    type: "FU_APPT_TESTS",
+    sd: 0,
+    readyAt: "vitals",
+    back: 3,
+  },
+  {
+    id: "DEMO_L3",
+    name: "Walkthrough Three (bloods)",
+    age_sex: "63M",
+    type: "FU_APPT_TESTS",
+    sd: 1,
+    readyAt: "vitals",
+    back: 2,
+  },
+];
+
 const SCENARIOS = [
   {
     id: "DEMO_1",
@@ -83,6 +120,10 @@ const SCENARIOS = [
     sd: 0,
     stopAt: "blood_sample",
     addAbi: true,
+    lab: {
+      cases: [{ tests: ["HBA1C", "LIPID PROFILE"], ready: false }],
+      docs: ["abi"],
+    },
     back: 22,
     stepMin: 3,
   }, // active at lab (+ABI queued)
@@ -93,13 +134,76 @@ const SCENARIOS = [
     type: "FU_APPT_TESTS",
     sd: 1,
     readyAt: "blood_sample",
+    lab: {
+      cases: [
+        { tests: ["DIABETES PROFILE (BASE +)"], ready: true },
+        { tests: ["Homa IR", "Homa -B"], ready: false },
+      ],
+      docs: ["vpt", "xray"],
+    },
     back: 16,
   }, // ready in lab queue
 ];
 
 export async function cleanFlowDemo(client = pool) {
   const r = await client.query("DELETE FROM flow_visits WHERE patient_id LIKE 'DEMO_%'");
+  // Demo patients exist so the lab panel has something to read: it is built from
+  // lab_cases and documents keyed on a real patients row. Children first — all
+  // three reference patients(id).
+  const ids = (await client.query("SELECT id FROM patients WHERE file_no LIKE 'DEMO_%'")).rows.map(
+    (x) => x.id,
+  );
+  if (ids.length) {
+    await client.query("DELETE FROM lab_results WHERE patient_id = ANY($1::int[])", [ids]);
+    await client.query("DELETE FROM documents WHERE patient_id = ANY($1::int[])", [ids]);
+    await client.query("DELETE FROM lab_cases WHERE patient_id = ANY($1::int[])", [ids]);
+    await client.query("DELETE FROM patients WHERE id = ANY($1::int[])", [ids]);
+  }
   return r.rowCount;
+}
+
+// A patients row per demo scenario, plus the HealthRay-shaped lab data the panel
+// reads. Pathology goes to lab_cases (with test_names), imaging to documents by
+// doc_type — the two places HealthRay actually keeps them.
+async function seedDemoPatientLab(client, sc) {
+  const p = (
+    await client.query(
+      `INSERT INTO patients (name, file_no, age, sex)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [
+        sc.name,
+        sc.id,
+        parseInt(String(sc.age_sex || "").replace(/\D/g, "")) || null,
+        String(sc.age_sex || "").slice(-1) === "F" ? "Female" : "Male",
+      ],
+    )
+  ).rows[0];
+  if (!sc.lab) return p.id;
+  for (const [i, c] of (sc.lab.cases || []).entries()) {
+    const no = `${sc.id}-${i + 1}`;
+    // lab_case_id is an integer; the other three keys are text. Reusing one
+    // placeholder for both made Postgres deduce conflicting types for $1.
+    await client.query(
+      `INSERT INTO lab_cases
+         (case_no, patient_case_no, case_uid, lab_case_id, patient_id, test_names,
+          case_date, results_synced, case_source)
+       VALUES ($1,$1,$1,$2,$3,$4,CURRENT_DATE,$5,'inhouse')`,
+      [no, 900000 + i, p.id, c.tests, !!c.ready],
+    );
+    if (c.ready)
+      for (const t of c.tests)
+        await client.query(
+          `INSERT INTO lab_results (patient_id, test_date, test_name, result, unit, source)
+           VALUES ($1, CURRENT_DATE, $2, $3, $4, 'demo')`,
+          [p.id, t, String(5 + Math.round(Math.random() * 90) / 10), "mg/dL"],
+        );
+  }
+  for (const d of sc.lab.docs || [])
+    await client.query(
+      `INSERT INTO documents (patient_id, doc_type, file_name) VALUES ($1,$2,$3)`,
+      [p.id, d, `${sc.id}-${d}.pdf`],
+    );
+  return p.id;
 }
 
 async function templateSteps(client, type) {
@@ -116,7 +220,7 @@ async function templateSteps(client, type) {
   return rows;
 }
 
-export async function seedFlowDemo(client = pool) {
+export async function seedFlowDemo(client = pool, set = "dashboard") {
   await cleanFlowDemo(client);
   const sds = (
     await client.query(
@@ -131,7 +235,8 @@ export async function seedFlowDemo(client = pool) {
   const nm = (d) => (d ? d.short_name || d.name : null);
 
   let count = 0;
-  for (const sc of SCENARIOS) {
+  const scenarios = set === "lab" ? LAB_WALKTHROUGH : SCENARIOS;
+  for (const sc of scenarios) {
     const steps = await templateSteps(client, sc.type);
     if (sc.addAbi) {
       const i = steps.findIndex((s) => s.step_catalog_id === "blood_sample");
@@ -144,28 +249,45 @@ export async function seedFlowDemo(client = pool) {
           assigned_role: "lab_tech",
         });
     }
+    if (sc.addXray) {
+      const i = steps.findIndex(
+        (s) => s.step_catalog_id === "abi" || s.step_catalog_id === "blood_sample",
+      );
+      if (i >= 0)
+        steps.splice(i + 1, 0, {
+          step_catalog_id: "x_ray",
+          step_name: "X-RAY",
+          dur: 15,
+          station: "Lab",
+          assigned_role: "lab_tech",
+        });
+    }
     const maxTime =
       (await client.query("SELECT max_time_min FROM flow_visit_types WHERE id=$1", [sc.type]))
         .rows[0]?.max_time_min || 60;
     const total = steps.reduce((a, s) => a + Number(s.dur), 0);
     const sd = sds[sc.sd];
 
+    const patientDbId = await seedDemoPatientLab(client, sc);
+
     const visitId = (
       await client.query(
         `INSERT INTO flow_visits
-           (patient_id, patient_name, patient_age_sex, visit_type_id, is_vip, max_time_min,
-            suggested_wait_min, checkin_time, estimated_completion, status, actual_completion,
-            visit_token, assigned_sd, assigned_sd_name, assigned_chief, assigned_chief_name, checked_in_by)
+           (patient_id, patient_db_id, patient_name, patient_age_sex, visit_type_id, is_vip,
+            max_time_min, suggested_wait_min, checkin_time, estimated_completion, status,
+            actual_completion, visit_token, assigned_sd, assigned_sd_name, assigned_chief,
+            assigned_chief_name, checked_in_by)
          VALUES
-           ($1,$2,$3,$4,$5,$6,$7,
-            NOW() - make_interval(mins => $8),
-            NOW() - make_interval(mins => $8) + make_interval(mins => $7),
-            $9,
-            CASE WHEN $9='completed' THEN NOW() ELSE NULL END,
-            $10,$11,$12,$13,$14,'demo')
+           ($1,$2,$3,$4,$5,$6,$7,$8,
+            NOW() - make_interval(mins => $9),
+            NOW() - make_interval(mins => $9) + make_interval(mins => $8),
+            $10,
+            CASE WHEN $10='completed' THEN NOW() ELSE NULL END,
+            $11,$12,$13,$14,$15,'demo')
          RETURNING id`,
         [
           sc.id,
+          patientDbId,
           sc.name,
           sc.age_sex || null,
           sc.type,
@@ -213,8 +335,10 @@ export async function seedFlowDemo(client = pool) {
       const r = await client.query(
         `INSERT INTO flow_visit_steps
            (visit_id, step_catalog_id, step_order, step_name, planned_duration_min,
-            actual_duration_min, station, assigned_role, status, started_at, completed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, ${startedExpr}, ${completedExpr})
+            actual_duration_min, station, assigned_role, status, started_at, completed_at,
+            is_background)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, ${startedExpr}, ${completedExpr},
+                 COALESCE((SELECT is_background FROM flow_step_catalog WHERE id=$2), FALSE))
          RETURNING id`,
         [
           visitId,

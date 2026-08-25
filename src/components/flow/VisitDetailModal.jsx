@@ -9,6 +9,7 @@ import {
   useFlowReorderSteps,
   useFlowSetToken,
 } from "../../queries/hooks/useFlow";
+import LabPanel from "./LabPanel";
 import "../../styles/flow.css";
 
 // Quick-pick reasons for skipping a step (free text still allowed).
@@ -61,7 +62,12 @@ export default function VisitDetailModal({ visit, onClose, readOnly = false }) {
   }, []);
 
   // Steps sorted by order — the list we render and reorder against.
-  const steps = (visit.steps || []).slice().sort((a, b) => a.step_order - b.step_order);
+  const allSteps = (visit.steps || []).slice().sort((a, b) => a.step_order - b.step_order);
+  // Lab delivery/processing/reporting run alongside the patient rather than
+  // being places they walk to, so they render on their own track below the
+  // journey instead of inline in it.
+  const steps = allSteps.filter((s) => !s.is_background);
+  const labTrack = allSteps.filter((s) => s.is_background);
   // Only not-yet-started steps can move, and only past one another (a pending
   // step can't jump ahead of a completed/in-progress one).
   const MOVABLE = (st) => st === "pending" || st === "ready";
@@ -474,6 +480,56 @@ export default function VisitDetailModal({ visit, onClose, readOnly = false }) {
                   Cancel
                 </button>
               </div>
+            </div>
+          )}
+
+          <LabPanel lab={visit.lab} />
+
+          {labTrack.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div className="flow-sec-title" style={{ marginBottom: 4 }}>
+                Reports gate
+              </div>
+              <div className="flow-muted" style={{ marginBottom: 6 }}>
+                The consultation opens once results are in. Skip to release it if they are never
+                going to arrive.
+              </div>
+              {labTrack.map((s) => (
+                <div key={s.id} className="jb-step">
+                  <span className="jb-name">
+                    {s.step_name}
+                    <span
+                      className={`flow-badge ${s.status === "completed" ? "fb-grn" : s.status === "skipped" ? "fb-ink" : "fb-amb"}`}
+                      style={{ marginLeft: 6 }}
+                    >
+                      {s.status === "completed" ? "results in" : s.status}
+                    </span>
+                    {s.data?.auto_completed === "lab_results" && (
+                      <span className="flow-badge fb-ink" style={{ marginLeft: 4 }}>
+                        auto
+                      </span>
+                    )}
+                  </span>
+                  {!readOnly && !["completed", "skipped"].includes(s.status) && (
+                    <button
+                      className="jb-remove"
+                      title="Skip — releases the consultation"
+                      onClick={() =>
+                        act(
+                          () =>
+                            removeStep.mutateAsync({
+                              stepId: s.id,
+                              reason: "reports not arriving",
+                            }),
+                          "Gate released",
+                        )
+                      }
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 

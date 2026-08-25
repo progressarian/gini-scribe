@@ -28,6 +28,9 @@ api.interceptors.response.use(
         m.default.getState().setCurrentDoctor(null);
         m.default.getState().setAuthToken("");
       });
+      // Session expiry leaves the same residue as an explicit logout.
+      import("../queries/client.js").then((m) => m.default.clear());
+      import("../stores/patientStore.js").then((m) => m.default.getState().resetPatientContext());
       if (window.location.pathname !== "/login") {
         window.location.replace("/login");
       }
