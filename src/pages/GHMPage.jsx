@@ -23,6 +23,7 @@ import {
   Sunrise,
   Trash2,
   X,
+  RotateCcw,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
@@ -39,6 +40,7 @@ import {
   callLabel,
 } from "../../shared/callStatuses.js";
 import { slotStartHour } from "../../shared/slotHour.js";
+import { followUpTiming } from "../lib/followUp.js";
 import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
 import Dropdown from "../components/ui/Dropdown.jsx";
 import FilterPopover from "../components/ui/FilterPopover.jsx";
@@ -69,6 +71,7 @@ import {
   useLogCallAttempt,
   usePatchAppointment,
   usePatientByFileNo,
+  usePatientByPhone,
   useReassignAppointment,
 } from "../queries/hooks/useGhm";
 import { qk } from "../queries/keys";
@@ -499,6 +502,11 @@ function GhmFilters({ view, date, doctor, doctors, collectionFilter, activeCount
   );
 }
 
+const BOOKING_STATUSES = [
+  { value: "scheduled", label: "Booked" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 // ─── New Appointment modal ─────────────────────────────────────────────────
 function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated }) {
   const isPrefilled = !!prefill?.patient_name;
@@ -506,6 +514,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     patient_name: prefill?.patient_name || "",
     file_no: prefill?.file_no || "",
     phone: prefill?.phone || "",
+    alt_phone: prefill?.alt_phone || "",
     doctor_name: prefill?.doctor_name || doctors[0] || "",
     appointment_date: defaultDate,
     time_slot: "",
@@ -517,8 +526,11 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     booked_by_name: "",
     notes: "",
     home_collection: false,
+    status: "scheduled",
   });
   const [err, setErr] = useState("");
+  const [dup, setDup] = useState(null);
+  const [booked, setBooked] = useState(null);
 
   useBodyScrollLock();
 
@@ -544,10 +556,43 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
       phone: String(lookedUpPatient.phone || f.phone || "")
         .replace(/\D/g, "")
         .slice(0, 10),
+      alt_phone:
+        f.alt_phone.trim() ||
+        String(lookedUpPatient.alt_phone || "")
+          .replace(/\D/g, "")
+          .slice(0, 10),
       address: lookedUpPatient.address || f.address,
       visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
     }));
   }, [lookedUpPatient]);
+
+  const [phoneQuery, setPhoneQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setPhoneQuery(form.phone.trim()), 350);
+    return () => clearTimeout(t);
+  }, [form.phone]);
+
+  const { data: phonePatient, isFetching: lookingUpPhone } = usePatientByPhone(phoneQuery);
+  const filledFromPhoneRef = useRef("");
+
+  useEffect(() => {
+    if (!phonePatient) return;
+    const key = String(phonePatient.phone || "");
+    if (filledFromPhoneRef.current === key) return;
+    filledFromPhoneRef.current = key;
+    setForm((f) => ({
+      ...f,
+      patient_name: f.patient_name.trim() || phonePatient.name || "",
+      file_no: f.file_no.trim() || String(phonePatient.file_no || ""),
+      address: f.address.trim() || phonePatient.address || "",
+      alt_phone:
+        f.alt_phone.trim() ||
+        String(phonePatient.alt_phone || "")
+          .replace(/\D/g, "")
+          .slice(0, 10),
+      visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
+    }));
+  }, [phonePatient]);
 
   const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
   const availSlots = availData ?? null;
@@ -565,8 +610,9 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
 
   // Phone: keep digits only, cap at 10
   const setPhone = (v) => set("phone", v.replace(/\D/g, "").slice(0, 10));
+  const setAltPhone = (v) => set("alt_phone", v.replace(/\D/g, "").slice(0, 10));
 
-  const save = async () => {
+  const save = async (allowDuplicate = false) => {
     const name = form.patient_name.trim();
     if (!name) return setErr("Patient name is required");
     if (!/^[A-Za-z.\s'-]+$/.test(name)) return setErr("Patient name should contain letters only");
@@ -575,6 +621,10 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     // Phone is optional, but if entered must be exactly 10 digits
     if (form.phone && !/^\d{10}$/.test(form.phone))
       return setErr("Mobile number must be exactly 10 digits");
+    if (form.alt_phone && !/^\d{10}$/.test(form.alt_phone))
+      return setErr("Alternate number must be exactly 10 digits");
+    if (form.alt_phone && form.alt_phone === form.phone)
+      return setErr("Alternate number must be different from the mobile number");
     // A brand-new patient (no file no) needs a phone to be reachable
     if (!form.file_no.trim() && !form.phone)
       return setErr("Mobile number is required for a new patient");
@@ -582,13 +632,80 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
       return setErr("File No can only contain letters, numbers, _ and -");
 
     setErr("");
+    setDup(null);
     try {
-      await createMutation.mutateAsync(form);
-      onCreated(form.appointment_date);
+      const created = await createMutation.mutateAsync(
+        allowDuplicate ? { ...form, allow_duplicate: true } : form,
+      );
+      setBooked({
+        patient_name: form.patient_name.trim(),
+        file_no: created?.file_no || form.file_no.trim(),
+        phone: form.phone,
+        doctor_name: form.doctor_name,
+        appointment_date: form.appointment_date,
+        time_slot: form.time_slot,
+        reporting_time_slot: created?.reporting_time_slot || "",
+        status: form.status,
+      });
     } catch (e) {
-      setErr(e?.response?.data?.error || "Could not save. Please try again.");
+      const data = e?.response?.data;
+      if (data?.error === "duplicate_booking") return setDup(data.detail || {});
+      setErr(data?.error || "Could not save. Please try again.");
     }
   };
+
+  const done = () => onCreated(booked?.appointment_date || form.appointment_date);
+
+  if (booked) {
+    const cancelled = booked.status === "cancelled";
+    return (
+      <div className="modal-overlay" onClick={done}>
+        <div className="modal modal--sm" onClick={(e) => e.stopPropagation()}>
+          <div className="modal__hdr">
+            <span className="modal__title">
+              <Check size={16} aria-hidden="true" />
+              {cancelled ? "Saved as Cancelled" : "Appointment Booked"}
+            </span>
+            <button className="modal__x" onClick={done} aria-label="Close">
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="modal__body">
+            <div className={`booked ${cancelled ? "booked--cancelled" : ""}`}>
+              <div className="booked__line">
+                <strong>{booked.patient_name}</strong>
+                {booked.file_no ? ` · ${booked.file_no}` : ""}
+                {booked.phone ? ` · ${booked.phone}` : ""}
+              </div>
+              <div className="booked__date">
+                {cancelled ? "Marked cancelled for " : "Booked for "}
+                <strong>{prettyDate(booked.appointment_date)}</strong>
+                {booked.time_slot ? ` · ${booked.time_slot}` : ""}
+              </div>
+              <div className="booked__line">
+                With <strong>{booked.doctor_name}</strong>
+              </div>
+              {!cancelled && booked.reporting_time_slot && (
+                <div className="booked__line booked__line--muted">
+                  Reporting time: {booked.reporting_time_slot}
+                </div>
+              )}
+              {!cancelled && (
+                <div className="booked__line booked__line--muted">
+                  Tell the patient this date and slot before ending the call.
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="modal__foot">
+            <button className="btn btn--primary" onClick={done}>
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -605,6 +722,17 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
 
         <div className="modal__body">
           {err && <div className="modal__err">{err}</div>}
+          {dup && (
+            <div className="modal__err">
+              This patient already has an appointment on {form.appointment_date}
+              {dup.doctor_name ? ` with ${dup.doctor_name}` : ""}
+              {dup.time_slot ? ` at ${dup.time_slot}` : ""}
+              {dup.booked_by_name ? `, booked by ${dup.booked_by_name}` : ""}.
+              <button type="button" className="btn btn--ghost" onClick={() => save(true)}>
+                Book anyway
+              </button>
+            </div>
+          )}
           {isPrefilled && (
             <div className="modal__prefill-note">
               <Check size={14} aria-hidden="true" />
@@ -645,6 +773,13 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 {form.phone && form.phone.length !== 10 && (
                   <em className="fld__warn">{form.phone.length}/10</em>
                 )}
+                {lookingUpPhone && <em className="fld__opt"> — searching…</em>}
+                {!lookingUpPhone && phonePatient && (
+                  <em className="fld__ok"> — {phonePatient.name} found</em>
+                )}
+                {!lookingUpPhone && phoneQuery.length === 10 && !phonePatient && (
+                  <em className="fld__warn"> — no match</em>
+                )}
               </span>
               <input
                 type="tel"
@@ -652,6 +787,22 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 maxLength={10}
                 value={form.phone}
                 onChange={(e) => setPhone(e.target.value)}
+                placeholder="10-digit number"
+              />
+            </label>
+            <label className="fld">
+              <span>
+                Alternate Number <em className="fld__opt">(optional)</em>
+                {form.alt_phone && form.alt_phone.length !== 10 && (
+                  <em className="fld__warn"> {form.alt_phone.length}/10</em>
+                )}
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                value={form.alt_phone}
+                onChange={(e) => setAltPhone(e.target.value)}
                 placeholder="10-digit number"
               />
             </label>
@@ -695,6 +846,16 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 {APPOINTMENT_MODES.map((v) => (
                   <option key={v} value={v}>
                     {v}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="fld">
+              <span>Status</span>
+              <select value={form.status} onChange={(e) => set("status", e.target.value)}>
+                {BOOKING_STATUSES.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </select>
@@ -754,7 +915,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
           <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button className="btn btn--primary" onClick={save} disabled={saving}>
+          <button className="btn btn--primary" onClick={() => save()} disabled={saving}>
             {saving ? "Booking…" : "Book Appointment"}
           </button>
         </div>
@@ -1238,15 +1399,16 @@ export default function GHMPage() {
   const initialTab = VIEW_TABS.find((t) => t.id === searchParams.get("tab")) || VIEW_TABS[0];
   const [view, setView] = useState(initialTab.id); // by_date | tomorrow | fu3
   const [date, setDate] = useState(
-    initialTab.offset !== null ? addDaysStr(initialTab.offset) : todayStr(),
+    searchParams.get("date") ||
+      (initialTab.offset !== null ? addDaysStr(initialTab.offset) : todayStr()),
   );
   const [showNew, setShowNew] = useState(false);
   const [newPrefill, setNewPrefill] = useState(null);
-  const [doctor, setDoctor] = useState("All");
-  const [collectionFilter, setCollectionFilter] = useState("all");
+  const [doctor, setDoctor] = useState(searchParams.get("doctor") || "All");
+  const [collectionFilter, setCollectionFilter] = useState(searchParams.get("collection") || "all");
   // Debounced copy of `search` — drives the date-independent Patient Lookup fetch
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState(searchParams.get("q") || "");
+  const [search, setSearch] = useState(searchParams.get("q") || "");
   const [recordFor, setRecordFor] = useState(null);
   const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const EXPORT_PAGE_SIZE = 100;
@@ -1272,6 +1434,40 @@ export default function GHMPage() {
 
   const searchQ = debouncedSearch.trim();
   const lookupQ = view === "lookup" ? searchQ : "";
+
+  const tabDefaultDate = (id) => {
+    const t = VIEW_TABS.find((x) => x.id === id);
+    return t && t.offset !== null ? addDaysStr(t.offset) : todayStr();
+  };
+
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        const put = (k, v, def) => (v && v !== def ? next.set(k, v) : next.delete(k));
+        put("doctor", doctor, "All");
+        put("collection", collectionFilter, "all");
+        put("q", searchQ, "");
+        put("date", date, tabDefaultDate(view));
+        return next;
+      },
+      { replace: true },
+    );
+  }, [doctor, collectionFilter, searchQ, date, view, setSearchParams]);
+
+  const filtersActive =
+    doctor !== "All" ||
+    collectionFilter !== "all" ||
+    searchQ !== "" ||
+    date !== tabDefaultDate(view);
+
+  const resetFilters = () => {
+    setDoctor("All");
+    setCollectionFilter("all");
+    setSearch("");
+    setDebouncedSearch("");
+    setDate(tabDefaultDate(view));
+  };
 
   const buildQuery = useCallback(
     (pageNum, limit) => {
@@ -1533,6 +1729,17 @@ export default function GHMPage() {
                 setCollectionFilter(next.collectionFilter);
               }}
             />
+            {filtersActive && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={resetFilters}
+                title="Clear search, doctor, collection and date filters"
+              >
+                <RotateCcw size={14} aria-hidden="true" />
+                Reset filters
+              </button>
+            )}
             {view !== "reassign" && (
               <button
                 type="button"
@@ -1685,6 +1892,7 @@ export default function GHMPage() {
                     <th style={{ width: 220 }}>Doctor</th>
                     <th style={{ width: 150 }}>Assigned MO</th>
                     <th style={{ width: 140 }}>Last Consultant Seen</th>
+                    <th style={{ width: 120 }}>Last Visit Date</th>
                     <th style={{ width: 160 }}>Prescription Explained By</th>
                     {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
                     {showCallStatus && (
@@ -1852,6 +2060,7 @@ export default function GHMPage() {
                                     condition: row.condition,
                                     address: row.address,
                                     doctor_name: row.doctor_name,
+                                    alt_phone: row.alt_phone,
                                   });
                                   setShowNew(true);
                                 }}
@@ -1990,6 +2199,16 @@ export default function GHMPage() {
                             })()}
                           </td>
 
+                          <td>
+                            {row.last_visit_date ? (
+                              <span className="fu-date">{prettyDate(row.last_visit_date)}</span>
+                            ) : (
+                              <span className="muted" title="No earlier attended visit on record">
+                                —
+                              </span>
+                            )}
+                          </td>
+
                           {/* Prescription explained by — editable */}
                           <td>
                             <InlineEdit
@@ -2048,8 +2267,10 @@ export default function GHMPage() {
                             <td>
                               <input
                                 list="cc-agents-list"
-                                defaultValue={row.call_made_by || loggedInName || ""}
-                                key={`cb-${row.id}-${row.call_made_by}`}
+                                defaultValue={
+                                  row.call_made_by || activeCall?.calling_by || loggedInName || ""
+                                }
+                                key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}`}
                                 onBlur={(e) => {
                                   const v = e.target.value.trim();
                                   if (v !== (row.call_made_by || ""))
@@ -2099,8 +2320,11 @@ export default function GHMPage() {
                                 //    on hover so the info isn't lost.
                                 const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
                                 const hrDate = hr.date || "";
-                                const hrTiming = hr.timing || "";
-                                const hrNotes = hr.notes || "";
+                                const rawTiming = hr.timing || "";
+                                const hrTiming = followUpTiming(rawTiming);
+                                const hrNotes = [hrTiming ? "" : rawTiming, hr.notes || ""]
+                                  .filter(Boolean)
+                                  .join(" · ");
                                 if (hrDate || hrTiming) {
                                   return (
                                     <div className="fu-cell">

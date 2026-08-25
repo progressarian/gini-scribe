@@ -68,6 +68,7 @@ export const qk = {
     availability: (doctor, date) => ["ghm", "availability", doctor || null, date || null],
     conflicts: (date) => ["ghm", "conflicts", date],
     patientByFileNo: (fileNo) => ["ghm", "patient-by-file-no", fileNo || null],
+    patientByPhone: (phone) => ["ghm", "patient-by-phone", phone || null],
   },
   // analytics: {
   //   all: ["analytics"],

@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { toast } from "../../stores/uiStore";
-import { useFlowQueue, useFlowAdvance, useFlowStartStep } from "../../queries/hooks/useFlow";
+import {
+  useFlowQueue,
+  useFlowAdvance,
+  useFlowStartStep,
+  useFlowVisits,
+  useFlowStepCatalog,
+  useFlowAddStep,
+  useFlowRemoveStep,
+  useFlowClaimStep,
+  useFlowReleaseStep,
+} from "../../queries/hooks/useFlow";
+import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES as CAP, hasCapability, ownsStationRole } from "../../../shared/permissions";
 import "../../styles/flow.css";
 
 // Friendly URL slug → the assigned_role stored on flow_visit_steps, plus the
@@ -8,7 +20,7 @@ import "../../styles/flow.css";
 // standalone station page and the "Live Lab Queue" tab on /lab-requests.
 export const ROLES = {
   vitals: { role: "vitals_associate", title: "⚖️ Vitals Station", form: "vitals" },
-  mo: { role: "mo", title: "🩺 Medical Officer", form: "notes" },
+  mo: { role: "mo", title: "🩺 Doctor", form: "notes" },
   lab: { role: "lab_tech", title: "🔬 Lab & Tests", form: "lab" },
   dietitian: { role: "dietitian", title: "🥗 Dietitian", form: "notes" },
   rx: { role: "nurse", title: "💬 Prescription Explain", form: "rx" },
@@ -21,18 +33,72 @@ const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", min
 // list in VisitDetailModal so skip reasons stay consistent across the app.
 const SKIP_REASONS = ["Already done", "Not required", "Done elsewhere", "Patient declined"];
 
+// Patients still in the building — a completed or cancelled visit has left, so
+// it would only add noise to a live station screen.
+const PRESENT_STATUSES = ["waiting", "paused", "in_progress"];
+const VISIT_STATUS_LABEL = {
+  waiting: "waiting — timer not started",
+  paused: "paused",
+  in_progress: "in progress",
+};
+
+// Where a patient is right now: the step being worked, else the next one open.
+const currentStepOf = (v) => {
+  const steps = (v.steps || []).slice().sort((a, b) => a.step_order - b.step_order);
+  return (
+    steps.find((s) => s.status === "in_progress") ||
+    steps.find((s) => ["ready", "pending"].includes(s.status)) ||
+    null
+  );
+};
+
 // The live execution queue for one station role: the active (in-progress)
-// patient with a role-specific form + "advance", a call-in ready queue, and the
-// pending list. Self-contained (owns its data + mutations) so it can be dropped
-// into any page.
+// patient with a role-specific form + "advance", and one call-in queue holding
+// every step assigned here. Self-contained (owns its data + mutations) so it
+// can be dropped into any page.
 export default function StationQueue({ role, form, freeMove = false }) {
   const { data, isLoading } = useFlowQueue(role);
   const advance = useFlowAdvance();
   const startStep = useFlowStartStep();
+  const addStep = useFlowAddStep();
+  const removeStep = useFlowRemoveStep();
+  const claimStep = useFlowClaimStep();
+  const releaseStep = useFlowReleaseStep();
+  // Server-side floor search (name / file / phone / token), debounced so a
+  // desk can find any patient today without scrolling the whole floor.
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  const searching = debounced.length > 0;
+
+  const { data: allVisits = [], isFetching: searchBusy } = useFlowVisits(
+    undefined,
+    undefined,
+    {},
+    debounced,
+  );
+  const { data: catalog = [] } = useFlowStepCatalog();
+  const myRole = useAuthStore((st) => st.currentDoctor?.role);
+  const myId = useAuthStore((st) => st.currentDoctor?.id);
+  const heldByMe = (s) => s.claim && String(s.claim.by_id) === String(myId);
+  const heldByOther = (s) => s.claim && String(s.claim.by_id) !== String(myId);
+  const canManage = hasCapability(myRole, CAP.FLOW_COORDINATOR);
+  // Journey edits confined to this desk: floor managers anywhere, station staff
+  // only where they actually work.
+  const canEditHere = canManage || ownsStationRole(myRole, role);
 
   const active = data?.active?.[0] || null;
-  const ready = data?.ready || [];
-  const pending = data?.pending || [];
+  // Callable and not-yet-reachable steps sit in one list: POST /flow/steps/:id/
+  // start accepts a pending step, so the desk can pull a patient forward instead
+  // of waiting for an earlier station to release them. VIP first, then arrival.
+  const ready = [...(data?.ready || []), ...(data?.pending || [])].sort(
+    (a, b) =>
+      Number(!!b.is_vip) - Number(!!a.is_vip) ||
+      new Date(a.checkin_time) - new Date(b.checkin_time),
+  );
 
   // In free-move stations (vitals) the user picks who sits in the form box. The
   // box patient is a LOCAL selection (default: whoever is in_progress, else
@@ -50,6 +116,55 @@ export default function StationQueue({ role, form, freeMove = false }) {
   // patient), so anyone can be skipped at any time. Replaces the native prompt.
   const [skipTarget, setSkipTarget] = useState(null);
   const [skipReason, setSkipReason] = useState("");
+  // Remove a step from the patient's journey — the undo for "Send to my
+  // station", and for a step queued here that shouldn't be.
+  const [removeTarget, setRemoveTarget] = useState(null);
+  const [removeReason, setRemoveReason] = useState("");
+
+  // Everyone still in the building who isn't already somewhere in this
+  // station's own queue (active / ready / queued-behind-an-earlier-step).
+  const myVisitIds = new Set([...(data?.active || []), ...ready].map((i) => i.visit_id));
+  // Already dealt with here — their step at this station is completed, or was
+  // deliberately skipped. Either way this desk is done with them, so they drop
+  // off the list rather than looking like outstanding work.
+  const settledHere = (v) =>
+    (v.steps || []).some(
+      (s) => s.assigned_role === role && ["completed", "skipped"].includes(s.status),
+    );
+  // While searching, show every match the server returned — including patients
+  // this desk has already finished with, since finding them again is the point.
+  const notSeenHere = (
+    searching
+      ? allVisits
+      : allVisits.filter(
+          (v) => PRESENT_STATUSES.includes(v.status) && !myVisitIds.has(v.id) && !settledHere(v),
+        )
+  ).map((v) => ({ visit: v, step: currentStepOf(v) }));
+
+  // Catalog steps this station works — used to append one for a patient who
+  // never got a step here (or whose step is already done). Several stations own
+  // more than one (lab: Blood Sample / ABI / X-Ray), so the user picks.
+  const myCatalogSteps = catalog.filter((c) => c.assigned_role === role);
+
+  const sendToMyStation = async (v, catId) => {
+    const c = myCatalogSteps.find((x) => x.id === catId) || myCatalogSteps[0];
+    if (!c) return;
+    const maxOrder = (v.steps || []).reduce((m, s) => Math.max(m, s.step_order || 0), 0);
+    try {
+      await addStep.mutateAsync({
+        visitId: v.id,
+        step_catalog_id: c.id,
+        step_name: c.name,
+        planned_duration_min: c.default_duration_min,
+        station: c.station,
+        assigned_role: c.assigned_role,
+        insert_after_order: maxOrder,
+      });
+      toast(`${v.patient_name} → ${c.name} added to this station's queue`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
 
   const callIn = async (stepId) => {
     try {
@@ -59,9 +174,32 @@ export default function StationQueue({ role, form, freeMove = false }) {
     }
   };
 
-  // Bring a queued patient into the form box (and send whoever was in the box
-  // back to the list). Pure client-side selection — does NOT advance them.
-  const moveIntoBox = (s) => setSelectedId(s.id);
+  // Bring a queued patient into the form box. Takes the step first, so two
+  // people at the same desk can't quietly work the same patient — the loser is
+  // told who has them rather than finding out at "Done".
+  const moveIntoBox = async (s) => {
+    if (heldByOther(s)) {
+      toast(`${s.claim.by} is already working ${s.patient_name}`, "warn");
+      return;
+    }
+    try {
+      await claimStep.mutateAsync(s.id);
+      setSelectedId(s.id);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  // Hand a patient back to the queue without completing them.
+  const release = async (s) => {
+    try {
+      await releaseStep.mutateAsync(s.id);
+      if (selectedId === s.id) setSelectedId(null);
+      toast(`${s.patient_name} released back to the queue`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
 
   const complete = async () => {
     if (!boxPatient) return;
@@ -102,6 +240,22 @@ export default function StationQueue({ role, form, freeMove = false }) {
     }
   };
 
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    try {
+      await removeStep.mutateAsync({ stepId: removeTarget.id, reason: removeReason.trim() });
+      toast(`${removeTarget.patient_name} — ${removeTarget.step_name} removed`, "success");
+      if (removeTarget.id === boxPatient?.id) {
+        setFormData({});
+        setSelectedId(null);
+      }
+      setRemoveTarget(null);
+      setRemoveReason("");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
   if (isLoading) return <div className="flow-card flow-empty">Loading…</div>;
 
   return (
@@ -127,6 +281,12 @@ export default function StationQueue({ role, form, freeMove = false }) {
               <div style={{ fontSize: 10, opacity: 0.8 }}>
                 Visit: {boxPatient.visit_remaining_min}m left
               </div>
+              {boxPatient.claim && (
+                <div style={{ fontSize: 10, opacity: 0.9, marginTop: 2 }}>
+                  🔒{" "}
+                  {heldByMe(boxPatient) ? "you have this patient" : `with ${boxPatient.claim.by}`}
+                </div>
+              )}
             </div>
           </div>
           <div className="station-body">
@@ -135,7 +295,10 @@ export default function StationQueue({ role, form, freeMove = false }) {
               <button
                 className={`flow-btn ${form === "pharmacy" ? "flow-btn-primary" : "flow-btn-grn"}`}
                 style={{ padding: "8px 18px" }}
-                disabled={advance.isPending}
+                disabled={advance.isPending || heldByOther(boxPatient)}
+                title={
+                  heldByOther(boxPatient) ? `${boxPatient.claim.by} is working this patient` : ""
+                }
                 onClick={complete}
               >
                 {form === "pharmacy"
@@ -145,13 +308,32 @@ export default function StationQueue({ role, form, freeMove = false }) {
               <button
                 className="flow-btn flow-btn-ghost"
                 style={{ padding: "8px 14px" }}
-                disabled={advance.isPending}
+                disabled={advance.isPending || heldByOther(boxPatient)}
                 onClick={() => setSkipTarget(boxPatient)}
-                title="Skip this step — patient still advances"
+                title={
+                  heldByOther(boxPatient)
+                    ? `${boxPatient.claim.by} is working this patient`
+                    : "Skip this step — patient still advances"
+                }
               >
                 ⏭ Skip
               </button>
-              <span className="flow-muted">Patient auto-moves to their next station</span>
+              {heldByMe(boxPatient) && (
+                <button
+                  className="flow-btn flow-btn-ghost"
+                  style={{ padding: "8px 14px" }}
+                  disabled={releaseStep.isPending}
+                  onClick={() => release(boxPatient)}
+                  title="Hand this patient back to the queue without completing"
+                >
+                  ↩ Release
+                </button>
+              )}
+              <span className="flow-muted">
+                {heldByOther(boxPatient)
+                  ? `${boxPatient.claim.by} has this patient — ask them to release before you take over.`
+                  : "Patient auto-moves to their next station"}
+              </span>
             </div>
           </div>
         </div>
@@ -164,160 +346,340 @@ export default function StationQueue({ role, form, freeMove = false }) {
       )}
 
       {/* Queue — free-move: pick anyone into the box; else call-in order */}
-      <div className="flow-sec-title">
-        {freeMove ? "My queue — pick anyone" : "My queue — ready to call in"}
-      </div>
-      {listItems.length === 0 ? (
-        <div className="flow-card flow-empty">No one waiting at this station.</div>
-      ) : (
-        listItems.map((s) => (
-          <div
-            key={s.id}
-            className={`qitem${s.visit_urgency === "breach" ? " urgent" : s.visit_urgency === "atrisk" ? " amber" : ""}`}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700 }}>
-                {s.token_number ? (
-                  <span className="flow-badge fb-ink">#{s.token_number}</span>
-                ) : null}{" "}
-                {s.patient_name} {s.is_vip ? "⭐" : ""}
+      <div className="q-sec">
+        <div className="q-sec-head">
+          <span className="flow-sec-title" style={{ margin: 0 }}>
+            {freeMove ? "My queue — pick anyone" : "My queue — ready to call in"}
+            <span className="q-count">{listItems.length}</span>
+          </span>
+        </div>
+        {listItems.length === 0 ? (
+          <div className="flow-card flow-empty">No one waiting at this station.</div>
+        ) : (
+          listItems.map((s) => (
+            <div
+              key={s.id}
+              className={`qrow${s.visit_urgency === "breach" ? " qrow--breach" : s.visit_urgency === "atrisk" ? " qrow--atrisk" : ""}`}
+            >
+              <span className="qrow-tok">{s.token_number || "—"}</span>
+              <div className="qrow-main">
+                <div className="qrow-name">
+                  {s.patient_name}
+                  {s.is_vip && <span title="VIP">⭐</span>}
+                </div>
+                <div className="qrow-meta">
+                  {s.patient_age_sex || ""} · {s.file_no} · {s.visit_type_id} · Step {s.step_order}{" "}
+                  of {s.total_steps}
+                </div>
+                <div className="qrow-chips">
+                  <span
+                    className={`flow-badge ${s.visit_urgency === "breach" ? "fb-red" : s.visit_urgency === "atrisk" ? "fb-amb" : "fb-ink"}`}
+                  >
+                    {s.visit_remaining_min}m left of visit
+                  </span>
+                  <span className="flow-badge fb-ink">in since {fmtTime(s.checkin_time)}</span>
+                  {s.status === "pending" && (
+                    <span className="flow-badge fb-ink">upstream step still open</span>
+                  )}
+                  {s.claim && (
+                    <span className={`flow-badge ${heldByMe(s) ? "fb-blu" : "fb-amb"}`}>
+                      🔒 {heldByMe(s) ? "you have this patient" : `with ${s.claim.by}`}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flow-muted">
-                {s.patient_age_sex || ""} · {s.file_no} · {s.visit_type_id} · Step {s.step_order} of{" "}
-                {s.total_steps}
-              </div>
-              <div style={{ marginTop: 4 }}>
-                <span className="flow-badge fb-ink">{s.visit_remaining_min}m left of visit</span>
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div className="flow-muted">{fmtTime(s.checkin_time)}</div>
-              <div
-                style={{
-                  marginTop: 6,
-                  display: "flex",
-                  gap: 6,
-                  justifyContent: "flex-end",
-                  flexWrap: "wrap",
-                }}
-              >
+              <div className="qrow-actions">
                 {freeMove ? (
                   <>
                     <button
-                      className="flow-btn flow-btn-ghost"
-                      disabled={advance.isPending}
-                      title="Skip — patient still advances"
-                      onClick={() => setSkipTarget(s)}
-                    >
-                      ⏭ Skip
-                    </button>
-                    <button
                       className="flow-btn flow-btn-primary"
-                      title="Bring this patient into the form box"
+                      disabled={heldByOther(s) || claimStep.isPending}
+                      title={
+                        heldByOther(s)
+                          ? `${s.claim.by} is working this patient`
+                          : "Take this patient into the form box"
+                      }
                       onClick={() => moveIntoBox(s)}
                     >
                       ↑ Move in
+                    </button>
+                    <button
+                      className="flow-btn flow-btn-ghost"
+                      disabled={advance.isPending || heldByOther(s)}
+                      title={
+                        heldByOther(s)
+                          ? `${s.claim.by} is working this patient`
+                          : "Skip — patient still advances"
+                      }
+                      onClick={() => setSkipTarget(s)}
+                    >
+                      ⏭ Skip
                     </button>
                   </>
                 ) : (
                   <button
                     className="flow-btn flow-btn-primary"
-                    disabled={!!active || startStep.isPending}
-                    title={active ? "Finish the current patient first" : "Call in"}
+                    disabled={!!active || startStep.isPending || heldByOther(s)}
+                    title={
+                      heldByOther(s)
+                        ? `${s.claim.by} is working this patient`
+                        : active
+                          ? "Finish the current patient first"
+                          : "Call in"
+                    }
                     onClick={() => callIn(s.id)}
                   >
                     Call in
                   </button>
                 )}
+                {heldByMe(s) && (
+                  <button
+                    className="flow-btn flow-btn-ghost"
+                    disabled={releaseStep.isPending}
+                    title="Hand this patient back to the queue"
+                    onClick={() => release(s)}
+                  >
+                    ↩ Release
+                  </button>
+                )}
+                {canEditHere && (
+                  <RemoveStepBtn
+                    step={s}
+                    busy={removeStep.isPending}
+                    heldBy={heldByOther(s) ? s.claim.by : null}
+                    onPick={setRemoveTarget}
+                  />
+                )}
               </div>
             </div>
-          </div>
-        ))
-      )}
+          ))
+        )}
+      </div>
 
-      {/* Pending (waiting on a prior step — e.g. ABI queued after Blood Sample) */}
-      {pending.length > 0 && (
-        <>
-          <div className="flow-sec-title" style={{ marginTop: 12 }}>
-            Queued — waiting on an earlier step
-          </div>
-          {pending.map((s) => (
-            <div key={s.id} className="qitem" style={{ opacity: 0.6 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>{s.patient_name}</div>
-                <div className="flow-muted">
-                  {s.file_no} · Step {s.step_order} of {s.total_steps} · queued after an earlier
-                  step
-                </div>
-              </div>
-            </div>
-          ))}
-        </>
-      )}
-
-      {/* Skip-reason dialog (proper modal — replaces the native prompt) */}
-      {skipTarget && (
-        <div
-          onClick={() => setSkipTarget(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,.4)",
-            zIndex: 600,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="flow-card"
-            style={{ width: "100%", maxWidth: 380, borderRadius: 10 }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
-              Skip “{skipTarget.step_name}”
-            </div>
-            <div className="flow-muted" style={{ marginBottom: 10 }}>
-              {skipTarget.patient_name} · {skipTarget.file_no} — they’ll move to the next step. Pick
-              or type a reason (optional).
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-              {SKIP_REASONS.map((r) => (
-                <button
-                  key={r}
-                  className={`flow-btn ${skipReason === r ? "flow-btn-primary" : "flow-btn-ghost"}`}
-                  style={{ padding: "5px 10px", fontSize: 12 }}
-                  onClick={() => setSkipReason(r)}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
+      <div className="q-sec">
+        <div className="q-sec-head">
+          <span className="flow-sec-title" style={{ margin: 0 }}>
+            {searching ? "Search results" : "Checked in today — not yet seen at this station"}
+            <span className="q-count">{notSeenHere.length}</span>
+          </span>
+          <div className="q-search">
+            <span aria-hidden="true">🔎</span>
             <input
-              autoFocus
-              value={skipReason}
-              onChange={(e) => setSkipReason(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && confirmSkip()}
-              placeholder="Reason (optional)…"
-              style={{ width: "100%", padding: "8px 10px", marginBottom: 12 }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, file no, phone or token…"
+              aria-label="Search today's patients"
             />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="flow-btn flow-btn-ghost" onClick={() => setSkipTarget(null)}>
-                Cancel
+            {search && (
+              <button className="q-search-x" title="Clear search" onClick={() => setSearch("")}>
+                ✕
               </button>
-              <button
-                className="flow-btn flow-btn-grn"
-                disabled={advance.isPending}
-                onClick={confirmSkip}
-              >
-                ⏭ Skip step
-              </button>
-            </div>
+            )}
           </div>
         </div>
+        {searching && (
+          <div className="flow-muted" style={{ marginBottom: 6 }}>
+            {searchBusy ? "Searching…" : `Matching today’s patients for “${debounced}”`}
+          </div>
+        )}
+
+        {notSeenHere.length === 0 ? (
+          <div className="flow-card flow-empty">
+            {searching
+              ? `No patient today matches “${debounced}”.`
+              : "Everyone checked in has either been through this station or is in your queue above."}
+          </div>
+        ) : (
+          notSeenHere.map(({ visit: v, step }) => {
+            const settled = settledHere(v);
+            const queuedHere = myVisitIds.has(v.id);
+            return (
+              <div key={v.id} className="qrow qrow--muted">
+                <span className="qrow-tok">{v.token_number || "—"}</span>
+                <div className="qrow-main">
+                  <div className="qrow-name">
+                    {v.patient_name}
+                    {v.is_vip && <span title="VIP">⭐</span>}
+                  </div>
+                  <div className="qrow-meta">
+                    {v.patient_id}
+                    {v.patient_age_sex ? ` · ${v.patient_age_sex}` : ""} ·{" "}
+                    {VISIT_STATUS_LABEL[v.status] || v.status}
+                  </div>
+                  <div className="qrow-chips">
+                    <span className="flow-badge fb-ink">
+                      {step ? `now at ${step.step_name}` : "journey not started"}
+                    </span>
+                    {queuedHere && <span className="flow-badge fb-blu">already in your queue</span>}
+                    {settled && !queuedHere && (
+                      <span className="flow-badge fb-grn">done at this station</span>
+                    )}
+                  </div>
+                </div>
+                <div className="qrow-actions">
+                  {canEditHere && myCatalogSteps.length > 0 && !queuedHere && (
+                    <SendToStation
+                      visit={v}
+                      steps={myCatalogSteps}
+                      busy={addStep.isPending}
+                      onSend={sendToMyStation}
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {skipTarget && (
+        <StepReasonDialog
+          title={`Skip “${skipTarget.step_name}”`}
+          subtitle={`${skipTarget.patient_name} · ${skipTarget.file_no} — they’ll move to the next step. Pick or type a reason (optional).`}
+          reason={skipReason}
+          setReason={setSkipReason}
+          confirmLabel="⏭ Skip step"
+          confirmClass="flow-btn-grn"
+          busy={advance.isPending}
+          onCancel={() => setSkipTarget(null)}
+          onConfirm={confirmSkip}
+        />
+      )}
+
+      {removeTarget && (
+        <StepReasonDialog
+          title={`Remove “${removeTarget.step_name}”`}
+          subtitle={`${removeTarget.patient_name} · ${removeTarget.file_no} — this step leaves their journey entirely. A step already started is kept and marked skipped instead.`}
+          reason={removeReason}
+          setReason={setRemoveReason}
+          confirmLabel="✕ Remove step"
+          confirmClass="flow-btn-red"
+          busy={removeStep.isPending}
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={confirmRemove}
+        />
       )}
     </>
+  );
+}
+
+function SendToStation({ visit, steps, busy, onSend }) {
+  if (steps.length === 1) {
+    return (
+      <button
+        className="flow-btn flow-btn-ghost"
+        disabled={busy}
+        title={`Add "${steps[0].name}" to this patient's journey and queue them here`}
+        onClick={() => onSend(visit, steps[0].id)}
+      >
+        → Send to my station
+      </button>
+    );
+  }
+  return (
+    <select
+      className="jb-addsel"
+      value=""
+      disabled={busy}
+      title="Add a step for this station to the patient's journey"
+      onChange={(e) => {
+        if (e.target.value) onSend(visit, e.target.value);
+        e.target.value = "";
+      }}
+    >
+      <option value="">→ Send to my station…</option>
+      {steps.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function RemoveStepBtn({ step, busy, heldBy, onPick }) {
+  return (
+    <button
+      className="flow-btn flow-btn-ghost"
+      style={{ color: "var(--fre)", borderColor: "var(--fre)" }}
+      disabled={busy || !!heldBy}
+      title={
+        heldBy
+          ? `${heldBy} is working this patient — they must release it first`
+          : "Remove this step from the patient's journey"
+      }
+      onClick={() => onPick(step)}
+    >
+      ✕ Remove
+    </button>
+  );
+}
+
+// Shared confirm-with-reason modal for skipping and for removing a step.
+function StepReasonDialog({
+  title,
+  subtitle,
+  reason,
+  setReason,
+  confirmLabel,
+  confirmClass,
+  busy,
+  onCancel,
+  onConfirm,
+}) {
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.4)",
+        zIndex: 600,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flow-card"
+        style={{ width: "100%", maxWidth: 380, borderRadius: 10 }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{title}</div>
+        <div className="flow-muted" style={{ marginBottom: 10 }}>
+          {subtitle}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+          {SKIP_REASONS.map((r) => (
+            <button
+              key={r}
+              className={`flow-btn ${reason === r ? "flow-btn-primary" : "flow-btn-ghost"}`}
+              style={{ padding: "5px 10px", fontSize: 12 }}
+              onClick={() => setReason(r)}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        <input
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onConfirm()}
+          placeholder="Reason (optional)…"
+          style={{ width: "100%", padding: "8px 10px", marginBottom: 12 }}
+        />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="flow-btn flow-btn-ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className={`flow-btn ${confirmClass}`} disabled={busy} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -390,6 +752,9 @@ const OPTIONAL_VITALS = [
   ["pain_score", "Pain (0–10)"],
 ];
 const CORE_VITAL_KEYS = ["weight", "bp_sys", "bp_dia", "pulse", "spo2"];
+// Shown for every patient alongside the core vitals. Still removable per
+// patient via the ✕, and re-addable from the "+ Add vital" picker.
+const DEFAULT_EXTRA_VITALS = ["bmi", "body_fat"];
 
 function VitalsForm({ value, onChange }) {
   const set = (k, v) => onChange({ ...value, [k]: v });
@@ -400,11 +765,16 @@ function VitalsForm({ value, onChange }) {
     setExtras((a) => a.filter((e) => e.key !== k));
   };
   // Extra (optional/custom) vitals the associate has added for this patient.
-  const [extras, setExtras] = useState(() =>
-    Object.keys(value)
-      .filter((k) => !CORE_VITAL_KEYS.includes(k))
-      .map((k) => ({ key: k, label: OPTIONAL_VITALS.find((o) => o[0] === k)?.[1] || k })),
-  );
+  const [extras, setExtras] = useState(() => {
+    const keys = [
+      ...DEFAULT_EXTRA_VITALS,
+      ...Object.keys(value).filter((k) => !CORE_VITAL_KEYS.includes(k)),
+    ];
+    return [...new Set(keys)].map((k) => ({
+      key: k,
+      label: OPTIONAL_VITALS.find((o) => o[0] === k)?.[1] || k,
+    }));
+  });
 
   const addOptional = (key) => {
     const o = OPTIONAL_VITALS.find((x) => x[0] === key);

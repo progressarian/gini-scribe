@@ -70,7 +70,21 @@ export const CAPABILITIES = {
   // Patient Flow Management module (docs/FLOW_MANAGEMENT_PLAN.md)
   FLOW_RECEPTION: "FLOW_RECEPTION", // check-in + journey builder
   FLOW_COORDINATOR: "FLOW_COORDINATOR", // live floor dashboard
-  FLOW_STATION: "FLOW_STATION", // role station queues (vitals/mo/lab/dietitian/rx)
+  FLOW_STATION: "FLOW_STATION", // umbrella: holds at least one station desk
+  FLOW_STATION_VITALS: "FLOW_STATION_VITALS",
+  FLOW_STATION_MO: "FLOW_STATION_MO",
+  FLOW_STATION_LAB: "FLOW_STATION_LAB",
+  FLOW_STATION_DIET: "FLOW_STATION_DIET",
+  FLOW_STATION_RX: "FLOW_STATION_RX",
+  FLOW_STATION_PHARM: "FLOW_STATION_PHARM",
+  FLOW_FLOOR_VIEW: "FLOW_FLOOR_VIEW", // read the live floor board (no management)
+  // A consultant's own worklist + hand-over offers. Consultants only: SD is
+  // always a consultant (2,802) or admin (73), never an MO, so an MO's list
+  // would always be empty.
+  FLOW_MY_PATIENTS: "FLOW_MY_PATIENTS",
+  // Consultant Station: the floor-wide view of who is seeing whom. Managers get
+  // the hand-over controls on top; consultants get the read-only roll-call.
+  FLOW_CONSULTANTS: "FLOW_CONSULTANTS",
   FLOW_PHARMACY: "FLOW_PHARMACY", // pharmacy dispense + confirm-exit (stops the clock)
   FLOW_REPORTS: "FLOW_REPORTS", // wait-time / bottleneck analytics
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
@@ -102,7 +116,13 @@ export const ROLE_CAPABILITIES = {
     C.SIDE_EFFECTS,
     C.RECEPTION_OPS,
     C.ANALYTICS,
-    C.FLOW_STATION,
+    // No station desk: a consultant's work is the SD/Chief consultation, done
+    // from /consultant. In 2,837 MO steps not one was ever worked by a
+    // consultant, and putting them on the MO desk only invited confusion
+    // between the MO workup and their own consultation.
+    C.FLOW_FLOOR_VIEW,
+    C.FLOW_MY_PATIENTS,
+    C.FLOW_CONSULTANTS,
     C.FLOW_REPORTS,
   ],
   [ROLES.MO]: [
@@ -117,6 +137,8 @@ export const ROLE_CAPABILITIES = {
     C.SIDE_EFFECTS,
     C.RECEPTION_OPS,
     C.FLOW_STATION,
+    C.FLOW_STATION_MO,
+    C.FLOW_FLOOR_VIEW,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the
@@ -129,11 +151,31 @@ export const ROLE_CAPABILITIES = {
     C.LAB_REQUESTS,
     C.SIDE_EFFECTS,
     C.FLOW_STATION,
+    C.FLOW_STATION_VITALS,
+    C.FLOW_STATION_DIET,
+    C.FLOW_STATION_RX,
+    C.FLOW_FLOOR_VIEW,
   ],
   // Lab/tech need PATIENT_READ so they can look up whose report they're
   // uploading (Find + chart), on top of the lab upload/request capabilities.
-  [ROLES.LAB]: [C.PATIENT_READ, C.PATIENT_CHART, C.LAB_PORTAL, C.LAB_REQUESTS, C.FLOW_STATION],
-  [ROLES.TECH]: [C.PATIENT_READ, C.PATIENT_CHART, C.LAB_PORTAL, C.LAB_REQUESTS, C.FLOW_STATION],
+  [ROLES.LAB]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.LAB_PORTAL,
+    C.LAB_REQUESTS,
+    C.FLOW_STATION,
+    C.FLOW_STATION_LAB,
+    C.FLOW_FLOOR_VIEW,
+  ],
+  [ROLES.TECH]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.LAB_PORTAL,
+    C.LAB_REQUESTS,
+    C.FLOW_STATION,
+    C.FLOW_STATION_LAB,
+    C.FLOW_FLOOR_VIEW,
+  ],
   [ROLES.RECEPTION]: [
     C.PATIENT_READ,
     C.PATIENT_CHART,
@@ -143,6 +185,10 @@ export const ROLE_CAPABILITIES = {
     C.MED_COLLECTION,
     C.FLOW_RECEPTION,
     C.FLOW_COORDINATOR,
+    C.FLOW_FLOOR_VIEW,
+    C.FLOW_CONSULTANTS,
+    C.FLOW_STATION,
+    C.FLOW_STATION_VITALS,
     C.OBT_OPS,
   ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
@@ -154,6 +200,11 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_RECEPTION,
     C.FLOW_COORDINATOR,
     C.FLOW_REPORTS,
+    C.FLOW_FLOOR_VIEW,
+    C.FLOW_CONSULTANTS,
+    C.FLOW_STATION,
+    C.FLOW_STATION_VITALS,
+    C.FLOW_STATION_DIET,
     C.OBT_OPS,
   ],
   [ROLES.PHARMACY]: [
@@ -164,6 +215,8 @@ export const ROLE_CAPABILITIES = {
     C.MED_COLLECTION,
     C.FLOW_PHARMACY,
     C.FLOW_STATION,
+    C.FLOW_STATION_PHARM,
+    C.FLOW_FLOOR_VIEW,
   ],
   // OBT outbound call team. The ONLY role without PATIENT_CHART: they phone
   // patients to confirm tomorrow's appointment, which needs identity and phone
@@ -190,6 +243,15 @@ export function normalizeRole(role) {
 }
 
 const OWN_LIST_ROLES = [ROLES.CONSULTANT, ROLES.MO];
+
+// Roles that actually hold a personal consultation queue. Admin holds ALL, so a
+// plain capability check puts "My Patients" in their switcher too — but admin
+// runs the floor, they do not consult, so the desk is meaningless to them.
+const OWN_CONSULT_QUEUE_ROLES = [ROLES.CONSULTANT];
+
+export function hasOwnConsultQueue(role) {
+  return OWN_CONSULT_QUEUE_ROLES.includes(normalizeRole(role));
+}
 
 export function hasOwnPatientList(role) {
   return OWN_LIST_ROLES.includes(normalizeRole(role));
@@ -219,4 +281,44 @@ export function hasAnyCapability(role, capabilities) {
   if (GRANT_ALL_CAPABILITIES) return true;
   const list = Array.isArray(capabilities) ? capabilities : [capabilities];
   return list.some((c) => hasCapability(role, c));
+}
+
+// ── Flow stations ───────────────────────────────────────────────────────────
+// Each of the six station desks has its own capability, so a role only reaches
+// the desk it actually works. STATION_CAPABILITY is keyed by the URL slug
+// (/flow/station/:slug); STATION_ROLE_CAPABILITY by the assigned_role stored on
+// flow_visit_steps, which is what the queue API and the step guards match on.
+export const STATION_CAPABILITY = {
+  vitals: CAPABILITIES.FLOW_STATION_VITALS,
+  mo: CAPABILITIES.FLOW_STATION_MO,
+  lab: CAPABILITIES.FLOW_STATION_LAB,
+  dietitian: CAPABILITIES.FLOW_STATION_DIET,
+  rx: CAPABILITIES.FLOW_STATION_RX,
+  pharmacy: CAPABILITIES.FLOW_STATION_PHARM,
+};
+
+export const STATION_ROLE_CAPABILITY = {
+  vitals_associate: CAPABILITIES.FLOW_STATION_VITALS,
+  mo: CAPABILITIES.FLOW_STATION_MO,
+  lab_tech: CAPABILITIES.FLOW_STATION_LAB,
+  dietitian: CAPABILITIES.FLOW_STATION_DIET,
+  nurse: CAPABILITIES.FLOW_STATION_RX,
+  pharmacist: CAPABILITIES.FLOW_STATION_PHARM,
+};
+
+// Can this role work a step assigned to `assignedRole`? Steps whose role has no
+// station desk (waiting areas, sd/chief/billing) stay unrestricted — they are
+// advanced from the floor or the clinical screens, not from a station queue.
+export function canWorkStationRole(role, assignedRole) {
+  const cap = STATION_ROLE_CAPABILITY[assignedRole];
+  return cap ? hasCapability(role, cap) : true;
+}
+
+// Stricter form, for editing a journey rather than working a step: the role must
+// hold a real station desk for `assignedRole`. Unlike canWorkStationRole this
+// fails closed on the desk-less roles (sd, chief, billing, waiting areas), so a
+// nurse can add or remove their own Vitals step but not an SD Consultation.
+export function ownsStationRole(role, assignedRole) {
+  const cap = STATION_ROLE_CAPABILITY[assignedRole];
+  return cap ? hasCapability(role, cap) : false;
 }

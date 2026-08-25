@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "../../stores/uiStore";
 import {
   useFlowAdvance,
@@ -36,7 +36,16 @@ const fmtSkipTime = (t) => {
 // force-advance. Shared by the Flow Coordinator floor and the Reception "checked
 // in today" list so both manage a visit the same way. `visit` must include
 // `steps` + `_timing` (the shape returned by GET /api/flow/visits).
-export default function VisitDetailModal({ visit, onClose }) {
+const stepActualMin = (s, now) => {
+  if (s.actual_duration_min != null) return s.actual_duration_min;
+  if (!s.started_at) return null;
+  const from = new Date(s.started_at).getTime();
+  if (isNaN(from)) return null;
+  const to = s.completed_at ? new Date(s.completed_at).getTime() : now;
+  return Math.max(0, Math.round((to - from) / 60000));
+};
+
+export default function VisitDetailModal({ visit, onClose, readOnly = false }) {
   const advance = useFlowAdvance();
   const setToken = useFlowSetToken();
   const editDur = useFlowEditDuration();
@@ -44,6 +53,12 @@ export default function VisitDetailModal({ visit, onClose }) {
   const addStep = useFlowAddStep();
   const reorder = useFlowReorderSteps();
   const { data: catalog = [] } = useFlowStepCatalog();
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   // Steps sorted by order — the list we render and reorder against.
   const steps = (visit.steps || []).slice().sort((a, b) => a.step_order - b.step_order);
@@ -177,7 +192,7 @@ export default function VisitDetailModal({ visit, onClose }) {
             <input
               defaultValue={visit.token_number || ""}
               placeholder="e.g. 27 or A-14"
-              disabled={setToken.isPending}
+              disabled={readOnly || setToken.isPending}
               // Blur-to-save, matching how step durations are edited here.
               onBlur={async (e) => {
                 const next = e.target.value.trim().slice(0, 16);
@@ -194,8 +209,9 @@ export default function VisitDetailModal({ visit, onClose }) {
           </div>
 
           <div className="flow-muted" style={{ marginBottom: 8 }}>
-            Edit a step's minutes (blur to save) · ✕ to remove a not-yet-done step. Completed steps
-            are locked.
+            {readOnly
+              ? "Actual time taken · planned minutes. View only — you don't manage the floor."
+              : "Actual time taken · planned minutes (blur to save) · ✕ to remove a not-yet-done step. Completed steps are locked."}
           </div>
 
           {steps.map((s, i) => (
@@ -206,6 +222,7 @@ export default function VisitDetailModal({ visit, onClose }) {
                     className="jb-move-btn"
                     title="Move up"
                     disabled={
+                      readOnly ||
                       reorder.isPending ||
                       i === 0 ||
                       !MOVABLE(s.status) ||
@@ -219,6 +236,7 @@ export default function VisitDetailModal({ visit, onClose }) {
                     className="jb-move-btn"
                     title="Move down"
                     disabled={
+                      readOnly ||
                       reorder.isPending ||
                       i === steps.length - 1 ||
                       !MOVABLE(s.status) ||
@@ -244,12 +262,41 @@ export default function VisitDetailModal({ visit, onClose }) {
                     {s.status}
                   </span>
                 </span>
+                {(() => {
+                  const actual = s.status === "skipped" ? null : stepActualMin(s, now);
+                  if (actual == null)
+                    return (
+                      <span className="jb-actual jb-actual-idle" title="Not started yet">
+                        —
+                      </span>
+                    );
+                  const delta = actual - s.planned_duration_min;
+                  return (
+                    <span
+                      className={`jb-actual ${
+                        delta > 0
+                          ? "jb-actual-over"
+                          : s.status === "in_progress"
+                            ? "jb-actual-running"
+                            : "jb-actual-ok"
+                      }`}
+                      title={`Actual ${actual} min vs planned ${s.planned_duration_min} min`}
+                    >
+                      {s.status === "in_progress" ? "⏱ " : ""}
+                      {actual}m
+                      {delta !== 0 && (
+                        <span className="jb-actual-delta">{delta > 0 ? `+${delta}` : delta}</span>
+                      )}
+                    </span>
+                  );
+                })()}
                 <input
                   className="jb-dur"
                   type="number"
                   min="0"
+                  title="Planned minutes"
                   defaultValue={s.planned_duration_min}
-                  disabled={s.status === "completed"}
+                  disabled={readOnly || s.status === "completed"}
                   onBlur={(e) => {
                     const v = parseInt(e.target.value);
                     if (v !== s.planned_duration_min)
@@ -259,7 +306,7 @@ export default function VisitDetailModal({ visit, onClose }) {
                       );
                   }}
                 />
-                {!["completed", "skipped"].includes(s.status) && (
+                {!readOnly && !["completed", "skipped"].includes(s.status) && (
                   <button
                     className="jb-remove"
                     title="Remove / skip step"
@@ -347,7 +394,7 @@ export default function VisitDetailModal({ visit, onClose }) {
             </div>
           ))}
 
-          {visit.status === "in_progress" && (
+          {!readOnly && visit.status === "in_progress" && (
             <div className="jb-addrow">
               <select
                 className="jb-addsel"
@@ -430,7 +477,7 @@ export default function VisitDetailModal({ visit, onClose }) {
             </div>
           )}
 
-          {visit.status === "in_progress" && (
+          {!readOnly && visit.status === "in_progress" && (
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button
                 className="flow-btn flow-btn-grn"

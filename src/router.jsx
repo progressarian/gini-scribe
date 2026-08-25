@@ -90,6 +90,8 @@ const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagemen
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
+const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
+const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
 const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
 const PatientJourneyPage = lazyWithRetry(() => import("./pages/PatientJourneyPage"));
 const FlowReportsPage = lazyWithRetry(() => import("./pages/flow/FlowReportsPage"));
@@ -208,6 +210,9 @@ const router = createBrowserRouter([
               // Patient Flow Management
               { path: "/flow/checkin", element: lazyEl(FlowCheckinPage) },
               { path: "/flow/coordinator", element: lazyEl(FlowCoordinatorPage) },
+              { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
+              { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
+              { path: "/flow/station", element: lazyEl(FlowStationPage) },
               { path: "/flow/station/:role", element: lazyEl(FlowStationPage) },
               { path: "/flow/reports", element: lazyEl(FlowReportsPage) },
               { path: "/flow/admin", element: lazyEl(FlowAdminPage) },

@@ -42,12 +42,13 @@ export function useFlowStaff(role) {
 }
 
 // ── Live reads (polling) ──
-export function useFlowVisits(date = today(), status, options = {}) {
+export function useFlowVisits(date = today(), status, options = {}, q = "") {
   return useQuery({
-    queryKey: qk.flow.visits(date, status),
+    queryKey: [...qk.flow.visits(date, status), q || "all"],
     queryFn: async () => {
       const params = new URLSearchParams({ date });
       if (status) params.set("status", status);
+      if (q) params.set("q", q);
       return (await api.get(`/api/flow/visits?${params}`)).data;
     },
     refetchInterval: 15_000,
@@ -212,6 +213,66 @@ export function useFlowStopTimer() {
       return (await api.post(`/api/flow/visits/${visitId}/stop-timer`)).data;
     } catch (err) {
       throw new Error(errMsg(err, "Could not stop timer"));
+    }
+  });
+}
+export function useFlowMyPatients(date = today(), options = {}) {
+  return useQuery({
+    queryKey: [...qk.flow.all, "my-patients", date],
+    queryFn: async () => (await api.get(`/api/flow/my-patients?date=${date}`)).data,
+    refetchInterval: 15_000,
+    staleTime: 5_000,
+    ...options,
+  });
+}
+export function useFlowOfferVisit() {
+  return useFlowMutation(async ({ visitId, to_doctor_id, to_doctor_name, reason }) => {
+    try {
+      return (
+        await api.post(`/api/flow/visits/${visitId}/offer`, {
+          to_doctor_id,
+          to_doctor_name,
+          reason,
+        })
+      ).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not offer this patient"));
+    }
+  });
+}
+export function useFlowAcceptOffer() {
+  return useFlowMutation(async (visitId) => {
+    try {
+      return (await api.post(`/api/flow/visits/${visitId}/offer/accept`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not accept this patient"));
+    }
+  });
+}
+export function useFlowDeclineOffer() {
+  return useFlowMutation(async ({ visitId, reason }) => {
+    try {
+      return (await api.post(`/api/flow/visits/${visitId}/offer/decline`, { reason })).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not decline this patient"));
+    }
+  });
+}
+export function useFlowClaimStep() {
+  return useFlowMutation(async (stepId) => {
+    try {
+      return (await api.post(`/api/flow/steps/${stepId}/claim`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not take this patient"));
+    }
+  });
+}
+export function useFlowReleaseStep() {
+  return useFlowMutation(async (stepId) => {
+    try {
+      return (await api.post(`/api/flow/steps/${stepId}/release`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not release this patient"));
     }
   });
 }

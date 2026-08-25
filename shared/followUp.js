@@ -15,6 +15,13 @@ export function effectiveFollowUpDate(row) {
   );
 }
 
+const TIMING_INTERVAL = /^\d{1,2}\s*(day|week|month|year)s?$/i;
+
+export function followUpTiming(v) {
+  const s = String(v ?? "").trim();
+  return TIMING_INTERVAL.test(s) ? s : "";
+}
+
 export function effectiveFollowUp(row) {
   const date = effectiveFollowUpDate(row);
   const hr = row?.healthray_follow_up || {};

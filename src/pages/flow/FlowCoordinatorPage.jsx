@@ -8,6 +8,8 @@ import {
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import VisitDetailModal from "../../components/flow/VisitDetailModal";
+import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions";
 import "../../styles/flow.css";
 
 // OPD/GHM-aligned stage labels — same vocabulary as the OPD pages.
@@ -79,6 +81,8 @@ const shorten = (n) =>
 
 export default function FlowCoordinatorPage() {
   const { data: allVisits = [], isLoading, dataUpdatedAt } = useFlowVisits();
+  const myRole = useAuthStore((st) => st.currentDoctor?.role);
+  const canManage = hasCapability(myRole, CAP.FLOW_COORDINATOR);
   // Cancelled check-ins (mistaken / not-present) don't belong on the live floor.
   const visits = useMemo(() => allVisits.filter((v) => v.status !== "cancelled"), [allVisits]);
   const [openId, setOpenId] = useState(null);
@@ -483,7 +487,7 @@ export default function FlowCoordinatorPage() {
                       {t.urgency === "breach" ? " ⚠" : t.urgency === "atrisk" ? " ⏱" : ""}
                     </span>
                   )}
-                  {(v.status === "waiting" || v.status === "paused") && (
+                  {canManage && (v.status === "waiting" || v.status === "paused") && (
                     <button
                       className="flow-btn flow-btn-primary"
                       style={{ marginTop: 6, padding: "3px 10px" }}
@@ -498,7 +502,7 @@ export default function FlowCoordinatorPage() {
                       {v.status === "paused" ? "▶ Resume" : "▶ Start"}
                     </button>
                   )}
-                  {v.status === "in_progress" && (
+                  {canManage && v.status === "in_progress" && (
                     <button
                       className="flow-btn flow-btn-ghost"
                       style={{ marginTop: 6, padding: "3px 8px" }}
@@ -509,27 +513,28 @@ export default function FlowCoordinatorPage() {
                       ⏸ Stop
                     </button>
                   )}
-                  {(v.status === "in_progress" ||
-                    v.status === "waiting" ||
-                    v.status === "paused") && (
-                    <button
-                      className="flow-btn flow-btn-ghost"
-                      style={{
-                        marginTop: 6,
-                        padding: "3px 8px",
-                        color: "var(--fre)",
-                        borderColor: "var(--fre)",
-                      }}
-                      disabled={cancelVisit.isPending}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCancelTarget(v);
-                      }}
-                      title="Cancel this check-in (mistaken / patient not present)"
-                    >
-                      ✕ Cancel
-                    </button>
-                  )}
+                  {canManage &&
+                    (v.status === "in_progress" ||
+                      v.status === "waiting" ||
+                      v.status === "paused") && (
+                      <button
+                        className="flow-btn flow-btn-ghost"
+                        style={{
+                          marginTop: 6,
+                          padding: "3px 8px",
+                          color: "var(--fre)",
+                          borderColor: "var(--fre)",
+                        }}
+                        disabled={cancelVisit.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCancelTarget(v);
+                        }}
+                        title="Cancel this check-in (mistaken / patient not present)"
+                      >
+                        ✕ Cancel
+                      </button>
+                    )}
                 </div>
               </div>
             );
@@ -626,7 +631,9 @@ export default function FlowCoordinatorPage() {
         </div>
       </div>
 
-      {openVisit && <VisitDetailModal visit={openVisit} onClose={() => setOpenId(null)} />}
+      {openVisit && (
+        <VisitDetailModal visit={openVisit} onClose={() => setOpenId(null)} readOnly={!canManage} />
+      )}
 
       <ConfirmModal
         open={!!cancelTarget}

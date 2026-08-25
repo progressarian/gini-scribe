@@ -203,6 +203,26 @@ export function usePatientByFileNo(fileNo) {
   });
 }
 
+export function usePatientByPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return useQuery({
+    queryKey: qk.ghm.patientByPhone(digits),
+    queryFn: async () => {
+      const { data } = await api.get(`/api/patients?q=${encodeURIComponent(digits)}&limit=1`);
+      const hit = arr(data?.data)[0];
+      const match = [hit?.phone, hit?.alt_phone].some(
+        (v) =>
+          String(v || "")
+            .replace(/\D/g, "")
+            .endsWith(digits) && String(v || "").replace(/\D/g, "").length >= 10,
+      );
+      return hit && match ? hit : null;
+    },
+    enabled: digits.length === 10,
+    staleTime: 60_000,
+  });
+}
+
 export function useDoctorConflicts(date, enabled = true) {
   return useQuery({
     queryKey: qk.ghm.conflicts(date),

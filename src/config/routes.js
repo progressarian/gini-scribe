@@ -39,7 +39,12 @@ export const ROUTE_MAP = {
 // Gate a page on the capability its OWN API calls need. A page listed more
 // loosely than its endpoints renders for a role that then 403s on every fetch;
 // listed more tightly, the API stays reachable to roles the UI hides it from.
-import { CAPABILITIES as CAP, ROLES, normalizeRole } from "../../shared/permissions.js";
+import {
+  CAPABILITIES as CAP,
+  ROLES,
+  STATION_CAPABILITY,
+  normalizeRole,
+} from "../../shared/permissions.js";
 
 export const PAGE_CAPABILITIES = {
   // Patient identity — reachable with lookup alone, because clicking a result in
@@ -107,8 +112,15 @@ export const PAGE_CAPABILITIES = {
   "/ci": CAP.ANALYTICS,
   // Patient Flow Management
   "/flow/checkin": CAP.FLOW_RECEPTION,
-  "/flow/coordinator": CAP.FLOW_COORDINATOR,
-  "/flow/station": CAP.FLOW_STATION,
+  "/flow/coordinator": CAP.FLOW_FLOOR_VIEW,
+  "/flow/my-patients": CAP.FLOW_MY_PATIENTS,
+  "/flow/consultants": CAP.FLOW_CONSULTANTS,
+  // Consultants have no station desk — the bare path redirects them to their
+  // own worklist, which is the desk they do have.
+  "/flow/station": [CAP.FLOW_STATION, CAP.FLOW_MY_PATIENTS],
+  ...Object.fromEntries(
+    Object.entries(STATION_CAPABILITY).map(([slug, cap]) => [`/flow/station/${slug}`, cap]),
+  ),
   "/flow/reports": CAP.FLOW_REPORTS,
   "/flow/admin": CAP.ADMIN,
 };

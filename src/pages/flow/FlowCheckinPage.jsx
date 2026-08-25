@@ -799,18 +799,37 @@ export default function FlowCheckinPage() {
 
           {/* MIDDLE — form */}
           <div className="flow-card">
-            <div className="flow-sec-title">Check-in patient</div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <label className="flow-stat-lbl">Patient type & visit</label>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                marginBottom: 10,
+              }}
+            >
+              <div className="flow-sec-title" style={{ margin: 0 }}>
+                Check-in patient
+              </div>
+              <button
+                className="flow-btn flow-btn-primary"
+                style={{ marginLeft: "auto" }}
+                title="Register a brand-new patient (full record)"
+                onClick={() => setNewPatientOpen(true)}
+              >
+                + New patient
+              </button>
               <button
                 className="flow-btn flow-btn-ghost flow-btn-mini"
-                style={{ marginLeft: "auto" }}
                 title="Clear every field and unlink the picked appointment"
                 onClick={resetForm}
               >
                 ✕ Clear form
               </button>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <label className="flow-stat-lbl">Patient type & visit</label>
             </div>
             <div className="flow-type-grid" style={{ marginBottom: 12 }}>
               {TYPE_BUTTONS.map((t) => (
@@ -954,22 +973,12 @@ export default function FlowCheckinPage() {
                     (auto for new patients)
                   </span>
                 </label>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input
-                    style={{ flex: 1 }}
-                    value={form.file_no}
-                    onChange={(e) => setForm({ ...form, file_no: e.target.value })}
-                    placeholder={patientDbId ? "" : "Auto-generated (GNI-…)"}
-                    readOnly={!!patientDbId}
-                  />
-                  <button
-                    className="flow-btn flow-btn-ghost"
-                    title="Register a brand-new patient (full record)"
-                    onClick={() => setNewPatientOpen(true)}
-                  >
-                    New patient
-                  </button>
-                </div>
+                <input
+                  value={form.file_no}
+                  onChange={(e) => setForm({ ...form, file_no: e.target.value })}
+                  placeholder={patientDbId ? "" : "Auto-generated (GNI-…)"}
+                  readOnly={!!patientDbId}
+                />
               </div>
               <div className="flow-field">
                 <label>Phone (WhatsApp)</label>

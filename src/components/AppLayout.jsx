@@ -11,6 +11,7 @@ import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
 import { PAGE_CAPABILITIES, navAllowlistForRole } from "../config/routes";
 import { hasAnyCapability } from "../../shared/permissions";
+
 import "../styles/App.css";
 
 // Each item's `cap` is the capability required to see it (from the shared
@@ -148,11 +149,14 @@ const NAV_ITEMS = [
     cap: C["/flow/coordinator"],
     show: () => true,
   },
+  // One tab for all six station desks — the page's own switcher is the
+  // sub-navigation, showing only the desks this role can work.
   {
-    path: "/flow/station/vitals",
-    label: "⚖️ Vitals Station",
+    path: "/flow/station",
+    label: "⚖️ Stations",
     cap: C["/flow/station"],
     show: () => true,
+    match: (p) => p.startsWith("/flow/station") || p === "/flow/my-patients",
   },
   { path: "/flow/reports", label: "📊 Flow Reports", cap: C["/flow/reports"], show: () => true },
   { path: "/flow/admin", label: "⚙️ Flow Settings", cap: C["/flow/admin"], show: () => true },
@@ -404,9 +408,10 @@ export default function AppLayout() {
                   key={t.path}
                   to={t.path}
                   end={t.path === "/"}
-                  className={({ isActive }) =>
-                    `tab-btn ${isActive ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`
-                  }
+                  className={({ isActive }) => {
+                    const on = t.match ? t.match(location.pathname) : isActive;
+                    return `tab-btn ${on ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`;
+                  }}
                 >
                   {t.label}
                   {t.count && t.count(navState) > 0 && (

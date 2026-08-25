@@ -343,6 +343,33 @@
   font-size: 12px;
   font-weight: 600;
 }
+.jb-actual {
+  min-width: 54px;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.jb-actual-ok {
+  color: var(--fgn);
+}
+.jb-actual-running {
+  color: var(--fsk);
+}
+.jb-actual-over {
+  color: var(--fre);
+}
+.jb-actual-idle {
+  color: var(--fink3);
+  font-weight: 500;
+}
+.jb-actual-delta {
+  margin-left: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.75;
+}
 .jb-dur {
   width: 56px;
   text-align: center;
@@ -678,6 +705,215 @@
   box-shadow: var(--fsh);
   margin-bottom: 6px;
 }
+/* Consultant station — admin load board + all-patients table */
+.clb-card {
+  border: 1px solid var(--fbd);
+  border-radius: var(--fr);
+  background: var(--fwhite);
+  overflow: hidden;
+}
+.clb-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.clb-head:hover {
+  background: var(--fbg);
+}
+.clb-caret {
+  color: var(--fink3);
+  font-size: 11px;
+  width: 10px;
+}
+.clb-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fink);
+  white-space: nowrap;
+}
+.clb-spec {
+  font-style: normal;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--fink3);
+}
+.clb-bar {
+  flex: 1;
+  min-width: 40px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--fbd);
+  overflow: hidden;
+}
+.clb-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+.clb-body {
+  border-top: 1px solid var(--fbd);
+  padding: 8px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--fbg);
+}
+.clb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-radius: 6px;
+}
+@media (max-width: 640px) {
+  .clb-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* Station queue rows — one row shape for the desk's queue and the floor list */
+.q-sec {
+  margin-top: 14px;
+}
+.q-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.q-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--fbd);
+  color: var(--fink2);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.q-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 0 8px;
+  border: 1px solid var(--fbd);
+  border-radius: 999px;
+  background: var(--fwhite);
+  min-width: 240px;
+}
+.q-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 7px 0;
+  font-size: 12px;
+  color: var(--fink);
+}
+.q-search-x {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--fink3);
+  font-size: 12px;
+  padding: 0 2px;
+}
+.qrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 13px;
+  margin-bottom: 6px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-left: 3px solid var(--fbd2);
+  border-radius: var(--fr);
+  box-shadow: var(--fsh);
+}
+.qrow--breach {
+  border-left-color: var(--fre);
+  background: var(--frel);
+}
+.qrow--atrisk {
+  border-left-color: var(--fam);
+  background: var(--faml);
+}
+.qrow--muted {
+  border-left-color: var(--fbd);
+  background: var(--fbg);
+}
+.qrow-tok {
+  flex: 0 0 auto;
+  min-width: 40px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--fnv);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.qrow--muted .qrow-tok {
+  background: var(--fbd2);
+  color: var(--fink2);
+}
+.qrow-main {
+  flex: 1;
+  min-width: 0;
+}
+.qrow-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fink);
+}
+.qrow-meta {
+  font-size: 11px;
+  color: var(--fink3);
+  margin-top: 1px;
+}
+.qrow-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.qrow-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 640px) {
+  .qrow {
+    flex-wrap: wrap;
+  }
+  .qrow-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .q-search {
+    min-width: 100%;
+    margin-left: 0;
+  }
+}
+
 .qitem.urgent {
   border-left: 3px solid var(--fre);
   background: var(--frel);
