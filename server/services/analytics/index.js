@@ -234,6 +234,7 @@ export async function buildFullReport(db, { asOf } = {}) {
           patients: members.length,
           control: buildMarkerControl(narrowed, { asOf: reportDate }),
           cascade: buildControlCascade(narrowed, conditionIndex, members, { asOf: reportDate }),
+          goal_attainment: buildGoalAttainment(narrowed, members, { asOf: reportDate }),
           by_continuity: buildControlByContinuity(narrowed, members, {
             asOf: reportDate,
             markers: HEADLINE_MARKERS,

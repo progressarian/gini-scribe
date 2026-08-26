@@ -302,7 +302,7 @@ function Biomarkers() {
         section={data.s4_biomarkers}
         value={cohort}
         onChange={setCohort}
-        scopeNote="The cascade, target bands and continuity tables are recomputed for them. The goal-attainment section keeps its own fixed denominator and does not follow this filter."
+        scopeNote="The cascade, goal attainment, target bands and continuity tables are all recomputed for them."
       />
 
       <h3>The diabetes control cascade</h3>

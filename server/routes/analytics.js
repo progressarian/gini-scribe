@@ -138,7 +138,9 @@ router.get("/analytics/sections/:id", async (req, res) => {
     const refresh = req.query.refresh === "1";
     const loaded = await loadReport({ sections, refresh, asOf: req.query.as_of });
     const { source } = loaded;
-    const report = withCohort(loaded.report, req.query.cohort);
+    // Bands are re-applied after the cohort merge: the merge swaps in the
+    // cohort's own control rows, which have not been through withBandLabels.
+    const report = withBandLabels(withCohort(loaded.report, req.query.cohort));
     const payload = { source, meta: report.meta, snapshot: report.snapshot };
     for (const key of sections) {
       if (key !== "meta") payload[key] = report[key];

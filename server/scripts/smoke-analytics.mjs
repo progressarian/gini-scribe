@@ -78,6 +78,18 @@ try {
         `${id}?cohort=${opt.key} withholds the other cohorts`,
         !JSON.stringify(section).includes('"cohorts"'),
       );
+      if (key === "s4_biomarkers") {
+        check(
+          `${id}?cohort=${opt.key} keeps band labels on the filtered rows`,
+          section.control.every((r) => r.at_goal_pct == null || r.bands?.compact),
+          section.control.find((r) => r.at_goal_pct != null && !r.bands)?.marker,
+        );
+        check(
+          `${id}?cohort=${opt.key} scopes goal attainment to the cohort`,
+          section.goal_attainment.engaged_patients <= all[key].goal_attainment.engaged_patients,
+          `${section.goal_attainment.engaged_patients} vs ${all[key].goal_attainment.engaged_patients}`,
+        );
+      }
     }
     const bogus = await get(`/api/analytics/sections/${id}?cohort=nope`);
     check(`${id} falls back to the whole panel on an unknown cohort`, bogus[key].cohort === "all");
