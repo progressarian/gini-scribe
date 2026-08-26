@@ -77,6 +77,7 @@ export const CAPABILITIES = {
   FLOW_STATION_DIET: "FLOW_STATION_DIET",
   FLOW_STATION_RX: "FLOW_STATION_RX",
   FLOW_STATION_PHARM: "FLOW_STATION_PHARM",
+  FLOW_STATION_REPORTS: "FLOW_STATION_REPORTS",
   FLOW_FLOOR_VIEW: "FLOW_FLOOR_VIEW", // read the live floor board (no management)
   // A consultant's own worklist + hand-over offers. Consultants only: SD is
   // always a consultant (2,802) or admin (73), never an MO, so an MO's list
@@ -195,6 +196,7 @@ export const ROLE_CAPABILITIES = {
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   [ROLES.COORDINATOR]: [
     C.PATIENT_READ,
+    C.FLOW_STATION_REPORTS,
     C.PATIENT_CHART,
     C.AI_TOOLS,
     C.RECEPTION_OPS,
@@ -296,6 +298,7 @@ export const STATION_CAPABILITY = {
   dietitian: CAPABILITIES.FLOW_STATION_DIET,
   rx: CAPABILITIES.FLOW_STATION_RX,
   pharmacy: CAPABILITIES.FLOW_STATION_PHARM,
+  assistant: CAPABILITIES.FLOW_STATION_REPORTS,
 };
 
 export const STATION_ROLE_CAPABILITY = {
@@ -305,6 +308,7 @@ export const STATION_ROLE_CAPABILITY = {
   dietitian: CAPABILITIES.FLOW_STATION_DIET,
   nurse: CAPABILITIES.FLOW_STATION_RX,
   pharmacist: CAPABILITIES.FLOW_STATION_PHARM,
+  report_desk: CAPABILITIES.FLOW_STATION_REPORTS,
 };
 
 // Can this role work a step assigned to `assignedRole`? Steps whose role has no

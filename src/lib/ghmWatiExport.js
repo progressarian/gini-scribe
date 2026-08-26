@@ -2,9 +2,9 @@ import { LIST_PREDICATES, isNewVisitType } from "../../shared/patientLists.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const BLOCK_WIDTH = 9;
+const BLOCK_WIDTH = 16;
 
-const COL_WIDTHS = [22, 12, 14, 14, 12, 14, 12, 12, 14];
+const COL_WIDTHS = [22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14];
 
 const HEADERS = [
   "Name",
@@ -16,6 +16,13 @@ const HEADERS = [
   "Start_Time",
   "End_Time",
   "Alt_Phone",
+  "UHID",
+  "Age",
+  "Sex",
+  "Doctor",
+  "Last_Visit_Date",
+  "Follow_Up_Date",
+  "Preferred_Date",
 ];
 
 export const fmtSheetDate = (value) => {
@@ -62,6 +69,13 @@ const toSheetRow = (row, fallbackDate) => {
       .filter(Boolean)
       .map((n) => splitCountryCode(n).number)
       .join(", "),
+    row.file_no || "",
+    row.disp_age ?? row.age ?? "",
+    row.disp_sex || row.sex || "",
+    row.doctor_name || row.preferred_doctor || "",
+    fmtSheetDate(row.last_visit_date),
+    fmtSheetDate(row.follow_up_date),
+    fmtSheetDate(row.preferred_date),
   ];
 };
 

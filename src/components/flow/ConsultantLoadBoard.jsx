@@ -188,6 +188,10 @@ export default function ConsultantLoadBoard({ visits }) {
                             {v.patient_name}
                             {v.is_vip && <span title="VIP">⭐</span>}
                           </div>
+                          <div className="qrow-meta">
+                            {v.patient_id}
+                            {v.patient_age_sex ? ` · ${v.patient_age_sex}` : ""}
+                          </div>
                           <div className="qrow-chips">
                             <span
                               className={`flow-badge ${waited > 45 ? "fb-red" : waited > 25 ? "fb-amb" : "fb-ink"}`}

@@ -46,7 +46,10 @@ function StepPills({ steps, now = Date.now() }) {
   return (
     <div className="j-steps">
       {steps
-        .filter((s) => s.status !== "skipped")
+        // Background stages are not places the patient stands — the lab and the
+        // assistant work them while the patient is elsewhere. Showing them as
+        // journey pills put "Lab — processing ✓" before "Blood Sample".
+        .filter((s) => !s.is_background && s.status !== "skipped")
         .map((s, i, arr) => {
           let cls = "j-next";
           let label = s.step_name;

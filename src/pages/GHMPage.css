@@ -178,6 +178,11 @@
 }
 
 .spill {
+  /* --spill-on is the solid fill the pill takes when it is the active filter;
+     each colour variant below sets its own. The default is Total's — it is the
+     cleared state, so it sits filled whenever no filter is on and stays a
+     neutral slate rather than shouting like a real filter. */
+  --spill-on: #475569;
   padding: 1px 7px;
   border-radius: 20px;
   font-size: 9.5px;
@@ -193,8 +198,9 @@
   font-family: inherit;
   line-height: inherit;
   transition:
-    box-shadow 0.12s ease,
-    filter 0.12s ease;
+    background-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
 }
 
 .spill--btn:hover {
@@ -206,48 +212,66 @@
   outline-offset: 1px;
 }
 
+/* The active filter is filled with its own colour, so which pill the list is
+   showing is readable at a glance from across the desk. */
 .spill--btn.is-on {
-  box-shadow: inset 0 0 0 1px currentColor;
-  filter: brightness(0.95);
+  background: var(--spill-on);
+  color: #fff;
+  border-color: var(--spill-on);
+  font-weight: 700;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3.5px var(--spill-on);
+}
+
+.spill--btn.is-on:hover {
+  filter: brightness(1.08);
 }
 
 .spill--green {
+  --spill-on: #15803d;
   background: #dcfce7;
   color: #15803d;
   border-color: #86efac;
 }
 
 .spill--red {
+  --spill-on: #dc2626;
   background: #fef2f2;
   color: #dc2626;
   border-color: #fca5a5;
 }
 
 .spill--blue {
+  --spill-on: #1d4ed8;
   background: #dbeafe;
   color: #1d4ed8;
   border-color: #93c5fd;
 }
 
 .spill--amber {
+  --spill-on: #b45309;
   background: #fef3c7;
   color: #92400e;
   border-color: #fde047;
 }
 
 .spill--orange {
+  --spill-on: #c2410c;
   background: #fff7ed;
   color: #c2410c;
   border-color: #fdba74;
 }
 
 .spill--purple {
+  --spill-on: #6d28d9;
   background: #f5f3ff;
   color: #6d28d9;
   border-color: #ddd6fe;
 }
 
 .spill--gray {
+  --spill-on: #475569;
   background: #f1f5f9;
   color: #64748b;
 }

@@ -15,7 +15,10 @@ export default function FlowStationPage() {
   const cfg = ROLES[slug];
   const { data } = useFlowQueue(cfg?.role); // header counts (shares cache with StationQueue)
   const inQueue =
-    (data?.ready?.length || 0) + (data?.pending?.length || 0) + (data?.active?.length ? 1 : 0);
+    (data?.ready?.length || 0) +
+    (data?.pending?.length || 0) +
+    (data?.active?.length ? 1 : 0) +
+    (data?.awaiting || 0);
 
   // Bare /flow/station (the nav tab) or an unknown slug → the first desk this
   // role can work. A role with no desk at all shouldn't be here.

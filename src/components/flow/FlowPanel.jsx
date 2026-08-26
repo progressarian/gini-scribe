@@ -24,6 +24,8 @@ export default function FlowPanel({ patientDbId, fileNo, roleHint }) {
 
   const t = visit._timing || {};
   const steps = (visit.steps || []).filter((s) => s.status !== "skipped");
+  // The pills are where the patient goes; background stages happen without them.
+  const journeySteps = steps.filter((s) => !s.is_background);
   const current = steps.find((s) => s.status === "in_progress");
   const tone =
     t.urgency === "breach" ? "var(--fre)" : t.urgency === "atrisk" ? "var(--fam)" : "var(--ftl)";
@@ -75,7 +77,7 @@ export default function FlowPanel({ patientDbId, fileNo, roleHint }) {
 
         {/* Journey pills */}
         <div className="j-steps" style={{ marginTop: 8 }}>
-          {steps.map((s, i) => {
+          {journeySteps.map((s, i) => {
             let cls = "j-next";
             let txt = shorten(s.step_name);
             if (s.status === "completed") {
@@ -88,7 +90,7 @@ export default function FlowPanel({ patientDbId, fileNo, roleHint }) {
             return (
               <span key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                 <span className={`j-step ${cls}`}>{txt}</span>
-                {i < steps.length - 1 && <span className="j-arrow">→</span>}
+                {i < journeySteps.length - 1 && <span className="j-arrow">→</span>}
               </span>
             );
           })}

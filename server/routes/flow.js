@@ -12,6 +12,7 @@ import {
   hasAnyCapability,
   canWorkStationRole,
   ownsStationRole,
+  hasOwnConsultQueue,
 } from "../../shared/permissions.js";
 import { sendFlowCheckin } from "../services/msg91.js";
 import { seedFlowDemo, cleanFlowDemo } from "../services/flow/demo.js";
@@ -336,6 +337,101 @@ async function reconcileFromAppointments(visits, stepMap) {
 //     park several patients in_progress at once.
 //
 // is_background never counts: lab reporting runs unattended.
+const LAB_ROLE = "lab_tech";
+const REPORT_ROLE = "report_desk";
+const PAYMENT_STATES = ["paid", "due", "unbilled"];
+
+// Money and destination, confirmed before the needle goes in. Neither blocks the
+// call-in: an unpaid patient is warned about and recorded, never turned away, because
+// HealthRay often generates the bill after the visit. The route only enforces that a
+// non-paid state carries a reason and an outside test names its lab.
+function labCallInChecks(req) {
+  const { payment, outside } = req.body || {};
+  if (!payment && !outside) return null;
+  const out = {};
+  if (payment) {
+    const status = String(payment.status || "").toLowerCase();
+    if (!PAYMENT_STATES.includes(status)) {
+      throw new Error("Unknown payment status");
+    }
+    const note = String(payment.note || "").trim();
+    if (status !== "paid" && !note) {
+      throw new Error("Give a reason for collecting before payment");
+    }
+    out.payment = {
+      status,
+      due_amount: Number(payment.due_amount) || 0,
+      note: note || null,
+      source: payment.source === "manual" ? "manual" : "healthray",
+      by: ACTOR(req),
+      at: new Date().toISOString(),
+    };
+  }
+  if (outside) {
+    const sent = outside.sent === true || outside.sent === "true";
+    const labName = String(outside.lab_name || "").trim();
+    if (sent && !labName) throw new Error("Name the outside lab");
+    out.outside = {
+      sent,
+      lab_name: sent ? labName : null,
+      expected_on: sent && outside.expected_on ? String(outside.expected_on).slice(0, 10) : null,
+      by: ACTOR(req),
+      at: new Date().toISOString(),
+    };
+  }
+  return out;
+}
+
+// A test the patient has gone elsewhere for. Our lab never touches the sample, so
+// the courier and machine stages are fiction — drop them, but only once no test on
+// the visit is still ours. A patient with bloods outside and an X-Ray here still
+// needs the lab to deliver and process the X-Ray.
+async function applyOutsideTest(client, visitId, outside) {
+  await client.query(
+    `UPDATE flow_visit_steps
+        SET assigned_role=$2, station=$3,
+            data = COALESCE(data,'{}'::jsonb) || $4::jsonb
+      WHERE visit_id=$1 AND step_catalog_id='lab_reports'
+        AND status NOT IN ('completed','skipped')`,
+    [
+      visitId,
+      REPORT_ROLE,
+      "Assistant Station",
+      JSON.stringify({
+        awaiting_outside: { lab_name: outside.lab_name, expected_on: outside.expected_on },
+      }),
+    ],
+  );
+  if (outside.mode !== "patient_goes") return;
+  const ours = await client.query(
+    `SELECT 1 FROM flow_visit_steps
+      WHERE visit_id=$1 AND assigned_role=$2 AND NOT is_background
+        AND (status IN ('in_progress','ready','pending')
+             OR (status='completed' AND COALESCE(data->'outside'->>'mode','') <> 'patient_goes'))
+      LIMIT 1`,
+    [visitId, LAB_ROLE],
+  );
+  if (ours.rowCount) return;
+  await client.query(
+    `UPDATE flow_visit_steps
+        SET status='skipped', completed_at=NOW(),
+            data = COALESCE(data,'{}'::jsonb) || $2::jsonb
+      WHERE visit_id=$1 AND step_catalog_id IN ('lab_delivered','lab_processing')
+        AND status NOT IN ('completed','skipped')`,
+    [
+      visitId,
+      JSON.stringify({
+        outside_dropped: true,
+        skip: {
+          reason: `Test done at ${outside.lab_name} — our lab never handles the sample`,
+          by: "system",
+          at: new Date().toISOString(),
+        },
+      }),
+    ],
+  );
+}
+
 async function stationBusy(client, role, staffId, actorId = null, exceptVisitId = null) {
   if (!role || role === WAITING_ROLE) return false;
   const params = [role];
@@ -1112,6 +1208,22 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
         at: new Date().toISOString(),
       };
     }
+    if (mergedData.outside?.sent) {
+      if (!String(mergedData.outside.lab_name || "").trim()) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Name the outside lab" });
+      }
+      mergedData.outside = {
+        sent: true,
+        mode: mergedData.outside.mode === "patient_goes" ? "patient_goes" : "courier",
+        lab_name: String(mergedData.outside.lab_name).trim(),
+        expected_on: mergedData.outside.expected_on
+          ? String(mergedData.outside.expected_on).slice(0, 10)
+          : null,
+        by: ACTOR(req),
+        at: new Date().toISOString(),
+      };
+    }
     await client.query(
       `UPDATE flow_visit_steps
          SET status=$4, completed_at=NOW(), actual_duration_min=$2,
@@ -1127,6 +1239,10 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
       { actual_duration_min: actualDur, reason: skip ? mergedData.skip.reason : undefined },
       ACTOR(req),
     );
+
+    // Drop the stages our lab will never work before picking what runs next,
+    // so the next stage is chosen from what is actually left.
+    if (mergedData.outside?.sent) await applyOutsideTest(client, visitId, mergedData.outside);
 
     // Next open step in order.
     await runNextLabStage(client, visitId);
@@ -1617,6 +1733,7 @@ router.get("/flow/my-patients", async (req, res) => {
     await reconcileFromAppointments(visits, stepMap);
     await syncLabReportsFromResults(visits, stepMap);
     await attachLabPanel(visits);
+    await attachPrescriptions(visits);
     const now = Date.now();
     const mine = [];
     const offers = [];
@@ -1675,6 +1792,120 @@ async function sdStepFor(client, visitId) {
     )
   ).rows[0];
 }
+
+// Close a visit that is finished in reality but not on paper — the patient has
+// no medicines to collect, or is settling the bill later. Everything still open
+// is skipped with a reason rather than silently dropped, so the journey reads as
+// ended-early, not as work that vanished.
+router.post("/flow/visits/:id/end", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const visitId = req.params.id;
+    const visit = (
+      await client.query("SELECT * FROM flow_visits WHERE id=$1 FOR UPDATE", [visitId])
+    ).rows[0];
+    if (!visit) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit not found" });
+    }
+    if (visit.status !== "in_progress" && visit.status !== "paused") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `This visit is already ${visit.status}` });
+    }
+    const reason = String(req.body?.reason || "")
+      .trim()
+      .slice(0, 200);
+    if (!reason) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Give a reason for ending the visit early" });
+    }
+    // Anyone holding the patient at a desk can end them, as can a floor manager.
+    const open = (
+      await client.query(
+        `SELECT * FROM flow_visit_steps
+          WHERE visit_id=$1 AND status IN ('in_progress','ready','pending')
+          ORDER BY step_order ASC`,
+        [visitId],
+      )
+    ).rows;
+    // Where the patient is NOW, not anywhere their journey happens to pass. The
+    // pharmacist owns a step on every visit; that must not let them close one
+    // still sitting at Vitals.
+    const here = open.find((s) => s.status === "in_progress") || open[0];
+    const atDesk = !!here && canWorkStationRole(req.doctor?.role, here.assigned_role);
+    if (!hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) && !atDesk) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "This patient is not at your station" });
+    }
+    // "Prescription explained and end visit" has to mean explained: the step the
+    // person just did is completed with their notes, and only what genuinely did
+    // not happen is skipped.
+    const completeCurrent = req.body?.complete_current === true && !!here;
+    if (completeCurrent) {
+      await client.query(
+        `UPDATE flow_visit_steps
+            SET status='completed', completed_at=NOW(),
+                actual_duration_min = COALESCE(actual_duration_min,
+                  CASE WHEN started_at IS NOT NULL
+                       THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                       END),
+                data = COALESCE(data,'{}'::jsonb) || $2::jsonb
+          WHERE id=$1`,
+        [here.id, JSON.stringify(req.body?.step_data || {})],
+      );
+    }
+    const skip = {
+      skip: {
+        reason: `Visit ended early — ${reason}`,
+        by: ACTOR(req),
+        at: new Date().toISOString(),
+      },
+    };
+    await client.query(
+      `UPDATE flow_visit_steps
+          SET status='skipped', completed_at=NOW(),
+              actual_duration_min = COALESCE(actual_duration_min,
+                CASE WHEN started_at IS NOT NULL
+                     THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                     END),
+              data = COALESCE(data,'{}'::jsonb) || $2::jsonb
+        WHERE visit_id=$1 AND status IN ('in_progress','ready','pending')`,
+      [visitId, JSON.stringify(skip)],
+    );
+    await client.query(
+      `UPDATE flow_visits
+          SET status='completed', actual_completion=NOW(), current_step_id=NULL, updated_at=NOW()
+        WHERE id=$1`,
+      [visitId],
+    );
+    await logEvent(
+      client,
+      visitId,
+      "visit_completed",
+      null,
+      {
+        ended_early: true,
+        reason,
+        completed_step: completeCurrent ? here.step_name : null,
+        skipped_steps: completeCurrent ? open.length - 1 : open.length,
+      },
+      ACTOR(req),
+    );
+    await client.query("COMMIT");
+    await syncAppointmentStatus(visit.appointment_id, "completed");
+    res.json({
+      status: "completed",
+      completed_step: completeCurrent ? here.step_name : null,
+      skipped_steps: completeCurrent ? open.length - 1 : open.length,
+    });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow end visit");
+  } finally {
+    client.release();
+  }
+});
 
 router.post("/flow/visits/:id/offer", requireCapability(CAP.FLOW_COORDINATOR), async (req, res) => {
   const client = await pool.connect();
@@ -1894,6 +2125,53 @@ const IS_CONSULT_ROLE = (role) => role === "sd" || role === "chief";
 // sync, and a report can also arrive on paper — so the lab needs a way to say
 // "results are in" without waiting for HealthRay. Completes the stage only; it
 // does not advance the patient, who may still be at another station.
+// The doctor confirming they have actually read the report. Not a journey step —
+// the consultation is already unlocked by the handover — just a record that the
+// paper reached a pair of eyes, and the row leaves their panel.
+router.post("/flow/steps/:stepId/reviewed", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const step = (
+      await client.query("SELECT * FROM flow_visit_steps WHERE id=$1 FOR UPDATE", [
+        req.params.stepId,
+      ])
+    ).rows[0];
+    if (!step) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Step not found" });
+    }
+    if (step.step_catalog_id !== "report_delivered") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Only a delivered report can be marked reviewed" });
+    }
+    const role = req.doctor?.role;
+    if (
+      !hasAnyCapability(role, CAP.FLOW_COORDINATOR) &&
+      !hasAnyCapability(role, CAP.FLOW_STATION_MO) &&
+      !hasOwnConsultQueue(role)
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Only the treating doctor can mark a report reviewed" });
+    }
+    const reviewed = { by: ACTOR(req), at: new Date().toISOString() };
+    await client.query(
+      `UPDATE flow_visit_steps
+          SET data = COALESCE(data,'{}'::jsonb) || $2::jsonb
+        WHERE id=$1`,
+      [step.id, JSON.stringify({ reviewed })],
+    );
+    await logEvent(client, step.visit_id, "report_reviewed", step.step_order, reviewed, ACTOR(req));
+    await client.query("COMMIT");
+    res.json({ status: "reviewed", reviewed });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    handleError(res, e, "Flow mark report reviewed");
+  } finally {
+    client.release();
+  }
+});
+
 router.post("/flow/steps/:stepId/results-in", async (req, res) => {
   const client = await pool.connect();
   try {
@@ -2040,11 +2318,42 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
       });
     }
 
+    let checks = null;
+    if (!step.is_background && step.assigned_role === LAB_ROLE) {
+      try {
+        checks = labCallInChecks(req);
+      } catch (err) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     // Calling a patient in also takes them, so the row shows who has them.
     await client.query(
       "UPDATE flow_visit_steps SET status='in_progress', started_at=NOW(), data=$2 WHERE id=$1",
-      [stepId, JSON.stringify(withClaim(step, req))],
+      [stepId, JSON.stringify({ ...withClaim(step, req), ...(checks || {}) })],
     );
+    // An outside test never produces lab_results, so the stage that waits for
+    // them would hang forever at a desk that cannot see the paper report. Hand
+    // it to the reports desk, who physically receive it.
+    if (checks?.outside?.sent) {
+      await client.query(
+        `UPDATE flow_visit_steps SET assigned_role=$2, station=$3
+          WHERE visit_id=$1 AND step_catalog_id='lab_reports'
+            AND status NOT IN ('completed','skipped')`,
+        [step.visit_id, REPORT_ROLE, "Assistant Station"],
+      );
+    }
+    if (checks) {
+      await logEvent(
+        client,
+        step.visit_id,
+        "lab_call_in_checks",
+        step.step_order,
+        { step_name: step.step_name, payment: checks.payment, outside: checks.outside },
+        ACTOR(req),
+      );
+    }
 
     // Auto-complete an immediately-preceding wait_* step still open.
     const prev = (
@@ -2402,8 +2711,14 @@ async function syncLabReportsFromResults(visits, stepMap) {
   const pending = [];
   for (const v of visits) {
     if (!v.patient_db_id) continue;
+    // Only the lab's own stages. Printing a report and walking it to the doctor
+    // are physical acts by a person — HealthRay cannot observe them, and closing
+    // them on a results sync claims a handover that never happened.
     const open = (stepMap.get(v.id) || []).filter(
-      (s) => s.is_background && !["completed", "skipped"].includes(s.status),
+      (s) =>
+        s.is_background &&
+        s.assigned_role !== REPORT_ROLE &&
+        !["completed", "skipped"].includes(s.status),
     );
     if (open.length) pending.push({ visit: v, open });
   }
@@ -2450,6 +2765,36 @@ async function syncLabReportsFromResults(visits, stepMap) {
 // lab_cases.appointment_id is set on 1 of 5,327 rows, so both are matched on
 // patient + visit date rather than on the appointment.
 const IMAGING_DOC_TYPES = ["abi", "vpt", "xray", "x_ray", "eye", "kidney", "ecg", "tmt"];
+
+// Whether today's prescription actually exists yet. The nurse who explains it
+// had no way to know: her form is a notes box, and a prescription arrives as a
+// document, not a step. 115 land on a normal day.
+async function attachPrescriptions(visits) {
+  const ids = [...new Set(visits.map((v) => v.patient_db_id).filter(Boolean))];
+  if (!ids.length) return;
+  try {
+    const rows = (
+      await pool.query(
+        `SELECT patient_id,
+                MAX(created_at) AS at,
+                (ARRAY_AGG(id ORDER BY created_at DESC)
+                   FILTER (WHERE file_url IS NOT NULL OR storage_path IS NOT NULL))[1] AS doc_id
+           FROM documents
+          WHERE patient_id = ANY($1::int[]) AND created_at::date = $2
+            AND doc_type = 'prescription'
+          GROUP BY patient_id`,
+        [ids, visits[0].visit_date],
+      )
+    ).rows;
+    const byPatient = new Map(rows.map((r) => [r.patient_id, r]));
+    for (const v of visits) {
+      const r = byPatient.get(v.patient_db_id);
+      v.rx = r ? { ready: true, doc_id: r.doc_id || null, at: r.at } : { ready: false };
+    }
+  } catch (e) {
+    console.error("Prescription attach failed:", e.message);
+  }
+}
 
 async function attachLabPanel(visits) {
   const ids = [...new Set(visits.map((v) => v.patient_db_id).filter(Boolean))];
@@ -2571,6 +2916,7 @@ router.get("/flow/visits", async (req, res) => {
     await reconcileFromAppointments(visits, stepMap);
     await syncLabReportsFromResults(visits, stepMap);
     await attachLabPanel(visits);
+    await attachPrescriptions(visits);
     const now = Date.now();
     for (const v of visits) {
       v.steps = stepMap.get(v.id) || [];
@@ -3031,7 +3377,13 @@ router.get("/flow/queue/:role", async (req, res) => {
               v.visit_type_id, v.max_time_min, v.checkin_time, v.actual_completion, v.status AS visit_status,
               v.patient_db_id,
               (SELECT COUNT(*)::int FROM flow_visit_steps x
-                WHERE x.visit_id=v.id AND NOT x.is_background) AS total_steps
+                WHERE x.visit_id=v.id AND NOT x.is_background) AS total_steps,
+              -- step_order counts background stages too, so a patient with three
+              -- lab stages read "Step 11 of 8". This is the position a person
+              -- would count to, on the same scale as total_steps.
+              (SELECT COUNT(*)::int FROM flow_visit_steps x
+                WHERE x.visit_id=v.id AND NOT x.is_background
+                  AND x.step_order <= s.step_order) AS step_position
          FROM flow_visit_steps s
          JOIN flow_visits v ON v.id = s.visit_id
         WHERE s.assigned_role=$1 AND v.visit_date=$2 AND v.status='in_progress'
@@ -3072,11 +3424,31 @@ router.get("/flow/queue/:role", async (req, res) => {
         [role, date],
       )
     ).rows[0].n;
+    // Desks whose work is background (the reports desk) have no queue rows at
+    // all, so the header count has to come from the stages waiting on them —
+    // this role's earliest open stage, on visits where nothing before it is open.
+    const awaiting = (
+      await pool.query(
+        `SELECT COUNT(*)::int n FROM flow_visits v
+          WHERE v.visit_date=$2 AND v.status='in_progress'
+            AND EXISTS (
+              SELECT 1 FROM flow_visit_steps s
+               WHERE s.visit_id=v.id AND s.is_background AND s.assigned_role=$1
+                 AND s.status NOT IN ('completed','skipped')
+                 AND NOT EXISTS (
+                   SELECT 1 FROM flow_visit_steps e
+                    WHERE e.visit_id=v.id AND e.is_background
+                      AND e.step_order < s.step_order
+                      AND e.status NOT IN ('completed','skipped')))`,
+        [role, date],
+      )
+    ).rows[0].n;
     res.json({
       role,
       active: items.filter((i) => i.status === "in_progress"),
       ready: items.filter((i) => i.status === "ready"),
       pending: items.filter((i) => i.status === "pending"),
+      awaiting,
       done_today: doneToday,
     });
   } catch (e) {

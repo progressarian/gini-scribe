@@ -285,10 +285,31 @@ export function useFlowReleaseStep() {
     }
   });
 }
-export function useFlowStartStep() {
+export function useFlowEndVisit() {
+  return useFlowMutation(async ({ visitId, reason, complete_current, step_data }) => {
+    try {
+      return (
+        await api.post(`/api/flow/visits/${visitId}/end`, { reason, complete_current, step_data })
+      ).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not end the visit"));
+    }
+  });
+}
+export function useFlowMarkReviewed() {
   return useFlowMutation(async (stepId) => {
     try {
-      return (await api.post(`/api/flow/steps/${stepId}/start`)).data;
+      return (await api.post(`/api/flow/steps/${stepId}/reviewed`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not mark the report reviewed"));
+    }
+  });
+}
+export function useFlowStartStep() {
+  return useFlowMutation(async (arg) => {
+    const { stepId, ...checks } = typeof arg === "object" && arg ? arg : { stepId: arg };
+    try {
+      return (await api.post(`/api/flow/steps/${stepId}/start`, checks)).data;
     } catch (err) {
       throw new Error(errMsg(err, "Could not call in patient"));
     }

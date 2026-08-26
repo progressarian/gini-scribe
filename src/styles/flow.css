@@ -1640,3 +1640,148 @@
   color: #fff;
   border-color: var(--ftl);
 }
+
+.flow-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.lab-callin {
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: 10px;
+}
+.lab-callin-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+}
+.lab-callin-sub {
+  margin: 2px 0 10px;
+}
+.lab-callin-sec {
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+  padding: 8px 12px 12px;
+  margin: 0 0 10px;
+}
+.lab-callin-sec legend {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fink3);
+  padding: 0 4px;
+}
+.lab-callin-line {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 2px 0 8px;
+}
+.lab-callin-line--ok {
+  color: var(--fgn);
+}
+.lab-callin-line--bad {
+  color: var(--fre);
+}
+.lab-callin-line--warn {
+  color: var(--fam);
+}
+.lab-callin-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  margin: 4px 0;
+  cursor: pointer;
+}
+.lab-callin-check input {
+  width: auto;
+  margin: 0;
+}
+.lab-callin-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.lab-callin-sub-choice {
+  margin-left: 18px;
+}
+
+.labstage--outside {
+  color: var(--fam);
+}
+
+.station-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.station-split > .station-main {
+  min-width: 0;
+}
+.station-side {
+  min-width: 0;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  border: 1px solid var(--fbd);
+  border-radius: 10px;
+  background: var(--fwhite);
+  padding: 10px 12px;
+}
+.docrep {
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.docrep-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.docrep-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+@media (max-width: 1100px) {
+  .station-split {
+    grid-template-columns: 1fr;
+  }
+  .station-side {
+    position: static;
+    max-height: none;
+  }
+}
+
+.docrep-seen {
+  margin-top: 8px;
+}
+
+.rx-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 8px 0 0;
+}
+.rx-state--ok {
+  color: var(--fgn);
+}
+.rx-state--wait {
+  font-weight: 600;
+}

@@ -8,9 +8,11 @@ import {
   useFlowVisits,
   useFlowAcceptOffer,
   useFlowDeclineOffer,
+  useFlowMarkReviewed,
 } from "../../queries/hooks/useFlow";
 import StationSwitcher from "../../components/flow/StationSwitcher";
 import LabPanel from "../../components/flow/LabPanel";
+import DoctorReportsPanel, { deliveredReportRows } from "../../components/flow/DoctorReportsPanel";
 import {
   CAPABILITIES as CAP,
   hasCapability,
@@ -125,6 +127,7 @@ export default function FlowMyPatientsPage() {
   const { data: allVisits = [] } = useFlowVisits();
   const accept = useFlowAcceptOffer();
   const decline = useFlowDeclineOffer();
+  const markReportReviewed = useFlowMarkReviewed();
   const [busyId, setBusyId] = useState(null);
   const [openingId, setOpeningId] = useState(null);
   const [q, setQ] = useState("");
@@ -138,6 +141,18 @@ export default function FlowMyPatientsPage() {
 
   const mine = data?.mine || [];
   const offers = data?.offers || [];
+  // Only this consultant's own patients — the right column's other-consultant
+  // groups are other people's reports to read.
+  const myReports = deliveredReportRows(mine);
+
+  const markReviewed = async (step, name) => {
+    try {
+      await markReportReviewed.mutateAsync(step.id);
+      toast(`${name} — report marked reviewed`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
 
   // Everyone else's patients — the floor-wide view, minus anyone already on my
   // side of the screen so a patient never appears in both columns.
@@ -294,6 +309,13 @@ export default function FlowMyPatientsPage() {
 
         <div className="mp-split">
           <section>
+            {myReports.length > 0 && (
+              <DoctorReportsPanel
+                rows={myReports}
+                onReview={markReviewed}
+                busy={markReportReviewed.isPending}
+              />
+            )}
             {offers.length > 0 && (
               <div className="q-sec" style={{ marginTop: 0 }}>
                 <div className="q-sec-head">

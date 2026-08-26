@@ -3,6 +3,8 @@ import { toast } from "../../stores/uiStore";
 import {
   useFlowQueue,
   useFlowAdvance,
+  useFlowMarkReviewed,
+  useFlowEndVisit,
   useFlowStartStep,
   useFlowVisits,
   useFlowStepCatalog,
@@ -14,6 +16,8 @@ import {
 } from "../../queries/hooks/useFlow";
 import useAuthStore from "../../stores/authStore";
 import LabPanel from "./LabPanel";
+import LabCallInDialog from "./LabCallInDialog";
+import DoctorReportsPanel, { deliveredReportRows } from "./DoctorReportsPanel";
 import PdfViewerModal from "../visit/PdfViewerModal";
 import { CAPABILITIES as CAP, hasCapability, ownsStationRole } from "../../../shared/permissions";
 import "../../styles/flow.css";
@@ -21,6 +25,8 @@ import "../../styles/flow.css";
 // Friendly URL slug → the assigned_role stored on flow_visit_steps, plus the
 // station's display title and which data-entry form to render. Shared by the
 // standalone station page and the "Live Lab Queue" tab on /lab-requests.
+export const LAB_ROLE = "lab_tech";
+
 export const ROLES = {
   vitals: { role: "vitals_associate", title: "⚖️ Vitals Station", form: "vitals" },
   mo: { role: "mo", title: "🩺 Doctor", form: "notes" },
@@ -28,6 +34,7 @@ export const ROLES = {
   dietitian: { role: "dietitian", title: "🥗 Dietitian", form: "notes" },
   rx: { role: "nurse", title: "💬 Prescription Explain", form: "rx" },
   pharmacy: { role: "pharmacist", title: "💊 Pharmacy — Final Step", form: "pharmacy" },
+  assistant: { role: "report_desk", title: "🧑‍⚕️ Assistant Station", form: "assistant" },
 };
 
 const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -87,7 +94,11 @@ const STAGE_ACTION = {
   lab_delivered: "✓ Delivered to lab",
   lab_processing: "✓ Processing done",
   lab_reports: "✓ Reports available",
+  report_printed: "🖨️ Printed",
+  report_delivered: "✓ Handed to the doctor",
 };
+
+const stageLabel = (name) => name.replace(/^(Lab|Reports) — /, "");
 
 // What the completing action means at this step. A lab desk does not "finish a
 // step" — it takes a sample or performs a test, and the notes it writes differ.
@@ -110,6 +121,8 @@ const LAB_ACTION = {
 export default function StationQueue({ role, form, freeMove = false }) {
   const { data, isLoading } = useFlowQueue(role);
   const advance = useFlowAdvance();
+  const markReportReviewed = useFlowMarkReviewed();
+  const endVisit = useFlowEndVisit();
   const startStep = useFlowStartStep();
   const addStep = useFlowAddStep();
   const removeStep = useFlowRemoveStep();
@@ -172,6 +185,13 @@ export default function StationQueue({ role, form, freeMove = false }) {
   // none); clicking "Move in" on a queued patient just swaps them into the box
   // (and the previous one returns to the list) — it does NOT advance anyone.
   const [selectedId, setSelectedId] = useState(null);
+  const [callInTarget, setCallInTarget] = useState(null);
+  const [endTarget, setEndTarget] = useState(null);
+  const [endReason, setEndReason] = useState("");
+  const isLab = form === "lab";
+  const isAssistant = form === "assistant";
+  const isDoctor = role === "mo";
+  const isRx = form === "rx";
   const queueItems = freeMove ? [...(data?.active || []), ...ready] : [];
   const active = activeList.find((a) => a.id === selectedId) || activeList[0] || null;
   const boxPatient = freeMove ? queueItems.find((i) => i.id === selectedId) || active : active;
@@ -194,37 +214,118 @@ export default function StationQueue({ role, form, freeMove = false }) {
   // Collection is the last hands-on step, so once it is done the patient leaves
   // this queue — but their reports stage is still open and only this desk can
   // close it. Without this list there is nowhere to press "results received".
+  // The whole after-the-patient chain: every collection step, then every
+  // background stage whatever desk owns it. Both the lab and the reports desk
+  // show the same line, so each can see what the other has already done — only
+  // the actionable stage differs.
   const awaitingResults = allVisits
     .filter((v) => LIVE_VISIT.includes(v.status))
     .map((v) => {
-      const stages = (v.steps || [])
-        .filter((s) => s.is_background && s.assigned_role === role)
+      const bg = (v.steps || [])
+        .filter((s) => s.is_background)
         .sort((a, b) => a.step_order - b.step_order);
       const taken = (v.steps || [])
         .filter(
           (s) =>
-            s.assigned_role === role &&
+            s.assigned_role === LAB_ROLE &&
             !s.is_background &&
             ["completed", "skipped"].includes(s.status),
         )
         .sort((a, b) => a.step_order - b.step_order);
+      const open = (x) => !["completed", "skipped"].includes(x.status);
+      const collections = (v.steps || []).filter(
+        (x) => x.assigned_role === LAB_ROLE && !x.is_background,
+      );
+      // Everything went elsewhere: the courier and machine stages were dropped
+      // and the collection was never ours, so the whole story is one line —
+      // "sent outside", then print and hand over.
+      const allOutside = collections.length > 0 && collections.every((x) => x.data?.outside?.sent);
+      const shown = (x) =>
+        !x.data?.outside_dropped && !(allOutside && !x.is_background && x.data?.outside?.sent);
+      // Stages run in order across desks, so this desk's earliest open stage is
+      // only offered once everything before it is closed.
+      const mine = bg.filter((x) => x.assigned_role === role).find(open) || null;
+      const blockedBy = mine ? bg.find((x) => x.step_order < mine.step_order && open(x)) : null;
       return {
         visit: v,
-        stages,
-        line: [...taken, ...stages],
-        // The stage the lab can act on now — stages run in order, so only the
-        // earliest open one is offered.
-        next: stages.find((s) => !["completed", "skipped"].includes(s.status)) || null,
-        done: taken.filter((s) => s.status === "completed"),
+        line: [...taken, ...bg].filter(shown),
+        allOutside,
+        next: blockedBy ? null : mine,
+        // A test the patient went elsewhere for is closed work too — without it
+        // an all-outside visit would appear in neither desk's list.
+        done: taken.filter((s) => s.status === "completed" || s.data?.outside?.sent),
       };
     })
     .filter((e) => e.next && e.done.length)
     .sort((a, b) => new Date(a.visit.checkin_time) - new Date(b.visit.checkin_time));
 
+  // The assistant's two jobs are different work: chasing a report the patient is
+  // fetching from another lab, versus printing one that is already in. One list
+  // headed "results are ready" was a lie for half its rows.
+  const waitingOutside = awaitingResults.filter((e) => e.next?.data?.awaiting_outside);
+  const readyToPrint = awaitingResults.filter((e) => !e.next?.data?.awaiting_outside);
+  const stageSections = isAssistant
+    ? [
+        {
+          key: "print",
+          title: "Ready to print & hand over",
+          sub: "Results are in. Print the report, then hand it to the doctor — the consultation opens once you mark it delivered.",
+          rows: readyToPrint,
+        },
+        {
+          key: "waiting",
+          title: "Waiting on outside labs",
+          sub: "Being done elsewhere. Mark the report received when the patient brings it in — nothing to print until then.",
+          rows: waitingOutside,
+        },
+      ]
+    : [
+        {
+          key: "lab",
+          title: "In the lab",
+          sub: "Sample taken, patient gone to their consultation. Work the stages in order — the consultation opens once reports are available.",
+          rows: awaitingResults,
+        },
+      ];
+
+  const deliveredReports = isDoctor ? deliveredReportRows(allVisits) : [];
+
+  const confirmEndVisit = async () => {
+    try {
+      const r = await endVisit.mutateAsync({
+        visitId: endTarget.visit_id,
+        reason: endReason.trim(),
+        complete_current: isRx,
+        step_data: isRx ? formData : undefined,
+      });
+      toast(
+        `${endTarget.patient_name} — ${r.completed_step ? `${r.completed_step} done, ` : ""}visit ended${
+          r.skipped_steps ? `, ${r.skipped_steps} step(s) skipped` : ""
+        }`,
+        "success",
+      );
+      setEndTarget(null);
+      setEndReason("");
+      setFormData({});
+      setSelectedId(null);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const markReviewed = async (step, name) => {
+    try {
+      await markReportReviewed.mutateAsync(step.id);
+      toast(`${name} — report marked reviewed`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
   const markStageIn = async (stage, name) => {
     try {
       await resultsIn.mutateAsync(stage.id);
-      toast(`${name} — ${stage.step_name.replace(/^Lab — /, "")} done`, "success");
+      toast(`${name} — ${stageLabel(stage.step_name)} done`, "success");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -310,9 +411,32 @@ export default function StationQueue({ role, form, freeMove = false }) {
     }
   };
 
-  const callIn = async (stepId) => {
+  const callIn = async (stepId, checks) => {
     try {
-      await startStep.mutateAsync(stepId);
+      await startStep.mutateAsync({ stepId, ...(checks || {}) });
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const confirmCallIn = async ({ handsOff, ...checks }) => {
+    const s = callInTarget;
+    setCallInTarget(null);
+    if (!handsOff) {
+      await callIn(s.id, checks);
+      return;
+    }
+    // Nothing to call in for: the patient is going to that lab themselves, so
+    // the test leaves this desk and only its report comes back to us.
+    try {
+      await advance.mutateAsync({
+        visitId: s.visit_id,
+        step_id: s.id,
+        skip: true,
+        reason: `Sent to ${checks.outside.lab_name}`,
+        step_data: { outside: checks.outside },
+      });
+      toast(`${s.patient_name} — ${s.step_name} sent to ${checks.outside.lab_name}`, "success");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -405,481 +529,603 @@ export default function StationQueue({ role, form, freeMove = false }) {
   return (
     <>
       {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
-      {/* Patient in the form box */}
-      {boxPatient ? (
-        <div className="station-active">
-          <div className="station-head">
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700 }}>
-                {boxPatient.token_number ? `#${boxPatient.token_number} · ` : ""}
-                {boxPatient.patient_name} · Step {boxPatient.step_order} of {boxPatient.total_steps}
-              </div>
-              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
-                {boxPatient.patient_age_sex || ""} · {boxPatient.file_no} ·{" "}
-                {boxPatient.visit_type_id} · budget ≤ {boxPatient.planned_duration_min} min
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 14 }}>
-                At station: {boxPatient.step_timing?.at_station_min ?? 0} min
-              </div>
-              <div style={{ fontSize: 10, opacity: 0.8 }}>
-                Visit: {boxPatient.visit_remaining_min}m left
-              </div>
-              {boxPatient.claim && (
-                <div style={{ fontSize: 10, opacity: 0.9, marginTop: 2 }}>
-                  🔒{" "}
-                  {heldByMe(boxPatient) ? "you have this patient" : `with ${boxPatient.claim.by}`}
-                </div>
-              )}
-            </div>
-          </div>
-          {boxTests.length > 1 && (
-            <div className="station-tests">
-              <span className="flow-muted">At your desk now:</span>
-              {boxTests.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className={`flow-btn flow-btn-mini station-test${
-                    a.id === boxPatient.id ? " is-on" : ""
-                  }`}
-                  aria-pressed={a.id === boxPatient.id}
-                  onClick={() => {
-                    setSelectedId(a.id);
-                    setFormData({});
-                  }}
-                >
-                  {a.step_name}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="station-body">
-            <StationForm
-              key={boxPatient.id}
-              form={form}
-              value={formData}
-              onChange={setFormData}
-              labAction={labAction}
-            />
-
-            {form === "lab" && (
-              <>
-                <LabPanel lab={boxVisit?.lab} />
-                {openLabStage && anyTestDone && (
-                  <div className="lab-manual">
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>{openLabStage.step_name}</div>
-                      <div className="flow-muted">
-                        Completes on its own when HealthRay syncs the results. Mark it by hand if
-                        the report came another way.
-                      </div>
-                    </div>
-                    <button
-                      className="flow-btn flow-btn-grn"
-                      disabled={resultsIn.isPending}
-                      onClick={markResultsIn}
-                    >
-                      ✓ Results received
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
-              <button
-                className={`flow-btn ${form === "pharmacy" ? "flow-btn-primary" : "flow-btn-grn"}`}
-                style={{ padding: "8px 18px" }}
-                disabled={advance.isPending || heldByOther(boxPatient)}
-                title={
-                  heldByOther(boxPatient) ? `${boxPatient.claim.by} is working this patient` : ""
-                }
-                onClick={complete}
-              >
-                {form === "pharmacy"
-                  ? "💊 Dispensed — Confirm Exit (stops clock)"
-                  : labAction
-                    ? labAction.btn
-                    : "✓ Done — move to next step"}
-              </button>
-              <button
-                className="flow-btn flow-btn-ghost"
-                style={{ padding: "8px 14px" }}
-                disabled={advance.isPending || heldByOther(boxPatient)}
-                onClick={() => setSkipTarget(boxPatient)}
-                title={
-                  heldByOther(boxPatient)
-                    ? `${boxPatient.claim.by} is working this patient`
-                    : "Skip this step — patient still advances"
-                }
-              >
-                ⏭ Skip
-              </button>
-              {heldByMe(boxPatient) && (
-                <button
-                  className="flow-btn flow-btn-ghost"
-                  style={{ padding: "8px 14px" }}
-                  disabled={releaseStep.isPending}
-                  onClick={() => release(boxPatient)}
-                  title="Hand this patient back to the queue without completing"
-                >
-                  ↩ Release
-                </button>
-              )}
-              <span className="flow-muted">
-                {heldByOther(boxPatient)
-                  ? `${boxPatient.claim.by} has this patient — ask them to release before you take over.`
-                  : "Patient auto-moves to their next station"}
-              </span>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="flow-card flow-empty">
-          {freeMove
-            ? "No patient selected. Pick one from the queue below."
-            : "No patient in progress. Call in the next from your queue."}
-        </div>
+      {callInTarget && (
+        <LabCallInDialog
+          step={callInTarget}
+          busy={startStep.isPending}
+          onCancel={() => setCallInTarget(null)}
+          onConfirm={confirmCallIn}
+        />
       )}
-
-      {awaitingResults.length > 0 && (
-        <div className="q-sec">
-          <div className="q-sec-head">
-            <span className="flow-sec-title" style={{ margin: 0 }}>
-              In the lab
-              <span className="q-count">{awaitingResults.length}</span>
-            </span>
-          </div>
-          <div className="flow-muted" style={{ marginBottom: 6 }}>
-            Sample taken, patient gone to their consultation. Work the stages in order — the
-            consultation opens once reports are available.
-          </div>
-          {awaitingResults.map(({ visit, line, next }) => (
-            <div key={visit.id} className="qrow qrow--muted">
-              <span className="qrow-tok">{visit.token_number || "—"}</span>
-              <div className="qrow-main">
-                <div className="qrow-name">
-                  {visit.patient_name}
-                  {visit.is_vip && <span title="VIP">⭐</span>}
+      <div className={isDoctor ? "station-split" : undefined}>
+        <div className="station-main">
+          {/* Patient in the form box */}
+          {boxPatient ? (
+            <div className="station-active">
+              <div className="station-head">
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>
+                    {boxPatient.token_number ? `#${boxPatient.token_number} · ` : ""}
+                    {boxPatient.patient_name} · Step{" "}
+                    {boxPatient.step_position ?? boxPatient.step_order} of {boxPatient.total_steps}
+                  </div>
+                  <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
+                    {boxPatient.patient_age_sex || ""} · {boxPatient.file_no} ·{" "}
+                    {boxPatient.visit_type_id} · budget ≤ {boxPatient.planned_duration_min} min
+                  </div>
                 </div>
-                <div className="qrow-meta">
-                  {visit.patient_id} · now at {currentStepOf(visit)?.step_name || "—"}
-                </div>
-
-                <div className="labstages">
-                  {line.map((st) => {
-                    const isDone = st.status === "completed";
-                    const isSkipped = st.status === "skipped";
-                    const isNext = next && st.id === next.id;
-                    const isRunning = st.status === "in_progress";
-                    return (
-                      <div
-                        key={st.id}
-                        className={`labstage${isDone ? " labstage--done" : isSkipped ? " labstage--skip" : isNext ? " labstage--next" : ""}`}
-                      >
-                        <span className="labstage-dot">
-                          {isDone ? "✓" : isSkipped ? "–" : isRunning || isNext ? "●" : "○"}
-                        </span>
-                        <span className="labstage-name">{st.step_name.replace(/^Lab — /, "")}</span>
-                        {isDone && st.actual_duration_min != null && (
-                          <span className="flow-badge fb-ink">{st.actual_duration_min}m</span>
-                        )}
-                        {st.status === "in_progress" && st.started_at && (
-                          <span className="flow-badge fb-amb">
-                            {Math.max(
-                              0,
-                              Math.round((Date.now() - new Date(st.started_at).getTime()) / 60000),
-                            )}
-                            m
-                          </span>
-                        )}
-
-                        {isDone && st.data?.auto_completed === "lab_results" && (
-                          <span className="flow-badge fb-ink">auto</span>
-                        )}
-                        {isDone && st.data?.results_in?.manual && (
-                          <span className="flow-badge fb-ink">by hand</span>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 14 }}>
+                    At station: {boxPatient.step_timing?.at_station_min ?? 0} min
+                  </div>
+                  <div style={{ fontSize: 10, opacity: 0.8 }}>
+                    Visit: {boxPatient.visit_remaining_min}m left
+                  </div>
+                  {boxPatient.claim && (
+                    <div style={{ fontSize: 10, opacity: 0.9, marginTop: 2 }}>
+                      🔒{" "}
+                      {heldByMe(boxPatient)
+                        ? "you have this patient"
+                        : `with ${boxPatient.claim.by}`}
+                    </div>
+                  )}
+                  <div className="qrow-chips" style={{ justifyContent: "flex-end", marginTop: 4 }}>
+                    <CheckChips step={boxPatient} />
+                  </div>
                 </div>
               </div>
+              {boxTests.length > 1 && (
+                <div className="station-tests">
+                  <span className="flow-muted">At your desk now:</span>
+                  {boxTests.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className={`flow-btn flow-btn-mini station-test${
+                        a.id === boxPatient.id ? " is-on" : ""
+                      }`}
+                      aria-pressed={a.id === boxPatient.id}
+                      onClick={() => {
+                        setSelectedId(a.id);
+                        setFormData({});
+                      }}
+                    >
+                      {a.step_name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="station-body">
+                <StationForm
+                  key={boxPatient.id}
+                  form={form}
+                  value={formData}
+                  onChange={setFormData}
+                  labAction={labAction}
+                />
 
-              <div className="qrow-actions">
-                <button
-                  className="flow-btn flow-btn-grn"
-                  disabled={resultsIn.isPending}
-                  title={`Mark "${next.step_name}" done`}
-                  onClick={() => markStageIn(next, visit.patient_name)}
-                >
-                  {STAGE_ACTION[next.step_catalog_id] ||
-                    `✓ ${next.step_name.replace(/^Lab — /, "")} done`}
-                </button>
-                {canEditHere && (
+                {isRx && <RxState rx={boxVisit?.rx} onView={setViewingDoc} />}
+                {form === "lab" && (
+                  <>
+                    <LabPanel lab={boxVisit?.lab} />
+                    {openLabStage && anyTestDone && (
+                      <div className="lab-manual">
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 700 }}>
+                            {openLabStage.step_name}
+                          </div>
+                          <div className="flow-muted">
+                            Completes on its own when HealthRay syncs the results. Mark it by hand
+                            if the report came another way.
+                          </div>
+                        </div>
+                        <button
+                          className="flow-btn flow-btn-grn"
+                          disabled={resultsIn.isPending}
+                          onClick={markResultsIn}
+                        >
+                          ✓ Results received
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
+                  <button
+                    className={`flow-btn ${form === "pharmacy" ? "flow-btn-primary" : "flow-btn-grn"}`}
+                    style={{ padding: "8px 18px" }}
+                    disabled={advance.isPending || heldByOther(boxPatient)}
+                    title={
+                      heldByOther(boxPatient)
+                        ? `${boxPatient.claim.by} is working this patient`
+                        : ""
+                    }
+                    onClick={complete}
+                  >
+                    {form === "pharmacy"
+                      ? "💊 Dispensed — Confirm Exit (stops clock)"
+                      : isRx
+                        ? "✓ Prescription explained — move to next step"
+                        : labAction
+                          ? labAction.btn
+                          : "✓ Done — move to next step"}
+                  </button>
                   <button
                     className="flow-btn flow-btn-ghost"
-                    style={{ color: "var(--fre)", borderColor: "var(--fre)" }}
-                    disabled={removeStep.isPending}
-                    title="Skip this stage — releases the consultation if it is the last one"
-                    onClick={() => setRemoveTarget(next)}
+                    style={{ padding: "8px 14px" }}
+                    disabled={advance.isPending || heldByOther(boxPatient)}
+                    onClick={() => setSkipTarget(boxPatient)}
+                    title={
+                      heldByOther(boxPatient)
+                        ? `${boxPatient.claim.by} is working this patient`
+                        : "Skip this step — patient still advances"
+                    }
                   >
-                    ✕ Skip
+                    ⏭ Skip
                   </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Queue — free-move: pick anyone into the box; else call-in order */}
-      <div className="q-sec">
-        <div className="q-sec-head">
-          <span className="flow-sec-title" style={{ margin: 0 }}>
-            {freeMove ? "My queue — pick anyone" : "My queue — ready to call in"}
-            <span className="q-count">{listGroups.length}</span>
-          </span>
-        </div>
-        {listGroups.length === 0 ? (
-          <div className="flow-card flow-empty">No one waiting at this station.</div>
-        ) : (
-          listGroups.map(({ visit_id, head, steps }) => {
-            const away = busyElsewhere(head);
-            const visit = visitById.get(visit_id);
-            return (
-              <div
-                key={visit_id}
-                className={`qrow${head.visit_urgency === "breach" ? " qrow--breach" : head.visit_urgency === "atrisk" ? " qrow--atrisk" : ""}`}
-              >
-                <span className="qrow-tok">{head.token_number || "—"}</span>
-                <div className="qrow-main">
-                  <div className="qrow-name">
-                    {head.patient_name}
-                    {head.is_vip && <span title="VIP">⭐</span>}
-                  </div>
-                  <div className="qrow-meta">
-                    {head.patient_age_sex || ""} · {head.file_no} · in since{" "}
-                    {fmtTime(head.checkin_time)}
-                  </div>
-                  <div className="qrow-chips">
-                    <span
-                      className={`flow-badge ${head.visit_urgency === "breach" ? "fb-red" : head.visit_urgency === "atrisk" ? "fb-amb" : "fb-ink"}`}
-                    >
-                      {head.visit_remaining_min}m left of visit
-                    </span>
-                    {away && <span className="flow-badge fb-amb">🔒 at {away} now</span>}
-                    {head.claim && (
-                      <span className={`flow-badge ${heldByMe(head) ? "fb-blu" : "fb-amb"}`}>
-                        🔒 {heldByMe(head) ? "you have this patient" : `with ${head.claim.by}`}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="qtests">
-                    {/* Tests already finished here — the queue payload only
-      carries open ones, so these come from the visit. */}
-                    {(visit?.steps || [])
-                      .filter(
-                        (x) =>
-                          x.assigned_role === role && !x.is_background && SKIPPED_OR_DONE(x.status),
-                      )
-                      .sort((a, b) => a.step_order - b.step_order)
-                      .map((x) => {
-                        const st = labStateForStep(x, visit?.lab);
-                        return (
-                          <div key={x.id} className="qtest qtest--done">
-                            <span className="qtest-name">{x.step_name}</span>
-                            <span
-                              className={`flow-badge ${x.status === "skipped" ? "fb-ink" : "fb-grn"}`}
-                            >
-                              {x.status === "skipped" ? "skipped" : "done"}
-                            </span>
-                            {st && <span className={`flow-badge ${st.cls}`}>{st.label}</span>}
-                            {st?.docId && (
-                              <button
-                                className="flow-btn flow-btn-ghost flow-btn-mini"
-                                onClick={() =>
-                                  setViewingDoc({
-                                    id: st.docId,
-                                    title: x.step_name,
-                                    file_name: `${x.step_name}.pdf`,
-                                  })
-                                }
-                              >
-                                View report
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    {steps.map((s) => (
-                      <div key={s.id} className="qtest">
-                        <span className="qtest-name">{s.step_name}</span>
-                        {freeMove ? (
-                          <button
-                            className="flow-btn flow-btn-primary flow-btn-mini"
-                            disabled={heldByOther(s) || !!busyElsewhere(s) || claimStep.isPending}
-                            title={
-                              busyElsewhere(s)
-                                ? `Patient is at ${busyElsewhere(s)} right now`
-                                : "Take this patient"
-                            }
-                            onClick={() => moveIntoBox(s)}
-                          >
-                            ↑ Move in
-                          </button>
-                        ) : (
-                          <button
-                            className="flow-btn flow-btn-primary flow-btn-mini"
-                            disabled={
-                              (!!active && !inMyBox(s)) ||
-                              startStep.isPending ||
-                              heldByOther(s) ||
-                              !!busyElsewhere(s)
-                            }
-                            title={
-                              busyElsewhere(s)
-                                ? `Patient is at ${busyElsewhere(s)} right now`
-                                : heldByOther(s)
-                                  ? `${s.claim.by} is working this patient`
-                                  : active && !inMyBox(s)
-                                    ? "Finish the current patient first"
-                                    : inMyBox(s)
-                                      ? "Call in — this patient is already at your desk"
-                                      : "Call in"
-                            }
-                            onClick={() => callIn(s.id)}
-                          >
-                            Call in
-                          </button>
-                        )}
-                        <button
-                          className="flow-btn flow-btn-ghost flow-btn-mini"
-                          disabled={advance.isPending || heldByOther(s)}
-                          title="Skip — patient still advances"
-                          onClick={() => setSkipTarget(s)}
-                        >
-                          ⏭
-                        </button>
-                        {canEditHere && (
-                          <button
-                            className="flow-btn flow-btn-ghost flow-btn-mini"
-                            style={{ color: "var(--fre)" }}
-                            disabled={removeStep.isPending || heldByOther(s)}
-                            title="Remove this test from the patient's journey"
-                            onClick={() => setRemoveTarget(s)}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="qrow-actions">
-                  {heldByMe(head) && (
+                  {heldByMe(boxPatient) && (
                     <button
                       className="flow-btn flow-btn-ghost"
+                      style={{ padding: "8px 14px" }}
                       disabled={releaseStep.isPending}
-                      title="Hand this patient back to the queue"
-                      onClick={() => release(head)}
+                      onClick={() => release(boxPatient)}
+                      title="Hand this patient back to the queue without completing"
                     >
                       ↩ Release
                     </button>
                   )}
-                  {canEditHere && (
-                    <AddMoreTests
-                      visit={visit}
-                      steps={myCatalogSteps}
-                      busy={addStep.isPending}
-                      onAdd={sendToMyStation}
-                    />
+                  {(isRx || form === "pharmacy") && (
+                    <button
+                      className="flow-btn flow-btn-ghost"
+                      style={{
+                        padding: "8px 14px",
+                        color: "var(--fre)",
+                        borderColor: "var(--fre)",
+                      }}
+                      disabled={endVisit.isPending}
+                      onClick={() => setEndTarget(boxPatient)}
+                      title={
+                        isRx
+                          ? "Record the explanation, then close the visit — billing and pharmacy are skipped"
+                          : "Close the visit here — everything still open is skipped with a reason"
+                      }
+                    >
+                      {isRx ? "⏹ Prescription explained — end visit" : "⏹ End visit"}
+                    </button>
                   )}
+                  <span className="flow-muted">
+                    {heldByOther(boxPatient)
+                      ? `${boxPatient.claim.by} has this patient — ask them to release before you take over.`
+                      : "Patient auto-moves to their next station"}
+                  </span>
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
+            </div>
+          ) : isAssistant ? null : (
+            <div className="flow-card flow-empty">
+              {freeMove
+                ? "No patient selected. Pick one from the queue below."
+                : "No patient in progress. Call in the next from your queue."}
+            </div>
+          )}
 
-      <div className="q-sec">
-        <div className="q-sec-head">
-          <span className="flow-sec-title" style={{ margin: 0 }}>
-            {searching ? "Search results" : "Checked in today — not yet seen at this station"}
-            <span className="q-count">{notSeenHere.length}</span>
-          </span>
-          <div className="q-search">
-            <span aria-hidden="true">🔎</span>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, file no, phone or token…"
-              aria-label="Search today's patients"
-            />
-            {search && (
-              <button className="q-search-x" title="Clear search" onClick={() => setSearch("")}>
-                ✕
-              </button>
-            )}
-          </div>
-        </div>
-        {searching && (
-          <div className="flow-muted" style={{ marginBottom: 6 }}>
-            {searchBusy ? "Searching…" : `Matching today’s patients for “${debounced}”`}
-          </div>
-        )}
-
-        {notSeenHere.length === 0 ? (
-          <div className="flow-card flow-empty">
-            {searching
-              ? `No patient today matches “${debounced}”.`
-              : "Everyone checked in has either been through this station or is in your queue above."}
-          </div>
-        ) : (
-          notSeenHere.map(({ visit: v, step }) => {
-            const settled = settledHere(v);
-            const queuedHere = myVisitIds.has(v.id);
-            return (
-              <div key={v.id} className="qrow qrow--muted">
-                <span className="qrow-tok">{v.token_number || "—"}</span>
-                <div className="qrow-main">
-                  <div className="qrow-name">
-                    {v.patient_name}
-                    {v.is_vip && <span title="VIP">⭐</span>}
-                  </div>
-                  <div className="qrow-meta">
-                    {v.patient_id}
-                    {v.patient_age_sex ? ` · ${v.patient_age_sex}` : ""} ·{" "}
-                    {VISIT_STATUS_LABEL[v.status] || v.status}
-                  </div>
-                  <div className="qrow-chips">
-                    <span className="flow-badge fb-ink">
-                      {step ? `now at ${step.step_name}` : "journey not started"}
+          {stageSections.map(
+            (sec) =>
+              sec.rows.length > 0 && (
+                <div key={sec.key} className="q-sec">
+                  <div className="q-sec-head">
+                    <span className="flow-sec-title" style={{ margin: 0 }}>
+                      {sec.title}
+                      <span className="q-count">{sec.rows.length}</span>
                     </span>
-                    {queuedHere && <span className="flow-badge fb-blu">already in your queue</span>}
-                    {settled && !queuedHere && (
-                      <span className="flow-badge fb-grn">done at this station</span>
-                    )}
                   </div>
+                  <div className="flow-muted" style={{ marginBottom: 6 }}>
+                    {sec.sub}
+                  </div>
+                  {sec.rows.map(({ visit, line, next, allOutside }) => (
+                    <div key={visit.id} className="qrow qrow--muted">
+                      <span className="qrow-tok">{visit.token_number || "—"}</span>
+                      <div className="qrow-main">
+                        <div className="qrow-name">
+                          {visit.patient_name}
+                          {visit.is_vip && <span title="VIP">⭐</span>}
+                        </div>
+                        <div className="qrow-meta">
+                          {visit.patient_id} · now at {currentStepOf(visit)?.step_name || "—"}
+                        </div>
+
+                        <div className="labstages">
+                          {line.map((st) => {
+                            const isDone = st.status === "completed";
+                            // A test the patient took elsewhere is not cancelled work —
+                            // striking it through reads as a mistake rather than a route.
+                            const isAway = st.data?.outside?.sent && st.status === "skipped";
+                            const isSkipped = st.status === "skipped" && !isAway;
+                            const isNext = next && st.id === next.id;
+                            const isRunning = st.status === "in_progress";
+                            return (
+                              <div
+                                key={st.id}
+                                className={`labstage${isDone ? " labstage--done" : isAway ? " labstage--outside" : isSkipped ? " labstage--skip" : isNext ? " labstage--next" : ""}`}
+                              >
+                                <span className="labstage-dot">
+                                  {isDone
+                                    ? "✓"
+                                    : isAway
+                                      ? "→"
+                                      : isSkipped
+                                        ? "–"
+                                        : isRunning || isNext
+                                          ? "●"
+                                          : "○"}
+                                </span>
+                                <span className="labstage-name">
+                                  {st.data?.awaiting_outside && allOutside
+                                    ? `sent outside · ${st.data.awaiting_outside.lab_name}`
+                                    : stageLabel(st.step_name)}
+                                </span>
+                                {isDone && st.actual_duration_min != null && (
+                                  <span className="flow-badge fb-ink">
+                                    {st.actual_duration_min}m
+                                  </span>
+                                )}
+                                {st.status === "in_progress" && st.started_at && (
+                                  <span className="flow-badge fb-amb">
+                                    {Math.max(
+                                      0,
+                                      Math.round(
+                                        (Date.now() - new Date(st.started_at).getTime()) / 60000,
+                                      ),
+                                    )}
+                                    m
+                                  </span>
+                                )}
+
+                                {isDone && st.data?.auto_completed === "lab_results" && (
+                                  <span className="flow-badge fb-ink">auto</span>
+                                )}
+                                {isDone && st.data?.results_in?.manual && (
+                                  <span className="flow-badge fb-ink">by hand</span>
+                                )}
+                                <CheckChips step={st} hideWaitLab={allOutside} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="qrow-actions">
+                        <button
+                          className="flow-btn flow-btn-grn"
+                          disabled={resultsIn.isPending}
+                          title={`Mark "${stageLabel(next.step_name)}" done`}
+                          onClick={() => markStageIn(next, visit.patient_name)}
+                        >
+                          {next.data?.awaiting_outside
+                            ? `✓ Report received from ${next.data.awaiting_outside.lab_name}`
+                            : STAGE_ACTION[next.step_catalog_id] ||
+                              `✓ ${stageLabel(next.step_name)} done`}
+                        </button>
+                        {canEditHere && (
+                          <button
+                            className="flow-btn flow-btn-ghost"
+                            style={{ color: "var(--fre)", borderColor: "var(--fre)" }}
+                            disabled={removeStep.isPending}
+                            title="Skip this stage — releases the consultation if it is the last one"
+                            onClick={() => setRemoveTarget(next)}
+                          >
+                            ✕ Skip
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="qrow-actions">
-                  {canEditHere && myCatalogSteps.length > 0 && !queuedHere && (
-                    <SendToStation
-                      visit={v}
-                      steps={myCatalogSteps}
-                      busy={addStep.isPending}
-                      onSend={sendToMyStation}
-                    />
+              ),
+          )}
+
+          {/* Queue — free-move: pick anyone into the box; else call-in order */}
+          {!isAssistant && (
+            <div className="q-sec">
+              <div className="q-sec-head">
+                <span className="flow-sec-title" style={{ margin: 0 }}>
+                  {freeMove ? "My queue — pick anyone" : "My queue — ready to call in"}
+                  <span className="q-count">{listGroups.length}</span>
+                </span>
+              </div>
+              {listGroups.length === 0 ? (
+                <div className="flow-card flow-empty">No one waiting at this station.</div>
+              ) : (
+                listGroups.map(({ visit_id, head, steps }) => {
+                  const away = busyElsewhere(head);
+                  const visit = visitById.get(visit_id);
+                  return (
+                    <div
+                      key={visit_id}
+                      className={`qrow${head.visit_urgency === "breach" ? " qrow--breach" : head.visit_urgency === "atrisk" ? " qrow--atrisk" : ""}`}
+                    >
+                      <span className="qrow-tok">{head.token_number || "—"}</span>
+                      <div className="qrow-main">
+                        <div className="qrow-name">
+                          {head.patient_name}
+                          {head.is_vip && <span title="VIP">⭐</span>}
+                        </div>
+                        <div className="qrow-meta">
+                          {head.patient_age_sex || ""} · {head.file_no} · in since{" "}
+                          {fmtTime(head.checkin_time)}
+                        </div>
+                        <div className="qrow-chips">
+                          <span
+                            className={`flow-badge ${head.visit_urgency === "breach" ? "fb-red" : head.visit_urgency === "atrisk" ? "fb-amb" : "fb-ink"}`}
+                          >
+                            {head.visit_remaining_min}m left of visit
+                          </span>
+                          {isRx &&
+                            (visitById.get(head.visit_id)?.rx?.ready ? (
+                              <span className="flow-badge fb-grn">Rx ready</span>
+                            ) : (
+                              <span
+                                className="flow-badge fb-amb"
+                                title="The doctor has not written it yet"
+                              >
+                                no Rx yet
+                              </span>
+                            ))}
+                          {away && <span className="flow-badge fb-amb">🔒 at {away} now</span>}
+                          {head.claim && (
+                            <span className={`flow-badge ${heldByMe(head) ? "fb-blu" : "fb-amb"}`}>
+                              🔒{" "}
+                              {heldByMe(head) ? "you have this patient" : `with ${head.claim.by}`}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="qtests">
+                          {/* Tests already finished here — the queue payload only
+        carries open ones, so these come from the visit. */}
+                          {(visit?.steps || [])
+                            .filter(
+                              (x) =>
+                                x.assigned_role === role &&
+                                !x.is_background &&
+                                SKIPPED_OR_DONE(x.status),
+                            )
+                            .sort((a, b) => a.step_order - b.step_order)
+                            .map((x) => {
+                              const st = labStateForStep(x, visit?.lab);
+                              return (
+                                <div key={x.id} className="qtest qtest--done">
+                                  <span className="qtest-name">{x.step_name}</span>
+                                  <span
+                                    className={`flow-badge ${x.status === "skipped" ? "fb-ink" : "fb-grn"}`}
+                                  >
+                                    {x.status === "skipped" ? "skipped" : "done"}
+                                  </span>
+                                  {st && <span className={`flow-badge ${st.cls}`}>{st.label}</span>}
+                                  {st?.docId && (
+                                    <button
+                                      className="flow-btn flow-btn-ghost flow-btn-mini"
+                                      onClick={() =>
+                                        setViewingDoc({
+                                          id: st.docId,
+                                          title: x.step_name,
+                                          file_name: `${x.step_name}.pdf`,
+                                        })
+                                      }
+                                    >
+                                      View report
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          {steps.map((s) => (
+                            <div key={s.id} className="qtest">
+                              <span className="qtest-name">{s.step_name}</span>
+                              {freeMove ? (
+                                <button
+                                  className="flow-btn flow-btn-primary flow-btn-mini"
+                                  disabled={
+                                    heldByOther(s) || !!busyElsewhere(s) || claimStep.isPending
+                                  }
+                                  title={
+                                    busyElsewhere(s)
+                                      ? `Patient is at ${busyElsewhere(s)} right now`
+                                      : "Take this patient"
+                                  }
+                                  onClick={() => moveIntoBox(s)}
+                                >
+                                  ↑ Move in
+                                </button>
+                              ) : (
+                                <button
+                                  className="flow-btn flow-btn-primary flow-btn-mini"
+                                  disabled={
+                                    (!!active && !inMyBox(s)) ||
+                                    startStep.isPending ||
+                                    heldByOther(s) ||
+                                    !!busyElsewhere(s)
+                                  }
+                                  title={
+                                    busyElsewhere(s)
+                                      ? `Patient is at ${busyElsewhere(s)} right now`
+                                      : heldByOther(s)
+                                        ? `${s.claim.by} is working this patient`
+                                        : active && !inMyBox(s)
+                                          ? "Finish the current patient first"
+                                          : inMyBox(s)
+                                            ? "Call in — this patient is already at your desk"
+                                            : "Call in"
+                                  }
+                                  onClick={() => (isLab ? setCallInTarget(s) : callIn(s.id))}
+                                >
+                                  Call in
+                                </button>
+                              )}
+                              <button
+                                className="flow-btn flow-btn-ghost flow-btn-mini"
+                                disabled={advance.isPending || heldByOther(s)}
+                                title="Skip — patient still advances"
+                                onClick={() => setSkipTarget(s)}
+                              >
+                                ⏭
+                              </button>
+                              {canEditHere && (
+                                <button
+                                  className="flow-btn flow-btn-ghost flow-btn-mini"
+                                  style={{ color: "var(--fre)" }}
+                                  disabled={removeStep.isPending || heldByOther(s)}
+                                  title="Remove this test from the patient's journey"
+                                  onClick={() => setRemoveTarget(s)}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="qrow-actions">
+                        {heldByMe(head) && (
+                          <button
+                            className="flow-btn flow-btn-ghost"
+                            disabled={releaseStep.isPending}
+                            title="Hand this patient back to the queue"
+                            onClick={() => release(head)}
+                          >
+                            ↩ Release
+                          </button>
+                        )}
+                        {canEditHere && (
+                          <AddMoreTests
+                            visit={visit}
+                            steps={myCatalogSteps}
+                            busy={addStep.isPending}
+                            onAdd={sendToMyStation}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {!isAssistant && (
+            <div className="q-sec">
+              <div className="q-sec-head">
+                <span className="flow-sec-title" style={{ margin: 0 }}>
+                  {searching ? "Search results" : "Checked in today — not yet seen at this station"}
+                  <span className="q-count">{notSeenHere.length}</span>
+                </span>
+                <div className="q-search">
+                  <span aria-hidden="true">🔎</span>
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search name, file no, phone or token…"
+                    aria-label="Search today's patients"
+                  />
+                  {search && (
+                    <button
+                      className="q-search-x"
+                      title="Clear search"
+                      onClick={() => setSearch("")}
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
               </div>
-            );
-          })
+              {searching && (
+                <div className="flow-muted" style={{ marginBottom: 6 }}>
+                  {searchBusy ? "Searching…" : `Matching today’s patients for “${debounced}”`}
+                </div>
+              )}
+
+              {notSeenHere.length === 0 ? (
+                <div className="flow-card flow-empty">
+                  {searching
+                    ? `No patient today matches “${debounced}”.`
+                    : "Everyone checked in has either been through this station or is in your queue above."}
+                </div>
+              ) : (
+                notSeenHere.map(({ visit: v, step }) => {
+                  const settled = settledHere(v);
+                  const queuedHere = myVisitIds.has(v.id);
+                  return (
+                    <div key={v.id} className="qrow qrow--muted">
+                      <span className="qrow-tok">{v.token_number || "—"}</span>
+                      <div className="qrow-main">
+                        <div className="qrow-name">
+                          {v.patient_name}
+                          {v.is_vip && <span title="VIP">⭐</span>}
+                        </div>
+                        <div className="qrow-meta">
+                          {v.patient_id}
+                          {v.patient_age_sex ? ` · ${v.patient_age_sex}` : ""} ·{" "}
+                          {VISIT_STATUS_LABEL[v.status] || v.status}
+                        </div>
+                        <div className="qrow-chips">
+                          <span className="flow-badge fb-ink">
+                            {step ? `now at ${step.step_name}` : "journey not started"}
+                          </span>
+                          {queuedHere && (
+                            <span className="flow-badge fb-blu">already in your queue</span>
+                          )}
+                          {settled && !queuedHere && (
+                            <span className="flow-badge fb-grn">done at this station</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="qrow-actions">
+                        {canEditHere && myCatalogSteps.length > 0 && !queuedHere && (
+                          <SendToStation
+                            visit={v}
+                            steps={myCatalogSteps}
+                            busy={addStep.isPending}
+                            onSend={sendToMyStation}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+        {isDoctor && (
+          <DoctorReportsPanel
+            rows={deliveredReports}
+            onReview={markReviewed}
+            busy={markReportReviewed.isPending}
+          />
         )}
       </div>
+
+      {endTarget && (
+        <StepReasonDialog
+          title={`End ${endTarget.patient_name}'s visit?`}
+          subtitle={
+            isRx
+              ? `Prescription Explain is recorded as done with your notes. Everything after it — billing, pharmacy — is skipped with your reason and the visit is closed. This also marks the appointment completed in OPD.`
+              : `Every step still open — billing, pharmacy, anything else — is skipped with your reason and the visit is closed. This also marks the appointment completed in OPD.`
+          }
+          reason={endReason}
+          setReason={setEndReason}
+          confirmLabel="⏹ End visit"
+          confirmClass="flow-btn-red"
+          busy={endVisit.isPending}
+          onCancel={() => {
+            setEndTarget(null);
+            setEndReason("");
+          }}
+          onConfirm={confirmEndVisit}
+        />
+      )}
 
       {skipTarget && (
         <StepReasonDialog
@@ -994,6 +1240,78 @@ function RemoveStepBtn({ step, busy, heldBy, onPick }) {
 }
 
 // Shared confirm-with-reason modal for skipping and for removing a step.
+const fmtDay = (d) =>
+  d ? new Date(`${d}T00:00:00`).toLocaleDateString([], { day: "numeric", month: "short" }) : "";
+
+function RxState({ rx, onView }) {
+  if (!rx?.ready) {
+    return (
+      <p className="flow-muted rx-state rx-state--wait">
+        ⚠ No prescription on file yet — the doctor has not written it. Explaining now means working
+        from memory.
+      </p>
+    );
+  }
+  return (
+    <p className="rx-state rx-state--ok">
+      <span>✓ Prescription ready</span>
+      {rx.doc_id ? (
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          onClick={() =>
+            onView({ id: rx.doc_id, title: "Prescription", file_name: "prescription.pdf" })
+          }
+        >
+          View prescription
+        </button>
+      ) : (
+        <span className="flow-muted">written, but no file to open</span>
+      )}
+    </p>
+  );
+}
+
+function CheckChips({ step, hideWaitLab = false }) {
+  const pay = step?.data?.payment;
+  const out = step?.data?.outside;
+  const wait = step?.data?.awaiting_outside;
+  if (!pay && !out?.sent && !wait) return null;
+  return (
+    <>
+      {pay &&
+        (pay.status === "paid" ? (
+          <span className="flow-badge fb-grn" title={`Confirmed by ${pay.by || "—"}`}>
+            paid
+          </span>
+        ) : (
+          <span className="flow-badge fb-red" title={pay.note || "Collected before payment"}>
+            unpaid{pay.due_amount ? ` ₹${pay.due_amount}` : ""}
+          </span>
+        ))}
+      {out?.sent && (
+        <span
+          className="flow-badge fb-amb"
+          title={
+            out.mode === "patient_goes"
+              ? "Patient went to this lab themselves"
+              : "Sample drawn here, couriered out"
+          }
+        >
+          outside · {out.lab_name}
+          {out.expected_on ? ` · due ${fmtDay(out.expected_on)}` : ""}
+        </span>
+      )}
+      {wait && (wait.expected_on || !hideWaitLab) && (
+        <span className="flow-badge fb-amb" title="Waiting on an outside lab's report">
+          {hideWaitLab ? "" : `from ${wait.lab_name}`}
+          {wait.expected_on ? `${hideWaitLab ? "" : " · "}due ${fmtDay(wait.expected_on)}` : ""}
+        </span>
+      )}
+    </>
+  );
+}
+
 function StepReasonDialog({
   title,
   subtitle,
