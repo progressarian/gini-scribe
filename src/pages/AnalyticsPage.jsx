@@ -217,8 +217,7 @@ function Overview() {
   );
 }
 
-function Conditions() {
-  const [cohort, setCohort] = useState("all");
+function Conditions({ cohort, setCohort }) {
   const { data, isLoading, isError, error } = useSection("conditions", cohort);
   if (isLoading) return <Loading />;
   if (isError) return <Failed error={error} />;
@@ -286,8 +285,7 @@ function Conditions() {
   );
 }
 
-function Biomarkers() {
-  const [cohort, setCohort] = useState("all");
+function Biomarkers({ cohort, setCohort }) {
   const { data, isLoading, isError, error } = useSection("biomarkers", cohort);
   if (isLoading) return <Loading />;
   if (isError) return <Failed error={error} />;
@@ -451,8 +449,7 @@ function Biomarkers() {
   );
 }
 
-function Treatment() {
-  const [cohort, setCohort] = useState("all");
+function Treatment({ cohort, setCohort }) {
   const { data, isLoading, isError, error } = useSection("treatment", cohort);
   if (isLoading) return <Loading />;
   if (isError) return <Failed error={error} />;
@@ -798,6 +795,9 @@ const RENDERERS = {
 export default function AnalyticsPage() {
   const [active, setActive] = useState("overview");
   const [downloading, setDownloading] = useState(false);
+  // One selection shared by every filterable tab, so switching tabs keeps the
+  // cohort and the export sends the same one the screen is showing.
+  const [cohort, setCohort] = useState("all");
 
   const { data: meta } = useQuery({
     queryKey: qk.analytics.meta(),
@@ -808,11 +808,15 @@ export default function AnalyticsPage() {
   const download = async (kind) => {
     setDownloading(true);
     try {
-      const res = await api.get(`/api/analytics/export.${kind}`, { responseType: "blob" });
+      const res = await api.get(`/api/analytics/export.${kind}`, {
+        responseType: "blob",
+        params: cohort !== "all" ? { cohort } : undefined,
+      });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `gini-outcomes-${meta?.snapshot?.as_of || "latest"}.${kind}`;
+      const suffix = cohort !== "all" ? `-${cohort.replace(/_/g, "-")}` : "";
+      a.download = `gini-outcomes-${meta?.snapshot?.as_of || "latest"}${suffix}.${kind}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -861,7 +865,7 @@ export default function AnalyticsPage() {
       </nav>
 
       <div className="an-body">
-        <Renderer />
+        <Renderer cohort={cohort} setCohort={setCohort} />
       </div>
     </div>
   );

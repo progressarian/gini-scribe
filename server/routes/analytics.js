@@ -96,6 +96,20 @@ function withCohort(report, cohortKey) {
   return out;
 }
 
+// Resolves the cohort for an export: applies the same server-side merge the
+// section endpoints use, and returns the label so the rendered report can say
+// which population it covers rather than silently showing a subset.
+function exportView(report, cohortKey) {
+  const merged = withBandLabels(withCohort(report, cohortKey));
+  const applied = merged.s4_biomarkers?.cohort;
+  const option = (merged.s4_biomarkers?.cohort_options || []).find((c) => c.key === applied);
+  return {
+    report: merged,
+    slug: option ? `-${option.key.replace(/_/g, "-")}` : "",
+    cohort: option || null,
+  };
+}
+
 async function loadReport({ sections, refresh, asOf }) {
   if (refresh) {
     liveCache = { at: 0, report: null };
@@ -153,17 +167,21 @@ router.get("/analytics/sections/:id", async (req, res) => {
 
 router.get("/analytics/export.xlsx", async (req, res) => {
   try {
-    const { report } = await loadReport({
+    const loaded = await loadReport({
       refresh: req.query.refresh === "1",
       asOf: req.query.as_of,
     });
-    const buffer = await buildWorkbook(report);
+    const { report, slug, cohort } = exportView(loaded.report, req.query.cohort);
+    const buffer = await buildWorkbook(report, { cohort });
     const stamp = report.meta?.as_of || new Date().toISOString().slice(0, 10);
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader("Content-Disposition", `attachment; filename="gini-outcomes-data-${stamp}.xlsx"`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="gini-outcomes-data-${stamp}${slug}.xlsx"`,
+    );
     res.send(buffer);
   } catch (e) {
     handleError(res, e, "Analytics export");
@@ -172,18 +190,19 @@ router.get("/analytics/export.xlsx", async (req, res) => {
 
 router.get("/analytics/export.html", async (req, res) => {
   try {
-    const { report } = await loadReport({
+    const loaded = await loadReport({
       refresh: req.query.refresh === "1",
       asOf: req.query.as_of,
     });
+    const { report, slug, cohort } = exportView(loaded.report, req.query.cohort);
     const stamp = report.meta?.as_of || new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="gini-outcomes-report-${stamp}.html"`,
+      `attachment; filename="gini-outcomes-report-${stamp}${slug}.html"`,
     );
     res.send(
-      `<!doctype html><html><head><meta charset="utf-8">${renderHtmlReport(report)}</head></html>`,
+      `<!doctype html><html><head><meta charset="utf-8">${renderHtmlReport(report, { cohort })}</head></html>`,
     );
   } catch (e) {
     handleError(res, e, "Analytics html export");

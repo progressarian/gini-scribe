@@ -18,7 +18,7 @@ function widths(aoa) {
   });
 }
 
-export async function buildWorkbook(report) {
+export async function buildWorkbook(report, { cohort = null } = {}) {
   const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
 
@@ -42,6 +42,14 @@ export async function buildWorkbook(report) {
     ["Position as at", report.meta.as_of],
     ["Generated at (UTC)", report.meta.generated_at],
     ["Engine version", report.meta.engine_version],
+    ["Patient filter", cohort ? cohort.label : "All patients"],
+    ["Patients in filter", cohort ? cohort.patients : k.patients_with_visit],
+    [
+      "Filter scope",
+      cohort
+        ? "Conditions, Outcomes and Prescribing sheets cover only these patients; all other sheets are panel-wide."
+        : "",
+    ],
     [],
     ["Headline", "Value"],
     ["Registered patients", k.registered_patients],

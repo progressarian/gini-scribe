@@ -915,7 +915,7 @@ function renderMethodology(report) {
      <div class="notes caveat"><ul>${limitations.map((d) => `<li>${esc(d)}</li>`).join("")}</ul></div>`;
 }
 
-export function renderHtmlReport(report) {
+export function renderHtmlReport(report, { cohort = null } = {}) {
   const sections = [
     {
       id: "s1",
@@ -982,6 +982,11 @@ export function renderHtmlReport(report) {
   <header class="report">
     <h1>Gini clinical outcomes report</h1>
     <p class="sub">Gini Advanced Care Hospital · position as at ${esc(report.meta.as_of)} · generated ${esc(report.meta.generated_at.slice(0, 16).replace("T", " "))} UTC · engine ${esc(report.meta.engine_version)}</p>
+    ${
+      cohort
+        ? `<p class="sub"><strong>Filtered report — ${esc(cohort.label)} (${num(cohort.patients)} patients).</strong> ${esc(cohort.note)} Sections 2, 4 and 5 cover only these patients; the rest of the report is panel-wide.</p>`
+        : ""
+    }
   </header>
   <nav class="toc" aria-label="Report sections"><ul>${toc}</ul></nav>
   ${sections.map((s) => section(s.id, s.title, s.lede, s.body)).join("")}

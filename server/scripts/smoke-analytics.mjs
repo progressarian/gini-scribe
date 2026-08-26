@@ -95,6 +95,23 @@ try {
     check(`${id} falls back to the whole panel on an unknown cohort`, bogus[key].cohort === "all");
   }
 
+  console.log("filtered exports");
+  for (const kind of ["html", "xlsx"]) {
+    const plain = await get(`/api/analytics/export.${kind}`, { raw: true });
+    const filtered = await get(`/api/analytics/export.${kind}?cohort=dense_year`, { raw: true });
+    check(`${kind} export accepts a cohort`, filtered.length > 0);
+    if (kind === "html") {
+      const a = plain.toString("utf8");
+      const b = filtered.toString("utf8");
+      check("html export is unlabelled when unfiltered", !a.includes("Filtered report"));
+      check("html export names the cohort it covers", b.includes("Filtered report"));
+      check("html export differs once filtered", a !== b);
+    } else {
+      check("xlsx export differs once filtered", !plain.equals(filtered));
+      check("xlsx export is a real zip when filtered", filtered.subarray(0, 2).toString() === "PK");
+    }
+  }
+
   console.log("denominators");
   const bio = await get("/api/analytics/sections/biomarkers");
   const cascade = bio.s4_biomarkers.cascade;

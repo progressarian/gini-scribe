@@ -6,9 +6,12 @@
  *
  * ⚠️ .env DATABASE_URL points at PRODUCTION. This INSERTS live rows.
  * Run from gini-scribe/server:
- *   node scripts/seed-obt-team.mjs
+ *   node scripts/seed-obt-team.mjs                 # the TEAM list below
+ *   node scripts/seed-obt-team.mjs Nancy           # one person, PIN generated
+ *   node scripts/seed-obt-team.mjs Nancy 4821      # one person, PIN given
  */
 import "../loadEnv.js";
+import crypto from "crypto";
 import pool from "../config/db.js";
 
 // name -> PIN. Fill in a PIN for each before running (left blank so real PINs
@@ -21,8 +24,17 @@ const TEAM = [
   { name: "Rajinder", pin: "" },
 ];
 
+// A 4-digit PIN, matching what the existing OBT accounts use. crypto, not
+// Math.random, so the PIN of a live account is not guessable from the clock.
+const generatePin = () => String(crypto.randomInt(0, 10000)).padStart(4, "0");
+
+// One name (and optionally its PIN) on the command line adds just that person;
+// no arguments falls back to the TEAM list above.
+const [argName, argPin] = process.argv.slice(2);
+const roster = argName ? [{ name: argName, pin: argPin || generatePin() }] : TEAM;
+
 async function main() {
-  for (const { name, pin } of TEAM) {
+  for (const { name, pin } of roster) {
     if (!pin) {
       console.log(`skip  ${name} — no PIN set in the script`);
       continue;
