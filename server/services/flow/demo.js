@@ -18,6 +18,37 @@ import { genVisitToken } from "./journey.js";
 // seeded, so the reports stage never auto-completes: you drive Vitals → Doctor
 // Assessment → the tests → "Results received" (or Skip) → SD → Rx → Billing →
 // Pharmacy yourself. Seed with POST /api/flow/demo/seed?set=lab.
+const RX_WALKTHROUGH = [
+  {
+    id: "DEMO_R1",
+    name: "Rx One (mid consultation)",
+    age_sex: "54M",
+    type: "FU_APPT",
+    sd: 0,
+    stopAt: "sd_consult",
+    back: 3,
+  },
+  {
+    id: "DEMO_R2",
+    name: "Rx Two (no prescription yet)",
+    age_sex: "61F",
+    type: "FU_APPT",
+    sd: 0,
+    readyAt: "rx_ready",
+    back: 2,
+  },
+  {
+    id: "DEMO_R3",
+    name: "Rx Three (prescription written)",
+    age_sex: "47M",
+    type: "FU_APPT",
+    sd: 1,
+    readyAt: "rx_ready",
+    back: 2,
+    rxDoc: true,
+  },
+];
+
 const LAB_WALKTHROUGH = [
   {
     id: "DEMO_L1",
@@ -178,7 +209,15 @@ async function seedDemoPatientLab(client, sc) {
       ],
     )
   ).rows[0];
-  if (!sc.lab) return p.id;
+  if (!sc.lab) {
+    if (sc.rxDoc)
+      await client.query(
+        `INSERT INTO documents (patient_id, doc_type, title, file_name, source, doc_date)
+         VALUES ($1,'prescription',$2,$3,'visit',CURRENT_DATE)`,
+        [p.id, `Prescription — Demo — Visit`, `${sc.id}-prescription.pdf`],
+      );
+    return p.id;
+  }
   for (const [i, c] of (sc.lab.cases || []).entries()) {
     const no = `${sc.id}-${i + 1}`;
     // lab_case_id is an integer; the other three keys are text. Reusing one
@@ -198,6 +237,12 @@ async function seedDemoPatientLab(client, sc) {
           [p.id, t, String(5 + Math.round(Math.random() * 90) / 10), "mg/dL"],
         );
   }
+  if (sc.rxDoc)
+    await client.query(
+      `INSERT INTO documents (patient_id, doc_type, title, file_name, source, doc_date)
+       VALUES ($1,'prescription',$2,$3,'visit',CURRENT_DATE)`,
+      [p.id, `Prescription — Demo — Visit`, `${sc.id}-prescription.pdf`],
+    );
   for (const d of sc.lab.docs || [])
     await client.query(
       `INSERT INTO documents (patient_id, doc_type, file_name) VALUES ($1,$2,$3)`,
@@ -235,7 +280,7 @@ export async function seedFlowDemo(client = pool, set = "dashboard") {
   const nm = (d) => (d ? d.short_name || d.name : null);
 
   let count = 0;
-  const scenarios = set === "lab" ? LAB_WALKTHROUGH : SCENARIOS;
+  const scenarios = set === "lab" ? LAB_WALKTHROUGH : set === "rx" ? RX_WALKTHROUGH : SCENARIOS;
   for (const sc of scenarios) {
     const steps = await templateSteps(client, sc.type);
     if (sc.addAbi) {

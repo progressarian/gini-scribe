@@ -20,9 +20,11 @@ export default function FlowStationPage() {
     (data?.active?.length ? 1 : 0) +
     (data?.awaiting || 0);
 
-  // Bare /flow/station (the nav tab) or an unknown slug → the first desk this
-  // role can work. A role with no desk at all shouldn't be here.
-  if (!cfg) {
+  // Bare /flow/station (the nav tab), an unknown slug, or a desk this role may
+  // not work → the first desk they can. The API refuses the queue either way,
+  // but rendering a desk someone cannot use shows them a broken page instead of
+  // their own, and leaks which desks exist.
+  if (!cfg || !hasCapability(role, STATION_CAPABILITY[slug])) {
     if (myStations.length) return <Navigate to={`/flow/station/${myStations[0]}`} replace />;
     // No station desk, but consultants still have their own worklist.
     if (hasOwnConsultQueue(role)) return <Navigate to="/flow/my-patients" replace />;

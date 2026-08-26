@@ -605,8 +605,11 @@ router.get("/flow/step-catalog", async (req, res) => {
 // ── Demo data (ADMIN only) — seed/clear sample patients for testing ──
 router.post("/flow/demo/seed", requireCapability(CAP.ADMIN), async (req, res) => {
   try {
-    // ?set=lab seeds the hand-walk set (parked at step 1, no HealthRay data).
-    const count = await seedFlowDemo(undefined, req.query.set === "lab" ? "lab" : "dashboard");
+    // ?set=lab  — the lab hand-walk set, parked at step 1, no HealthRay data
+    // ?set=rx   — the prescription set, parked either side of "Prescription — ready"
+    const KNOWN_SETS = ["lab", "rx"];
+    const set = KNOWN_SETS.includes(req.query.set) ? req.query.set : "dashboard";
+    const count = await seedFlowDemo(undefined, set);
     res.json({ seeded: true, count });
   } catch (e) {
     handleError(res, e, "Flow demo seed");
@@ -1265,8 +1268,17 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
       // A consultation cannot open while the patient's reports are outstanding;
       // the step waits at `ready` instead of pulling them in.
       const labWait = IS_CONSULT_ROLE(next.assigned_role)
-        ? await labStagesPending(client, visitId)
-        : null;
+        ? await labStagesPending(client, visitId, next.step_order)
+        : next.step_catalog_id === "rx_explain"
+          ? (
+              await client.query(
+                `SELECT step_name FROM flow_visit_steps
+                  WHERE visit_id=$1 AND step_catalog_id='rx_ready'
+                    AND status NOT IN ('completed','skipped') LIMIT 1`,
+                [visitId],
+              )
+            ).rows[0]
+          : null;
       const busy =
         labWait || (await stationBusy(client, next.assigned_role, next.assigned_staff_id));
       const nextStatus = busy ? "ready" : "in_progress";
@@ -1732,6 +1744,7 @@ router.get("/flow/my-patients", async (req, res) => {
     // consultant should not be shown a patient who has already left.
     await reconcileFromAppointments(visits, stepMap);
     await syncLabReportsFromResults(visits, stepMap);
+    await syncPrescriptionReady(visits, stepMap);
     await attachLabPanel(visits);
     await attachPrescriptions(visits);
     const now = Date.now();
@@ -2109,13 +2122,18 @@ router.post("/flow/visits/:id/offer/decline", async (req, res) => {
 // stuck stage, which records who/why in data.skip. 333 of 5,327 lab cases
 // (6.3%) never sync at all, so without a human override those patients would
 // be held indefinitely.
-async function labStagesPending(client, visitId) {
+// Bounded by position: a stage that comes AFTER the step being started was never
+// meant to gate it. Without the bound, adding any background stage after a
+// consultation deadlocks it — the consult waits on the stage, and the stage
+// waits on what the consult produces.
+async function labStagesPending(client, visitId, beforeOrder = null) {
   return (
     await client.query(
       `SELECT step_name FROM flow_visit_steps
         WHERE visit_id=$1 AND is_background AND status NOT IN ('completed','skipped')
+          AND ($2::int IS NULL OR step_order < $2)
         ORDER BY step_order ASC LIMIT 1`,
-      [visitId],
+      [visitId, beforeOrder],
     )
   ).rows[0];
 }
@@ -2292,12 +2310,31 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
     // this guards the patient, so a second station cannot pull someone who is
     // already mid-step somewhere else.
     if (IS_CONSULT_ROLE(step.assigned_role)) {
-      const waiting = await labStagesPending(client, step.visit_id);
+      const waiting = await labStagesPending(client, step.visit_id, step.step_order);
       if (waiting) {
         await client.query("ROLLBACK");
         return res.status(409).json({
           error: `Reports not ready — waiting on ${waiting.step_name}`,
           waiting_on: waiting.step_name,
+        });
+      }
+    }
+    // Nothing to explain until the prescription exists. Overridable: the stage
+    // itself takes "results-in" from an MO or a floor manager for a paper Rx.
+    if (step.step_catalog_id === "rx_explain") {
+      const rx = (
+        await client.query(
+          `SELECT step_name FROM flow_visit_steps
+            WHERE visit_id=$1 AND step_catalog_id='rx_ready'
+              AND status NOT IN ('completed','skipped') LIMIT 1`,
+          [step.visit_id],
+        )
+      ).rows[0];
+      if (rx) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "No prescription yet — the doctor has not submitted it",
+          waiting_on: rx.step_name,
         });
       }
     }
@@ -2707,6 +2744,54 @@ async function stepsByVisit(visitIds) {
 // Results arriving prove the earlier stages happened, so any still-open delivery
 // or processing stage closes with them. Durations are stamped only where the
 // stage was actually started, keeping Flow Reports averages honest.
+// The prescription makes itself: whoever ends the visit, and the HealthRay sync
+// when it sees the appointment marked seen, both render the PDF and write a
+// documents row. This stage just notices. Only rx_ready — never the lab or the
+// assistant's stages, which are other people's work.
+async function syncPrescriptionReady(visits, stepMap) {
+  const pending = [];
+  for (const v of visits) {
+    if (!v.patient_db_id) continue;
+    const open = (stepMap.get(v.id) || []).filter(
+      (s) => s.step_catalog_id === "rx_ready" && !["completed", "skipped"].includes(s.status),
+    );
+    if (open.length) pending.push({ visit: v, open });
+  }
+  if (!pending.length) return;
+  try {
+    const ids = [...new Set(pending.map((p) => p.visit.patient_db_id))];
+    const have = new Set(
+      (
+        await pool.query(
+          `SELECT DISTINCT patient_id FROM documents
+            WHERE patient_id = ANY($1::int[]) AND created_at::date = $2
+              AND doc_type = 'prescription'`,
+          [ids, pending[0].visit.visit_date],
+        )
+      ).rows.map((r) => r.patient_id),
+    );
+    for (const p of pending) {
+      if (!have.has(p.visit.patient_db_id)) continue;
+      await pool.query(
+        `UPDATE flow_visit_steps
+            SET status='completed', completed_at=COALESCE(completed_at, NOW()),
+                actual_duration_min = COALESCE(actual_duration_min,
+                  CASE WHEN started_at IS NOT NULL
+                       THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60))::int
+                       END),
+                data = COALESCE(data,'{}'::jsonb) || '{"auto_completed":"prescription"}'::jsonb
+          WHERE id = ANY($1::uuid[])`,
+        [p.open.map((s) => s.id)],
+      );
+      p.open.forEach((s) => {
+        s.status = "completed";
+      });
+    }
+  } catch (e) {
+    console.error("Prescription stage sync failed:", e.message);
+  }
+}
+
 async function syncLabReportsFromResults(visits, stepMap) {
   const pending = [];
   for (const v of visits) {
@@ -2915,6 +3000,7 @@ router.get("/flow/visits", async (req, res) => {
     // Reflect clinical-side completion (OPD/GHM "seen"/"completed") before timing.
     await reconcileFromAppointments(visits, stepMap);
     await syncLabReportsFromResults(visits, stepMap);
+    await syncPrescriptionReady(visits, stepMap);
     await attachLabPanel(visits);
     await attachPrescriptions(visits);
     const now = Date.now();

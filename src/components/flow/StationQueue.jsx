@@ -3,7 +3,6 @@ import { toast } from "../../stores/uiStore";
 import {
   useFlowQueue,
   useFlowAdvance,
-  useFlowMarkReviewed,
   useFlowEndVisit,
   useFlowStartStep,
   useFlowVisits,
@@ -17,7 +16,7 @@ import {
 import useAuthStore from "../../stores/authStore";
 import LabPanel from "./LabPanel";
 import LabCallInDialog from "./LabCallInDialog";
-import DoctorReportsPanel, { deliveredReportRows } from "./DoctorReportsPanel";
+import DoctorReportsPanel, { prescriptionRows } from "./DoctorReportsPanel";
 import PdfViewerModal from "../visit/PdfViewerModal";
 import { CAPABILITIES as CAP, hasCapability, ownsStationRole } from "../../../shared/permissions";
 import "../../styles/flow.css";
@@ -95,7 +94,7 @@ const STAGE_ACTION = {
   lab_processing: "✓ Processing done",
   lab_reports: "✓ Reports available",
   report_printed: "🖨️ Printed",
-  report_delivered: "✓ Handed to the doctor",
+  report_delivered: "✓ Handed to the consultant",
 };
 
 const stageLabel = (name) => name.replace(/^(Lab|Reports) — /, "");
@@ -121,7 +120,6 @@ const LAB_ACTION = {
 export default function StationQueue({ role, form, freeMove = false }) {
   const { data, isLoading } = useFlowQueue(role);
   const advance = useFlowAdvance();
-  const markReportReviewed = useFlowMarkReviewed();
   const endVisit = useFlowEndVisit();
   const startStep = useFlowStartStep();
   const addStep = useFlowAddStep();
@@ -161,6 +159,13 @@ export default function StationQueue({ role, form, freeMove = false }) {
         x.assigned_role !== s.assigned_role,
     );
     return other ? other.step_name : null;
+  };
+  // The nurse's own gate, shown before she clicks rather than as an error after.
+  const rxNotReady = (s) => {
+    if (!isRx) return null;
+    const v = visitById.get(s.visit_id);
+    const stage = (v?.steps || []).find((x) => x.step_catalog_id === "rx_ready");
+    return stage && !["completed", "skipped"].includes(stage.status) ? stage : null;
   };
   const heldByMe = (s) => s.claim && String(s.claim.by_id) === String(myId);
   const heldByOther = (s) => s.claim && String(s.claim.by_id) !== String(myId);
@@ -288,7 +293,9 @@ export default function StationQueue({ role, form, freeMove = false }) {
         },
       ];
 
-  const deliveredReports = isDoctor ? deliveredReportRows(allVisits) : [];
+  // The MO's own work, not the consultant's. Reports are delivered to the
+  // consultant now, so listing them here was showing someone else's queue.
+  const toPrepare = isDoctor ? prescriptionRows(allVisits) : [];
 
   const confirmEndVisit = async () => {
     try {
@@ -313,10 +320,10 @@ export default function StationQueue({ role, form, freeMove = false }) {
     }
   };
 
-  const markReviewed = async (step, name) => {
+  const markPrepared = async (step, name) => {
     try {
-      await markReportReviewed.mutateAsync(step.id);
-      toast(`${name} — report marked reviewed`, "success");
+      await resultsIn.mutateAsync(step.id);
+      toast(`${name} — prescription ready, the nurse can explain it`, "success");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -944,18 +951,21 @@ export default function StationQueue({ role, form, freeMove = false }) {
                                     (!!active && !inMyBox(s)) ||
                                     startStep.isPending ||
                                     heldByOther(s) ||
-                                    !!busyElsewhere(s)
+                                    !!busyElsewhere(s) ||
+                                    !!rxNotReady(s)
                                   }
                                   title={
-                                    busyElsewhere(s)
-                                      ? `Patient is at ${busyElsewhere(s)} right now`
-                                      : heldByOther(s)
-                                        ? `${s.claim.by} is working this patient`
-                                        : active && !inMyBox(s)
-                                          ? "Finish the current patient first"
-                                          : inMyBox(s)
-                                            ? "Call in — this patient is already at your desk"
-                                            : "Call in"
+                                    rxNotReady(s)
+                                      ? "No prescription yet — the doctor has not submitted it"
+                                      : busyElsewhere(s)
+                                        ? `Patient is at ${busyElsewhere(s)} right now`
+                                        : heldByOther(s)
+                                          ? `${s.claim.by} is working this patient`
+                                          : active && !inMyBox(s)
+                                            ? "Finish the current patient first"
+                                            : inMyBox(s)
+                                              ? "Call in — this patient is already at your desk"
+                                              : "Call in"
                                   }
                                   onClick={() => (isLab ? setCallInTarget(s) : callIn(s.id))}
                                 >
@@ -1099,9 +1109,15 @@ export default function StationQueue({ role, form, freeMove = false }) {
         </div>
         {isDoctor && (
           <DoctorReportsPanel
-            rows={deliveredReports}
-            onReview={markReviewed}
-            busy={markReportReviewed.isPending}
+            rows={toPrepare}
+            onReview={markPrepared}
+            busy={resultsIn.isPending}
+            title="Prescriptions to prepare"
+            subtitle="The consultant has finished with these patients. The nurse cannot explain anything until you submit the prescription."
+            emptyText="Nothing waiting. A patient appears here once their consultation ends, and leaves as soon as the prescription is on file."
+            actionLabel="✓ Prescription prepared"
+            actionTitle="Submit the prescription — this releases the nurse"
+            stampLabel="consulted"
           />
         )}
       </div>

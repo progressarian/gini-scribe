@@ -242,7 +242,7 @@ The chain is now six stages across two desks:
 
 ```
 sample collection → delivered to lab → lab processing → reports available   [Lab]
-                  → printed → delivered to Doctor                    [Assistant Station]
+                  → printed → delivered to Consultant                    [Assistant Station]
 ```
 
 |                 |                                                          |
@@ -262,7 +262,7 @@ templates (`FU_APPT_TESTS`, `NEW_APPT`, `NEW_WALK`) between `lab_reports` and `w
 extending the chain extended the gate for free: **SD Consultation will not start until the
 report has been handed to the doctor.** That is the point of the desk — the doctor sees the
 patient with the paper in hand. Verified: starting the consult after printing but before
-delivery returns `Reports not ready — waiting on Reports — delivered to Doctor`.
+delivery returns `Reports not ready — waiting on Reports — delivered to Consultant`.
 
 ### Outside tests
 
@@ -314,7 +314,7 @@ lines describing work that never existed. When **every** test on the visit went 
 line collapses to what actually happened:
 
 ```
-○ sent outside · SRL · due 28 Aug     ○ printed     ○ delivered to Doctor
+○ sent outside · SRL · due 28 Aug     ○ printed     ○ delivered to Consultant
         [✓ Report received from SRL]
 ```
 
@@ -375,9 +375,16 @@ a floor manager. The lab cannot.
 patients only) — the report is in front of whoever is with the patient. The right-hand column
 on My Patients is other consultants' patients, so the panel sits at the top of the left.
 
-An open question left deliberately: the step is called **delivered to Doctor**, but the MO's
-own step is #2 and the report lands at #8 — the person who reads it during the consultation
-is usually the SD. Nothing enforces which of them picks it up.
+**Resolved 2026-08-26.** The step was originally called *delivered to Consultant*, which named
+the wrong person: the MO's own step is #2 and the report lands at #8, six steps after their
+part ends. Checked against a day's data — all 8 delivered patients had a named consultant
+waiting (Dr. Beant Kaur, Dr. Simranpreet Kaur), and every one of their MO steps had already
+been auto-closed by the OPD sync before the report existed.
+
+It is now **Reports — delivered to Consultant**. The GDA still does the delivering
+(`assigned_role` stays `report_desk`); only the recipient in the label was wrong. The panel
+is still shown to both the MO and the consultant, since it costs nothing while the MOs are
+barely in the system.
 
 ### A bug this uncovered
 
