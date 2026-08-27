@@ -194,9 +194,13 @@ export const ROLE_CAPABILITIES = {
     C.OBT_OPS,
   ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
+  // The GDA works two desks: Vitals and the Assistant Station. Dietitian was
+  // never theirs — 4 steps ever, none worked by hand, no dietitian accounts —
+  // and re-assigning patients between consultants (FLOW_CONSULTANTS) is an
+  // admin/reception job. FLOW_COORDINATOR is separate and still lets them
+  // override anything from the floor screens.
   [ROLES.COORDINATOR]: [
     C.PATIENT_READ,
-    C.FLOW_STATION_REPORTS,
     C.PATIENT_CHART,
     C.AI_TOOLS,
     C.RECEPTION_OPS,
@@ -204,10 +208,9 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_COORDINATOR,
     C.FLOW_REPORTS,
     C.FLOW_FLOOR_VIEW,
-    C.FLOW_CONSULTANTS,
     C.FLOW_STATION,
     C.FLOW_STATION_VITALS,
-    C.FLOW_STATION_DIET,
+    C.FLOW_STATION_REPORTS,
     C.OBT_OPS,
   ],
   [ROLES.PHARMACY]: [
