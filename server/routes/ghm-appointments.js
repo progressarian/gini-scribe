@@ -134,6 +134,58 @@ const normalizeAltPhones = (value, primary) => {
   return { value: out.length ? out : null };
 };
 
+// Demographics. The desk types either a DOB or an age — DOB is the durable
+// fact, so when it is given the age is derived from it and the typed age is
+// ignored. Both stay optional; a blank clears the column.
+const SEXES = ["Male", "Female", "Other"];
+
+const normalizeDob = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { value: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { error: "Date of birth must be a valid date" };
+  const d = new Date(`${raw}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return { error: "Date of birth must be a valid date" };
+  if (d.getTime() > Date.now()) return { error: "Date of birth cannot be in the future" };
+  return { value: raw };
+};
+
+const ageFromDob = (dob) => {
+  if (!dob) return null;
+  const b = new Date(`${dob}T00:00:00Z`);
+  const now = new Date();
+  let age = now.getUTCFullYear() - b.getUTCFullYear();
+  const m = now.getUTCMonth() - b.getUTCMonth();
+  if (m < 0 || (m === 0 && now.getUTCDate() < b.getUTCDate())) age -= 1;
+  return age >= 0 && age <= 120 ? age : null;
+};
+
+const normalizeAge = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { value: null };
+  if (!/^\d{1,3}$/.test(raw)) return { error: "Age must be a whole number of years" };
+  const age = Number(raw);
+  if (age > 120) return { error: "Age must be between 0 and 120" };
+  return { value: age };
+};
+
+const normalizeSex = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { value: null };
+  const hit = SEXES.find((s) => s.toLowerCase() === raw.toLowerCase());
+  return hit ? { value: hit } : { error: `Gender must be one of ${SEXES.join(", ")}` };
+};
+
+// Returns { dob, age, sex } or { error }. Age follows DOB when both arrive.
+const normalizeDemographics = ({ dob, age, sex }) => {
+  const d = normalizeDob(dob);
+  if (d.error) return d;
+  const a = normalizeAge(age);
+  if (a.error) return a;
+  const s = normalizeSex(sex);
+  if (s.error) return s;
+  return { dob: d.value, age: d.value ? ageFromDob(d.value) : a.value, sex: s.value };
+};
+
 const claimant = (req) => ({
   id: req.doctor?.doctor_id || null,
   name: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim(),
@@ -718,6 +770,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.patient_category,
                 ${LAST_VISIT_SQL} AS last_visit_date,
                 p.id AS patient_id, p.address, p.email,
+                p.dob AS disp_dob,
                 COALESCE(a.age, p.age) AS disp_age,
                 COALESCE(a.sex, p.sex) AS disp_sex,
                 a.healthray_follow_up,
@@ -949,6 +1002,9 @@ router.post("/ghm-appointments", async (req, res) => {
       home_collection = false,
       address,
       alt_phone,
+      dob,
+      age,
+      sex,
     } = req.body;
 
     if (!patient_name || !appointment_date || !doctor_name)
@@ -959,6 +1015,9 @@ router.post("/ghm-appointments", async (req, res) => {
     const altPhones = normalizeAltPhones(alt_phone, phone);
     if (altPhones.error) return res.status(400).json({ error: altPhones.error });
     const cleanAltPhone = altPhones.value;
+
+    const demo = normalizeDemographics({ dob, age, sex });
+    if (demo.error) return res.status(400).json({ error: demo.error });
 
     // Resolve patient_id — by file_no, then phone. If still none, register a
     // brand-new patient (auto-generates a GNI-xxxxx file_no).
@@ -991,19 +1050,37 @@ router.post("/ghm-appointments", async (req, res) => {
         newFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
       }
       const created = await pool.query(
-        `INSERT INTO patients (name, phone, file_no, address, alt_phone)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id, file_no`,
-        [patient_name, phone || null, newFileNo, cleanAddress, cleanAltPhone],
+        `INSERT INTO patients (name, phone, file_no, address, alt_phone, dob, age, sex)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, file_no`,
+        [
+          patient_name,
+          phone || null,
+          newFileNo,
+          cleanAddress,
+          cleanAltPhone,
+          demo.dob,
+          demo.age,
+          demo.sex,
+        ],
       );
       patient_id = created.rows[0].id;
       resolved_file_no = created.rows[0].file_no;
-    } else if (cleanAddress || cleanAltPhone) {
+    } else if (cleanAddress || cleanAltPhone || demo.dob || demo.age != null || demo.sex) {
+      // The patient already has a chart. Demographics FILL BLANKS ONLY —
+      // COALESCE(dob, $n), not COALESCE($n, dob) — because a booking resolves to
+      // an existing chart by phone, and a phone belongs to a whole family. A
+      // typed DOB or gender must never overwrite an established record on the
+      // strength of a shared number; corrections go through the Edit Patient
+      // form, which targets one appointment's own patient deliberately.
       await pool.query(
         `UPDATE patients
             SET address = COALESCE($1, address),
-                alt_phone = COALESCE($2, alt_phone)
-          WHERE id = $3`,
-        [cleanAddress, cleanAltPhone, patient_id],
+                alt_phone = COALESCE($2, alt_phone),
+                dob = COALESCE(dob, $3),
+                age = COALESCE(age, $4),
+                sex = COALESCE(sex, $5)
+          WHERE id = $6`,
+        [cleanAddress, cleanAltPhone, demo.dob, demo.age, demo.sex, patient_id],
       );
     }
 
@@ -1073,8 +1150,9 @@ router.post("/ghm-appointments", async (req, res) => {
              misc_notes=$18, reports_uploaded=$19, will_get_test_at_gini=$20,
              requested_by_cc=$21, cc_remark_date=$22, notes=$23, is_walkin=$24,
              whatsapp_message=$25, additional_whatsapp_msg=$26, home_collection=$27,
-             status='scheduled', alt_phone=COALESCE($28, alt_phone)
-           WHERE id=$29 RETURNING *`,
+             status='scheduled', alt_phone=COALESCE($28, alt_phone),
+             age=COALESCE($29, age), sex=COALESCE($30, sex)
+           WHERE id=$31 RETURNING *`,
           [
             patient_id,
             patient_name,
@@ -1104,6 +1182,8 @@ router.post("/ghm-appointments", async (req, res) => {
             additional_whatsapp_msg,
             home_collection,
             cleanAltPhone,
+            demo.age,
+            demo.sex,
             priorRow.id,
           ],
         )
@@ -1117,10 +1197,12 @@ router.post("/ghm-appointments", async (req, res) => {
         earlier_slot_given, condition, chief_complaint,
         misc_notes, reports_uploaded, will_get_test_at_gini,
         requested_by_cc, cc_remark_date, notes, is_walkin,
-        whatsapp_message, additional_whatsapp_msg, home_collection, alt_phone, status
+        whatsapp_message, additional_whatsapp_msg, home_collection, alt_phone,
+        age, sex, status
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,'scheduled'
+        $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+        $31,$32,'scheduled'
       ) RETURNING *`,
           [
             patient_id,
@@ -1153,6 +1235,8 @@ router.post("/ghm-appointments", async (req, res) => {
             additional_whatsapp_msg,
             home_collection,
             cleanAltPhone,
+            demo.age,
+            demo.sex,
           ],
         );
 
@@ -1221,16 +1305,86 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "patient_category",
       "alt_phone",
       "booking_status",
+      "patient_name",
+      "phone",
+      "age",
+      "sex",
+      "whatsapp_message",
+      "additional_whatsapp_msg",
     ];
 
     if ("patient_category" in req.body && !isValidCategory(req.body.patient_category || null))
       return res.status(400).json({ error: `Unknown category: ${req.body.patient_category}` });
 
+    // Patient details the desk corrects after the booking. They live on the
+    // appointment and on the patient master, so both are written together —
+    // dob and address exist on the master only.
+    if ("patient_name" in req.body) {
+      const name = String(req.body.patient_name || "").trim();
+      if (!name) return res.status(400).json({ error: "Patient name is required" });
+      if (!/^[A-Za-z.\s'-]+$/.test(name))
+        return res.status(400).json({ error: "Patient name should contain letters only" });
+      req.body.patient_name = name;
+    }
+
+    if ("phone" in req.body) {
+      const digits = String(req.body.phone || "").replace(/\D/g, "");
+      if (digits && digits.length !== 10)
+        return res.status(400).json({ error: "Mobile number must be exactly 10 digits" });
+      req.body.phone = digits || null;
+    }
+
+    const editsDemographics = ["dob", "age", "sex"].some((k) => k in req.body);
+    let demo = null;
+    if (editsDemographics) {
+      demo = normalizeDemographics(req.body);
+      if (demo.error) return res.status(400).json({ error: demo.error });
+      if ("age" in req.body || "dob" in req.body) req.body.age = demo.age;
+      if ("sex" in req.body) req.body.sex = demo.sex;
+    }
+
+    const cleanAddress =
+      "address" in req.body ? String(req.body.address || "").trim() || null : null;
+
     if ("alt_phone" in req.body) {
-      const current = await pool.query("SELECT phone FROM appointments WHERE id=$1", [id]);
+      const current =
+        "phone" in req.body
+          ? { rows: [{ phone: req.body.phone }] }
+          : await pool.query("SELECT phone FROM appointments WHERE id=$1", [id]);
       const alts = normalizeAltPhones(req.body.alt_phone, current.rows[0]?.phone);
       if (alts.error) return res.status(400).json({ error: alts.error });
       req.body.alt_phone = alts.value;
+    }
+
+    // The reporting time and the WhatsApp message are generated at booking from
+    // the date, slot, doctor, name and visit type. Editing any of those makes
+    // the stored message wrong — and it is what the desk sends the patient — so
+    // regenerate both here, unless the caller set them itself.
+    const MESSAGE_INPUTS = [
+      "appointment_date",
+      "time_slot",
+      "doctor_name",
+      "visit_type",
+      "patient_name",
+    ];
+    const regenerate =
+      MESSAGE_INPUTS.some((k) => k in req.body) &&
+      !("whatsapp_message" in req.body) &&
+      !("reporting_time_slot" in req.body);
+    if (regenerate) {
+      const prev = await pool.query(
+        `SELECT ${MESSAGE_INPUTS.join(",")} FROM appointments WHERE id=$1`,
+        [id],
+      );
+      if (!prev.rows.length) return res.status(404).json({ error: "Not found" });
+      // DATE columns come back as plain YYYY-MM-DD strings (see config/db.js),
+      // so the stored date needs no reformatting before it goes in the message.
+      const merged = { ...prev.rows[0] };
+      for (const k of MESSAGE_INPUTS) if (k in req.body) merged[k] = req.body[k];
+      const msg = buildWhatsappMessage(merged);
+      req.body.reporting_time_slot = REPORTING_MAP[merged.time_slot] || merged.time_slot;
+      req.body.whatsapp_message = msg.whatsapp_message;
+      req.body.additional_whatsapp_msg = msg.additional_whatsapp_msg;
     }
 
     const sets = [];
@@ -1243,7 +1397,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
         sets.push(`${key}=$${vals.length}`);
       }
     }
-    if (!sets.length) return res.status(400).json({ error: "Nothing to update" });
+    const patientOnly = "dob" in req.body || "address" in req.body;
+    if (!sets.length && !patientOnly) return res.status(400).json({ error: "Nothing to update" });
 
     // If a doctor field is being changed, record the old value first (for audit log)
     const TRACK = {
@@ -1265,19 +1420,37 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     }
 
     vals.push(id);
-    const r = await pool.query(
-      `UPDATE appointments SET ${sets.join(",")} WHERE id=$${vals.length} RETURNING *`,
-      vals,
-    );
+    const r = sets.length
+      ? await pool.query(
+          `UPDATE appointments SET ${sets.join(",")} WHERE id=$${vals.length} RETURNING *`,
+          vals,
+        )
+      : await pool.query("SELECT * FROM appointments WHERE id=$1", [id]);
     if (!r.rows.length) return res.status(404).json({ error: "Not found" });
 
     // Keep the patient's master record in step, so the number is there for the
     // next booking and for the phone lookup in the New Appointment form.
-    if ("alt_phone" in req.body && r.rows[0].patient_id) {
-      await pool.query("UPDATE patients SET alt_phone=$1 WHERE id=$2", [
-        req.body.alt_phone,
-        r.rows[0].patient_id,
-      ]);
+    const patientSets = [];
+    const patientVals = [];
+    const putPatient = (col, value) => {
+      patientVals.push(value);
+      patientSets.push(`${col}=$${patientVals.length}`);
+    };
+    if ("alt_phone" in req.body) putPatient("alt_phone", req.body.alt_phone);
+    if ("patient_name" in req.body) putPatient("name", req.body.patient_name);
+    if ("phone" in req.body) putPatient("phone", req.body.phone);
+    if ("address" in req.body) putPatient("address", cleanAddress);
+    if (demo) {
+      if ("dob" in req.body) putPatient("dob", demo.dob);
+      if ("age" in req.body || "dob" in req.body) putPatient("age", demo.age);
+      if ("sex" in req.body) putPatient("sex", demo.sex);
+    }
+    if (patientSets.length && r.rows[0].patient_id) {
+      patientVals.push(r.rows[0].patient_id);
+      await pool.query(
+        `UPDATE patients SET ${patientSets.join(",")} WHERE id=$${patientVals.length}`,
+        patientVals,
+      );
     }
 
     // Log doctor changes

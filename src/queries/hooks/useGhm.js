@@ -14,6 +14,10 @@ const idKey = (ids) => [...new Set(ids)].sort((a, b) => a - b).join(",");
 
 export const PAGE_SIZE = 50;
 
+// How many charts on one phone number the booking form will offer to choose
+// between. Beyond this the desk should search by name or File No instead.
+export const PHONE_MATCH_LIMIT = 10;
+
 export function useGhmDoctors() {
   return useQuery({
     queryKey: qk.ghm.doctors(),
@@ -203,20 +207,25 @@ export function usePatientByFileNo(fileNo) {
   });
 }
 
-export function usePatientByPhone(phone) {
+// A phone number is NOT unique — families share one, and ~24% of patients with
+// a number share it with someone. So this returns EVERY chart on the number and
+// lets the caller decide; picking the first would book the wrong family member.
+export function usePatientsByPhone(phone) {
   const digits = String(phone || "").replace(/\D/g, "");
   return useQuery({
     queryKey: qk.ghm.patientByPhone(digits),
     queryFn: async () => {
-      const { data } = await api.get(`/api/patients?q=${encodeURIComponent(digits)}&limit=1`);
-      const hit = arr(data?.data)[0];
-      const match = [hit?.phone, ...(Array.isArray(hit?.alt_phone) ? hit.alt_phone : [])].some(
-        (v) =>
-          String(v || "")
-            .replace(/\D/g, "")
-            .endsWith(digits) && String(v || "").replace(/\D/g, "").length >= 10,
+      const { data } = await api.get(
+        `/api/patients?q=${encodeURIComponent(digits)}&limit=${PHONE_MATCH_LIMIT}`,
       );
-      return hit && match ? hit : null;
+      return arr(data?.data).filter((hit) =>
+        [hit?.phone, ...(Array.isArray(hit?.alt_phone) ? hit.alt_phone : [])].some(
+          (v) =>
+            String(v || "")
+              .replace(/\D/g, "")
+              .endsWith(digits) && String(v || "").replace(/\D/g, "").length >= 10,
+        ),
+      );
     },
     enabled: digits.length === 10,
     staleTime: 60_000,
@@ -270,6 +279,15 @@ export function usePatchAppointment(listKey, applyOptimistic) {
       queryClient.invalidateQueries({ queryKey: qk.ghm.all, refetchType: "none" });
       queryClient.invalidateQueries({ queryKey: ["ghm", "category-counts"] });
     },
+  });
+}
+
+// Patient details corrected after the booking — several fields land together,
+// and the server writes them to the appointment and the patient master both.
+export function useUpdateAppointmentPatient() {
+  return useGhmMutation(async ({ id, ...fields }) => {
+    const { data } = await api.patch(`/api/ghm-appointments/${id}`, fields);
+    return data;
   });
 }
 

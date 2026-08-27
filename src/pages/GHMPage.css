@@ -1079,6 +1079,25 @@ a.pcell__ph:hover {
   border-color: #93c5fd;
 }
 
+.edit-pt-btn {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.edit-pt-btn:hover {
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
 .records-btn {
   align-self: flex-start;
   margin-top: 3px;
@@ -1125,6 +1144,67 @@ a.pcell__ph:hover {
 }
 
 /* Prefill note inside modal */
+.pickpt {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 7px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.pickpt__hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+
+.pickpt__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pickpt__opt {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pickpt__opt:hover {
+  border-color: #f59e0b;
+  background: #fffdf5;
+}
+
+.pickpt__opt--new {
+  border-style: dashed;
+}
+
+.pickpt__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a2332;
+}
+
+.pickpt__meta {
+  font-size: 11px;
+  color: #6b7a90;
+}
+
 .modal__prefill-note {
   background: #f0fdf4;
   border: 1px solid #86efac;
@@ -1725,6 +1805,7 @@ a.pcell__ph:hover {
 .pref-tag,
 .book-next-btn,
 .records-btn,
+.edit-pt-btn,
 .pcell__ph,
 .pcell__addr,
 .reassign-msg {
@@ -1738,7 +1819,8 @@ a.pcell__ph:hover {
 .pref-tag,
 .attempt-badge,
 .book-next-btn,
-.records-btn {
+.records-btn,
+.edit-pt-btn {
   gap: 4px;
 }
 

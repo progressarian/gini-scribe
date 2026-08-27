@@ -15,6 +15,7 @@ import {
   MoveDown,
   MoveRight,
   MoveUp,
+  Pencil,
   Phone,
   PhoneCall,
   Plus,
@@ -25,6 +26,7 @@ import {
   Star,
   Sunrise,
   Trash2,
+  Users,
   X,
   RotateCcw,
 } from "lucide-react";
@@ -74,8 +76,9 @@ import {
   useLogCallAttempt,
   usePatchAppointment,
   usePatientByFileNo,
-  usePatientByPhone,
+  usePatientsByPhone,
   useReassignAppointment,
+  useUpdateAppointmentPatient,
 } from "../queries/hooks/useGhm";
 import { qk } from "../queries/keys";
 import { visitStatus } from "../lib/visitStatus.js";
@@ -160,6 +163,27 @@ const VIEW_TABS = [
     cap: CAP.RECEPTION_OPS,
   },
 ];
+
+// The tab survives a reload even when the URL has been stripped (a bookmark, a
+// sidebar link, a fresh window) — the URL stays the source of truth, this is the
+// fallback behind it.
+const TAB_STORE_KEY = "ghm_view_tab";
+
+const readStoredTab = () => {
+  try {
+    return localStorage.getItem(TAB_STORE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+
+const storeTab = (id) => {
+  try {
+    localStorage.setItem(TAB_STORE_KEY, id);
+  } catch {
+    /* private mode / storage disabled — the URL still carries the tab */
+  }
+};
 
 // ─── Call status options ───────────────────────────────────────────────────
 const SHOW_STATUSES = [
@@ -577,6 +601,118 @@ const BOOKING_STATUSES = [
   { value: "cancelled", label: "Cancelled", color: "red" },
 ];
 
+// Gender values the patients table accepts — the column has a CHECK on them.
+const SEXES = ["Male", "Female", "Other"];
+
+// The desk usually knows the age, not the date of birth. Either is accepted;
+// when a DOB is there the age follows from it and is never typed by hand.
+const ageFromDob = (dob) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dob || ""))) return "";
+  const b = new Date(`${dob}T00:00:00`);
+  if (Number.isNaN(b.getTime())) return "";
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age -= 1;
+  return age >= 0 && age <= 120 ? String(age) : "";
+};
+
+const toDateInput = (v) => (v ? String(v).slice(0, 10) : "");
+
+// Legacy rows carry "male"/"MALE" — match them to the canonical option so the
+// dropdown shows what is stored instead of reading as "not set".
+const canonSex = (v) => SEXES.find((s) => s.toLowerCase() === String(v || "").toLowerCase()) || "";
+
+// Shared alternate-numbers editor — the booking form and the edit form keep
+// the same list of extra numbers for a patient.
+function AltPhoneFields({ list, onChange }) {
+  const setAt = (i, v) =>
+    onChange(list.map((x, j) => (j === i ? v.replace(/\D/g, "").slice(0, 10) : x)));
+  const removeAt = (i) => {
+    const next = list.filter((_, j) => j !== i);
+    onChange(next.length ? next : [""]);
+  };
+  return (
+    <div className="fld">
+      <span>
+        Alternate Numbers <em className="fld__opt">(optional)</em>
+      </span>
+      {list.map((v, i) => (
+        <div className="altrow" key={i}>
+          <input
+            type="tel"
+            inputMode="numeric"
+            maxLength={10}
+            value={v}
+            onChange={(e) => setAt(i, e.target.value)}
+            placeholder="10-digit number"
+            aria-label={`Alternate number ${i + 1}`}
+          />
+          {(v || list.length > 1) && (
+            <button
+              type="button"
+              className="altrow__x"
+              onClick={() => removeAt(i)}
+              aria-label={`Remove alternate number ${i + 1}`}
+            >
+              <X size={13} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      ))}
+      <button type="button" className="altrow__add" onClick={() => onChange([...list, ""])}>
+        <Plus size={12} aria-hidden="true" />
+        Add another number
+      </button>
+    </div>
+  );
+}
+
+// Shared DOB / Age / Gender trio — the New Appointment form and the Edit
+// Patient form capture exactly the same three facts.
+function DemographicFields({ dob, age, sex, onChange }) {
+  const derived = ageFromDob(dob);
+  return (
+    <>
+      <label className="fld">
+        <span>
+          Date of Birth <em className="fld__opt">(optional)</em>
+        </span>
+        <input
+          type="date"
+          max={todayStr()}
+          value={dob}
+          onChange={(e) => onChange("dob", e.target.value)}
+        />
+      </label>
+      <label className="fld">
+        <span>Age {dob && <em className="fld__opt">— from date of birth</em>}</span>
+        <input
+          type="number"
+          min="0"
+          max="120"
+          inputMode="numeric"
+          value={dob ? derived : age}
+          readOnly={!!dob}
+          onChange={(e) => onChange("age", e.target.value.replace(/\D/g, "").slice(0, 3))}
+          placeholder="Years"
+        />
+      </label>
+      <label className="fld">
+        <span>Gender</span>
+        <select value={sex} onChange={(e) => onChange("sex", e.target.value)}>
+          <option value="">— Select gender</option>
+          {SEXES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
 // ─── New Appointment modal ─────────────────────────────────────────────────
 function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated }) {
   const isPrefilled = !!prefill?.patient_name;
@@ -585,6 +721,9 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     file_no: prefill?.file_no || "",
     phone: prefill?.phone || "",
     alt_phone: toAltList(prefill?.alt_phone),
+    dob: toDateInput(prefill?.dob),
+    age: prefill?.age != null ? String(prefill.age) : "",
+    sex: canonSex(prefill?.sex),
     doctor_name: prefill?.doctor_name || doctors[0] || "",
     appointment_date: defaultDate,
     time_slot: "",
@@ -626,6 +765,9 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
         .replace(/\D/g, "")
         .slice(0, 10),
       alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(lookedUpPatient.alt_phone),
+      dob: f.dob || toDateInput(lookedUpPatient.dob),
+      age: f.age || (lookedUpPatient.age != null ? String(lookedUpPatient.age) : ""),
+      sex: f.sex || canonSex(lookedUpPatient.sex),
       address: lookedUpPatient.address || f.address,
       visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
     }));
@@ -637,23 +779,68 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     return () => clearTimeout(t);
   }, [form.phone]);
 
-  const { data: phonePatient, isFetching: lookingUpPhone } = usePatientByPhone(phoneQuery);
+  // A number can belong to several charts — families share one line. One match
+  // fills the form as before; several must be chosen between, because guessing
+  // books the appointment onto a sibling's chart. Booking a second person on a
+  // known number is the same flow: "Someone else on this number".
+  const { data: phoneMatches, isFetching: lookingUpPhone } = usePatientsByPhone(phoneQuery);
+  const matches = useMemo(() => safeArr(phoneMatches), [phoneMatches]);
+  const [pickedPhonePatient, setPickedPhonePatient] = useState(null);
   const filledFromPhoneRef = useRef("");
 
-  useEffect(() => {
-    if (!phonePatient) return;
-    const key = String(phonePatient.phone || "");
-    if (filledFromPhoneRef.current === key) return;
-    filledFromPhoneRef.current = key;
+  const fillFromPatient = useCallback((p) => {
     setForm((f) => ({
       ...f,
-      patient_name: f.patient_name.trim() || phonePatient.name || "",
-      file_no: f.file_no.trim() || String(phonePatient.file_no || ""),
-      address: f.address.trim() || phonePatient.address || "",
-      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(phonePatient.alt_phone),
+      patient_name: p.name || f.patient_name,
+      file_no: String(p.file_no || ""),
+      address: p.address || f.address,
+      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(p.alt_phone),
+      dob: toDateInput(p.dob) || f.dob,
+      age: p.age != null ? String(p.age) : f.age,
+      sex: canonSex(p.sex) || f.sex,
       visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
     }));
-  }, [phonePatient]);
+  }, []);
+
+  useEffect(() => {
+    if (matches.length !== 1) return;
+    const only = matches[0];
+    const key = String(only.id || only.file_no || "");
+    if (filledFromPhoneRef.current === key) return;
+    filledFromPhoneRef.current = key;
+    setPickedPhonePatient(only);
+    setForm((f) => ({
+      ...f,
+      patient_name: f.patient_name.trim() || only.name || "",
+      file_no: f.file_no.trim() || String(only.file_no || ""),
+      address: f.address.trim() || only.address || "",
+      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(only.alt_phone),
+      dob: f.dob || toDateInput(only.dob),
+      age: f.age || (only.age != null ? String(only.age) : ""),
+      sex: f.sex || canonSex(only.sex),
+      visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
+    }));
+  }, [matches]);
+
+  // A new number, or one the desk edited, clears the earlier choice so the
+  // chooser comes back instead of leaving a stale chart selected.
+  useEffect(() => {
+    setPickedPhonePatient(null);
+    filledFromPhoneRef.current = "";
+  }, [phoneQuery]);
+
+  const chooseSharedPatient = (p) => {
+    setPickedPhonePatient(p || { id: "new" });
+    if (p) fillFromPatient(p);
+    else
+      setForm((f) => ({
+        ...f,
+        file_no: "",
+        visit_type: "New",
+      }));
+  };
+
+  const needsPhoneChoice = matches.length > 1 && !pickedPhonePatient;
 
   const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
   const availSlots = availData ?? null;
@@ -671,17 +858,6 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
 
   // Phone: keep digits only, cap at 10
   const setPhone = (v) => set("phone", v.replace(/\D/g, "").slice(0, 10));
-  const setAltPhone = (i, v) =>
-    setForm((f) => ({
-      ...f,
-      alt_phone: f.alt_phone.map((x, j) => (j === i ? v.replace(/\D/g, "").slice(0, 10) : x)),
-    }));
-  const addAltPhone = () => setForm((f) => ({ ...f, alt_phone: [...f.alt_phone, ""] }));
-  const removeAltPhone = (i) =>
-    setForm((f) => {
-      const next = f.alt_phone.filter((_, j) => j !== i);
-      return { ...f, alt_phone: next.length ? next : [""] };
-    });
 
   const save = async (allowDuplicate = false) => {
     const name = form.patient_name.trim();
@@ -704,6 +880,12 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
       return setErr("Mobile number is required for a new patient");
     if (form.file_no && !/^[A-Za-z0-9_-]+$/.test(form.file_no.trim()))
       return setErr("File No can only contain letters, numbers, _ and -");
+    // Several charts share this number and nobody has said which — booking now
+    // would attach the visit to whichever one happened to sort first.
+    if (needsPhoneChoice)
+      return setErr("This number belongs to more than one patient — pick who this is for");
+    if (form.dob && form.dob > todayStr()) return setErr("Date of birth cannot be in the future");
+    if (!form.dob && form.age && +form.age > 120) return setErr("Age must be between 0 and 120");
 
     setErr("");
     setDup(null);
@@ -808,6 +990,52 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
               Patient details auto-filled. Just pick the date, slot &amp; doctor.
             </div>
           )}
+          {needsPhoneChoice && (
+            <div className="pickpt">
+              <div className="pickpt__hdr">
+                <Users size={14} aria-hidden="true" />
+                {matches.length} patients share this number — who is this appointment for?
+              </div>
+              <ul className="pickpt__list">
+                {matches.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className="pickpt__opt"
+                      onClick={() => chooseSharedPatient(p)}
+                    >
+                      <span className="pickpt__name">{p.name}</span>
+                      <span className="pickpt__meta">
+                        {[
+                          p.file_no,
+                          canonSex(p.sex),
+                          p.age != null ? `${p.age} yrs` : null,
+                          p.last_visit
+                            ? `last visit ${prettyDate(String(p.last_visit).slice(0, 10))}`
+                            : null,
+                          p.visit_count ? `${p.visit_count} visits` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+                <li>
+                  <button
+                    type="button"
+                    className="pickpt__opt pickpt__opt--new"
+                    onClick={() => chooseSharedPatient(null)}
+                  >
+                    <span className="pickpt__name">Someone else on this number</span>
+                    <span className="pickpt__meta">
+                      Creates a new patient record with its own File No
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          )}
 
           <div className="fgrid">
             <label className="fld fld--wide">
@@ -843,10 +1071,13 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                   <em className="fld__warn">{form.phone.length}/10</em>
                 )}
                 {lookingUpPhone && <em className="fld__opt"> — searching…</em>}
-                {!lookingUpPhone && phonePatient && (
-                  <em className="fld__ok"> — {phonePatient.name} found</em>
+                {!lookingUpPhone && matches.length === 1 && (
+                  <em className="fld__ok"> — {matches[0].name} found</em>
                 )}
-                {!lookingUpPhone && phoneQuery.length === 10 && !phonePatient && (
+                {!lookingUpPhone && matches.length > 1 && (
+                  <em className="fld__warn"> — {matches.length} patients on this number</em>
+                )}
+                {!lookingUpPhone && phoneQuery.length === 10 && matches.length === 0 && (
                   <em className="fld__warn"> — no match</em>
                 )}
               </span>
@@ -859,38 +1090,13 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 placeholder="10-digit number"
               />
             </label>
-            <div className="fld">
-              <span>
-                Alternate Numbers <em className="fld__opt">(optional)</em>
-              </span>
-              {form.alt_phone.map((v, i) => (
-                <div className="altrow" key={i}>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={10}
-                    value={v}
-                    onChange={(e) => setAltPhone(i, e.target.value)}
-                    placeholder="10-digit number"
-                    aria-label={`Alternate number ${i + 1}`}
-                  />
-                  {(v || form.alt_phone.length > 1) && (
-                    <button
-                      type="button"
-                      className="altrow__x"
-                      onClick={() => removeAltPhone(i)}
-                      aria-label={`Remove alternate number ${i + 1}`}
-                    >
-                      <X size={13} aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button type="button" className="altrow__add" onClick={addAltPhone}>
-                <Plus size={12} aria-hidden="true" />
-                Add another number
-              </button>
-            </div>
+            <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
+            <DemographicFields
+              dob={form.dob}
+              age={form.age}
+              sex={form.sex}
+              onChange={(k, v) => set(k, v)}
+            />
             <label className="fld">
               <span>Date *</span>
               <input
@@ -999,13 +1205,292 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   );
 }
 
+// ─── Edit Patient modal ────────────────────────────────────────────────────
+// A booking is made on the phone, often before the desk has the patient's full
+// details — so everything the booking form captures stays correctable from the
+// row afterwards. File No is the one exception: it identifies the chart, and
+// re-pointing a booking at a different patient is a reassignment, not an edit.
+// The save writes the appointment and the patient master together, so the next
+// booking starts from the corrected record.
+function EditPatientModal({ row, doctors, onClose }) {
+  const [form, setForm] = useState({
+    patient_name: row.patient_name || "",
+    phone: String(row.phone || "")
+      .replace(/\D/g, "")
+      .slice(-10),
+    alt_phone: toAltList(row.alt_phone),
+    dob: toDateInput(row.disp_dob),
+    age: row.disp_age != null ? String(row.disp_age) : "",
+    sex: canonSex(row.disp_sex),
+    appointment_date: toDateInput(row.appointment_date),
+    time_slot: row.time_slot || "",
+    doctor_name: row.doctor_name || "",
+    appointment_type: row.mode_of_appointment || row.appointment_type || "",
+    condition: row.condition || "",
+    address: row.address || "",
+    booked_by_name: row.booked_by_name || "",
+    notes: row.notes || "",
+    home_collection: !!row.home_collection,
+  });
+  const [err, setErr] = useState("");
+
+  useBodyScrollLock();
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
+  const availSlots = availData ?? null;
+
+  const updateMutation = useUpdateAppointmentPatient();
+  const saving = updateMutation.isPending;
+
+  // A slot that has gone unavailable since the booking is still the one this
+  // patient holds — it stays selectable so an unrelated edit never silently
+  // drops it. Only a fresh pick has to land on a free slot.
+  //
+  // It is listed verbatim rather than through withCurrent(): most bookings
+  // carry a sheet ("05. 1-2PM") or HealthRay ("13:00") label that the catalog
+  // never had, so tagging those "(retired)" would claim the patient's slot was
+  // discontinued when it is only written in another format.
+  const offered = slotOptions(availSlots).map((s) => ({
+    value: s.slot_label,
+    label: s.available
+      ? s.slot_label
+      : `${s.slot_label} — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`,
+    available: s.available,
+  }));
+  const slotList = offered.some((s) => s.value === form.time_slot)
+    ? offered
+    : [
+        ...(form.time_slot
+          ? [{ value: form.time_slot, label: `${form.time_slot} — booked`, available: true }]
+          : []),
+        ...offered,
+      ];
+
+  const doctorList = withCurrent(
+    doctors.map((d) => ({ value: d, label: d })),
+    form.doctor_name,
+  );
+
+  const save = async () => {
+    const name = form.patient_name.trim();
+    if (!name) return setErr("Patient name is required");
+    if (!/^[A-Za-z.\s'-]+$/.test(name)) return setErr("Patient name should contain letters only");
+    if (!form.doctor_name) return setErr("Please select a doctor");
+    if (!form.appointment_date) return setErr("Please select a date");
+    if (form.phone && !/^\d{10}$/.test(form.phone))
+      return setErr("Mobile number must be exactly 10 digits");
+    const alts = form.alt_phone.map((v) => v.trim()).filter(Boolean);
+    if (alts.some((v) => !/^\d{10}$/.test(v)))
+      return setErr("Each alternate number must be exactly 10 digits");
+    if (alts.some((v) => v === form.phone))
+      return setErr("An alternate number must be different from the mobile number");
+    if (new Set(alts).size !== alts.length)
+      return setErr("The same alternate number is entered twice");
+    if (form.dob && form.dob > todayStr()) return setErr("Date of birth cannot be in the future");
+    if (!form.dob && form.age && +form.age > 120) return setErr("Age must be between 0 and 120");
+
+    setErr("");
+    try {
+      await updateMutation.mutateAsync({
+        id: row.id,
+        patient_name: name,
+        phone: form.phone,
+        alt_phone: alts,
+        dob: form.dob,
+        age: form.dob ? "" : form.age,
+        sex: form.sex,
+        appointment_date: form.appointment_date,
+        time_slot: form.time_slot,
+        doctor_name: form.doctor_name,
+        appointment_type: form.appointment_type,
+        condition: form.condition.trim(),
+        address: form.address.trim(),
+        booked_by_name: form.booked_by_name.trim(),
+        notes: form.notes.trim(),
+        home_collection: form.home_collection,
+      });
+      onClose();
+    } catch (e) {
+      setErr(e?.response?.data?.error || "Could not save. Please try again.");
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal__hdr">
+          <span className="modal__title">
+            <Pencil size={16} aria-hidden="true" />
+            {row.file_no ? `Edit Patient Details — ${row.file_no}` : "Edit Patient Details"}
+          </span>
+          <button className="modal__x" onClick={onClose} aria-label="Close">
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="modal__body">
+          {err && <div className="modal__err">{err}</div>}
+
+          <div className="fgrid">
+            <label className="fld fld--wide">
+              <span>Patient Name *</span>
+              <input
+                value={form.patient_name}
+                onChange={(e) => set("patient_name", e.target.value)}
+                placeholder="Full name"
+                autoFocus
+              />
+            </label>
+            <label className="fld">
+              <span>
+                Mobile{" "}
+                {form.phone && form.phone.length !== 10 && (
+                  <em className="fld__warn">{form.phone.length}/10</em>
+                )}
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                value={form.phone}
+                onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                placeholder="10-digit number"
+              />
+            </label>
+            <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
+            <DemographicFields
+              dob={form.dob}
+              age={form.age}
+              sex={form.sex}
+              onChange={(k, v) => set(k, v)}
+            />
+            <label className="fld">
+              <span>Date *</span>
+              <input
+                type="date"
+                value={form.appointment_date}
+                onChange={(e) => set("appointment_date", e.target.value)}
+              />
+            </label>
+            <label className="fld">
+              <span>Time Slot</span>
+              <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
+                <option value="">— Select slot</option>
+                {slotList.map((s) => (
+                  <option
+                    key={s.value}
+                    value={s.value}
+                    disabled={s.available === false && s.value !== form.time_slot}
+                  >
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="fld fld--wide">
+              <span>Doctor *</span>
+              <select value={form.doctor_name} onChange={(e) => set("doctor_name", e.target.value)}>
+                <option value="">— Select doctor</option>
+                {doctorList.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="fld">
+              <span>Visit Type</span>
+              <select
+                value={form.appointment_type}
+                onChange={(e) => set("appointment_type", e.target.value)}
+              >
+                {withCurrent(MODE_OPTIONS, form.appointment_type).map((v) => (
+                  <option key={v.value} value={v.value}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="fld">
+              <span>Condition</span>
+              <input
+                value={form.condition}
+                onChange={(e) => set("condition", e.target.value)}
+                placeholder="Diabetes / Thyroid…"
+              />
+            </label>
+            <label className="fld fld--wide">
+              <span>Address</span>
+              <input
+                value={form.address}
+                onChange={(e) => set("address", e.target.value)}
+                placeholder="House / street, area, city, pincode"
+              />
+            </label>
+            <label className="fld">
+              <span>Booked By</span>
+              <input
+                value={form.booked_by_name}
+                onChange={(e) => set("booked_by_name", e.target.value)}
+                placeholder="Your name"
+              />
+            </label>
+            <label className="fld fld--wide">
+              <span>Notes</span>
+              <input
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder="Any note…"
+              />
+            </label>
+            <label className="fld fld--check fld--wide">
+              <input
+                type="checkbox"
+                checked={form.home_collection}
+                onChange={(e) => set("home_collection", e.target.checked)}
+              />
+              <span>Needs home sample collection</span>
+            </label>
+          </div>
+
+          <p className="modal__hint">
+            File No is fixed: moving this booking to another patient is a reassignment, not an edit.
+            <br />
+            <Smartphone size={13} aria-hidden="true" /> Changing the date, slot, doctor or visit
+            type regenerates the reporting time &amp; WhatsApp message.
+          </p>
+        </div>
+
+        <div className="modal__foot">
+          <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button className="btn btn--primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Call history expandable row content ───────────────────────────────────
 // The two per-patient actions. They live in the Patient cell normally and move
 // into the row's expander in compact mode, where that cell is cut down to the
 // name and number — so compact never costs the desk an action.
-function RowActions({ row, onBookNext, onRecords }) {
+function RowActions({ row, onBookNext, onRecords, onEditPatient }) {
   return (
     <>
+      <button
+        className="edit-pt-btn"
+        title="Edit this patient's name, number, age, gender and address"
+        onClick={() => onEditPatient(row)}
+      >
+        <Pencil size={12} aria-hidden="true" />
+        Edit details
+      </button>
       <button
         className="book-next-btn"
         title="Book next appointment for this patient"
@@ -1514,7 +1999,10 @@ export default function GHMPage() {
   );
   const canReassign = visibleTabs.some((t) => t.id === "reassign");
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = VIEW_TABS.find((t) => t.id === searchParams.get("tab")) || VIEW_TABS[0];
+  const initialTab =
+    VIEW_TABS.find((t) => t.id === searchParams.get("tab")) ||
+    VIEW_TABS.find((t) => t.id === readStoredTab()) ||
+    VIEW_TABS[0];
   const [view, setView] = useState(initialTab.id); // by_date | tomorrow | fu3
   const [date, setDate] = useState(
     searchParams.get("date") ||
@@ -1531,6 +2019,7 @@ export default function GHMPage() {
   const [debouncedSearch, setDebouncedSearch] = useState(searchParams.get("q") || "");
   const [search, setSearch] = useState(searchParams.get("q") || "");
   const [recordFor, setRecordFor] = useState(null);
+  const [editPatientFor, setEditPatientFor] = useState(null);
   const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const EXPORT_PAGE_SIZE = 100;
 
@@ -1538,19 +2027,15 @@ export default function GHMPage() {
   const ccAgents = useCcAgents().data || [];
 
   // ── Switch the day-view tab (also sets the date) ─────────────────────────
+  // Only `view` moves here. The URL is written in one place (the sync effect
+  // below) — writing `tab` here too raced that effect, which rebuilds the query
+  // from the searchParams of the render it was created in and so could replay a
+  // snapshot taken before this write and drop `tab` again.
   const switchView = (tab) => {
     setView(tab.id);
     setExpanded(null);
     if (tab.offset !== null) setDate(addDaysStr(tab.offset));
     else setDate(todayStr());
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("tab", tab.id);
-        return next;
-      },
-      { replace: true },
-    );
   };
 
   const searchQ = debouncedSearch.trim();
@@ -1566,6 +2051,7 @@ export default function GHMPage() {
       (prev) => {
         const next = new URLSearchParams(prev);
         const put = (k, v, def) => (v && v !== def ? next.set(k, v) : next.delete(k));
+        next.set("tab", view);
         put("doctor", doctor, "All");
         put("collection", collectionFilter, "all");
         put("pill", pillFilter, "");
@@ -1577,6 +2063,18 @@ export default function GHMPage() {
       { replace: true },
     );
   }, [doctor, collectionFilter, pillFilter, compact, searchQ, date, view, setSearchParams]);
+
+  useEffect(() => {
+    storeTab(view);
+  }, [view]);
+
+  // A stored or linked tab the role cannot open (Reassign is RECEPTION_OPS) would
+  // otherwise leave the page on a tab with no visible button.
+  useEffect(() => {
+    if (visibleTabs.length && !visibleTabs.some((t) => t.id === view)) {
+      switchView(visibleTabs[0]);
+    }
+  }, [view, visibleTabs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtersActive =
     doctor !== "All" ||
@@ -1748,6 +2246,9 @@ export default function GHMPage() {
       address: row.address,
       doctor_name: row.doctor_name,
       alt_phone: row.alt_phone,
+      dob: row.disp_dob,
+      age: row.disp_age,
+      sex: row.disp_sex,
     });
     setShowNew(true);
   }, []);
@@ -2051,6 +2552,14 @@ export default function GHMPage() {
         />
       )}
 
+      {editPatientFor && (
+        <EditPatientModal
+          row={editPatientFor}
+          doctors={doctors}
+          onClose={() => setEditPatientFor(null)}
+        />
+      )}
+
       {recordFor && (
         <PatientRecordModal
           patientId={recordFor.id}
@@ -2322,6 +2831,7 @@ export default function GHMPage() {
                                   row={row}
                                   onBookNext={bookNext}
                                   onRecords={setRecordFor}
+                                  onEditPatient={setEditPatientFor}
                                 />
                               )}
                             </div>
@@ -2688,6 +3198,7 @@ export default function GHMPage() {
                                   row={row}
                                   onBookNext={bookNext}
                                   onRecords={setRecordFor}
+                                  onEditPatient={setEditPatientFor}
                                 />
                               ) : null
                             }
