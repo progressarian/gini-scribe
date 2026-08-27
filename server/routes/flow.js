@@ -6,6 +6,8 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { fetchBlockRow, resolvePatientId } from "../services/patientBlockGuard.js";
+import { redactBlock } from "../services/patientBlockView.js";
 import { requireCapability } from "../middleware/auth.js";
 import {
   CAPABILITIES as CAP,
@@ -27,6 +29,12 @@ import {
 } from "../services/flow/journey.js";
 import { fetchPatientTransactions } from "../services/healthray/client.js";
 import { transactionsToBilling } from "../services/healthray/billingExtractor.js";
+
+// Blocked patients are hidden from working lists — nobody should be calling,
+// booking or preparing for them. They stay findable in /find and on the admin
+// Blocked tab. See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
+const NOT_BLOCKED = (a = "a") =>
+  ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
 
 const router = Router();
 
@@ -903,6 +911,15 @@ router.post("/flow/checkin", async (req, res) => {
       return res.status(400).json({ error: "journey_steps must be a non-empty array" });
     }
 
+    // Blocklist — a WARNING here, not a refusal. The person is standing at the
+    // desk; reception needs to be told, not stonewalled. The hard stop lives on
+    // the booking paths. Their WhatsApp confirmation is suppressed below.
+    // NB: flow's `patient_id` is the file number; `patient_db_id` is patients.id.
+    const blockPatientId =
+      patient_db_id || (await resolvePatientId({ fileNo: patient_id, phone: patient_phone }));
+    const blockRow = await fetchBlockRow(blockPatientId);
+    const patientBlocked = !!blockRow?.is_blocked;
+
     const vt = await client.query("SELECT * FROM flow_visit_types WHERE id=$1", [visit_type_id]);
     if (!vt.rows.length) return res.status(400).json({ error: "Unknown visit_type_id" });
     const maxTime = vt.rows[0].max_time_min;
@@ -1083,7 +1100,7 @@ router.post("/flow/checkin", async (req, res) => {
 
     // Best-effort WhatsApp confirmation — never blocks/fails the check-in.
     let whatsappSent = false;
-    if (send_whatsapp && patient_phone) {
+    if (send_whatsapp && patient_phone && !patientBlocked) {
       try {
         const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
         const host = req.get("host");
@@ -1117,6 +1134,7 @@ router.post("/flow/checkin", async (req, res) => {
       token_number: tokenNumber,
       suggested_wait_min: totalPlanned,
       whatsapp_sent: whatsappSent,
+      blocked: redactBlock(blockRow, req.doctor?.role),
     });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -3260,7 +3278,7 @@ router.get("/flow/appointments", async (req, res) => {
 
     // Same day-membership rule as the GHM list: booked on the date, OR asked to
     // come on the date (preferred_date) while booked for another one.
-    let where = "WHERE (a.appointment_date = $1 OR a.preferred_date = $1)";
+    let where = "WHERE (a.appointment_date = $1 OR a.preferred_date = $1)" + NOT_BLOCKED("a");
     if (req.query.doctor) {
       params.push(`%${req.query.doctor}%`);
       where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;

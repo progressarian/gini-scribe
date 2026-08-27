@@ -30,6 +30,12 @@ export const qk = {
     all: ["patient"],
     full: (id) => ["patient", "full", String(id)],
   },
+  patientBlocks: {
+    all: ["patient-blocks"],
+    status: (patientIds) => ["patient-blocks", "status", patientIds],
+    list: (params) => ["patient-blocks", "list", params || null],
+    history: (patientId) => ["patient-blocks", "history", String(patientId)],
+  },
   flow: {
     all: ["flow"],
     visits: (date, status) => ["flow", "visits", date, status || null],

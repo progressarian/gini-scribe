@@ -15,6 +15,13 @@ import {
   routeForForm,
 } from "../services/medication/normalize.js";
 import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
+
+// Blocked patients are hidden from working lists — nobody should be calling,
+// booking or preparing for them. They stay findable in /find and on the admin
+// Blocked tab. See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
+const NOT_BLOCKED = (a = "a") =>
+  ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
 
 // Invalidate summary cache after any successful mutation on /appointments/:id/*.
 // (List & status reads aren't matched here.) Skip the lightweight status flip,
@@ -39,6 +46,10 @@ const syncAppointmentToGenie = noop;
 const syncCareTeamToGenie = noop;
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 // ── DB migration: ensure OPD columns exist ───────────────────────────────────
 pool
@@ -369,6 +380,7 @@ router.get("/opd/appointments", async (req, res) => {
            ON (a.file_no IS NOT NULL AND p.file_no = a.file_no)
            OR (a.file_no IS NULL AND p.id = a.patient_id)
         WHERE a.appointment_date = $1
+          AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = a.patient_id AND bp.is_blocked)
         ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
       [date],
     );
@@ -986,7 +998,7 @@ router.get("/opd/appointments-range", async (req, res) => {
     const doctorFilter = (req.query.doctor || "").trim();
     const specialtyFilter = (req.query.specialty || req.query.speciality || "").trim();
     const params = [start, end];
-    let qualWhere = "WHERE a.appointment_date BETWEEN $1 AND $2";
+    let qualWhere = "WHERE a.appointment_date BETWEEN $1 AND $2" + NOT_BLOCKED("a");
     if (doctorFilter) {
       params.push(doctorFilter);
       qualWhere += ` AND a.doctor_name = $${params.length}`;

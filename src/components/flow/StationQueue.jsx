@@ -421,13 +421,26 @@ export default function StationQueue({ role, form, freeMove = false }) {
     (v.steps || []).some(
       (s) => s.assigned_role === role && ["completed", "skipped"].includes(s.status),
     );
+  // Has this station's work still ahead of them — the step exists on their
+  // journey and is neither done nor skipped. Without this the list was every
+  // patient in the building on every station's page, which reads as a backlog
+  // when most of them will never come to this desk.
+  const pendingHere = (v) =>
+    (v.steps || []).some(
+      (s) => s.assigned_role === role && !["completed", "skipped"].includes(s.status),
+    );
   // While searching, show every match the server returned — including patients
-  // this desk has already finished with, since finding them again is the point.
+  // this desk has already finished with, and patients with no step here at all,
+  // since finding them to send them here is the point.
   const notSeenHere = (
     searching
       ? allVisits
       : allVisits.filter(
-          (v) => PRESENT_STATUSES.includes(v.status) && !myVisitIds.has(v.id) && !settledHere(v),
+          (v) =>
+            PRESENT_STATUSES.includes(v.status) &&
+            !myVisitIds.has(v.id) &&
+            !settledHere(v) &&
+            pendingHere(v),
         )
   ).map((v) => ({ visit: v, step: currentStepOf(v) }));
 
@@ -1098,7 +1111,7 @@ export default function StationQueue({ role, form, freeMove = false }) {
             <div className="q-sec">
               <div className="q-sec-head">
                 <span className="flow-sec-title" style={{ margin: 0 }}>
-                  {searching ? "Search results" : "Checked in today — not yet seen at this station"}
+                  {searching ? "Search results" : "Due at this station — not yet in your queue"}
                   <span className="q-count">{notSeenHere.length}</span>
                 </span>
                 <div className="q-search">
@@ -1120,17 +1133,19 @@ export default function StationQueue({ role, form, freeMove = false }) {
                   )}
                 </div>
               </div>
-              {searching && (
-                <div className="flow-muted" style={{ marginBottom: 6 }}>
-                  {searchBusy ? "Searching…" : `Matching today’s patients for “${debounced}”`}
-                </div>
-              )}
+              <div className="flow-muted" style={{ marginBottom: 6 }}>
+                {searching
+                  ? searchBusy
+                    ? "Searching…"
+                    : `Matching today’s patients for “${debounced}”`
+                  : "Patients whose journey still has a step here, waiting on earlier stations. Search to find anyone else checked in today."}
+              </div>
 
               {notSeenHere.length === 0 ? (
                 <div className="flow-card flow-empty">
                   {searching
                     ? `No patient today matches “${debounced}”.`
-                    : "Everyone checked in has either been through this station or is in your queue above."}
+                    : "Nobody is waiting on this station further down their journey. Search above to find any patient checked in today and send them here."}
                 </div>
               ) : (
                 notSeenHere.map(({ visit: v, step }) => {

@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
+import BlockedBadge from "../components/ui/BlockedBadge";
+import { usePatientBlockStatus } from "../queries/hooks/usePatientBlocks";
 import { genieSupabase, hasGenieRealtime } from "../lib/genieSupabase.js";
 import { useConversations } from "../queries/hooks/useConversations";
 import { useThreadMessages, flattenThread } from "../queries/hooks/useThreadMessages";
@@ -419,6 +421,9 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
     };
   }, [patientQuery, showNewChat]);
 
+  const patientBlocks =
+    usePatientBlockStatus((patientResults || []).map((p) => p.id).filter(Boolean)).data || {};
+
   const startChatWithPatient = async (patient) => {
     if (!patient?.id || startingChat) return;
     setStartingChat(true);
@@ -803,7 +808,9 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
                     <div>
-                      <div style={{ fontWeight: 500, fontSize: 14 }}>{p.name || "Unnamed"}</div>
+                      <div style={{ fontWeight: 500, fontSize: 14 }}>
+                        {p.name || "Unnamed"} <BlockedBadge block={patientBlocks[p.id]} size="sm" />
+                      </div>
                       <div style={{ fontSize: 12, color: "#64748b" }}>{p.phone || "No phone"}</div>
                     </div>
                     <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 500 }}>Chat →</div>

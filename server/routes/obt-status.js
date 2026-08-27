@@ -1,8 +1,17 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { blockWriteBodyGuard, blockWriteGuardVia } from "../middleware/blockWriteGuard.js";
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+// Scoped to this router's own path. A pathless router.use() on a router
+// mounted at /api runs for EVERY /api request that reaches it, so it would
+// guard unrelated routes registered later in index.js.
+router.use("/obt-status", blockWriteBodyGuard);
+router.param("id", blockWriteGuardVia("obt_call_status", "file_no"));
 
 // GET /api/obt-status?date=2026-06-02  — tomorrow's list with call status
 router.get("/obt-status", async (req, res) => {

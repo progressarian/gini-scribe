@@ -101,6 +101,7 @@ export const PAGE_CAPABILITIES = {
   "/ghm": [CAP.RECEPTION_OPS, CAP.OBT_OPS],
   "/obt-dashboard": CAP.OBT_OPS,
   "/doctor-management": CAP.ADMIN,
+  "/admin/blocklist": CAP.ADMIN,
   "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
   // Appointment search + Quick Book (it POSTs /api/appointments — not read-only).

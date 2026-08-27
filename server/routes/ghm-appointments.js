@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
+import { checkPatientBlocked, blockedResponse, blockActor } from "../services/patientBlockGuard.js";
 import {
   ownFu,
   dayWindowWhere,
@@ -714,6 +715,12 @@ const summaryCols = (a, callStat = null) => {
 // Hard ceiling for an export=1 response. Well above a real day's list (the
 // busiest date in the table is a few hundred) and above every lookup result
 // seen so far, so it only ever trips on a runaway query.
+// Hide blocked patients from a list. Join-independent on purpose: the `where`
+// built here is shared between the row query (which joins `patients`) and the
+// summary count query (which does not), so it must not reference that join.
+const NOT_BLOCKED = (a = "a") =>
+  ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
+
 const EXPORT_MAX = 5000;
 
 const ATTENDED_STATUSES = `'{"seen","completed","checkedin","in_visit","in-progress"}'::text[]`;
@@ -770,6 +777,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.patient_category,
                 ${LAST_VISIT_SQL} AS last_visit_date,
                 p.id AS patient_id, p.address, p.email,
+                COALESCE(p.is_blocked, FALSE) AS is_blocked,
                 p.dob AS disp_dob,
                 COALESCE(a.age, p.age) AS disp_age,
                 COALESCE(a.sex, p.sex) AS disp_sex,
@@ -802,7 +810,9 @@ router.get("/ghm-appointments", async (req, res) => {
             `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1} OR EXISTS (SELECT 1 FROM unnest(COALESCE(a.alt_phone, '{}')) alt WHERE alt ILIKE $${i + 1}))`,
         )
         .join(" AND ");
-      const searchWhere = `WHERE (${tokenConds})${homeCond}`;
+      // Lookup is still GHM ops, so blocked patients stay hidden here too — they
+      // are reachable from /find and the admin Blocked tab.
+      const searchWhere = `WHERE (${tokenConds})${homeCond}${NOT_BLOCKED("a")}`;
       const likeParams = tokens.map((t) => `%${t}%`);
       const dIdx = tokens.length + 1;
 
@@ -894,6 +904,16 @@ router.get("/ghm-appointments", async (req, res) => {
     // } else {
     where = dayWindowWhere("a");
     // }
+    // Blocked patients are hidden from the ops day list entirely — nobody should
+    // be calling or booking them, so they should not be in the working set at
+    // all. They remain findable in /find and on the admin Blocked tab.
+    //
+    // NOT_BLOCKED, not a `p.is_blocked` test: this same `where` is reused by the
+    // summary count query, which selects FROM appointments alone with no
+    // `patients` join. Referencing `p` there is a missing-FROM-clause error that
+    // takes the whole day list down.
+    // See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
+    where += NOT_BLOCKED("a");
     where += homeCond;
     if (doctor) {
       params.push(`%${doctor}%`);
@@ -1039,6 +1059,17 @@ router.post("/ghm-appointments", async (req, res) => {
         resolved_file_no = resolved_file_no || pr.rows[0].file_no;
       }
     }
+    // Blocklist. Sits between identity resolution and chart creation so a
+    // blocked patient is never laundered into a fresh chart, and so the
+    // demographics UPDATE below never runs for a refused booking.
+    const blockedPatient = await checkPatientBlocked({
+      patientId: patient_id,
+      force: req.body.force,
+      role: req.doctor?.role,
+      actor: blockActor(req),
+    });
+    if (blockedPatient) return res.status(409).json(blockedResponse(blockedPatient));
+
     // New patient — create a master record so they're tracked permanently
     if (!patient_id) {
       let newFileNo = file_no;

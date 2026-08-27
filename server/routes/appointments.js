@@ -8,7 +8,14 @@ import {
   resolveDoctorIdByName,
   checkBookingAvailability as checkAvailability,
 } from "../services/bookingGuard.js";
+import { checkPatientBlocked, blockedResponse, blockActor } from "../services/patientBlockGuard.js";
 import { isSlotAvailable, findAvailableDoctors } from "../services/availability.js";
+
+// Blocked patients are hidden from working lists — nobody should be calling,
+// booking or preparing for them. They stay findable in /find and on the admin
+// Blocked tab. See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
+const NOT_BLOCKED = (a = "a") =>
+  ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -27,7 +34,7 @@ router.get("/appointments", async (req, res) => {
     const offset = (page - 1) * limit;
     const d = date || new Date().toISOString().split("T")[0];
 
-    let where = `WHERE a.appointment_date = $1`;
+    let where = `WHERE a.appointment_date = $1` + NOT_BLOCKED("a");
     const params = [d];
     if (doctor) {
       params.push(`%${doctor}%`);
@@ -137,44 +144,53 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
       is_walkin,
     } = req.body;
 
-    // Auto-match or auto-create patient if patient_id not provided
-    if (!patient_id && patient_name) {
-      if (file_no) {
-        const match = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
-          file_no,
-        ]);
-        if (match.rows[0]) {
-          patient_id = match.rows[0].id;
-        }
+    // Auto-match patient if patient_id not provided
+    if (!patient_id && patient_name && file_no) {
+      const match = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [
+        file_no,
+      ]);
+      if (match.rows[0]) {
+        patient_id = match.rows[0].id;
       }
+    }
 
-      // No existing patient found — create one with auto-generated file_no
-      if (!patient_id) {
-        let autoFileNo = file_no || null;
-        if (!autoFileNo) {
-          const seq = await pool.query(
-            `SELECT COALESCE(MAX(CAST(SUBSTRING(file_no FROM 'GNI-([0-9]+)') AS INTEGER)), 0) + 1 AS next
-             FROM patients WHERE file_no ~ '^GNI-[0-9]+$'`,
-          );
-          autoFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
-        }
-        try {
-          const newPt = await pool.query(
-            `INSERT INTO patients (name, phone, file_no)
-             VALUES ($1, $2, $3) RETURNING id, file_no`,
-            [patient_name, phone || null, autoFileNo],
-          );
-          patient_id = newPt.rows[0].id;
-          file_no = newPt.rows[0].file_no;
-        } catch (dupErr) {
-          const existing = await pool.query(
-            `SELECT id, file_no FROM patients WHERE file_no = $1 LIMIT 1`,
-            [autoFileNo],
-          );
-          if (existing.rows[0]) {
-            patient_id = existing.rows[0].id;
-            file_no = existing.rows[0].file_no;
-          }
+    // Blocklist. Checked once identity is resolved and BEFORE the auto-create
+    // below, so a blocked patient is never laundered into a fresh chart.
+    const blocked = await checkPatientBlocked({
+      patientId: patient_id,
+      force: req.body.force,
+      role: req.doctor?.role,
+      actor: blockActor(req),
+    });
+    if (blocked) return res.status(409).json(blockedResponse(blocked));
+
+    // Auto-create patient if still unmatched — a genuinely new person with an
+    // auto-generated file_no.
+    if (!patient_id && patient_name) {
+      let autoFileNo = file_no || null;
+      if (!autoFileNo) {
+        const seq = await pool.query(
+          `SELECT COALESCE(MAX(CAST(SUBSTRING(file_no FROM 'GNI-([0-9]+)') AS INTEGER)), 0) + 1 AS next
+           FROM patients WHERE file_no ~ '^GNI-[0-9]+$'`,
+        );
+        autoFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
+      }
+      try {
+        const newPt = await pool.query(
+          `INSERT INTO patients (name, phone, file_no)
+           VALUES ($1, $2, $3) RETURNING id, file_no`,
+          [patient_name, phone || null, autoFileNo],
+        );
+        patient_id = newPt.rows[0].id;
+        file_no = newPt.rows[0].file_no;
+      } catch (dupErr) {
+        const existing = await pool.query(
+          `SELECT id, file_no FROM patients WHERE file_no = $1 LIMIT 1`,
+          [autoFileNo],
+        );
+        if (existing.rows[0]) {
+          patient_id = existing.rows[0].id;
+          file_no = existing.rows[0].file_no;
         }
       }
     }
@@ -295,10 +311,22 @@ router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, r
     let newDoctorId;
     if (doctor_name != null || appointment_date != null || time_slot != null) {
       const cur = await pool.query(
-        "SELECT doctor_name, appointment_date, time_slot FROM appointments WHERE id=$1",
+        "SELECT patient_id, doctor_name, appointment_date, time_slot FROM appointments WHERE id=$1",
         [req.params.id],
       );
       if (!cur.rows[0]) return res.status(404).json({ error: "Not found" });
+
+      // Moving a blocked patient to a new doctor/date/slot is a new booking in
+      // all but name. Status-only updates are left alone — staff must still be
+      // able to cancel or complete an existing appointment.
+      const blocked = await checkPatientBlocked({
+        patientId: cur.rows[0].patient_id,
+        force: req.body.force,
+        role: req.doctor?.role,
+        actor: blockActor(req),
+      });
+      if (blocked) return res.status(409).json(blockedResponse(blocked));
+
       const effDoctor = doctor_name ?? cur.rows[0].doctor_name;
       const effDate = appointment_date ?? cur.rows[0].appointment_date;
       const effSlot = time_slot ?? cur.rows[0].time_slot;

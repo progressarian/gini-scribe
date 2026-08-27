@@ -23,6 +23,12 @@ export const CALL_STATUSES = [
 // describe a call nobody has made.
 export const ATTEMPT_OUTCOMES = CALL_STATUSES.filter((s) => s.attempt !== false);
 
+// The other side of that line: statuses that describe a call nobody made, so
+// there is no caller and no call date to record against them.
+export const NO_ATTEMPT_STATUSES = CALL_STATUSES.filter((s) => s.attempt === false).map(
+  (s) => s.value,
+);
+
 const valuesWhere = (flag) => CALL_STATUSES.filter((s) => s[flag]).map((s) => s.value);
 
 export const OPEN_CALL_STATUSES = valuesWhere("open");

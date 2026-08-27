@@ -1,6 +1,12 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import {
+  checkPatientBlocked,
+  blockedResponse,
+  blockActor,
+  resolvePatientId,
+} from "../services/patientBlockGuard.js";
 
 const router = Router();
 
@@ -62,6 +68,18 @@ router.post("/walkins", async (req, res) => {
     } = req.body;
     if (!walkin_date || !patient_name)
       return res.status(400).json({ error: "walkin_date and patient_name required" });
+
+    // Walk-ins carry no patient_id, so resolve identity before checking the
+    // blocklist. Composing the WhatsApp copy is skipped for a blocked patient
+    // too — the booking is refused below unless an admin forces it.
+    const patient_id = await resolvePatientId({ fileNo: file_no, phone: contact_number });
+    const blocked = await checkPatientBlocked({
+      patientId: patient_id,
+      force: req.body.force,
+      role: req.doctor?.role,
+      actor: blockActor(req),
+    });
+    if (blocked) return res.status(409).json(blockedResponse(blocked));
 
     const { whatsapp_message, additional_whatsapp_message } = buildWalkinWhatsapp({
       patient_name,

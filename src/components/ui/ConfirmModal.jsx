@@ -5,6 +5,10 @@
 // Escape / backdrop click.
 import { useEffect } from "react";
 
+// `message` takes a node, so a dialog that needs to collect something (a
+// reason, a note) can pass fields here rather than hand-rolling a second modal.
+// `confirmDisabled` / `busy` / `error` support that case; all are optional and
+// default to the plain confirm behaviour every existing caller relies on.
 export default function ConfirmModal({
   open,
   title = "Are you sure?",
@@ -14,6 +18,9 @@ export default function ConfirmModal({
   variant = "danger",
   onConfirm,
   onCancel,
+  confirmDisabled = false,
+  busy = false,
+  error = null,
 }) {
   useEffect(() => {
     if (!open) return;
@@ -74,9 +81,23 @@ export default function ConfirmModal({
             {message}
           </div>
         )}
+        {error && (
+          <div
+            style={{
+              fontSize: 12,
+              color: "#b91c1c",
+              lineHeight: 1.5,
+              marginBottom: 12,
+              wordBreak: "break-word",
+            }}
+          >
+            {error}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button
             type="button"
+            disabled={busy}
             onClick={onCancel}
             style={{
               padding: "8px 14px",
@@ -95,7 +116,10 @@ export default function ConfirmModal({
           <button
             type="button"
             onClick={onConfirm}
-            onMouseEnter={(e) => (e.currentTarget.style.background = confirmHoverBg)}
+            disabled={confirmDisabled || busy}
+            onMouseEnter={(e) => {
+              if (!confirmDisabled && !busy) e.currentTarget.style.background = confirmHoverBg;
+            }}
             onMouseLeave={(e) => (e.currentTarget.style.background = confirmBg)}
             style={{
               padding: "8px 14px",
@@ -105,7 +129,8 @@ export default function ConfirmModal({
               borderRadius: 6,
               fontSize: 13,
               fontWeight: 700,
-              cursor: "pointer",
+              cursor: confirmDisabled || busy ? "not-allowed" : "pointer",
+              opacity: confirmDisabled || busy ? 0.55 : 1,
               fontFamily: "inherit",
             }}
           >

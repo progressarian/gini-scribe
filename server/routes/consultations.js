@@ -18,6 +18,10 @@ import {
   buildVisitPayloadFromDb,
 } from "../services/prescriptionAutoSave.js";
 import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
+import { fetchBlockRow } from "../services/patientBlockGuard.js";
+import { blockDetail } from "../services/patientBlockView.js";
+import { hasCapability, CAPABILITIES } from "../../shared/permissions.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -25,6 +29,10 @@ const syncVisitToGenie = null;
 const syncPatientLogsFromGenie = null;
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 // Idempotent migration — add exam_data column if not present
 pool.query(`ALTER TABLE consultations ADD COLUMN IF NOT EXISTS exam_data JSONB`).catch(() => {});
@@ -65,6 +73,25 @@ router.post("/consultations", validate(consultationCreateSchema), async (req, re
           [patient.name, int(patient.age), patient.sex],
         )
       ).rows[0];
+    }
+
+    // Blocked-patient guard. This route carries the patient in the BODY, not
+    // the URL, so the router.param guard above cannot see it — check here, once
+    // identity is resolved and before any demographics or clinical rows are
+    // written. Admin `force` matches the escape hatch in blockWriteGuard.
+    if (existing) {
+      const blockRow = await fetchBlockRow(existing.id, client);
+      const forced =
+        (req.body?.force === true || req.body?.force === "true") &&
+        hasCapability(req.doctor?.role, CAPABILITIES.ADMIN);
+      if (blockRow?.is_blocked && !forced) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "Patient is blocked",
+          reason: "patient_blocked",
+          detail: blockDetail(blockRow, req.doctor?.role),
+        });
+      }
     }
 
     if (existing) {

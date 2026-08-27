@@ -9,16 +9,7 @@ import {
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
 
-// Verifies the scribe-issued JWT (doctor OR patient). The `kind` claim
-// in the payload distinguishes them; both flavours have a `jti` that lives
-// in auth_sessions until logout/expiry.
 export const authMiddleware = async (req, res, next) => {
-  // Accept the JWT from any of:
-  //   • x-auth-token header (default for app/web client `post()` calls)
-  //   • Authorization: Bearer <token> (used by fetch() for binary endpoints
-  //     like /api/documents/:id/stream where setting custom headers is fine)
-  //   • ?token=<token> query string (so the URL handed to <Image> or an
-  //     in-app browser is self-authenticating without needing headers)
   const authHeader = req.headers["authorization"] || req.headers["Authorization"];
   const bearerMatch = typeof authHeader === "string" && /^Bearer\s+(.+)$/i.exec(authHeader.trim());
   const token =
@@ -68,10 +59,6 @@ const PUBLIC_PATHS = [
   "/api/patient/auth/login",
 ];
 
-// NOTE: these bypass authentication entirely — no token required at all. Keep
-// the list as small as possible and prefer a capability mapping below instead.
-// `/api/admin/` used to sit here, which left POST /api/admin/backfill-healthray-docs
-// (a write) reachable with no token; it is now gated by CAP.ADMIN.
 const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/"];
 
 const PUBLIC_PATTERNS = [
@@ -89,9 +76,6 @@ const PUBLIC_PATTERNS = [
   /^\/api\/flow\/track\/[^/]+\/(verify|assessment)$/,
 ];
 
-// Paths under these prefixes must be a doctor — patients are rejected even
-// with a valid session. Audit list: clinical workflows, doctor admin,
-// sync/import paths that touch other patients' data.
 const DOCTOR_ONLY_PREFIXES = [
   "/api/active-visits",
   "/api/consultations",
@@ -105,27 +89,9 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/reasoning",
   "/api/dose-change-requests",
   "/api/refills",
-  "/api/flow", // all flow endpoints are staff-only EXCEPT /api/flow/track/:token (PUBLIC_PATTERNS, matched first)
+  "/api/flow", 
 ];
 
-// Role-based capability gating. Maps an API path-prefix to the capability a
-// doctor must hold to use it. Checked with LONGEST-prefix match, so a nested
-// path like /api/patients/:id/refill-requests resolves to /api/patients
-// (PATIENT_READ) while the top-level /api/refill-requests resolves to REFILLS.
-//
-// NOTE: prefixes are the ACTUAL API segments (verified against route files) —
-// these differ from the frontend nav paths (e.g. refills page → /api/refill-
-// requests). Patient JWTs are unaffected (they use the PUBLIC_PATTERNS
-// allowlist); this only gates doctor sessions. These mappings are ENFORCED —
-// a doctor whose role lacks the capability gets a 403 here.
-//
-// A value may be a single capability or an ARRAY of them, which is an any-of
-// gate (see hasAnyCapability in shared/permissions.js) — used where several
-// roles legitimately share an endpoint but hold different capabilities.
-//
-// Anything NOT listed here falls through to "any authenticated doctor session",
-// including a role that normalized to `guest`. Treat an unmapped prefix as a
-// hole, not a default: add the row when you add the route.
 const ROUTE_CAPABILITIES = [
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
@@ -142,6 +108,8 @@ const ROUTE_CAPABILITIES = [
   ["/api/active-visits", CAP.CLINICAL_WRITE],
   ["/api/alerts", CAP.CLINICAL_WRITE],
   ["/api/patient-alerts", CAP.CLINICAL_WRITE],
+  ["/api/patient-blocks", CAP.ADMIN],
+  ["/api/patient-block-status", CAP.PATIENT_READ],
   ["/api/rx-feedback", CAP.CLINICAL_WRITE],
   ["/api/ai", CAP.AI_TOOLS],
   ["/api/genie-chats", CAP.AI_TOOLS],
@@ -152,16 +120,6 @@ const ROUTE_CAPABILITIES = [
   ["/api/lab-requests", CAP.LAB_REQUESTS],
   ["/api/side-effects", CAP.SIDE_EFFECTS],
   ["/api/opd", CAP.RECEPTION_OPS],
-  // ── Shared with the OBT call team ────────────────────────────────────────
-  // These back the two pages OBT was given: /find and /ghm. Granting them via
-  // any-of keeps `obt` out of RECEPTION_OPS, so /opd, /reception-inbox,
-  // walk-ins, cancellations and station-tracking stay closed to them.
-  //
-  // ⚠️ /api/appointments is a coarse grant: the prefix matcher is literal and
-  // appointment ids are dynamic, so opening it necessarily also opens
-  // /api/appointments/:id/{vitals,prep,compliance,biomarkers,resync-condata}
-  // and DELETE /api/appointments/:id. Splitting those off would need a
-  // method- and pattern-aware gate, not another prefix row.
   ["/api/appointments", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/appointment-slots", CAP.RECEPTION_OPS],
   ["/api/appointment-changes", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
@@ -177,48 +135,23 @@ const ROUTE_CAPABILITIES = [
   ["/api/obt-status", CAP.OBT_OPS],
   ["/api/obt-dashboard", CAP.OBT_OPS],
   ["/api/diabetes-champions", CAP.RECEPTION_OPS],
-  // ⚠️ PATIENT_READ here is identity-level by intent, but this row is coarser
-  // than that: the matcher is literal-prefix and patient ids are dynamic, so
-  // /api/patients also covers the CLINICAL sub-paths (/:id/labs, /medications,
-  // /summary, /outcomes...). A role with PATIENT_READ but not PATIENT_CHART —
-  // today only `obt` — is therefore blocked from the chart in the UI but could
-  // still reach those endpoints with its token. Closing that needs a
-  // pattern-aware gate, not another prefix row.
   ["/api/patients", CAP.PATIENT_READ],
-  // These two ARE separable prefixes, so they get the clinical capability.
   ["/api/documents", CAP.PATIENT_CHART],
   ["/api/outcomes", CAP.PATIENT_CHART],
   ["/api/conversations", CAP.PATIENT_READ],
   ["/api/messages", CAP.PATIENT_READ],
-  // Companion mismatch reviews — read-only doc/lab reconciliation surface.
   ["/api/companion", CAP.PATIENT_READ],
-  // Patient-app self-service (/api/patient/auth/*, /api/patient/app/*). Distinct
-  // prefix from /api/patients, so this row does NOT shadow it. Patient JWTs skip
-  // the capability check entirely; this only bounds which staff roles can call it.
   ["/api/patient", CAP.PATIENT_READ],
   ["/api/push-tokens", CAP.PATIENT_READ],
-  // AI prescription-parsing utility. No frontend caller today (dev/ops endpoint),
-  // but it spends Anthropic tokens per call, so keep it off open roles.
   ["/api/extract", CAP.CLINICAL_WRITE],
   // Pharmacy counter worklist (docs/medicines-management/).
   ["/api/pharmacy", CAP.MED_COLLECTION],
-  // Scheduling / doctor directory. GET /api/doctors (the login picker) is an
-  // exact PUBLIC_PATHS entry and short-circuits before this, so this row gates
-  // the /api/doctors/:id/* sub-paths — profile, availability, breaks. The
-  // admin-only writes among them keep their per-route requireCapability(ADMIN).
   ["/api/doctors", CAP.RECEPTION_OPS],
   // Slot availability — drives the time-slot picker on both /find and /ghm.
   ["/api/availability", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/slot-catalog", CAP.RECEPTION_OPS],
   // App-install funnel, tracked per registering coordinator (registered_by_cc).
   ["/api/app-installs", CAP.RECEPTION_OPS],
-  // ── Patient Flow Management (docs/FLOW_MANAGEMENT_PLAN.md) ────────────────
-  // /api/flow/track/:token stays public — PUBLIC_PATTERNS is tested first.
-  // Base row is an any-of gate because every flow role reads visits and advances
-  // steps, and no single capability is common to all of them. The sub-prefixes
-  // below narrow the surfaces one role owns. Admin-only writes (visit-types,
-  // step-catalog, demo) additionally carry requireCapability(ADMIN) per route,
-  // which runs after this check.
   [
     "/api/flow",
     [
@@ -244,10 +177,6 @@ const ROUTE_CAPABILITIES = [
   ["/api/admin", CAP.ADMIN],
 ];
 
-// Longest-prefix match → required capability, an array of them (any-of), or
-// null if the path isn't mapped.
-// Exported so the mapping can be asserted without booting the app or flipping
-// the master switch (which makes every check pass and hides mistakes).
 export const capabilityForPath = (path) => {
   let best = null;
   let bestLen = -1;

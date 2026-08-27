@@ -60,8 +60,10 @@ export const DC = {
   hypo: "#2563eb",
   obesity: "#92400e",
   dyslipidemia: "#0891b2",
+  blocked: "#b91c1c",
 };
 export const FRIENDLY = {
+  blocked: "Blocked",
   dm2: "Type 2 Diabetes (DM)",
   dm1: "Type 1 Diabetes (DM)",
   htn: "High Blood Pressure (Hypertension)",

@@ -1,6 +1,7 @@
 // ── HealthRay Sync DB operations ────────────────────────────────────────────
 
 import pool from "../../config/db.js";
+import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
@@ -736,6 +737,7 @@ export async function upsertAppointment(existingId, data) {
       familyMemberId || null,
     ],
   );
+  noteSyncedWhileBlocked(patientId, "healthray_sync");
   return rows[0].id;
 }
 

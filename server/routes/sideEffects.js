@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 // genie-sync.cjs is a legacy CommonJS module; load it via createRequire so
 // this ES-module route file can use its conversation helpers.
@@ -14,6 +15,10 @@ try {
 }
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 const SEVERITY_LABEL = {
   warn: "⚠️ Warning",

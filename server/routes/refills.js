@@ -2,8 +2,13 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { doctorScope, latestDoctorIs, scopeParams } from "../services/patientScope.js";
 import { handleError } from "../utils/errorHandler.js";
+import { blockWriteGuardVia } from "../middleware/blockWriteGuard.js";
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuardVia("medication_refill_requests", "patient_id"));
 
 const VALID_STATUS = ["pending", "approved", "fulfilled", "rejected"];
 

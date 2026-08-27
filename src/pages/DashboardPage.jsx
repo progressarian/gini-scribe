@@ -20,6 +20,8 @@ import useMessagingStore from "../stores/messagingStore";
 import { cleanNote } from "../utils/cleanNote.js";
 import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions";
 import { PAGE_CAPABILITIES } from "../config/routes";
+import BlockedBadge from "../components/ui/BlockedBadge";
+import { usePatientBlock } from "../queries/hooks/usePatientBlocks";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -107,6 +109,7 @@ export default function DashboardPage() {
   const fetchThread = useMessagingStore((s) => s.fetchThread);
   const markRead = useMessagingStore((s) => s.markRead);
   const [bookErrors, setBookErrors] = useState({});
+  const { block } = usePatientBlock(patient?.id);
 
   // Doctor's slot availability for the Book Appointment form.
   const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
@@ -143,7 +146,9 @@ export default function DashboardPage() {
             {(patient.name || "?").charAt(0).toUpperCase()}
           </div>
           <div className="dashboard__patient-info">
-            <div className="dashboard__patient-name">{patient.name || "New Patient"}</div>
+            <div className="dashboard__patient-name">
+              {patient.name || "New Patient"} <BlockedBadge block={block} size="sm" />
+            </div>
             <div className="dashboard__patient-details">
               {patient.age ? `${patient.age}Y` : ""}
               {patient.sex ? ` · ${patient.sex}` : ""}

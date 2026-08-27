@@ -865,6 +865,13 @@ a.pcell__ph:hover {
   color: #94a3b8;
 }
 
+.cc-input:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}
+
 /* Follow-up date — read only */
 .fu-cell {
   display: flex;
@@ -1982,4 +1989,58 @@ a.pcell__ph:hover {
 
 .altrow__add:hover {
   background: #dbeafe;
+}
+
+/* ── Blocked Patients tab ── */
+.blocked__search {
+  width: 100%;
+  max-width: 340px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+.blocked__reason {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a05049;
+  background: #fbeceb;
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+.blocked__unblock {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+.blocked__unblock:hover {
+  background: #fef2f2;
+}
+/* The unblock dialog is the shared ConfirmModal, which brings its own overlay
+   and panel; these two only style the note field inside it. */
+.blocked__label {
+  display: block;
+  margin: 14px 0 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+.blocked__textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  resize: vertical;
+}
+.blocked__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

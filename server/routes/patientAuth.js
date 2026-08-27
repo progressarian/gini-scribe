@@ -22,6 +22,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import pool from "../config/db.js";
+import { isPatientBlocked } from "../services/patientBlockGuard.js";
 import { handleError } from "../utils/errorHandler.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { sendOtpSms } from "../services/msg91.js";
@@ -219,6 +220,17 @@ export async function propagateToAllRows(phone, fields) {
 // ── JWT minting ─────────────────────────────────────────────────────────────
 
 async function issueSession(db, patient) {
+  // A blocked patient gets no session. Every way into the app — login,
+  // set-password, verify-otp completion and the app→hospital upgrade — mints
+  // its session here, so one check closes all of them. /patient/auth/* is in
+  // PUBLIC_PATHS, so no middleware runs; the check has to live in the handler.
+  if (db === "hospital" && (await isPatientBlocked(patient?.id))) {
+    const err = new Error("Your account is not active. Please contact the hospital reception.");
+    err.status = 403;
+    err.code = "account_blocked";
+    throw err;
+  }
+
   const jti = crypto.randomBytes(16).toString("hex");
   const token = jwt.sign(
     {

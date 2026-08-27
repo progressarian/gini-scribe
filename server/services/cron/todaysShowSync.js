@@ -8,6 +8,7 @@
 
 import { readTodaysAppt } from "../sheets/reader.js";
 import pool from "../../config/db.js";
+import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -221,8 +222,10 @@ export async function syncTodaysShow() {
          RETURNING id`,
         [patientId, fileNo || null, name || null, phone || null, doctor || null, timeSlot || null],
       );
-      if (ins.rows[0]) inserted++;
-      else skippedExisting++;
+      if (ins.rows[0]) {
+        inserted++;
+        noteSyncedWhileBlocked(patientId, "todays_show_sync");
+      } else skippedExisting++;
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

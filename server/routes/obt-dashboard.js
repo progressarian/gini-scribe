@@ -4,6 +4,12 @@ import { handleError } from "../utils/errorHandler.js";
 import { dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
 import { OPEN_CALL_STATUSES, UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 
+// Blocked patients are hidden from working lists — nobody should be calling,
+// booking or preparing for them. They stay findable in /find and on the admin
+// Blocked tab. See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
+const NOT_BLOCKED = (a = "a") =>
+  ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
+
 const router = Router();
 
 const OPEN_CALL_SQL = pgArray(OPEN_CALL_STATUSES);
@@ -22,7 +28,7 @@ router.get("/obt-dashboard", async (req, res) => {
     const date = req.query.date || isoDate(new Date());
     // Same window as the GHM sheet's day tabs, so every tile counts exactly the
     // rows the OBT team sees when they open that date.
-    const where = dayWindowWhere("a");
+    const where = dayWindowWhere("a") + NOT_BLOCKED("a");
 
     const r = await pool.query(
       `SELECT COUNT(*)::int                                                    AS total,

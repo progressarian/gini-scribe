@@ -4,6 +4,7 @@ import bcrypt from "bcrypt";
 import pool from "../config/db.js";
 import { n, int } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
+import { isPatientBlocked } from "../services/patientBlockGuard.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
@@ -593,6 +594,16 @@ router.post("/patients/:id/reset-app-password", requireDoctor, async (req, res) 
     const { rows } = await pool.query("SELECT id, phone FROM patients WHERE id=$1", [scribeId]);
     const hospitalPatient = rows[0];
     if (!hospitalPatient) return res.status(404).json({ error: "Patient not found" });
+
+    // A blocked patient's app access is closed. Handing them a fresh temp
+    // password would reopen the door the block just shut.
+    if (await isPatientBlocked(scribeId)) {
+      return res.status(409).json({
+        error: "Patient is blocked",
+        reason: "patient_blocked",
+        detail: "App access is disabled while this patient is blocked.",
+      });
+    }
     if (!hospitalPatient.phone) {
       return res.status(400).json({ error: "Patient has no phone — cannot manage app password." });
     }

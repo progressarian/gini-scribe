@@ -87,6 +87,7 @@ const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
 const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
 const OBTDashboardPage = lazyWithRetry(() => import("./pages/OBTDashboardPage"));
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
+const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
@@ -205,6 +206,7 @@ const router = createBrowserRouter([
               { path: "/obt-dashboard", element: lazyEl(OBTDashboardPage) },
               // Doctor availability / leave / reassignment management
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
+              { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
               // Pharmacy: mark which medicines each patient collected
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
               // Patient Flow Management

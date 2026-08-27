@@ -41,6 +41,7 @@ import {
 import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
 import { backfillCommonSideEffectsForMed } from "../services/medication/commonSideEffectsAI.js";
 import { enrichMedWithDays } from "../services/medication/daysOfWeek.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -61,6 +62,10 @@ const updateGenieVitalsByGenieId = noopOk;
 const updateGenieLabByGenieId = noopOk;
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("patientId", blockWriteGuard);
 
 // Invalidate cached pre/post-visit summaries on any successful mutation under
 // /visit/:patientId/*. Read-only and pure-helper endpoints are skipped — these

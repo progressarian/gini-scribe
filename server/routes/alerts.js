@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createRequire } from "module";
 import { handleError } from "../utils/errorHandler.js";
 import { doctorScope, myPatientIds } from "../services/patientScope.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 const require = createRequire(import.meta.url);
 let sendAlertToGenie = null;
@@ -15,6 +16,10 @@ try {
 }
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 // Get all alerts from mobile app (for Home page)
 router.get("/alerts/from-genie", async (req, res) => {

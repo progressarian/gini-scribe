@@ -1,6 +1,7 @@
 import express from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 const require = createRequire(import.meta.url);
 
@@ -16,6 +17,10 @@ const syncLabsToGenie = noop;
 const syncDocumentsToGenie = noop;
 
 const router = express.Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 /**
  * POST /patients/:id/sync-health-logs

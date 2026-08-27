@@ -403,3 +403,19 @@
   color: #cbd5e1;
   margin-top: 4px;
 }
+
+.find__patient-block {
+  margin-top: 4px;
+  padding: 3px 9px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b91c1c;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.find__patient-block:hover {
+  background: #fef2f2;
+}

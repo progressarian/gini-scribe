@@ -20,9 +20,16 @@ export const isRescheduledRow = (row) =>
   !!row?.call_reschedule_date ||
   (!!row?.preferred_date && day(row.preferred_date) !== day(row.appointment_date));
 
+// A blocked patient stays visible on the day list — staff must be able to see
+// why the appointment exists — but drops out of the call lists, because nobody
+// should be phoning them. See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
+export const isBlockedRow = (row) => row?.is_blocked === true;
+
 export const LIST_PREDICATES = {
-  new: (r) => isNewVisitType(r.visit_type) && !isCancelledRow(r) && !isRescheduledRow(r),
-  followup: (r) => !isNewVisitType(r.visit_type) && !isCancelledRow(r) && !isRescheduledRow(r),
+  new: (r) =>
+    isNewVisitType(r.visit_type) && !isCancelledRow(r) && !isRescheduledRow(r) && !isBlockedRow(r),
+  followup: (r) =>
+    !isNewVisitType(r.visit_type) && !isCancelledRow(r) && !isRescheduledRow(r) && !isBlockedRow(r),
   cancelled: (r) => isCancelledRow(r),
   rescheduled: (r) => !isCancelledRow(r) && isRescheduledRow(r),
 };

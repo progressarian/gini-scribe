@@ -85,10 +85,18 @@ export const loginSchema = z.object({
 });
 
 // ---- Patients ----
+// A phone with letters in it is not a number anyone can ring — it is a typo or
+// a paste of something else. Kept to that one rule rather than the strict
+// 10-digit mobile the forms enforce, because the same schema guards edits to
+// legacy records whose stored numbers are landlines or partial (26 today).
+const phoneField = optStr.refine((v) => !v || !/[A-Za-z]/.test(v), {
+  message: "Phone number cannot contain letters",
+});
+
 export const patientCreateSchema = z
   .object({
     name: optStr,
-    phone: optStr,
+    phone: phoneField,
     dob: optDate,
     age: optInt,
     sex: z.enum(["Male", "Female", "Other"]).optional().nullable(),

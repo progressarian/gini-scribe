@@ -2,6 +2,7 @@
 
 import { readUpcomingAppointments } from "../sheets/reader.js";
 import pool from "../../config/db.js";
+import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -304,6 +305,7 @@ async function importSheetPatient(patient, tabDate) {
      RETURNING id`,
     [patientId, name, fileNo, phone, apptDate, timeSlot, visitType, age, sex, condition],
   );
+  noteSyncedWhileBlocked(patientId, "sheets_sync");
 
   if (rows[0]) return { id: rows[0].id, action: "created" };
 

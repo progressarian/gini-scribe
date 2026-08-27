@@ -4,6 +4,7 @@ import pool from "../config/db.js";
 import { doctorScope, myPatientIds } from "../services/patientScope.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 import {
   messageCreateSchema,
   conversationMessageSchema,
@@ -20,6 +21,11 @@ try {
 }
 
 const router = Router();
+
+// No write against a blocked patient succeeds — messaging one included.
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("patientId", blockWriteGuard);
+router.param("id", blockWriteGuard);
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 

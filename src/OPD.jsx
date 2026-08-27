@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 // of the main bundle (~900 KB pre-gzip). Nothing else in this file touches it.
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
 import { SLOT_CATALOG, SLOT_REASON, isClinicalDoctor } from "./lib/slotAvailability.js";
+import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../shared/phone.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
@@ -22,6 +23,9 @@ import { cleanNote } from "./utils/cleanNote.js";
 import "./OPD.css";
 import { effectiveFollowUpDate } from "./lib/followUp.js";
 import { visitStatus } from "./lib/visitStatus.js";
+import BlockedBadge from "./components/ui/BlockedBadge";
+import { usePatientBlockStatus } from "./queries/hooks/usePatientBlocks";
+import { notifyIfBlocked } from "./services/api";
 
 // ─── Inject fonts ────────────────────────────────────────────
 if (!document.getElementById("opd-fonts")) {
@@ -84,6 +88,17 @@ function apiFetch(path, opts = {}) {
       "Content-Type": "application/json",
       ...(opts.headers || {}),
     },
+  }).then((res) => {
+    // Same blocked-patient refusal the axios instance reports. Reads a clone so
+    // the caller still receives an unconsumed body.
+    if (res.status === 409) {
+      res
+        .clone()
+        .json()
+        .then(notifyIfBlocked)
+        .catch(() => {});
+    }
+    return res;
   });
 }
 function apiFetchRaw(path, opts = {}) {
@@ -372,13 +387,14 @@ function Lbl({ children }) {
   );
 }
 
-function Inp({ value, onChange, placeholder, type = "text", style = {} }) {
+function Inp({ value, onChange, placeholder, type = "text", style = {}, ...rest }) {
   return (
     <input
       type={type}
       value={value}
       onChange={onChange}
       placeholder={placeholder}
+      {...rest}
       style={{
         border: `1px solid ${BD}`,
         borderRadius: 7,
@@ -5088,6 +5104,7 @@ function PatientDetail({
 function NewPatientForm({ onCreated, onBack, showToast }) {
   const [showIds, setShowIds] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [errs, setErrs] = useState({});
   const [p, setP] = useState({
     name: "",
     dob: "",
@@ -5139,9 +5156,18 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
 
   const handleCreate = async () => {
     if (!p.name) {
+      setErrs({ name: true });
       showToast("Full name is required", "err");
       return;
     }
+    // The number is how the hospital reaches this patient — a record created
+    // with a typo for one is a record nobody can call.
+    if (!isValidMobile(p.phone)) {
+      setErrs({ phone: true });
+      showToast(p.phone ? MOBILE_HINT : "Phone number is required", "err");
+      return;
+    }
+    setErrs({});
     setSaving(true);
     try {
       const r = await apiFetch("/api/patients", { method: "POST", body: JSON.stringify(p) });
@@ -5197,8 +5223,13 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
             <Lbl>Full Name *</Lbl>
             <Inp
               value={p.name}
-              onChange={(e) => set("name", e.target.value)}
+              onChange={(e) => {
+                set("name", e.target.value);
+                if (e.target.value.trim()) setErrs((prev) => ({ ...prev, name: false }));
+              }}
               placeholder="e.g. Harpreet Singh Mann"
+              aria-invalid={errs.name ? "true" : undefined}
+              style={errs.name ? { borderColor: "#ef4444" } : undefined}
             />
           </div>
           <div>
@@ -5218,9 +5249,19 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
             <Lbl>Phone Number *</Lbl>
             <Inp
               value={p.phone}
-              onChange={(e) => set("phone", e.target.value)}
+              onChange={(e) => {
+                const digits = toEntryDigits(e.target.value);
+                set("phone", digits);
+                if (isValidMobile(digits)) setErrs((prev) => ({ ...prev, phone: false }));
+              }}
               placeholder="9814XXXXXX"
               type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={PHONE_DIGITS}
+              title={MOBILE_HINT}
+              aria-invalid={errs.phone ? "true" : undefined}
+              style={errs.phone ? { borderColor: "#ef4444" } : undefined}
             />
           </div>
           <div>
@@ -5419,6 +5460,9 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState([]);
   const [selPt, setSelPt] = useState(null);
+  const searchBlocks =
+    usePatientBlockStatus([...(results || []).map((p) => p.id), selPt?.id].filter(Boolean)).data ||
+    {};
   const [saving, setSaving] = useState(false);
   const [genieCandidates, setGenieCandidates] = useState([]);
   const [importingId, setImportingId] = useState(null);
@@ -5709,7 +5753,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: FD, fontSize: 15, color: INK, marginBottom: 3 }}>
-                    {p.name}
+                    {p.name} <BlockedBadge block={searchBlocks[p.id]} size="sm" />
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     {p.file_no && (
@@ -5973,7 +6017,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: FD, fontSize: 15, color: INK, marginBottom: 3 }}>
-                {selPt.name}
+                {selPt.name} <BlockedBadge block={searchBlocks[selPt.id]} size="sm" />
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {selPt.file_no && (

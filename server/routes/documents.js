@@ -43,8 +43,13 @@ import {
   resolveStartedDate,
 } from "../services/medication/historicalStart.js";
 import { backfillCommonSideEffectsForMed } from "../services/medication/commonSideEffectsAI.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 // Weekly / fortnightly meds need an anchor day for the patient app scheduler.
 // Mirrors src/services/extraction.js:applyWeeklyDayDefaults. Returns

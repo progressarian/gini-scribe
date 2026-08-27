@@ -40,6 +40,7 @@ import { PATIENT_CATEGORIES } from "../../shared/patientCategories.js";
 import {
   ATTEMPT_OUTCOMES,
   CALL_STATUSES,
+  NO_ATTEMPT_STATUSES,
   UNREACHABLE_STATUSES,
   callColor,
   callLabel,
@@ -50,11 +51,14 @@ import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
 import Dropdown from "../components/ui/Dropdown.jsx";
 import FilterPopover from "../components/ui/FilterPopover.jsx";
 import SearchBox from "../components/ui/SearchBox.jsx";
+import BlockedBadge from "../components/ui/BlockedBadge.jsx";
+import { usePatientBlockStatus } from "../queries/hooks/usePatientBlocks.js";
 import DatePicker from "../components/DatePicker.jsx";
 import useBodyScrollLock from "../hooks/useBodyScrollLock.js";
 import useViewportFill from "../hooks/useViewportFill.js";
 import {
   PAGE_SIZE,
+  fetchLastMo,
   useActiveCalls,
   useAppointmentChanges,
   useCallAttemptCounts,
@@ -143,6 +147,8 @@ const prettyDate = (s) => {
 // `cap` gates the tab per role (omitted = visible to anyone who can open /ghm).
 // Reassigning appointments between doctors is scheduling-desk work, so it is
 // RECEPTION_OPS — the OBT call team reaches /ghm via OBT_OPS and doesn't get it.
+const CALL_LOCK_HINT = "Set the call status first — these record who made the call and when.";
+
 const EXPORT_LABELS = {
   by_date: "ghm-by-date",
   tomorrow: "ghm-tomorrow",
@@ -2135,6 +2141,7 @@ export default function GHMPage() {
   const patientIds = useMemo(() => rows.map((r) => r.patient_id).filter(Boolean), [rows]);
   const appointmentIds = useMemo(() => rows.map((r) => r.id).filter(Boolean), [rows]);
   const biomarkerQuery = useGhmBiomarkers(patientIds);
+  const blockQuery = usePatientBlockStatus(patientIds);
   const lastMoQuery = useGhmLastMo(patientIds);
   const attemptQuery = useCallAttemptCounts(appointmentIds);
   const activeCallQuery = useActiveCalls(appointmentIds);
@@ -2146,6 +2153,7 @@ export default function GHMPage() {
   const slotCountQuery = useGhmSlotCounts(preferredDates);
   const slotCounts = slotCountQuery.data || {};
   const biomarkers = biomarkerQuery.data || {};
+  const blocks = blockQuery.data || {};
   const lastMo = lastMoQuery.data || {};
   const attemptCounts = attemptQuery.data || {};
   const activeCalls = activeCallQuery.data || {};
@@ -2193,7 +2201,15 @@ export default function GHMPage() {
         return;
       }
       const label = EXPORT_LABELS[view] || "ghm-export";
-      const counts = await exportWatiWorkbook(all, view === "lookup" ? todayStr() : date, label);
+      // The sheet names the last consultant seen, which lives outside the row —
+      // fetched for the exported rows, not just the ones on screen.
+      const lastSeen = await fetchLastMo(all.map((r) => r.patient_id)).catch(() => ({}));
+      const counts = await exportWatiWorkbook(
+        all,
+        view === "lookup" ? todayStr() : date,
+        label,
+        lastSeen,
+      );
       if (!counts.total) window.alert("No patients with a phone number to export.");
     } catch (e) {
       // Without this the whole export failed into an unhandled rejection and
@@ -2267,7 +2283,7 @@ export default function GHMPage() {
       // 21st counts as called on the 20th, and the 21st reads "not called"
       // again. Overwritten, not filled-in-if-empty — a date left by an earlier
       // day's call would otherwise file today's call under that older day.
-      if (value && value !== "pending") {
+      if (value && !NO_ATTEMPT_STATUSES.includes(value)) {
         const today = todayStr();
         if (row.call_date !== today) patch(row.id, "call_date", today);
         if (loggedInName && row.call_made_by !== loggedInName)
@@ -2674,6 +2690,7 @@ export default function GHMPage() {
                   {rows.map((row, i) => {
                     const isSaving = saving[row.id];
                     const callStat = row.call_status || "pending";
+                    const callLogged = !NO_ATTEMPT_STATUSES.includes(callStat);
                     const showStat = row.show_no_show || "";
 
                     const isOpen = expanded === row.id;
@@ -2778,6 +2795,7 @@ export default function GHMPage() {
                                 {row.booking_status === "cancelled" && (
                                   <span className="cancel-tag">Cancelled</span>
                                 )}
+                                <BlockedBadge block={blocks[row.patient_id]} size="sm" />
                               </span>
                               {row.phone ? (
                                 <a
@@ -3031,15 +3049,24 @@ export default function GHMPage() {
                             </td>
                           )}
 
-                          {/* Called by — auto-fills logged-in user, editable, with dropdown */}
+                          {/* Called by — auto-fills logged-in user, editable, with dropdown.
+                          Locked until the call status says a call happened: a name
+                          filled in beside "Not Called Yet" reads as a call nobody made. */}
                           {showCalledBy && (
                             <td>
                               <input
                                 list="cc-agents-list"
                                 defaultValue={
-                                  row.call_made_by || activeCall?.calling_by || loggedInName || ""
+                                  callLogged
+                                    ? row.call_made_by ||
+                                      activeCall?.calling_by ||
+                                      loggedInName ||
+                                      ""
+                                    : row.call_made_by || ""
                                 }
-                                key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}`}
+                                key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}-${callLogged ? 1 : 0}`}
+                                disabled={!callLogged}
+                                title={callLogged ? undefined : CALL_LOCK_HINT}
                                 onBlur={(e) => {
                                   const v = e.target.value.trim();
                                   if (v !== (row.call_made_by || ""))
@@ -3048,19 +3075,20 @@ export default function GHMPage() {
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") e.target.blur();
                                 }}
-                                placeholder="CC name"
+                                placeholder={callLogged ? "CC name" : "Set call status"}
                                 className="cc-input"
                               />
                             </td>
                           )}
 
-                          {/* Call date */}
+                          {/* Call date — locked with Called By, for the same reason */}
                           {showCallDate && (
-                            <td>
+                            <td title={callLogged ? undefined : CALL_LOCK_HINT}>
                               <DatePicker
                                 value={row.call_date || ""}
                                 onChange={(v) => patch(row.id, "call_date", v)}
                                 placeholder="—"
+                                disabled={!callLogged}
                                 style={CELL_DATE_STYLE}
                               />
                             </td>

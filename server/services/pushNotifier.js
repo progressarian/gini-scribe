@@ -4,6 +4,7 @@
 // freely. Tokens that come back as unregistered are pruned from the table.
 
 import pool from "../config/db.js";
+import { isPatientBlocked } from "./patientBlockGuard.js";
 
 let firebaseAdmin = null;
 let initAttempted = false;
@@ -45,6 +46,9 @@ async function pruneToken(token) {
 
 export async function sendToPatient(patientId, { title, body, data = {} }) {
   if (!patientId) return { sent: 0, skipped: true };
+  // A blocked patient receives nothing. Suppressing here covers every push in
+  // the app, including sendDoseDecisionNotification below.
+  if (await isPatientBlocked(patientId)) return { sent: 0, skipped: true, reason: "blocked" };
   const admin = await getAdmin();
   const tokens = await fetchTokens(patientId);
   if (!admin || tokens.length === 0) {

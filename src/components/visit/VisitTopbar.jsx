@@ -1,5 +1,7 @@
 import { memo, useState, useEffect, useRef } from "react";
 import { fmtDate } from "./helpers";
+import BlockedBadge from "../ui/BlockedBadge";
+import { usePatientBlock } from "../../queries/hooks/usePatientBlocks";
 
 // In-clinic elapsed timer — updates every minute
 const InClinicTimer = memo(function InClinicTimer({ startIso }) {
@@ -182,6 +184,7 @@ const VisitTopbar = memo(function VisitTopbar({
       : apptStatusRaw;
   const apptSty = apptStatusRaw ? apptStatusStyle(promotedStatus) : null;
   const today = new Date().toISOString().split("T")[0];
+  const { block } = usePatientBlock(patient?.id);
   const [printOpen, setPrintOpen] = useState(false);
   const printRef = useRef(null);
 
@@ -208,6 +211,7 @@ const VisitTopbar = memo(function VisitTopbar({
       <div className="ptinfo">
         <div className="ptname">
           {patient.name}
+          <BlockedBadge block={block} size="sm" />
           <span style={{ fontSize: 12, fontWeight: 400, color: "var(--t3)" }}>
             {patient.age}/{patient.sex?.[0]} · ID #{patient.file_no || `P-${patient.id}`}
             {patient.blood_group ? ` · ${patient.blood_group}` : ""}

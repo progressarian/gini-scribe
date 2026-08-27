@@ -1,4 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import BlockedBadge from "../components/ui/BlockedBadge";
+import { usePatientBlockStatus } from "../queries/hooks/usePatientBlocks";
+import BlockPatientModal from "../components/patient/BlockPatientModal";
+import { hasCapability, CAPABILITIES } from "../../shared/permissions.js";
+import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../../shared/phone.js";
 import { useNavigate } from "react-router-dom";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
@@ -17,7 +22,7 @@ import "./FindPage.css";
 export default function FindPage() {
   const navigate = useNavigate();
   const sentinelRef = useRef(null);
-  const { doctorsList, fetchDoctorsList } = useAuthStore();
+  const { doctorsList, fetchDoctorsList, currentDoctor } = useAuthStore();
   const { loadPatientDB } = usePatientStore();
   const {
     todayAppointments,
@@ -59,6 +64,13 @@ export default function FindPage() {
   } = useUiStore();
 
   const [bookErrors, setBookErrors] = useState({});
+
+  // Blocklist badges for the current result page — one batched call, not one
+  // per row.
+  const blocks =
+    usePatientBlockStatus((dbPatients || []).map((p) => p.id).filter(Boolean)).data || {};
+  const canBlock = hasCapability(currentDoctor?.role, CAPABILITIES.ADMIN);
+  const [blockTarget, setBlockTarget] = useState(null);
 
   // Doctor's slot availability for the quick-book form.
   const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
@@ -267,11 +279,20 @@ export default function FindPage() {
             />
             <input
               value={quickBookPatient.phone}
-              onChange={(e) => setQuickBookPatient({ ...quickBookPatient, phone: e.target.value })}
-              placeholder="Phone"
+              onChange={(e) => {
+                const digits = toEntryDigits(e.target.value);
+                setQuickBookPatient({ ...quickBookPatient, phone: digits });
+                if (!digits || isValidMobile(digits)) setBookErrors((p) => ({ ...p, phone: false }));
+              }}
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={PHONE_DIGITS}
+              placeholder="Phone (10-digit)"
+              aria-invalid={bookErrors.phone ? "true" : undefined}
+              title={MOBILE_HINT}
               style={{
                 padding: "6px 8px",
-                border: "1px solid #e2e8f0",
+                border: `1px solid ${bookErrors.phone ? "#ef4444" : "#e2e8f0"}`,
                 borderRadius: 6,
                 fontSize: 11,
               }}
@@ -365,6 +386,10 @@ export default function FindPage() {
                 const errs = {};
                 const todayStr = new Date().toISOString().split("T")[0];
                 if (!quickBookPatient.name.trim()) errs.name = true;
+                // Optional field, but a half-typed number is worse than none:
+                // it books a patient nobody can ring to confirm.
+                if (quickBookPatient.phone.trim() && !isValidMobile(quickBookPatient.phone.trim()))
+                  errs.phone = true;
                 if (!bookForm.dt) errs.dt = true;
                 else if (bookForm.dt < todayStr) errs.dt = "past";
                 if (!bookForm.doc) errs.doc = true;
@@ -377,7 +402,9 @@ export default function FindPage() {
                   errs.msg =
                     errs.dt === "past"
                       ? "Date cannot be in the past"
-                      : `Please fill: ${missing.join(", ")}`;
+                      : errs.phone && !missing.length
+                        ? MOBILE_HINT
+                        : `Please fill: ${missing.join(", ")}${errs.phone ? ` · ${MOBILE_HINT}` : ""}`;
                   setBookErrors(errs);
                   return;
                 }
@@ -652,6 +679,7 @@ export default function FindPage() {
                     {r.age}Y/{r.sex?.charAt(0)}
                   </span>
                   {r.file_no && <span className="find__patient-fileno">{r.file_no}</span>}
+                  <BlockedBadge block={blocks[r.id]} size="sm" />
                 </div>
                 {r.diagnosis_labels && <div className="find__patient-dx">{r.diagnosis_labels}</div>}
                 {r.phone && <div className="find__patient-phone">{r.phone}</div>}
@@ -671,6 +699,19 @@ export default function FindPage() {
                   </div>
                 )}
                 {r.last_doctor && <div className="find__patient-doctor">{r.last_doctor}</div>}
+                {canBlock && !blocks[r.id]?.blocked && (
+                  <button
+                    type="button"
+                    className="find__patient-block"
+                    title="Block this patient"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBlockTarget(r);
+                    }}
+                  >
+                    Block
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -739,6 +780,10 @@ export default function FindPage() {
             ) : null}
           </div>
         </>
+      )}
+
+      {blockTarget && (
+        <BlockPatientModal patient={blockTarget} onClose={() => setBlockTarget(null)} />
       )}
     </div>
   );

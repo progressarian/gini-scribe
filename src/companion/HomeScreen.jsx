@@ -8,6 +8,8 @@ import AppointmentsList from "./AppointmentsList";
 import DatePicker from "./DatePicker";
 import DoctorSelect from "./DoctorSelect";
 import CompanionBell from "./CompanionBell";
+import BlockedBadge from "../components/ui/BlockedBadge";
+import { usePatientBlockStatus } from "../queries/hooks/usePatientBlocks";
 
 const STATUS_ORDER = {
   in_visit: 0,
@@ -73,6 +75,9 @@ export default function HomeScreen() {
     homeTab,
     setHomeTab,
   } = useCompanionStore();
+
+  const patientBlocks =
+    usePatientBlockStatus((patients || []).map((p) => p.id).filter(Boolean)).data || {};
 
   // Refresh patient list (with updated visit_count) on every mount
   useEffect(() => {
@@ -325,7 +330,9 @@ export default function HomeScreen() {
                 <div key={p.id} onClick={() => handlePatientClick(p)} className="home__patient">
                   <div className="home__avatar">{(p.name || "?")[0].toUpperCase()}</div>
                   <div className="home__info">
-                    <div className="home__name">{p.name}</div>
+                    <div className="home__name">
+                      {p.name} <BlockedBadge block={patientBlocks[p.id]} size="sm" />
+                    </div>
                     <div className="home__details">
                       {p.age}Y/{p.sex?.[0]} • {p.file_no}
                     </div>

@@ -8,6 +8,7 @@ import VisitDetailModal from "../../components/flow/VisitDetailModal";
 import AppointmentPicker from "../../components/flow/AppointmentPicker";
 import NewPatientModal from "../../components/flow/NewPatientModal";
 import { classifyAppointment } from "../../lib/flowAppointmentType";
+import { isValidMobile, toLocal10 } from "../../../shared/phone.js";
 import {
   useFlowVisitTypes,
   useFlowTemplate,
@@ -75,13 +76,9 @@ const STAGE_LABEL = {
 };
 
 // The +91 country code is fixed in the UI; form.phone holds just the 10 local
-// digits. A valid Indian mobile is 10 digits starting 6–9.
-const isValidMobile = (local) => /^[6-9]\d{9}$/.test(local || "");
-// What we store/send: 91 + the 10 local digits (no +), for WhatsApp.
+// digits, validated by the shared rule. What we store/send is 91 + those digits
+// (no +), for WhatsApp.
 const normalizeMobile = (local) => `91${local}`;
-// When pulling an existing patient's saved phone (which may include code/format),
-// keep just the last 10 digits to fit the +91-prefixed field.
-const toLocal10 = (raw) => (raw || "").replace(/\D/g, "").slice(-10);
 
 // GHM rows carry free-text sex ("M", "male", "FEMALE"); patientCreateSchema is
 // a strict Male|Female|Other enum, so anything else must be dropped rather than

@@ -82,6 +82,23 @@ export function useGhmBiomarkers(patientIds) {
   );
 }
 
+// The export can carry more rows than the table has loaded, so it asks for the
+// last-seen consultant itself instead of reading the visible page's cache. Sent
+// in chunks — one id list per request keeps the query planner off a huge array.
+const LAST_MO_CHUNK = 200;
+
+export async function fetchLastMo(patientIds) {
+  const ids = [...new Set((patientIds || []).filter((id) => Number.isInteger(id)))];
+  const out = {};
+  for (let i = 0; i < ids.length; i += LAST_MO_CHUNK) {
+    const { data } = await api.post("/api/ghm-appointments/last-mo", {
+      patient_ids: ids.slice(i, i + LAST_MO_CHUNK),
+    });
+    Object.assign(out, data || {});
+  }
+  return out;
+}
+
 export function useGhmLastMo(patientIds) {
   return useIdBatch(qk.ghm.lastMo, "/api/ghm-appointments/last-mo", patientIds, "patient_ids");
 }

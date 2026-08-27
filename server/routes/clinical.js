@@ -5,8 +5,13 @@ import { handleError } from "../utils/errorHandler.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { validate } from "../middleware/validate.js";
 import { labCreateSchema } from "../schemas/index.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 
 // Get vitals
 router.get("/patients/:id/vitals", async (req, res) => {

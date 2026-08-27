@@ -17,10 +17,38 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Blocked-patient refusal. A write against a blocked patient is rejected
+// server-side with 409 { reason: "patient_blocked" }
+// (server/middleware/blockWriteGuard.js). Surfacing it here means every write
+// path reports it without each save handler having to check — the mirror of the
+// one middleware that raises it.
+//
+// `detail` is already redacted by role on the server, so this never has to know
+// who is allowed to see the reason.
+const BLOCK_TOAST_WINDOW_MS = 6000;
+let lastBlockToastAt = 0;
+
+// Exported so the non-axios callers (OPD's apiFetch) report identically instead
+// of reimplementing the rule.
+export function notifyIfBlocked(body) {
+  if (body?.reason !== "patient_blocked") return false;
+
+  // A single save can fan out into several writes; one message per burst.
+  const now = Date.now();
+  if (now - lastBlockToastAt >= BLOCK_TOAST_WINDOW_MS) {
+    lastBlockToastAt = now;
+    import("../stores/uiStore.js").then((m) =>
+      m.toast(body.detail || "This patient is blocked. Not saved.", "error", 6000),
+    );
+  }
+  return true;
+}
+
 // Response interceptor: on 401 clear auth and redirect to login
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    if (err.response?.status === 409) notifyIfBlocked(err.response.data);
     if (err.response?.status === 401) {
       localStorage.removeItem("gini_auth_token");
       // Lazy-import to avoid circular dependency

@@ -139,6 +139,13 @@ const NAV_ITEMS = [
     cap: C["/doctor-management"],
     show: () => true,
   },
+  // Admin: the patient blocklist
+  {
+    path: "/admin/blocklist",
+    label: "🚫 Blocked Patients",
+    cap: C["/admin/blocklist"],
+    show: () => true,
+  },
   // Pharmacy: medicine collection tracking
   {
     path: "/medicine-collection",

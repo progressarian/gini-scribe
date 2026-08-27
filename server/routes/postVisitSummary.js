@@ -5,8 +5,13 @@ import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
 import { buildVisitLabContext } from "../services/visitLabContext.js";
 import { computeCarePhase, deriveBiomarkerPriorityStatus } from "../utils/carePhase.js";
+import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 
 const router = Router();
+
+// No write against a blocked patient succeeds (admin `force` excepted).
+// See docs/PATIENT_BLOCKLIST_PLAN.md §3.9
+router.param("id", blockWriteGuard);
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 // Single-flight map (see server/routes/summary.js for rationale).

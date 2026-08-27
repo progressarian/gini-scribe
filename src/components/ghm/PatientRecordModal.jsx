@@ -3,6 +3,8 @@ import { ExternalLink, History, Paperclip, X } from "lucide-react";
 import api, { API_URL } from "../../services/api.js";
 import useBodyScrollLock from "../../hooks/useBodyScrollLock.js";
 import "./PatientRecordModal.css";
+import BlockedBadge from "../ui/BlockedBadge.jsx";
+import { usePatientBlock } from "../../queries/hooks/usePatientBlocks.js";
 
 const TABS = [
   { id: "documents", label: "Documents", Icon: Paperclip },
@@ -88,13 +90,17 @@ export default function PatientRecordModal({ patientId, patientName, onClose }) 
   }, [escClose]);
 
   const counts = record ? { documents: record.documents.length, visits: record.visits.length } : {};
+  const { block } = usePatientBlock(patientId);
 
   return (
     <div className="prm-overlay" onClick={onClose}>
       <div className="prm" onClick={(e) => e.stopPropagation()}>
         <div className="prm__hdr">
           <div>
-            <h3>{patientName || record?.patient?.name || "Patient record"}</h3>
+            <h3>
+              {patientName || record?.patient?.name || "Patient record"}{" "}
+              <BlockedBadge block={block} size="sm" />
+            </h3>
             {record?.patient && (
               <span className="prm__sub">
                 {[

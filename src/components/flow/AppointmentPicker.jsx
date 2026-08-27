@@ -10,6 +10,8 @@
 import { useMemo, useState } from "react";
 import { useFlowAppointments } from "../../queries/hooks/useFlow";
 import { classifyAppointment } from "../../lib/flowAppointmentType";
+import BlockedBadge from "../ui/BlockedBadge";
+import { usePatientBlockStatus } from "../../queries/hooks/usePatientBlocks";
 
 // Appointment statuses that mean the visit is over. `no_show` is deliberately
 // absent: the Sheets sync defaults rows to no_show until the patient is marked
@@ -51,6 +53,9 @@ export default function AppointmentPicker({ date, selectedAppointmentId, onPick,
     refetch,
     isFetching,
   } = useFlowAppointments(date, {});
+
+  const patientIds = useMemo(() => rows.map((a) => a.patient_id).filter(Boolean), [rows]);
+  const blocks = usePatientBlockStatus(patientIds).data || {};
 
   const counts = useMemo(() => {
     const c = { pending: 0, ongoing: 0, done: 0, all: rows.length };
@@ -161,6 +166,7 @@ export default function AppointmentPicker({ date, selectedAppointmentId, onPick,
                       PREF
                     </span>
                   )}
+                  <BlockedBadge block={blocks[a.patient_id]} size="sm" />
                 </div>
                 <div className="ap-meta">
                   {[a.file_no, ageSexOf(a), a.doctor_name].filter(Boolean).join(" · ") || "—"}
