@@ -276,6 +276,15 @@ export function useFlowClaimStep() {
     }
   });
 }
+export function useFlowCancelCallIn() {
+  return useFlowMutation(async (stepId) => {
+    try {
+      return (await api.post(`/api/flow/steps/${stepId}/cancel-start`)).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not cancel the call-in"));
+    }
+  });
+}
 export function useFlowReleaseStep() {
   return useFlowMutation(async (stepId) => {
     try {

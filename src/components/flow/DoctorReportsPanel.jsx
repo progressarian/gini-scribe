@@ -11,7 +11,10 @@ export function deliveredReportRows(visits = []) {
       const handed = (v.steps || []).find(
         (s) => s.step_catalog_id === "report_delivered" && s.status === "completed",
       );
-      if (!handed || handed.data?.reviewed) return null;
+      // "The assistant has brought these up" has to be true. A stage closed by a
+      // sync is not a handover — the old lab_results sweep used to close these,
+      // and the cards it left behind claimed a delivery nobody made.
+      if (!handed || handed.data?.reviewed || handed.data?.auto_completed) return null;
       const tests = (v.steps || [])
         .filter((s) => s.assigned_role === "lab_tech" && !s.is_background)
         .map((s) => s.step_name);
@@ -60,9 +63,12 @@ export default function DoctorReportsPanel({
   actionLabel = "✓ Reviewed",
   actionTitle = "Record that you have read this report",
   stampLabel = "handed over",
+  // The station renders this as a sticky right rail; inside a column it has to
+  // read as an ordinary section instead.
+  className = "station-side",
 }) {
   return (
-    <aside className="station-side">
+    <aside className={className}>
       <div className="q-sec-head">
         <span className="flow-sec-title" style={{ margin: 0 }}>
           {title}

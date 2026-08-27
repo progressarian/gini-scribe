@@ -706,15 +706,58 @@
   margin-bottom: 6px;
 }
 /* My Patients — my queue beside the rest of the floor */
+/* My Patients — my work on the left, the rest of the floor on the right. The
+   left column carries action buttons and chips, so it gets the extra width;
+   both tracks are minmax(0,…) so a long patient name cannot push the grid
+   wider than the page. */
 .mp-split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
   align-items: start;
 }
-@media (max-width: 900px) {
+.mp-split > section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mp-split > section > .q-sec {
+  margin-top: 0;
+}
+
+/* The reports panel is a sticky rail at a station; here it is just a section. */
+.mp-reports {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  border: 1px solid var(--fbd);
+  border-radius: 10px;
+  background: var(--fwhite);
+  padding: 10px 12px;
+}
+
+@media (max-width: 1250px) {
   .mp-split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+@media (max-width: 1000px) {
+  .mp-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The header stacks before the rows do — two stat tiles beside a long title
+   overflow well above the 640px row breakpoint. The row rules for that width
+   already exist further down; this deliberately does not restate them. */
+@media (max-width: 760px) {
+  .flow-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .flow-header-right {
+    margin-left: 0;
   }
 }
 
@@ -1152,10 +1195,15 @@
 @media (max-width: 640px) {
   .qrow {
     flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .qrow-main {
+    flex: 1 1 100%;
   }
   .qrow-actions {
     width: 100%;
     justify-content: flex-start;
+    margin-top: 8px;
   }
   .q-search {
     min-width: 100%;
@@ -1784,4 +1832,15 @@
 }
 .rx-state--wait {
   font-weight: 600;
+}
+
+.consult-box {
+  margin-bottom: 14px;
+}
+.consult-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }

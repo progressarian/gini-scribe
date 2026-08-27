@@ -1662,6 +1662,114 @@ router.post("/flow/steps/:stepId/claim", async (req, res) => {
 });
 
 // Hand a step back. Yours to release, or a floor manager clearing a stuck one.
+// Undo a call-in. Release only drops the claim and leaves the clock running —
+// this is for "I opened the wrong patient": the step goes back to ready with its
+// timer cleared, so the patient returns to the queue as if never called.
+//
+// If the OPD sync still shows the appointment in_visit it will re-open the step
+// on the next pass, but with started_at NULL it restarts the clock rather than
+// resuming the old one — which is the point.
+router.post("/flow/steps/:stepId/cancel-start", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const step = (
+      await client.query("SELECT * FROM flow_visit_steps WHERE id=$1 FOR UPDATE", [
+        req.params.stepId,
+      ])
+    ).rows[0];
+    if (!step) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Step not found" });
+    }
+    if (step.status !== "in_progress") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Cannot cancel a ${step.status} step` });
+    }
+    const held = claimBlocks(step, req);
+    if (held && !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Held by ${held.by} — only they can cancel it` });
+    }
+    // Never rewind a patient who has already moved past this step.
+    const moved = await client.query(
+      `SELECT 1 FROM flow_visit_steps
+        WHERE visit_id=$1 AND step_order > $2 AND status IN ('in_progress','completed')
+          AND NOT is_background LIMIT 1`,
+      [step.visit_id, step.step_order],
+    );
+    if (moved.rowCount) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "This patient has already moved on" });
+    }
+    // The minutes since the call-in are real: the patient sat there. They are
+    // not consultation time, so they go back into the wait that preceded this
+    // step rather than being thrown away.
+    const spent = step.started_at
+      ? Math.max(0, Math.round((Date.now() - new Date(step.started_at).getTime()) / 60000))
+      : 0;
+    const next = { ...(step.data || {}) };
+    delete next.claim;
+    next.cancelled = { by: ACTOR(req), at: new Date().toISOString(), returned_wait_min: spent };
+    await client.query(
+      `UPDATE flow_visit_steps
+          SET status='ready', started_at=NULL, actual_duration_min=NULL, data=$2
+        WHERE id=$1`,
+      [step.id, JSON.stringify(next)],
+    );
+
+    // Re-open the waiting step this call-in closed, back-dated by what it had
+    // already accrued plus the cancelled minutes — so it keeps counting until
+    // the patient is genuinely seen, and /start records the full wait.
+    const wait = (
+      await client.query(
+        `SELECT * FROM flow_visit_steps
+          WHERE visit_id=$1 AND step_order < $2 AND assigned_role=$3
+          ORDER BY step_order DESC LIMIT 1`,
+        [step.visit_id, step.step_order, WAITING_ROLE],
+      )
+    ).rows[0];
+    let returnedTo = null;
+    if (wait) {
+      const prior = wait.actual_duration_min || 0;
+      await client.query(
+        `UPDATE flow_visit_steps
+            SET status='in_progress', completed_at=NULL, actual_duration_min=NULL,
+                started_at = NOW() - make_interval(mins => $2)
+          WHERE id=$1`,
+        [wait.id, prior + spent],
+      );
+      returnedTo = wait.step_name;
+      await client.query(
+        `UPDATE flow_visits SET current_step_id=$2, current_step_order=$3, updated_at=NOW()
+          WHERE id=$1`,
+        [step.visit_id, wait.id, wait.step_order],
+      );
+    } else {
+      await client.query(
+        `UPDATE flow_visits SET current_step_id=NULL, updated_at=NOW()
+          WHERE id=$1 AND current_step_id=$2`,
+        [step.visit_id, step.id],
+      );
+    }
+    await logEvent(
+      client,
+      step.visit_id,
+      "call_in_cancelled",
+      step.step_order,
+      { returned_wait_min: spent, returned_to: returnedTo },
+      ACTOR(req),
+    );
+    await client.query("COMMIT");
+    res.json({ ok: true, status: "ready", returned_wait_min: spent, returned_to: returnedTo });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow cancel call-in");
+  } finally {
+    client.release();
+  }
+});
+
 router.post("/flow/steps/:stepId/release", async (req, res) => {
   const client = await pool.connect();
   try {
@@ -2207,7 +2315,21 @@ router.post("/flow/steps/:stepId/results-in", async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "That is not a lab stage" });
     }
+    // The prescription stage belongs to the MO, but the consultant who just saw
+    // the patient is often the one who writes it — so they may close their own
+    // patient's stage. Anyone else's patient, or any other stage, is refused.
+    const ownConsult =
+      step.step_catalog_id === "rx_ready" &&
+      hasOwnConsultQueue(req.doctor?.role) &&
+      (
+        await client.query(
+          `SELECT 1 FROM flow_visits
+            WHERE id=$1 AND (assigned_sd=$2 OR assigned_chief=$2) LIMIT 1`,
+          [step.visit_id, req.doctor?.doctor_id],
+        )
+      ).rowCount > 0;
     if (
+      !ownConsult &&
       !hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR) &&
       !canWorkStationRole(req.doctor?.role, step.assigned_role)
     ) {
@@ -2319,22 +2441,62 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
         });
       }
     }
+    // A patient cannot be pulled to a later desk before finishing the earlier
+    // ones. The one-place guard below only catches a step that is in_progress,
+    // so a patient sitting between steps could be jumped straight to Pharmacy.
+    // Floor managers keep their override — they skip the intervening steps
+    // deliberately, which leaves a reason on each.
+    if (!hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR)) {
+      const earlier = (
+        await client.query(
+          `SELECT step_name FROM flow_visit_steps
+            WHERE visit_id=$1 AND NOT is_background AND step_order < $2
+              AND status NOT IN ('completed','skipped')
+            ORDER BY step_order ASC LIMIT 1`,
+          [step.visit_id, step.step_order],
+        )
+      ).rows[0];
+      if (earlier) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: `Not their turn yet — still at ${earlier.step_name}`,
+          waiting_on: earlier.step_name,
+        });
+      }
+    }
+
     // Nothing to explain until the prescription exists. Overridable: the stage
     // itself takes "results-in" from an MO or a floor manager for a paper Rx.
     if (step.step_catalog_id === "rx_explain") {
-      const rx = (
+      const stage = (
         await client.query(
-          `SELECT step_name FROM flow_visit_steps
-            WHERE visit_id=$1 AND step_catalog_id='rx_ready'
-              AND status NOT IN ('completed','skipped') LIMIT 1`,
+          `SELECT step_name, status FROM flow_visit_steps
+            WHERE visit_id=$1 AND step_catalog_id='rx_ready' LIMIT 1`,
           [step.visit_id],
         )
       ).rows[0];
-      if (rx) {
+      // Visits created before the stage existed have no rx_ready row at all, so
+      // the stage check alone waved them straight through. Fall back to the
+      // thing the stage is a proxy for: does a prescription actually exist?
+      let blocked = null;
+      if (stage) {
+        if (!["completed", "skipped"].includes(stage.status)) blocked = stage.step_name;
+      } else {
+        const doc = await client.query(
+          `SELECT 1 FROM documents d
+             JOIN flow_visits v ON v.id=$1
+            WHERE d.patient_id = v.patient_db_id AND d.doc_type='prescription'
+              AND d.created_at::date = v.visit_date
+            LIMIT 1`,
+          [step.visit_id],
+        );
+        if (!doc.rowCount) blocked = "the prescription";
+      }
+      if (blocked) {
         await client.query("ROLLBACK");
         return res.status(409).json({
           error: "No prescription yet — the doctor has not submitted it",
-          waiting_on: rx.step_name,
+          waiting_on: blocked,
         });
       }
     }
@@ -2552,6 +2714,22 @@ router.post("/flow/visits/:id/steps", async (req, res) => {
     }
 
     await client.query("BEGIN");
+    // A step the patient already has open is not a new piece of work. Without
+    // this, repeated clicks stack identical rows onto one journey.
+    if (step_catalog_id) {
+      const dup = await client.query(
+        `SELECT step_name FROM flow_visit_steps
+          WHERE visit_id=$1 AND step_catalog_id=$2
+            AND status NOT IN ('completed','skipped') LIMIT 1`,
+        [req.params.id, step_catalog_id],
+      );
+      if (dup.rowCount) {
+        await client.query("ROLLBACK");
+        return res
+          .status(409)
+          .json({ error: `${dup.rows[0].step_name} is already in this patient's journey` });
+      }
+    }
     const newOrder = parseInt(insert_after_order) + 1;
     // Shift down (highest first to respect the UNIQUE(visit_id, step_order)).
     await client.query(

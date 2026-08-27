@@ -9,10 +9,17 @@ import {
   useFlowAcceptOffer,
   useFlowDeclineOffer,
   useFlowMarkReviewed,
+  useFlowStartStep,
+  useFlowClaimStep,
+  useFlowReleaseStep,
+  useFlowCancelCallIn,
+  useFlowAdvance,
+  useFlowResultsIn,
 } from "../../queries/hooks/useFlow";
 import StationSwitcher from "../../components/flow/StationSwitcher";
 import LabPanel from "../../components/flow/LabPanel";
 import DoctorReportsPanel, { deliveredReportRows } from "../../components/flow/DoctorReportsPanel";
+import ConsultationBox from "../../components/flow/ConsultationBox";
 import {
   CAPABILITIES as CAP,
   hasCapability,
@@ -22,6 +29,10 @@ import "../../styles/flow.css";
 
 const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const waitedMin = (t) => Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
+// Matches CLAIM_STALE_MIN on the server — a claim older than this no longer
+// holds the patient, so the box must let go of them too.
+const CLAIM_STALE_MIN = 15;
+
 const LIVE = ["waiting", "paused", "in_progress"];
 
 // Whether the consultation itself is done, independent of the visit still being
@@ -128,6 +139,13 @@ export default function FlowMyPatientsPage() {
   const accept = useFlowAcceptOffer();
   const decline = useFlowDeclineOffer();
   const markReportReviewed = useFlowMarkReviewed();
+  const startStep = useFlowStartStep();
+  const claimStep = useFlowClaimStep();
+  const releaseStep = useFlowReleaseStep();
+  const cancelCallIn = useFlowCancelCallIn();
+  const advance = useFlowAdvance();
+  const resultsIn = useFlowResultsIn();
+  const [consultNotes, setConsultNotes] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [openingId, setOpeningId] = useState(null);
   const [q, setQ] = useState("");
@@ -145,6 +163,101 @@ export default function FlowMyPatientsPage() {
   // groups are other people's reports to read.
   const myReports = deliveredReportRows(mine);
 
+  // The consultation step for a visit, and the prescription stage behind it.
+  const consultStepOf = (v) =>
+    (v?.steps || []).find(
+      (x) => x.assigned_role === (v.my_role === "chief" ? "chief" : "sd") && !x.is_background,
+    ) || null;
+  const rxStepOf = (v) => (v?.steps || []).find((x) => x.step_catalog_id === "rx_ready") || null;
+
+  // The box follows the STEP, not the claim. 99% of consultations are opened by
+  // the OPD sync, so a patient marked in-consultation is already with this
+  // consultant — hunting for them in a list and pressing a button would just be
+  // re-typing what the system knows. A claim by someone else is the one thing
+  // that keeps them out of my box.
+  //
+  // Deriving it from the claim alone was wrong for a second reason: claims go
+  // stale after 15 minutes and the median consultation is 83, so the patient
+  // vanished from the box halfway through.
+  const claimOf = (step) => {
+    const c = step?.data?.claim;
+    if (!c?.at) return null;
+    return (Date.now() - new Date(c.at).getTime()) / 60000 > CLAIM_STALE_MIN ? null : c;
+  };
+  const claimedByOther = (step) => {
+    const c = claimOf(step);
+    return c && String(c.by_id) !== String(me?.id) ? c : null;
+  };
+  const boxVisit =
+    mine.find((v) => {
+      const st = consultStepOf(v);
+      return st?.status === "in_progress" && !claimedByOther(st);
+    }) || null;
+  const boxStep = consultStepOf(boxVisit);
+  const boxClaim = claimOf(boxStep);
+  const boxIsMine = !!boxClaim && String(boxClaim.by_id) === String(me?.id);
+
+  // 99% of consultations are already in progress from the OPD sync, so calling
+  // in claims rather than starts. Either way the patient lands in the box with
+  // this consultant's name on them — which the floor could never see before.
+  const callIn = async (v) => {
+    const step = consultStepOf(v);
+    if (!step) {
+      toast("This visit has no consultation step", "warn");
+      return;
+    }
+    try {
+      if (step.status === "in_progress") await claimStep.mutateAsync(step.id);
+      else await startStep.mutateAsync(step.id);
+      setConsultNotes("");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const finishConsult = async () => {
+    try {
+      await advance.mutateAsync({
+        visitId: boxVisit.id,
+        step_id: boxStep.id,
+        step_data: { notes: consultNotes.trim() },
+      });
+      toast(`${boxVisit.patient_name} — consultation done`, "success");
+      setConsultNotes("");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const markPrescriptionWritten = async () => {
+    const rx = rxStepOf(boxVisit);
+    if (!rx) return;
+    try {
+      await resultsIn.mutateAsync(rx.id);
+      toast(`${boxVisit.patient_name} — prescription written, the nurse can explain it`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const releaseConsult = async () => {
+    try {
+      await releaseStep.mutateAsync(boxStep.id);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const cancelConsult = async () => {
+    try {
+      await cancelCallIn.mutateAsync(boxStep.id);
+      toast(`${boxVisit.patient_name} — call-in cancelled, back in your queue`, "success");
+      setConsultNotes("");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
   const markReviewed = async (step, name) => {
     try {
       await markReportReviewed.mutateAsync(step.id);
@@ -161,9 +274,19 @@ export default function FlowMyPatientsPage() {
     // is still their SD's patient — hiding them understated that SD's load,
     // which is the one thing this column exists to show.
     const skip = new Set([...mine.filter((v) => v.my_role === "sd"), ...offers].map((v) => v.id));
+    // mine holds only live visits, so my own COMPLETED patients were falling back
+    // into the floor list under my own name — a "Dr. Bhansali" group sitting in
+    // "Other consultants' patients". Match on identity, not on what is still open.
+    // Match on the id. The name on a visit is the doctor's SHORT name — visits
+    // carry "Dr. Bhansali" while the account is "Dr. Anil Bhansali" — so a
+    // straight name comparison silently matches nothing.
+    const isMine = (v) =>
+      (me?.id != null && String(v.assigned_sd) === String(me.id)) ||
+      (!!v.assigned_sd_name &&
+        [me?.short_name, me?.name].filter(Boolean).includes(v.assigned_sd_name));
     const term = q.trim().toLowerCase();
     return allVisits
-      .filter((v) => !skip.has(v.id))
+      .filter((v) => !skip.has(v.id) && !isMine(v))
       .filter((v) =>
         !term
           ? true
@@ -177,7 +300,7 @@ export default function FlowMyPatientsPage() {
           Number(!!b.is_vip) - Number(!!a.is_vip) ||
           new Date(a.checkin_time) - new Date(b.checkin_time),
       );
-  }, [allVisits, mine, offers, q]);
+  }, [allVisits, mine, offers, q, me]);
 
   // Grouped by consultant, busiest first — the point of this column is seeing
   // who is carrying what, which a flat list buries.
@@ -307,6 +430,30 @@ export default function FlowMyPatientsPage() {
 
         <StationSwitcher />
 
+        {boxVisit && (
+          <ConsultationBox
+            visit={boxVisit}
+            step={boxStep}
+            rxStep={rxStepOf(boxVisit)}
+            notes={consultNotes}
+            setNotes={setConsultNotes}
+            busy={
+              advance.isPending ||
+              resultsIn.isPending ||
+              releaseStep.isPending ||
+              cancelCallIn.isPending
+            }
+            opening={openingId === boxVisit.id}
+            onDone={finishConsult}
+            onPrescription={markPrescriptionWritten}
+            onRelease={releaseConsult}
+            onCancel={cancelConsult}
+            onClaim={() => callIn(boxVisit)}
+            mine={boxIsMine}
+            onOpenChart={() => openPatient(boxVisit)}
+          />
+        )}
+
         <div className="mp-split">
           <section>
             {myReports.length > 0 && (
@@ -314,6 +461,7 @@ export default function FlowMyPatientsPage() {
                 rows={myReports}
                 onReview={markReviewed}
                 busy={markReportReviewed.isPending}
+                className="q-sec mp-reports"
               />
             )}
             {offers.length > 0 && (
@@ -360,17 +508,42 @@ export default function FlowMyPatientsPage() {
                   No patients assigned to you in the building right now.
                 </div>
               ) : (
-                mine.map((v) => (
-                  <PatientRow key={v.id} visit={v}>
-                    <button
-                      className="flow-btn flow-btn-primary"
-                      disabled={openingId === v.id}
-                      onClick={() => openPatient(v)}
-                    >
-                      {openingId === v.id ? "Opening…" : "Open chart →"}
-                    </button>
-                  </PatientRow>
-                ))
+                mine
+                  .filter((v) => v.id !== boxVisit?.id)
+                  .map((v) => {
+                    const step = consultStepOf(v);
+                    const wait = labPending(v);
+                    // in_progress patients are in the box, or held by a colleague
+                    // whose name the row already shows — neither is a call-in.
+                    const canCall = !!step && ["ready", "pending"].includes(step.status);
+                    const heldBy = claimedByOther(step);
+                    return (
+                      <PatientRow key={v.id} visit={v}>
+                        {heldBy && <span className="flow-badge fb-amb">🔒 with {heldBy.by}</span>}
+                        {canCall && (
+                          <button
+                            className="flow-btn flow-btn-grn"
+                            disabled={!!wait || startStep.isPending || claimStep.isPending}
+                            title={
+                              wait
+                                ? "Reports are not ready for this patient yet"
+                                : "Call this patient in"
+                            }
+                            onClick={() => callIn(v)}
+                          >
+                            Call in
+                          </button>
+                        )}
+                        <button
+                          className="flow-btn flow-btn-primary"
+                          disabled={openingId === v.id}
+                          onClick={() => openPatient(v)}
+                        >
+                          {openingId === v.id ? "Opening…" : "Open chart →"}
+                        </button>
+                      </PatientRow>
+                    );
+                  })
               )}
             </div>
           </section>

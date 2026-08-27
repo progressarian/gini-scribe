@@ -165,7 +165,28 @@ export default function StationQueue({ role, form, freeMove = false }) {
     if (!isRx) return null;
     const v = visitById.get(s.visit_id);
     const stage = (v?.steps || []).find((x) => x.step_catalog_id === "rx_ready");
-    return stage && !["completed", "skipped"].includes(stage.status) ? stage : null;
+    // No stage at all (a visit created before it existed) is not a green light —
+    // fall back to whether a prescription is genuinely on file.
+    if (!stage) return v && !v.rx?.ready ? { step_name: "the prescription" } : null;
+    return ["completed", "skipped"].includes(stage.status) ? null : stage;
+  };
+  // Everything before this step that is still open. The patient stays visible in
+  // the queue — the desk wants to see who is coming — but cannot be called in
+  // until they have actually finished the earlier stations. Mirrors the same
+  // guard on POST /steps/:id/start, so the button never promises what the API
+  // will refuse.
+  const notTheirTurn = (s) => {
+    const v = visitById.get(s.visit_id);
+    return (
+      (v?.steps || [])
+        .filter(
+          (x) =>
+            !x.is_background &&
+            x.step_order < s.step_order &&
+            !["completed", "skipped"].includes(x.status),
+        )
+        .sort((a, b) => a.step_order - b.step_order)[0] || null
+    );
   };
   const heldByMe = (s) => s.claim && String(s.claim.by_id) === String(myId);
   const heldByOther = (s) => s.claim && String(s.claim.by_id) !== String(myId);
@@ -401,6 +422,15 @@ export default function StationQueue({ role, form, freeMove = false }) {
   const sendToMyStation = async (v, catId) => {
     const c = myCatalogSteps.find((x) => x.id === catId) || myCatalogSteps[0];
     if (!c) return;
+    // Adding a step the patient already has open just creates a second copy of
+    // the same work — three "Prescription Explain" rows on one journey.
+    const already = (v.steps || []).find(
+      (x) => x.step_catalog_id === c.id && !["completed", "skipped"].includes(x.status),
+    );
+    if (already) {
+      toast(`${v.patient_name} already has ${c.name} in their journey`, "warn");
+      return;
+    }
     const maxOrder = (v.steps || []).reduce((m, s) => Math.max(m, s.step_order || 0), 0);
     try {
       await addStep.mutateAsync({
@@ -412,7 +442,9 @@ export default function StationQueue({ role, form, freeMove = false }) {
         assigned_role: c.assigned_role,
         insert_after_order: maxOrder,
       });
-      toast(`${v.patient_name} → ${c.name} added to this station's queue`, "success");
+      // Not "added to the queue": it goes at the end of their journey, so they
+      // only appear here once they have finished everything before it.
+      toast(`${v.patient_name} → ${c.name} added to their journey`, "success");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -831,6 +863,16 @@ export default function StationQueue({ role, form, freeMove = false }) {
               ),
           )}
 
+          {/* This desk has no call-in queue and no patient box, so with both stage
+              lists empty the page would otherwise be blank below the header. */}
+          {isAssistant && stageSections.every((sec) => sec.rows.length === 0) && (
+            <div className="flow-card flow-empty">
+              Nothing waiting. A patient appears here once the lab marks their reports available —
+              print it, then hand it to the consultant. Patients having tests done at an outside lab
+              show up too, so you can mark the report received when they bring it in.
+            </div>
+          )}
+
           {/* Queue — free-move: pick anyone into the box; else call-in order */}
           {!isAssistant && (
             <div className="q-sec">
@@ -952,20 +994,25 @@ export default function StationQueue({ role, form, freeMove = false }) {
                                     startStep.isPending ||
                                     heldByOther(s) ||
                                     !!busyElsewhere(s) ||
-                                    !!rxNotReady(s)
+                                    !!rxNotReady(s) ||
+                                    !!notTheirTurn(s)
                                   }
                                   title={
-                                    rxNotReady(s)
-                                      ? "No prescription yet — the doctor has not submitted it"
-                                      : busyElsewhere(s)
-                                        ? `Patient is at ${busyElsewhere(s)} right now`
-                                        : heldByOther(s)
-                                          ? `${s.claim.by} is working this patient`
-                                          : active && !inMyBox(s)
-                                            ? "Finish the current patient first"
-                                            : inMyBox(s)
-                                              ? "Call in — this patient is already at your desk"
-                                              : "Call in"
+                                    notTheirTurn(s)
+                                      ? notTheirTurn(s).status === "in_progress"
+                                        ? `Patient is at ${notTheirTurn(s).step_name} right now`
+                                        : `Not their turn yet — still at ${notTheirTurn(s).step_name}`
+                                      : rxNotReady(s)
+                                        ? "No prescription yet — the doctor has not submitted it"
+                                        : busyElsewhere(s)
+                                          ? `Patient is at ${busyElsewhere(s)} right now`
+                                          : heldByOther(s)
+                                            ? `${s.claim.by} is working this patient`
+                                            : active && !inMyBox(s)
+                                              ? "Finish the current patient first"
+                                              : inMyBox(s)
+                                                ? "Call in — this patient is already at your desk"
+                                                : "Call in"
                                   }
                                   onClick={() => (isLab ? setCallInTarget(s) : callIn(s.id))}
                                 >
@@ -1175,12 +1222,26 @@ export default function StationQueue({ role, form, freeMove = false }) {
 }
 
 function SendToStation({ visit, steps, busy, onSend }) {
+  // Steps this patient already has open. Offering them again just stacks
+  // duplicates — the API refuses them, so the option should say why rather
+  // than failing after the click. Kept visible but disabled: silently removing
+  // an option leaves the user wondering where it went.
+  const already = new Set(
+    (visit.steps || [])
+      .filter((s) => !["completed", "skipped"].includes(s.status))
+      .map((s) => s.step_catalog_id),
+  );
   if (steps.length === 1) {
+    const has = already.has(steps[0].id);
     return (
       <button
         className="flow-btn flow-btn-ghost"
-        disabled={busy}
-        title={`Add "${steps[0].name}" to this patient's journey and queue them here`}
+        disabled={busy || has}
+        title={
+          has
+            ? `${steps[0].name} is already in this patient's journey`
+            : `Add "${steps[0].name}" to this patient's journey and queue them here`
+        }
         onClick={() => onSend(visit, steps[0].id)}
       >
         → Send to my station
@@ -1200,8 +1261,9 @@ function SendToStation({ visit, steps, busy, onSend }) {
     >
       <option value="">→ Send to my station…</option>
       {steps.map((c) => (
-        <option key={c.id} value={c.id}>
+        <option key={c.id} value={c.id} disabled={already.has(c.id)}>
           {c.name}
+          {already.has(c.id) ? " — already in their journey" : ""}
         </option>
       ))}
     </select>
