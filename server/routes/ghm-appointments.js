@@ -2,7 +2,12 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
-import { ownFu, dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
+import {
+  ownFu,
+  dayWindowWhere,
+  callStatusToday,
+  isLatestFollowUpVisit,
+} from "../services/ghmDayWindow.js";
 import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 import { CATEGORY_VALUES, isValidCategory } from "../../shared/patientCategories.js";
 import { slotStartHour } from "../../shared/slotHour.js";
@@ -757,6 +762,7 @@ router.get("/ghm-appointments", async (req, res) => {
           SELECT fu.file_no, ${ownFu("fu")} AS x
             FROM appointments fu
            WHERE fu.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
+             AND ${isLatestFollowUpVisit("fu")}
         ) s GROUP BY file_no
       )`;
 

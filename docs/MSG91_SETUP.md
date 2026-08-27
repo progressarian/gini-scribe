@@ -20,11 +20,11 @@ inside the template body.
 
 ## What you need to collect
 
-| Env var | What it is | Where to copy from |
-|---|---|---|
-| `MSG91_AUTH_KEY` | Your MSG91 account key | MSG91 dashboard → profile icon (top-right) → **Auth Key** |
-| `MSG91_SENDER_ID` | 6-letter DLT-approved header (e.g. `GINIHL`) | MSG91 dashboard → **SMS → Sender IDs** — pick a row with status "Approved" |
-| `MSG91_FLOW_ID` | MSG91 internal Flow ID tying template + sender | MSG91 dashboard → **Flows** — created in step 4 below |
+| Env var           | What it is                                     | Where to copy from                                                         |
+| ----------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| `MSG91_AUTH_KEY`  | Your MSG91 account key                         | MSG91 dashboard → profile icon (top-right) → **Auth Key**                  |
+| `MSG91_SENDER_ID` | 6-letter DLT-approved header (e.g. `GINIHL`)   | MSG91 dashboard → **SMS → Sender IDs** — pick a row with status "Approved" |
+| `MSG91_FLOW_ID`   | MSG91 internal Flow ID tying template + sender | MSG91 dashboard → **Flows** — created in step 4 below                      |
 
 ## Step 1 — Auth Key
 
@@ -95,21 +95,19 @@ something the Flow API can trigger by ID.
 
 That's `MSG91_FLOW_ID`.
 
-
-
 ## Where DLT IDs come from
 
 "DLT" = Distributed Ledger Technology, a TRAI-mandated registry that
 all Indian SMS senders must register on. Registration happens on a DLT
 **operator portal** (one of several, all sync to each other):
 
-| Operator | Portal | Notes |
-|---|---|---|
-| Jio | https://trueconnect.jio.com | Most common, simplest UI |
-| Vodafone-Idea | https://www.vilpower.in | Slightly more bureaucratic |
-| Airtel | https://dltconnect.airtel.in | Per-domain registrations |
-| BSNL | https://www.ucc-bsnl.co.in | Rarely used standalone |
-| Tata Tele | https://smartping.live | Common with enterprise |
+| Operator      | Portal                       | Notes                      |
+| ------------- | ---------------------------- | -------------------------- |
+| Jio           | https://trueconnect.jio.com  | Most common, simplest UI   |
+| Vodafone-Idea | https://www.vilpower.in      | Slightly more bureaucratic |
+| Airtel        | https://dltconnect.airtel.in | Per-domain registrations   |
+| BSNL          | https://www.ucc-bsnl.co.in   | Rarely used standalone     |
+| Tata Tele     | https://smartping.live       | Common with enterprise     |
 
 You typically pick **one** registrar (Jio is the path of least resistance
 for most startups) and the registration auto-propagates to all carriers.

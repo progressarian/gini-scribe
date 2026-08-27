@@ -27,8 +27,8 @@ OBT call-list work only, rather than reusing the broad `reception` role.
 While it is true, `hasCapability()` returns `true` for everyone, so **no role
 actually restricts anything at runtime** — role only shapes the frontend nav.
 
-The work below makes `obt` *correctly scoped for when the switch is flipped to
-`false`*. It does **not**, on its own, hard-wall the OBT team today. Truly
+The work below makes `obt` _correctly scoped for when the switch is flipped to
+`false`_. It does **not**, on its own, hard-wall the OBT team today. Truly
 enforcing the restriction is a separate decision (flip the switch + regression-test
 every other role) and is out of scope for this plan unless explicitly requested.
 
@@ -47,13 +47,13 @@ endpoint to it.
 
 It is gated by `RECEPTION_OPS`, which is held by **four** roles plus admin:
 
-| Role | Has RECEPTION_OPS today | Keep OBT list after re-gate? |
-|---|---|---|
-| `admin` | ALL | yes (ALL) |
-| `reception` | yes | **yes** → grant `OBT_OPS` |
-| `coordinator` | yes | **yes** → grant `OBT_OPS` |
-| `consultant` | yes | **NO — deliberate drop** (doctors don't work the call list) |
-| `mo` | yes | **NO — deliberate drop** (doctors don't work the call list) |
+| Role          | Has RECEPTION_OPS today | Keep OBT list after re-gate?                                |
+| ------------- | ----------------------- | ----------------------------------------------------------- |
+| `admin`       | ALL                     | yes (ALL)                                                   |
+| `reception`   | yes                     | **yes** → grant `OBT_OPS`                                   |
+| `coordinator` | yes                     | **yes** → grant `OBT_OPS`                                   |
+| `consultant`  | yes                     | **NO — deliberate drop** (doctors don't work the call list) |
+| `mo`          | yes                     | **NO — deliberate drop** (doctors don't work the call list) |
 
 - `OBT_OPS` is granted to: `obt`, `reception`, `coordinator`, `admin`(=ALL).
 - **`consultant` and `mo` intentionally lose access** to the OBT list under the
@@ -121,9 +121,9 @@ It is gated by `RECEPTION_OPS`, which is held by **four** roles plus admin:
 
 ## 4. Capability → access summary for the `obt` role
 
-| Capability | Grants access to |
-|---|---|
-| `OBT_OPS` | `GET /api/obt-status` (tomorrow's call list) |
+| Capability     | Grants access to                                                                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OBT_OPS`      | `GET /api/obt-status` (tomorrow's call list)                                                                                                             |
 | `PATIENT_READ` | `/api/patients`, `/api/documents`, `/api/outcomes`, `/api/conversations`, `/api/messages`; client `/patient`, `/visit`, `/history`, `/outcomes`, `/docs` |
 
 **Explicitly NOT granted:** clinical write, vitals, AI tools, lab portal,
@@ -156,7 +156,7 @@ med collection, all flow stations, analytics, admin.
 ## 7. Open questions for the user
 
 1. **Scope confirmed?** OBT = call list + patient lookup only. If they also need
-   to *update* call status (mark called/booked), that's a write endpoint that
+   to _update_ call status (mark called/booked), that's a write endpoint that
    must also be gated by `OBT_OPS` — name it if so.
 2. **PINs** — user-supplied or Claude-generated random 4-digit?
 3. **Enforce now or later?** This plan makes `obt` correct for the switch-off

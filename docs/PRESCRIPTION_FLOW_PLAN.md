@@ -1,7 +1,7 @@
 # Prescription — who makes it ready, and how the nurse finds out
 
 **Status:** built and live, 2026-08-26
-**Applies to:** `sd_consult` → *(new)* `rx_ready` → `rx_explain`
+**Applies to:** `sd_consult` → _(new)_ `rx_ready` → `rx_explain`
 **Related:** `docs/LAB_FLOW_PLAN.md` §11, `docs/FLOW_MANAGEMENT_PLAN.md`
 
 ---
@@ -14,22 +14,22 @@ to explain.
 
 ### Where prescriptions come from
 
-| Source | All-time | Today | Who |
-| ---------------- | -------- | ----- | ------------------------------------- |
-| `healthray`      | 31,366   | 62    | written in HealthRay, pulled by sync   |
-| `visit`          | 5,684    | 56    | rendered by **our** PDF service        |
-| scribe / upload / external | ~90 | 0 | scanned or uploaded one-offs      |
+| Source                     | All-time | Today | Who                                  |
+| -------------------------- | -------- | ----- | ------------------------------------ |
+| `healthray`                | 31,366   | 62    | written in HealthRay, pulled by sync |
+| `visit`                    | 5,684    | 56    | rendered by **our** PDF service      |
+| scribe / upload / external | ~90      | 0     | scanned or uploaded one-offs         |
 
 ### The part that matters: nobody in the building presses anything
 
 `source='visit'` looks like a human ending a visit in our app. It is not. Five code paths
 call `savePrescriptionForVisit()` and **all five pass `source: "visit"`** — including
 `autoSavePrescriptionAfterSeen()` in `services/healthray/db.js`, which fires when the
-HealthRay sync sees the appointment marked *seen*, rebuilds the payload with
+HealthRay sync sees the appointment marked _seen_, rebuilds the payload with
 `buildVisitPayloadFromDb()`, and renders the PDF with `titlePrefix: "Prescription — Visit"`.
 
-Today's titles are exactly that shape — *"Prescription — Dr. Beant Sidhu — Visit — 2026-08-26
-01:56 PM"*. And the name in the title is **not** the person who clicked: `VisitPage.jsx:1167`
+Today's titles are exactly that shape — _"Prescription — Dr. Beant Sidhu — Visit — 2026-08-26
+01:56 PM"_. And the name in the title is **not** the person who clicked: `VisitPage.jsx:1167`
 sets `rxDoctor` from `apptDoctorName`, the appointment's consultant, whoever is logged in.
 
 Two facts close the argument:
@@ -46,7 +46,7 @@ system.** The doctor writes it in HealthRay; we notice and render a copy.
 ## 2. "The MO will make it ready and submit it"
 
 That is a normal division of labour — senior consultant dictates the plan, junior doctor
-writes it up — and it is a reasonable thing to *want*. Two facts have to be designed around
+writes it up — and it is a reasonable thing to _want_. Two facts have to be designed around
 rather than ignored:
 
 **The MO's step is in the wrong place.** `mo_assessment` is step **#2** in all five
@@ -72,16 +72,16 @@ the step; the floor never stalls waiting for someone who is not logged in.
 
 ### The step
 
-| | |
-| ---------------- | ---------------------------------------------- |
-| id               | `rx_ready`                                     |
-| name             | Prescription — MO to prepare                   |
-| background       | yes (nobody stands at it)                      |
-| budget           | 5 min                                          |
-| `assigned_role`  | `mo`                                           |
-| station          | Doctor Room                                    |
-| position         | after `sd_consult`, before `rx_explain`        |
-| attaches         | every template that has `rx_explain`           |
+|                 |                                         |
+| --------------- | --------------------------------------- |
+| id              | `rx_ready`                              |
+| name            | Prescription — MO to prepare            |
+| background      | yes (nobody stands at it)               |
+| budget          | 5 min                                   |
+| `assigned_role` | `mo`                                    |
+| station         | Doctor Room                             |
+| position        | after `sd_consult`, before `rx_explain` |
+| attaches        | every template that has `rx_explain`    |
 
 ### How it completes
 
@@ -107,7 +107,7 @@ open, with no bound on position:
 WHERE visit_id=$1 AND is_background AND status NOT IN ('completed','skipped')
 ```
 
-`rx_ready` sits *after* `sd_consult`. Under the current rule it would block the consultation
+`rx_ready` sits _after_ `sd_consult`. Under the current rule it would block the consultation
 — and the consultation is what produces the prescription. Every tested patient would wedge:
 the consult waiting on the prescription, the prescription waiting on the consult.
 
@@ -155,8 +155,8 @@ NEW_WALK       … 12.chief_consult 13.dietitian 14.rx_ready 15.rx_explain …
 
 ### Frontend
 
-The nurse's **Call in** is disabled while `rx_ready` is open, titled *"No prescription yet —
-the doctor has not submitted it"*, so she sees the gate before clicking rather than as an
+The nurse's **Call in** is disabled while `rx_ready` is open, titled _"No prescription yet —
+the doctor has not submitted it"_, so she sees the gate before clicking rather than as an
 error after. It sits first in the title chain, ahead of the busy/claim reasons.
 
 ---
@@ -176,12 +176,31 @@ building.
 Both stages now name the person who does the work, after the reports step was found to name
 the wrong one:
 
-| id | name | owner |
-| ------------------ | ----------------------------------- | ------------- |
-| `report_delivered` | Reports — delivered to Consultant   | `report_desk` |
-| `rx_ready`         | Prescription — MO to prepare        | `mo`          |
+| id                 | name                          | owner         |
+| ------------------ | ----------------------------- | ------------- |
+| `report_delivered` | Reports — delivered to Doctor | `report_desk` |
+| `rx_ready`         | Prescription — MO to prepare  | `mo`          |
 
-The sequence the names describe: **the consultant decides at `sd_consult` (#10), the MO
-prepares the prescription at `rx_ready` (#11), the nurse explains it at `rx_explain` (#12).**
+**Superseded 2026-08-27** — see §7. The order is now: the GDA delivers the report to the MO,
+the MO reviews it and drafts the prescription, and only then does the consultant see the
+patient.
 `rx_ready` still auto-completes the moment a prescription document lands, so the MO's name on
 it marks ownership of the fallback, not a click that must happen.
+
+---
+
+## 7. Moved before the consultation, 2026-08-27
+
+`rx_ready` now sits **before** `Wait for Consultant` on every tested visit, per
+`docs/MO_REPORT_REVIEW_PLAN.md`. Two consequences that change what this document said:
+
+- **The auto-complete effectively never fires there.** Prescription documents are produced
+  when the visit _ends_; sitting before the consultation, the stage is one an MO must press
+  every time. The sweep stays wired up for the case where a prescription does exist early.
+- **The nurse's gate needed re-basing.** It now requires `rx_ready` closed **and** a
+  prescription document on file — `rxExplainBlocked()`, shared by `/start` and the
+  auto-advance. Checking only the stage would have released the nurse on the MO's draft,
+  before the prescription she explains exists.
+
+No-test visits (`FU_APPT`, `FU_WALK`) keep `rx_ready` after the consultation: there is no
+report to review, so nothing for the MO to act on beforehand.

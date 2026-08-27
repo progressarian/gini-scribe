@@ -14,6 +14,7 @@ import {
   parsePrescriptionWithAi,
   extractVitalsFromAnswers,
   buildHealthrayParseRequest,
+  extractRelativeFollowUp,
 } from "../healthray/parser.js";
 import { BATCH_ENABLED, enqueue } from "../batch/batchQueue.js";
 import {
@@ -629,8 +630,13 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           clinical.healthrayLabs = parsed.labs || [];
           clinical.healthrayAdvice = parsed.advice || null;
           clinical.healthrayInvestigations = parsed.investigations_to_order || [];
-          clinical.healthrayFollowUp = parsed.follow_up || null;
-          clinical.healthrayFollowUpWith = parsed.follow_up_with || null;
+          const parsedFollowUp = parsed.follow_up || null;
+          clinical.healthrayFollowUp =
+            parsedFollowUp?.date || parsedFollowUp?.timing
+              ? parsedFollowUp
+              : extractRelativeFollowUp(rawText) || parsedFollowUp;
+          clinical.healthrayFollowUpWith =
+            parsed.follow_up_with || clinical.healthrayFollowUp?.notes || null;
 
           // Merge prescription-parsed BP / waist / bodyFat, but ONLY from the
           // vitals entry whose date matches apptDate. Weight / height / BMI

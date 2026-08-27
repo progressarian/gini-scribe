@@ -21,31 +21,51 @@ import { genVisitToken } from "./journey.js";
 const RX_WALKTHROUGH = [
   {
     id: "DEMO_R1",
-    name: "Rx One (mid consultation)",
+    name: "Rx One (reports just delivered)",
     age_sex: "54M",
-    type: "FU_APPT",
+    type: "FU_APPT_TESTS",
     sd: 0,
-    stopAt: "sd_consult",
+    readyAt: "mo_review",
     back: 3,
   },
   {
     id: "DEMO_R2",
-    name: "Rx Two (no prescription yet)",
+    name: "Rx Two (reviewed, needs prescription)",
     age_sex: "61F",
-    type: "FU_APPT",
+    type: "FU_APPT_TESTS",
     sd: 0,
     readyAt: "rx_ready",
     back: 2,
   },
   {
     id: "DEMO_R3",
-    name: "Rx Three (prescription written)",
+    name: "Rx Three (MO done, waiting on consultant)",
     age_sex: "47M",
+    type: "FU_APPT_TESTS",
+    sd: 1,
+    readyAt: "wait_sd",
+    back: 2,
+  },
+  {
+    id: "DEMO_R4",
+    name: "Rx Four (consulted, nurse blocked)",
+    age_sex: "58F",
+    type: "FU_APPT_TESTS",
+    sd: 0,
+    readyAt: "rx_explain",
+    back: 2,
+  },
+  // Seeded deliberately WITHOUT tests. Add a Blood Sample from the Lab station's
+  // "+ test" to watch the lab stages, the report handover and MO Reviews Reports
+  // attach themselves — the path 541 real FU_APPT visits have taken.
+  {
+    id: "DEMO_R5",
+    name: "Rx Five (no tests — add one to see the stages attach)",
+    age_sex: "44M",
     type: "FU_APPT",
     sd: 1,
-    readyAt: "rx_ready",
-    back: 2,
-    rxDoc: true,
+    readyAt: "mo_assessment",
+    back: 1,
   },
 ];
 

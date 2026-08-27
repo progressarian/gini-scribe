@@ -16,7 +16,7 @@ import {
 import useAuthStore from "../../stores/authStore";
 import LabPanel from "./LabPanel";
 import LabCallInDialog from "./LabCallInDialog";
-import DoctorReportsPanel, { prescriptionRows } from "./DoctorReportsPanel";
+import DoctorReportsPanel, { stageRows } from "./DoctorReportsPanel";
 import PdfViewerModal from "../visit/PdfViewerModal";
 import { CAPABILITIES as CAP, hasCapability, ownsStationRole } from "../../../shared/permissions";
 import "../../styles/flow.css";
@@ -161,14 +161,16 @@ export default function StationQueue({ role, form, freeMove = false }) {
     return other ? other.step_name : null;
   };
   // The nurse's own gate, shown before she clicks rather than as an error after.
+  // Mirrors rxExplainBlocked() on the server: BOTH the MO's stage closed AND a
+  // prescription on file. The stage alone is not enough — since it now sits
+  // before the consultation, the MO's draft can be done while the prescription
+  // the nurse actually explains does not exist yet.
   const rxNotReady = (s) => {
     if (!isRx) return null;
     const v = visitById.get(s.visit_id);
     const stage = (v?.steps || []).find((x) => x.step_catalog_id === "rx_ready");
-    // No stage at all (a visit created before it existed) is not a green light —
-    // fall back to whether a prescription is genuinely on file.
-    if (!stage) return v && !v.rx?.ready ? { step_name: "the prescription" } : null;
-    return ["completed", "skipped"].includes(stage.status) ? null : stage;
+    if (stage && !["completed", "skipped"].includes(stage.status)) return stage;
+    return v && !v.rx?.ready ? { step_name: "the prescription" } : null;
   };
   // Everything before this step that is still open. The patient stays visible in
   // the queue — the desk wants to see who is coming — but cannot be called in
@@ -188,6 +190,9 @@ export default function StationQueue({ role, form, freeMove = false }) {
         .sort((a, b) => a.step_order - b.step_order)[0] || null
     );
   };
+  // The nurse may proceed on a hard copy, but only when the MO's stage is done
+  // and the document alone is missing.
+  const paperPossible = (s) => rxNotReady(s)?.step_name === "the prescription";
   const heldByMe = (s) => s.claim && String(s.claim.by_id) === String(myId);
   const heldByOther = (s) => s.claim && String(s.claim.by_id) !== String(myId);
   const canManage = hasCapability(myRole, CAP.FLOW_COORDINATOR);
@@ -212,6 +217,8 @@ export default function StationQueue({ role, form, freeMove = false }) {
   // (and the previous one returns to the list) — it does NOT advance anyone.
   const [selectedId, setSelectedId] = useState(null);
   const [callInTarget, setCallInTarget] = useState(null);
+  const [paperTarget, setPaperTarget] = useState(null);
+  const [paperReason, setPaperReason] = useState("");
   const [endTarget, setEndTarget] = useState(null);
   const [endReason, setEndReason] = useState("");
   const isLab = form === "lab";
@@ -314,9 +321,10 @@ export default function StationQueue({ role, form, freeMove = false }) {
         },
       ];
 
-  // The MO's own work, not the consultant's. Reports are delivered to the
-  // consultant now, so listing them here was showing someone else's queue.
-  const toPrepare = isDoctor ? prescriptionRows(allVisits) : [];
+  // The MO's two jobs, in the order they happen: read the report the assistant
+  // brought up, then draft the prescription the consultant will approve.
+  const toReview = isDoctor ? stageRows(allVisits, "mo_review") : [];
+  const toPrepare = isDoctor ? stageRows(allVisits, "rx_ready") : [];
 
   const confirmEndVisit = async () => {
     try {
@@ -344,7 +352,16 @@ export default function StationQueue({ role, form, freeMove = false }) {
   const markPrepared = async (step, name) => {
     try {
       await resultsIn.mutateAsync(step.id);
-      toast(`${name} — prescription ready, the nurse can explain it`, "success");
+      toast(`${name} — prescription ready, the consultant can see them`, "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
+  const markReportRead = async (step, name) => {
+    try {
+      await resultsIn.mutateAsync(step.id);
+      toast(`${name} — report reviewed`, "success");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -456,6 +473,13 @@ export default function StationQueue({ role, form, freeMove = false }) {
     } catch (e) {
       toast(e.message, "error");
     }
+  };
+
+  const confirmPaperRx = async () => {
+    const s = paperTarget;
+    setPaperTarget(null);
+    setPaperReason("");
+    await callIn(s.id, { paper_rx: paperReason.trim() || "Patient has the printed prescription" });
   };
 
   const confirmCallIn = async ({ handsOff, ...checks }) => {
@@ -909,17 +933,7 @@ export default function StationQueue({ role, form, freeMove = false }) {
                           >
                             {head.visit_remaining_min}m left of visit
                           </span>
-                          {isRx &&
-                            (visitById.get(head.visit_id)?.rx?.ready ? (
-                              <span className="flow-badge fb-grn">Rx ready</span>
-                            ) : (
-                              <span
-                                className="flow-badge fb-amb"
-                                title="The doctor has not written it yet"
-                              >
-                                no Rx yet
-                              </span>
-                            ))}
+                          {isRx && <RxChip visit={visitById.get(head.visit_id)} />}
                           {away && <span className="flow-badge fb-amb">🔒 at {away} now</span>}
                           {head.claim && (
                             <span className={`flow-badge ${heldByMe(head) ? "fb-blu" : "fb-amb"}`}>
@@ -994,7 +1008,9 @@ export default function StationQueue({ role, form, freeMove = false }) {
                                     startStep.isPending ||
                                     heldByOther(s) ||
                                     !!busyElsewhere(s) ||
-                                    !!rxNotReady(s) ||
+                                    // Only a missing document is overridable —
+                                    // an unfinished MO stage is not.
+                                    (!!rxNotReady(s) && !paperPossible(s)) ||
                                     !!notTheirTurn(s)
                                   }
                                   title={
@@ -1002,19 +1018,27 @@ export default function StationQueue({ role, form, freeMove = false }) {
                                       ? notTheirTurn(s).status === "in_progress"
                                         ? `Patient is at ${notTheirTurn(s).step_name} right now`
                                         : `Not their turn yet — still at ${notTheirTurn(s).step_name}`
-                                      : rxNotReady(s)
-                                        ? "No prescription yet — the doctor has not submitted it"
-                                        : busyElsewhere(s)
-                                          ? `Patient is at ${busyElsewhere(s)} right now`
-                                          : heldByOther(s)
-                                            ? `${s.claim.by} is working this patient`
-                                            : active && !inMyBox(s)
-                                              ? "Finish the current patient first"
-                                              : inMyBox(s)
-                                                ? "Call in — this patient is already at your desk"
-                                                : "Call in"
+                                      : paperPossible(s)
+                                        ? "No prescription on file — call in only if the patient has the printed copy"
+                                        : rxNotReady(s)
+                                          ? "No prescription yet — the doctor has not submitted it"
+                                          : busyElsewhere(s)
+                                            ? `Patient is at ${busyElsewhere(s)} right now`
+                                            : heldByOther(s)
+                                              ? `${s.claim.by} is working this patient`
+                                              : active && !inMyBox(s)
+                                                ? "Finish the current patient first"
+                                                : inMyBox(s)
+                                                  ? "Call in — this patient is already at your desk"
+                                                  : "Call in"
                                   }
-                                  onClick={() => (isLab ? setCallInTarget(s) : callIn(s.id))}
+                                  onClick={() =>
+                                    isLab
+                                      ? setCallInTarget(s)
+                                      : paperPossible(s)
+                                        ? setPaperTarget(s)
+                                        : callIn(s.id)
+                                  }
                                 >
                                   Call in
                                 </button>
@@ -1155,19 +1179,50 @@ export default function StationQueue({ role, form, freeMove = false }) {
           )}
         </div>
         {isDoctor && (
-          <DoctorReportsPanel
-            rows={toPrepare}
-            onReview={markPrepared}
-            busy={resultsIn.isPending}
-            title="Prescriptions to prepare"
-            subtitle="The consultant has finished with these patients. The nurse cannot explain anything until you submit the prescription."
-            emptyText="Nothing waiting. A patient appears here once their consultation ends, and leaves as soon as the prescription is on file."
-            actionLabel="✓ Prescription prepared"
-            actionTitle="Submit the prescription — this releases the nurse"
-            stampLabel="consulted"
-          />
+          <aside className="station-side">
+            <DoctorReportsPanel
+              rows={toReview}
+              onReview={markReportRead}
+              busy={resultsIn.isPending}
+              title="Reports to review"
+              subtitle="The assistant has brought these up. Read them, then draft the prescription below."
+              emptyText="Nothing waiting. A patient appears here once the assistant hands you their printed report."
+              actionLabel="✓ Reviewed"
+              actionTitle="Record that you have read this report"
+              stampLabel="handed over"
+            />
+            <DoctorReportsPanel
+              rows={toPrepare}
+              onReview={markPrepared}
+              busy={resultsIn.isPending}
+              className="mo-panel-2"
+              title="Prescriptions to prepare"
+              subtitle="Reports reviewed. The consultant cannot see the patient until the prescription is drafted."
+              emptyText="Nothing waiting. A patient appears here once you have reviewed their reports."
+              actionLabel="✓ Prescription prepared"
+              actionTitle="Draft the prescription — this releases the consultant"
+              stampLabel="handed over"
+            />
+          </aside>
         )}
       </div>
+
+      {paperTarget && (
+        <StepReasonDialog
+          title="No prescription on file"
+          subtitle={`${paperTarget.patient_name} has no prescription document today. Call them in only if they are holding the printed copy — this is recorded on the step.`}
+          reason={paperReason}
+          setReason={setPaperReason}
+          confirmLabel="✓ Patient has the printed copy"
+          confirmClass="flow-btn-grn"
+          busy={startStep.isPending}
+          onCancel={() => {
+            setPaperTarget(null);
+            setPaperReason("");
+          }}
+          onConfirm={confirmPaperRx}
+        />
+      )}
 
       {endTarget && (
         <StepReasonDialog
@@ -1347,6 +1402,30 @@ function RxState({ rx, onView }) {
         <span className="flow-muted">written, but no file to open</span>
       )}
     </p>
+  );
+}
+
+// Three states, because two lied. Once rx_ready moved before the consultation the
+// MO can have drafted the prescription while no document exists yet — the row
+// would say "no Rx yet" moments after the MO pressed "Prescription prepared".
+function RxChip({ visit }) {
+  if (!visit) return null;
+  const stage = (visit.steps || []).find((s) => s.step_catalog_id === "rx_ready");
+  const drafted = !stage || ["completed", "skipped"].includes(stage.status);
+  if (visit.rx?.ready) return <span className="flow-badge fb-grn">Rx ready</span>;
+  if (drafted)
+    return (
+      <span
+        className="flow-badge fb-amb"
+        title="The doctor has drafted it — the final prescription is written at the consultation"
+      >
+        Rx drafted
+      </span>
+    );
+  return (
+    <span className="flow-badge fb-amb" title="The doctor has not written it yet">
+      no Rx yet
+    </span>
   );
 }
 

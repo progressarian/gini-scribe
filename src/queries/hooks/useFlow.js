@@ -305,18 +305,10 @@ export function useFlowEndVisit() {
     }
   });
 }
-export function useFlowMarkReviewed() {
-  return useFlowMutation(async (stepId) => {
-    try {
-      return (await api.post(`/api/flow/steps/${stepId}/reviewed`)).data;
-    } catch (err) {
-      throw new Error(errMsg(err, "Could not mark the report reviewed"));
-    }
-  });
-}
 export function useFlowStartStep() {
   return useFlowMutation(async (arg) => {
     const { stepId, ...checks } = typeof arg === "object" && arg ? arg : { stepId: arg };
+    // checks carries the lab call-in answers, or paper_rx at the nurse's desk.
     try {
       return (await api.post(`/api/flow/steps/${stepId}/start`, checks)).data;
     } catch (err) {

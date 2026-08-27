@@ -8,7 +8,6 @@ import {
   useFlowVisits,
   useFlowAcceptOffer,
   useFlowDeclineOffer,
-  useFlowMarkReviewed,
   useFlowStartStep,
   useFlowClaimStep,
   useFlowReleaseStep,
@@ -18,7 +17,6 @@ import {
 } from "../../queries/hooks/useFlow";
 import StationSwitcher from "../../components/flow/StationSwitcher";
 import LabPanel from "../../components/flow/LabPanel";
-import DoctorReportsPanel, { deliveredReportRows } from "../../components/flow/DoctorReportsPanel";
 import ConsultationBox from "../../components/flow/ConsultationBox";
 import {
   CAPABILITIES as CAP,
@@ -138,7 +136,6 @@ export default function FlowMyPatientsPage() {
   const { data: allVisits = [] } = useFlowVisits();
   const accept = useFlowAcceptOffer();
   const decline = useFlowDeclineOffer();
-  const markReportReviewed = useFlowMarkReviewed();
   const startStep = useFlowStartStep();
   const claimStep = useFlowClaimStep();
   const releaseStep = useFlowReleaseStep();
@@ -159,9 +156,6 @@ export default function FlowMyPatientsPage() {
 
   const mine = data?.mine || [];
   const offers = data?.offers || [];
-  // Only this consultant's own patients — the right column's other-consultant
-  // groups are other people's reports to read.
-  const myReports = deliveredReportRows(mine);
 
   // The consultation step for a visit, and the prescription stage behind it.
   const consultStepOf = (v) =>
@@ -253,15 +247,6 @@ export default function FlowMyPatientsPage() {
       await cancelCallIn.mutateAsync(boxStep.id);
       toast(`${boxVisit.patient_name} — call-in cancelled, back in your queue`, "success");
       setConsultNotes("");
-    } catch (e) {
-      toast(e.message, "error");
-    }
-  };
-
-  const markReviewed = async (step, name) => {
-    try {
-      await markReportReviewed.mutateAsync(step.id);
-      toast(`${name} — report marked reviewed`, "success");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -456,14 +441,6 @@ export default function FlowMyPatientsPage() {
 
         <div className="mp-split">
           <section>
-            {myReports.length > 0 && (
-              <DoctorReportsPanel
-                rows={myReports}
-                onReview={markReviewed}
-                busy={markReportReviewed.isPending}
-                className="q-sec mp-reports"
-              />
-            )}
             {offers.length > 0 && (
               <div className="q-sec" style={{ marginTop: 0 }}>
                 <div className="q-sec-head">

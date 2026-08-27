@@ -1,6 +1,6 @@
 # Patient Flow — every station, who works it, and when
 
-**Status:** current as of 2026-08-26 · generated from the live catalog, templates and
+**Status:** current as of 2026-08-27 · generated from the live catalog, templates and
 capability map, not from memory.
 **Related:** `docs/LAB_FLOW_PLAN.md` (lab + assistant detail), `docs/PRESCRIPTION_FLOW_PLAN.md`
 (the prescription stage), `docs/FLOW_MANAGEMENT_PLAN.md`
@@ -24,12 +24,12 @@ only lists the desks your role may open.
 
 Not desks, but part of the journey:
 
-|                    | Who                | Where they work                                       |
-| ------------------ | ------------------ | ----------------------------------------------------- |
-| SD Consultation    | `sd`               | the consultant's own worklist, `/flow/my-patients`    |
-| Chief Consultation | `chief`            | same                                                  |
-| Billing            | `billing`          | no desk — advanced from the floor or OPD              |
-| Wait for SD/Chief  | `flow_coordinator` | a waiting area, auto-closed when the next step starts |
+|                           | Who                | Where they work                                       |
+| ------------------------- | ------------------ | ----------------------------------------------------- |
+| SD Consultation           | `sd`               | the consultant's own worklist, `/flow/my-patients`    |
+| Chief Consultation        | `chief`            | same                                                  |
+| Billing                   | `billing`          | no desk — advanced from the floor or OPD              |
+| Wait for Consultant/Chief | `flow_coordinator` | a waiting area, auto-closed when the next step starts |
 
 **Floor managers** — admin, reception, coordinator — hold `FLOW_COORDINATOR` and may work or
 override any step from `/flow/floor` and `/flow/coordinator`.
@@ -43,15 +43,16 @@ the patient is somewhere else.
 
 ```
 FU_APPT / FU_WALK            follow-up, no tests
-  1 Vitals              2 Doctor Assessment    3 Wait for SD      4 SD Consultation
+  1 Vitals              2 Doctor Assessment    3 Wait for Consultant  4 SD Consultation
   5 Prescription (bg)   6 Prescription Explain 7 Billing          8 Pharmacy / Exit
 
 FU_APPT_TESTS                follow-up with tests
   1 Vitals              2 Doctor Assessment    3 Blood Sample
   4 delivered to lab (bg)  5 processing (bg)   6 reports available (bg)
-  7 Reports printed (bg)   8 delivered to Consultant (bg)
-  9 Wait for SD        10 SD Consultation     11 Prescription (bg)
- 12 Prescription Explain 13 Billing           14 Pharmacy / Exit
+  7 Reports printed (bg)    8 delivered to Doctor (bg)
+  9 MO Reviews Reports (bg) 10 Prescription — MO to prepare (bg)
+ 11 Wait for Consultant    12 SD Consultation
+ 13 Prescription Explain   14 Billing            15 Pharmacy / Exit
 
 NEW_APPT                     new patient, adds the chief
   … 10 SD Consultation  11 Wait for Chief     12 Chief Consultation
@@ -84,9 +85,10 @@ patient into the box rather than being handed the next in line.
 **Does:** the assessment. The station form is a notes box; the real clinical work happens in
 `/mo` and `/assess` — dictation, `MO_PROMPT` structuring, diagnoses, ordering labs.
 
-**Right-hand column: "Prescriptions to prepare".** Patients whose consultation has finished
-and whose prescription is not yet on file, each with the full lab panel, and one button —
-**✓ Prescription prepared** — which releases the nurse. See §5.
+**Right-hand column: two lists.** _Reports to review_ — patients whose printed report the
+assistant has just handed over, each with the full lab panel and **✓ Reviewed**. Then
+_Prescriptions to prepare_ — the same patients once reviewed, with **✓ Prescription
+prepared**. Both gate the consultation, so this column is the floor's critical path.
 
 ### 🔬 Lab & Tests — `lab_tech`, 5–15 min per test
 
@@ -115,8 +117,8 @@ Full detail, including the two outside-lab paths, in `LAB_FLOW_PLAN.md`.
 | **Ready to print & hand over** | the report is in                        | 🖨️ Printed → ✓ Handed to the consultant |
 | **Waiting on outside labs**    | the patient is having it done elsewhere | ✓ Report received                       |
 
-The delivery goes to the **consultant** — the doctor about to see the patient — not the MO,
-whose own step finished eight steps earlier.
+The delivery goes to the **MO**, who reviews the report and drafts the prescription before
+the consultant sees the patient (`docs/MO_REPORT_REVIEW_PLAN.md`).
 
 ### 💬 Prescription Explain — `nurse`, 5 min
 
@@ -153,14 +155,15 @@ collecting.
 Six of them. They never appear in a call-in queue, never count toward "Step X of Y", and are
 excluded from the public tracker and from both auto-advances.
 
-| Stage                             | Owner         | Budget | Closes when                                               |
-| --------------------------------- | ------------- | ------ | --------------------------------------------------------- |
-| Lab — delivered to lab            | `lab_tech`    | 10 min | the lab marks it, or results arrive                       |
-| Lab — processing                  | `lab_tech`    | 45 min | as above                                                  |
-| Lab — reports available           | `lab_tech`    | 80 min | `lab_results` land for that patient, **or** by hand       |
-| Reports — printed                 | `report_desk` | 10 min | the GDA presses it — **never** a sync                     |
-| Reports — delivered to Consultant | `report_desk` | 10 min | as above                                                  |
-| Prescription — MO to prepare      | `mo`          | 5 min  | a `prescription` document lands, **or** the MO presses it |
+| Stage                         | Owner         | Budget | Closes when                                               |
+| ----------------------------- | ------------- | ------ | --------------------------------------------------------- |
+| Lab — delivered to lab        | `lab_tech`    | 10 min | the lab marks it, or results arrive                       |
+| Lab — processing              | `lab_tech`    | 45 min | as above                                                  |
+| Lab — reports available       | `lab_tech`    | 80 min | `lab_results` land for that patient, **or** by hand       |
+| Reports — printed             | `report_desk` | 10 min | the GDA presses it — **never** a sync                     |
+| Reports — delivered to Doctor | `report_desk` | 10 min | as above                                                  |
+| MO Reviews Reports            | `mo`          | 10 min | the MO presses it — **never** a sync                      |
+| Prescription — MO to prepare  | `mo`          | 5 min  | a `prescription` document lands, **or** the MO presses it |
 
 `runNextLabStage()` starts the following stage the moment one closes, so each records its own
 `started_at` and duration instead of every stage reading zero.
@@ -170,16 +173,21 @@ observe; closing them automatically would claim a handover that never happened.
 
 ---
 
-## 5. The three gates
+## 5. The gates
 
 They chain, and each is bounded so it cannot deadlock:
 
 1. **Lab and report stages gate the consultation.** `SD Consultation` will not start while any
    background stage **before it** is open — so the consultant sees the patient with the
    printed report in hand.
-2. **The prescription stage gates the nurse.** `Prescription Explain` will not start while
-   `rx_ready` is open. Overridable by the MO or a floor manager.
-3. **One patient, one place.** A patient mid-step at another **station** cannot be called in
+2. **The MO gates the consultant.** `MO Reviews Reports` and `Prescription — MO to prepare`
+   both sit before `Wait for Consultant`, so the consultation cannot start until the MO has
+   read the report and drafted the prescription. The patient's own consultant, or any floor
+   manager, can clear either stage, and both carry ✕ Skip.
+3. **The prescription gates the nurse — on two conditions.** `Prescription Explain` needs
+   `rx_ready` closed **and** a prescription document on file. The MO's draft releases the
+   consultant; the real document releases the nurse.
+4. **One patient, one place.** A patient mid-step at another **station** cannot be called in
    elsewhere. Two tests at the _same_ desk are the same place, so they do not block each other.
 
 `labStagesPending()` is bounded by `step_order`: a stage that comes _after_ the step being
@@ -231,7 +239,6 @@ not how long the doctor spent.
 | `POST /flow/steps/:id/start`            | call in (lab: carries the payment/outside answers)     |
 | `POST /flow/visits/:id/advance`         | complete or skip the current step                      |
 | `POST /flow/steps/:id/results-in`       | close a background stage by hand                       |
-| `POST /flow/steps/:id/reviewed`         | consultant marks a delivered report read               |
 | `POST /flow/visits/:id/end`             | end a visit early, with a reason                       |
 | `POST /flow/steps/:id/claim` `/release` | take or hand back a patient                            |
 | `POST /flow/demo/seed?set=lab\|rx`      | walkthrough data · `/flow/demo/clean` removes it       |
@@ -260,30 +267,31 @@ not how long the doctor spent.
 The complete active catalog. Anything not in a template is added at check-in from the bill,
 or from **+ test / + Add step** at a station.
 
-| id                 | name                              | owner            | budget | station           | kind        |
-| ------------------ | --------------------------------- | ---------------- | ------ | ----------------- | ----------- |
-| `vitals`           | Vitals (Weight/BP/Pulse)          | vitals_associate | 5 min  | Vitals Station    | at the desk |
-| `mo_assessment`    | Doctor Assessment                 | mo               | 10 min | Doctor Room       | at the desk |
-| `blood_sample`     | Blood Sample                      | lab_tech         | 5 min  | Lab               | at the desk |
-| `abi`              | ABI Test                          | lab_tech         | 10 min | Lab               | at the desk |
-| `wait_sd`          | Wait for SD                       | flow_coordinator | 10 min | Waiting Area      | at the desk |
-| `sd_consult`       | SD Consultation                   | sd               | 20 min | SD Room           | at the desk |
-| `wait_chief`       | Wait for Chief                    | flow_coordinator | 10 min | Waiting Area      | at the desk |
-| `chief_consult`    | Chief Consultation                | chief            | 20 min | Chief Room        | at the desk |
-| `dietitian`        | Dietitian                         | dietitian        | 10 min | Dietitian Room    | at the desk |
-| `rx_explain`       | Prescription Explain              | nurse            | 5 min  | Nursing Station   | at the desk |
-| `billing`          | Billing                           | billing          | 5 min  | Billing Counter   | at the desk |
-| `pharmacy`         | Pharmacy / Exit                   | pharmacist       | 5 min  | Pharmacy          | at the desk |
-| `ecg`              | ECG                               | nurse            | 10 min | Nursing Station   | at the desk |
-| `tmt`              | TMT                               | nurse            | 10 min | Nursing Station   | at the desk |
-| `vpt`              | VPT                               | nurse            | 5 min  | Nursing Station   | at the desk |
-| `x_ray`            | X-RAY                             | lab_tech         | 15 min | Lab               | at the desk |
-| `lab_delivered`    | Lab — delivered to lab            | lab_tech         | 10 min | Lab               | background  |
-| `lab_processing`   | Lab — processing                  | lab_tech         | 45 min | Lab               | background  |
-| `lab_reports`      | Lab — reports available           | lab_tech         | 80 min | Lab               | background  |
-| `report_printed`   | Reports — printed                 | report_desk      | 10 min | Assistant Station | background  |
-| `report_delivered` | Reports — delivered to Consultant | report_desk      | 10 min | Assistant Station | background  |
-| `rx_ready`         | Prescription — MO to prepare      | mo               | 5 min  | Doctor Room       | background  |
+| id                 | name                          | owner            | budget | station           | kind        |
+| ------------------ | ----------------------------- | ---------------- | ------ | ----------------- | ----------- |
+| `vitals`           | Vitals (Weight/BP/Pulse)      | vitals_associate | 5 min  | Vitals Station    | at the desk |
+| `mo_assessment`    | Doctor Assessment             | mo               | 10 min | Doctor Room       | at the desk |
+| `blood_sample`     | Blood Sample                  | lab_tech         | 5 min  | Lab               | at the desk |
+| `abi`              | ABI Test                      | lab_tech         | 10 min | Lab               | at the desk |
+| `wait_sd`          | Wait for Consultant           | flow_coordinator | 10 min | Waiting Area      | at the desk |
+| `sd_consult`       | SD Consultation               | sd               | 20 min | SD Room           | at the desk |
+| `wait_chief`       | Wait for Chief                | flow_coordinator | 10 min | Waiting Area      | at the desk |
+| `chief_consult`    | Chief Consultation            | chief            | 20 min | Chief Room        | at the desk |
+| `dietitian`        | Dietitian                     | dietitian        | 10 min | Dietitian Room    | at the desk |
+| `rx_explain`       | Prescription Explain          | nurse            | 5 min  | Nursing Station   | at the desk |
+| `billing`          | Billing                       | billing          | 5 min  | Billing Counter   | at the desk |
+| `pharmacy`         | Pharmacy / Exit               | pharmacist       | 5 min  | Pharmacy          | at the desk |
+| `ecg`              | ECG                           | nurse            | 10 min | Nursing Station   | at the desk |
+| `tmt`              | TMT                           | nurse            | 10 min | Nursing Station   | at the desk |
+| `vpt`              | VPT                           | nurse            | 5 min  | Nursing Station   | at the desk |
+| `x_ray`            | X-RAY                         | lab_tech         | 15 min | Lab               | at the desk |
+| `lab_delivered`    | Lab — delivered to lab        | lab_tech         | 10 min | Lab               | background  |
+| `lab_processing`   | Lab — processing              | lab_tech         | 45 min | Lab               | background  |
+| `lab_reports`      | Lab — reports available       | lab_tech         | 80 min | Lab               | background  |
+| `report_printed`   | Reports — printed             | report_desk      | 10 min | Assistant Station | background  |
+| `report_delivered` | Reports — delivered to Doctor | report_desk      | 10 min | Assistant Station | background  |
+| `mo_review`        | MO Reviews Reports            | mo               | 10 min | Doctor Room       | background  |
+| `rx_ready`         | Prescription — MO to prepare  | mo               | 5 min  | Doctor Room       | background  |
 
 One inactive row remains: `blood_report` ("Blood — reports available"), superseded by the
 three shared lab stages and deactivated rather than deleted so old visits still render.

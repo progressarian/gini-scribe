@@ -15,7 +15,7 @@ The doctor availability you set up does **not** assign doctors. It only decides
 
 So the chain is:
 
-> **You set availability  →  System shows only free slots  →  Receptionist picks doctor + slot  →  Appointment is saved with that doctor.**
+> **You set availability → System shows only free slots → Receptionist picks doctor + slot → Appointment is saved with that doctor.**
 
 ---
 
@@ -24,14 +24,14 @@ So the chain is:
 Booking happens on the **GHM page** ("New Appointment" button). These roles are allowed
 to book / reassign:
 
-| Role | Can book appointments? |
-|------|------------------------|
-| Reception | ✅ Yes |
-| Coordinator | ✅ Yes |
-| Consultant (doctor) | ✅ Yes |
-| MO (Medical Officer) | ✅ Yes |
-| Admin | ✅ Yes (and can bulk-reassign) |
-| Nurse / Lab / Pharmacy | ❌ No (not for booking) |
+| Role                   | Can book appointments?         |
+| ---------------------- | ------------------------------ |
+| Reception              | ✅ Yes                         |
+| Coordinator            | ✅ Yes                         |
+| Consultant (doctor)    | ✅ Yes                         |
+| MO (Medical Officer)   | ✅ Yes                         |
+| Admin                  | ✅ Yes (and can bulk-reassign) |
+| Nurse / Lab / Pharmacy | ❌ No (not for booking)        |
 
 > Note: `GRANT_ALL_CAPABILITIES` was turned **OFF** on 2026-08-18, so the table above is
 > now actually enforced — nurse/lab/pharmacy/OBT get a 403 and don't see the GHM tab.
@@ -44,7 +44,7 @@ to book / reassign:
 1. **Receptionist clicks "New Appointment"** on the GHM page.
 2. **Fills patient details** (name, phone, file number — a new patient auto-gets a
    `GNI-xxxxx` file number).
-3. **Picks a doctor** from the *Doctor* dropdown. ← *this is the doctor assignment*
+3. **Picks a doctor** from the _Doctor_ dropdown. ← _this is the doctor assignment_
 4. **Picks a date.**
 5. The system instantly **loads that doctor's available slots** for that date
    (calls `/api/availability/day`).
@@ -81,7 +81,7 @@ Yes:
 - **Reception/Coordinator** can change the doctor on an existing appointment from the
   GHM page (inline edit). The change is logged.
 - **Admin** can **bulk-reassign** patients to another doctor — e.g. when a doctor
-  suddenly goes on leave. Here the system *does* suggest available doctors (same
+  suddenly goes on leave. Here the system _does_ suggest available doctors (same
   specialty + free capacity), but a human still confirms.
 
 ---
@@ -100,17 +100,17 @@ The doctor stays the one chosen at booking, unless someone reassigns.
 
 ## Key tables (for developers)
 
-| Table | What it holds |
-|-------|----------------|
-| `appointments` | The booking — patient, **doctor_name**, date, time_slot, status |
-| `doctor_profile` | A doctor's weekly availability (off days, work hours, lunch) |
-| `doctor_unavailability` | Specific dates a doctor is off (leave/holiday/emergency) |
-| `clinic_holidays` | Whole-clinic closure dates |
-| `appointment_slots` | Per-slot capacity + manual blocks + booked count |
-| `slot_catalog` | The standard list of time slots |
-| `active_visits` | Live OPD queue (who's with which doctor now) |
-| `consultations` | Created when the visit is completed |
-| `appointment_change_log` / `appointment_reassignments` | History of doctor/slot changes |
+| Table                                                  | What it holds                                                   |
+| ------------------------------------------------------ | --------------------------------------------------------------- |
+| `appointments`                                         | The booking — patient, **doctor_name**, date, time_slot, status |
+| `doctor_profile`                                       | A doctor's weekly availability (off days, work hours, lunch)    |
+| `doctor_unavailability`                                | Specific dates a doctor is off (leave/holiday/emergency)        |
+| `clinic_holidays`                                      | Whole-clinic closure dates                                      |
+| `appointment_slots`                                    | Per-slot capacity + manual blocks + booked count                |
+| `slot_catalog`                                         | The standard list of time slots                                 |
+| `active_visits`                                        | Live OPD queue (who's with which doctor now)                    |
+| `consultations`                                        | Created when the visit is completed                             |
+| `appointment_change_log` / `appointment_reassignments` | History of doctor/slot changes                                  |
 
 ---
 

@@ -25,6 +25,19 @@ export const ownFu = (a) => `COALESCE(
              + btrim(lower(${a}.healthray_follow_up->>'timing'))::interval)::date END
 )`;
 
+// A visit is the patient's CURRENT one for follow-up purposes only if it is
+// their latest visit that carries a follow-up at all. Every older visit's
+// follow-up was superseded the moment they were seen again — the doctor
+// re-planned the next visit at that later consultation. Shared by the day
+// window and the search view so the two cannot disagree about which date is
+// a patient's real next follow-up.
+export const isLatestFollowUpVisit = (a) => `${a}.appointment_date = (
+  SELECT MAX(prev.appointment_date)
+    FROM appointments prev
+   WHERE prev.file_no = ${a}.file_no
+     AND ${ownFu("prev")} IS NOT NULL
+)`;
+
 // Everyone the day's list covers: booked that date, asked for that date, or
 // due a follow-up on it. The two extra clauses keep one row per patient —
 // only their latest follow-up-bearing visit counts, and a patient who already
@@ -36,12 +49,7 @@ export const dayWindowWhere = (a = "a") => `WHERE (
     ${a}.appointment_date = $1
     OR ${a}.preferred_date = $1
     OR ${a}.file_no IS NULL
-    OR ${a}.appointment_date = (
-      SELECT MAX(prev.appointment_date)
-      FROM appointments prev
-      WHERE prev.file_no = ${a}.file_no
-        AND ${ownFu("prev")} IS NOT NULL
-    )
+    OR ${isLatestFollowUpVisit(a)}
   )
   AND (
     ${a}.appointment_date = $1

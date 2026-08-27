@@ -327,6 +327,32 @@ export function repairAndParseJSON(raw) {
   return null;
 }
 
+const RELATIVE_FOLLOW_UP_RE =
+  /\b(?:FOLLOW\s*-?\s*UP|FOLLOWUP|F\/?U|REVIEW|REVISIT|RTC)\s+(?:WITH\s*)?(?:AFTER|IN|WITHIN)\s+(\d{1,2})\s*(DAY|WEEK|MONTH|YEAR)S?\b([^\n]*)/gi;
+
+const DATED_LOG_TAIL_RE = /^[\s:-]*\d{1,2}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{2,4}/;
+
+export function extractRelativeFollowUp(rawText) {
+  if (!rawText) return null;
+  let last = null;
+  for (const m of rawText.matchAll(RELATIVE_FOLLOW_UP_RE)) {
+    if (DATED_LOG_TAIL_RE.test(m[3] || "")) continue;
+    last = m;
+  }
+  if (!last) return null;
+  const count = parseInt(last[1], 10);
+  if (!count) return null;
+  const notes = (last[3] || "")
+    .replace(/^[\s:-]*WITH\s+/i, "")
+    .replace(/[.,;)\s]+$/, "")
+    .trim();
+  return {
+    date: null,
+    timing: `${count} ${last[2].toLowerCase()}${count === 1 ? "" : "s"}`,
+    notes: notes || null,
+  };
+}
+
 export const CLINICAL_EXTRACTION_PROMPT = `Parse this clinical note into structured JSON. Extract ONLY data present in the text.
 
 Return JSON with these keys:
@@ -505,10 +531,15 @@ STRICT Rules:
 - For advice: glucose monitoring instructions (e.g. "D1-FASTING AND 2HR POST BREAKFAST, D3-..., D5-..."), insulin titration rules (e.g. "increase evening dose by 1 unit per day till post dinner 150 and fasting 100"), TSH targets, medication holds, other clinical instructions. Null if not found. Do NOT put glucose monitoring schedules into medications.
 - For investigations_to_order: extract ALL tests/investigations ordered or recommended. Set urgency to "urgent" if marked urgent, "next_visit" if scheduled for next visit, "routine" otherwise. [] if none found
 - For follow_up: extract the NEXT scheduled follow-up (the appointment the doctor is booking AT THE END OF this visit, for a future date). Fields: date (YYYY-MM-DD if exact date given), timing (e.g. "1 month", "3 months"), notes. Null fields if not found.
-  • The NEXT follow-up is signalled by phrases like "NEXT FOLLOW UP", "NEXT FOLLOW UP ON", "YOUR NEXT FOLLOW UP IS SCHEDULED ON", "REVIEW ON", "REVISIT ON", "F/U ON", "RTC ON", "come back after X weeks/months", or a plain future date under a "NEXT FOLLOW UP" / "PLAN" header.
+  • The NEXT follow-up is signalled by phrases like "NEXT FOLLOW UP", "NEXT FOLLOW UP ON", "YOUR NEXT FOLLOW UP IS SCHEDULED ON", "REVIEW ON", "REVISIT ON", "F/U ON", "RTC ON", "come back after X weeks/months", "FOLLOW UP AFTER X DAYS/WEEKS/MONTHS", "FOLLOW UP AFTER X MONTHS WITH <tests>", "FOLLOW UP IN X WEEKS/MONTHS", "FOLLOW UP WITH IN X MONTHS", "FOLLOW UP WITHIN X MONTHS", "REVIEW AFTER X WEEKS/MONTHS", "F/U AFTER X MONTHS", "RTC AFTER X MONTHS", or a plain future date under a "NEXT FOLLOW UP" / "PLAN" header.
   • CRITICAL — a header like "FOLLOW UP TODAY ON <date>" / "FOLLOW UP ON <past date>:" / "FOLLOW UP NOTES(<past date>)" that is followed by lab values, vitals, or C/O complaints is a PAST visit log entry (the doctor is recording what happened previously). Those are NOT the next follow-up and must be IGNORED when choosing follow_up.
+  • A relative phrase IMMEDIATELY FOLLOWED BY A DATE is also a past log header, not a booking — e.g. "FOLLOW UP AFTER 3 MONTHS 24/4/23:\nFBG: 120" means "the follow-up that was due after 3 months happened on 24/4/23". Ignore it and keep looking for an undated relative phrase later in the note.
   • If multiple "FOLLOW UP" sections appear, pick the one whose date is chronologically LATEST AND is strictly in the future relative to the note's own visit date. If every dated "FOLLOW UP" section is a past log entry, then follow_up.date = null (use timing/notes only if the note also says something like "come back after 1 month").
   • If only a relative phrase is given (e.g. "review in 2 weeks"), put that in timing and leave date null — do NOT compute the date.
+  • UNDATED "FOLLOW UP" LINE = THE NEXT FOLLOW-UP. The past-log rule above applies ONLY to headers that name a date. A "FOLLOW UP …" line carrying NO date, and not followed by lab values / vitals / C/O complaints, is the next follow-up — never a past log. This is the single most commonly missed case: notes that END with "FOLLOW UP AFTER 3 MONTH" or "FOLLOW UP AFTER 3 MONTHS WITH FPG, PPBG CHARTING, HBA1C, LIPIDS, CREATININE, UACR", usually the last line after the TREATMENT block. Returning follow_up: null for such a note is WRONG.
+    EXAMPLE: note tail "…INJ NEUROBION FORTE 500 MCG I/M WEEKLY FOR 5 WEEKS\n\nFOLLOW UP AFTER 3 MONTH\nFOLLOW UP AFTER 3 MONTHS WITH FPG, PPBG CHARTING, HBA1C, LIPIDS, CREATININE, UACR"
+    → follow_up: {"date": null, "timing": "3 months", "notes": "With FPG, PPBG charting, HbA1c, Lipids, Creatinine, UACR"} and follow_up_with: "FPG, PPBG CHARTING, HBA1C, LIPIDS, CREATININE, UACR"
+  • TIMING FORMAT — always write timing as a plain digit + unit, lower case, pluralised: "3 months", "6 weeks", "10 days", "1 year". Downstream code counts that interval from the visit date, so "3 MONTH", "three months", "3/12" or "quarterly" are NOT acceptable — normalise them to "3 months".
 - For follow_up_with: capture the ENTIRE free-text block that follows the heading "FOLLOW UP WITH" (or "Follow up with", "FOLLOWUP WITH", "Next visit instructions") — including the prep instructions AND the trailing list of tests/labs the patient must bring. This is ONE field, not split. Read until you hit a hard section break: a new heading, a blank line followed by a non-prep heading, a closing parenthesis ")" that closes the surrounding block, or end of note. Do NOT stop early at the first period / "HRS" / "AM" — the trailing list of tests after those words is part of the same instruction and MUST be preserved.
   EXAMPLE (the entire run-on string is one value, tests included):
     Input: "FOLLOW UP WITH FASTING SAMPLE AT GINI HEALTH 8:30AM AFTER OMISSION OF ANTIDIABETIC MEDICATION FOR 24 HRS FBG ,FPI,C-PEPTIDE ,HBA1C ,CREATININE ,URINE ACR ,LIPIDS . )"
@@ -679,10 +710,15 @@ STRICT Rules:
 - For advice: glucose monitoring instructions (e.g. "D1-FASTING AND 2HR POST BREAKFAST, D3-..., D5-..."), insulin titration rules (e.g. "increase evening dose by 1 unit per day till post dinner 150 and fasting 100"), TSH targets, medication holds, other clinical instructions. Null if not found. Do NOT put glucose monitoring schedules into medications.
 - For investigations_to_order: extract ALL tests/investigations ordered or recommended. Set urgency to "urgent" if marked urgent, "next_visit" if scheduled for next visit, "routine" otherwise. [] if none found
 - For follow_up: extract the NEXT scheduled follow-up (the appointment the doctor is booking AT THE END OF this visit, for a future date). Fields: date (YYYY-MM-DD if exact date given), timing (e.g. "1 month", "3 months"), notes. Null fields if not found.
-  • The NEXT follow-up is signalled by phrases like "NEXT FOLLOW UP", "NEXT FOLLOW UP ON", "YOUR NEXT FOLLOW UP IS SCHEDULED ON", "REVIEW ON", "REVISIT ON", "F/U ON", "RTC ON", "come back after X weeks/months", or a plain future date under a "NEXT FOLLOW UP" / "PLAN" header.
+  • The NEXT follow-up is signalled by phrases like "NEXT FOLLOW UP", "NEXT FOLLOW UP ON", "YOUR NEXT FOLLOW UP IS SCHEDULED ON", "REVIEW ON", "REVISIT ON", "F/U ON", "RTC ON", "come back after X weeks/months", "FOLLOW UP AFTER X DAYS/WEEKS/MONTHS", "FOLLOW UP AFTER X MONTHS WITH <tests>", "FOLLOW UP IN X WEEKS/MONTHS", "FOLLOW UP WITH IN X MONTHS", "FOLLOW UP WITHIN X MONTHS", "REVIEW AFTER X WEEKS/MONTHS", "F/U AFTER X MONTHS", "RTC AFTER X MONTHS", or a plain future date under a "NEXT FOLLOW UP" / "PLAN" header.
   • CRITICAL — a header like "FOLLOW UP TODAY ON <date>" / "FOLLOW UP ON <past date>:" / "FOLLOW UP NOTES(<past date>)" that is followed by lab values, vitals, or C/O complaints is a PAST visit log entry (the doctor is recording what happened previously). Those are NOT the next follow-up and must be IGNORED when choosing follow_up.
+  • A relative phrase IMMEDIATELY FOLLOWED BY A DATE is also a past log header, not a booking — e.g. "FOLLOW UP AFTER 3 MONTHS 24/4/23:\nFBG: 120" means "the follow-up that was due after 3 months happened on 24/4/23". Ignore it and keep looking for an undated relative phrase later in the note.
   • If multiple "FOLLOW UP" sections appear, pick the one whose date is chronologically LATEST AND is strictly in the future relative to the note's own visit date. If every dated "FOLLOW UP" section is a past log entry, then follow_up.date = null (use timing/notes only if the note also says something like "come back after 1 month").
   • If only a relative phrase is given (e.g. "review in 2 weeks"), put that in timing and leave date null — do NOT compute the date.
+  • UNDATED "FOLLOW UP" LINE = THE NEXT FOLLOW-UP. The past-log rule above applies ONLY to headers that name a date. A "FOLLOW UP …" line carrying NO date, and not followed by lab values / vitals / C/O complaints, is the next follow-up — never a past log. This is the single most commonly missed case: notes that END with "FOLLOW UP AFTER 3 MONTH" or "FOLLOW UP AFTER 3 MONTHS WITH FPG, PPBG CHARTING, HBA1C, LIPIDS, CREATININE, UACR", usually the last line after the TREATMENT block. Returning follow_up: null for such a note is WRONG.
+    EXAMPLE: note tail "…INJ NEUROBION FORTE 500 MCG I/M WEEKLY FOR 5 WEEKS\n\nFOLLOW UP AFTER 3 MONTH\nFOLLOW UP AFTER 3 MONTHS WITH FPG, PPBG CHARTING, HBA1C, LIPIDS, CREATININE, UACR"
+    → follow_up: {"date": null, "timing": "3 months", "notes": "With FPG, PPBG charting, HbA1c, Lipids, Creatinine, UACR"} and follow_up_with: "FPG, PPBG CHARTING, HBA1C, LIPIDS, CREATININE, UACR"
+  • TIMING FORMAT — always write timing as a plain digit + unit, lower case, pluralised: "3 months", "6 weeks", "10 days", "1 year". Downstream code counts that interval from the visit date, so "3 MONTH", "three months", "3/12" or "quarterly" are NOT acceptable — normalise them to "3 months".
 - For follow_up_with: capture the ENTIRE free-text block that follows the heading "FOLLOW UP WITH" (or "Follow up with", "FOLLOWUP WITH", "Next visit instructions") — including the prep instructions AND the trailing list of tests/labs the patient must bring. This is ONE field, not split. Read until you hit a hard section break: a new heading, a blank line followed by a non-prep heading, a closing parenthesis ")" that closes the surrounding block, or end of note. Do NOT stop early at the first period / "HRS" / "AM" — the trailing list of tests after those words is part of the same instruction and MUST be preserved.
   EXAMPLE (the entire run-on string is one value, tests included):
     Input: "FOLLOW UP WITH FASTING SAMPLE AT GINI HEALTH 8:30AM AFTER OMISSION OF ANTIDIABETIC MEDICATION FOR 24 HRS FBG ,FPI,C-PEPTIDE ,HBA1C ,CREATININE ,URINE ACR ,LIPIDS . )"

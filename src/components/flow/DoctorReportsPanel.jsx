@@ -2,56 +2,34 @@ import LabPanel from "./LabPanel";
 
 const LIVE = ["in_progress", "paused"];
 
-// Reports physically handed over and not yet acknowledged. Shared by the doctor
-// station and the consultant worklist so both read the same rule.
-export function deliveredReportRows(visits = []) {
-  return visits
-    .filter((v) => LIVE.includes(v.status))
-    .map((v) => {
-      const handed = (v.steps || []).find(
-        (s) => s.step_catalog_id === "report_delivered" && s.status === "completed",
-      );
-      // "The assistant has brought these up" has to be true. A stage closed by a
-      // sync is not a handover — the old lab_results sweep used to close these,
-      // and the cards it left behind claimed a delivery nobody made.
-      if (!handed || handed.data?.reviewed || handed.data?.auto_completed) return null;
-      const tests = (v.steps || [])
-        .filter((s) => s.assigned_role === "lab_tech" && !s.is_background)
-        .map((s) => s.step_name);
-      return { visit: v, step: handed, at: handed.completed_at, tests };
-    })
-    .filter(Boolean)
-    .sort((a, b) => new Date(b.at) - new Date(a.at));
-}
-
-const fmtTime = (t) =>
-  t ? new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-
-// Patients the consultant has finished with, whose prescription the MO has not
-// prepared yet. Everything before the stage must be closed — a prescription
-// cannot be written before the consultation that decides it.
-export function prescriptionRows(visits = []) {
+// One rule for every stage list: the stage is open, and nothing before it is.
+// Used for both of the MO's lists, and by the Assistant Station's two sections,
+// so a patient can never appear at a desk before the work reaching them is done.
+export function stageRows(visits = [], catalogId) {
   return visits
     .filter((v) => LIVE.includes(v.status))
     .map((v) => {
       const steps = v.steps || [];
-      const stage = steps.find((s) => s.step_catalog_id === "rx_ready");
+      const stage = steps.find((s) => s.step_catalog_id === catalogId);
       if (!stage || ["completed", "skipped"].includes(stage.status)) return null;
       const blocked = steps.some(
-        (s) =>
-          !s.is_background &&
-          s.step_order < stage.step_order &&
-          !["completed", "skipped"].includes(s.status),
+        (s) => s.step_order < stage.step_order && !["completed", "skipped"].includes(s.status),
       );
       if (blocked) return null;
-      const consult = steps.find(
-        (s) => s.assigned_role === "sd" && ["completed", "skipped"].includes(s.status),
+      const handed = steps.find(
+        (s) => s.step_catalog_id === "report_delivered" && s.status === "completed",
       );
-      return { visit: v, step: stage, at: consult?.completed_at || null, tests: [] };
+      const tests = steps
+        .filter((s) => s.assigned_role === "lab_tech" && !s.is_background)
+        .map((s) => s.step_name);
+      return { visit: v, step: stage, at: handed?.completed_at || null, tests };
     })
     .filter(Boolean)
     .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
 }
+
+const fmtTime = (t) =>
+  t ? new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
 
 export default function DoctorReportsPanel({
   rows,
@@ -63,12 +41,12 @@ export default function DoctorReportsPanel({
   actionLabel = "✓ Reviewed",
   actionTitle = "Record that you have read this report",
   stampLabel = "handed over",
-  // The station renders this as a sticky right rail; inside a column it has to
-  // read as an ordinary section instead.
-  className = "station-side",
+  // Always a plain section — the caller decides whether to wrap one or several
+  // in a sticky rail. Rendering its own <aside> made two panels two rails.
+  className = "",
 }) {
   return (
-    <aside className={className}>
+    <section className={className}>
       <div className="q-sec-head">
         <span className="flow-sec-title" style={{ margin: 0 }}>
           {title}
@@ -118,6 +96,6 @@ export default function DoctorReportsPanel({
           </article>
         ))
       )}
-    </aside>
+    </section>
   );
 }

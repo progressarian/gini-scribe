@@ -1,6 +1,6 @@
 # Lab & Tests — role, steps, and what the system actually knows
 
-**Status:** built and live (2026-08-25)
+**Status:** built and live (2026-08-25) · §9–10 partly superseded, see `MO_REPORT_REVIEW_PLAN.md`
 **Applies to:** `lab` and `tech` roles · `/flow/station/lab`
 **Related:** `docs/FLOW_MANAGEMENT_PLAN.md`
 
@@ -61,7 +61,7 @@ A visit with tests (`FU_APPT_TESTS`, `NEW_APPT`, `NEW_WALK` where `needs_tests`)
 4  Lab — delivered to lab          lab_tech      ← background
 5  Lab — processing                lab_tech      ← background
 6  Lab — reports available         lab_tech      ← background
-7  Wait for SD                     flow_coordinator   ← gated on 4–6
+7  Wait for Consultant             flow_coordinator   ← gated on 4–6
 8  SD Consultation                 sd
 9  Prescription Explain            nurse
 10 Billing                         billing
@@ -120,9 +120,9 @@ Worked from the **In the lab** list, in order — only the earliest open stage i
 - Excluded from: `stationBusy`, one-patient-one-place, `recalcEstimate`, `total_steps`, the
   public tracker, `deriveStage`, both auto-advances, both bypass sweeps, and the queue itself
 
-### Wait for SD — _the gate_
+### Wait for Consultant — _the gate_
 
-`labStagesPending()` blocks `Wait for SD` from releasing and `SD Consultation` from starting
+`labStagesPending()` blocks `Wait for Consultant` from releasing and `SD Consultation` from starting
 while **any** background stage is open. Both the manual call-in (409) and the auto-advance
 (lands `ready`) respect it. The consultation opens when reports are available — the point of
 the four stages is that the doctor sees the patient with results in hand.
@@ -242,12 +242,12 @@ The chain is now six stages across two desks:
 
 ```
 sample collection → delivered to lab → lab processing → reports available   [Lab]
-                  → printed → delivered to Consultant                    [Assistant Station]
+                  → printed → delivered to Doctor                    [Assistant Station]
 ```
 
 |                 |                                                          |
 | --------------- | -------------------------------------------------------- |
-| URL             | `/flow/station/assistant`                                  |
+| URL             | `/flow/station/assistant`                                |
 | `assigned_role` | `report_desk`                                            |
 | Capability      | `FLOW_STATION_REPORTS` — **coordinator (GDA)** and admin |
 | Steps           | `report_printed` (10 min), `report_delivered` (10 min)   |
@@ -262,18 +262,18 @@ templates (`FU_APPT_TESTS`, `NEW_APPT`, `NEW_WALK`) between `lab_reports` and `w
 extending the chain extended the gate for free: **SD Consultation will not start until the
 report has been handed to the doctor.** That is the point of the desk — the doctor sees the
 patient with the paper in hand. Verified: starting the consult after printing but before
-delivery returns `Reports not ready — waiting on Reports — delivered to Consultant`.
+delivery returns `Reports not ready — waiting on Reports — delivered to Doctor`.
 
 ### Outside tests
 
 Both happen, so the dialog asks which:
 
-| | Patient goes there | We draw and courier |
-| ------------- | ----------------------------------------- | ---------------------------------- |
-| Called in?    | **No** — button reads "Send outside"      | Yes, normal call-in                |
-| Collection    | `skipped`, stamped `outside.mode=patient_goes` | worked at the desk as usual   |
-| Lab stages    | **dropped** (see below)                   | worked as usual                    |
-| Results stage | Assistant Station                              | Assistant Station                       |
+|               | Patient goes there                             | We draw and courier         |
+| ------------- | ---------------------------------------------- | --------------------------- |
+| Called in?    | **No** — button reads "Send outside"           | Yes, normal call-in         |
+| Collection    | `skipped`, stamped `outside.mode=patient_goes` | worked at the desk as usual |
+| Lab stages    | **dropped** (see below)                        | worked as usual             |
+| Results stage | Assistant Station                              | Assistant Station           |
 
 `lab_reports` moves from `lab_tech` to `report_desk` in **both** cases, because an outside
 test never produces `lab_results` — the HealthRay auto-complete can never fire — and the
@@ -299,10 +299,10 @@ the patient appears in neither desk's list — invisible to everyone.
 
 The Assistant Station's two jobs are different work, so they are separate sections:
 
-| Section | Rows | Action |
-| ------------------------------ | ---------------------------------------- | ------------------------- |
-| **Ready to print & hand over** | report is in                             | 🖨️ Printed → ✓ To doctor |
-| **Waiting on outside labs**    | earliest open stage carries `awaiting_outside` | ✓ Report received   |
+| Section                        | Rows                                           | Action                   |
+| ------------------------------ | ---------------------------------------------- | ------------------------ |
+| **Ready to print & hand over** | report is in                                   | 🖨️ Printed → ✓ To doctor |
+| **Waiting on outside labs**    | earliest open stage carries `awaiting_outside` | ✓ Report received        |
 
 One combined list headed "results are ready" was false for every row still waiting on an
 outside lab, and buried the rows that could actually be worked.
@@ -314,7 +314,7 @@ lines describing work that never existed. When **every** test on the visit went 
 line collapses to what actually happened:
 
 ```
-○ sent outside · SRL · due 28 Aug     ○ printed     ○ delivered to Consultant
+○ sent outside · SRL · due 28 Aug     ○ printed     ○ delivered to Doctor
         [✓ Report received from SRL]
 ```
 
@@ -350,9 +350,10 @@ Added 2026-08-26. Handing the report over is only half a handover if nothing on 
 doctor's screen says it arrived.
 
 `/flow/station/mo` is now two columns. The left is the station as before; the right is
-**"Lab reports handed to you"** — every live visit whose `report_delivered` stage is
-completed, newest first, each with the test names and the full `LabPanel` (values, flags,
-critical first, and **View report** through the shared `PdfViewerModal`).
+**Superseded 2026-08-27.** This panel showed the consultant every live visit whose
+`report_delivered` stage was complete. Reports now go to the **MO**, so the panel moved to
+`/flow/station/mo` and became two lists — _Reports to review_ and _Prescriptions to prepare_.
+See `docs/MO_REPORT_REVIEW_PLAN.md` §4.
 
 It is a reference list, not a queue: the doctor's own step finished long before the lab did,
 so there is nothing here to complete. The column collapses under the main content below
@@ -375,13 +376,13 @@ a floor manager. The lab cannot.
 patients only) — the report is in front of whoever is with the patient. The right-hand column
 on My Patients is other consultants' patients, so the panel sits at the top of the left.
 
-**Resolved 2026-08-26.** The step was originally called *delivered to Consultant*, which named
+**Resolved 2026-08-26.** The step was originally called _delivered to Doctor_, which named
 the wrong person: the MO's own step is #2 and the report lands at #8, six steps after their
 part ends. Checked against a day's data — all 8 delivered patients had a named consultant
 waiting (Dr. Beant Kaur, Dr. Simranpreet Kaur), and every one of their MO steps had already
 been auto-closed by the OPD sync before the report existed.
 
-It is now **Reports — delivered to Consultant**. The GDA still does the delivering
+It is now **Reports — delivered to Doctor**. The GDA still does the delivering
 (`assigned_role` stays `report_desk`); only the recipient in the label was wrong. The panel
 is still shown to both the MO and the consultant, since it costs nothing while the MOs are
 barely in the system.
@@ -433,8 +434,8 @@ medicines to collect had to be closed by someone else. `POST /flow/visits/:id/en
 gap: every still-open step is **skipped** carrying `Visit ended early — <reason>`, the visit
 is completed, and the appointment is mirrored to OPD. A reason is required.
 
-**Who may end it:** a floor manager, or whoever can work the desk the patient is at *right
-now*. The first cut checked whether the caller could work *any* open step, which let the
+**Who may end it:** a floor manager, or whoever can work the desk the patient is at _right
+now_. The first cut checked whether the caller could work _any_ open step, which let the
 pharmacist close a visit still sitting at Vitals — every journey ends at their desk. It now
 looks only at the in-progress step, or the earliest open one.
 

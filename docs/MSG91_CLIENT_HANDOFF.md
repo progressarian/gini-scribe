@@ -73,13 +73,14 @@ Please share the following three values (securely — over a password
 manager, encrypted message, or via the team's preferred secret-sharing
 channel — not plain email):
 
-| Label | Example shape | Where it came from |
-|---|---|---|
-| **MSG91 Auth Key** | `4XXXXXAabcdefGHIJKLMnop` | Step 3 above |
-| **MSG91 Flow ID** | `66a4f2c8d5e2b3e8f9012345` | Step 2.7 above |
+| Label               | Example shape                   | Where it came from       |
+| ------------------- | ------------------------------- | ------------------------ |
+| **MSG91 Auth Key**  | `4XXXXXAabcdefGHIJKLMnop`       | Step 3 above             |
+| **MSG91 Flow ID**   | `66a4f2c8d5e2b3e8f9012345`      | Step 2.7 above           |
 | **MSG91 Sender ID** | `GINIHL` (your 6-letter header) | Approved sender from DLT |
 
 Optionally also share:
+
 - Which DLT portal you registered on (Jio / Vi / Airtel / etc.) — so we
   know where to look if a template ever needs updating.
 - The MSG91 account email/login — so we can troubleshoot delivery

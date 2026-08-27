@@ -1270,14 +1270,7 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
       const labWait = IS_CONSULT_ROLE(next.assigned_role)
         ? await labStagesPending(client, visitId, next.step_order)
         : next.step_catalog_id === "rx_explain"
-          ? (
-              await client.query(
-                `SELECT step_name FROM flow_visit_steps
-                  WHERE visit_id=$1 AND step_catalog_id='rx_ready'
-                    AND status NOT IN ('completed','skipped') LIMIT 1`,
-                [visitId],
-              )
-            ).rows[0]
+          ? await rxExplainBlocked(client, visitId)
           : null;
       const busy =
         labWait || (await stationBusy(client, next.assigned_role, next.assigned_staff_id));
@@ -2234,6 +2227,31 @@ router.post("/flow/visits/:id/offer/decline", async (req, res) => {
 // meant to gate it. Without the bound, adding any background stage after a
 // consultation deadlocks it — the consult waits on the stage, and the stage
 // waits on what the consult produces.
+// The nurse needs BOTH: the MO's stage closed, and a prescription document on
+// file. Shared by /start and the auto-advance — putting the rule in only one of
+// them let the other pull the patient straight through.
+async function rxExplainBlocked(client, visitId) {
+  const stage = (
+    await client.query(
+      `SELECT step_name, status FROM flow_visit_steps
+        WHERE visit_id=$1 AND step_catalog_id='rx_ready' LIMIT 1`,
+      [visitId],
+    )
+  ).rows[0];
+  if (stage && !["completed", "skipped"].includes(stage.status)) {
+    return { step_name: stage.step_name };
+  }
+  const doc = await client.query(
+    `SELECT 1 FROM documents d
+       JOIN flow_visits v ON v.id=$1
+      WHERE d.patient_id = v.patient_db_id AND d.doc_type='prescription'
+        AND d.created_at::date = v.visit_date
+      LIMIT 1`,
+    [visitId],
+  );
+  return doc.rowCount ? null : { step_name: "the prescription" };
+}
+
 async function labStagesPending(client, visitId, beforeOrder = null) {
   return (
     await client.query(
@@ -2251,53 +2269,6 @@ const IS_CONSULT_ROLE = (role) => role === "sd" || role === "chief";
 // sync, and a report can also arrive on paper — so the lab needs a way to say
 // "results are in" without waiting for HealthRay. Completes the stage only; it
 // does not advance the patient, who may still be at another station.
-// The doctor confirming they have actually read the report. Not a journey step —
-// the consultation is already unlocked by the handover — just a record that the
-// paper reached a pair of eyes, and the row leaves their panel.
-router.post("/flow/steps/:stepId/reviewed", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const step = (
-      await client.query("SELECT * FROM flow_visit_steps WHERE id=$1 FOR UPDATE", [
-        req.params.stepId,
-      ])
-    ).rows[0];
-    if (!step) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Step not found" });
-    }
-    if (step.step_catalog_id !== "report_delivered") {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Only a delivered report can be marked reviewed" });
-    }
-    const role = req.doctor?.role;
-    if (
-      !hasAnyCapability(role, CAP.FLOW_COORDINATOR) &&
-      !hasAnyCapability(role, CAP.FLOW_STATION_MO) &&
-      !hasOwnConsultQueue(role)
-    ) {
-      await client.query("ROLLBACK");
-      return res.status(403).json({ error: "Only the treating doctor can mark a report reviewed" });
-    }
-    const reviewed = { by: ACTOR(req), at: new Date().toISOString() };
-    await client.query(
-      `UPDATE flow_visit_steps
-          SET data = COALESCE(data,'{}'::jsonb) || $2::jsonb
-        WHERE id=$1`,
-      [step.id, JSON.stringify({ reviewed })],
-    );
-    await logEvent(client, step.visit_id, "report_reviewed", step.step_order, reviewed, ACTOR(req));
-    await client.query("COMMIT");
-    res.json({ status: "reviewed", reviewed });
-  } catch (e) {
-    await client.query("ROLLBACK");
-    handleError(res, e, "Flow mark report reviewed");
-  } finally {
-    client.release();
-  }
-});
-
 router.post("/flow/steps/:stepId/results-in", async (req, res) => {
   const client = await pool.connect();
   try {
@@ -2319,7 +2290,7 @@ router.post("/flow/steps/:stepId/results-in", async (req, res) => {
     // the patient is often the one who writes it — so they may close their own
     // patient's stage. Anyone else's patient, or any other stage, is refused.
     const ownConsult =
-      step.step_catalog_id === "rx_ready" &&
+      ["rx_ready", "mo_review"].includes(step.step_catalog_id) &&
       hasOwnConsultQueue(req.doctor?.role) &&
       (
         await client.query(
@@ -2381,6 +2352,9 @@ router.post("/flow/steps/:stepId/results-in", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────
 router.post("/flow/steps/:stepId/start", async (req, res) => {
   const client = await pool.connect();
+  // Declared up here because the nurse's paper-prescription override is decided
+  // in the gates near the top and written to data much further down.
+  let paperRx = null;
   try {
     const stepId = req.params.stepId;
     await client.query("BEGIN");
@@ -2449,11 +2423,16 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
     if (!hasAnyCapability(req.doctor?.role, CAP.FLOW_COORDINATOR)) {
       const earlier = (
         await client.query(
+          // A waiting step is not somewhere the patient still has to go — it is
+          // them queuing for this very step, and /start auto-completes it a few
+          // lines below. Counting it here blocked every consultation behind its
+          // own waiting room.
           `SELECT step_name FROM flow_visit_steps
             WHERE visit_id=$1 AND NOT is_background AND step_order < $2
+              AND assigned_role <> $3
               AND status NOT IN ('completed','skipped')
             ORDER BY step_order ASC LIMIT 1`,
-          [step.visit_id, step.step_order],
+          [step.visit_id, step.step_order, WAITING_ROLE],
         )
       ).rows[0];
       if (earlier) {
@@ -2468,29 +2447,16 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
     // Nothing to explain until the prescription exists. Overridable: the stage
     // itself takes "results-in" from an MO or a floor manager for a paper Rx.
     if (step.step_catalog_id === "rx_explain") {
-      const stage = (
-        await client.query(
-          `SELECT step_name, status FROM flow_visit_steps
-            WHERE visit_id=$1 AND step_catalog_id='rx_ready' LIMIT 1`,
-          [step.visit_id],
-        )
-      ).rows[0];
-      // Visits created before the stage existed have no rx_ready row at all, so
-      // the stage check alone waved them straight through. Fall back to the
-      // thing the stage is a proxy for: does a prescription actually exist?
-      let blocked = null;
-      if (stage) {
-        if (!["completed", "skipped"].includes(stage.status)) blocked = stage.step_name;
-      } else {
-        const doc = await client.query(
-          `SELECT 1 FROM documents d
-             JOIN flow_visits v ON v.id=$1
-            WHERE d.patient_id = v.patient_db_id AND d.doc_type='prescription'
-              AND d.created_at::date = v.visit_date
-            LIMIT 1`,
-          [step.visit_id],
-        );
-        if (!doc.rowCount) blocked = "the prescription";
+      let blocked = (await rxExplainBlocked(client, step.visit_id))?.step_name || null;
+      // A paper prescription is still a prescription. When the only thing
+      // missing is the document — the MO's stage is closed — the nurse may
+      // proceed by saying she has the hard copy, and that is recorded on the
+      // step. A stage the MO has not finished is a different matter and stays
+      // blocked; it has its own ✕ Skip.
+      const paper = String(req.body?.paper_rx || "").trim();
+      if (blocked === "the prescription" && paper) {
+        paperRx = { note: paper.slice(0, 200), by: ACTOR(req), at: new Date().toISOString() };
+        blocked = null;
       }
       if (blocked) {
         await client.query("ROLLBACK");
@@ -2530,7 +2496,14 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
     // Calling a patient in also takes them, so the row shows who has them.
     await client.query(
       "UPDATE flow_visit_steps SET status='in_progress', started_at=NOW(), data=$2 WHERE id=$1",
-      [stepId, JSON.stringify({ ...withClaim(step, req), ...(checks || {}) })],
+      [
+        stepId,
+        JSON.stringify({
+          ...withClaim(step, req),
+          ...(checks || {}),
+          ...(paperRx ? { paper_rx: paperRx } : {}),
+        }),
+      ],
     );
     // An outside test never produces lab_results, so the stage that waits for
     // them would hang forever at a desk that cannot see the paper report. Hand
@@ -2585,7 +2558,14 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
       "UPDATE flow_visits SET current_step_id=$2, current_step_order=$3, updated_at=NOW() WHERE id=$1",
       [step.visit_id, step.id, step.step_order],
     );
-    await logEvent(client, step.visit_id, "step_started", step.step_order, null, ACTOR(req));
+    await logEvent(
+      client,
+      step.visit_id,
+      "step_started",
+      step.step_order,
+      paperRx ? { paper_rx: paperRx.note } : null,
+      ACTOR(req),
+    );
     await client.query("COMMIT");
     // Mirror to OPD: doctor called the patient in → in_visit.
     if (["sd", "chief"].includes(step.assigned_role)) {

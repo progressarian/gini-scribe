@@ -21,14 +21,14 @@ already have results in hand — which is the entire point of the gate that hold
 
 ### The numbers that shape the design
 
-| | |
-| ------------------------------------------ | ------------------------------- |
-| Consultations started by `opd-sync`         | **1,414** of 1,429              |
-| …by a person                                | 15 (2 by a consultant)          |
-| Consultations completed **by a person**     | **1,338** — 41%                 |
-| `sd_consult` steps ever **claimed**         | **0**                           |
-| Consultant logins ever                      | 384, most recent today          |
-| Median duration                             | **83 min** against a 20 min budget |
+|                                         |                                    |
+| --------------------------------------- | ---------------------------------- |
+| Consultations started by `opd-sync`     | **1,414** of 1,429                 |
+| …by a person                            | 15 (2 by a consultant)             |
+| Consultations completed **by a person** | **1,338** — 41%                    |
+| `sd_consult` steps ever **claimed**     | **0**                              |
+| Consultant logins ever                  | 384, most recent today             |
+| Median duration                         | **83 min** against a 20 min budget |
 
 Read together: consultants **are** in the system and do close their own steps, but the start
 is always the sync noticing HealthRay, and nobody has ever been able to claim a patient —
@@ -50,8 +50,8 @@ Either way the patient lands in the box with the consultant's name on them. Noth
 double-started, and for the first time the floor can see who holds whom.
 
 **Disabled with a reason** when the reports gate is still closed — the same treatment the
-nurse's Call in gets — so the consultant sees *"Reports not ready — waiting on Lab —
-processing"* before clicking rather than as an error after.
+nurse's Call in gets — so the consultant sees _"Reports not ready — waiting on Lab —
+processing"_ before clicking rather than as an error after.
 
 ### The box
 
@@ -134,10 +134,10 @@ durations only follow once calling in is habit.
 
 Two different intentions, so two buttons:
 
-| | Claim | Step status | The minutes so far |
-| ------------------- | ------- | ---------------- | ------------------------------------- |
-| **↩ Release**       | dropped | stays `in_progress` | stay on the consultation, still counting |
-| **✕ Cancel call-in** | dropped | back to `ready`  | **moved into the preceding wait step** |
+|                      | Claim   | Step status         | The minutes so far                       |
+| -------------------- | ------- | ------------------- | ---------------------------------------- |
+| **↩ Release**        | dropped | stays `in_progress` | stay on the consultation, still counting |
+| **✕ Cancel call-in** | dropped | back to `ready`     | **moved into the preceding wait step**   |
 
 Cancel is for "I opened the wrong patient". It does not discard the elapsed time — the
 patient really did sit there — it moves it where it belongs. The waiting step this call-in
