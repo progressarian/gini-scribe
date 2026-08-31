@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gini — Doctor Station</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9;--white:#fff;--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--ink4:#94a3b8;
+  --bd:#e2e8f0;--bd2:#cbd5e1;--nv:#0f172a;
+  --red:#dc2626;--red-l:#fef2f2;--red-b:rgba(220,38,38,.14);
+  --amb:#d97706;--amb-l:#fffbeb;--amb-b:rgba(217,119,6,.14);
+  --grn:#16a34a;--grn-l:#f0fdf4;--grn-b:rgba(22,163,74,.14);
+  --blu:#2563eb;--blu-l:#eff6ff;--blu-b:rgba(37,99,235,.14);
+  --pu:#7c3aed;--pu-l:#f5f3ff;--pu-b:rgba(124,58,237,.14);
+  --tl:#0d9488;--tl-l:#f0fdfa;--tl-b:rgba(13,148,136,.14);
+  --fb:'Inter',sans-serif;--fm:'JetBrains Mono',monospace;--fd:'Instrument Serif',serif;
+  --sh:0 1px 2px rgba(0,0,0,.05),0 1px 3px rgba(0,0,0,.08);
+  --sh-md:0 4px 12px rgba(0,0,0,.08);
+  --r:8px;--r-lg:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fb);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.5}
+
+/* ── SCREENS ── */
+.screen{display:none;height:100vh;flex-direction:column;overflow:hidden}
+.screen.active{display:flex}
+
+/* ── TOP RAIL ── */
+.top-rail{background:var(--nv);height:46px;display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0}
+.tr-logo{font-family:var(--fd);font-size:15px;color:#fff;font-style:italic}
+.tr-sep{width:1px;height:14px;background:rgba(255,255,255,.15)}
+.tr-name{font-size:12px;font-weight:600;color:#fff}
+.tr-r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.top-btn{padding:4px 11px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.7);font-family:var(--fb);transition:all .15s}
+.top-btn:hover{background:rgba(255,255,255,.1);color:#fff}
+.top-btn.primary{background:var(--grn);border-color:var(--grn);color:#fff}
+.voice-btn{background:var(--pu);border:none;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:#fff;cursor:pointer;font-family:var(--fb);display:flex;align-items:center;gap:5px}
+.voice-btn:hover{background:#6d28d9}
+
+/* ── SHARED ── */
+.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.b-red{background:var(--red-l);color:var(--red)}.b-amb{background:var(--amb-l);color:var(--amb)}
+.b-grn{background:var(--grn-l);color:var(--grn)}.b-tl{background:var(--tl-l);color:var(--tl)}
+.b-blu{background:var(--blu-l);color:var(--blu)}.b-pu{background:var(--pu-l);color:var(--pu)}
+.b-ink{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.btn{padding:5px 11px;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb);transition:all .15s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.btn-ghost{background:var(--white);color:var(--ink3);border-color:var(--bd)}.btn-ghost:hover{color:var(--ink);border-color:var(--bd2)}
+.btn-tl{background:var(--tl);color:#fff;border-color:var(--tl)}.btn-tl:hover{opacity:.88}
+.btn-grn{background:var(--grn);color:#fff;border-color:var(--grn)}.btn-grn:hover{opacity:.88}
+
+/* ════════════════════════════
+   SCREEN 1 — PATIENT LIST
+════════════════════════════ */
+#s-list .list-body{flex:1;overflow-y:auto;padding:14px 16px}
+#s-list .list-body::-webkit-scrollbar{width:4px}
+#s-list .list-body::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+
+.list-stats{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.lstat{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:8px 14px;display:flex;gap:10px;align-items:center;box-shadow:var(--sh)}
+.ls-val{font-size:22px;font-weight:600;font-family:var(--fm);color:var(--ink)}
+.ls-lbl{font-size:10px;color:var(--ink3);font-weight:500}
+.ls-val.red{color:var(--red)}.ls-val.amb{color:var(--amb)}.ls-val.grn{color:var(--grn)}.ls-val.tl{color:var(--tl)}
+
+.patient-row{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all .15s;box-shadow:var(--sh)}
+.patient-row:hover{border-color:var(--tl);box-shadow:var(--sh-md);transform:translateY(-1px)}
+.patient-row.active-row{border-color:var(--tl);border-left:4px solid var(--tl)}
+.pr-slot{font-family:var(--fm);font-size:12px;color:var(--ink3);min-width:42px;flex-shrink:0;font-weight:500}
+.pr-av{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.pr-body{flex:1;min-width:0}
+.pr-name{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:2px;display:flex;align-items:center;gap:6px}
+.pr-meta{font-size:10px;color:var(--ink3)}
+.pr-chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.pr-numbers{display:flex;gap:6px;flex-shrink:0;align-items:center}
+.pr-num{text-align:center;min-width:48px}
+.prn-val{font-family:var(--fm);font-size:13px;font-weight:600;line-height:1}
+.prn-val.r{color:var(--red)}.prn-val.a{color:var(--amb)}.prn-val.g{color:var(--grn)}
+.prn-lbl{font-size:9px;color:var(--ink3);font-weight:500;margin-top:1px}
+.pr-status{min-width:110px;text-align:right;flex-shrink:0}
+.status-pill{font-size:10px;font-weight:600;padding:3px 9px;border-radius:20px;display:inline-block;white-space:nowrap}
+.sp-waiting{background:#f1f5f9;color:#64748b}
+.sp-ready{background:var(--tl-l);color:var(--tl)}
+.sp-withme{background:var(--pu-l);color:var(--pu)}
+.sp-done{background:var(--grn-l);color:var(--grn)}
+.sp-vitals{background:var(--blu-l);color:var(--blu)}
+.rep-dot{font-size:9px;font-weight:600;margin-top:4px}
+.rep-ok{color:var(--grn)}.rep-partial{color:var(--amb)}.rep-none{color:var(--red)}
+.pr-open{flex-shrink:0}
+.section-divider{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:6px;margin-top:2px;padding-left:2px}
+
+/* ════════════════════════════
+   SCREEN 2 — PATIENT DETAIL
+════════════════════════════ */
+#s-detail{background:var(--bg)}
+.detail-scroll{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.detail-scroll::-webkit-scrollbar{width:4px}
+.detail-scroll::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+
+/* Patient header */
+.pt-header{background:var(--nv);padding:11px 16px;display:flex;align-items:flex-start;gap:12px;flex-shrink:0}
+.pth-body{flex:1}
+.pth-name{font-family:var(--fd);font-size:20px;color:#fff;font-style:italic;margin-bottom:3px}
+.pth-meta{font-size:11px;color:rgba(255,255,255,.45);line-height:1.6}
+.pth-chips{display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;align-items:flex-start}
+
+/* Visit summary bar */
+.visit-bar{background:rgba(255,255,255,.08);border-top:1px solid rgba(255,255,255,.06);padding:8px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0}
+.vb-visit{font-size:11px;font-weight:500;color:rgba(255,255,255,.5)}
+.vb-sep{width:1px;height:14px;background:rgba(255,255,255,.12)}
+.vb-chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;display:flex;align-items:center;gap:4px}
+.vbc-grn{background:rgba(22,163,74,.2);color:#86efac}
+.vbc-red{background:rgba(220,38,38,.2);color:#fca5a5}
+.vbc-amb{background:rgba(217,119,6,.2);color:#fcd34d}
+
+/* Section cards */
+.sec{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);box-shadow:var(--sh);overflow:hidden;margin:0 14px 10px}
+.sec:first-of-type{margin-top:12px}
+.sec-head{padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;background:var(--white);position:sticky;top:0;z-index:10}
+.sh-left{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ink)}
+.sh-sub{font-size:10px;color:var(--ink3);font-weight:400}
+.sh-right{display:flex;gap:6px;align-items:center}
+.collapse-btn{font-size:11px;color:var(--ink3);cursor:pointer;padding:2px 8px;border-radius:4px;border:1px solid var(--bd);background:var(--white);font-family:var(--fb)}
+.collapse-btn:hover{background:var(--bg)}
+.sec-body{padding:12px 14px}
+.collapsed .sec-body{display:none}
+
+/* Concerns grid */
+.concerns-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.cg-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid var(--bd)}
+.ci{display:flex;gap:7px;align-items:flex-start;padding:5px 0;border-bottom:1px dashed rgba(0,0,0,.05);font-size:11px;line-height:1.5}
+.ci:last-child{border:none}
+.ci-ico{font-size:12px;flex-shrink:0;margin-top:1px}
+.ci strong{color:var(--ink);font-weight:600}
+
+/* Numbers row */
+.num-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px}
+.nt{border-radius:var(--r);padding:10px;border:1px solid;cursor:pointer;transition:all .15s}
+.nt:hover{box-shadow:var(--sh-md);transform:translateY(-1px)}
+.nt.r{background:var(--red-l);border-color:var(--red-b)}
+.nt.a{background:var(--amb-l);border-color:var(--amb-b)}
+.nt.g{background:var(--grn-l);border-color:var(--grn-b)}
+.nt.n{background:var(--bg);border-color:var(--bd)}
+.nt-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+.nt.r .nt-lbl{color:var(--red)}.nt.a .nt-lbl{color:var(--amb)}.nt.g .nt-lbl{color:var(--grn)}.nt.n .nt-lbl{color:var(--ink3)}
+.nt-val{font-family:var(--fm);font-size:19px;font-weight:500;line-height:1;margin-bottom:2px}
+.nt.r .nt-val{color:var(--red)}.nt.a .nt-val{color:var(--amb)}.nt.g .nt-val{color:var(--grn)}.nt.n .nt-val{color:var(--ink)}
+.nt-trend{font-size:9px;font-weight:600;margin-bottom:4px}
+.nt.r .nt-trend{color:var(--red)}.nt.a .nt-trend{color:var(--amb)}.nt.g .nt-trend{color:var(--grn)}.nt.n .nt-trend{color:var(--ink3)}
+.nt-spark{display:flex;gap:1px;align-items:flex-end;height:14px}
+.sp{border-radius:1px 1px 0 0;min-height:2px;flex:1}
+.nt-hint{font-size:8px;color:var(--ink3);margin-top:3px;opacity:.7}
+
+/* Labs accordion */
+.labs-tabs{display:flex;gap:0;border-bottom:1px solid var(--bd);margin-bottom:10px}
+.lt{padding:7px 13px;font-size:11px;font-weight:600;cursor:pointer;color:var(--ink3);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.lt.active{color:var(--tl);border-bottom-color:var(--tl)}
+.lt:hover{color:var(--ink)}
+.lab-panel{display:none}.lab-panel.active{display:block}
+.lab-result-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--bd);font-size:12px}
+.lab-result-row:last-child{border:none}
+.lr-name{flex:1;color:var(--ink2);font-weight:500}
+.lr-val{font-family:var(--fm);font-size:13px;font-weight:600;min-width:80px;text-align:right}
+.lr-val.r{color:var(--red)}.lr-val.a{color:var(--amb)}.lr-val.g{color:var(--grn)}
+.lr-ref{font-size:10px;color:var(--ink3);min-width:80px;text-align:right}
+.lr-trend{font-size:10px;font-weight:600;min-width:60px;text-align:right}
+.lr-chart{cursor:pointer;font-size:10px;color:var(--tl);font-weight:600;min-width:40px;text-align:right}
+.report-file{display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--bg);border-radius:var(--r);border:1px solid var(--bd);margin-bottom:6px;cursor:pointer}
+.rf-ico{font-size:18px;flex-shrink:0}
+.rf-body{flex:1}
+.rf-name{font-size:12px;font-weight:600;color:var(--ink)}
+.rf-meta{font-size:10px;color:var(--ink3);margin-top:1px}
+.rf-action{font-size:11px;color:var(--tl);font-weight:600;flex-shrink:0}
+
+/* Prescription */
+.rx-layout{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.rx-col-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid var(--bd)}
+.rx-ref{opacity:.65;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-lg);padding:10px 12px}
+.rx-edit{background:var(--white);border:2px solid var(--tl);border-radius:var(--r-lg);padding:10px 12px}
+.rx-row{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--bd)}
+.rx-row:last-child{border:none}
+.rx-num{font-family:var(--fm);font-size:10px;color:var(--ink3);min-width:16px;flex-shrink:0;padding-top:1px}
+.rx-body{flex:1}
+.rx-name{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:1px}
+.rx-for{font-size:10px;color:var(--ink3)}
+.rx-r{text-align:right;flex-shrink:0}
+.rx-dose{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink2)}
+.rx-time{font-size:10px;color:var(--ink3)}
+.rx-tag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;display:inline-block;margin-bottom:2px}
+.rt-changed{background:var(--amb-l);color:var(--amb)}.rt-new{background:var(--grn-l);color:var(--grn)}.rt-stopped{background:var(--red-l);color:var(--red)}
+.copy-btn{width:100%;padding:7px;border:1.5px dashed var(--bd2);border-radius:var(--r);background:transparent;font-size:11px;font-weight:600;color:var(--ink3);cursor:pointer;font-family:var(--fb);margin-bottom:8px;transition:all .15s}
+.copy-btn:hover{border-color:var(--tl);color:var(--tl);background:var(--tl-l)}
+.voice-bar{background:var(--pu-l);border:1px solid var(--pu-b);border-radius:var(--r);padding:10px 12px;margin-bottom:10px;display:flex;gap:10px;align-items:center}
+.vb-text{flex:1;font-size:11px;color:var(--ink3);line-height:1.5}
+.vb-text em{color:var(--pu);font-style:italic}
+
+/* Medicine card */
+.med-card-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px;margin-top:4px}
+.med-card-grid{border:1px solid var(--bd);border-radius:var(--r-lg);overflow:hidden}
+.mc-row{display:flex;align-items:stretch;border-bottom:1px solid var(--bd)}
+.mc-row:last-child{border:none}
+.mc-time{min-width:100px;padding:10px 12px;background:var(--bg);border-right:1px solid var(--bd);display:flex;flex-direction:column;justify-content:center;flex-shrink:0}
+.mc-time-label{font-size:10px;font-weight:700;color:var(--ink);margin-bottom:1px}
+.mc-time-sub{font-size:9px;color:var(--ink3)}
+.mc-meds{flex:1;padding:8px 12px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.mc-pill{font-size:10px;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.mc-pill.diab{background:var(--blu-l);border-color:var(--blu-b);color:var(--blu)}
+.mc-pill.bp{background:var(--amb-l);border-color:var(--amb-b);color:var(--amb)}
+.mc-pill.lipid{background:var(--pu-l);border-color:var(--pu-b);color:var(--pu)}
+.mc-pill.supp{background:var(--grn-l);border-color:var(--grn-b);color:var(--grn)}
+.mc-pill.pain{background:#f1f5f9;border-color:var(--bd);color:var(--ink3)}
+.mc-empty{font-size:10px;color:var(--ink4);font-style:italic}
+.mc-dose{font-size:9px;opacity:.7;margin-left:2px;font-weight:400}
+
+/* Care plan */
+.care-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.care-block{background:var(--bg);border-radius:var(--r);padding:11px 13px}
+.cb-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px}
+.care-item{display:flex;gap:7px;font-size:11px;line-height:1.5;color:var(--ink2);margin-bottom:6px}
+.care-item:last-child{margin-bottom:0}
+.care-ico{font-size:12px;flex-shrink:0;margin-top:1px}
+.care-item strong{color:var(--ink);font-weight:600}
+.urgency-tabs{display:flex;gap:4px;margin-bottom:8px}
+.ut{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--white);font-family:var(--fb);transition:all .15s}
+.ut.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+.test-chips{display:flex;flex-wrap:wrap;gap:4px}
+.tc{padding:3px 9px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid var(--bd);background:var(--white);font-family:var(--fb);transition:all .15s;font-weight:500}
+.tc.sel{background:var(--tl-l);border-color:var(--tl);color:var(--tl);font-weight:600}
+.ref-chips{display:flex;flex-wrap:wrap;gap:4px}
+.rc{padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px dashed var(--bd);background:var(--white);font-family:var(--fb);transition:all .15s;font-weight:500}
+.rc:hover,.rc.sel{background:var(--pu-l);border-color:var(--pu);color:var(--pu);font-weight:600;border-style:solid}
+.goal-row{display:flex;gap:5px}
+.goal-item{flex:1;background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:7px 8px;text-align:center}
+.gi-val{font-family:var(--fm);font-size:12px;font-weight:500;color:var(--ink);margin-bottom:1px}
+.gi-lbl{font-size:9px;color:var(--ink3);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.health-score-bar{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:10px;color:var(--ink3)}
+.hs-track{flex:1;height:5px;background:var(--bd);border-radius:3px;overflow:hidden}
+.hs-fill{height:100%;border-radius:3px}
+.treatment-area{width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-family:var(--fb);font-size:11px;color:var(--ink);background:var(--white);resize:none;min-height:65px;outline:none;line-height:1.6}
+.treatment-area:focus{border-color:var(--tl)}
+
+/* Finalize */
+.finalize{background:var(--nv);border-radius:var(--r-lg);padding:14px 16px;margin:0 14px 16px;display:flex;align-items:center;gap:14px}
+.fin-text{flex:1;color:#fff}
+.fin-title{font-size:14px;font-weight:700;margin-bottom:5px}
+.fin-routes{display:flex;gap:5px;flex-wrap:wrap}
+.fin-route{font-size:10px;font-weight:600;padding:3px 9px;border-radius:20px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.65)}
+.fin-btn{padding:12px 22px;background:var(--grn);color:#fff;border:none;border-radius:var(--r-lg);font-size:14px;font-weight:700;cursor:pointer;font-family:var(--fb);flex-shrink:0}
+.fin-btn:hover{opacity:.88}
+
+/* Graph modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal-box{background:var(--white);border-radius:var(--r-lg);padding:20px;width:480px;box-shadow:0 20px 50px rgba(0,0,0,.2);position:relative}
+.modal-close{position:absolute;top:12px;right:12px;background:var(--bg);border:none;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:13px;color:var(--ink3)}
+.graph-svg{width:100%;height:110px}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:var(--r-lg);font-size:12px;font-weight:500;z-index:999;box-shadow:var(--sh-md);display:none;white-space:nowrap}
+.toast.show{display:block}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════
+     SCREEN 1 — PATIENT LIST
+══════════════════════════════ -->
+<div class="screen active" id="s-list">
+  <div class="top-rail">
+    <div class="tr-logo">Gini Scribe</div>
+    <div class="tr-sep"></div>
+    <div class="tr-name">Dr. Anil Bhansali</div>
+    <div class="tr-r">
+      <span style="font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.4)" id="clk">--:--</span>
+      <button class="top-btn" onclick="toast('Triage board opened')">← Triage</button>
+    </div>
+  </div>
+  <div class="list-body">
+
+    <!-- Stats -->
+    <div class="list-stats">
+      <div class="lstat"><div class="ls-val">18</div><div><div class="ls-lbl">Total today</div><div style="font-size:9px;color:var(--ink4)">Dr. Bhansali</div></div></div>
+      <div class="lstat"><div class="ls-val tl">3</div><div><div class="ls-lbl">With me now</div><div style="font-size:9px;color:var(--ink4)">in visit</div></div></div>
+      <div class="lstat"><div class="ls-val red">6</div><div><div class="ls-lbl">Waiting</div><div style="font-size:9px;color:var(--ink4)">results ready</div></div></div>
+      <div class="lstat"><div class="ls-val grn">8</div><div><div class="ls-lbl">Completed</div><div style="font-size:9px;color:var(--ink4)">today</div></div></div>
+      <div class="lstat"><div class="ls-val amb">1</div><div><div class="ls-lbl">Missing reports</div><div style="font-size:9px;color:var(--ink4)">can't categorise</div></div></div>
+    </div>
+
+    <!-- In visit now -->
+    <div class="section-divider">🟢 With me now</div>
+
+    <div class="patient-row active-row" onclick="openPatient()">
+      <div class="pr-slot">08:30</div>
+      <div class="pr-av" style="background:#b45309">SK</div>
+      <div class="pr-body">
+        <div class="pr-name">Sandeep Kumar <span class="badge b-amb" style="font-size:9px">🟡 Flag for review</span></div>
+        <div class="pr-meta">50M · P_177562 · Visit 5 · Phase 1 Uncontrolled · 10 months with Gini</div>
+        <div class="pr-chips">
+          <span class="badge b-red" style="font-size:9px">TG 368 ↑↑↑</span>
+          <span class="badge b-amb" style="font-size:9px">BP 143/90</span>
+          <span class="badge b-ink" style="font-size:9px">74% compliance</span>
+        </div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val a">6.8<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val a">139</div><div class="prn-lbl">FBS</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-withme">With me now</div>
+        <div class="rep-dot rep-ok">✓ Reports complete</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-tl" onclick="event.stopPropagation();openPatient()">Open →</button></div>
+    </div>
+
+    <div class="patient-row" onclick="openPatient()">
+      <div class="pr-slot">09:00</div>
+      <div class="pr-av" style="background:#7f1d1d">GS</div>
+      <div class="pr-body">
+        <div class="pr-name">Gurmail Singh Sandhu <span class="badge b-red" style="font-size:9px">🔴 Getting worse</span></div>
+        <div class="pr-meta">71M · P_14207 · Visit 8 · Phase 1 · UACR critically elevated</div>
+        <div class="pr-chips"><span class="badge b-red" style="font-size:9px">UACR 4643</span><span class="badge b-red" style="font-size:9px">eGFR 11</span></div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val g">5.9<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val a">143<span style="font-size:10px">/90</span></div><div class="prn-lbl">BP</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-withme">With me now</div>
+        <div class="rep-dot rep-ok">✓ Reports complete</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" onclick="event.stopPropagation();openPatient()">Open →</button></div>
+    </div>
+
+    <!-- Waiting — ready -->
+    <div class="section-divider" style="margin-top:12px">⏳ Waiting — results ready</div>
+
+    <div class="patient-row" onclick="openPatient()">
+      <div class="pr-slot">09:30</div>
+      <div class="pr-av" style="background:#1e3a5f">IS</div>
+      <div class="pr-body">
+        <div class="pr-name">Isha Gambhir <span class="badge b-amb" style="font-size:9px">🟡 Flag for review</span></div>
+        <div class="pr-meta">41F · P_42220 · Visit 5 · Phase 1 Stabilize · T1DM + Coeliac</div>
+        <div class="pr-chips"><span class="badge b-amb" style="font-size:9px">BP 138/93</span><span class="badge b-tl" style="font-size:9px">HbA1c improving ↓</span></div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val a">7.3<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val g">70</div><div class="prn-lbl">FBS</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-ready">Ready for you</div>
+        <div class="rep-dot rep-ok">✓ Reports complete</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" onclick="event.stopPropagation();openPatient()">Open →</button></div>
+    </div>
+
+    <div class="patient-row" onclick="openPatient()">
+      <div class="pr-slot">10:00</div>
+      <div class="pr-av" style="background:#14532d">DK</div>
+      <div class="pr-body">
+        <div class="pr-name">Deepak Khanna <span class="badge b-grn" style="font-size:9px">✅ In control</span></div>
+        <div class="pr-meta">61M · P_176559 · Visit 18 · Phase 3 Sustain · Stable</div>
+        <div class="pr-chips"><span class="badge b-grn" style="font-size:9px">All markers at target</span></div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val g">7.3<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val g">98</div><div class="prn-lbl">FBS</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-ready">Ready for you</div>
+        <div class="rep-dot rep-ok">✓ Reports complete</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" onclick="event.stopPropagation();openPatient()">Open →</button></div>
+    </div>
+
+    <div class="patient-row" onclick="openPatient()">
+      <div class="pr-slot">10:30</div>
+      <div class="pr-av" style="background:#1e3a5f">PP</div>
+      <div class="pr-body">
+        <div class="pr-name">Promila Puri <span class="badge b-red" style="font-size:9px">🔴 Getting worse</span></div>
+        <div class="pr-meta">33F · P_131520 · Visit 7 · Phase 1 Uncontrolled</div>
+        <div class="pr-chips"><span class="badge b-red" style="font-size:9px">HbA1c 12.6 ↑</span><span class="badge b-red" style="font-size:9px">FBS 346</span></div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val r">12.6<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val r">346</div><div class="prn-lbl">FBS</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-ready">Ready for you</div>
+        <div class="rep-dot rep-ok">✓ Gini Lab received</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" onclick="event.stopPropagation();openPatient()">Open →</button></div>
+    </div>
+
+    <!-- Waiting vitals -->
+    <div class="section-divider" style="margin-top:12px">🔵 In pipeline — vitals or SD not yet done</div>
+
+    <div class="patient-row" style="opacity:.75">
+      <div class="pr-slot">11:00</div>
+      <div class="pr-av" style="background:#374151">AD</div>
+      <div class="pr-body">
+        <div class="pr-name">Anil Dhamija <span class="badge b-amb" style="font-size:9px">🟡 Flag for review</span></div>
+        <div class="pr-meta">60M · P_308530 · Visit 15 · Phase 2 Stabilize</div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val a">8.5<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val r">255</div><div class="prn-lbl">TG</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-vitals">With SD</div>
+        <div class="rep-dot rep-ok">✓ Reports ready</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" style="opacity:.5" onclick="event.stopPropagation()">Pending</button></div>
+    </div>
+
+    <div class="patient-row" style="opacity:.6">
+      <div class="pr-slot">11:30</div>
+      <div class="pr-av" style="background:#374151">NP</div>
+      <div class="pr-body">
+        <div class="pr-name">Nishant Puri <span class="badge b-pu" style="font-size:9px">🔵 No reports</span></div>
+        <div class="pr-meta">26M · P_51200 · Visit 19 · Checked in · Reports not uploaded</div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val n">—</div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val n">—</div><div class="prn-lbl">FBS</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-waiting">At vitals</div>
+        <div class="rep-dot rep-none">✗ Reports missing</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" onclick="event.stopPropagation();toast('Upload report for Nishant')">Upload</button></div>
+    </div>
+
+    <!-- Done -->
+    <div class="section-divider" style="margin-top:12px">✅ Done today — 8 completed</div>
+    <div class="patient-row" style="opacity:.5">
+      <div class="pr-slot">08:00</div>
+      <div class="pr-av" style="background:#374151">RG</div>
+      <div class="pr-body">
+        <div class="pr-name">Ravinder Grewal <span class="badge b-grn" style="font-size:9px">✅ In control</span></div>
+        <div class="pr-meta">62M · P_54700 · Visit 22 · Phase 3 · Completed 08:34</div>
+      </div>
+      <div class="pr-numbers">
+        <div class="pr-num"><div class="prn-val g">8.6<span style="font-size:10px">%</span></div><div class="prn-lbl">HbA1c</div></div>
+        <div class="pr-num"><div class="prn-val g">98</div><div class="prn-lbl">FBS</div></div>
+      </div>
+      <div class="pr-status">
+        <div class="status-pill sp-done">✓ Done 08:34</div>
+        <div class="rep-dot rep-ok">Prescription sent</div>
+      </div>
+      <div class="pr-open"><button class="btn btn-ghost" onclick="event.stopPropagation();openPatient()">Review →</button></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     SCREEN 2 — PATIENT DETAIL
+══════════════════════════════ -->
+<div class="screen" id="s-detail">
+  <div class="top-rail">
+    <div class="tr-logo">Gini Scribe</div>
+    <div class="tr-sep"></div>
+    <div style="display:flex;align-items:center;gap:7px">
+      <span style="font-size:12px;font-weight:600;color:#fff">Sandeep Kumar</span>
+      <span class="badge b-ink" style="font-size:9px">50M · P_177562</span>
+      <span class="badge b-amb" style="font-size:9px">Phase 1 · Uncontrolled</span>
+    </div>
+    <div class="tr-r">
+      <button class="voice-btn" onclick="toast('🎤 Listening… speak your instructions')">🎤 Voice AI</button>
+      <button class="top-btn" onclick="goList()">← All patients</button>
+      <button class="top-btn" onclick="toast('Draft saved')">Draft</button>
+      <button class="top-btn primary" onclick="toast('✓ Visit finalized · sent to pharmacy + lab + patient')">Finalize</button>
+    </div>
+  </div>
+
+  <div class="detail-scroll">
+
+    <!-- Patient header -->
+    <div class="pt-header">
+      <div class="pth-body">
+        <div class="pth-name">Sandeep Kumar</div>
+        <div class="pth-meta">50M · P_177562 · DB #9500 · Dr. Beant Sidhu (SD) · Visit 5 of 5 · 10 months with Gini · T2DM AOO 38 yrs</div>
+      </div>
+      <div class="pth-chips">
+        <span class="badge" style="background:rgba(217,119,6,.25);color:#fcd34d;font-size:10px">Phase 1 · Uncontrolled</span>
+        <span class="badge b-red" style="font-size:10px">🟡 Flag for review</span>
+      </div>
+    </div>
+
+    <!-- One-line visit summary -->
+    <div class="visit-bar">
+      <span class="vb-visit">Visit 5 · 20 May 2026 · Last visit 4 Nov 2025 (7 months ago)</span>
+      <div class="vb-sep"></div>
+      <span class="vb-chip vbc-grn">✓ 4 in control — HbA1c · UACR · Creatinine · Retinopathy</span>
+      <span class="vb-chip vbc-red">↑ 1 worse — TG tripled to 368</span>
+      <span class="vb-chip vbc-amb">⚠ 2 watch — BP 143/90 · LDL 127</span>
+    </div>
+
+    <!-- SECTION 1: CONCERNS -->
+    <div class="sec">
+      <div class="sec-head">
+        <div class="sh-left">🔍 Today's concerns <span class="sh-sub">— reports · patient · since last visit</span></div>
+        <div class="sh-right"><button class="collapse-btn" onclick="toggleSec(this)">Collapse</button></div>
+      </div>
+      <div class="sec-body">
+        <div class="concerns-grid">
+          <div>
+            <div class="cg-head" style="color:var(--red)">🧪 From reports — 20 May 2026</div>
+            <div class="ci"><span class="ci-ico">🔴</span><span><strong>Triglycerides tripled</strong> — 131.5 → 368 mg/dL. On Lipaglyn + Atchol. Lipid strategy needs urgent review.</span></div>
+            <div class="ci"><span class="ci-ico">🟡</span><span><strong>FBS 139 mg/dL</strong> — above target &lt;130. Mean plasma glucose 164.78 mg/dL.</span></div>
+            <div class="ci"><span class="ci-ico">🟡</span><span><strong>BP 143/90</strong> — improving from 152/88 but still elevated. On Telma AM + CONCOR AM.</span></div>
+            <div class="ci"><span class="ci-ico">🟡</span><span><strong>LDL 127 mg/dL</strong> — above target &lt;100. Atchol 20mg insufficient. Consider dose increase.</span></div>
+            <div class="ci"><span class="ci-ico">✅</span><span>HbA1c 6.8% — at target. UACR 6.11 — normal. eGFR 85.5 — stable G2A2.</span></div>
+          </div>
+          <div>
+            <div class="cg-head" style="color:var(--blu)">💬 Patient reported — pre-visit</div>
+            <div class="ci"><span class="ci-ico">💬</span><span><strong>Evening fatigue</strong> — new since last visit. Consider checking TSH (not in recent labs).</span></div>
+            <div class="ci"><span class="ci-ico">💬</span><span><strong>Weight concern</strong> — "kya dawai se weight badh raha hai?" CONCOR and Lipaglyn both can cause weight gain.</span></div>
+            <div class="ci"><span class="ci-ico">❓</span><span><strong>Question:</strong> "TG itna kyun high hai — kya diet mein kuch galat hua?"</span></div>
+            <div class="ci"><span class="ci-ico">✅</span><span>No hypoglycaemia. No foot complaints. No chest pain. No new hospitalisation.</span></div>
+          </div>
+          <div>
+            <div class="cg-head" style="color:var(--amb)">📅 Since last visit — 7 months</div>
+            <div class="ci"><span class="ci-ico">🟡</span><span><strong>Compliance 74%</strong> — missed Cospiaq and Montair mainly on weekends.</span></div>
+            <div class="ci"><span class="ci-ico">🟡</span><span><strong>Weight +0.5 kg</strong> — slow but steady gain. BMI now 35.92. MASLD active.</span></div>
+            <div class="ci"><span class="ci-ico">📋</span><span>Retinopathy screen: NO DRP (R and L). Neuropathy — VPT Left 7V, ABI Left 1 (Oct 2025).</span></div>
+            <div class="ci"><span class="ci-ico">✅</span><span>No medications added by other doctors. No new diagnoses from outside.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 2: NUMBERS & LABS -->
+    <div class="sec">
+      <div class="sec-head">
+        <div class="sh-left">📊 Numbers & Labs <span class="sh-sub">— click any tile for trend graph · lab 20 May 2026</span></div>
+        <div class="sh-right">
+          <button class="btn btn-ghost" onclick="toast('Full raw lab report opened')">Full report →</button>
+          <button class="collapse-btn" onclick="toggleSec(this)">Collapse</button>
+        </div>
+      </div>
+      <div class="sec-body">
+        <!-- Key number tiles -->
+        <div class="num-row">
+          <div class="nt a" onclick="openGraph('HbA1c','6.9,6.8,6.9,6.8','%','<7.0%')">
+            <div class="nt-lbl">HbA1c</div><div class="nt-val">6.8<span style="font-size:12px;font-weight:400">%</span></div>
+            <div class="nt-trend">↑ from 6.6% · borderline</div>
+            <div class="nt-spark"><div class="sp" style="height:55%;background:var(--amb);opacity:.5"></div><div class="sp" style="height:60%;background:var(--amb);opacity:.7"></div><div class="sp" style="height:55%;background:var(--amb);opacity:.8"></div><div class="sp" style="height:65%;background:var(--amb)"></div></div>
+            <div class="nt-hint">Tap → trend graph</div>
+          </div>
+          <div class="nt a" onclick="openGraph('FBS','133,128,135,139','mg/dL','<130 mg/dL')">
+            <div class="nt-lbl">FBS</div><div class="nt-val">139<span style="font-size:11px;font-weight:400"> mg</span></div>
+            <div class="nt-trend">↑ from 133 · above target</div>
+            <div class="nt-hint">Tap → trend graph</div>
+          </div>
+          <div class="nt r" onclick="openGraph('Triglycerides','131,145,180,368','mg/dL','<150 mg/dL')">
+            <div class="nt-lbl">Triglycerides</div><div class="nt-val">368<span style="font-size:11px;font-weight:400"> mg</span></div>
+            <div class="nt-trend">↑↑↑ tripled from 131</div>
+            <div class="nt-spark"><div class="sp" style="height:25%;background:var(--red);opacity:.4"></div><div class="sp" style="height:35%;background:var(--red);opacity:.5"></div><div class="sp" style="height:55%;background:var(--red);opacity:.7"></div><div class="sp" style="height:100%;background:var(--red)"></div></div>
+            <div class="nt-hint">Tap → trend graph</div>
+          </div>
+          <div class="nt a" onclick="openGraph('LDL','130,127,125,127','mg/dL','<100 mg/dL')">
+            <div class="nt-lbl">LDL</div><div class="nt-val">127<span style="font-size:11px;font-weight:400"> mg</span></div>
+            <div class="nt-trend">Stable but above target</div>
+            <div class="nt-hint">Tap → trend graph</div>
+          </div>
+          <div class="nt g" onclick="openGraph('eGFR','87,88,86,85','mL/min','>60 mL/min')">
+            <div class="nt-lbl">eGFR</div><div class="nt-val">85.5</div>
+            <div class="nt-trend">↓ slight · stable G2A2</div>
+            <div class="nt-hint">Tap → trend graph</div>
+          </div>
+          <div class="nt a" onclick="openGraph('BP','152,148,145,143','mmHg','<130/80')">
+            <div class="nt-lbl">BP today</div><div class="nt-val" style="font-size:16px">143<span style="font-size:11px;font-weight:400">/90</span></div>
+            <div class="nt-trend">↓ improving · still elevated</div>
+            <div class="nt-hint">Tap → trend graph</div>
+          </div>
+        </div>
+
+        <!-- Labs detail tabs -->
+        <div class="labs-tabs">
+          <div class="lt active" onclick="switchLabTab(this,'lt-diab')">🩸 Diabetes</div>
+          <div class="lt" onclick="switchLabTab(this,'lt-lipid')">💛 Lipids</div>
+          <div class="lt" onclick="switchLabTab(this,'lt-renal')">🫘 Renal</div>
+          <div class="lt" onclick="switchLabTab(this,'lt-body')">⚖️ Body / vitals</div>
+          <div class="lt" onclick="switchLabTab(this,'lt-reports')">📄 Reports</div>
+        </div>
+
+        <div class="lab-panel active" id="lt-diab">
+          <div class="lab-result-row"><div class="lr-name">HbA1c — Glycated Haemoglobin</div><div class="lr-val a">6.8%</div><div class="lr-ref">Ref 4.5–6.5%</div><div class="lr-trend amb">↑ from 6.6</div><div class="lr-chart" onclick="openGraph('HbA1c','6.9,6.8,6.9,6.8','%','<7.0%')">Graph →</div></div>
+          <div class="lab-result-row"><div class="lr-name">Fasting Blood Sugar</div><div class="lr-val a">139 mg/dL</div><div class="lr-ref">&lt;100 mg/dL</div><div class="lr-trend amb">↑ from 133</div><div class="lr-chart" onclick="openGraph('FBS','133,128,135,139','mg/dL','<130')">Graph →</div></div>
+          <div class="lab-result-row"><div class="lr-name">Mean Plasma Glucose</div><div class="lr-val a">164.8 mg/dL</div><div class="lr-ref">&lt;154 mg/dL</div><div class="lr-trend">—</div><div class="lr-chart">—</div></div>
+          <div class="lab-result-row"><div class="lr-name">HOMA-IR</div><div class="lr-val n">—</div><div class="lr-ref">Normal &lt;2.5</div><div class="lr-trend">No insulin data</div><div class="lr-chart">—</div></div>
+        </div>
+        <div class="lab-panel" id="lt-lipid">
+          <div class="lab-result-row"><div class="lr-name">Triglycerides</div><div class="lr-val r">368 mg/dL</div><div class="lr-ref">&lt;150 mg/dL</div><div class="lr-trend red">↑↑↑ from 131</div><div class="lr-chart" onclick="openGraph('Triglycerides','131,145,180,368','mg/dL','<150')">Graph →</div></div>
+          <div class="lab-result-row"><div class="lr-name">LDL Cholesterol</div><div class="lr-val a">127 mg/dL</div><div class="lr-ref">&lt;100 mg/dL</div><div class="lr-trend amb">Stable, above target</div><div class="lr-chart" onclick="openGraph('LDL','130,127,125,127','mg/dL','<100')">Graph →</div></div>
+          <div class="lab-result-row"><div class="lr-name">HDL Cholesterol</div><div class="lr-val g">38 mg/dL</div><div class="lr-ref">&gt;40 mg/dL</div><div class="lr-trend amb">↓ borderline</div><div class="lr-chart">—</div></div>
+          <div class="lab-result-row"><div class="lr-name">Total Cholesterol</div><div class="lr-val a">189 mg/dL</div><div class="lr-ref">&lt;200 mg/dL</div><div class="lr-trend">—</div><div class="lr-chart">—</div></div>
+        </div>
+        <div class="lab-panel" id="lt-renal">
+          <div class="lab-result-row"><div class="lr-name">eGFR (Kidney function)</div><div class="lr-val g">85.5 mL/min</div><div class="lr-ref">&gt;60 mL/min</div><div class="lr-trend grn">↓ slight · stable</div><div class="lr-chart" onclick="openGraph('eGFR','87,88,86,85','mL/min','>60')">Graph →</div></div>
+          <div class="lab-result-row"><div class="lr-name">Creatinine</div><div class="lr-val g">0.99 mg/dL</div><div class="lr-ref">&lt;1.2 mg/dL</div><div class="lr-trend grn">↓ from 1.06</div><div class="lr-chart">—</div></div>
+          <div class="lab-result-row"><div class="lr-name">UACR (Albumin:Creatinine)</div><div class="lr-val g">6.11 mg/g</div><div class="lr-ref">&lt;30 mg/g</div><div class="lr-trend grn">✓ Normal range</div><div class="lr-chart">—</div></div>
+        </div>
+        <div class="lab-panel" id="lt-body">
+          <div class="lab-result-row"><div class="lr-name">Weight</div><div class="lr-val a">116.8 kg</div><div class="lr-ref">Target: reduce</div><div class="lr-trend amb">↑ +0.5 kg</div><div class="lr-chart">—</div></div>
+          <div class="lab-result-row"><div class="lr-name">BMI</div><div class="lr-val a">35.92</div><div class="lr-ref">&lt;25</div><div class="lr-trend amb">Obese class II</div><div class="lr-chart">—</div></div>
+          <div class="lab-result-row"><div class="lr-name">Blood Pressure</div><div class="lr-val a">143/90 mmHg</div><div class="lr-ref">&lt;130/80</div><div class="lr-trend grn">↓ from 152/88</div><div class="lr-chart" onclick="openGraph('BP','152,148,145,143','mmHg','<130/80')">Graph →</div></div>
+          <div class="lab-result-row"><div class="lr-name">Body Fat %</div><div class="lr-val a">36.76%</div><div class="lr-ref">&lt;25% (male)</div><div class="lr-trend">—</div><div class="lr-chart">—</div></div>
+        </div>
+        <div class="lab-panel" id="lt-reports">
+          <div class="report-file" onclick="toast('Opening Lab Report 17714 PDF…')">
+            <div class="rf-ico">🧪</div>
+            <div class="rf-body"><div class="rf-name">Lab Report — 17714</div><div class="rf-meta">16 Jul 2026 · Gini Lab · lab_healthray · lab_case:17714 · Latest</div></div>
+            <div class="rf-action">View PDF →</div>
+          </div>
+          <div class="report-file" onclick="toast('Opening Lab Report 16125 PDF…')">
+            <div class="rf-ico">🧪</div>
+            <div class="rf-body"><div class="rf-name">Lab Report — 16125</div><div class="rf-meta">4 Jun 2026 · Gini Lab · lab_case:16125 · Normal range</div></div>
+            <div class="rf-action">View PDF →</div>
+          </div>
+          <div class="report-file" onclick="toast('Opening Retinopathy screening report…')">
+            <div class="rf-ico">👁</div>
+            <div class="rf-body"><div class="rf-name">Retinopathy Screening</div><div class="rf-meta">Oct 2025 · Fundus photo · NO DRP (R and L) · Bilateral clear</div></div>
+            <div class="rf-action">View →</div>
+          </div>
+          <div style="text-align:center;margin-top:8px">
+            <button class="btn btn-ghost" onclick="toast('Upload report dialog opened')">+ Upload new report</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3: PRESCRIPTION + MEDICINE CARD -->
+    <div class="sec">
+      <div class="sec-head">
+        <div class="sh-left">💊 Prescription <span class="sh-sub">— last visit left · edit right · medicine card below</span></div>
+        <div class="sh-right">
+          <button class="voice-btn" style="font-size:10px;padding:4px 10px" onclick="toast('🎤 Listening for Rx changes…')">🎤 Voice edit</button>
+          <button class="collapse-btn" onclick="toggleSec(this)">Collapse</button>
+        </div>
+      </div>
+      <div class="sec-body">
+
+        <!-- Voice bar -->
+        <div class="voice-bar">
+          <button class="voice-btn" onclick="toast('🎤 Listening…')">🎤 Speak</button>
+          <div class="vb-text">Say: <em>"Increase Atchol to 40mg"</em> · <em>"Add Fenofibrate 145mg for triglycerides"</em> · <em>"Stop Montair"</em> · <em>"Copy last prescription"</em></div>
+        </div>
+
+        <!-- Two column: reference + edit -->
+        <div class="rx-layout">
+          <div>
+            <div class="rx-col-head">Last visit · 4 Nov 2025 · reference (click any to copy)</div>
+            <div class="rx-ref">
+              <div class="rx-row"><div class="rx-num">1.</div><div class="rx-body"><div class="rx-name">Cospiaq SM 25/100/1000</div><div class="rx-for">Metformin · Diabetes</div></div><div class="rx-r"><div class="rx-dose">OD + SOS</div><div class="rx-time">With meals</div></div></div>
+              <div class="rx-row"><div class="rx-num">2.</div><div class="rx-body"><div class="rx-name">Montair LC</div><div class="rx-for">Montelukast · Respiratory</div></div><div class="rx-r"><div class="rx-dose">OD + SOS</div></div></div>
+              <div class="rx-row"><div class="rx-num">3.</div><div class="rx-body"><div class="rx-name">Aktiv-D 60,000 IU</div><div class="rx-for">Vitamin D3 · Supplement</div></div><div class="rx-r"><div class="rx-dose">Once/15 days</div></div></div>
+              <div class="rx-row"><div class="rx-num">4.</div><div class="rx-body"><div class="rx-name">Lipaglyn 4mg</div><div class="rx-for">Saroglitazar · Lipids</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">Before breakfast</div></div></div>
+              <div class="rx-row"><div class="rx-num">5.</div><div class="rx-body"><div class="rx-name">CONCOR AM 2.5/5</div><div class="rx-for">Bisoprolol · BP</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">Morning</div></div></div>
+              <div class="rx-row"><div class="rx-num">6.</div><div class="rx-body"><div class="rx-name">Atchol 20mg</div><div class="rx-for">Atorvastatin · Lipids</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">At night</div></div></div>
+              <div class="rx-row"><div class="rx-num">7.</div><div class="rx-body"><div class="rx-name">Telma AM 40+5</div><div class="rx-for">Telmisartan · BP / Kidney</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">Morning</div></div></div>
+              <div class="rx-row"><div class="rx-num">8.</div><div class="rx-body"><div class="rx-name">Voveron gel</div><div class="rx-for">Diclofenac · Pain (topical)</div></div><div class="rx-r"><div class="rx-dose">SOS</div></div></div>
+            </div>
+          </div>
+          <div>
+            <div class="rx-col-head">This visit · editing now</div>
+            <button class="copy-btn" onclick="toast('Last prescription copied — edit as needed')">↙ Copy from last visit</button>
+            <div class="rx-edit">
+              <div class="rx-row"><div class="rx-num">1.</div><div class="rx-body"><div class="rx-name">Cospiaq SM 25/100/1000</div><div class="rx-for">Diabetes · continue</div></div><div class="rx-r"><div class="rx-dose">OD + SOS</div><div class="rx-time">With meals</div></div></div>
+              <div class="rx-row"><div class="rx-num">2.</div><div class="rx-body"><div class="rx-name">Aktiv-D 60,000 IU</div><div class="rx-for">Supplement</div></div><div class="rx-r"><div class="rx-dose">Once/15 days</div></div></div>
+              <div class="rx-row"><div class="rx-num">3.</div><div class="rx-body"><div class="rx-name">Lipaglyn 4mg</div><div class="rx-for">Lipids · continue + review for TG</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">Before breakfast</div></div></div>
+              <div class="rx-row"><div class="rx-num">4.</div><div class="rx-body"><div class="rx-name">CONCOR AM 2.5/5</div><div class="rx-for">BP · continue</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">Morning</div></div></div>
+              <div class="rx-row" style="background:var(--amb-l);margin:-1px;padding:7px 4px;border-radius:5px"><div class="rx-num">5.</div><div class="rx-body"><div class="rx-tag rt-changed">↑ 20→40mg</div><div class="rx-name">Atchol 40mg</div><div class="rx-for">Atorvastatin · LDL 127 above target</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">At night</div></div></div>
+              <div class="rx-row"><div class="rx-num">6.</div><div class="rx-body"><div class="rx-name">Telma AM 40+5</div><div class="rx-for">BP / Kidney · continue</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">Morning</div></div></div>
+              <div class="rx-row" style="background:var(--grn-l);margin:-1px;padding:7px 4px;border-radius:5px"><div class="rx-num">7.</div><div class="rx-body"><div class="rx-tag rt-new">🆕 New</div><div class="rx-name">Fenofibrate 145mg</div><div class="rx-for">Triglycerides 368 — fibrate added</div></div><div class="rx-r"><div class="rx-dose">OD</div><div class="rx-time">With lunch</div></div></div>
+              <div style="margin-top:8px;display:flex;gap:5px">
+                <button class="btn btn-ghost" style="font-size:10px" onclick="toast('Add medicine opened')">+ Medicine</button>
+                <button class="btn btn-ghost" style="font-size:10px" onclick="toast('Stop medicine dialog opened')">− Stop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Medicine card -->
+        <div class="med-card-title">Medicine card — daily schedule</div>
+        <div class="med-card-grid">
+          <div class="mc-row">
+            <div class="mc-time"><div class="mc-time-label">🌅 Morning</div><div class="mc-time-sub">6–9 AM</div></div>
+            <div class="mc-meds">
+              <div class="mc-pill bp">CONCOR AM 2.5/5mg <span class="mc-dose">· OD</span></div>
+              <div class="mc-pill bp">Telma AM 40+5mg <span class="mc-dose">· OD</span></div>
+            </div>
+          </div>
+          <div class="mc-row">
+            <div class="mc-time"><div class="mc-time-label">🍳 Before breakfast</div><div class="mc-time-sub">30 min prior</div></div>
+            <div class="mc-meds">
+              <div class="mc-pill lipid">Lipaglyn 4mg <span class="mc-dose">· OD</span></div>
+            </div>
+          </div>
+          <div class="mc-row">
+            <div class="mc-time"><div class="mc-time-label">🥘 With meals</div><div class="mc-time-sub">Breakfast / lunch</div></div>
+            <div class="mc-meds">
+              <div class="mc-pill diab">Cospiaq SM 25/100/1000 <span class="mc-dose">· OD + SOS</span></div>
+              <div class="mc-pill lipid">Fenofibrate 145mg <span class="mc-dose">· with lunch 🆕</span></div>
+            </div>
+          </div>
+          <div class="mc-row">
+            <div class="mc-time"><div class="mc-time-label">🌙 At night</div><div class="mc-time-sub">After dinner</div></div>
+            <div class="mc-meds">
+              <div class="mc-pill lipid">Atchol 40mg <span class="mc-dose">· ↑ changed</span></div>
+            </div>
+          </div>
+          <div class="mc-row">
+            <div class="mc-time"><div class="mc-time-label">📅 Every 15 days</div><div class="mc-time-sub">Fortnightly</div></div>
+            <div class="mc-meds">
+              <div class="mc-pill supp">Aktiv-D 60,000 IU <span class="mc-dose">· Vit D3</span></div>
+            </div>
+          </div>
+          <div class="mc-row">
+            <div class="mc-time"><div class="mc-time-label">🔔 As needed</div><div class="mc-time-sub">SOS</div></div>
+            <div class="mc-meds">
+              <div class="mc-pill pain">Voveron gel <span class="mc-dose">· topical · pain</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4: CARE PLAN -->
+    <div class="sec">
+      <div class="sec-head">
+        <div class="sh-left">📋 Care plan <span class="sh-sub">— treatment · diet · exercise · tests · referrals · next visit</span></div>
+        <div class="sh-right">
+          <button class="voice-btn" style="font-size:10px;padding:4px 10px" onclick="toast('🎤 Dictating care plan…')">🎤 Dictate</button>
+          <button class="collapse-btn" onclick="toggleSec(this)">Collapse</button>
+        </div>
+      </div>
+      <div class="sec-body">
+        <div class="care-grid">
+          <div style="display:flex;flex-direction:column;gap:10px">
+
+            <!-- Treatment notes -->
+            <div class="care-block">
+              <div class="cb-title">Treatment plan — this visit</div>
+              <textarea class="treatment-area" rows="4">1. Atchol increased 20→40mg — LDL 127, target <100
+2. Added Fenofibrate 145mg for TG 368 (tripled)
+3. Lipaglyn continued — review if TG not controlled by next visit
+4. BP 143/90 — on Telma + CONCOR. Watch, may need 3rd agent next visit</textarea>
+            </div>
+
+            <!-- Diet -->
+            <div class="care-block">
+              <div class="cb-title">🥗 Diet & lifestyle</div>
+              <div class="care-item"><span class="care-ico">🔴</span><div class="care-text"><strong>Triglycerides critical:</strong> eliminate sugar, fruit juice, white rice, maida, alcohol completely. These 3 months determine lipid control.</div></div>
+              <div class="care-item"><span class="care-ico">🥗</span><div class="care-text"><strong>Calorie target:</strong> 1800 kcal/day. Mediterranean pattern. Increase omega-3 — walnuts, flaxseed, fish.</div></div>
+              <div class="care-item"><span class="care-ico">🏃</span><div class="care-text"><strong>Exercise:</strong> 30 min brisk walk 5×/week. Resistance 2×/week — helps MASLD and weight.</div></div>
+              <div class="care-item"><span class="care-ico">💊</span><div class="care-text"><strong>Compliance:</strong> take Cospiaq and Montair daily — not just weekdays. Log on MHG.</div></div>
+            </div>
+
+            <!-- Health score -->
+            <div class="care-block" style="background:var(--nv)">
+              <div class="cb-title" style="color:rgba(255,255,255,.4)">Overall health score</div>
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+                <div style="font-family:var(--fm);font-size:36px;font-weight:500;color:#fff;line-height:1">52<span style="font-size:16px;color:rgba(255,255,255,.35)">/100</span></div>
+                <div style="font-size:10px;color:rgba(255,255,255,.4)">↑ from 48 at first visit</div>
+              </div>
+              <div class="health-score-bar"><span style="width:70px;flex-shrink:0;color:rgba(255,255,255,.5)">Glucose</span><div class="hs-track"><div class="hs-fill" style="width:68%;background:#fcd34d"></div></div><span style="color:rgba(255,255,255,.4);min-width:24px;text-align:right">68</span></div>
+              <div class="health-score-bar"><span style="width:70px;flex-shrink:0;color:rgba(255,255,255,.5)">Lipids</span><div class="hs-track"><div class="hs-fill" style="width:22%;background:#fca5a5"></div></div><span style="color:rgba(255,255,255,.4);min-width:24px;text-align:right">22</span></div>
+              <div class="health-score-bar"><span style="width:70px;flex-shrink:0;color:rgba(255,255,255,.5)">BP</span><div class="hs-track"><div class="hs-fill" style="width:55%;background:#fcd34d"></div></div><span style="color:rgba(255,255,255,.4);min-width:24px;text-align:right">55</span></div>
+              <div class="health-score-bar"><span style="width:70px;flex-shrink:0;color:rgba(255,255,255,.5)">Kidney</span><div class="hs-track"><div class="hs-fill" style="width:82%;background:#86efac"></div></div><span style="color:rgba(255,255,255,.4);min-width:24px;text-align:right">82</span></div>
+              <div class="health-score-bar" style="margin:0"><span style="width:70px;flex-shrink:0;color:rgba(255,255,255,.5)">Compliance</span><div class="hs-track"><div class="hs-fill" style="width:74%;background:#fcd34d"></div></div><span style="color:rgba(255,255,255,.4);min-width:24px;text-align:right">74</span></div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <!-- Tests -->
+            <div class="care-block">
+              <div class="cb-title">🔬 Tests to order</div>
+              <div style="font-size:10px;color:var(--ink3);margin-bottom:5px">When?</div>
+              <div class="urgency-tabs">
+                <div class="ut" onclick="setUrgency(this,'today')">Today</div>
+                <div class="ut" onclick="setUrgency(this,'tomorrow')">Tomorrow</div>
+                <div class="ut active" onclick="setUrgency(this,'next')">Next visit</div>
+              </div>
+              <div class="test-chips">
+                <div class="tc sel" onclick="this.classList.toggle('sel')">HbA1c</div>
+                <div class="tc sel" onclick="this.classList.toggle('sel')">FBS</div>
+                <div class="tc sel" onclick="this.classList.toggle('sel')">Lipid panel</div>
+                <div class="tc sel" onclick="this.classList.toggle('sel')">Creatinine / eGFR</div>
+                <div class="tc sel" onclick="this.classList.toggle('sel')">UACR</div>
+                <div class="tc sel" onclick="this.classList.toggle('sel')">TSH</div>
+                <div class="tc" onclick="this.classList.toggle('sel')">LFT</div>
+                <div class="tc" onclick="this.classList.toggle('sel')">CBC</div>
+                <div class="tc" onclick="this.classList.toggle('sel')">Vit D</div>
+                <div class="tc" onclick="this.classList.toggle('sel')">Fasting Insulin</div>
+                <div class="tc" onclick="this.classList.toggle('sel')">NT-proBNP</div>
+                <div class="tc" onclick="this.classList.toggle('sel')">VPT / NCS</div>
+              </div>
+              <div style="font-size:10px;color:var(--tl);font-weight:600;margin-top:6px">6 selected · routed to reception + lab</div>
+            </div>
+
+            <!-- Referrals -->
+            <div class="care-block">
+              <div class="cb-title">↗ Referrals</div>
+              <div class="ref-chips">
+                <div class="rc" onclick="this.classList.toggle('sel')">Cardiology</div>
+                <div class="rc sel" onclick="this.classList.toggle('sel')">Ophthalmology (fundus)</div>
+                <div class="rc" onclick="this.classList.toggle('sel')">Nephrology</div>
+                <div class="rc" onclick="this.classList.toggle('sel')">Dietitian</div>
+                <div class="rc" onclick="this.classList.toggle('sel')">Bariatric consult</div>
+                <div class="rc" onclick="this.classList.toggle('sel')">Podiatry</div>
+              </div>
+            </div>
+
+            <!-- Next visit -->
+            <div class="care-block">
+              <div class="cb-title">📅 Next visit</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:var(--ink3)">
+                <span style="font-weight:600;color:var(--ink)">Date:</span>
+                <input style="border:1px solid var(--bd);border-radius:5px;padding:5px 9px;font-family:var(--fm);font-size:12px;color:var(--ink);background:var(--white);outline:none;flex:1" type="date" value="2026-11-20">
+                <span style="font-size:10px">~3 months</span>
+              </div>
+              <div style="font-size:10px;font-weight:600;color:var(--ink3);margin-bottom:6px">Goals for next visit</div>
+              <div class="goal-row">
+                <div class="goal-item"><div class="gi-val">&lt;7.0%</div><div class="gi-lbl">HbA1c</div></div>
+                <div class="goal-item"><div class="gi-val">&lt;130</div><div class="gi-lbl">FBS</div></div>
+                <div class="goal-item"><div class="gi-val">&lt;150</div><div class="gi-lbl">TG mg/dL</div></div>
+                <div class="goal-item"><div class="gi-val">&lt;130</div><div class="gi-lbl">BP</div></div>
+              </div>
+            </div>
+
+            <!-- Doctor's note -->
+            <div class="care-block">
+              <div class="cb-title">📝 Doctor's note — internal</div>
+              <textarea class="treatment-area" rows="3" placeholder="Internal note — visible to Gini team only…">TG tripling unusual — ask about diet change, new alcohol use, or secondary cause. Consider checking thyroid if TSH abnormal. Fatigue could be hypothyroid.</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FINALIZE -->
+    <div class="finalize">
+      <div class="fin-text">
+        <div class="fin-title">Finalize visit</div>
+        <div class="fin-routes">
+          <span class="fin-route">💊 Pharmacy — dispense + counselling note</span>
+          <span class="fin-route">📱 Patient MHG — visit summary</span>
+          <span class="fin-route">🔬 Lab + Reception — 6 tests for next visit</span>
+          <span class="fin-route">👁 Ophthalmology referral</span>
+        </div>
+      </div>
+      <button class="fin-btn" onclick="toast('✓ Visit finalized · Prescription sent to pharmacy · Tests sent to lab · Patient MHG updated')">Finalize →</button>
+    </div>
+
+  </div><!-- /detail-scroll -->
+</div>
+
+<!-- Graph modal -->
+<div class="modal-overlay" id="gModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeGraph()">✕</button>
+    <div style="font-size:15px;font-weight:700;margin-bottom:3px" id="gTitle">—</div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:14px" id="gSub">—</div>
+    <svg class="graph-svg" id="gSvg" viewBox="0 0 440 100" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink3);margin-top:4px" id="gDates"></div>
+    <div style="margin-top:10px;font-size:11px;color:var(--ink3)" id="gNote"></div>
+  </div>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<script>
+// Navigation
+function openPatient(){
+  document.getElementById('s-list').classList.remove('active');
+  document.getElementById('s-detail').classList.add('active');
+}
+function goList(){
+  document.getElementById('s-detail').classList.remove('active');
+  document.getElementById('s-list').classList.add('active');
+}
+
+// Toast
+let _tt;
+function toast(msg,ms=2800){
+  const el=document.getElementById('toastEl');
+  el.textContent=msg;el.classList.add('show');
+  clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),ms);
+}
+
+// Collapse sections
+function toggleSec(btn){
+  const sec=btn.closest('.sec');
+  sec.classList.toggle('collapsed');
+  btn.textContent=sec.classList.contains('collapsed')?'Expand':'Collapse';
+}
+
+// Lab tabs
+function switchLabTab(btn,id){
+  btn.closest('.labs-tabs').querySelectorAll('.lt').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.lab-panel').forEach(p=>p.classList.remove('active'));
+  const el=document.getElementById(id);
+  if(el)el.classList.add('active');
+}
+
+// Urgency
+function setUrgency(btn,val){
+  btn.closest('.urgency-tabs').querySelectorAll('.ut').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const msgs={today:'Tests for today → sent to reception + lab now',tomorrow:'Tests for tomorrow → reception notified',next:'Tests for next visit → patient reminded via MHG'};
+  toast(msgs[val]);
+}
+
+// Graph
+function openGraph(name,valStr,unit,target){
+  const vals=valStr.split(',').map(Number);
+  const max=Math.max(...vals)*1.15, min=Math.min(...vals)*0.85;
+  const W=440,H=80,P=28;
+  const x=i=>P+(i/(vals.length-1))*(W-2*P);
+  const y=v=>H-P-((v-min)/(max-min))*(H-2*P);
+  const isRed=vals[vals.length-1]>Number((target.match(/[\d.]+/)||['999'])[0]);
+  const col=isRed?'#dc2626':'#16a34a';
+  const tval=Number((target.match(/[\d.]+/)||['0'])[0]);
+  const ty=Math.max(P,Math.min(H-P,y(tval)));
+  let path=vals.map((v,i)=>(i===0?'M':'L')+x(i).toFixed(1)+','+y(v).toFixed(1)).join(' ');
+  document.getElementById('gSvg').innerHTML=`
+    <line x1="${P}" y1="${ty}" x2="${W-P}" y2="${ty}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4 2"/>
+    <text x="${W-P+4}" y="${ty+4}" font-size="9" fill="#94a3b8">target</text>
+    <path d="${path}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    ${vals.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${col}"/><text x="${x(i).toFixed(1)}" y="${(y(v)-9).toFixed(1)}" font-size="10" fill="${col}" text-anchor="middle" font-weight="600">${v}</text>`).join('')}
+  `;
+  const dates=['Nov 2024','May 2025','Nov 2025','May 2026'];
+  document.getElementById('gDates').innerHTML=vals.map((_,i)=>`<span>${dates[i]||'V'+(i+1)}</span>`).join('');
+  document.getElementById('gTitle').textContent=name;
+  document.getElementById('gSub').textContent=unit+' · Target '+target+' · '+vals.length+' readings';
+  document.getElementById('gNote').textContent=isRed?'⚠ Above target — review treatment and compliance':'✓ Within target range — continue current approach';
+  document.getElementById('gModal').classList.add('open');
+}
+function closeGraph(){document.getElementById('gModal').classList.remove('open')}
+document.getElementById('gModal').addEventListener('click',e=>{if(e.target.id==='gModal')closeGraph()});
+
+// Clock
+function tick(){
+  const n=new Date(),p=x=>String(x).padStart(2,'0');
+  const el=document.getElementById('clk');if(el)el.textContent=p(n.getHours())+':'+p(n.getMinutes());
+}
+setInterval(tick,1000);tick();
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 
 import { readUpcomingAppointments } from "../sheets/reader.js";
 import pool from "../../config/db.js";
+import { ownFu, IST_TODAY } from "../ghmDayWindow.js";
 import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
@@ -282,6 +283,7 @@ async function importSheetPatient(patient, tabDate) {
        WHERE id = $1`,
       [row.id, patientId, name, phone, timeSlot, visitType, age, sex, condition],
     );
+    await linkPendingFollowUp(fileNo, apptDate, row.id);
     return { id: row.id, action: "updated" };
   }
 
@@ -307,7 +309,10 @@ async function importSheetPatient(patient, tabDate) {
   );
   noteSyncedWhileBlocked(patientId, "sheets_sync");
 
-  if (rows[0]) return { id: rows[0].id, action: "created" };
+  if (rows[0]) {
+    await linkPendingFollowUp(fileNo, apptDate, rows[0].id);
+    return { id: rows[0].id, action: "created" };
+  }
 
   // Lost the race — another worker inserted the row first. Look it up so
   // downstream callers still get an id, mirroring the existing-row branch.
@@ -320,6 +325,53 @@ async function importSheetPatient(patient, tabDate) {
   return lookup.rows[0]
     ? { id: lookup.rows[0].id, action: "skip-race" }
     : { id: null, action: "skip-race" };
+}
+
+// ── Link a fresh booking to the follow-up it satisfies ──────────────────────
+// A patient whose follow-up falls due on the 3rd, rung by the team and booked
+// for the 1st, used to sit on BOTH days: the booking row on the 1st and the old
+// visit still saying "due the 3rd". The callers rang them twice and the second
+// call had nothing to offer. Stamping the booking's date onto that visit's
+// preferred_date moves it to the day the patient is actually coming — the day
+// window treats preferred_date as authoritative — and booking_status marks both
+// rows Booked so the caller can see at a glance there is nothing left to do.
+// The booking row gets its own date as preferred_date as well, so the column
+// reads the same on whichever of the two days the caller is looking at.
+//
+// Only ever touches a follow-up that is still pending and unclaimed: a row the
+// desk already gave a preferred_date to is somebody's decision, and a cancelled
+// booking_status is not overwritten by an import.
+async function linkPendingFollowUp(fileNo, apptDate, bookingId) {
+  if (!fileNo || !apptDate) return null;
+
+  const { rows } = await pool.query(
+    `UPDATE appointments SET preferred_date = $2,
+            booking_status = COALESCE(booking_status, 'booked'),
+            updated_at = NOW()
+      WHERE id = (
+        SELECT fu.id FROM appointments fu
+         WHERE fu.file_no = $1
+           AND fu.id <> $3
+           AND fu.preferred_date IS NULL
+           AND fu.appointment_date < $2
+           AND ${ownFu("fu")} IS NOT NULL
+           AND ${ownFu("fu")} <> $2
+           AND ${ownFu("fu")} >= ${IST_TODAY}
+         ORDER BY fu.appointment_date DESC
+         LIMIT 1
+      )
+      RETURNING id`,
+    [fileNo, apptDate, bookingId],
+  );
+  if (!rows[0]) return null;
+
+  await pool.query(
+    `UPDATE appointments SET booking_status = 'booked',
+            preferred_date = COALESCE(preferred_date, $2), updated_at = NOW()
+      WHERE id = $1 AND booking_status IS NULL`,
+    [bookingId, apptDate],
+  );
+  return rows[0].id;
 }
 
 // ── Main sync: read all 3 tabs & import ────────────────────────────────────

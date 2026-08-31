@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gini — Doctor View with Addendum v1.1 Changes</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9;--white:#fff;--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--ink4:#94a3b8;
+  --bd:#e2e8f0;--bd2:#cbd5e1;--nv:#0f172a;
+  --red:#dc2626;--red-l:#fef2f2;--red-b:rgba(220,38,38,.14);
+  --amb:#d97706;--amb-l:#fffbeb;--amb-b:rgba(217,119,6,.14);
+  --grn:#16a34a;--grn-l:#f0fdf4;--grn-b:rgba(22,163,74,.14);
+  --blu:#2563eb;--blu-l:#eff6ff;--blu-b:rgba(37,99,235,.14);
+  --pu:#7c3aed;--pu-l:#f5f3ff;--pu-b:rgba(124,58,237,.14);
+  --tl:#0d9488;--tl-l:#f0fdfa;--tl-b:rgba(13,148,136,.14);
+  --fb:'Inter',sans-serif;--fm:'JetBrains Mono',monospace;--fd:'Instrument Serif',serif;
+  --sh:0 1px 2px rgba(0,0,0,.05),0 1px 3px rgba(0,0,0,.08);
+  --sh-md:0 4px 14px rgba(0,0,0,.1);
+  --r:8px;--r-lg:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--fb);background:#e6e9ef;color:var(--ink);font-size:13px;line-height:1.5;padding:20px}
+.demo-note{max-width:900px;margin:0 auto 14px;background:var(--nv);color:#fff;border-radius:var(--r-lg);padding:12px 16px;font-size:12px;line-height:1.6}
+.demo-note strong{color:#5eead4}
+.frame{max-width:900px;margin:0 auto 26px;background:var(--white);border-radius:var(--r-lg);overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.12);border:1px solid var(--bd)}
+.frame-label{max-width:900px;margin:0 auto 8px;font-size:12px;font-weight:700;color:var(--ink2);display:flex;align-items:center;gap:8px}
+.chg-num{background:var(--tl);color:#fff;font-size:10px;font-weight:700;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+
+.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.b-red{background:var(--red-l);color:var(--red)}.b-amb{background:var(--amb-l);color:var(--amb)}
+.b-grn{background:var(--grn-l);color:var(--grn)}.b-tl{background:var(--tl-l);color:var(--tl)}
+.b-ink{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.btn{padding:5px 11px;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb);display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.btn-ghost{background:var(--white);color:var(--ink3);border-color:var(--bd)}
+.btn-tl{background:var(--tl);color:#fff;border-color:var(--tl)}
+.btn-grn{background:var(--grn);color:#fff;border-color:var(--grn)}
+.btn-red-o{background:var(--white);color:var(--red);border-color:var(--red-b)}
+.btn-amb-o{background:var(--white);color:var(--amb);border-color:var(--amb-b)}
+
+/* header */
+.pt-hdr{background:var(--nv);padding:11px 16px;display:flex;align-items:flex-start;gap:10px}
+.ph-name{font-family:var(--fd);font-size:18px;color:#fff;font-style:italic}
+.ph-meta{font-size:10px;color:rgba(255,255,255,.4);margin-top:2px}
+/* CHANGE 4: allergy strip */
+.allergy-strip{background:#450a0a;padding:6px 16px;display:flex;align-items:center;gap:8px}
+.allergy-strip .al-ico{font-size:13px}
+.allergy-strip .al-t{font-size:11px;font-weight:700;color:#fca5a5;letter-spacing:.2px}
+.allergy-strip .al-items{font-size:11px;font-weight:600;color:#fff}
+
+/* CHANGE 2: fast path bar */
+.fastpath{background:linear-gradient(90deg,var(--grn-l),#fff);border-bottom:2px solid var(--grn-b);padding:11px 16px;display:flex;align-items:center;gap:12px}
+.fp-ico{font-size:20px}
+.fp-body{flex:1}
+.fp-t{font-size:12px;font-weight:700;color:var(--grn)}
+.fp-s{font-size:10px;color:var(--ink3);margin-top:1px}
+.fp-btn{padding:10px 18px;background:var(--grn);color:#fff;border:none;border-radius:var(--r-lg);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fb);white-space:nowrap;box-shadow:0 2px 8px rgba(22,163,74,.3)}
+
+/* prescription table */
+.rx-wrap{padding:14px 16px}
+.sec-title{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:3px;display:flex;align-items:center;gap:7px}
+.sec-sub{font-size:10px;color:var(--ink3);margin-bottom:10px}
+.rx-tbl{width:100%;border-collapse:collapse}
+.rx-tbl th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);text-align:left;padding:6px 9px;border-bottom:2px solid var(--bd);background:var(--bg)}
+.rx-tbl td{padding:8px 9px;border-bottom:1px solid var(--bd);vertical-align:middle;font-size:12px}
+.med-n{font-weight:700;color:var(--ink)}
+.med-f{font-size:10px;color:var(--ink3)}
+.dose{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink2)}
+.tag{font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;display:inline-block;margin-bottom:2px}
+.tag-cont{background:#f1f5f9;color:#64748b}
+.tag-prop{background:var(--pu-l);color:var(--pu)}
+/* CHANGE 3: proposed rows */
+.row-proposed{background:rgba(124,58,237,.04)}
+.row-proposed td:first-child{border-left:3px solid var(--pu)}
+.approve-acts{display:flex;gap:4px}
+.aa-btn{padding:3px 9px;border-radius:5px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid;font-family:var(--fb)}
+.aa-ok{background:var(--grn);color:#fff;border-color:var(--grn)}
+.aa-adj{background:var(--white);color:var(--amb);border-color:var(--amb-b)}
+.aa-rej{background:var(--white);color:var(--red);border-color:var(--red-b)}
+.approved-chip{font-size:10px;font-weight:700;color:var(--grn)}
+
+.callout{margin:0 16px 16px;background:var(--tl-l);border:1px solid var(--tl-b);border-radius:var(--r);padding:9px 12px;font-size:11px;color:var(--tl);line-height:1.6}
+
+/* Finalize with PDF */
+.finalize{background:var(--nv);margin:0 16px 16px;border-radius:var(--r-lg);padding:12px 15px;display:flex;align-items:center;gap:12px}
+.fin-t{flex:1;color:#fff}
+.fin-title{font-size:13px;font-weight:700;margin-bottom:4px}
+.fr{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.6);display:inline-block;margin:0 3px 3px 0}
+.fr.new{background:rgba(13,148,136,.25);border-color:rgba(13,148,136,.4);color:#5eead4}
+.fin-btn{padding:11px 20px;background:var(--grn);color:#fff;border:none;border-radius:var(--r-lg);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fb)}
+.int-warn{margin:0 16px 12px;background:var(--amb-l);border:1px solid var(--amb-b);border-radius:var(--r);padding:9px 12px;font-size:11px;color:var(--amb);display:flex;gap:8px;align-items:flex-start;line-height:1.5}
+</style>
+</head>
+<body>
+
+<div class="demo-note">
+  <strong>Design mockup — Addendum v1.1 changes applied to the doctor view.</strong> The four numbered callouts below show each change from the addendum in place: ① pre-seeded prescription (no Copy button), ② fast-path bar for stable patients, ③ MO-proposed changes with Approve/Adjust/Reject, ④ allergy strip + full interaction check + prescription PDF at Finalize.
+</div>
+
+<!-- ═══ MOCKUP A: Stable patient — fast path ═══ -->
+<div class="frame-label"><span class="chg-num">2</span> Stable (green) patient — the 30-second visit · Deepak Khanna</div>
+<div class="frame">
+  <div class="pt-hdr">
+    <div style="flex:1">
+      <div class="ph-name">Deepak Khanna</div>
+      <div class="ph-meta">61M · P_176559 · Visit 18 · Phase 3 Sustain · Dr. Beant Sidhu (SD)</div>
+    </div>
+    <span class="badge b-grn" style="align-self:center">✅ In control — all markers at target</span>
+  </div>
+  <!-- CHANGE 4: allergies always visible -->
+  <div class="allergy-strip">
+    <span class="al-ico">⚠️</span>
+    <span class="al-t">ALLERGIES:</span>
+    <span class="al-items">Sulfa drugs · Penicillin</span>
+    <span style="font-size:9px;color:rgba(255,255,255,.4);margin-left:auto">visible on every screen, every role — change ④</span>
+  </div>
+  <!-- CHANGE 2: fast path -->
+  <div class="fastpath">
+    <div class="fp-ico">⚡</div>
+    <div class="fp-body">
+      <div class="fp-t">Stable patient — fast path available</div>
+      <div class="fp-s">Continues all 4 medicines unchanged · repeats today's panel at next visit · next visit 20 Nov 2026 (+3 months, editable) · sends to pharmacy + MHG</div>
+    </div>
+    <button class="fp-btn">✓ Continue all · Repeat panel · Finalize</button>
+  </div>
+  <div style="padding:10px 16px 16px;font-size:11px;color:var(--ink3)">
+    …full consult page continues below as normal (Overview · Labs · Prescription · Tests · Medicine card) — fast path is an addition, not a replacement. Doctor can still scroll and edit anything.
+  </div>
+</div>
+
+<!-- ═══ MOCKUP B: Complex patient — pre-seeded + proposed diff ═══ -->
+<div class="frame-label"><span class="chg-num">1</span><span class="chg-num">3</span> Complex patient — pre-seeded prescription with MO-proposed changes · Sandeep Kumar</div>
+<div class="frame">
+  <div class="pt-hdr">
+    <div style="flex:1">
+      <div class="ph-name">Sandeep Kumar</div>
+      <div class="ph-meta">50M · P_177562 · Visit 5 · Phase 1 Uncontrolled · Dr. Beant Sidhu (SD)</div>
+    </div>
+    <span class="badge b-amb" style="align-self:center">🟡 Flag for review</span>
+  </div>
+  <div class="allergy-strip">
+    <span class="al-ico">⚠️</span>
+    <span class="al-t">ALLERGIES:</span>
+    <span class="al-items">None recorded</span>
+  </div>
+
+  <div class="rx-wrap">
+    <div class="sec-title">💊 Prescription <span class="badge b-pu" style="font-size:9px">2 changes proposed by Dr. Sidhu — review below</span></div>
+    <div class="sec-sub">Opens pre-loaded with last visit's regimen (change ①) — no Copy button. Purple rows are MO proposals (change ③): Approve, Adjust, or Reject each.</div>
+
+    <table class="rx-tbl">
+      <thead><tr><th style="width:26px">#</th><th>Medicine</th><th>Dose</th><th>Timing · Time</th><th>Stock</th><th style="width:190px">Review</th></tr></thead>
+      <tbody>
+        <tr>
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">1.</td>
+          <td><span class="tag tag-cont">Continued</span><div class="med-n">Cospiaq SM 25/100/1000</div><div class="med-f">Diabetes · unchanged from last visit</div></td>
+          <td class="dose">OD + SOS</td>
+          <td style="font-size:11px;color:var(--ink3)">With meals · 8:00 AM</td>
+          <td style="font-size:11px;color:var(--grn);font-weight:600">✓ 84</td>
+          <td style="font-size:10px;color:var(--ink4)">— pre-seeded, no action needed</td>
+        </tr>
+        <tr class="row-proposed">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">2.</td>
+          <td><span class="tag tag-prop">Proposed by Dr. Sidhu</span><div class="med-n">Atchol 20mg → <span style="color:var(--pu)">40mg</span></div><div class="med-f">LDL 127, target &lt;100 — dose increase proposed</div></td>
+          <td class="dose" style="color:var(--pu)">40mg OD</td>
+          <td style="font-size:11px;color:var(--ink3)">At bedtime · 10:00 PM</td>
+          <td style="font-size:11px;color:var(--grn);font-weight:600">✓ 60</td>
+          <td><div class="approve-acts"><button class="aa-btn aa-ok">✓ Approve</button><button class="aa-btn aa-adj">Adjust</button><button class="aa-btn aa-rej">Reject</button></div></td>
+        </tr>
+        <tr class="row-proposed">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">3.</td>
+          <td><span class="tag tag-prop">Proposed by Dr. Sidhu</span><div class="med-n">Fenofibrate 145mg <span style="font-size:9px;background:var(--grn);color:#fff;padding:1px 5px;border-radius:3px;font-weight:700">NEW</span></div><div class="med-f">TG 368 — tripled · fibrate addition proposed</div></td>
+          <td class="dose" style="color:var(--pu)">145mg OD</td>
+          <td style="font-size:11px;color:var(--ink3)">With lunch · 1:30 PM</td>
+          <td style="font-size:11px;color:var(--grn);font-weight:600">✓ 45</td>
+          <td><span class="approved-chip">✓ Approved by Dr. Bhansali</span></td>
+        </tr>
+        <tr>
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">4.</td>
+          <td><span class="tag tag-cont">Continued</span><div class="med-n">Telma AM 40+5</div><div class="med-f">BP / Kidney</div></td>
+          <td class="dose">OD</td>
+          <td style="font-size:11px;color:var(--ink3)">Morning · 8:00 AM</td>
+          <td style="font-size:11px;color:var(--red);font-weight:600">✗ Out</td>
+          <td style="font-size:10px;color:var(--pu);font-weight:600;text-decoration:underline;cursor:pointer">Alternatives →</td>
+        </tr>
+        <tr>
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">5.</td>
+          <td><span class="tag tag-cont">Continued</span><div class="med-n">CONCOR AM 2.5/5 · Lipaglyn 4mg · Aktiv-D · Voveron gel</div><div class="med-f">+ 4 more continued unchanged</div></td>
+          <td class="dose">—</td>
+          <td style="font-size:11px;color:var(--ink3)">as before</td>
+          <td style="font-size:11px;color:var(--grn);font-weight:600">✓</td>
+          <td style="font-size:10px;color:var(--ink4)">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    💡 <strong>Finalize is blocked while any proposal is still pending</strong> — the doctor must Approve, Adjust, or Reject each purple row. One proposal above is still pending (Atchol), so the Finalize button shows "1 proposal to review."
+  </div>
+
+  <!-- CHANGE 4: interaction check at finalize -->
+  <div class="int-warn">
+    <span style="font-size:15px">⚠️</span>
+    <span><strong>Interaction check — full combined list (change ④):</strong> Ramipril 5mg (external, Dr. Gupta) + Telma AM = dual RAAS blockade — monitor potassium. Atchol 40mg + Fenofibrate = statin + fibrate — counsel patient on muscle pain. <strong>Moderate — warning only, finalize allowed.</strong> Severe interactions would block finalize.</span>
+  </div>
+
+  <div class="finalize">
+    <div class="fin-t">
+      <div class="fin-title">Finalize & end visit</div>
+      <div>
+        <span class="fr">💊 Pharmacy — Gini meds</span>
+        <span class="fr">📱 Patient MHG — medicine card</span>
+        <span class="fr">🔬 Lab — 6 tests</span>
+        <span class="fr new">📄 Prescription PDF — letterhead + reg. no. (change ④)</span>
+      </div>
+    </div>
+    <button class="fin-btn" style="opacity:.55">1 proposal to review</button>
+  </div>
+</div>
+
+<div class="demo-note" style="background:var(--white);color:var(--ink2);border:1px solid var(--bd)">
+  <strong style="color:var(--tl)">MO/SD side (change ③):</strong> Dr. Sidhu's station gets the same inline prescription editor. Instead of writing a free-text plan, he edits the actual draft — his edits become the purple "Proposed" rows above. His "Ready for Dr. Bhansali" button sends the draft with proposals attached.
+</div>
+
+</body>
+</html>

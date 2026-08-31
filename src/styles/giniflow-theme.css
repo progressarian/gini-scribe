@@ -1,0 +1,40 @@
+/* Gini Flow design tokens, lifted verbatim from docs/gini-flow-manager.html.
+   The prototype is the design spec; every Gini Flow screen reads these and
+   defines no colours of its own. Scoped to .gf so nothing here can reach
+   Scribe's own styles. */
+.gf {
+  --bg: #f4f6f9;
+  --white: #fff;
+  --ink: #0f172a;
+  --ink2: #334155;
+  --ink3: #64748b;
+  --ink4: #94a3b8;
+  --bd: #e2e8f0;
+  --bd2: #cbd5e1;
+  --nv: #0f172a;
+  --red: #dc2626;
+  --red-l: #fef2f2;
+  --red-b: rgba(220, 38, 38, 0.14);
+  --amb: #d97706;
+  --amb-l: #fffbeb;
+  --amb-b: rgba(217, 119, 6, 0.14);
+  --grn: #16a34a;
+  --grn-l: #f0fdf4;
+  --grn-b: rgba(22, 163, 74, 0.14);
+  --blu: #2563eb;
+  --blu-l: #eff6ff;
+  --blu-b: rgba(37, 99, 235, 0.14);
+  --pu: #7c3aed;
+  --pu-l: #f5f3ff;
+  --pu-b: rgba(124, 58, 237, 0.14);
+  --tl: #0d9488;
+  --tl-l: #f0fdfa;
+  --tl-b: rgba(13, 148, 136, 0.14);
+  --fb: "Inter", sans-serif;
+  --fm: "JetBrains Mono", monospace;
+  --fd: "Instrument Serif", serif;
+  --sh: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --sh-md: 0 4px 14px rgba(0, 0, 0, 0.1);
+  --r: 8px;
+  --r-lg: 12px;
+}

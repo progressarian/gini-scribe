@@ -13,6 +13,7 @@
     "worker": "node server/worker.js",
     "dev:worker": "nodemon server/worker.js",
     "format": "prettier --write \"src/**/*.{js,jsx,css}\" \"server/**/*.js\" \"*.{js,json}\"",
+    "smoke:giniflow-render": "node scripts/smoke-giniflow-render.mjs",
     "format:check": "prettier --check \"src/**/*.{js,jsx,css}\" \"server/**/*.js\" \"*.{js,json}\""
   },
   "dependencies": {

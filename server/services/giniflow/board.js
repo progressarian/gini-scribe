@@ -1,0 +1,480 @@
+import pool from "../../config/db.js";
+import { toLocal10 } from "../../../shared/phone.js";
+import {
+  BOARD_COLUMNS,
+  OFF_BOARD_STATUSES,
+  STATUS_LABEL,
+  slaKeyForStatus,
+} from "../../../shared/giniflowStatus.js";
+import { IST_TODAY, budgetColour } from "./statusEngine.js";
+
+export async function getSlaConfig(db = pool) {
+  const { rows } = await db.query(
+    `SELECT station, label, description, budget_minutes, category_overrides, display_order
+       FROM giniflow_sla_config ORDER BY display_order`,
+  );
+  return rows.map((r) => ({
+    station: r.station,
+    label: r.label,
+    description: r.description,
+    budgetMinutes: r.budget_minutes,
+    categoryOverrides: r.category_overrides,
+    displayOrder: r.display_order,
+  }));
+}
+
+export const budgetMap = (slaConfig) =>
+  Object.fromEntries(slaConfig.map((s) => [s.station, s.budgetMinutes]));
+
+// One round trip for the whole day. The lateral joins keep it to a single query
+// no matter how many visits the day has — the board polls every 10s and a
+// per-visit follow-up query would multiply that by the floor's population.
+const BOARD_SQL = `
+  SELECT v.id,
+         v.patient_id,
+         v.visit_date::text                        AS visit_date,
+         v.current_status,
+         v.results_status,
+         v.category,
+         v.blocked_reason,
+         v.appointment_time::text                  AS appointment_time,
+         p.name                                    AS patient_name,
+         p.file_no,
+         p.age,
+         p.sex,
+         sd.short_name                             AS sd_name,
+         doc.short_name                            AS doctor_name,
+         seq.visit_number,
+         first_ev.occurred_at                      AS journey_started_at,
+         last_ev.occurred_at                       AS status_since,
+         lab.sample_status                         AS lab_sample_status,
+         lab.payment_status                        AS lab_payment_status,
+         lab.test_count                            AS lab_test_count,
+         lab.since                                 AS lab_since
+    FROM giniflow_visits v
+    JOIN patients p ON p.id = v.patient_id
+    LEFT JOIN doctors sd  ON sd.id  = v.assigned_sd_id
+    LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
+    LEFT JOIN LATERAL (
+      -- The patient's real visit sequence. giniflow_visits alone would always
+      -- say 1 — it has no history before today (GF-05).
+      SELECT COUNT(*)::int + 1 AS visit_number
+        FROM appointments pa
+       WHERE pa.patient_id = v.patient_id
+         AND pa.appointment_date < v.visit_date
+         AND pa.status = 'completed'
+    ) seq ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT e.occurred_at FROM giniflow_visit_events e
+       WHERE e.visit_id = v.id AND e.status = 'checked_in'
+       ORDER BY e.occurred_at LIMIT 1
+    ) first_ev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT e.occurred_at FROM giniflow_visit_events e
+       WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
+    ) last_ev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT o.sample_status, o.payment_status, o.updated_at AS since,
+             (SELECT COUNT(*)::int FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_count
+        FROM giniflow_lab_orders o
+       WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+       ORDER BY o.created_at DESC LIMIT 1
+    ) lab ON TRUE
+   WHERE v.visit_date = $1::date
+   ORDER BY last_ev.occurred_at NULLS LAST`;
+
+const TERMINAL_STATUSES = ["dispensed", "exited"];
+
+const minutesSince = (from, now) =>
+  from ? Math.max(0, Math.round((now - new Date(from)) / 60000)) : null;
+
+const istClock = (ts) =>
+  ts
+    ? new Date(ts).toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Asia/Kolkata",
+      })
+    : null;
+
+const subtitleFor = (row) => {
+  if (row.blocked_reason) return row.blocked_reason;
+  // A queueing patient's most useful fact is when they arrived (GF-06).
+  if (["checked_in", "vitals_pending"].includes(row.current_status)) {
+    const at = istClock(row.journey_started_at);
+    return at ? `${at} check-in` : "Checked in";
+  }
+  if (row.current_status === "with_sd" && row.sd_name) return `${row.sd_name} · workup`;
+  if (row.current_status === "with_doctor" && row.doctor_name)
+    return `${row.doctor_name} · consult`;
+  if (row.current_status === "ready_for_doctor")
+    return row.results_status === "ready" ? "Results ✓ · SD plan ready" : "SD plan ready";
+  if (row.current_status === "with_vitals") return "BP + weight in progress";
+  if (row.current_status === "pharmacy_pending") return "Dispensing";
+  if (["dispensed", "exited"].includes(row.current_status)) return "Exited";
+  return STATUS_LABEL[row.current_status] || row.current_status;
+};
+
+// The one-line note under a card explaining what it is waiting on. Blocked
+// reasons take precedence and are rendered in the red variant by the board.
+const hintFor = (row) => {
+  if (row.blocked_reason) return null;
+  if (row.current_status === "checked_in" || row.current_status === "vitals_pending")
+    return "Waiting for vitals station";
+  if (row.current_status === "ready_for_doctor" && row.category === "in_control")
+    return "Green category — SD could close";
+  if (row.current_status === "sd_pending") return "Waiting for SD / MO";
+  return null;
+};
+
+const hintIconFor = (row) =>
+  row.current_status === "ready_for_doctor" && row.category === "in_control" ? "💡" : "→";
+
+// What the lab card is waiting on, distinct from the main journey's hints (GF-19).
+const LAB_HINT = {
+  payment_pending: "Waiting: reception payment",
+  results_ready: "Upload pending",
+  processing: null,
+  sample_collected: null,
+  paid: "Waiting: sample collection",
+  ordered: "Waiting: payment request",
+};
+
+const LAB_SUBTITLE = {
+  ordered: "Ordered",
+  payment_pending: "💰 Payment pending at reception",
+  paid: "Paid · awaiting collection",
+  sample_collected: "Sample collected",
+  processing: "⚙️ Processing in analyzer",
+  results_ready: "📤 Results ready — awaiting upload",
+};
+
+export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = pool) {
+  const budgets = budgetMap(slaConfig);
+  const { rows } = await db.query(BOARD_SQL, [visitDate]);
+
+  const cards = rows.map((row) => {
+    // A finished visit's clock stopped when it exited; only a patient still in
+    // the building is timed against the present moment.
+    const finished = TERMINAL_STATUSES.includes(row.current_status);
+    const clock = finished && row.status_since ? new Date(row.status_since) : now;
+    const statusMinutes = finished ? null : minutesSince(row.status_since, now);
+    const totalMinutes = minutesSince(row.journey_started_at, clock);
+    const budget = budgets[slaKeyForStatus(row.current_status)] ?? null;
+    return {
+      id: row.id,
+      patientId: row.patient_id,
+      name: row.patient_name,
+      fileNo: row.file_no,
+      age: row.age,
+      sex: row.sex,
+      visitNumber: row.visit_number,
+      status: row.current_status,
+      statusLabel: STATUS_LABEL[row.current_status] || row.current_status,
+      category: row.category,
+      resultsStatus: row.results_status,
+      blockedReason: row.blocked_reason,
+      subtitle: subtitleFor(row),
+      hint: hintFor(row),
+      hintIcon: hintIconFor(row),
+      finished,
+      statusSince: row.status_since ? new Date(row.status_since).toISOString() : null,
+      journeyStartedAt: row.journey_started_at
+        ? new Date(row.journey_started_at).toISOString()
+        : null,
+      statusMinutes,
+      statusBudget: budget,
+      statusColour: finished ? "green" : budgetColour(statusMinutes ?? 0, budget),
+      totalMinutes,
+      totalBudget: budgets.total_journey ?? null,
+      totalOver: totalMinutes !== null && totalMinutes > (budgets.total_journey ?? Infinity),
+      lab: row.lab_sample_status
+        ? {
+            since: row.lab_since ? new Date(row.lab_since).toISOString() : null,
+            sampleStatus: row.lab_sample_status,
+            paymentStatus: row.lab_payment_status,
+            testCount: row.lab_test_count,
+            subtitle: LAB_SUBTITLE[row.lab_sample_status] || row.lab_sample_status,
+            minutes: minutesSince(row.lab_since, now),
+            budget: budgets.lab_total ?? null,
+            colour: budgetColour(minutesSince(row.lab_since, now) ?? 0, budgets.lab_total ?? null),
+            hint: LAB_HINT[row.lab_sample_status] || null,
+            hintIcon: row.lab_sample_status === "payment_pending" ? "💰" : "📤",
+            blocking: row.lab_sample_status === "payment_pending",
+          }
+        : null,
+    };
+  });
+
+  const onFloor = cards.filter((c) => !OFF_BOARD_STATUSES.includes(c.status));
+
+  const columns = BOARD_COLUMNS.map((col) => {
+    const items =
+      col.key === "lab"
+        ? onFloor.filter((c) => c.lab)
+        : onFloor.filter((c) => col.statuses.includes(c.status));
+    const budget = budgets[col.slaKey] ?? null;
+    // Blocked patients are excluded from the average: they are stuck on missing
+    // reports, not on this station's throughput, and letting them skew it points
+    // the bottleneck banner at the wrong station.
+    const timedCards = items.filter((c) => !c.blockedReason);
+    const timed =
+      col.key === "lab"
+        ? timedCards.map((c) => c.lab.minutes ?? 0)
+        : timedCards.map((c) => c.statusMinutes ?? 0);
+    const avg = timed.length ? Math.round(timed.reduce((a, b) => a + b, 0) / timed.length) : 0;
+    return {
+      ...col,
+      budgetMinutes: budget,
+      count: items.length,
+      avgMinutes: avg,
+      hot: col.key !== "done" && !!budget && timed.length > 0 && avg > budget,
+      cards: items,
+    };
+  });
+
+  return { cards, onFloor, columns };
+}
+
+// Server-side patient search across one day's board. Server-side because the
+// floor can hold 100+ patients and the answer must not depend on which cards a
+// column happened to have rendered — and because matching a phone number means
+// normalising it the same way the rest of the repo does.
+//
+// Returns visit ids; the board filters itself to them. Scoped to the day, so it
+// can never become a back-door patient directory.
+export async function searchDayVisits(visitDate, query, db = pool) {
+  const raw = String(query || "").trim();
+  if (raw.length < 2) return [];
+
+  const digits = toLocal10(raw);
+  // A short numeric string is a partial phone or a file number, not a 10-digit
+  // mobile — match it as a suffix so "1547" finds P_181547 and ...81547.
+  const numeric = raw.replace(/\D/g, "");
+
+  // LIKE patterns are built here rather than concatenated in SQL. Two untyped
+  // operands make Postgres resolve `||` to ARRAY concatenation, which fails with
+  // "malformed array literal" — and a complete parameter is clearer anyway.
+  const like = `%${raw}%`;
+  const phoneSuffix = digits.length === 10 ? `%${digits}` : null;
+  const numericLike = numeric ? `%${numeric}%` : null;
+
+  const { rows } = await db.query(
+    `SELECT v.id, v.current_status, p.name, p.file_no, p.age, p.sex
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+      WHERE v.visit_date = $1::date
+        AND NOT COALESCE(p.is_blocked, FALSE)
+        AND (
+          p.name ILIKE $2
+          OR p.file_no ILIKE $2
+          OR ($3::text IS NOT NULL AND regexp_replace(COALESCE(p.phone, ''), '\\D', '', 'g') LIKE $3)
+          OR ($4::text IS NOT NULL AND regexp_replace(COALESCE(p.phone, ''), '\\D', '', 'g') LIKE $4)
+          -- alt_phone is text[], not text: a patient may carry several numbers.
+          -- Match any element, digits-only, the same way the primary phone is matched.
+          OR (
+            $4::text IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM unnest(COALESCE(p.alt_phone, ARRAY[]::text[])) AS alt
+               WHERE regexp_replace(alt, '\\D', '', 'g') LIKE $4
+            )
+          )
+        )
+      ORDER BY p.name
+      LIMIT 50`,
+    [visitDate, like, phoneSuffix, numericLike],
+  );
+
+  return rows.map((r) => ({
+    visitId: r.id,
+    name: r.name,
+    fileNo: r.file_no,
+    age: r.age,
+    sex: r.sex,
+    status: r.current_status,
+  }));
+}
+
+export function getBottleneck(columns) {
+  const candidates = columns
+    .filter(
+      (c) => c.key !== "done" && c.budgetMinutes && c.count > 0 && c.avgMinutes > c.budgetMinutes,
+    )
+    .map((c) => ({ column: c, overBy: c.avgMinutes - c.budgetMinutes }))
+    .sort((a, b) => b.overBy - a.overBy);
+
+  if (!candidates.length) return null;
+
+  const { column } = candidates[0];
+  const longest = [...column.cards.filter((c) => !c.blockedReason)].sort(
+    (a, b) => (b.statusMinutes ?? 0) - (a.statusMinutes ?? 0),
+  )[0];
+
+  const greenWaiting =
+    column.key === "wait_doctor" &&
+    column.cards.filter((c) => c.category === "in_control").length > 0;
+
+  return {
+    station: column.key,
+    label: column.name,
+    count: column.count,
+    avgMinutes: column.avgMinutes,
+    budgetMinutes: column.budgetMinutes,
+    longest: longest
+      ? { id: longest.id, name: longest.name, minutes: longest.statusMinutes }
+      : null,
+    suggestion: greenWaiting
+      ? "SD closes green-category patients directly."
+      : `Add capacity at ${column.name.toLowerCase()} or hold new check-ins.`,
+  };
+}
+
+export async function getDayStats(visitDate, board, slaConfig, db = pool) {
+  const budgets = budgetMap(slaConfig);
+  // "of N booked" is the day's expected patients: scheduled appointments that
+  // were not cancelled and did not no-show, excluding blocked patients the way
+  // every other list in this repo does (GF-10).
+  const { rows } = await db.query(
+    `SELECT COUNT(*) FILTER (WHERE a.status NOT IN ('cancelled', 'no_show'))::int AS booked,
+            COUNT(*) FILTER (WHERE a.status = 'no_show')::int   AS no_show,
+            COUNT(*) FILTER (WHERE a.status = 'cancelled')::int AS cancelled
+       FROM appointments a
+      WHERE a.appointment_date = $1::date
+        AND NOT EXISTS (
+              SELECT 1 FROM patients bp WHERE bp.id = a.patient_id AND bp.is_blocked
+            )`,
+    [visitDate],
+  );
+  const appts = rows[0] || { booked: 0, no_show: 0, cancelled: 0 };
+
+  const inBuilding = board.onFloor.filter((c) => !["dispensed", "exited"].includes(c.status));
+  const done = board.cards.filter((c) => ["dispensed", "exited"].includes(c.status));
+  const journeys = done.map((c) => c.totalMinutes).filter((m) => m !== null);
+  const avgJourney = journeys.length
+    ? Math.round(journeys.reduce((a, b) => a + b, 0) / journeys.length)
+    : null;
+
+  const overBudget = inBuilding.filter((c) => c.statusColour === "red").length;
+  const blocked = board.onFloor.filter(
+    (c) => c.status === "blocked_reports" || c.blockedReason,
+  ).length;
+  // GF-21: this counted live cards, not transitions. Measure what the label says
+  // — completed station-to-station hops today that finished inside their budget.
+  const { rows: hops } = await db.query(
+    `SELECT e.status,
+            EXTRACT(EPOCH FROM (nxt.occurred_at - e.occurred_at)) / 60 AS minutes
+       FROM giniflow_visit_events e
+       JOIN giniflow_visits v ON v.id = e.visit_id AND v.visit_date = $1::date
+       JOIN LATERAL (
+         SELECT occurred_at FROM giniflow_visit_events n
+          WHERE n.visit_id = e.visit_id AND n.occurred_at > e.occurred_at
+          ORDER BY n.occurred_at LIMIT 1
+       ) nxt ON TRUE`,
+    [visitDate],
+  );
+  const budgeted = hops
+    .map((h) => ({ minutes: Number(h.minutes), budget: budgets[slaKeyForStatus(h.status)] }))
+    .filter((h) => h.budget);
+  const withinSla = budgeted.length
+    ? Math.round((budgeted.filter((h) => h.minutes <= h.budget).length / budgeted.length) * 100)
+    : null;
+
+  return {
+    inBuilding: inBuilding.length,
+    booked: appts.booked,
+    noShow: appts.no_show,
+    cancelled: appts.cancelled,
+    completed: done.length,
+    avgCompletedMinutes: avgJourney,
+    overBudget,
+    blocked,
+    journeyTargetMinutes: budgets.total_journey ?? null,
+    withinSlaPct: withinSla,
+    slaTransitions: budgeted.length,
+  };
+}
+
+// Today's average per station, for the footer strip. Reads closed transitions
+// from the log rather than the live cards, so it reflects the whole day.
+export async function getStationAverages(visitDate, slaConfig, db = pool) {
+  const budgets = budgetMap(slaConfig);
+  const { rows } = await db.query(
+    `SELECT e.status,
+            AVG(EXTRACT(EPOCH FROM (nxt.occurred_at - e.occurred_at)) / 60)::numeric(10,1) AS avg_minutes,
+            COUNT(*)::int AS samples
+       FROM giniflow_visit_events e
+       JOIN giniflow_visits v ON v.id = e.visit_id AND v.visit_date = $1::date
+       JOIN LATERAL (
+         SELECT occurred_at FROM giniflow_visit_events n
+          WHERE n.visit_id = e.visit_id AND n.occurred_at > e.occurred_at
+          ORDER BY n.occurred_at LIMIT 1
+       ) nxt ON TRUE
+      GROUP BY e.status`,
+    [visitDate],
+  );
+
+  const byStation = {};
+  for (const row of rows) {
+    const key = slaKeyForStatus(row.status);
+    if (!key) continue;
+    byStation[key] = byStation[key] || { minutes: 0, samples: 0 };
+    byStation[key].minutes += Number(row.avg_minutes) * row.samples;
+    byStation[key].samples += row.samples;
+  }
+
+  // Two budgets are not measured by a status dwell time and so never appear in
+  // the query above: the lab track lives in its own table, and the journey total
+  // spans the whole chain (GF-07).
+  const [{ lab_minutes: labMinutes, lab_samples: labSamples }] = (
+    await db.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (o.uploaded_at - o.created_at)) / 60)::numeric(10,1) AS lab_minutes,
+              COUNT(*)::int AS lab_samples
+         FROM giniflow_lab_orders o
+         JOIN giniflow_visits v ON v.id = o.visit_id AND v.visit_date = $1::date
+        WHERE o.uploaded_at IS NOT NULL`,
+      [visitDate],
+    )
+  ).rows;
+
+  const [{ journey_minutes: journeyMinutes, journey_samples: journeySamples }] = (
+    await db.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (fin.occurred_at - start.occurred_at)) / 60)::numeric(10,1) AS journey_minutes,
+              COUNT(*)::int AS journey_samples
+         FROM giniflow_visits v
+         JOIN LATERAL (
+           SELECT occurred_at FROM giniflow_visit_events e
+            WHERE e.visit_id = v.id AND e.status = 'checked_in' ORDER BY occurred_at LIMIT 1
+         ) start ON TRUE
+         JOIN LATERAL (
+           SELECT occurred_at FROM giniflow_visit_events e
+            WHERE e.visit_id = v.id AND e.status IN ('exited', 'dispensed')
+            ORDER BY occurred_at DESC LIMIT 1
+         ) fin ON TRUE
+        WHERE v.visit_date = $1::date`,
+      [visitDate],
+    )
+  ).rows;
+
+  if (labSamples)
+    byStation.lab_total = { minutes: Number(labMinutes) * labSamples, samples: labSamples };
+  if (journeySamples)
+    byStation.total_journey = {
+      minutes: Number(journeyMinutes) * journeySamples,
+      samples: journeySamples,
+    };
+
+  return slaConfig.map((s) => {
+    const agg = byStation[s.station];
+    const actual = agg && agg.samples ? Math.round(agg.minutes / agg.samples) : null;
+    return {
+      station: s.station,
+      label: s.label,
+      budgetMinutes: s.budgetMinutes,
+      actualMinutes: actual,
+      samples: agg?.samples ?? 0,
+      colour: actual === null ? "neutral" : budgetColour(actual, s.budgetMinutes),
+      fillPct: actual === null ? 0 : Math.min(100, Math.round((actual / s.budgetMinutes) * 100)),
+    };
+  });
+}

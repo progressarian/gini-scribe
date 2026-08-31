@@ -8,6 +8,7 @@ import {
   dayWindowWhere,
   callStatusToday,
   isLatestFollowUpVisit,
+  upcomingBookingElsewhere,
 } from "../services/ghmDayWindow.js";
 import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 import { CATEGORY_VALUES, isValidCategory } from "../../shared/patientCategories.js";
@@ -945,6 +946,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.call_status AS call_status_any,
                 ${callStatusToday("a")} AS call_status,
                 (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
+                ${upcomingBookingElsewhere("a")} AS booked_on,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced
                 --      HealthRay appointment value, or prescription-extracted date —

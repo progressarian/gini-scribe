@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gini Scribe — Triage v3</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ── ROOT ── */
+:root {
+  --bg:#f0f2f5;--white:#fff;--ink:#0f1923;--ink2:#2d3f52;--ink3:#5a6e82;--ink4:#8fa0b0;
+  --bd:#e0e6ed;--bd2:#c8d2dc;
+  --nv:#0b1d35;--nv2:#142640;
+  --tl:#007d70;--tll:#e8f7f5;--tlb:rgba(0,125,112,.18);
+  /* Category palette — high contrast on white */
+  --red:#b91c1c;   --red-l:#fef2f2;  --red-b:rgba(185,28,28,.18);
+  --amb:#b45309;   --amb-l:#fffbeb;  --amb-b:rgba(180,83,9,.18);
+  --grn:#166534;   --grn-l:#f0fdf4;  --grn-b:rgba(22,101,52,.18);
+  --blu:#1d4ed8;   --blu-l:#eff6ff;  --blu-b:rgba(29,78,216,.18);
+  --pu:#6d28d9;    --pu-l:#f5f3ff;   --pu-b:rgba(109,40,217,.18);
+  --mid-grn:#15803d; /* darker for in-control header */
+  --sh:0 1px 3px rgba(0,0,0,.07);
+  --sh-md:0 4px 12px rgba(0,0,0,.09);
+  --r:9px;
+  --fb:'Outfit',sans-serif;
+  --fm:'DM Mono',monospace;
+  --fd:'Instrument Serif',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--fb);color:var(--ink);background:var(--bg);font-size:13px;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+/* ── APP BAR ── */
+.app-bar{background:var(--nv);height:43px;display:flex;align-items:center;padding:0 14px;gap:3px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06)}
+.app-logo{font-family:var(--fd);font-size:16px;color:#fff;font-style:italic;margin-right:7px}
+.anav{padding:4px 10px;border-radius:5px;font-size:11px;font-weight:600;color:rgba(255,255,255,.5);cursor:pointer;white-space:nowrap;transition:all .15s}
+.anav:hover{color:rgba(255,255,255,.85);background:rgba(255,255,255,.07)}
+.anav.active{color:#fff;background:rgba(255,255,255,.13)}
+.app-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.time-chip{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:2px 10px;font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.6)}
+
+/* ── SUB NAV ── */
+.sub-nav{background:var(--nv2);height:38px;display:flex;align-items:center;padding:0 16px;gap:3px;border-bottom:1px solid rgba(255,255,255,.05);flex-shrink:0}
+.snav{padding:4px 11px;border-radius:5px;font-size:11px;font-weight:600;color:rgba(255,255,255,.4);cursor:pointer;transition:all .15s}
+.snav:hover{color:rgba(255,255,255,.75)}
+.snav.active{color:#fff;background:rgba(255,255,255,.12)}
+.sub-r{margin-left:auto;display:flex;gap:6px;align-items:center}
+
+/* ── PIPELINE BAR ── */
+.pipeline-bar{background:var(--white);border-bottom:1px solid var(--bd);padding:10px 16px;flex-shrink:0}
+.pipeline-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.pipeline-title{font-family:var(--fd);font-size:17px;color:var(--nv);font-style:italic}
+.pipeline-meta{font-size:11px;color:var(--ink3);margin-top:1px}
+.pipe-actions{display:flex;gap:6px;align-items:center}
+.live-badge{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--grn)}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.btn{padding:5px 11px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb);transition:all .15s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.btn-ghost{background:var(--white);color:var(--ink3);border-color:var(--bd)}
+.btn-ghost:hover{color:var(--ink);border-color:var(--bd2)}
+.btn-primary{background:var(--tl);color:#fff;border-color:var(--tl)}
+.btn-primary:hover{opacity:.88}
+.date-nav{display:flex;align-items:center;gap:3px}
+.dnav-btn{width:24px;height:24px;border-radius:5px;border:1px solid var(--bd);background:var(--white);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink3)}
+.dnav-btn:hover{background:var(--bg)}
+.date-lbl{font-size:12px;font-weight:700;color:var(--ink);padding:3px 9px}
+.view-seg{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden}
+.vs-btn{padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;border-right:1px solid var(--bd);background:var(--white);color:var(--ink3);font-family:var(--fb);border-top:none;border-bottom:none;border-left:none;transition:all .15s}
+.vs-btn:last-child{border-right:none}
+.vs-btn.active{background:var(--nv);color:#fff}
+.search-inp{padding:5px 11px;border:1px solid var(--bd);border-radius:6px;font-family:var(--fb);font-size:12px;color:var(--ink);background:var(--bg);outline:none;width:210px}
+.search-inp:focus{border-color:var(--tl);background:var(--white)}
+
+/* ── PIPELINE STEPS ── */
+.pipeline-steps{display:flex;background:var(--bg);border:1px solid var(--bd);border-radius:9px;overflow:hidden}
+.ps{flex:1;padding:8px 10px;border-right:1px solid var(--bd);text-align:center;cursor:pointer;transition:background .15s;position:relative}
+.ps:last-child{border-right:none}
+.ps:hover{background:var(--tll)}
+.ps-val{font-family:var(--fm);font-size:20px;font-weight:500;line-height:1;margin-bottom:2px}
+.ps-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+.ps-sub{font-size:9px;color:var(--ink4);margin-top:1px;line-height:1.3}
+.val-ok{color:var(--mid-grn)}.val-warn{color:var(--amb)}.val-crit{color:var(--red)}.val-dim{color:var(--ink3)}.val-pu{color:var(--pu)}
+
+/* ── FILTER BAR ── */
+.filter-bar{background:var(--white);border-bottom:1px solid var(--bd);padding:7px 16px;display:flex;align-items:center;gap:7px;flex-shrink:0;flex-wrap:wrap}
+.flbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink4);flex-shrink:0}
+.fsep{width:1px;height:18px;background:var(--bd);flex-shrink:0}
+.fchip{padding:4px 11px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--white);color:var(--ink3);transition:all .15s;white-space:nowrap;line-height:1.4}
+.fchip:hover{border-color:var(--bd2)}
+.fchip.fc-all{background:var(--nv);color:#fff;border-color:var(--nv)}
+.fchip.fc-red{background:var(--red-l);color:var(--red);border-color:var(--red-b)}
+.fchip.fc-amb{background:var(--amb-l);color:var(--amb);border-color:var(--amb-b)}
+.fchip.fc-grn{background:var(--grn-l);color:var(--mid-grn);border-color:var(--grn-b)}
+.fchip.fc-pu{background:var(--pu-l);color:var(--pu);border-color:var(--pu-b)}
+.fchip.fc-doc{background:var(--white);color:var(--ink2);border-color:var(--bd2);font-weight:700}
+.fchip.fc-doc:hover{background:var(--tll);border-color:var(--tl);color:var(--tl)}
+.fchip.fc-doc.active{background:var(--tl);color:#fff;border-color:var(--tl)}
+.fchip.fc-upload{background:var(--pu-l);color:var(--pu);border-color:var(--pu-b)}
+
+/* ── MAIN LAYOUT ── */
+.triage-main{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.kanban{flex:1;overflow-x:auto;overflow-y:hidden;display:flex;padding:10px 14px;gap:10px}
+.kanban::-webkit-scrollbar{height:5px}
+.kanban::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:3px}
+
+/* ── COLUMNS ── */
+.col{flex:0 0 284px;display:flex;flex-direction:column;border-radius:11px;overflow:hidden;border:1.5px solid}
+.col-head{padding:10px 12px;display:flex;align-items:flex-start;justify-content:space-between}
+/* All column headers use strong background with WHITE text for contrast */
+.col-red{border-color:var(--red-b)}.col-red .col-head{background:var(--red)}
+.col-amb{border-color:var(--amb-b)}.col-amb .col-head{background:var(--amb)}
+.col-byet{border-color:var(--grn-b)}.col-byet .col-head{background:#2d9a42}
+.col-bctrl{border-color:var(--grn-b)}.col-bctrl .col-head{background:var(--mid-grn)}
+.col-norep{border-color:var(--pu-b)}.col-norep .col-head{background:var(--pu)}
+/* Header text always white */
+.col-head .ch-title,.col-head .ch-sub,.col-head .ch-count{color:#fff}
+.ch-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;line-height:1.3}
+.ch-sub{font-size:9px;opacity:.82;margin-top:3px;font-weight:500;line-height:1.4}
+.ch-count{font-family:var(--fm);font-size:20px;font-weight:500;line-height:1}
+.col-body{flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.55)}
+.col-body::-webkit-scrollbar{width:3px}
+.col-body::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+
+/* ── PATIENT CARD ── */
+.pt-card{background:var(--white);border:1px solid var(--bd);border-radius:9px;padding:10px 11px;cursor:pointer;transition:all .15s;box-shadow:var(--sh);position:relative}
+.pt-card:hover{box-shadow:var(--sh-md);border-color:var(--bd2);transform:translateY(-1px)}
+.pt-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:9px 0 0 9px}
+.col-red .pt-card::before{background:var(--red)}
+.col-amb .pt-card::before{background:var(--amb)}
+.col-byet .pt-card::before{background:#2d9a42}
+.col-bctrl .pt-card::before{background:var(--mid-grn)}
+.col-norep .pt-card::before{background:var(--pu)}
+
+/* Card top row */
+.pc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:5px;gap:6px}
+.pc-name{font-size:12px;font-weight:800;color:var(--ink);line-height:1.2}
+.pc-id{font-size:9px;color:var(--ink4);margin-top:1px;font-family:var(--fm)}
+.pc-right{text-align:right;flex-shrink:0}
+.pc-slot{font-family:var(--fm);font-size:11px;font-weight:500;color:var(--ink2)}
+
+/* Appointment + report status on ONE row, clearly labelled */
+.pc-status-row{display:flex;gap:5px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.status-pill{font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;white-space:nowrap;line-height:1.5}
+.sp-appt-confirmed{background:#dcfce7;color:#15803d;border:1px solid rgba(21,128,61,.2)}
+.sp-appt-day-before{background:#e0f2fe;color:#0369a1;border:1px solid rgba(3,105,161,.2)}
+.sp-appt-not-confirmed{background:#fef9c3;color:#854d0e;border:1px solid rgba(133,77,14,.2)}
+.sp-checked-in{background:#dbeafe;color:#1d4ed8;border:1px solid rgba(29,78,216,.2)}
+.sp-in-visit{background:rgba(109,40,217,.12);color:var(--pu);border:1px solid rgba(109,40,217,.2)}
+.sp-new{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}
+
+/* Dates row */
+.pc-dates{font-size:9px;color:var(--ink4);display:flex;gap:8px;margin-bottom:5px;line-height:1.4}
+.pc-dates strong{color:var(--ink3);font-weight:600}
+
+/* Category badges */
+.pc-badges{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:5px}
+.badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;white-space:nowrap;line-height:1.5;display:inline-flex;align-items:center;gap:2px}
+.b-red{background:var(--red-l);color:var(--red)}.b-amb{background:var(--amb-l);color:var(--amb)}
+.b-grn{background:var(--grn-l);color:var(--mid-grn)}.b-pu{background:var(--pu-l);color:var(--pu)}
+.b-blu{background:var(--blu-l);color:var(--blu)}.b-ink{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}
+.b-tl{background:var(--tll);color:var(--tl)}
+
+/* Report status */
+.pc-rep{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:7px;font-size:10px;font-weight:600;margin-bottom:5px;line-height:1.4}
+.rep-ok{background:#f0fdf4;color:var(--mid-grn);border:1px solid rgba(22,101,52,.15)}
+.rep-partial{background:#fffbeb;color:var(--amb);border:1px solid rgba(180,83,9,.15)}
+.rep-missing{background:#fdf4ff;color:var(--pu);border:1px solid rgba(109,40,217,.15)}
+.rep-upload-btn{margin-left:auto;font-size:9px;font-weight:800;padding:2px 8px;border-radius:4px;background:var(--pu);color:#fff;border:none;cursor:pointer;font-family:var(--fb);flex-shrink:0}
+
+/* BIO CHIPS — key change: show PREV → CURRENT */
+.pc-bios{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:5px}
+.bio-chip{font-size:10px;font-weight:600;padding:3px 7px;border-radius:6px;font-family:var(--fm);border:1px solid;line-height:1.4;white-space:nowrap}
+.bio-chip .bio-prev{opacity:.6;font-size:9px}
+.bio-chip .bio-arr{opacity:.55;font-size:9px;margin:0 1px}
+.bio-chip .bio-cur{font-weight:800}
+/* Colors on chips — high contrast text on light bg */
+.bc-r{background:var(--red-l);color:var(--red);border-color:rgba(185,28,28,.2)}
+.bc-a{background:var(--amb-l);color:var(--amb);border-color:rgba(180,83,9,.2)}
+.bc-g{background:var(--grn-l);color:var(--mid-grn);border-color:rgba(22,101,52,.2)}
+.bc-n{background:#f8fafc;color:var(--ink3);border-color:var(--bd)}
+
+/* Compliance bar */
+.pc-comp{display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:10px;color:var(--ink3)}
+.comp-pct{font-family:var(--fm);font-weight:700;min-width:28px;flex-shrink:0}
+.comp-bar{flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden;border:1px solid var(--bd)}
+.comp-fill{height:100%;border-radius:3px}
+.comp-lbl{font-size:9px;color:var(--ink4);font-weight:500;flex-shrink:0}
+
+/* Question / Symptom */
+.pc-question{background:var(--blu-l);border-left:3px solid var(--blu);border-radius:0 7px 7px 0;padding:5px 8px;margin-bottom:5px;font-size:10px;color:#1e3a8a;display:flex;gap:5px;align-items:flex-start;line-height:1.4;font-weight:500}
+.pc-symptom{background:var(--amb-l);border-left:3px solid var(--amb);border-radius:0 7px 7px 0;padding:5px 8px;margin-bottom:5px;font-size:10px;color:#78350f;display:flex;gap:5px;align-items:flex-start;line-height:1.4;font-weight:500}
+.pc-info-row{display:flex;align-items:flex-start;gap:5px;font-size:10px;color:var(--ink3);margin-bottom:4px;line-height:1.4}
+.pc-info-row strong{color:var(--ink2);font-weight:700}
+
+/* Actions */
+.pc-actions{display:flex;gap:5px;align-items:center;margin-top:2px}
+.assign-tag{font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;line-height:1.4}
+.at-ok{background:var(--grn-l);color:var(--mid-grn)}
+.at-empty{background:var(--amb-l);color:var(--amb)}
+.at-empty-red{background:var(--red-l);color:var(--red)}
+.pc-btn{font-size:10px;font-weight:700;padding:4px 9px;border-radius:6px;border:1px solid;cursor:pointer;font-family:var(--fb);transition:all .15s;white-space:nowrap;line-height:1.4}
+.pb-assign{background:var(--tl);color:#fff;border-color:var(--tl)}.pb-assign:hover{opacity:.88}
+.pb-open{background:var(--white);color:var(--ink3);border-color:var(--bd);margin-left:auto}.pb-open:hover{color:var(--ink)}
+.pb-reassign{background:var(--white);color:var(--ink3);border-color:var(--bd);font-size:9px}.pb-reassign:hover{color:var(--ink)}
+.pb-upload{background:var(--pu);color:#fff;border-color:var(--pu)}.pb-upload:hover{opacity:.88}
+
+/* ── ASSIGN MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:500;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--white);border-radius:14px;padding:20px;width:370px;box-shadow:0 20px 50px rgba(0,0,0,.22)}
+.modal-title{font-size:14px;font-weight:800;color:var(--ink);margin-bottom:3px}
+.modal-sub{font-size:11px;color:var(--ink3);margin-bottom:14px;line-height:1.5}
+.sd-opt{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid var(--bd);margin-bottom:7px;cursor:pointer;transition:all .15s}
+.sd-opt:hover,.sd-opt.sel{border-color:var(--tl);background:var(--tll)}
+.sd-av{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0}
+.sd-info{flex:1}
+.sd-name{font-size:12px;font-weight:700;color:var(--ink)}
+.sd-detail{font-size:10px;color:var(--ink3);margin-top:2px;line-height:1.4}
+.sd-bar{height:4px;background:var(--bd);border-radius:2px;margin-top:4px;overflow:hidden}
+.sd-fill{height:100%;border-radius:2px;background:var(--tl)}
+.modal-acts{display:flex;gap:8px;margin-top:14px}
+.m-cancel{flex:1;padding:9px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--bd);background:var(--white);color:var(--ink3);font-family:var(--fb)}
+.m-confirm{flex:2;padding:9px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:var(--tl);color:#fff;font-family:var(--fb)}
+
+/* ── UPLOAD MODAL ── */
+.upload-modal{background:var(--white);border-radius:14px;padding:22px;width:420px;box-shadow:0 20px 50px rgba(0,0,0,.22)}
+.upload-zone{border:2px dashed var(--bd2);border-radius:10px;padding:22px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px}
+.upload-zone:hover{border-color:var(--tl);background:var(--tll)}
+.patient-match-row{background:var(--grn-l);border:1px solid rgba(22,101,52,.2);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:11px;color:var(--mid-grn);font-weight:600;display:flex;align-items:center;gap:8px}
+.or-row{text-align:center;font-size:10px;color:var(--ink3);margin:8px 0;display:flex;align-items:center;gap:8px}
+.or-row::before,.or-row::after{content:'';flex:1;height:1px;background:var(--bd)}
+
+/* ── TOAST ── */
+.toast{position:fixed;bottom:22px;right:22px;background:var(--nv);color:#fff;padding:10px 16px;border-radius:9px;font-size:12px;font-weight:600;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,.2);display:none}
+.toast.show{display:block}
+
+/* ── UTILITY ── */
+.placeholder-card{text-align:center;padding:12px;border:1.5px dashed var(--bd2);border-radius:9px;font-size:10px;color:var(--ink4);cursor:pointer}
+.placeholder-card:hover{border-color:var(--tl);color:var(--tl)}
+</style>
+</head>
+<body>
+
+<!-- APP BAR -->
+<div class="app-bar">
+  <div class="app-logo">Gini Scribe</div>
+  <div class="anav">🏠 Home</div>
+  <div class="anav">🔍 Find</div>
+  <div class="anav active">📋 OPD</div>
+  <div class="anav">⚡ Quick</div>
+  <div class="anav">👤 MO</div>
+  <div class="anav">🟡 Con</div>
+  <div class="anav">📅 Plan</div>
+  <div class="anav">📄 Docs</div>
+  <div class="anav">💊 Refills</div>
+  <div class="anav">📊 Reports</div>
+  <div class="app-r"><div class="time-chip" id="clk">--:--:-- · Mon 18 May</div></div>
+</div>
+
+<!-- SUB NAV -->
+<div class="sub-nav">
+  <div class="snav">OPD Manager</div>
+  <div class="snav">📅 Schedule</div>
+  <div class="snav">📊 Live Dashboard</div>
+  <div class="snav active">🔴🟡✅ Triage</div>
+  <div class="snav">➕ New Appointment</div>
+  <div class="snav">📥 Import Excel</div>
+</div>
+
+<!-- TRIAGE MAIN -->
+<div class="triage-main">
+
+  <!-- PIPELINE BAR -->
+  <div class="pipeline-bar">
+    <div class="pipeline-top">
+      <div>
+        <div class="pipeline-title">Today's Patient Triage</div>
+        <div class="pipeline-meta">Mon, 18 May 2026 · 108 patients · Dr. Bhansali's team</div>
+      </div>
+      <div class="pipe-actions">
+        <div class="live-badge"><div class="live-dot"></div>Live · Updated 15:47</div>
+        <div class="date-nav">
+          <button class="dnav-btn">‹</button>
+          <div class="date-lbl">Mon, 18 May</div>
+          <button class="dnav-btn">›</button>
+          <button class="btn btn-ghost" style="padding:3px 9px;font-size:10px">Today</button>
+        </div>
+        <div class="view-seg">
+          <button class="vs-btn active">Category</button>
+          <button class="vs-btn">Assignment</button>
+        </div>
+        <button class="btn btn-ghost" onclick="showToast('Refreshing...')">⟳ Refresh</button>
+        <input class="search-inp" placeholder="Search by name or file no…">
+      </div>
+    </div>
+
+    <!-- PIPELINE STEPS: pre-visit readiness funnel + operational counts -->
+    <div class="pipeline-steps">
+      <div class="ps">
+        <div class="ps-val val-dim">108</div>
+        <div class="ps-lbl">Total</div>
+        <div class="ps-sub">Appointments today</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-warn">31</div>
+        <div class="ps-lbl">Lab reports in</div>
+        <div class="ps-sub">From Gini Lab · auto-synced</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-dim">48</div>
+        <div class="ps-lbl">Reports uploaded</div>
+        <div class="ps-sub">By patient or phlebotomist</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-ok">64</div>
+        <div class="ps-lbl">Data complete</div>
+        <div class="ps-sub">Can be categorised</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-ok">82</div>
+        <div class="ps-lbl">Categorised</div>
+        <div class="ps-sub">26 still pending</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-ok">82</div>
+        <div class="ps-lbl">Assigned</div>
+        <div class="ps-sub">26 unassigned</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-dim">19</div>
+        <div class="ps-lbl">Checked in</div>
+        <div class="ps-sub">14 in visit · 5 seen</div>
+      </div>
+      <div class="ps">
+        <div class="ps-val val-crit">20</div>
+        <div class="ps-lbl">No-show / Cancel</div>
+        <div class="ps-sub">14 no-show · 6 cancelled</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FILTER BAR -->
+  <div class="filter-bar">
+    <span class="flbl">Show</span>
+    <div class="fchip fc-all">All 108</div>
+    <div class="fchip fc-red">🔴 Getting Worse — Out of range (46)</div>
+    <div class="fchip fc-amb">🟡 Getting Worse — In range (29)</div>
+    <div class="fchip fc-grn">✅ Getting Better (13)</div>
+    <div class="fchip fc-pu">🔵 No reports (20)</div>
+    <div class="fsep"></div>
+    <!-- Assign To = FILTER to see that doctor's patients -->
+    <span class="flbl" title="Click to filter board to that doctor's assigned patients">Assign to / Filter by doctor</span>
+    <div class="fchip fc-doc" onclick="filterDoc(this,'beant')">Dr. Beant Sidhu</div>
+    <div class="fchip fc-doc" onclick="filterDoc(this,'simran')">Dr. Simranpreet</div>
+    <div class="fchip fc-doc" onclick="filterDoc(this,'bhansali')">Dr. Bhansali</div>
+    <div class="fsep"></div>
+    <div class="fchip fc-upload" onclick="openUpload()">⬆ Upload reports</div>
+  </div>
+
+  <!-- KANBAN BOARD -->
+  <div class="kanban">
+
+    <!-- ── COL 1: GETTING WORSE — OUT OF RANGE ── -->
+    <div class="col col-red">
+      <div class="col-head">
+        <div>
+          <div class="ch-title">🔴 Getting Worse</div>
+          <div class="ch-sub">Out of range · Not in control<br>Dr. Bhansali leads</div>
+        </div>
+        <div class="ch-count">46</div>
+      </div>
+      <div class="col-body">
+
+        <!-- Puneet Sharma — new patient, question from MHG -->
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Puneet Sharma</div>
+              <div class="pc-id">45M · P_179468</div>
+            </div>
+            <div class="pc-right">
+              <div class="pc-slot">12:00</div>
+            </div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-confirmed">Appt: ✓ Confirmed</span>
+            <span class="status-pill sp-new">New patient · Visit 1</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>17 May</strong></span>
+            <span>🩺 Last visit: <strong>First visit</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-red">🔴 Red</span>
+            <span class="badge b-tl">Reports pre-uploaded ✓</span>
+          </div>
+          <div class="pc-rep rep-ok">
+            <span>📊</span><span>HbA1c · FBS · Lipid · eGFR · UACR — all present</span>
+          </div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-r"><span class="bio-cur">HbA1c 10.9</span></span>
+            <span class="bio-chip bc-r"><span class="bio-cur">LDL 157.9</span></span>
+            <span class="bio-chip bc-r"><span class="bio-cur">TG 227.4</span></span>
+            <span class="bio-chip bc-r"><span class="bio-cur">UACR 9.62</span></span>
+            <span class="bio-chip bc-r"><span class="bio-cur">eGFR 112</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px;color:var(--ink3)">💊</span>
+            <span class="comp-pct" style="color:var(--ink3)">—</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:0"></div></div>
+            <span class="comp-lbl">New — no history</span>
+          </div>
+          <div class="pc-question">
+            <span>❓</span><span>"Doctor se poochna tha — kya insulin lena padega?" (added via MHG)</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-empty-red">⏳ Unassigned</span>
+            <button class="pc-btn pb-assign" onclick="openAssign('Puneet Sharma')">+ Assign</button>
+            <button class="pc-btn pb-open">↗ Open</button>
+          </div>
+        </div>
+
+        <!-- Amit Gupta — trend values shown prev → current -->
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Amit Gupta</div>
+              <div class="pc-id">45M · P_128880</div>
+            </div>
+            <div class="pc-right">
+              <div class="pc-slot">13:00</div>
+            </div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-confirmed">Appt: ✓ Confirmed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 23</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>16 May</strong></span>
+            <span>🩺 Last visit: <strong>14 Apr 2026</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-red">🔴 Red</span>
+            <span class="badge b-red">Rising trend ↑</span>
+          </div>
+          <div class="pc-rep rep-partial">
+            <span>⚠</span><span>HbA1c · FBS present — LDL, UACR missing</span>
+          </div>
+          <!-- KEY CHANGE: prev → current values -->
+          <div class="pc-bios">
+            <span class="bio-chip bc-r"><span class="bio-prev">6.9</span><span class="bio-arr">→</span><span class="bio-cur">7.4</span> HbA1c</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">148</span><span class="bio-arr">→</span><span class="bio-cur">165.4</span> FBS</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">55</span><span class="bio-arr">→</span><span class="bio-cur">62.2</span> LDL</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">9.1</span><span class="bio-arr">→</span><span class="bio-cur">13.55</span> UACR</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 103</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--red)">52%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:52%;background:var(--red)"></div></div>
+            <span class="comp-lbl" style="color:var(--red);font-weight:700">Low — missed doses</span>
+          </div>
+          <div class="pc-symptom">
+            <span>🔴</span><span>Pre-visit: dizziness 3 days · swelling in feet (added via MHG)</span>
+          </div>
+          <div class="pc-info-row" style="background:var(--amb-l);border-left:2px solid var(--amb);padding:4px 7px;border-radius:0 6px 6px 0;margin-bottom:5px">
+            <span>🥗</span><span style="color:var(--amb);font-weight:700">Lifestyle concern flagged</span><span style="color:var(--ink3);margin-left:4px">— see intake for details</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-empty-red">⏳ Unassigned</span>
+            <button class="pc-btn pb-assign" onclick="openAssign('Amit Gupta')">+ Assign</button>
+            <button class="pc-btn pb-open">↗ Open</button>
+          </div>
+        </div>
+
+        <!-- Ajay Bansal — diabetic foot, auto-routed -->
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Ajay Bansal</div>
+              <div class="pc-id">52M · P_177587</div>
+            </div>
+            <div class="pc-right">
+              <div class="pc-slot">15:30</div>
+            </div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-confirmed">Appt: ✓ Confirmed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 6</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>18 May</strong> (Gini Lab)</span>
+            <span>🩺 Last visit: <strong>3 Mar 2026</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-red">🔴 Red</span>
+            <span class="badge b-red">Diabetic foot ulcer ⚑</span>
+          </div>
+          <div class="pc-rep rep-ok">
+            <span>📊</span><span>All reports · From Gini Lab · auto-received</span>
+          </div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-r"><span class="bio-prev">7.1</span><span class="bio-arr">→</span><span class="bio-cur">7.8</span> HbA1c</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">104</span><span class="bio-arr">→</span><span class="bio-cur">119</span> FBS</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">95</span><span class="bio-arr">→</span><span class="bio-cur">90</span> LDL</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">118</span><span class="bio-arr">→</span><span class="bio-cur">136</span> TG</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">UACR 4.03</span></span>
+            <span class="bio-chip bc-a"><span class="bio-cur">eGFR 103</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">88%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:88%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl">Good</span>
+          </div>
+          <div class="pc-info-row"><span>🦶</span><span><strong>Diabetic foot ulcer</strong> — auto-routed to Dr. Beant Sidhu</span></div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Beant Sidhu</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+            <button class="pc-btn pb-reassign" onclick="openAssign('Ajay Bansal')">↺</button>
+          </div>
+        </div>
+
+        <div class="placeholder-card">+ 43 more in this category · scroll</div>
+      </div>
+    </div>
+
+    <!-- ── COL 2: GETTING WORSE — IN RANGE ── -->
+    <div class="col col-amb">
+      <div class="col-head">
+        <div>
+          <div class="ch-title">🟡 Getting Worse</div>
+          <div class="ch-sub">In range but trend ↑ · borderline<br>SD leads · Dr. Bhansali validates</div>
+        </div>
+        <div class="ch-count">29</div>
+      </div>
+      <div class="col-body">
+
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Promila Puri</div>
+              <div class="pc-id">33F · P_131520</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">11:00</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-confirmed">Appt: ✓ Confirmed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 7</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>16 May</strong></span>
+            <span>🩺 Last visit: <strong>10 Apr 2026</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-amb">🟡 Mixed signals</span>
+            <span class="badge b-tl">Pre-uploaded 2 days before ✓</span>
+          </div>
+          <div class="pc-rep rep-ok">
+            <span>📊</span><span>All reports uploaded 2 days before appointment</span>
+          </div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-r"><span class="bio-prev">9.4</span><span class="bio-arr">→</span><span class="bio-cur">12.6</span> HbA1c</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">221</span><span class="bio-arr">→</span><span class="bio-cur">346</span> FBS</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">112</span><span class="bio-arr">→</span><span class="bio-cur">137.1</span> LDL</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">98</span><span class="bio-arr">→</span><span class="bio-cur">120.3</span> TG</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">UACR 11.9</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 97</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--amb)">71%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:71%;background:var(--amb)"></div></div>
+            <span class="comp-lbl">Moderate</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-empty">⏳ Unassigned</span>
+            <button class="pc-btn pb-assign" onclick="openAssign('Promila Puri')">+ Assign</button>
+            <button class="pc-btn pb-open">↗ Open</button>
+          </div>
+        </div>
+
+        <!-- Anil Dhamija — patient question from MHG -->
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Anil Dhamija</div>
+              <div class="pc-id">60M · P_308530</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">16:00</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-day-before">Appt: Day-before confirmed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 15</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>18 May</strong> (Gini Lab)</span>
+            <span>🩺 Last visit: <strong>20 Mar 2026</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-amb">🟡 Borderline</span>
+            <span class="badge b-ink">Stable 3 visits</span>
+          </div>
+          <div class="pc-rep rep-ok">
+            <span>📊</span><span>Reports from Gini Lab — auto-received</span>
+          </div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-a"><span class="bio-prev">7.9</span><span class="bio-arr">→</span><span class="bio-cur">8.5</span> HbA1c</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">96</span><span class="bio-arr">→</span><span class="bio-cur">106</span> FBS</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">114</span><span class="bio-arr">→</span><span class="bio-cur">120</span> LDL</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">190</span><span class="bio-arr">→</span><span class="bio-cur">255</span> TG</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">UACR 25.69</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 70</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">91%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:91%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl">Good</span>
+          </div>
+          <div class="pc-question">
+            <span>❓</span><span>"TG itna kyun high hai? Main toh khaana theek khata hoon" — via MHG pre-visit</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Simranpreet</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+            <button class="pc-btn pb-reassign" onclick="openAssign('Anil Dhamija')">↺</button>
+          </div>
+        </div>
+
+        <!-- Daljit Singh — checked in -->
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Mr. Daljit Singh</div>
+              <div class="pc-id">59M · P_175697</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">07:30</div></div>
+          </div>
+          <!-- Checked in replaces the confirmation status -->
+          <div class="pc-status-row">
+            <span class="status-pill sp-checked-in">✓ Checked in</span>
+            <span class="badge b-amb">🟡 Mixed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 11</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>18 May</strong></span>
+            <span>🩺 Last visit: <strong>28 Feb 2026</strong></span>
+          </div>
+          <div class="pc-rep rep-ok">
+            <span>📊</span><span>All reports complete</span>
+          </div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-g"><span class="bio-prev">7.1</span><span class="bio-arr">→</span><span class="bio-cur">6.8</span> HbA1c</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">110</span><span class="bio-arr">→</span><span class="bio-cur">131.8</span> FBS</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">58</span><span class="bio-arr">→</span><span class="bio-cur">49.4</span> LDL</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">TG 127.9</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">UACR 13.5</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 101</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">95%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:95%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl" style="color:var(--mid-grn);font-weight:700">Excellent</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Bhansali</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+          </div>
+        </div>
+
+        <div class="placeholder-card">+ 26 more in this category</div>
+      </div>
+    </div>
+
+    <!-- ── COL 3: GETTING BETTER — NOT YET IN CONTROL ── -->
+    <div class="col col-byet">
+      <div class="col-head">
+        <div>
+          <div class="ch-title">↑ Getting Better</div>
+          <div class="ch-sub">Improving · not at target yet<br>SD closes · Dr. Bhansali async</div>
+        </div>
+        <div class="ch-count">10</div>
+      </div>
+      <div class="col-body">
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Mrs. Jasbir Kaur</div>
+              <div class="pc-id">56F · P_99340</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">08:15</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-confirmed">Appt: ✓ Confirmed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 7</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>17 May</strong> (patient via MHG)</span>
+            <span>🩺 Last visit: <strong>12 Mar 2026</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-tl">↑ Improving — 8.1 → 6.9 this year</span>
+          </div>
+          <div class="pc-rep rep-ok">
+            <span>📊</span><span>Uploaded by patient via MHG — 1 day before</span>
+          </div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-g"><span class="bio-prev">6.1</span><span class="bio-arr">→</span><span class="bio-cur">5.4</span> HbA1c</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">98</span><span class="bio-arr">→</span><span class="bio-cur">90</span> FBS</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">145</span><span class="bio-arr">→</span><span class="bio-cur">167</span> LDL</span>
+            <span class="bio-chip bc-r"><span class="bio-prev">290</span><span class="bio-arr">→</span><span class="bio-cur">372</span> TG</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 108</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">88%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:88%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl">Good</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Bhansali</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+          </div>
+        </div>
+
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Daksh Jindal</div>
+              <div class="pc-id">38M · P_244310</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">08:45</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-confirmed">Appt: ✓ Confirmed</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 5</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>18 May</strong> (Gini Lab)</span>
+            <span>🩺 Last visit: <strong>5 Apr 2026</strong></span>
+          </div>
+          <div class="pc-badges">
+            <span class="badge b-tl">↑ Improving</span>
+            <span class="badge b-ink">Phase 1 → 2</span>
+          </div>
+          <div class="pc-rep rep-ok"><span>📊</span><span>All reports · Gini Lab</span></div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-a"><span class="bio-prev">7.8</span><span class="bio-arr">→</span><span class="bio-cur">7.2</span> HbA1c</span>
+            <span class="bio-chip bc-a"><span class="bio-prev">149</span><span class="bio-arr">→</span><span class="bio-cur">132</span> FBS</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">82</span><span class="bio-arr">→</span><span class="bio-cur">78</span> LDL</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 95</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">82%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:82%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl">Good</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Beant Sidhu</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+          </div>
+        </div>
+        <div class="placeholder-card">+ 8 more improving patients</div>
+      </div>
+    </div>
+
+    <!-- ── COL 4: IN CONTROL ── -->
+    <div class="col col-bctrl">
+      <div class="col-head">
+        <div>
+          <div class="ch-title">✅ In Control</div>
+          <div class="ch-sub">At target · stable regimen<br>SD closes independently</div>
+        </div>
+        <div class="ch-count">3</div>
+      </div>
+      <div class="col-body">
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Mr. Deepak Khanna</div>
+              <div class="pc-id">61M · P_176559</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">08:30</div></div>
+          </div>
+          <!-- Checked-in: replaces confirmation status entirely -->
+          <div class="pc-status-row">
+            <span class="status-pill sp-checked-in">✓ Checked in</span>
+            <span class="badge b-grn">Phase 3 · Sustain</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 18</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>17 May</strong> (patient)</span>
+            <span>🩺 Last visit: <strong>10 Apr 2026</strong></span>
+          </div>
+          <div class="pc-rep rep-ok"><span>📊</span><span>All reports · uploaded by patient</span></div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-g"><span class="bio-prev">7.6</span><span class="bio-arr">→</span><span class="bio-cur">7.3</span> HbA1c</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">108</span><span class="bio-arr">→</span><span class="bio-cur">98.2</span> FBS</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">62</span><span class="bio-arr">→</span><span class="bio-cur">57.7</span> LDL</span>
+            <span class="bio-chip bc-g"><span class="bio-prev">82</span><span class="bio-arr">→</span><span class="bio-cur">70.9</span> TG</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">UACR 22.11</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 88</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">96%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:96%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl" style="color:var(--mid-grn);font-weight:700">Excellent</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Beant Sidhu</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+          </div>
+        </div>
+
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Ravinder Grewal</div>
+              <div class="pc-id">62M · P_54700</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">08:45</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-checked-in">✓ Checked in</span>
+            <span class="badge b-grn">Phase 3</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 22</span>
+          </div>
+          <div class="pc-dates">
+            <span>📅 Report added: <strong>18 May</strong> (Gini Lab)</span>
+            <span>🩺 Last visit: <strong>10 Apr 2026</strong></span>
+          </div>
+          <div class="pc-rep rep-ok"><span>📊</span><span>All reports · Gini Lab auto-received</span></div>
+          <div class="pc-bios">
+            <span class="bio-chip bc-g"><span class="bio-prev">8.9</span><span class="bio-arr">→</span><span class="bio-cur">8.6</span> HbA1c</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">FBS 98.2</span></span>
+            <span class="bio-chip bc-g"><span class="bio-prev">89</span><span class="bio-arr">→</span><span class="bio-cur">85.8</span> LDL</span>
+            <span class="bio-chip bc-g"><span class="bio-cur">TG 114</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">UACR 2.66</span></span>
+            <span class="bio-chip bc-g"><span class="bio-cur">eGFR 90</span></span>
+          </div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--mid-grn)">93%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:93%;background:var(--mid-grn)"></div></div>
+            <span class="comp-lbl">Excellent</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Bhansali</span>
+            <button class="pc-btn pb-open" style="margin-left:auto">↗ Open</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── COL 5: NO REPORTS ── -->
+    <div class="col col-norep">
+      <div class="col-head">
+        <div>
+          <div class="ch-title">🔵 No Reports</div>
+          <div class="ch-sub">Can't categorise yet<br>Chase reports · send phlebotomist</div>
+        </div>
+        <div class="ch-count">20</div>
+      </div>
+      <div class="col-body">
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Nishant Puri</div>
+              <div class="pc-id">26M · P_51200</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">14:45</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-checked-in">✓ Checked in</span>
+            <span class="badge b-pu">No reports</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 19</span>
+          </div>
+          <div class="pc-dates">
+            <span>🩺 Last visit: <strong>20 Mar 2026</strong> · HbA1c was <strong>5.3%</strong></span>
+          </div>
+          <div class="pc-rep rep-missing">
+            <span>⚠</span><span>No reports uploaded or received yet</span>
+            <button class="rep-upload-btn" onclick="openUpload()">Upload now</button>
+          </div>
+          <div class="pc-info-row"><span>📋</span><span>Last HbA1c <strong>5.3%</strong> — was in control. Unknown if still controlled this visit.</span></div>
+          <div class="pc-comp">
+            <span style="font-size:9px">💊</span>
+            <span class="comp-pct" style="color:var(--amb)">76%</span>
+            <div class="comp-bar"><div class="comp-fill" style="width:76%;background:var(--amb)"></div></div>
+            <span class="comp-lbl">Moderate</span>
+          </div>
+          <div class="pc-actions">
+            <span class="assign-tag at-ok">→ Dr. Beant Sidhu</span>
+            <button class="pc-btn pb-upload" onclick="openUpload()">⬆ Upload</button>
+            <button class="pc-btn pb-open">↗ Open</button>
+          </div>
+        </div>
+
+        <div class="pt-card">
+          <div class="pc-top">
+            <div>
+              <div class="pc-name">Uma Kumari</div>
+              <div class="pc-id">52F · P_185560</div>
+            </div>
+            <div class="pc-right"><div class="pc-slot">14:55</div></div>
+          </div>
+          <div class="pc-status-row">
+            <span class="status-pill sp-appt-not-confirmed">Appt: Not confirmed</span>
+            <span class="badge b-pu">No reports</span>
+            <span class="badge b-ink" style="font-size:9px">Visit 4</span>
+          </div>
+          <div class="pc-dates">
+            <span>🩺 Last visit: <strong>18 Jan 2026</strong></span>
+          </div>
+          <div class="pc-rep rep-missing">
+            <span>⚠</span><span>Required: HbA1c · FBS · Lipid · Kidney</span>
+            <button class="rep-upload-btn" onclick="openUpload()">Upload</button>
+          </div>
+          <div class="pc-info-row"><span>📞</span><span>Call patient — confirm appointment + ask to bring or upload reports</span></div>
+          <div class="pc-info-row"><span>🩸</span><span>Option: send Gini phlebotomist for home collection today</span></div>
+          <div class="pc-actions">
+            <span class="assign-tag at-empty">⏳ Unassigned</span>
+            <button class="pc-btn pb-assign" onclick="openAssign('Uma Kumari')">+ Assign</button>
+            <button class="pc-btn pb-open">↗ Open</button>
+          </div>
+        </div>
+
+        <div class="placeholder-card">+ 18 more need reports — chase before visit</div>
+      </div>
+    </div>
+
+  </div><!-- /kanban -->
+</div><!-- /triage-main -->
+
+
+<!-- ── ASSIGN MODAL ── -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal">
+    <div class="modal-title" id="assignTitle">Assign Specialist Doctor</div>
+    <div class="modal-sub">Red patients: Dr. Bhansali leads. Amber: SD leads, Dr. Bhansali validates. Green: SD closes independently.</div>
+    <div id="sdList">
+      <div class="sd-opt" onclick="selectSD(this,'Dr. Beant Sidhu')">
+        <div class="sd-av" style="background:linear-gradient(135deg,#6d28d9,#a855f7)">BS</div>
+        <div class="sd-info">
+          <div class="sd-name">Dr. Beant Sidhu</div>
+          <div class="sd-detail">4 assigned · load 57% · Speciality: foot ulcers, neuropathy</div>
+          <div class="sd-bar"><div class="sd-fill" style="width:57%"></div></div>
+        </div>
+      </div>
+      <div class="sd-opt" onclick="selectSD(this,'Dr. Simranpreet Kaur')">
+        <div class="sd-av" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">SK</div>
+        <div class="sd-info">
+          <div class="sd-name">Dr. Simranpreet Kaur</div>
+          <div class="sd-detail">3 assigned · load 43% · Available now</div>
+          <div class="sd-bar"><div class="sd-fill" style="width:43%"></div></div>
+        </div>
+      </div>
+      <div class="sd-opt" onclick="selectSD(this,'Dr. Bhansali (direct)')">
+        <div class="sd-av" style="background:linear-gradient(135deg,#b45309,#d97706)">AB</div>
+        <div class="sd-info">
+          <div class="sd-name">Dr. Bhansali (direct — Red only)</div>
+          <div class="sd-detail">2 waiting · 72% load · Use for complex Red patients</div>
+          <div class="sd-bar"><div class="sd-fill" style="width:72%;background:var(--amb)"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="m-cancel" onclick="closeAssign()">Cancel</button>
+      <button class="m-confirm" onclick="confirmAssign()">✓ Confirm assignment</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── UPLOAD MODAL ── -->
+<div class="modal-overlay" id="uploadModal">
+  <div class="upload-modal">
+    <div class="modal-title" style="margin-bottom:4px">⬆ Upload Patient Reports</div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:14px;line-height:1.6">
+      Upload lab reports, prescription scans, or external records. AI extracts values and attempts to auto-match to a patient. <strong style="color:var(--ink)">Always confirm the patient match before saving.</strong>
+    </div>
+
+    <!-- Patient lookup — required -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em">Patient (required — AI will try to auto-match from report name)</div>
+      <div style="display:flex;gap:7px">
+        <input class="search-inp" placeholder="Type name or file no e.g. P_179468" style="flex:1;width:auto">
+        <button class="btn btn-ghost">Search</button>
+      </div>
+      <div class="patient-match-row" style="margin-top:7px">
+        ✓ Auto-matched: <strong>Puneet Sharma · P_179468 · 45M</strong> — confirm this is correct
+      </div>
+    </div>
+
+    <div class="upload-zone" onclick="showToast('File picker opened')">
+      <div style="font-size:26px;margin-bottom:8px">📄</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:3px">Drop report here or tap to browse</div>
+      <div style="font-size:10px;color:var(--ink3)">PDF · JPG · PNG · HEIC · Multiple files OK</div>
+    </div>
+
+    <div style="display:flex;gap:7px;margin-bottom:12px">
+      <button class="btn btn-ghost" style="flex:1" onclick="showToast('Camera opened')">📸 Camera</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="showToast('WhatsApp forward')">💬 WhatsApp</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="showToast('Gini Lab sync')">🧪 Gini Lab</button>
+    </div>
+    <div style="font-size:10px;color:var(--ink3);margin-bottom:14px">Or forward to <strong>lab@ginihealth.com</strong> — system auto-uploads and matches patient by name</div>
+
+    <div class="modal-acts">
+      <button class="m-cancel" onclick="closeUpload()">Cancel</button>
+      <button class="m-confirm" onclick="closeUpload();showToast('✓ Report uploaded · AI extracting values')">Upload & extract values</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// Clock
+function tick(){
+  const n=new Date(),p=x=>String(x).padStart(2,'0');
+  const d=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][n.getDay()];
+  const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][n.getMonth()];
+  document.getElementById('clk').textContent=`${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())} · ${d} ${n.getDate()} ${m}`;
+}
+setInterval(tick,1000);tick();
+
+// Toast
+function showToast(msg,ms=2500){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),ms);
+}
+
+// Assign modal
+let selSD='',assignPt='';
+function openAssign(name){
+  assignPt=name;
+  document.getElementById('assignTitle').textContent='Assign — '+name;
+  document.querySelectorAll('.sd-opt').forEach(o=>o.classList.remove('sel'));
+  document.getElementById('assignModal').classList.add('open');
+}
+function closeAssign(){document.getElementById('assignModal').classList.remove('open');}
+function selectSD(el,name){
+  document.querySelectorAll('.sd-opt').forEach(o=>o.classList.remove('sel'));
+  el.classList.add('sel');selSD=name;
+}
+function confirmAssign(){
+  if(!selSD){showToast('Select a doctor first');return;}
+  closeAssign();showToast('✓ '+assignPt+' assigned to '+selSD);
+  selSD='';assignPt='';
+}
+
+// Upload modal
+function openUpload(){document.getElementById('uploadModal').classList.add('open');}
+function closeUpload(){document.getElementById('uploadModal').classList.remove('open');}
+
+// Doctor filter
+let activeDoc='';
+function filterDoc(el,doc){
+  if(activeDoc===doc){
+    el.classList.remove('active');activeDoc='';
+    showToast('Showing all patients');
+  } else {
+    document.querySelectorAll('.fc-doc').forEach(c=>c.classList.remove('active'));
+    el.classList.add('active');activeDoc=doc;
+    const names={beant:'Dr. Beant Sidhu',simran:'Dr. Simranpreet',bhansali:'Dr. Bhansali'};
+    showToast('Filtering to '+names[doc]+'\'s patients');
+  }
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(o=>{
+  o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');});
+});
+</script>
+
+<!-- ══════════════════════════════════════════════════════════
+     DEVELOPER HANDOFF NOTES — Gini Triage v3
+     Last updated: May 2026 · Design: Claude / Anthropic
+══════════════════════════════════════════════════════════ -->
+<div style="display:none" id="devNotes">
+<!--
+=== API ENDPOINTS NEEDED ===
+
+GET /api/appointments?date=YYYY-MM-DD
+Returns: [ { id, patientId, patientName, fileNo, age, gender, slot, visitNo,
+             appointmentStatus, triage_category, assigned_sd_id,
+             reports: { status, addedDate, source, values: [ {name, prev, current, flag} ] },
+             compliance_pct, mhg_questions: [], mhg_symptoms: [],
+             lifestyle_flagged: bool, last_visit_date, no_show: bool, cancelled: bool } ]
+
+GET /api/pipeline-stats?date=YYYY-MM-DD
+Returns: { total, lab_received, uploaded, data_complete, categorised,
+           assigned, checked_in, no_show, cancelled }
+
+PATCH /api/appointments/:id
+Body: { triage_category?, assigned_sd_id?, appointmentStatus? }
+Triggers auto-refresh on connected clients via Supabase realtime.
+
+=== APPOINTMENT STATUS CHAIN ===
+booked → confirmed_call → confirmed_day_before → checked_in →
+vitals_in_progress → vitals_done → waiting_sd → with_sd →
+awaiting_lab → results_received → waiting_dr_bhansali →
+with_dr_bhansali → prescription_pending → billing → pharmacy → completed
+
+Status pill logic:
+- If status is 'checked_in' or beyond: show "✓ Checked in" (blue pill)
+- If status is 'confirmed_call': show "Appt: ✓ Confirmed" (green pill)
+- If status is 'confirmed_day_before': show "Appt: Day-before confirmed" (blue-tint pill)
+- If status is 'booked' only: show "Appt: Not confirmed" (yellow pill)
+- Never show confirmation status AND checked-in status on same card
+
+=== TRIAGE CATEGORIES (5) ===
+getting_worse_out  → Red column  → Dr. Bhansali leads
+getting_worse_in   → Amber column → SD leads, Dr. Bhansali validates
+getting_better_yet → Mid-green column → SD closes, Dr. Bhansali async
+in_control         → Dark-green column → SD closes independently
+no_reports         → Purple column → Chase reports, send phlebotomist
+
+Auto-categorisation rule engine (runs when reports loaded):
+  if HbA1c > 9.0 OR rising > 1.5 points: getting_worse_out
+  elif HbA1c 7.0-9.0 AND rising: getting_worse_in
+  elif HbA1c improving AND > 7.0: getting_better_yet
+  elif HbA1c ≤ 7.0 AND stable/improving: in_control
+  elif no HbA1c available: no_reports
+Coordinator can override any auto-assignment.
+
+=== SPECIAL AUTO-ROUTING RULES ===
+if diagnoses includes 'diabetic_foot_ulcer': suggest Dr. Beant Sidhu
+if diagnoses includes 'retinopathy': suggest ophthalmology referral flag
+(More rules to be added as team is trained — store in system_config table)
+
+=== BIO CHIP FORMAT ===
+Show: "6.9 → 7.4 HbA1c" (prev → current name)
+Color logic:
+  - If current > prev AND current > threshold: .bc-r (red)
+  - If current > prev BUT current within range: .bc-a (amber)  
+  - If current ≤ prev OR improving: .bc-g (green)
+  - If no prev value (new patient or first report): show current only, .bc-n (neutral)
+Threshold per biomarker: HbA1c >7, FBS >130, LDL >100, TG >150, UACR >30, eGFR <60
+
+=== REPORT STATUS ===
+rep-ok      → all required tests present (HbA1c, FBS, Lipid, eGFR, UACR)
+rep-partial → some tests present, some missing (list missing tests)
+rep-missing → no tests uploaded or received yet
+Source labels: "Gini Lab · auto-received" | "Patient via MHG" | "Uploaded by coordinator"
+Report date: date the most recent report was added to the system.
+
+=== COMPLIANCE % ===
+Source: from last visit's Scribe compliance entry (coordinator or MO captured)
+Show as: percentage bar, coloured red (<60%), amber (60-80%), green (>80%)
+"No history" for visit 1 patients — don't show bar, show text "New patient"
+
+=== PATIENT QUESTIONS & SYMPTOMS ===
+Source: MHG app pre-visit check-in (submitted by patient 1-10 days before appointment)
+Questions: shown in blue left-bordered box
+Symptoms: shown in amber left-bordered box
+Lifestyle flag: shown as amber info row if lifestyle_flagged = true in intake
+Full lifestyle detail lives in coordinator intake screen — NOT in triage card.
+
+=== UPLOAD FROM INDIVIDUAL CARD ===
+When "Upload" button is clicked on a specific patient card:
+- Patient is pre-locked: show "Uploading for: [name] · [fileNo]" confirmed at top
+- No search or matching needed — context already known
+- After upload: AI extracts biomarker values, coordinator reviews before saving
+
+When global "Upload reports" button clicked (in filter bar):
+- Show patient search field first
+- AI attempts auto-match from patient name on report document
+- Always show "Auto-matched: [name] · [fileNo] — confirm this is correct" before saving
+
+=== DOCTOR FILTER (Assign To pills) ===
+Clicking a doctor name filters the kanban board to show only that doctor's assigned patients.
+Clicking again deselects and shows all patients.
+This is a DISPLAY FILTER only — does not change assignments.
+Useful for each doctor checking their own morning list.
+
+=== PIPELINE BAR ===
+Each step is clickable — clicking should filter the board to patients matching that step.
+e.g. clicking "Reports uploaded: 48" shows patients whose reports were manually uploaded.
+Steps: Total → Lab received → Uploaded → Data complete → Categorised → Assigned → Checked in → No-show/Cancel
+
+=== SUPABASE SCHEMA ADDITIONS NEEDED ===
+appointments table: add triage_category, assigned_sd_id, lifestyle_flagged (bool)
+biomarkers table: add source ('healthray'|'manual'|'mhg'), added_date, report_date
+mhg_previsit table: patient_id, appointment_id, questions:jsonb, symptoms:jsonb, submitted_at
+system_config table: key, value (for storing triage rules, benchmarks — no code deploy needed)
+
+=== REALTIME UPDATES ===
+Use Supabase realtime (postgres_changes) to push appointment status changes to all
+connected coordinator screens without manual refresh.
+The "Live · Updated 15:47" badge should reflect the last realtime event timestamp.
+-->
+</div>
+
+</body>
+</html>

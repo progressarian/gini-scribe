@@ -22,7 +22,10 @@
     "smoke:panel-scope": "node scripts/smoke-panel-scope.mjs",
     "analytics:report": "node scripts/build-gini-report.mjs",
     "analytics:snapshot": "node scripts/build-gini-report.mjs --snapshot",
-    "smoke:analytics": "node scripts/smoke-analytics.mjs"
+    "smoke:analytics": "node scripts/smoke-analytics.mjs",
+    "smoke:giniflow": "node scripts/smoke-giniflow-manager.mjs",
+    "smoke:giniflow-http": "node scripts/smoke-giniflow-http.mjs",
+    "smoke:giniflow-sync": "node scripts/smoke-giniflow-sync.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

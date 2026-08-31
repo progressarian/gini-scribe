@@ -161,6 +161,14 @@ const NAV_ITEMS = [
     cap: C["/flow/coordinator"],
     show: () => true,
   },
+  // Gini Flow. Runs alongside the old Flow Floor board until parity is signed
+  // off, then that one and its FLOW_* keys are deleted (docs/gini-flow/).
+  {
+    path: "/giniflow/manager",
+    label: "🕐 Gini Flow",
+    cap: C["/giniflow/manager"],
+    show: () => true,
+  },
   // One tab for all six station desks — the page's own switcher is the
   // sub-navigation, showing only the desks this role can work.
   {

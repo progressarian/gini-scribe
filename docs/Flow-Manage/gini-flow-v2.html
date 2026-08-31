@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gini Flow — Station App</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+/* ── DESIGN TOKENS ── */
+:root {
+  --c0:#0a0e1a; /* near-black navy */
+  --c1:#111827; /* dark surface */
+  --c2:#1f2937; /* card bg dark */
+  --c3:#374151; /* border dark */
+  --c4:#6b7280; /* muted text */
+  --c5:#9ca3af; /* secondary text */
+  --c6:#d1d5db; /* primary text dark mode */
+  --c7:#f9fafb; /* near white */
+  --bg:#f4f6f9; /* page bg */
+  --white:#ffffff;
+  --ink:#0f172a;
+  --ink2:#334155;
+  --ink3:#64748b;
+  --bd:#e2e8f0;
+  --bd2:#cbd5e1;
+  /* Semantic */
+  --red:#dc2626;    --red-l:#fef2f2;  --red-m:rgba(220,38,38,.12);
+  --amb:#d97706;    --amb-l:#fffbeb;  --amb-m:rgba(217,119,6,.12);
+  --grn:#16a34a;    --grn-l:#f0fdf4;  --grn-m:rgba(22,163,74,.12);
+  --blu:#2563eb;    --blu-l:#eff6ff;  --blu-m:rgba(37,99,235,.12);
+  --pu:#7c3aed;     --pu-l:#f5f3ff;   --pu-m:rgba(124,58,237,.12);
+  --tl:#0d9488;     --tl-l:#f0fdfa;   --tl-m:rgba(13,148,136,.12);
+  /* Typography */
+  --fb:'Inter',sans-serif;
+  --fm:'JetBrains Mono',monospace;
+  --fd:'Instrument Serif',serif;
+  /* Shadows */
+  --sh:0 1px 2px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.1);
+  --sh-md:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06);
+  --sh-lg:0 10px 25px rgba(0,0,0,.1),0 4px 6px rgba(0,0,0,.05);
+  --r:8px; --r-lg:12px; --r-xl:16px;
+}
+
+/* ── RESET ── */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fb);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.5}
+
+/* ── SCREENS ── */
+.screen{display:none;height:100vh;flex-direction:column;overflow:hidden}
+.screen.active{display:flex}
+
+/* ── LANDING ── */
+#s-land{background:var(--ink);align-items:center;justify-content:center;padding:40px 20px}
+.land-logo{font-family:var(--fd);font-size:36px;color:#fff;font-style:italic;margin-bottom:6px;text-align:center}
+.land-sub{font-size:13px;color:rgba(255,255,255,.4);margin-bottom:48px;text-align:center;letter-spacing:.5px}
+.role-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:900px;width:100%}
+.role-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:var(--r-xl);padding:22px 18px;cursor:pointer;transition:all .2s;text-align:center}
+.role-card:hover{background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.22);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.rc-ico{font-size:28px;margin-bottom:10px}
+.rc-name{font-size:13px;font-weight:600;color:#fff;margin-bottom:4px}
+.rc-desc{font-size:11px;color:rgba(255,255,255,.4);line-height:1.5}
+.rc-count{margin-top:10px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;display:inline-block}
+
+/* ── TOP RAIL ── */
+.top-rail{height:46px;display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0;border-bottom:1px solid var(--bd)}
+#s-floor .top-rail{background:var(--ink);border-color:rgba(255,255,255,.08)}
+#s-vitals .top-rail,#s-rx .top-rail{background:var(--white)}
+#s-doctor .top-rail{background:var(--white)}
+.tr-logo{font-family:var(--fd);font-size:15px;font-style:italic}
+#s-floor .tr-logo{color:#fff}
+.tr-role{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px}
+.tr-back{margin-left:auto;font-size:11px;font-weight:500;cursor:pointer;padding:4px 10px;border-radius:6px;border:1px solid var(--bd);background:transparent;font-family:var(--fb);color:var(--ink3)}
+#s-floor .tr-back{border-color:rgba(255,255,255,.15);color:rgba(255,255,255,.6)}
+.tr-back:hover{background:var(--bd);color:var(--ink)}
+.tr-stat{font-size:11px;font-weight:700}
+
+/* ── SHARED UTILITY ── */
+.card{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);box-shadow:var(--sh)}
+.btn{padding:7px 14px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb);transition:all .15s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.btn-primary{background:var(--ink);color:#fff;border-color:var(--ink)}.btn-primary:hover{opacity:.88}
+.btn-green{background:var(--grn);color:#fff;border-color:var(--grn)}.btn-green:hover{opacity:.88}
+.btn-ghost{background:var(--white);color:var(--ink3);border-color:var(--bd)}.btn-ghost:hover{color:var(--ink)}
+.btn-red{background:var(--red);color:#fff;border-color:var(--red)}
+.btn-tl{background:var(--tl);color:#fff;border-color:var(--tl)}.btn-tl:hover{opacity:.88}
+.badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.b-red{background:var(--red-l);color:var(--red)}.b-amb{background:var(--amb-l);color:var(--amb)}
+.b-grn{background:var(--grn-l);color:var(--grn)}.b-tl{background:var(--tl-l);color:var(--tl)}
+.b-blu{background:var(--blu-l);color:var(--blu)}.b-pu{background:var(--pu-l);color:var(--pu)}
+.b-ink{background:#f1f5f9;color:#475569}
+.mono{font-family:var(--fm)}
+.red{color:var(--red)}.amb{color:var(--amb)}.grn{color:var(--grn)}.tl{color:var(--tl)}
+
+/* ── VOICE PILL ── */
+.voice-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--pu);color:#fff;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:var(--fb);transition:all .2s}
+.voice-pill:hover{background:#6d28d9;transform:scale(1.02)}
+.voice-pill.listening{background:#ef4444;animation:vpulse 1s infinite}
+@keyframes vpulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}
+.voice-dot{width:7px;height:7px;border-radius:50%;background:#fff;opacity:.8}
+.voice-fab{position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;background:var(--pu);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;font-size:20px;box-shadow:var(--sh-lg);z-index:100;transition:all .2s}
+.voice-fab:hover{background:#6d28d9;transform:scale(1.05)}
+
+/* ── TOAST ── */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:var(--r-lg);font-size:12px;font-weight:500;z-index:999;box-shadow:var(--sh-lg);display:none;white-space:nowrap}
+.toast.show{display:block}
+
+/* ════════════════════════════════
+   FLOOR COORDINATOR
+════════════════════════════════ */
+#s-floor{background:var(--c0)}
+#s-floor .top-rail .tr-logo{color:#fff}
+.floor-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.floor-body::-webkit-scrollbar{width:4px}.floor-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+
+/* Floor stats strip */
+.floor-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.fstat{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:var(--r-lg);padding:12px 14px;text-align:center}
+.fstat-val{font-size:26px;font-weight:600;color:#fff;line-height:1;margin-bottom:3px;font-family:var(--fm)}
+.fstat-lbl{font-size:10px;color:rgba(255,255,255,.4);font-weight:500;text-transform:uppercase;letter-spacing:.5px}
+.fstat.alert{background:rgba(220,38,38,.15);border-color:rgba(220,38,38,.3)}
+.fstat.alert .fstat-val{color:#fca5a5}
+
+/* Floor patient rows */
+.floor-section-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.3);margin-bottom:6px;margin-top:4px}
+.floor-row{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:var(--r-lg);padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all .15s}
+.floor-row:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.15)}
+.floor-row.breach{border-color:rgba(220,38,38,.4);background:rgba(220,38,38,.08)}
+.fr-av{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;font-family:var(--fm)}
+.fr-body{flex:1;min-width:0}
+.fr-name{font-size:12px;font-weight:600;color:#fff;margin-bottom:2px}
+.fr-meta{font-size:10px;color:rgba(255,255,255,.4)}
+/* Step pills */
+.fr-steps{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.step-pill{font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.sp-done{background:rgba(22,163,74,.2);color:#86efac}
+.sp-now{background:rgba(37,99,235,.25);color:#93c5fd}
+.sp-wait{background:rgba(255,255,255,.07);color:rgba(255,255,255,.4)}
+.sp-breach{background:rgba(220,38,38,.25);color:#fca5a5}
+/* Progress bar */
+.fr-progress{text-align:right;flex-shrink:0;min-width:100px}
+.fp-bar{height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;margin-bottom:4px}
+.fp-fill{height:100%;border-radius:2px;transition:width .3s}
+.fp-time{font-family:var(--fm);font-size:13px;font-weight:500;color:#fff}
+.fp-left{font-size:9px;color:rgba(255,255,255,.35)}
+
+/* ════════════════════════════════
+   VITALS STATION
+════════════════════════════════ */
+.station-layout{flex:1;display:grid;grid-template-columns:260px 1fr;overflow:hidden}
+.squeue{border-right:1px solid var(--bd);overflow-y:auto;background:var(--white)}
+.sq-header{padding:12px 14px;border-bottom:1px solid var(--bd);background:var(--bg)}
+.sq-title{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.sq-sub{font-size:10px;color:var(--ink3)}
+.sq-item{padding:10px 14px;border-bottom:1px solid var(--bd);cursor:pointer;transition:background .12s;position:relative}
+.sq-item:hover{background:var(--tl-l)}
+.sq-item.active{background:var(--tl-l);border-left:3px solid var(--tl)}
+.si-name{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:2px}
+.si-meta{font-size:10px;color:var(--ink3)}
+.si-slot{position:absolute;top:10px;right:12px;font-size:10px;font-family:var(--fm);color:var(--ink3)}
+.si-bios{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
+.sbio{font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;font-family:var(--fm)}
+.sbio-r{background:var(--red-l);color:var(--red)}.sbio-a{background:var(--amb-l);color:var(--amb)}.sbio-g{background:var(--grn-l);color:var(--grn)}
+.station-detail{overflow-y:auto;display:flex;flex-direction:column}
+.station-detail::-webkit-scrollbar{width:4px}.station-detail::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.sd-header{padding:14px 18px;border-bottom:1px solid var(--bd);background:var(--white);flex-shrink:0;display:flex;align-items:flex-start;gap:12px}
+.sdh-body{flex:1}
+.sdh-name{font-family:var(--fd);font-size:19px;color:var(--ink);font-style:italic;margin-bottom:2px}
+.sdh-meta{font-size:11px;color:var(--ink3)}
+.sdh-acts{display:flex;gap:6px;flex-shrink:0;align-items:center}
+.sd-body{flex:1;padding:18px}
+
+/* Vitals grid */
+.vitals-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+.vf{display:flex;flex-direction:column;gap:4px}
+.vf-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3)}
+.vf-prev{font-size:9px;color:var(--ink3);margin-bottom:2px}
+.vf-inp{border:1.5px solid var(--bd);border-radius:var(--r);padding:10px 12px;font-family:var(--fm);font-size:16px;font-weight:500;color:var(--ink);background:var(--bg);outline:none;width:100%;transition:all .15s}
+.vf-inp:focus{border-color:var(--tl);background:var(--white);box-shadow:0 0 0 3px var(--tl-m)}
+.vf-inp.ok{border-color:var(--grn);background:var(--grn-l);color:var(--grn)}
+.vf-unit{font-size:10px;color:var(--ink3)}
+.voice-bar{background:var(--pu-l);border:1px solid rgba(124,58,237,.2);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px}
+.vb-desc{flex:1;font-size:11px;color:var(--ink3);line-height:1.5}
+.vb-desc strong{color:var(--pu);font-weight:600}
+.done-bar{background:var(--grn);border-radius:var(--r-lg);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.db-text{color:#fff}
+.db-title{font-size:14px;font-weight:700;margin-bottom:2px}
+.db-sub{font-size:11px;opacity:.8}
+
+/* ════════════════════════════════
+   DOCTOR / CONSULTANT VIEW
+════════════════════════════════ */
+#s-doctor{background:var(--bg)}
+.doc-layout{flex:1;display:grid;grid-template-columns:260px 1fr;overflow:hidden}
+
+/* Patient sidebar */
+.doc-sidebar{background:var(--white);border-right:1px solid var(--bd);overflow-y:auto;display:flex;flex-direction:column}
+.doc-sidebar::-webkit-scrollbar{width:3px}.doc-sidebar::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.dsb-pt{padding:14px}
+.dsb-name{font-family:var(--fd);font-size:16px;font-style:italic;color:var(--ink);margin-bottom:2px}
+.dsb-meta{font-size:10px;color:var(--ink3);line-height:1.6}
+.dsb-badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+/* Key numbers */
+.dsb-nums{padding:10px 14px;background:var(--bg);border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+.dsb-num-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.dsb-num{text-align:center;padding:8px 4px}
+.dsbn-val{font-family:var(--fm);font-size:18px;font-weight:500;line-height:1;margin-bottom:2px}
+.dsbn-val.r{color:var(--red)}.dsbn-val.a{color:var(--amb)}.dsbn-val.g{color:var(--grn)}
+.dsbn-lbl{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:var(--ink3)}
+/* Diagnoses in sidebar */
+.dsb-dx{padding:10px 14px}
+.dsb-dx-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:7px}
+.dsb-dx-item{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:500;color:var(--ink2);margin-bottom:5px}
+/* Active meds mini list */
+.dsb-meds{padding:10px 14px;border-top:1px solid var(--bd)}
+.dsb-meds-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:7px}
+.dsb-med-row{font-size:11px;color:var(--ink2);padding:2px 0;border-bottom:1px dashed var(--bd)}
+.dsb-med-row:last-child{border:none}
+/* Section jump */
+.dsb-jumps{padding:10px 14px;border-top:1px solid var(--bd);margin-top:auto}
+.dsb-jump-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:7px}
+.jmp-btn{display:block;width:100%;text-align:left;padding:5px 8px;border-radius:5px;font-size:11px;font-weight:500;color:var(--ink3);cursor:pointer;border:none;background:transparent;font-family:var(--fb);transition:all .12s;margin-bottom:2px}
+.jmp-btn:hover{background:var(--tl-l);color:var(--tl)}
+
+/* Doctor main scroll */
+.doc-main{overflow-y:auto;display:flex;flex-direction:column}
+.doc-main::-webkit-scrollbar{width:4px}.doc-main::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+/* Patient header strip */
+.doc-pt-header{background:var(--ink);padding:12px 18px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.dph-name{font-family:var(--fd);font-size:18px;color:#fff;font-style:italic;flex:1}
+.dph-meta{font-size:11px;color:rgba(255,255,255,.5);margin-top:2px}
+.dph-chips{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
+
+/* Section wrapper */
+.doc-section{margin:0;border-bottom:1px solid var(--bd)}
+.section-head{padding:12px 18px;background:var(--white);display:flex;align-items:center;justify-content:space-between;cursor:pointer;position:sticky;top:0;z-index:10;border-bottom:1px solid var(--bd)}
+.sh-title{font-size:12px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:7px}
+.sh-sub{font-size:10px;color:var(--ink3);font-weight:400;margin-left:4px}
+.sh-acts{display:flex;gap:6px;align-items:center}
+.section-body{padding:16px 18px;background:var(--bg)}
+
+/* Brief section */
+.brief-text{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:14px;font-size:12px;line-height:1.8;color:var(--ink2);margin-bottom:10px}
+.brief-text strong{color:var(--ink);font-weight:700}
+.hl-r{color:var(--red);font-weight:700}.hl-a{color:var(--amb);font-weight:700}.hl-g{color:var(--grn);font-weight:700}
+.flag-list{display:flex;flex-direction:column;gap:6px}
+.flag-item{display:flex;gap:8px;align-items:flex-start;padding:8px 11px;border-radius:var(--r);font-size:11px;line-height:1.5}
+.flag-item.flag-r{background:var(--red-l);color:#991b1b}
+.flag-item.flag-a{background:var(--amb-l);color:#92400e}
+.flag-item.flag-g{background:var(--grn-l);color:#14532d}
+.flag-ico{font-size:13px;flex-shrink:0;margin-top:1px}
+
+/* Labs & vitals section */
+.bio-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.bio-tile{background:var(--white);border:1px solid;border-radius:var(--r-lg);padding:11px 12px}
+.bt-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.bt-val{font-family:var(--fm);font-size:22px;font-weight:500;line-height:1;margin-bottom:3px}
+.bt-trend{font-size:10px;font-weight:600}
+.bt-spark{display:flex;gap:2px;align-items:flex-end;height:22px;margin-top:6px}
+.sp-bar{border-radius:1px 1px 0 0;min-height:3px}
+.bio-tile.r{border-color:rgba(220,38,38,.2);background:var(--red-l)}
+.bio-tile.r .bt-lbl,.bio-tile.r .bt-trend{color:var(--red)}.bio-tile.r .bt-val{color:var(--red)}
+.bio-tile.a{border-color:rgba(217,119,6,.2);background:var(--amb-l)}
+.bio-tile.a .bt-lbl,.bio-tile.a .bt-trend{color:var(--amb)}.bio-tile.a .bt-val{color:var(--amb)}
+.bio-tile.g{border-color:rgba(22,163,74,.2);background:var(--grn-l)}
+.bio-tile.g .bt-lbl,.bio-tile.g .bt-trend{color:var(--grn)}.bio-tile.g .bt-val{color:var(--grn)}
+.vitals-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.vs-item{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:9px 10px;text-align:center}
+.vs-val{font-family:var(--fm);font-size:18px;font-weight:500;color:var(--ink);margin-bottom:2px}
+.vs-lbl{font-size:9px;color:var(--ink3);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+
+/* Prescription section — 2 column: reference + edit */
+.rx-layout{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rx-col-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+.rx-med-row{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bd)}
+.rx-med-row:last-child{border:none}
+.rx-num{font-family:var(--fm);font-size:10px;color:var(--ink3);min-width:16px;flex-shrink:0;padding-top:2px}
+.rx-body{flex:1}
+.rx-name{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:1px}
+.rx-for{font-size:10px;color:var(--ink3)}
+.rx-right{text-align:right;flex-shrink:0}
+.rx-dose{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink2)}
+.rx-timing{font-size:10px;color:var(--ink3)}
+.rx-tag{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;display:inline-block;margin-bottom:2px}
+.rx-new{background:var(--grn-l);color:var(--grn)}
+.rx-changed{background:var(--amb-l);color:var(--amb)}
+.rx-stopped{background:var(--red-l);color:var(--red)}
+.rx-ext{background:var(--blu-l);color:var(--blu)}
+.rx-ref-col{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:12px 14px;opacity:.7}
+.rx-edit-col{background:var(--white);border:2px solid var(--tl);border-radius:var(--r-lg);padding:12px 14px}
+/* Voice Rx */
+.rx-voice-panel{background:var(--pu-l);border:1px solid rgba(124,58,237,.2);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:12px}
+.rvp-title{font-size:11px;font-weight:700;color:var(--pu);margin-bottom:4px}
+.rvp-examples{font-size:10px;color:var(--ink3);line-height:1.7}
+.rvp-examples em{color:var(--pu);font-style:italic}
+/* Copy from last */
+.copy-last-btn{width:100%;padding:8px;border:1.5px dashed var(--bd2);border-radius:var(--r);background:transparent;font-size:11px;font-weight:600;color:var(--ink3);cursor:pointer;font-family:var(--fb);transition:all .15s;margin-bottom:10px}
+.copy-last-btn:hover{border-color:var(--tl);color:var(--tl);background:var(--tl-l)}
+
+/* Plan / Tests section */
+.test-panel{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.test-col-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--bd)}
+.test-col{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:12px 14px}
+.test-chip-group{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+.test-chip{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:500;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-family:var(--fb);transition:all .15s}
+.test-chip:hover,.test-chip.sel{border-color:var(--tl);background:var(--tl-l);color:var(--tl)}
+.test-urgency{display:flex;gap:5px;margin-bottom:10px}
+.tu-btn{flex:1;padding:6px;border-radius:var(--r);font-size:11px;font-weight:600;border:1px solid var(--bd);background:var(--white);cursor:pointer;font-family:var(--fb);text-align:center;transition:all .15s}
+.tu-btn.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+.next-date-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink3)}
+.next-date-inp{border:1px solid var(--bd);border-radius:5px;padding:4px 8px;font-family:var(--fm);font-size:11px;color:var(--ink);background:var(--bg);outline:none;flex:1}
+.next-date-inp:focus{border-color:var(--tl)}
+
+/* Finalize banner */
+.finalize-banner{margin:12px 18px 18px;background:var(--ink);border-radius:var(--r-xl);padding:16px 18px;display:flex;align-items:center;gap:14px}
+.fb-text{flex:1;color:#fff}
+.fb-title{font-size:14px;font-weight:700;margin-bottom:4px}
+.fb-routes{display:flex;gap:8px;flex-wrap:wrap}
+.fb-route{font-size:10px;font-weight:600;padding:3px 9px;border-radius:20px;border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.75)}
+.fb-btn{padding:11px 20px;background:var(--grn);color:#fff;border:none;border-radius:var(--r-lg);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fb);flex-shrink:0;white-space:nowrap}
+.fb-btn:hover{opacity:.88}
+
+/* ════════════════════════════════
+   PHARMACY STATION
+════════════════════════════════ */
+.pharm-rx-header{background:var(--ink);padding:12px 18px}
+.prh-name{font-family:var(--fd);font-size:17px;color:#fff;font-style:italic}
+.prh-meta{font-size:10px;color:rgba(255,255,255,.5);margin-top:2px}
+.counsel-box{background:var(--ink);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:14px}
+.cb-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#5dd6ca;margin-bottom:7px}
+.cb-text{font-size:12px;color:rgba(255,255,255,.85);line-height:1.8}
+.dispense-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--white);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:6px}
+.di-check{width:22px;height:22px;border-radius:6px;border:2px solid var(--bd);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all .15s}
+.di-check.done{background:var(--grn);border-color:var(--grn);color:#fff}
+.di-body{flex:1}
+.di-name{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:1px}
+.di-detail{font-size:10px;color:var(--ink3)}
+.di-qty{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink2);flex-shrink:0}
+.di-stock{font-size:9px;font-weight:600;margin-top:2px}
+.di-stock.ok{color:var(--grn)}.di-stock.low{color:var(--amb)}
+</style>
+</head>
+<body>
+
+<!-- ════════ LANDING ════════ -->
+<div class="screen active" id="s-land">
+  <div class="land-logo">Gini Flow</div>
+  <div class="land-sub">Choose your station · Thu 27 Aug 2026</div>
+  <div class="role-grid">
+    <div class="role-card" onclick="go('floor')">
+      <div class="rc-ico">🗺</div>
+      <div class="rc-name">Flow Coordinator</div>
+      <div class="rc-desc">Real-time floor view · patient tracking · bottleneck alerts</div>
+      <div class="rc-count" style="background:rgba(220,38,38,.2);color:#fca5a5">2 at risk</div>
+    </div>
+    <div class="role-card" onclick="go('vitals')">
+      <div class="rc-ico">⚖️</div>
+      <div class="rc-name">Vitals Station</div>
+      <div class="rc-desc">Weight · BP · pulse · SpO2 · voice entry</div>
+      <div class="rc-count" style="background:rgba(37,99,235,.2);color:#93c5fd">4 in queue</div>
+    </div>
+    <div class="role-card" onclick="go('doctor')">
+      <div class="rc-ico">👨‍⚕️</div>
+      <div class="rc-name">Consultant</div>
+      <div class="rc-desc">Brief · labs · prescription · plan · voice AI</div>
+      <div class="rc-count" style="background:rgba(220,38,38,.2);color:#fca5a5">6 waiting</div>
+    </div>
+    <div class="role-card" onclick="go('rx')">
+      <div class="rc-ico">💊</div>
+      <div class="rc-name">Pharmacy</div>
+      <div class="rc-desc">Dispense · patient counselling · exit confirmation</div>
+      <div class="rc-count" style="background:rgba(13,148,136,.2);color:#5dd6ca">2 ready</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ FLOOR COORDINATOR ════════ -->
+<div class="screen" id="s-floor">
+  <div class="top-rail">
+    <div class="tr-logo" style="color:#fff">Gini Flow</div>
+    <div class="tr-role" style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.7)">🗺 Flow Coordinator</div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <div style="font-size:10px;font-weight:600;color:rgba(255,255,255,.4);display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block"></span>Live · 15s ago</div>
+      <button class="tr-back" onclick="go('land')">← Stations</button>
+    </div>
+  </div>
+  <div class="floor-body">
+    <div class="floor-stats">
+      <div class="fstat"><div class="fstat-val">95</div><div class="fstat-lbl">Booked</div></div>
+      <div class="fstat"><div class="fstat-val" style="color:#86efac">32</div><div class="fstat-lbl">Checked in</div></div>
+      <div class="fstat"><div class="fstat-val" style="color:#93c5fd">17</div><div class="fstat-lbl">Completed</div></div>
+      <div class="fstat alert"><div class="fstat-val">2</div><div class="fstat-lbl">At risk</div></div>
+      <div class="fstat"><div class="fstat-val" style="color:rgba(255,255,255,.4)">6m</div><div class="fstat-lbl">Avg time</div></div>
+    </div>
+
+    <div class="floor-section-label">⚠ At risk — over time budget</div>
+
+    <div class="floor-row breach" onclick="showToast('Opening Baljinder Saini journey…')">
+      <div class="fr-av" style="background:#7f1d1d">BS</div>
+      <div class="fr-body">
+        <div class="fr-name">Baljinder Saini <span style="font-size:10px;color:rgba(255,255,255,.4);font-weight:400">34M · P_181516 · In 12:10</span></div>
+        <div class="fr-meta">Stuck at SD Consultation — 35 min, 15 min over budget</div>
+        <div class="fr-steps">
+          <span class="step-pill sp-done">Vitals ✓</span>
+          <span class="step-pill sp-done">MO ✓</span>
+          <span class="step-pill sp-done">Blood ✓</span>
+          <span class="step-pill sp-done">Wait ✓</span>
+          <span class="step-pill sp-breach">SD 35m ⚠</span>
+          <span class="step-pill sp-wait">Chief</span>
+          <span class="step-pill sp-wait">Rx</span>
+          <span class="step-pill sp-wait">Billing</span>
+          <span class="step-pill sp-wait">Pharmacy</span>
+        </div>
+      </div>
+      <div class="fr-progress">
+        <div class="fp-bar"><div class="fp-fill" style="width:29%;background:#f87171"></div></div>
+        <div class="fp-time">35m</div>
+        <div class="fp-left" style="color:#fca5a5">85m left of 120</div>
+      </div>
+    </div>
+
+    <div class="floor-row breach" onclick="showToast('Opening Mrs. Meenakshi Maria journey…')">
+      <div class="fr-av" style="background:#7f1d1d">MM</div>
+      <div class="fr-body">
+        <div class="fr-name">Mrs. Meenakshi Maria <span style="font-size:10px;color:rgba(255,255,255,.4);font-weight:400">62F · P_179234 · In 12:11</span></div>
+        <div class="fr-meta">Stuck at Doctor Assessment — 34 min, 24 min over budget</div>
+        <div class="fr-steps">
+          <span class="step-pill sp-done">Vitals ✓</span>
+          <span class="step-pill sp-breach">MO 34m ⚠</span>
+          <span class="step-pill sp-wait">Wait</span>
+          <span class="step-pill sp-wait">SD</span>
+          <span class="step-pill sp-wait">Rx</span>
+          <span class="step-pill sp-wait">Billing</span>
+          <span class="step-pill sp-wait">Pharmacy</span>
+        </div>
+      </div>
+      <div class="fr-progress">
+        <div class="fp-bar"><div class="fp-fill" style="width:29%;background:#f87171"></div></div>
+        <div class="fp-time">34m</div>
+        <div class="fp-left" style="color:#fca5a5">86m left of 120</div>
+      </div>
+    </div>
+
+    <div class="floor-section-label" style="margin-top:8px">✓ In progress — on track</div>
+
+    <div class="floor-row" onclick="showToast('Opening Sushma Gupta journey…')">
+      <div class="fr-av" style="background:#1e3a5f">SG</div>
+      <div class="fr-body">
+        <div class="fr-name">Sushma Gupta <span style="font-size:10px;color:rgba(255,255,255,.4);font-weight:400">60F · P_74360 · In 12:11</span></div>
+        <div class="fr-meta">Checked in · proceeding normally</div>
+        <div class="fr-steps">
+          <span class="step-pill sp-done">Vitals ✓</span>
+          <span class="step-pill sp-now">MO →</span>
+          <span class="step-pill sp-wait">Wait</span>
+          <span class="step-pill sp-wait">SD</span>
+          <span class="step-pill sp-wait">Rx</span>
+          <span class="step-pill sp-wait">Billing</span>
+          <span class="step-pill sp-wait">Pharmacy</span>
+        </div>
+      </div>
+      <div class="fr-progress">
+        <div class="fp-bar"><div class="fp-fill" style="width:29%;background:#60a5fa"></div></div>
+        <div class="fp-time">34m</div>
+        <div class="fp-left">86m left</div>
+      </div>
+    </div>
+
+    <div class="floor-row" onclick="showToast('Opening Jasbir Singh journey…')">
+      <div class="fr-av" style="background:#1e3a5f">JS</div>
+      <div class="fr-body">
+        <div class="fr-name">Jasbir Singh <span style="font-size:10px;color:rgba(255,255,255,.4);font-weight:400">66M · P_26350 · In 12:10</span></div>
+        <div class="fr-steps">
+          <span class="step-pill sp-done">Vitals ✓</span>
+          <span class="step-pill sp-done">MO ✓</span>
+          <span class="step-pill sp-wait">Wait</span>
+          <span class="step-pill sp-now">SD →</span>
+          <span class="step-pill sp-wait">Rx</span>
+          <span class="step-pill sp-wait">Billing</span>
+          <span class="step-pill sp-wait">Pharmacy</span>
+        </div>
+      </div>
+      <div class="fr-progress">
+        <div class="fp-bar"><div class="fp-fill" style="width:29%;background:#60a5fa"></div></div>
+        <div class="fp-time">35m</div>
+        <div class="fp-left">85m left</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:10px;font-size:11px;color:rgba(255,255,255,.25)">+ 12 more patients checked in today</div>
+  </div>
+</div>
+
+<!-- ════════ VITALS STATION ════════ -->
+<div class="screen" id="s-vitals">
+  <div class="top-rail">
+    <div class="tr-logo">Gini Flow</div>
+    <div class="tr-role" style="background:var(--blu-l);color:var(--blu)">⚖️ Vitals Station</div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <span class="badge b-blu">4 in queue</span>
+      <span class="badge b-grn">31 done today</span>
+      <button class="tr-back" onclick="go('land')">← Stations</button>
+    </div>
+  </div>
+  <div class="station-layout">
+    <div class="squeue">
+      <div class="sq-header">
+        <div class="sq-title">Vitals queue</div>
+        <div class="sq-sub">Tap patient to start</div>
+      </div>
+      <div class="sq-item active">
+        <div class="si-slot">Now</div>
+        <div class="si-name">Kulwinder Kaur Randhawa</div>
+        <div class="si-meta">44F · P_11822 · Visit 4 · 🟡 Amber</div>
+        <div class="si-bios"><span class="sbio sbio-a">HbA1c 7.4</span><span class="sbio sbio-r">BP 148/94</span></div>
+      </div>
+      <div class="sq-item">
+        <div class="si-slot">Next</div>
+        <div class="si-name">Amarjit Kaur Sekhon</div>
+        <div class="si-meta">57F · P_34910 · Visit 8 · ✅ Green</div>
+      </div>
+      <div class="sq-item">
+        <div class="si-slot">09:30</div>
+        <div class="si-name">Deepak Sharma</div>
+        <div class="si-meta">46M · P_55210 · Visit 5</div>
+      </div>
+      <div class="sq-item">
+        <div class="si-slot">09:45</div>
+        <div class="si-name">Aman Jolly</div>
+        <div class="si-meta">29M · P_88834 · Visit 6</div>
+      </div>
+      <div style="padding:10px 14px;font-size:10px;color:var(--ink3);border-top:1px solid var(--bd);margin-top:auto">✓ Done today: 31 patients</div>
+    </div>
+    <div class="station-detail">
+      <div class="sd-header">
+        <div class="sdh-body">
+          <div class="sdh-name">Kulwinder Kaur Randhawa</div>
+          <div class="sdh-meta">44F · P_11822 · Visit 4 · Phase 2 Stabilize · Checked in 9:00 AM</div>
+        </div>
+        <div class="sdh-acts">
+          <span class="badge b-amb">🟡 Amber</span>
+        </div>
+      </div>
+      <div class="sd-body">
+        <div class="voice-bar">
+          <button class="voice-pill" onclick="toggleVoice(this)">
+            <div class="voice-dot"></div> Speak vitals
+          </button>
+          <div class="vb-desc"><strong>Just say it:</strong> "Weight 72 kilos, BP 148 over 94, pulse 82, SpO2 98" — fields fill automatically.</div>
+        </div>
+        <div style="font-size:10px;color:var(--ink3);background:var(--bg);border-radius:var(--r);padding:7px 11px;margin-bottom:14px">
+          Last visit: <strong>Weight 71.0 kg · BP 152/96 · Pulse 82 · SpO2 98%</strong>
+        </div>
+        <div class="vitals-grid">
+          <div class="vf">
+            <div class="vf-lbl">Weight (kg)</div>
+            <input class="vf-inp ok" type="number" value="72.4">
+            <div class="vf-unit">↑ 1.4 kg from last visit</div>
+          </div>
+          <div class="vf">
+            <div class="vf-lbl">Height (cm)</div>
+            <input class="vf-inp ok" type="number" value="161">
+            <div class="vf-unit">BMI auto: 27.9</div>
+          </div>
+          <div class="vf">
+            <div class="vf-lbl">Blood pressure</div>
+            <div style="display:flex;gap:5px">
+              <input class="vf-inp" type="number" placeholder="Sys" style="flex:1">
+              <span style="padding:10px 3px;color:var(--ink3)">/</span>
+              <input class="vf-inp" type="number" placeholder="Dia" style="flex:1">
+            </div>
+            <div class="vf-unit">mmHg · Last: 152/96</div>
+          </div>
+          <div class="vf">
+            <div class="vf-lbl">Pulse (bpm)</div>
+            <input class="vf-inp" type="number" placeholder="e.g. 82">
+          </div>
+          <div class="vf">
+            <div class="vf-lbl">SpO2 (%)</div>
+            <input class="vf-inp" type="number" placeholder="e.g. 98">
+          </div>
+          <div class="vf">
+            <div class="vf-lbl">Temperature (°F)</div>
+            <input class="vf-inp" type="number" placeholder="98.6" step="0.1">
+          </div>
+        </div>
+        <div class="done-bar">
+          <div class="db-text">
+            <div class="db-title">✓ Vitals done</div>
+            <div class="db-sub">Patient moves to next station automatically</div>
+          </div>
+          <button class="btn" style="background:#fff;color:var(--grn);border-color:rgba(255,255,255,.3);font-size:13px;padding:9px 20px" onclick="showToast('✓ Kulwinder moved to MO queue automatically')">Done →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ DOCTOR / CONSULTANT VIEW ════════ -->
+<div class="screen" id="s-doctor">
+  <div class="top-rail">
+    <div class="tr-logo">Gini Flow</div>
+    <div class="tr-role" style="background:var(--amb-l);color:var(--amb)">👨‍⚕️ Dr. Anil Bhansali</div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <span class="badge b-red">6 waiting</span>
+      <button class="voice-pill" style="font-size:11px;padding:5px 11px" onclick="toggleVoice(this)"><div class="voice-dot"></div> Voice AI</button>
+      <button class="tr-back" onclick="go('land')">← Stations</button>
+    </div>
+  </div>
+  <div class="doc-layout">
+
+    <!-- LEFT SIDEBAR: patient context (always visible) -->
+    <div class="doc-sidebar">
+      <div class="dsb-pt">
+        <div class="dsb-name">Isha Gambhir</div>
+        <div class="dsb-meta">41F · P_42220 · DB #9593 · Visit 5 · 4+ years<br>Dr. Beant Sidhu · Phase 1 Stabilize</div>
+        <div class="dsb-badges">
+          <span class="badge b-amb">Phase 1 · Stabilize</span>
+          <span class="badge b-red">HbA1c 7.3% ↑</span>
+        </div>
+      </div>
+
+      <div class="dsb-nums">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:6px">Latest biomarkers</div>
+        <div class="dsb-num-grid">
+          <div class="dsb-num" style="border-right:1px solid var(--bd)">
+            <div class="dsbn-val a">7.3<span style="font-size:11px">%</span></div>
+            <div class="dsbn-lbl">HbA1c</div>
+          </div>
+          <div class="dsb-num">
+            <div class="dsbn-val g">70</div>
+            <div class="dsbn-lbl">FBS</div>
+          </div>
+          <div class="dsb-num" style="border-right:1px solid var(--bd);border-top:1px solid var(--bd)">
+            <div class="dsbn-val a">138<span style="font-size:10px">/93</span></div>
+            <div class="dsbn-lbl">BP</div>
+          </div>
+          <div class="dsb-num" style="border-top:1px solid var(--bd)">
+            <div class="dsbn-val g">53.6<span style="font-size:10px">kg</span></div>
+            <div class="dsbn-lbl">Weight</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dsb-dx">
+        <div class="dsb-dx-title">Diagnoses</div>
+        <div class="dsb-dx-item"><span class="badge b-red" style="font-size:8px">Primary</span> T1 Diabetes Mellitus</div>
+        <div class="dsb-dx-item"><span class="badge b-ink" style="font-size:8px">Present</span> Coeliac Disease</div>
+      </div>
+
+      <div class="dsb-meds">
+        <div class="dsb-meds-title">Active medicines (5)</div>
+        <div class="dsb-med-row">Toujeo 18U · SC · bedtime</div>
+        <div class="dsb-med-row">Daplo 10mg · OD · breakfast</div>
+        <div class="dsb-med-row">Telma 40mg · OD · 8pm</div>
+        <div class="dsb-med-row">Atchol 20mg · OD · 10pm</div>
+        <div class="dsb-med-row">Huminsulin R · variable · meals</div>
+      </div>
+
+      <div class="dsb-jumps">
+        <div class="dsb-jump-title">Jump to section</div>
+        <button class="jmp-btn" onclick="scrollTo('sec-brief')">📋 Brief & flags</button>
+        <button class="jmp-btn" onclick="scrollTo('sec-labs')">📊 Labs & vitals</button>
+        <button class="jmp-btn" onclick="scrollTo('sec-rx')">💊 Prescription</button>
+        <button class="jmp-btn" onclick="scrollTo('sec-plan')">📅 Tests & next visit</button>
+      </div>
+    </div>
+
+    <!-- RIGHT MAIN: scrollable sections -->
+    <div class="doc-main" id="doc-main-scroll">
+
+      <!-- Patient header strip -->
+      <div class="doc-pt-header">
+        <div style="flex:1">
+          <div class="dph-name">Isha Gambhir</div>
+          <div class="dph-meta">Visit 5 · 27 Aug 2026 · HbA1c 9.8→7.3% since first visit · ↓26%</div>
+        </div>
+        <div class="dph-chips">
+          <span class="badge" style="background:rgba(217,119,6,.25);color:#fcd34d">Phase 1 · Stabilize</span>
+          <span class="badge" style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.7)">4+ years · 5 visits</span>
+          <button class="btn" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:#fff;font-size:11px" onclick="showToast('Opening full patient history…')">History →</button>
+        </div>
+      </div>
+
+      <!-- ── SECTION 1: BRIEF ── -->
+      <div class="doc-section" id="sec-brief">
+        <div class="section-head">
+          <div class="sh-title">📋 Brief & Clinical Context <span class="sh-sub">— auto-generated from labs + history</span></div>
+          <div class="sh-acts">
+            <button class="voice-pill" style="font-size:10px;padding:4px 10px" onclick="toggleVoice(this)"><div class="voice-dot"></div> Add note</button>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="brief-text">
+            <strong>Isha is a 41-year-old woman with T1DM and Coeliac Disease, on 5 active medications.</strong> HbA1c has improved from <span class="hl-r">9.8% at first visit</span> to <span class="hl-a">7.3% today</span> — good progress but still above the 7% target. BP is <span class="hl-a">138/93 — elevated</span>, up from 151/88 last visit. FBS is <span class="hl-g">70 mg/dL — at target</span>. Weight stable at 53.6 kg. Gini Lab received today. LDL 78.4 ↓ (good). UACR 4.49 — borderline, watch.
+          </div>
+          <div class="flag-list">
+            <div class="flag-item flag-a">
+              <span class="flag-ico">⚠️</span>
+              <span><strong>BP 138/93 — elevated</strong> · up from 151/88. On Telma 40mg. Consider reviewing dose or adding 2nd agent. Target &lt;130/80.</span>
+            </div>
+            <div class="flag-item flag-a">
+              <span class="flag-ico">⚠️</span>
+              <span><strong>HbA1c 7.3% — improving but not at target</strong> · Toujeo at 18U. Review sliding scale for Huminsulin R — FBG on target but HbA1c above 7%.</span>
+            </div>
+            <div class="flag-item flag-g">
+              <span class="flag-ico">✅</span>
+              <span><strong>LDL 78.4 ↓ (↓19 from Jun 2026)</strong> · on Atchol 20mg — working well. eGFR 124 — kidney function excellent. UACR 4.49 — normal range.</span>
+            </div>
+          </div>
+          <div style="margin-top:10px;padding:9px 12px;background:var(--blu-l);border-radius:var(--r);font-size:11px;color:var(--ink2);border:1px solid var(--blu-m)">
+            <strong style="color:var(--blu)">Patient question (via MHG):</strong> "Doctor, mera weight badh raha hai — kya dawai mein kuch change hoga?" · Complaint: fatigue in evenings.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SECTION 2: LABS & VITALS ── -->
+      <div class="doc-section" id="sec-labs">
+        <div class="section-head">
+          <div class="sh-title">📊 Labs & Vitals <span class="sh-sub">— Gini Lab · 27 Aug 2026</span></div>
+          <div class="sh-acts">
+            <button class="btn btn-ghost" style="font-size:10px;padding:4px 9px" onclick="showToast('Full lab report opened')">Full report →</button>
+          </div>
+        </div>
+        <div class="section-body">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px">Diabetes markers</div>
+          <div class="bio-grid" style="margin-bottom:14px">
+            <div class="bio-tile a">
+              <div class="bt-lbl">HbA1c</div>
+              <div class="bt-val">7.3<span style="font-size:13px;font-weight:400">%</span></div>
+              <div class="bt-trend">↓ from 9.8% · target &lt;7%</div>
+              <div class="bt-spark">
+                <div class="sp-bar" style="height:95%;background:var(--amb);width:25%;border-radius:2px 2px 0 0"></div>
+                <div class="sp-bar" style="height:80%;background:var(--amb);width:25%;border-radius:2px 2px 0 0"></div>
+                <div class="sp-bar" style="height:65%;background:var(--amb);width:25%;border-radius:2px 2px 0 0"></div>
+                <div class="sp-bar" style="height:55%;background:var(--amb);width:25%;border-radius:2px 2px 0 0"></div>
+              </div>
+            </div>
+            <div class="bio-tile g">
+              <div class="bt-lbl">FBS</div>
+              <div class="bt-val">70<span style="font-size:13px;font-weight:400"> mg</span></div>
+              <div class="bt-trend">✓ At target &lt;100</div>
+            </div>
+            <div class="bio-tile a">
+              <div class="bt-lbl">BP systolic</div>
+              <div class="bt-val" style="font-size:18px">138/93</div>
+              <div class="bt-trend">↑ elevated from 151/88</div>
+              <div class="bt-spark">
+                <div class="sp-bar" style="height:90%;background:var(--red);width:25%;border-radius:2px 2px 0 0"></div>
+                <div class="sp-bar" style="height:85%;background:var(--red);width:25%;border-radius:2px 2px 0 0"></div>
+                <div class="sp-bar" style="height:80%;background:var(--amb);width:25%;border-radius:2px 2px 0 0"></div>
+                <div class="sp-bar" style="height:78%;background:var(--amb);width:25%;border-radius:2px 2px 0 0"></div>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px">Lipid / Renal / Body</div>
+          <div class="bio-grid" style="margin-bottom:14px">
+            <div class="bio-tile g">
+              <div class="bt-lbl">LDL</div>
+              <div class="bt-val">78.4<span style="font-size:13px;font-weight:400"> mg</span></div>
+              <div class="bt-trend">↓19 from Jun 2026</div>
+            </div>
+            <div class="bio-tile g">
+              <div class="bt-lbl">eGFR (kidney)</div>
+              <div class="bt-val">124</div>
+              <div class="bt-trend">↑83 from Jun 2026 ✓</div>
+            </div>
+            <div class="bio-tile g">
+              <div class="bt-lbl">UACR</div>
+              <div class="bt-val">4.49<span style="font-size:13px;font-weight:400"> mg</span></div>
+              <div class="bt-trend">↓3.0 · normal range</div>
+            </div>
+          </div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px">Vitals today</div>
+          <div class="vitals-strip">
+            <div class="vs-item"><div class="vs-val">53.6<span style="font-size:11px;color:var(--ink3)"> kg</span></div><div class="vs-lbl">Weight</div></div>
+            <div class="vs-item"><div class="vs-val" style="color:var(--amb)">138<span style="font-size:11px;color:var(--ink3)">/93</span></div><div class="vs-lbl">BP</div></div>
+            <div class="vs-item"><div class="vs-val">80<span style="font-size:11px;color:var(--ink3)"> bpm</span></div><div class="vs-lbl">Pulse</div></div>
+            <div class="vs-item"><div class="vs-val" style="color:var(--grn)">7.8<span style="font-size:11px;color:var(--ink3)"> g</span></div><div class="vs-lbl">Haemoglobin</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SECTION 3: PRESCRIPTION ── -->
+      <div class="doc-section" id="sec-rx">
+        <div class="section-head">
+          <div class="sh-title">💊 Prescription <span class="sh-sub">— last visit on left · edit on right</span></div>
+          <div class="sh-acts">
+            <button class="voice-pill" style="font-size:10px;padding:4px 10px" onclick="toggleVoice(this)"><div class="voice-dot"></div> Voice edit</button>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="rx-voice-panel">
+            <div class="rvp-title">🎤 Voice commands</div>
+            <div class="rvp-examples">
+              Say: <em>"Increase Toujeo to 20 units"</em> · <em>"Add Amlodipine 5mg once daily"</em> · <em>"Stop Daplo"</em> · <em>"Copy last prescription"</em> · <em>"Change Huminsulin to fixed 8 units thrice daily"</em>
+            </div>
+          </div>
+          <div class="rx-layout">
+            <!-- Reference: last visit -->
+            <div>
+              <div class="rx-col-head">Last visit · 4 Jun 2026 (reference — click any to copy)</div>
+              <div class="rx-ref-col">
+                <div class="rx-med-row">
+                  <div class="rx-num">1.</div>
+                  <div class="rx-body"><div class="rx-name">Toujeo</div><div class="rx-for">SC · Diabetes</div></div>
+                  <div class="rx-right"><div class="rx-dose">16U</div><div class="rx-timing">At bedtime</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">2.</div>
+                  <div class="rx-body"><div class="rx-name">Daplo 10mg</div><div class="rx-for">Oral · Diabetes</div></div>
+                  <div class="rx-right"><div class="rx-dose">OD</div><div class="rx-timing">30 min before breakfast</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">3.</div>
+                  <div class="rx-body"><div class="rx-name">Telma 40mg</div><div class="rx-for">Oral · Kidney/BP</div></div>
+                  <div class="rx-right"><div class="rx-dose">OD</div><div class="rx-timing">At 8 PM</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">4.</div>
+                  <div class="rx-body"><div class="rx-name">Atchol 20mg</div><div class="rx-for">Oral · Supplements</div></div>
+                  <div class="rx-right"><div class="rx-dose">OD</div><div class="rx-timing">At 10 PM</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">5.</div>
+                  <div class="rx-body"><div class="rx-name">Huminsulin R</div><div class="rx-for">SC · Diabetes · sliding scale</div></div>
+                  <div class="rx-right"><div class="rx-dose">Variable</div><div class="rx-timing">Before meals</div></div>
+                </div>
+              </div>
+            </div>
+            <!-- Edit: current visit -->
+            <div>
+              <div class="rx-col-head">This visit · editing now</div>
+              <button class="copy-last-btn" onclick="showToast('Last prescription copied — edit as needed')">↙ Copy from last visit</button>
+              <div class="rx-edit-col">
+                <div class="rx-med-row">
+                  <div class="rx-num">1.</div>
+                  <div class="rx-body">
+                    <div class="rx-tag rx-changed">↑ Changed</div>
+                    <div class="rx-name">Toujeo</div>
+                    <div class="rx-for">SC · Diabetes · increase by 1U daily until FBG 100</div>
+                  </div>
+                  <div class="rx-right"><div class="rx-dose">18U</div><div class="rx-timing">At 10 PM</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">2.</div>
+                  <div class="rx-body"><div class="rx-name">Daplo 10mg</div><div class="rx-for">Oral · Diabetes</div></div>
+                  <div class="rx-right"><div class="rx-dose">OD</div><div class="rx-timing">30 min before breakfast</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">3.</div>
+                  <div class="rx-body"><div class="rx-name">Telma 40mg</div><div class="rx-for">Oral · Kidney/BP</div></div>
+                  <div class="rx-right"><div class="rx-dose">OD</div><div class="rx-timing">At 8 PM</div></div>
+                </div>
+                <div class="rx-med-row">
+                  <div class="rx-num">4.</div>
+                  <div class="rx-body"><div class="rx-name">Atchol 20mg</div><div class="rx-for">Oral · Supplements</div></div>
+                  <div class="rx-right"><div class="rx-dose">OD</div><div class="rx-timing">At 10 PM</div></div>
+                </div>
+                <div class="rx-med-row" style="background:var(--amb-l);padding:6px 4px;border-radius:5px">
+                  <div class="rx-num">5.</div>
+                  <div class="rx-body">
+                    <div class="rx-tag rx-changed">↑ Changed</div>
+                    <div class="rx-name">Huminsulin R</div>
+                    <div class="rx-for">Sliding scale · pre-meal RBS target 80–130</div>
+                  </div>
+                  <div class="rx-right"><div class="rx-dose">Variable</div><div class="rx-timing">Before meals</div></div>
+                </div>
+                <div style="margin-top:10px;display:flex;gap:6px">
+                  <button class="btn btn-ghost" style="font-size:11px" onclick="showToast('Add medicine dialog opened')">+ Medicine</button>
+                  <button class="btn btn-ghost" style="font-size:11px" onclick="showToast('Stop medicine dialog opened')">− Stop medicine</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SECTION 4: TESTS & NEXT VISIT ── -->
+      <div class="doc-section" id="sec-plan">
+        <div class="section-head">
+          <div class="sh-title">📅 Tests & Next Visit Plan</div>
+          <div class="sh-acts">
+            <button class="voice-pill" style="font-size:10px;padding:4px 10px" onclick="toggleVoice(this)"><div class="voice-dot"></div> Add tests</button>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="test-panel">
+            <!-- Tests ordered -->
+            <div class="test-col">
+              <div class="test-col-head">Tests ordered this visit</div>
+              <!-- Urgency -->
+              <div style="font-size:10px;font-weight:600;color:var(--ink3);margin-bottom:5px">When needed?</div>
+              <div class="test-urgency">
+                <div class="tu-btn" onclick="selectUrgency(this,'today')">Today</div>
+                <div class="tu-btn" onclick="selectUrgency(this,'tomorrow')">Tomorrow</div>
+                <div class="tu-btn active" onclick="selectUrgency(this,'next')">Next visit</div>
+              </div>
+              <!-- Test chips -->
+              <div style="font-size:10px;font-weight:600;color:var(--ink3);margin-bottom:5px">Select tests</div>
+              <div class="test-chip-group">
+                <div class="test-chip sel" onclick="this.classList.toggle('sel')">HbA1c</div>
+                <div class="test-chip sel" onclick="this.classList.toggle('sel')">Creatinine</div>
+                <div class="test-chip sel" onclick="this.classList.toggle('sel')">UACR</div>
+                <div class="test-chip sel" onclick="this.classList.toggle('sel')">Lipids</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">FBS</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">TSH</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">LFT</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">CBC</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">Vit D</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">Vit B12</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">Fasting Insulin</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">Fundus</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">ECG</div>
+                <div class="test-chip" onclick="this.classList.toggle('sel')">Doppler</div>
+              </div>
+              <div style="font-size:10px;color:var(--ink3);margin-top:2px">✓ 4 tests selected — will go to reception + lab</div>
+            </div>
+            <!-- Next visit -->
+            <div class="test-col">
+              <div class="test-col-head">Next visit & follow-up</div>
+              <div class="next-date-row" style="margin-bottom:12px">
+                <span style="font-weight:600;color:var(--ink)">Next appointment:</span>
+                <input class="next-date-inp" type="date" value="2026-10-08">
+              </div>
+              <div style="font-size:10px;font-weight:600;color:var(--ink3);margin-bottom:5px">Goals for next visit</div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+                <div style="background:var(--bg);border-radius:var(--r);padding:7px 10px;font-size:11px;display:flex;justify-content:space-between">
+                  <span>FBS</span><span class="mono" style="font-weight:600">70–130 mg/dL</span>
+                </div>
+                <div style="background:var(--bg);border-radius:var(--r);padding:7px 10px;font-size:11px;display:flex;justify-content:space-between">
+                  <span>PPG</span><span class="mono" style="font-weight:600">90–180 mg/dL</span>
+                </div>
+                <div style="background:var(--bg);border-radius:var(--r);padding:7px 10px;font-size:11px;display:flex;justify-content:space-between">
+                  <span>HbA1c target</span><span class="mono" style="font-weight:600">&lt; 7.0%</span>
+                </div>
+              </div>
+              <div style="font-size:10px;font-weight:600;color:var(--ink3);margin-bottom:5px">Lifestyle advice</div>
+              <textarea style="width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-family:var(--fb);font-size:11px;color:var(--ink);background:var(--bg);resize:none;min-height:60px;outline:none" placeholder="Dietary advice, exercise, insulin timing…">Sliding scale insulin dosing: adjust Huminsulin R based on pre-meal RBS (target 80–130 mg/dL). Increase Toujeo by 1 unit daily until fasting blood glucose reaches 100 mg/dL.</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FINALIZE BANNER -->
+      <div class="finalize-banner">
+        <div class="fb-text">
+          <div class="fb-title">Finalize & end visit</div>
+          <div class="fb-routes">
+            <span class="fb-route">💊 → Pharmacy dispense queue</span>
+            <span class="fb-route">📋 → Pharmacy counselling note</span>
+            <span class="fb-route">📱 → Patient MHG summary</span>
+            <span class="fb-route">🔬 → Reception + Lab (tests for today)</span>
+          </div>
+        </div>
+        <button class="fb-btn" onclick="showToast('✓ Visit finalized · Prescription sent to pharmacy · Tests sent to reception + lab · Patient MHG updated')">Finalize →</button>
+      </div>
+
+    </div><!-- /doc-main -->
+  </div><!-- /doc-layout -->
+  <!-- Voice FAB -->
+  <button class="voice-fab" onclick="toggleVoice(this)" title="Voice AI">🎤</button>
+</div>
+
+<!-- ════════ PHARMACY STATION ════════ -->
+<div class="screen" id="s-rx">
+  <div class="top-rail">
+    <div class="tr-logo">Gini Flow</div>
+    <div class="tr-role" style="background:var(--tl-l);color:var(--tl)">💊 Pharmacy</div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <span class="badge b-tl">2 prescriptions ready</span>
+      <button class="tr-back" onclick="go('land')">← Stations</button>
+    </div>
+  </div>
+  <div class="station-layout">
+    <div class="squeue">
+      <div class="sq-header">
+        <div class="sq-title">Prescription queue</div>
+        <div class="sq-sub">2 ready · 17 dispensed today</div>
+      </div>
+      <div class="sq-item active">
+        <div class="si-slot" style="color:var(--tl)">Ready</div>
+        <div class="si-name">Isha Gambhir</div>
+        <div class="si-meta">41F · P_42220 · Dr. Bhansali</div>
+        <div class="si-bios"><span class="sbio sbio-a">Toujeo ↑</span><span class="sbio" style="background:var(--amb-l);color:var(--amb)">5 meds</span></div>
+      </div>
+      <div class="sq-item">
+        <div class="si-slot">Ready</div>
+        <div class="si-name">Sushma Gupta</div>
+        <div class="si-meta">60F · P_74360 · Dr. Beant Sidhu</div>
+      </div>
+      <div style="padding:10px 14px;font-size:10px;color:var(--ink3);border-top:1px solid var(--bd);margin-top:auto">✓ Dispensed today: 17 patients</div>
+    </div>
+    <div class="station-detail">
+      <div class="pharm-rx-header">
+        <div class="prh-name">Isha Gambhir</div>
+        <div class="prh-meta">41F · P_42220 · Prescription from Dr. Bhansali · Visit 5 · 27 Aug 2026</div>
+      </div>
+      <div class="sd-body">
+        <!-- Patient counselling note -->
+        <div class="counsel-box">
+          <div class="cb-label">Tell the patient — plain language</div>
+          <div class="cb-text">
+            Isha ji, aaj Doctor ne Toujeo 18 units kar diya hai — pehle 16 tha. Raat 10 baje lena hai sone se pehle. Huminsulin R khane se pehle lena hai — dose sliding scale ke hisab se. Atchol sone se pehle lena. Koi bhi dawai band mat karna without Doctor ki permission. BP thoda high hai — namak kam karo aur paani zyada peeyo.
+          </div>
+        </div>
+        <!-- Medicines to dispense -->
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:10px">Dispense checklist</div>
+        <div class="dispense-item">
+          <div class="di-check" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="di-body">
+            <div class="di-name">Toujeo <span class="badge b-amb" style="font-size:8px">↑ Changed 16→18U</span></div>
+            <div class="di-detail">SC · Once daily · at 10 PM · refrigerate</div>
+            <div class="di-stock ok">✓ In stock</div>
+          </div>
+          <div class="di-qty">1 pen</div>
+        </div>
+        <div class="dispense-item">
+          <div class="di-check" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="di-body">
+            <div class="di-name">Daplo 10mg</div>
+            <div class="di-detail">Oral · OD · 30 min before breakfast</div>
+            <div class="di-stock ok">✓ In stock · 60 tabs</div>
+          </div>
+          <div class="di-qty">30 tabs</div>
+        </div>
+        <div class="dispense-item">
+          <div class="di-check" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="di-body">
+            <div class="di-name">Telma 40mg</div>
+            <div class="di-detail">Oral · OD · at 8 PM</div>
+            <div class="di-stock ok">✓ In stock</div>
+          </div>
+          <div class="di-qty">30 tabs</div>
+        </div>
+        <div class="dispense-item">
+          <div class="di-check" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="di-body">
+            <div class="di-name">Atchol 20mg</div>
+            <div class="di-detail">Oral · OD · at 10 PM</div>
+            <div class="di-stock low">⚠ Low — 14 tabs left</div>
+          </div>
+          <div class="di-qty">30 tabs</div>
+        </div>
+        <div class="dispense-item">
+          <div class="di-check" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="di-body">
+            <div class="di-name">Huminsulin R <span class="badge b-amb" style="font-size:8px">↑ Dose changed</span></div>
+            <div class="di-detail">SC · variable · before meals · sliding scale per doctor's note</div>
+            <div class="di-stock ok">✓ In stock</div>
+          </div>
+          <div class="di-qty">2 vials</div>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn btn-tl" style="width:100%;padding:13px;font-size:14px;border-radius:var(--r-lg);justify-content:center" onclick="showToast('✓ Dispensed · Patient exit confirmed · NPS sent to MHG')">
+            ✓ All dispensed — confirm patient exit
+          </button>
+          <div style="font-size:10px;color:var(--ink3);text-align:center;margin-top:6px">NPS survey sent to patient MHG automatically on exit</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function go(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  const map={land:'s-land',floor:'s-floor',vitals:'s-vitals',doctor:'s-doctor',rx:'s-rx'};
+  const el=document.getElementById(map[id]||'s-land');
+  if(el)el.classList.add('active');
+}
+
+let toastTimer;
+function showToast(msg,ms=2800){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('show'),ms);
+}
+
+function toggleVoice(btn){
+  const isListening=btn.classList.contains('listening');
+  btn.classList.toggle('listening',!isListening);
+  if(!isListening){
+    btn.innerHTML='<div class="voice-dot"></div> Listening…';
+    setTimeout(()=>{
+      btn.classList.remove('listening');
+      btn.innerHTML='<div class="voice-dot"></div> Voice AI';
+      showToast('🎤 Voice captured — applying changes…');
+    },3000);
+  } else {
+    btn.innerHTML='<div class="voice-dot"></div> Voice AI';
+  }
+}
+
+function scrollTo(id){
+  const el=document.getElementById(id);
+  const main=document.getElementById('doc-main-scroll');
+  if(el&&main){main.scrollTo({top:el.offsetTop-46,behavior:'smooth'});}
+}
+
+function selectUrgency(btn,val){
+  btn.closest('.test-urgency').querySelectorAll('.tu-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const msgs={today:'Tests flagged for today — sent to reception + lab immediately',tomorrow:'Tests flagged for tomorrow — reception notified',next:'Tests added to next visit list — patient reminded via MHG'};
+  showToast(msgs[val]||'');
+}
+</script>
+</body>
+</html>

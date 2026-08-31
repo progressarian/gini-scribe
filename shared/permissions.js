@@ -88,6 +88,13 @@ export const CAPABILITIES = {
   FLOW_CONSULTANTS: "FLOW_CONSULTANTS",
   FLOW_PHARMACY: "FLOW_PHARMACY", // pharmacy dispense + confirm-exit (stops the clock)
   FLOW_REPORTS: "FLOW_REPORTS", // wait-time / bottleneck analytics
+
+  // Gini Flow — the replacement floor system (docs/gini-flow/). Deliberately its
+  // own keys rather than reusing FLOW_*: access to the two boards is granted
+  // independently while both run, and retiring the old module means deleting
+  // every FLOW_* key without touching these.
+  GINIFLOW_VIEW: "GINIFLOW_VIEW", // read the Gini Flow manager board
+  GINIFLOW_SLA_ADMIN: "GINIFLOW_SLA_ADMIN", // edit the Gini Flow time budgets
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
 };
 
@@ -126,6 +133,7 @@ export const ROLE_CAPABILITIES = {
     // second column, so a consultant has one desk, not two.
     C.FLOW_MY_PATIENTS,
     C.FLOW_REPORTS,
+    C.GINIFLOW_VIEW,
   ],
   [ROLES.MO]: [
     C.PATIENT_READ,
@@ -141,6 +149,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION,
     C.FLOW_STATION_MO,
     C.FLOW_FLOOR_VIEW,
+    C.GINIFLOW_VIEW,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the
@@ -157,6 +166,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_DIET,
     C.FLOW_STATION_RX,
     C.FLOW_FLOOR_VIEW,
+    C.GINIFLOW_VIEW,
   ],
   // Lab/tech need PATIENT_READ so they can look up whose report they're
   // uploading (Find + chart), on top of the lab upload/request capabilities.
@@ -168,6 +178,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION,
     C.FLOW_STATION_LAB,
     C.FLOW_FLOOR_VIEW,
+    C.GINIFLOW_VIEW,
   ],
   [ROLES.TECH]: [
     C.PATIENT_READ,
@@ -192,6 +203,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION,
     C.FLOW_STATION_VITALS,
     C.OBT_OPS,
+    C.GINIFLOW_VIEW,
   ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   // The GDA works two desks: Vitals and the Assistant Station. Dietitian was
@@ -212,6 +224,8 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_VITALS,
     C.FLOW_STATION_REPORTS,
     C.OBT_OPS,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_SLA_ADMIN,
   ],
   [ROLES.PHARMACY]: [
     C.PATIENT_READ,
@@ -223,6 +237,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION,
     C.FLOW_STATION_PHARM,
     C.FLOW_FLOOR_VIEW,
+    C.GINIFLOW_VIEW,
   ],
   // OBT outbound call team. The ONLY role without PATIENT_CHART: they phone
   // patients to confirm tomorrow's appointment, which needs identity and phone

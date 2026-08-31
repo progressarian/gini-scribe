@@ -2789,7 +2789,15 @@ export default function GHMPage() {
                                     Preferred
                                   </span>
                                 )}
-                                {row.booking_status === "booked" && (
+                                {row.booked_on && (
+                                  <span
+                                    className="booked-tag"
+                                    title={`Already booked for ${prettyDate(row.booked_on)} — no need to book again`}
+                                  >
+                                    Booked {prettyDate(row.booked_on)}
+                                  </span>
+                                )}
+                                {row.booking_status === "booked" && !row.booked_on && (
                                   <span className="booked-tag">Booked</span>
                                 )}
                                 {row.booking_status === "cancelled" && (

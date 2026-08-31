@@ -25,6 +25,7 @@ import { runDocumentClassification } from "./documentClassification.js";
 import { getLoginCooldownMs } from "../healthray/client.js";
 import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
+import { syncAppointmentsToFlow } from "../giniflow/appointmentSync.js";
 
 // ── Sync intervals ─────────────────────────────────────────────────────────
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
@@ -61,6 +62,12 @@ const STATUS_LOOP_MAX_BREAK_MS = 45 * 1000;
 // cadence keeps data fresh at a fraction of the request volume. Env-tunable so
 // ops can dial it further without a redeploy while there's no static-IP proxy
 // (the permanent fix — HEALTHRAY_PROXY_URL — is not yet provisioned).
+// Gini Flow's appointment sync reads our own Postgres, never HealthRay, so it is
+// not subject to the WAF rate limit that keeps the HealthRay loop at 2–3 minutes.
+// 30s keeps the floor board within one HealthRay poll of the truth.
+const GINIFLOW_LOOP_BREAK_MS = Number(process.env.GINIFLOW_SYNC_BREAK_MS) || 30 * 1000;
+const GINIFLOW_WATCHDOG_MS = 5 * 60 * 1000;
+
 const LAB_LOOP_MIN_BREAK_MS = Number(process.env.LAB_LOOP_MIN_BREAK_MS) || 120 * 1000;
 const LAB_LOOP_MAX_BREAK_MS = Number(process.env.LAB_LOOP_MAX_BREAK_MS) || 180 * 1000;
 
@@ -223,6 +230,34 @@ function scheduleNextLabSync(delayMs) {
   }, delayMs);
 }
 
+let giniflowLoopRunning = false;
+let giniflowLoopTimeoutId = null;
+
+function scheduleNextGiniflowSync(delayMs) {
+  if (!giniflowLoopRunning) return;
+  giniflowLoopTimeoutId = setTimeout(async () => {
+    giniflowLoopTimeoutId = null;
+    if (!giniflowLoopRunning) return;
+    const startedAt = Date.now();
+    try {
+      const r = await withWatchdog(
+        syncAppointmentsToFlow(),
+        GINIFLOW_WATCHDOG_MS,
+        "Gini Flow appointment sync",
+      );
+      // Only speak up when something moved — this runs every 30s all day.
+      if (r && (r.created || r.advanced || r.errors)) {
+        console.log(
+          `[Cron] Gini Flow sync: ${r.created} created, ${r.advanced} advanced, ${r.errors} errors of ${r.considered} in ${Date.now() - startedAt}ms`,
+        );
+      }
+    } catch (e) {
+      console.error("[Cron] Gini Flow appointment sync failed:", e.message);
+    }
+    scheduleNextGiniflowSync(GINIFLOW_LOOP_BREAK_MS);
+  }, delayMs);
+}
+
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
@@ -276,6 +311,18 @@ export function startCronJobs() {
 
   labLoopRunning = true;
   scheduleNextLabSync(0);
+
+  // Gini Flow floor board. Reads the appointments table the HealthRay loop
+  // maintains; writes only giniflow_* — it never touches the older flow_* module.
+  if (process.env.GINIFLOW_SYNC_DISABLED === "1") {
+    console.log("[Cron] Gini Flow appointment sync disabled by GINIFLOW_SYNC_DISABLED");
+  } else {
+    giniflowLoopRunning = true;
+    scheduleNextGiniflowSync(5_000);
+    console.log(
+      `[Cron] Gini Flow appointment sync every ${Math.round(GINIFLOW_LOOP_BREAK_MS / 1000)}s`,
+    );
+  }
 
   // Recovery job every 15 min
   recoveryIntervalId = setInterval(() => {
@@ -448,6 +495,11 @@ export function startCronJobs() {
 }
 
 export function stopCronJobs() {
+  giniflowLoopRunning = false;
+  if (giniflowLoopTimeoutId) {
+    clearTimeout(giniflowLoopTimeoutId);
+    giniflowLoopTimeoutId = null;
+  }
   if (healthrayLoopRunning || healthrayLoopTimeoutId) {
     healthrayLoopRunning = false;
     if (healthrayLoopTimeoutId) {

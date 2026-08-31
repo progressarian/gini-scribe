@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gini — Doctor View</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9;--white:#fff;--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--ink4:#94a3b8;
+  --bd:#e2e8f0;--bd2:#cbd5e1;--nv:#0f172a;
+  --red:#dc2626;--red-l:#fef2f2;--red-b:rgba(220,38,38,.14);
+  --amb:#d97706;--amb-l:#fffbeb;--amb-b:rgba(217,119,6,.14);
+  --grn:#16a34a;--grn-l:#f0fdf4;--grn-b:rgba(22,163,74,.14);
+  --blu:#2563eb;--blu-l:#eff6ff;--blu-b:rgba(37,99,235,.14);
+  --pu:#7c3aed;--pu-l:#f5f3ff;--pu-b:rgba(124,58,237,.14);
+  --tl:#0d9488;--tl-l:#f0fdfa;--tl-b:rgba(13,148,136,.14);
+  --fb:'Inter',sans-serif;--fm:'JetBrains Mono',monospace;--fd:'Instrument Serif',serif;
+  --sh:0 1px 2px rgba(0,0,0,.05),0 1px 3px rgba(0,0,0,.08);
+  --sh-md:0 4px 14px rgba(0,0,0,.1);
+  --r:8px;--r-lg:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fb);color:var(--ink);background:var(--bg);font-size:13px;line-height:1.5}
+
+/* ── SCREEN ── */
+.screen{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── TOP RAIL ── */
+.top-rail{background:var(--nv);height:44px;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0}
+.tr-logo{font-family:var(--fd);font-size:15px;color:#fff;font-style:italic}
+.tr-sep{width:1px;height:14px;background:rgba(255,255,255,.15);flex-shrink:0}
+.tr-r{margin-left:auto;display:flex;gap:5px;align-items:center}
+.tbtn{padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.7);font-family:var(--fb)}
+.tbtn:hover{background:rgba(255,255,255,.1);color:#fff}
+.tbtn.grn{background:var(--grn);border-color:var(--grn);color:#fff}
+.tbtn.grn:hover{opacity:.88}
+.vbtn{background:var(--pu);border:none;border-radius:20px;padding:5px 11px;font-size:11px;font-weight:600;color:#fff;cursor:pointer;font-family:var(--fb);display:flex;align-items:center;gap:4px}
+.vbtn:hover{background:#6d28d9}
+
+/* ── PATIENT HEADER ── */
+.pt-hdr{background:var(--nv);padding:9px 14px;display:flex;align-items:flex-start;gap:10px;flex-shrink:0}
+.ph-name{font-family:var(--fd);font-size:18px;color:#fff;font-style:italic;flex:1}
+.ph-meta{font-size:10px;color:rgba(255,255,255,.4);margin-top:2px;line-height:1.6}
+.ph-chips{display:flex;gap:5px;flex-wrap:wrap;flex-shrink:0}
+
+/* ── VISIT STRIP ── */
+.visit-strip{background:var(--white);border-bottom:1px solid var(--bd);display:flex;align-items:stretch;flex-shrink:0;overflow-x:auto}
+.visit-strip::-webkit-scrollbar{height:0}
+.vs-it{padding:7px 12px;border-right:1px solid var(--bd);flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.vs-it:first-child{padding-left:14px}
+.vs-it:last-child{border-right:none}
+.vsi-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink4)}
+.vsi-val{font-size:12px;font-weight:600;color:var(--ink)}
+.vsi-val.g{color:var(--grn)}.vsi-val.a{color:var(--amb)}.vsi-val.r{color:var(--red)}
+
+/* ── SUMMARY BAR ── */
+.summ-bar{background:var(--nv);padding:6px 14px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex-shrink:0}
+.sc{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;display:flex;align-items:center;gap:4px}
+.sc-g{background:rgba(22,163,74,.2);color:#86efac}
+.sc-r{background:rgba(220,38,38,.2);color:#fca5a5}
+.sc-a{background:rgba(217,119,6,.2);color:#fcd34d}
+.summ-sep{width:1px;height:14px;background:rgba(255,255,255,.12)}
+
+/* ── QUICK NAV ── */
+.qnav{background:var(--white);border-bottom:2px solid var(--bd);display:flex;flex-shrink:0;overflow-x:auto}
+.qnav::-webkit-scrollbar{height:0}
+.qn{padding:9px 14px;font-size:12px;font-weight:600;color:var(--ink3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--fb);transition:all .12s}
+.qn.active{color:var(--tl);border-bottom-color:var(--tl)}
+.qn:hover{color:var(--ink)}
+.qn-r{margin-left:auto;display:flex;gap:5px;align-items:center;padding:6px 12px;flex-shrink:0}
+
+/* ── SCROLL BODY ── */
+.body-scroll{flex:1;overflow-y:auto}
+.body-scroll::-webkit-scrollbar{width:4px}
+.body-scroll::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.inner{padding:12px 14px;display:flex;flex-direction:column;gap:10px;max-width:1100px;margin:0 auto}
+
+/* ── SECTION CARD ── */
+.sec{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);box-shadow:var(--sh);overflow:visible}
+.sec-hd{padding:9px 13px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;background:var(--white)}
+.sh-l{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ink)}
+.sh-sub{font-size:10px;color:var(--ink3);font-weight:400;margin-left:3px}
+.sh-r{display:flex;gap:5px;align-items:center}
+.sec-bd{padding:11px 13px}
+.collapsed .sec-bd{display:none}
+.col-btn{font-size:11px;color:var(--ink3);cursor:pointer;padding:2px 7px;border-radius:4px;border:1px solid var(--bd);background:var(--white);font-family:var(--fb)}
+
+/* ── SHARED ATOMS ── */
+.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.b-red{background:var(--red-l);color:var(--red)}.b-amb{background:var(--amb-l);color:var(--amb)}
+.b-grn{background:var(--grn-l);color:var(--grn)}.b-tl{background:var(--tl-l);color:var(--tl)}
+.b-blu{background:var(--blu-l);color:var(--blu)}.b-pu{background:var(--pu-l);color:var(--pu)}
+.b-ink{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.btn{padding:5px 10px;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb);transition:all .12s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.btn-ghost{background:var(--white);color:var(--ink3);border-color:var(--bd)}.btn-ghost:hover{color:var(--ink)}
+.btn-tl{background:var(--tl);color:#fff;border-color:var(--tl)}.btn-tl:hover{opacity:.88}
+.btn-grn{background:var(--grn);color:#fff;border-color:var(--grn)}.btn-grn:hover{opacity:.88}
+.slbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:6px}
+
+/* ══ 1. OVERVIEW ══ */
+.c3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.cg-hd{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--bd)}
+.ci{display:flex;gap:6px;align-items:flex-start;padding:5px 0;border-bottom:1px dashed rgba(0,0,0,.06);font-size:11px;line-height:1.5}
+.ci:last-child{border:none}
+.ci strong{color:var(--ink);font-weight:600}
+
+/* Numbers grid */
+.num-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-bottom:10px}
+.nt{border-radius:var(--r);padding:9px;border:1px solid;cursor:pointer;transition:all .12s}
+.nt:hover{box-shadow:var(--sh-md);transform:translateY(-1px)}
+.nt.r{background:var(--red-l);border-color:var(--red-b)}.nt.a{background:var(--amb-l);border-color:var(--amb-b)}
+.nt.g{background:var(--grn-l);border-color:var(--grn-b)}.nt.n{background:var(--bg);border-color:var(--bd)}
+.nt-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
+.nt.r .nt-lbl{color:var(--red)}.nt.a .nt-lbl{color:var(--amb)}.nt.g .nt-lbl{color:var(--grn)}.nt.n .nt-lbl{color:var(--ink3)}
+.nt-val{font-family:var(--fm);font-size:18px;font-weight:500;line-height:1;margin-bottom:2px}
+.nt.r .nt-val{color:var(--red)}.nt.a .nt-val{color:var(--amb)}.nt.g .nt-val{color:var(--grn)}.nt.n .nt-val{color:var(--ink)}
+.nt-tr{font-size:9px;font-weight:600;margin-bottom:3px}
+.nt.r .nt-tr{color:var(--red)}.nt.a .nt-tr{color:var(--amb)}.nt.g .nt-tr{color:var(--grn)}.nt.n .nt-tr{color:var(--ink3)}
+.sp-row{display:flex;gap:1px;align-items:flex-end;height:13px}
+.sp{border-radius:1px 1px 0 0;min-height:2px;flex:1}
+.nt-hint{font-size:8px;color:var(--ink3);margin-top:2px;opacity:.65}
+
+/* Diagnoses */
+.dx-grp{margin-bottom:7px}
+.dx-grp-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:4px}
+.dx-chips{display:flex;flex-wrap:wrap;gap:4px}
+.dx-chip{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;border:1px solid;display:flex;align-items:center;gap:4px;cursor:pointer}
+.dx-primary{background:var(--red-l);border-color:var(--red-b);color:var(--red)}
+.dx-present{background:#f1f5f9;border-color:var(--bd);color:var(--ink2)}
+
+/* ══ 2. LABS ══ */
+.lab-tabs{display:flex;border-bottom:1px solid var(--bd);margin-bottom:10px}
+.lt{padding:7px 12px;font-size:11px;font-weight:600;cursor:pointer;color:var(--ink3);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--fb)}
+.lt.active{color:var(--tl);border-bottom-color:var(--tl)}
+.lab-panel{display:none}.lab-panel.active{display:block}
+.lr{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);font-size:11px}
+.lr:last-child{border:none}
+.lr-name{flex:1;color:var(--ink2);font-weight:500}
+.lr-val{font-family:var(--fm);font-size:13px;font-weight:700;min-width:90px;text-align:right}
+.lr-val.r{color:var(--red)}.lr-val.a{color:var(--amb)}.lr-val.g{color:var(--grn)}
+.lr-ref{font-size:10px;color:var(--ink3);min-width:80px;text-align:right}
+.lr-trend{font-size:10px;font-weight:600;min-width:70px;text-align:right}
+.lr-chart{cursor:pointer;font-size:10px;color:var(--tl);font-weight:600;min-width:48px;text-align:right}
+.rep-file{display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--bg);border-radius:var(--r);border:1px solid var(--bd);margin-bottom:6px;cursor:pointer}
+.rf-ico{font-size:18px}.rf-body{flex:1}
+.rf-name{font-size:12px;font-weight:600;color:var(--ink)}.rf-meta{font-size:10px;color:var(--ink3);margin-top:1px}
+.rf-act{font-size:11px;color:var(--tl);font-weight:600}
+
+/* ══ 3. PRESCRIPTION ══ */
+.vbar{background:var(--pu-l);border:1px solid var(--pu-b);border-radius:var(--r);padding:8px 11px;margin-bottom:9px;display:flex;gap:8px;align-items:center}
+.vbar-t{flex:1;font-size:11px;color:var(--ink3);line-height:1.5}
+.vbar-t em{color:var(--pu);font-style:italic}
+
+/* Rx table */
+.rx-tbl{width:100%;border-collapse:collapse}
+.rx-tbl thead th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);text-align:left;padding:6px 9px;border-bottom:2px solid var(--bd);background:var(--bg)}
+.rx-tbl thead th.tl-col{color:var(--tl)}
+.rx-tr td{padding:8px 9px;border-bottom:1px solid var(--bd);vertical-align:middle}
+.rx-tr:hover td{background:var(--tl-l);cursor:pointer}
+.rx-tr:last-child td{border:none}
+.rx-edit-tr{display:none}
+.rx-edit-tr.open{display:table-row}
+.rx-edit-tr td{padding:0;border-bottom:1px solid var(--bd)}
+.ep{background:var(--tl-l);border-top:2px solid var(--tl);padding:11px 13px}
+/* 5-col edit grid to fit timing+time */
+.ep-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 100px;gap:9px;margin-bottom:9px}
+.ep-f label{display:block;font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px}
+.ep-inp{width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:7px 9px;font-family:var(--fb);font-size:12px;color:var(--ink);background:var(--white);outline:none}
+.ep-inp:focus{border-color:var(--tl);box-shadow:0 0 0 2px var(--tl-b)}
+.ep-acts{display:flex;gap:6px;align-items:center}
+/* Med cell */
+.med-n{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:1px}
+.med-f{font-size:10px;color:var(--ink3)}
+.med-tag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;display:inline-block;margin-bottom:2px}
+.mt-ch{background:var(--amb-l);color:var(--amb)}.mt-new{background:var(--grn-l);color:var(--grn)}.mt-stop{background:var(--red-l);color:var(--red)}
+/* Stock cell */
+.stk-ok{font-size:11px;font-weight:600;color:var(--grn);display:flex;flex-direction:column;gap:1px}
+.stk-lo{font-size:11px;font-weight:600;color:var(--amb);display:flex;flex-direction:column;gap:1px}
+.stk-out{font-size:11px;font-weight:600;color:var(--red);display:flex;flex-direction:column;gap:1px}
+.stk-qty{font-size:9px;font-weight:400;color:var(--ink3)}
+.stk-alt{font-size:9px;font-weight:700;color:var(--pu);cursor:pointer;text-decoration:underline}
+/* Row hover actions */
+.ra{display:flex;gap:3px;opacity:0;transition:opacity .1s}
+.rx-tr:hover .ra{opacity:1}
+.ra-btn{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid;font-family:var(--fb)}
+.ra-e{background:var(--white);color:var(--tl);border-color:var(--tl)}.ra-e:hover{background:var(--tl);color:#fff}
+.ra-p{background:var(--white);color:var(--amb);border-color:var(--amb-b)}.ra-p:hover{background:var(--amb);color:#fff}
+.ra-s{background:var(--white);color:var(--red);border-color:var(--red-b)}.ra-s:hover{background:var(--red);color:#fff}
+
+/* Add medicine */
+.add-panel{border:2px dashed var(--bd2);border-radius:var(--r-lg);padding:11px;transition:all .15s}
+.add-panel.open{border-color:var(--tl);border-style:solid;background:var(--tl-l)}
+.add-sr-row{display:flex;gap:7px;margin-bottom:8px}
+.add-inp{flex:1;border:1.5px solid var(--bd);border-radius:var(--r);padding:8px 11px;font-family:var(--fb);font-size:13px;color:var(--ink);background:var(--white);outline:none}
+.add-inp:focus{border-color:var(--tl)}
+.srlist{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);box-shadow:var(--sh-md);display:none;overflow:hidden;margin-bottom:8px}
+.srlist.open{display:block}
+.sri{padding:9px 11px;border-bottom:1px solid var(--bd);cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s}
+.sri:last-child{border:none}.sri:hover{background:var(--tl-l)}
+.sri-body{flex:1}
+.sri-name{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:1px}
+.sri-info{font-size:10px;color:var(--ink3)}
+.add-form{display:none}
+.add-form.open{display:block}
+.af-sel{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:8px 11px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.af-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 90px;gap:8px;margin-bottom:8px}
+.af-f label{display:block;font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px}
+.af-inp{width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:6px 9px;font-family:var(--fb);font-size:12px;color:var(--ink);background:var(--white);outline:none}
+.af-inp:focus{border-color:var(--tl)}
+
+/* External medicines table */
+.ext-tbl{width:100%;border-collapse:collapse}
+.ext-tbl th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);text-align:left;padding:6px 9px;border-bottom:2px solid var(--bd);background:var(--bg)}
+.ext-tbl td{padding:9px 9px;border-bottom:1px solid var(--bd);font-size:12px;vertical-align:top}
+.ext-tbl tr:last-child td{border:none}
+.ext-tbl tbody tr:hover td{background:var(--blu-l);cursor:pointer}
+.ext-n{font-weight:700;color:var(--ink);margin-bottom:1px}
+.ext-f{font-size:10px;color:var(--ink3)}
+.ext-dr{font-weight:600;color:var(--blu)}
+.ext-sp{font-size:10px;color:var(--ink3);margin-top:1px}
+.int-ok{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--grn-l);color:var(--grn)}
+.int-warn{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--amb-l);color:var(--amb)}
+/* Add external form */
+.aef{background:var(--blu-l);border-top:2px solid var(--blu);padding:11px 13px;display:none}
+.aef.open{display:block}
+.aef-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px}
+.aef-f label{display:block;font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px}
+.aef-inp{width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:6px 9px;font-family:var(--fb);font-size:12px;color:var(--ink);background:var(--white);outline:none}
+.aef-inp:focus{border-color:var(--blu)}
+
+/* ══ 4. TESTS ══ */
+.urgency-tabs{display:flex;gap:4px;margin-bottom:10px}
+.ut{padding:4px 11px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--white);font-family:var(--fb);transition:all .12s}
+.ut.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+.panels-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.panel-btn{padding:8px 12px;border-radius:var(--r);border:1px solid var(--bd);background:var(--white);cursor:pointer;font-family:var(--fb);transition:all .12s}
+.panel-btn:hover,.panel-btn.sel{border-color:var(--tl);background:var(--tl-l)}
+.pb-name{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.pb-tests{font-size:10px;color:var(--ink3)}
+.pb-count{font-size:10px;font-weight:700;color:var(--tl);margin-top:1px}
+.tests-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(125px,1fr));gap:5px;margin-bottom:10px}
+.tc{padding:6px 9px;border-radius:var(--r);font-size:11px;cursor:pointer;border:1px solid var(--bd);background:var(--white);font-family:var(--fb);transition:all .12s;font-weight:500}
+.tc:hover{border-color:var(--tl)}.tc.sel{background:var(--tl-l);border-color:var(--tl);color:var(--tl);font-weight:600}
+.tc-name{margin-bottom:1px}.tc-sub{font-size:9px;color:var(--ink3)}.tc.sel .tc-sub{color:var(--tl);opacity:.7}
+
+/* ══ 5. MEDICINE CARD ══ */
+.med-card{border:1px solid var(--bd);border-radius:var(--r-lg);overflow:hidden}
+.mc-row{display:flex;align-items:stretch;border-bottom:1px solid var(--bd)}
+.mc-row:last-child{border:none}
+.mc-time{min-width:130px;padding:9px 12px;background:var(--bg);border-right:1px solid var(--bd);flex-shrink:0}
+.mc-tl{font-size:10px;font-weight:700;color:var(--ink);margin-bottom:1px}
+.mc-ts{font-size:9px;color:var(--ink3)}
+.mc-pills{flex:1;padding:7px 11px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.mc-pill{font-size:10px;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid;white-space:nowrap}
+.mcp-d{background:var(--blu-l);border-color:var(--blu-b);color:var(--blu)}
+.mcp-b{background:var(--amb-l);border-color:var(--amb-b);color:var(--amb)}
+.mcp-l{background:var(--pu-l);border-color:var(--pu-b);color:var(--pu)}
+.mcp-s{background:var(--grn-l);border-color:var(--grn-b);color:var(--grn)}
+.mcp-p{background:#f1f5f9;border-color:var(--bd);color:var(--ink3)}
+.mcp-ext{background:var(--blu-l);border-color:var(--blu-b);color:var(--blu);border-style:dashed}
+.ptag{font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;margin-left:2px}
+.ptag-new{background:var(--grn);color:#fff}
+.ptag-ch{background:var(--amb);color:#fff}
+.ptag-ext{background:var(--blu);color:#fff}
+.pnote{font-size:9px;opacity:.65;font-weight:400}
+.mc-empty{font-size:10px;color:var(--ink4);font-style:italic}
+
+/* ── FINALIZE ── */
+.finalize{background:var(--nv);border-radius:var(--r-lg);padding:13px 15px;display:flex;align-items:center;gap:12px}
+.fin-t{flex:1;color:#fff}
+.fin-title{font-size:13px;font-weight:700;margin-bottom:4px}
+.fin-routes{display:flex;gap:4px;flex-wrap:wrap}
+.fr{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.6)}
+.fr.warn{background:rgba(217,119,6,.2);border-color:rgba(217,119,6,.3);color:#fcd34d}
+.fin-btn{padding:11px 20px;background:var(--grn);color:#fff;border:none;border-radius:var(--r-lg);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fb)}
+.fin-btn:hover{opacity:.88}
+
+/* Graph modal */
+.gmodal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;display:none;align-items:center;justify-content:center}
+.gmodal.open{display:flex}
+.gbox{background:var(--white);border-radius:var(--r-lg);padding:20px;width:480px;box-shadow:0 20px 50px rgba(0,0,0,.2);position:relative}
+.gcls{position:absolute;top:11px;right:11px;background:var(--bg);border:none;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:13px;color:var(--ink3)}
+.gsvg{width:100%;height:100px}
+
+/* Alternatives modal */
+.amodal{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;display:none;align-items:center;justify-content:center}
+.amodal.open{display:flex}
+.abox{background:var(--white);border-radius:var(--r-lg);padding:20px;width:440px;box-shadow:0 20px 50px rgba(0,0,0,.2)}
+.alt-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd);cursor:pointer}
+.alt-item:last-child{border:none}.alt-item:hover{opacity:.82}
+.ai-n{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.ai-d{font-size:10px;color:var(--ink3)}
+
+/* Toast */
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:var(--r-lg);font-size:12px;font-weight:500;z-index:999;box-shadow:var(--sh-md);display:none;white-space:nowrap}
+.toast.show{display:block}
+</style>
+</head>
+<body>
+<div class="screen">
+
+<!-- ── TOP RAIL ── -->
+<div class="top-rail">
+  <div class="tr-logo">Gini Scribe</div>
+  <div class="tr-sep"></div>
+  <span style="font-size:12px;font-weight:600;color:#fff">Sandeep Kumar</span>
+  <span class="badge b-ink" style="font-size:9px">50M · P_177562</span>
+  <span class="badge b-amb" style="font-size:9px">Phase 1 · Uncontrolled</span>
+  <div class="tr-r">
+    <button class="vbtn" onclick="toast('🎤 Listening… say instructions')">🎤 Voice AI</button>
+    <button class="tbtn" onclick="toast('← Back to patient list')">← Patients</button>
+    <button class="tbtn" onclick="toast('Draft saved')">Draft</button>
+    <button class="tbtn grn" onclick="toast('✓ Finalized · pharmacy + lab + patient')">Finalize →</button>
+  </div>
+</div>
+
+<!-- ── PATIENT HEADER ── -->
+<div class="pt-hdr">
+  <div>
+    <div class="ph-name">Sandeep Kumar</div>
+    <div class="ph-meta">50M · P_177562 · DB #9500 · Dr. Beant Sidhu (SD) · T2DM AOO 38 yrs · 7 diagnoses · 9 medicines</div>
+  </div>
+  <div class="ph-chips">
+    <span class="badge" style="background:rgba(217,119,6,.25);color:#fcd34d">Phase 1 · Uncontrolled</span>
+    <span class="badge b-amb">🟡 Flag for review</span>
+    <span class="badge" style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.55)">Visit 5 · 20 May 2026</span>
+  </div>
+</div>
+
+<!-- ── VISIT STRIP ── -->
+<div class="visit-strip">
+  <div class="vs-it"><div class="vsi-lbl">With Gini</div><div class="vsi-val">10 months</div></div>
+  <div class="vs-it"><div class="vsi-lbl">Visit</div><div class="vsi-val">5 of 5</div></div>
+  <div class="vs-it"><div class="vsi-lbl">HbA1c since 1st</div><div class="vsi-val g">6.6→6.8% <span style="font-size:10px;color:var(--ink3)">↑ slight</span></div></div>
+  <div class="vs-it"><div class="vsi-lbl">Weight since last</div><div class="vsi-val a">+0.5 kg · 116.8 kg</div></div>
+  <div class="vs-it"><div class="vsi-lbl">BP today</div><div class="vsi-val a">143/90 <span style="font-size:9px;background:var(--amb-l);color:var(--amb);padding:1px 4px;border-radius:3px;margin-left:2px">Review</span></div></div>
+  <div class="vs-it"><div class="vsi-lbl">Last visit</div><div class="vsi-val">4 Nov 2025 <span style="font-size:10px;color:var(--ink3)">7 months ago</span></div></div>
+  <div class="vs-it"><div class="vsi-lbl">Current regimen</div>
+    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px">
+      <span class="badge b-ink" style="font-size:9px">Cospiaq</span>
+      <span class="badge b-ink" style="font-size:9px">Lipaglyn</span>
+      <span class="badge b-ink" style="font-size:9px">Atchol</span>
+      <span class="badge b-tl" style="font-size:9px">+6 more</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── SUMMARY BAR ── -->
+<div class="summ-bar">
+  <span class="sc sc-g">✓ 4 in control — HbA1c · UACR · Creatinine · Retinopathy</span>
+  <div class="summ-sep"></div>
+  <span class="sc sc-r">↑ 1 worse — TG tripled to 368</span>
+  <div class="summ-sep"></div>
+  <span class="sc sc-a">⚠ 2 watch — BP 143/90 · LDL 127</span>
+</div>
+
+<!-- ── QUICK NAV ── -->
+<div class="qnav">
+  <button class="qn active" onclick="jumpTo('s-overview',this)">📋 Overview</button>
+  <button class="qn" onclick="jumpTo('s-labs',this)">📊 Labs & graphs</button>
+  <button class="qn" onclick="jumpTo('s-rx',this)">💊 Prescription</button>
+  <button class="qn" onclick="jumpTo('s-tests',this)">🔬 Tests</button>
+  <button class="qn" onclick="jumpTo('s-medcard',this)">🗒 Medicine card</button>
+  <div class="qn-r">
+    <button class="vbtn" style="font-size:10px;padding:4px 9px" onclick="toast('🎤 Speak changes…')">🎤 Speak</button>
+    <button class="btn btn-grn" onclick="toast('✓ Finalized')">Finalize →</button>
+  </div>
+</div>
+
+<!-- ── SCROLL BODY ── -->
+<div class="body-scroll" id="bodyScroll">
+<div class="inner">
+
+<!-- ══════ 1. OVERVIEW ══════ -->
+<div class="sec" id="s-overview">
+  <div class="sec-hd">
+    <div class="sh-l">📋 Overview — visit 5
+      <span class="sh-sub">today's concerns · key numbers · diagnoses</span></div>
+    <div class="sh-r"><button class="col-btn" onclick="toggleSec(this)">Collapse</button></div>
+  </div>
+  <div class="sec-bd">
+
+    <!-- Concerns 3-col -->
+    <div style="margin-bottom:12px">
+      <div class="slbl" style="margin-bottom:8px">Today's concerns</div>
+      <div class="c3">
+        <div>
+          <div class="cg-hd" style="color:var(--red)">🧪 From reports — 20 May 2026</div>
+          <div class="ci"><span>🔴</span><span><strong>TG tripled</strong> — 131→368 mg/dL. Lipid strategy needs urgent review.</span></div>
+          <div class="ci"><span>🟡</span><span><strong>FBS 139</strong> — above target &lt;130. Mean glucose 164.78 mg/dL.</span></div>
+          <div class="ci"><span>🟡</span><span><strong>BP 143/90</strong> — improving from 152/88, still elevated.</span></div>
+          <div class="ci"><span>🟡</span><span><strong>LDL 127</strong> — above target &lt;100. Atchol 20mg insufficient.</span></div>
+          <div class="ci"><span>✅</span><span>HbA1c 6.8% at target. UACR 6.11 normal. eGFR 85.5 stable G2A2.</span></div>
+        </div>
+        <div>
+          <div class="cg-hd" style="color:var(--blu)">💬 Patient reported — pre-visit</div>
+          <div class="ci"><span>💬</span><span><strong>Evening fatigue</strong> — new since last visit. Consider TSH.</span></div>
+          <div class="ci"><span>💬</span><span><strong>Weight concern</strong> — "kya dawai se weight badh raha hai?"</span></div>
+          <div class="ci"><span>❓</span><span><strong>Question:</strong> "TG itna kyun high hai — diet galat tha kya?"</span></div>
+          <div class="ci"><span>✅</span><span>No hypoglycaemia. No foot complaints. No hospitalisation.</span></div>
+        </div>
+        <div>
+          <div class="cg-hd" style="color:var(--amb)">📅 Since last visit — 7 months</div>
+          <div class="ci"><span>🟡</span><span><strong>Compliance 74%</strong> — missed Cospiaq + Montair on weekends.</span></div>
+          <div class="ci"><span>🟡</span><span><strong>Weight +0.5 kg</strong> — steady gain. BMI 35.92. MASLD active.</span></div>
+          <div class="ci"><span>📋</span><span>Retinopathy: NO DRP. Neuropathy: VPT Left 7V (Oct 2025).</span></div>
+          <div class="ci"><span>✅</span><span>No new outside medicines. No new diagnoses.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key numbers -->
+    <div style="margin-bottom:12px">
+      <div class="slbl" style="margin-bottom:7px">Key numbers — tap any for trend graph</div>
+      <div class="num-grid">
+        <div class="nt a" onclick="openGraph('HbA1c','6.9,6.8,6.9,6.8','%','<7.0%')">
+          <div class="nt-lbl">HbA1c</div><div class="nt-val">6.8<span style="font-size:11px;font-weight:400">%</span></div>
+          <div class="nt-tr">↑ from 6.6% · borderline</div>
+          <div class="sp-row"><div class="sp" style="height:55%;background:var(--amb);opacity:.5"></div><div class="sp" style="height:60%;background:var(--amb);opacity:.7"></div><div class="sp" style="height:55%;background:var(--amb)"></div><div class="sp" style="height:65%;background:var(--amb)"></div></div>
+          <div class="nt-hint">Tap → graph</div>
+        </div>
+        <div class="nt a" onclick="openGraph('FBS','133,128,135,139','mg/dL','<130')">
+          <div class="nt-lbl">FBS</div><div class="nt-val">139<span style="font-size:10px;font-weight:400"> mg</span></div>
+          <div class="nt-tr">↑ from 133 · above target</div><div class="nt-hint">Tap → graph</div>
+        </div>
+        <div class="nt r" onclick="openGraph('Triglycerides','131,145,180,368','mg/dL','<150')">
+          <div class="nt-lbl">Triglycerides</div><div class="nt-val">368<span style="font-size:10px;font-weight:400"> mg</span></div>
+          <div class="nt-tr">↑↑↑ tripled from 131</div>
+          <div class="sp-row"><div class="sp" style="height:25%;background:var(--red);opacity:.4"></div><div class="sp" style="height:40%;background:var(--red);opacity:.6"></div><div class="sp" style="height:60%;background:var(--red);opacity:.8"></div><div class="sp" style="height:100%;background:var(--red)"></div></div>
+          <div class="nt-hint">Tap → graph</div>
+        </div>
+        <div class="nt a" onclick="openGraph('LDL','130,127,125,127','mg/dL','<100')">
+          <div class="nt-lbl">LDL</div><div class="nt-val">127<span style="font-size:10px;font-weight:400"> mg</span></div>
+          <div class="nt-tr">Stable above target</div><div class="nt-hint">Tap → graph</div>
+        </div>
+        <div class="nt g" onclick="openGraph('eGFR','87,88,86,85','mL/min','>60')">
+          <div class="nt-lbl">eGFR</div><div class="nt-val">85.5</div>
+          <div class="nt-tr">↓ slight · stable G2A2</div><div class="nt-hint">Tap → graph</div>
+        </div>
+        <div class="nt a" onclick="openGraph('BP','152,148,145,143','mmHg','<130/80')">
+          <div class="nt-lbl">BP today</div><div class="nt-val" style="font-size:15px">143<span style="font-size:10px;font-weight:400">/90</span></div>
+          <div class="nt-tr">↓ improving · still elevated</div><div class="nt-hint">Tap → graph</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnoses -->
+    <div>
+      <div class="slbl" style="margin-bottom:7px">Diagnoses — 7 active</div>
+      <div class="dx-grp">
+        <div class="dx-grp-lbl">Primary</div>
+        <div class="dx-chips">
+          <div class="dx-chip dx-primary">T2 Diabetes <span style="font-size:9px;opacity:.7">AOO 38 yrs</span></div>
+        </div>
+      </div>
+      <div class="dx-grp" style="margin-top:7px">
+        <div class="dx-grp-lbl">Complications & comorbidities</div>
+        <div class="dx-chips">
+          <div class="dx-chip dx-present">Nephropathy <span style="font-size:9px;opacity:.6">G2 A2</span></div>
+          <div class="dx-chip dx-present">Neuropathy <span style="font-size:9px;opacity:.6">VPT L 7V</span></div>
+          <div class="dx-chip dx-present">Retinopathy <span style="font-size:9px;opacity:.6">NO DRP</span></div>
+          <div class="dx-chip dx-present">Hypertension</div>
+          <div class="dx-chip dx-present">MASLD</div>
+          <div class="dx-chip dx-present">Dual Adiposity <span style="font-size:9px;opacity:.6">BMI 35.9</span></div>
+          <div class="dx-chip" style="border:1px dashed var(--bd2);color:var(--ink3);background:transparent;cursor:pointer" onclick="toast('Add diagnosis')">+ Add</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 2. LABS ══════ -->
+<div class="sec" id="s-labs">
+  <div class="sec-hd">
+    <div class="sh-l">📊 Labs & graphs <span class="sh-sub">— Gini Lab · 20 May 2026</span></div>
+    <div class="sh-r">
+      <button class="btn btn-ghost" onclick="toast('Full lab report PDF opened')">Full report →</button>
+      <button class="col-btn" onclick="toggleSec(this)">Collapse</button>
+    </div>
+  </div>
+  <div class="sec-bd">
+    <div class="lab-tabs">
+      <button class="lt active" onclick="switchTab(this,'lt-d')">🩸 Diabetes</button>
+      <button class="lt" onclick="switchTab(this,'lt-l')">💛 Lipids</button>
+      <button class="lt" onclick="switchTab(this,'lt-r')">🫘 Renal</button>
+      <button class="lt" onclick="switchTab(this,'lt-b')">⚖️ Body / vitals</button>
+      <button class="lt" onclick="switchTab(this,'lt-rp')">📄 Reports</button>
+    </div>
+    <div class="lab-panel active" id="lt-d">
+      <div class="lr"><div class="lr-name">HbA1c — Glycated Haemoglobin</div><div class="lr-val a">6.8%</div><div class="lr-ref">Ref 4.5–6.5%</div><div class="lr-trend" style="color:var(--amb)">↑ from 6.6</div><div class="lr-chart" onclick="openGraph('HbA1c','6.9,6.8,6.9,6.8','%','<7.0%')">Graph →</div></div>
+      <div class="lr"><div class="lr-name">Fasting Blood Sugar</div><div class="lr-val a">139 mg/dL</div><div class="lr-ref">&lt;100 mg/dL</div><div class="lr-trend" style="color:var(--amb)">↑ from 133</div><div class="lr-chart" onclick="openGraph('FBS','133,128,135,139','mg/dL','<130')">Graph →</div></div>
+      <div class="lr"><div class="lr-name">Mean Plasma Glucose</div><div class="lr-val a">164.8 mg/dL</div><div class="lr-ref">&lt;154 mg/dL</div><div class="lr-trend">—</div><div class="lr-chart">—</div></div>
+    </div>
+    <div class="lab-panel" id="lt-l">
+      <div class="lr"><div class="lr-name">Triglycerides</div><div class="lr-val r">368 mg/dL</div><div class="lr-ref">&lt;150 mg/dL</div><div class="lr-trend" style="color:var(--red)">↑↑↑ from 131</div><div class="lr-chart" onclick="openGraph('Triglycerides','131,145,180,368','mg/dL','<150')">Graph →</div></div>
+      <div class="lr"><div class="lr-name">LDL Cholesterol</div><div class="lr-val a">127 mg/dL</div><div class="lr-ref">&lt;100 mg/dL</div><div class="lr-trend" style="color:var(--amb)">Stable, above target</div><div class="lr-chart" onclick="openGraph('LDL','130,127,125,127','mg/dL','<100')">Graph →</div></div>
+      <div class="lr"><div class="lr-name">HDL Cholesterol</div><div class="lr-val a">38 mg/dL</div><div class="lr-ref">&gt;40 mg/dL</div><div class="lr-trend" style="color:var(--amb)">↓ borderline</div><div class="lr-chart">—</div></div>
+      <div class="lr"><div class="lr-name">Total Cholesterol</div><div class="lr-val a">189 mg/dL</div><div class="lr-ref">&lt;200 mg/dL</div><div class="lr-trend">—</div><div class="lr-chart">—</div></div>
+    </div>
+    <div class="lab-panel" id="lt-r">
+      <div class="lr"><div class="lr-name">eGFR (Kidney function)</div><div class="lr-val g">85.5 mL/min</div><div class="lr-ref">&gt;60 mL/min</div><div class="lr-trend" style="color:var(--grn)">↓ slight · stable</div><div class="lr-chart" onclick="openGraph('eGFR','87,88,86,85','mL/min','>60')">Graph →</div></div>
+      <div class="lr"><div class="lr-name">Creatinine</div><div class="lr-val g">0.99 mg/dL</div><div class="lr-ref">&lt;1.2 mg/dL</div><div class="lr-trend" style="color:var(--grn)">↓ from 1.06</div><div class="lr-chart">—</div></div>
+      <div class="lr"><div class="lr-name">UACR</div><div class="lr-val g">6.11 mg/g</div><div class="lr-ref">&lt;30 mg/g</div><div class="lr-trend" style="color:var(--grn)">✓ Normal</div><div class="lr-chart">—</div></div>
+    </div>
+    <div class="lab-panel" id="lt-b">
+      <div class="lr"><div class="lr-name">Weight</div><div class="lr-val a">116.8 kg</div><div class="lr-ref">Target: reduce</div><div class="lr-trend" style="color:var(--amb)">↑ +0.5 kg</div><div class="lr-chart">—</div></div>
+      <div class="lr"><div class="lr-name">BMI</div><div class="lr-val a">35.92</div><div class="lr-ref">&lt;25</div><div class="lr-trend">Obese class II</div><div class="lr-chart">—</div></div>
+      <div class="lr"><div class="lr-name">Blood Pressure</div><div class="lr-val a">143/90 mmHg</div><div class="lr-ref">&lt;130/80</div><div class="lr-trend" style="color:var(--grn)">↓ from 152/88</div><div class="lr-chart" onclick="openGraph('BP','152,148,145,143','mmHg','<130/80')">Graph →</div></div>
+    </div>
+    <div class="lab-panel" id="lt-rp">
+      <div class="rep-file" onclick="toast('Opening Lab Report 17714…')"><div class="rf-ico">🧪</div><div class="rf-body"><div class="rf-name">Lab Report — 17714</div><div class="rf-meta">16 Jul 2026 · Gini Lab · Latest</div></div><div class="rf-act">View PDF →</div></div>
+      <div class="rep-file" onclick="toast('Opening Lab Report 16125…')"><div class="rf-ico">🧪</div><div class="rf-body"><div class="rf-name">Lab Report — 16125</div><div class="rf-meta">4 Jun 2026 · Gini Lab</div></div><div class="rf-act">View PDF →</div></div>
+      <div class="rep-file" onclick="toast('Opening Retinopathy screening…')"><div class="rf-ico">👁</div><div class="rf-body"><div class="rf-name">Retinopathy Screening</div><div class="rf-meta">Oct 2025 · NO DRP bilateral</div></div><div class="rf-act">View →</div></div>
+      <div style="text-align:center;margin-top:8px"><button class="btn btn-ghost" onclick="toast('Upload report')">+ Upload report</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 3. PRESCRIPTION ══════ -->
+<div class="sec" id="s-rx">
+  <div class="sec-hd">
+    <div class="sh-l">💊 Prescription — Gini medicines
+      <span class="sh-sub">Click row to edit · hover for quick actions</span></div>
+    <div class="sh-r">
+      <button class="vbtn" style="font-size:10px;padding:4px 9px" onclick="toast('🎤 Say: "Increase Atchol to 40mg" or "Add Fenofibrate 145mg OD with lunch"')">🎤 Voice edit</button>
+      <button class="btn btn-ghost" onclick="toast('Stopped medicines: Metoprolol (Jun 2025), Glimepiride (Mar 2025)')">Stopped meds</button>
+      <button class="col-btn" onclick="toggleSec(this)">Collapse</button>
+    </div>
+  </div>
+  <div class="sec-bd" style="padding:0">
+    <div style="padding:10px 13px 0">
+      <div class="vbar">
+        <button class="vbtn" onclick="toast('🎤 Listening…')">🎤 Speak</button>
+        <div class="vbar-t">Say: <em>"Increase Atchol to 40mg"</em> · <em>"Add Fenofibrate 145mg once daily with lunch"</em> · <em>"Stop Montair"</em> · <em>"Pause Lipaglyn 2 weeks"</em></div>
+      </div>
+    </div>
+    <table class="rx-tbl">
+      <thead><tr>
+        <th style="width:26px">#</th>
+        <th>Medicine</th>
+        <th>Dose</th>
+        <th>Timing</th>
+        <th>Time</th>
+        <th>For</th>
+        <th class="tl-col">Stock</th>
+        <th style="width:110px">Actions</th>
+      </tr></thead>
+      <tbody>
+        <!-- 1 -->
+        <tr class="rx-tr" onclick="toggleEdit('e1')">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">1.</td>
+          <td><div class="med-n">Cospiaq SM 25/100/1000</div><div class="med-f">Metformin · Diabetes</div></td>
+          <td style="font-family:var(--fm);font-size:12px;font-weight:600;color:var(--ink2)">OD + SOS</td>
+          <td style="font-size:11px;color:var(--ink3)">With meals</td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">8:00 AM</td>
+          <td><span class="badge b-ink" style="font-size:9px">Diabetes</span></td>
+          <td><div class="stk-ok">✓ 84 tabs<div class="stk-qty">~1 month</div></div></td>
+          <td><div class="ra"><button class="ra-btn ra-e" onclick="event.stopPropagation();toggleEdit('e1')">Edit</button><button class="ra-btn ra-p" onclick="event.stopPropagation();toast('Cospiaq paused')">Pause</button><button class="ra-btn ra-s" onclick="event.stopPropagation();toast('Cospiaq stopped')">Stop</button></div></td>
+        </tr>
+        <tr class="rx-edit-tr" id="e1"><td colspan="8"><div class="ep">
+          <div class="ep-grid">
+            <div class="ep-f"><label>Dose</label><input class="ep-inp" value="OD + SOS"></div>
+            <div class="ep-f"><label>Route</label><select class="ep-inp"><option>Oral</option><option>SC</option><option>Topical</option></select></div>
+            <div class="ep-f"><label>Timing</label><select class="ep-inp" onchange="updateTimingHint(this,'th1')">
+              <option>With meals</option>
+              <option>Before breakfast</option>
+              <option>After breakfast</option>
+              <option>Before lunch</option>
+              <option>With lunch</option>
+              <option>After lunch</option>
+              <option>Evening</option>
+              <option>Before dinner</option>
+              <option>With dinner</option>
+              <option>After dinner</option>
+              <option>At bedtime</option>
+              <option>As needed (SOS)</option>
+              <option>Fortnightly</option>
+              <option>Weekly</option>
+            </select></div>
+            <div class="ep-f"><label>Duration</label><input class="ep-inp" placeholder="ongoing / 30 days"></div>
+            <div class="ep-f"><label>Time</label><input class="ep-inp" type="time" value="08:00"></div>
+          </div>
+          <div class="ep-f" style="margin-bottom:8px"><label>Patient instruction</label><input class="ep-inp" value="Take with food to reduce stomach upset. Do not skip."></div>
+          <div class="ep-acts">
+            <button class="btn btn-tl" onclick="toggleEdit('e1');toast('Cospiaq saved')">Save</button>
+            <button class="btn btn-ghost" onclick="toggleEdit('e1')">Cancel</button>
+            <button class="btn" style="background:var(--amb-l);color:var(--amb);border-color:var(--amb-b)" onclick="toggleEdit('e1');toast('Cospiaq paused 2 weeks')">Pause 2 weeks</button>
+            <button class="btn" style="background:var(--red-l);color:var(--red);border-color:var(--red-b)" onclick="toggleEdit('e1');toast('Cospiaq stopped')">Stop</button>
+          </div>
+        </div></td></tr>
+
+        <!-- 2 Lipaglyn — low stock -->
+        <tr class="rx-tr" onclick="toggleEdit('e2')">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">2.</td>
+          <td><div class="med-n">Lipaglyn 4mg</div><div class="med-f">Saroglitazar · Lipids/Liver</div></td>
+          <td style="font-family:var(--fm);font-size:12px;font-weight:600;color:var(--ink2)">OD</td>
+          <td style="font-size:11px;color:var(--ink3)">Before breakfast</td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">7:30 AM</td>
+          <td><span class="badge b-ink" style="font-size:9px">Lipids</span></td>
+          <td><div class="stk-lo">⚠ 9 tabs<div class="stk-qty">&lt;2 weeks</div></div></td>
+          <td><div class="ra"><button class="ra-btn ra-e" onclick="event.stopPropagation();toggleEdit('e2')">Edit</button><button class="ra-btn ra-p" onclick="event.stopPropagation();toast('Lipaglyn paused')">Pause</button><button class="ra-btn ra-s" onclick="event.stopPropagation();toast('Lipaglyn stopped')">Stop</button></div></td>
+        </tr>
+        <tr class="rx-edit-tr" id="e2"><td colspan="8"><div class="ep">
+          <div class="ep-grid">
+            <div class="ep-f"><label>Dose</label><input class="ep-inp" value="4mg OD"></div>
+            <div class="ep-f"><label>Route</label><select class="ep-inp"><option>Oral</option></select></div>
+            <div class="ep-f"><label>Timing</label><select class="ep-inp"><option selected>Before breakfast</option><option>After breakfast</option><option>With meals</option><option>At bedtime</option><option>As needed (SOS)</option></select></div>
+            <div class="ep-f"><label>Duration</label><input class="ep-inp" value="Ongoing"></div>
+            <div class="ep-f"><label>Time</label><input class="ep-inp" type="time" value="07:30"></div>
+          </div>
+          <div style="background:var(--amb-l);border:1px solid var(--amb-b);border-radius:var(--r);padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--amb)">
+            ⚠ Only 9 tabs in stock — &lt;2 weeks. <span style="color:var(--pu);font-weight:700;cursor:pointer;text-decoration:underline" onclick="openAlt('Lipaglyn 4mg','Saroglitazar','Pemafibrate 0.1mg · Fenofibrate 145mg')">See alternatives →</span>
+          </div>
+          <div class="ep-acts">
+            <button class="btn btn-tl" onclick="toggleEdit('e2');toast('Lipaglyn saved')">Save</button>
+            <button class="btn btn-ghost" onclick="toggleEdit('e2')">Cancel</button>
+            <button class="btn" style="background:var(--red-l);color:var(--red);border-color:var(--red-b)" onclick="toggleEdit('e2');toast('Lipaglyn stopped')">Stop</button>
+          </div>
+        </div></td></tr>
+
+        <!-- 3 Atchol — changed -->
+        <tr class="rx-tr" style="background:rgba(217,119,6,.03)" onclick="toggleEdit('e3')">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">3.</td>
+          <td><div class="med-tag mt-ch">↑ Changed</div><div class="med-n">Atchol 40mg</div><div class="med-f">Atorvastatin · LDL 127 above target</div></td>
+          <td style="font-family:var(--fm);font-size:12px;font-weight:600;color:var(--ink2)">OD</td>
+          <td style="font-size:11px;color:var(--ink3)">At bedtime</td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">10:00 PM</td>
+          <td><span class="badge b-amb" style="font-size:9px">LDL 127↑</span></td>
+          <td><div class="stk-ok">✓ 60 tabs</div></td>
+          <td><div class="ra"><button class="ra-btn ra-e" onclick="event.stopPropagation();toggleEdit('e3')">Edit</button><button class="ra-btn ra-s" onclick="event.stopPropagation();toast('Atchol stopped')">Stop</button></div></td>
+        </tr>
+        <tr class="rx-edit-tr" id="e3"><td colspan="8"><div class="ep">
+          <div class="ep-grid">
+            <div class="ep-f"><label>Dose</label><input class="ep-inp" value="40mg OD"></div>
+            <div class="ep-f"><label>Route</label><select class="ep-inp"><option>Oral</option></select></div>
+            <div class="ep-f"><label>Timing</label><select class="ep-inp"><option>At bedtime</option><option>After dinner</option><option>With meals</option></select></div>
+            <div class="ep-f"><label>Reason for change</label><input class="ep-inp" value="LDL 127, target <100"></div>
+            <div class="ep-f"><label>Time</label><input class="ep-inp" type="time" value="22:00"></div>
+          </div>
+          <div class="ep-acts">
+            <button class="btn btn-tl" onclick="toggleEdit('e3');toast('Atchol 40mg saved')">Save</button>
+            <button class="btn btn-ghost" onclick="toggleEdit('e3')">Cancel</button>
+            <button class="btn" style="background:var(--red-l);color:var(--red);border-color:var(--red-b)" onclick="toggleEdit('e3');toast('Atchol stopped')">Stop</button>
+          </div>
+        </div></td></tr>
+
+        <!-- 4 Telma AM — out of stock -->
+        <tr class="rx-tr" onclick="toggleEdit('e4')">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">4.</td>
+          <td><div class="med-n">Telma AM 40+5</div><div class="med-f">Telmisartan + Amlodipine · BP/Kidney</div></td>
+          <td style="font-family:var(--fm);font-size:12px;font-weight:600;color:var(--ink2)">OD</td>
+          <td style="font-size:11px;color:var(--ink3)">Morning</td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">8:00 AM</td>
+          <td><span class="badge b-ink" style="font-size:9px">BP/Kidney</span></td>
+          <td><div class="stk-out">✗ Out of stock<div class="stk-alt" onclick="event.stopPropagation();openAlt('Telma AM 40+5','Telmisartan+Amlodipine','Telmikind AM 40+5mg · Telsar AM 40+5mg')">Alternatives →</div></div></td>
+          <td><div class="ra"><button class="ra-btn ra-e" onclick="event.stopPropagation();toggleEdit('e4')">Edit</button><button class="ra-btn ra-s" onclick="event.stopPropagation();toast('Telma stopped')">Stop</button></div></td>
+        </tr>
+        <tr class="rx-edit-tr" id="e4"><td colspan="8"><div class="ep">
+          <div style="background:var(--red-l);border:1px solid var(--red-b);border-radius:var(--r);padding:8px 10px;margin-bottom:9px;font-size:11px;color:var(--red)">
+            ✗ Telma AM 40+5 out of stock — 0 tabs. Choose alternative or patient brings from outside.
+            <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn" style="background:var(--white);color:var(--tl);border-color:var(--tl);font-size:10px" onclick="toggleEdit('e4');toast('✓ Switched to Telmikind AM 40+5 — in stock')">✓ Telmikind AM 40+5 <span style="background:var(--grn-l);color:var(--grn);font-size:8px;padding:1px 4px;border-radius:3px;margin-left:2px">In stock</span></button>
+              <button class="btn" style="background:var(--white);color:var(--tl);border-color:var(--tl);font-size:10px" onclick="toggleEdit('e4');toast('✓ Switched to Telsar AM 40+5')">✓ Telsar AM 40+5 <span style="background:var(--grn-l);color:var(--grn);font-size:8px;padding:1px 4px;border-radius:3px;margin-left:2px">In stock</span></button>
+              <button class="btn btn-ghost" style="font-size:10px" onclick="toggleEdit('e4');toast('Noted — patient will bring Telma AM from outside')">Patient brings from outside</button>
+            </div>
+          </div>
+          <div class="ep-acts"><button class="btn btn-ghost" onclick="toggleEdit('e4')">Cancel</button></div>
+        </div></td></tr>
+
+        <!-- 5 Fenofibrate — NEW -->
+        <tr class="rx-tr" style="background:rgba(22,163,74,.03)" onclick="toggleEdit('e5')">
+          <td style="color:var(--ink3);font-family:var(--fm);font-size:10px">5.</td>
+          <td><div class="med-tag mt-new">🆕 Added this visit</div><div class="med-n">Fenofibrate 145mg</div><div class="med-f">Fibrate · TG 368 (tripled)</div></td>
+          <td style="font-family:var(--fm);font-size:12px;font-weight:600;color:var(--ink2)">OD</td>
+          <td style="font-size:11px;color:var(--ink3)">With lunch</td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">1:30 PM</td>
+          <td><span class="badge b-red" style="font-size:9px">TG 368↑</span></td>
+          <td><div class="stk-ok">✓ 45 tabs</div></td>
+          <td><div class="ra"><button class="ra-btn ra-e" onclick="event.stopPropagation();toggleEdit('e5')">Edit</button><button class="ra-btn ra-s" onclick="event.stopPropagation();toast('Fenofibrate removed')">Remove</button></div></td>
+        </tr>
+        <tr class="rx-edit-tr" id="e5"><td colspan="8"><div class="ep">
+          <div class="ep-grid">
+            <div class="ep-f"><label>Dose</label><input class="ep-inp" value="145mg OD"></div>
+            <div class="ep-f"><label>Route</label><select class="ep-inp"><option>Oral</option></select></div>
+            <div class="ep-f"><label>Timing</label><select class="ep-inp"><option>With lunch</option><option>With meals</option><option>After lunch</option></select></div>
+            <div class="ep-f"><label>Reason</label><input class="ep-inp" value="TG 368 — tripled from 131"></div>
+            <div class="ep-f"><label>Time</label><input class="ep-inp" type="time" value="13:30"></div>
+          </div>
+          <div class="ep-acts">
+            <button class="btn btn-tl" onclick="toggleEdit('e5');toast('Fenofibrate saved')">Save</button>
+            <button class="btn btn-ghost" onclick="toggleEdit('e5')">Cancel</button>
+            <button class="btn" style="background:var(--red-l);color:var(--red);border-color:var(--red-b)" onclick="toggleEdit('e5');toast('Fenofibrate removed')">Remove</button>
+          </div>
+        </div></td></tr>
+      </tbody>
+    </table>
+
+    <!-- Add medicine -->
+    <div style="padding:0 13px 13px">
+      <div class="slbl" style="margin-top:4px;margin-bottom:6px">Add new medicine</div>
+      <div class="add-panel" id="addPanel">
+        <div class="add-sr-row">
+          <input class="add-inp" id="medQ" placeholder="Search medicine name or drug class…" oninput="searchMed(this.value)" onfocus="document.getElementById('addPanel').classList.add('open')">
+          <button class="vbtn" onclick="toast('🎤 Say: add Fenofibrate 145mg once daily with lunch for triglycerides')">🎤</button>
+          <button class="btn btn-ghost" onclick="closeAddMed()">Cancel</button>
+        </div>
+        <div class="srlist" id="srList">
+          <div class="sri" onclick="selectMed('Fenofibrate 145mg','Fibrate · Triglyceride control · OD with meals','Lipids','✓ 45 tabs')">
+            <div class="sri-body"><div class="sri-name">Fenofibrate 145mg</div><div class="sri-info">Fibrate · Triglyceride control</div></div>
+            <div class="stk-ok" style="text-align:right">✓ 45 tabs<div class="stk-qty">₹8/tab</div></div>
+          </div>
+          <div class="sri" onclick="selectMed('Rosuvastatin 20mg','Statin · LDL control · more potent than atorvastatin','Lipids','✓ 60 tabs')">
+            <div class="sri-body"><div class="sri-name">Rosuvastatin 20mg</div><div class="sri-info">Statin · LDL control · more potent than atorvastatin</div></div>
+            <div class="stk-ok" style="text-align:right">✓ 60 tabs<div class="stk-qty">₹6/tab</div></div>
+          </div>
+          <div class="sri" onclick="selectMed('Metformin SR 500mg','Biguanide · Diabetes · extended release','Diabetes','⚠ 18 tabs')">
+            <div class="sri-body"><div class="sri-name">Metformin SR 500mg</div><div class="sri-info">Biguanide · Diabetes · Extended release</div></div>
+            <div class="stk-lo" style="text-align:right">⚠ 18 tabs<div class="stk-qty">₹3/tab</div></div>
+          </div>
+          <div class="sri" onclick="selectMed('Sitagliptin 100mg','DPP-4 inhibitor · Diabetes · once daily','Diabetes','✓ 30 tabs')">
+            <div class="sri-body"><div class="sri-name">Sitagliptin 100mg</div><div class="sri-info">DPP-4 inhibitor · Diabetes</div></div>
+            <div class="stk-ok" style="text-align:right">✓ 30 tabs<div class="stk-qty">₹22/tab</div></div>
+          </div>
+        </div>
+        <div class="add-form" id="addForm">
+          <div class="af-sel" id="selDisp"></div>
+          <div class="af-grid">
+            <div class="af-f"><label>Dose</label><input class="af-inp" id="af-dose" placeholder="e.g. 145mg, 10mg"></div>
+            <div class="af-f"><label>Frequency</label><select class="af-inp"><option>OD (once daily)</option><option>BD (twice daily)</option><option>TDS (thrice daily)</option><option>SOS</option><option>Weekly</option><option>Fortnightly</option></select></div>
+            <div class="af-f"><label>Timing</label><select class="af-inp" id="af-timing">
+              <option>With meals</option>
+              <option>Before breakfast</option>
+              <option>After breakfast</option>
+              <option>Before lunch</option>
+              <option>With lunch</option>
+              <option>After lunch</option>
+              <option>Evening</option>
+              <option>Before dinner</option>
+              <option>With dinner</option>
+              <option>After dinner</option>
+              <option>At bedtime</option>
+              <option>As needed (SOS)</option>
+            </select></div>
+            <div class="af-f"><label>Time (optional)</label><input class="af-inp" type="time" placeholder="e.g. 08:00"></div>
+            <div class="af-f" style="grid-column:span 5"><label>Reason / for</label><input class="af-inp" id="af-for" placeholder="e.g. Triglycerides 368, target <150"></div>
+          </div>
+          <div class="af-f" style="margin-bottom:9px"><label>Patient instruction</label><input class="af-inp" placeholder="e.g. Take with food. Do not stop without doctor advice."></div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-tl" onclick="addMed()">+ Add to prescription</button>
+            <button class="btn btn-ghost" onclick="closeAddMed()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ EXTERNAL MEDICINES ══════ -->
+<div class="sec" id="s-ext">
+  <div class="sec-hd">
+    <div class="sh-l">🏥 External medicines — from other doctors
+      <span class="sh-sub">Shown in medicine card · interaction-checked · click → see medicine card</span></div>
+    <div class="sh-r">
+      <button class="btn btn-ghost" onclick="toggleExtForm()">+ Add external medicine</button>
+      <button class="col-btn" onclick="toggleSec(this)">Collapse</button>
+    </div>
+  </div>
+  <div class="sec-bd" style="padding:0">
+    <table class="ext-tbl">
+      <thead><tr>
+        <th>Medicine</th><th>Dose / timing / time</th><th>Prescribing doctor</th><th>Since</th><th>Interaction</th><th style="width:80px"></th>
+      </tr></thead>
+      <tbody>
+        <!-- Each row clicks to medicine card -->
+        <tr onclick="jumpToMedCard()" title="Click to see in medicine card" style="cursor:pointer">
+          <td><div class="ext-n">Ramipril 5mg</div><div class="ext-f">ACE inhibitor · BP + Kidney protection</div></td>
+          <td><span style="font-family:var(--fm);font-size:11px;font-weight:600">OD · At night</span><span style="font-size:10px;color:var(--ink3);margin-left:6px">10:00 PM</span></td>
+          <td><div class="ext-dr">Dr. Suresh Gupta</div><div class="ext-sp">Nephrology · Max Hospital, Mohali</div></td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">Mar 2025</td>
+          <td><span class="int-warn">⚠ Check with Telma AM — dual RAAS</span></td>
+          <td style="text-align:right"><button class="btn btn-ghost" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation();jumpToMedCard()">Med card →</button></td>
+        </tr>
+        <tr onclick="jumpToMedCard()" style="cursor:pointer">
+          <td><div class="ext-n">Pantoprazole 40mg</div><div class="ext-f">PPI · Stomach protection</div></td>
+          <td><span style="font-family:var(--fm);font-size:11px;font-weight:600">OD · Before breakfast</span><span style="font-size:10px;color:var(--ink3);margin-left:6px">7:00 AM</span></td>
+          <td><div class="ext-dr">Dr. Anand Sharma</div><div class="ext-sp">Gastroenterology · Fortis, Chandigarh</div></td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">Jan 2026</td>
+          <td><span class="int-ok">✓ No interaction</span></td>
+          <td style="text-align:right"><button class="btn btn-ghost" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation();jumpToMedCard()">Med card →</button></td>
+        </tr>
+        <tr onclick="jumpToMedCard()" style="cursor:pointer">
+          <td><div class="ext-n">Aspirin 75mg</div><div class="ext-f">Antiplatelet · Cardiac protection</div></td>
+          <td><span style="font-family:var(--fm);font-size:11px;font-weight:600">OD · After dinner</span><span style="font-size:10px;color:var(--ink3);margin-left:6px">9:00 PM</span></td>
+          <td><div class="ext-dr">Dr. Rajiv Mehta</div><div class="ext-sp">Cardiology · PGI Chandigarh</div></td>
+          <td style="font-family:var(--fm);font-size:11px;color:var(--ink3)">Nov 2023</td>
+          <td><span class="int-ok">✓ No interaction</span></td>
+          <td style="text-align:right"><button class="btn btn-ghost" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation();jumpToMedCard()">Med card →</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <!-- Add external form -->
+    <div class="aef" id="extForm">
+      <div style="font-size:11px;font-weight:700;color:var(--blu);margin-bottom:9px">Add medicine from another doctor</div>
+      <div class="aef-grid">
+        <div class="aef-f"><label>Medicine name & dose</label><input class="aef-inp" placeholder="e.g. Ramipril 5mg"></div>
+        <div class="aef-f"><label>Frequency</label><input class="aef-inp" placeholder="e.g. OD, BD, SOS"></div>
+        <div class="aef-f"><label>Timing</label><select class="aef-inp"><option>Morning</option><option>Before breakfast</option><option>After breakfast</option><option>With meals</option><option>Before lunch</option><option>With lunch</option><option>After lunch</option><option>Evening</option><option>Before dinner</option><option>After dinner</option><option>At bedtime</option><option>As needed</option></select></div>
+        <div class="aef-f"><label>Time (optional)</label><input class="aef-inp" type="time"></div>
+      </div>
+      <div class="aef-grid">
+        <div class="aef-f"><label>Prescribing doctor</label><input class="aef-inp" placeholder="e.g. Dr. Suresh Gupta"></div>
+        <div class="aef-f"><label>Specialty</label><input class="aef-inp" placeholder="e.g. Nephrology, Cardiology"></div>
+        <div class="aef-f"><label>Hospital / clinic</label><input class="aef-inp" placeholder="e.g. Max Hospital, Mohali"></div>
+        <div class="aef-f"><label>Prescribed since</label><input class="aef-inp" type="month"></div>
+      </div>
+      <div class="aef-f" style="margin-bottom:9px"><label>Condition / reason</label><input class="aef-inp" placeholder="e.g. BP, Kidney protection, Cardiac"></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-tl" onclick="toggleExtForm();toast('External medicine added · interaction check running…')">+ Add medicine</button>
+        <button class="btn btn-ghost" onclick="toggleExtForm()">Cancel</button>
+        <span style="font-size:10px;color:var(--ink3)">Interactions with Gini medicines checked automatically</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 4. TESTS ══════ -->
+<div class="sec" id="s-tests">
+  <div class="sec-hd">
+    <div class="sh-l">🔬 Tests to order <span class="sh-sub">— panels or individual · set when</span></div>
+    <div class="sh-r">
+      <button class="vbtn" style="font-size:10px;padding:4px 9px" onclick="toast('🎤 Say: "Order diabetes panel for next visit" or "Add TSH today"')">🎤 Voice</button>
+      <button class="col-btn" onclick="toggleSec(this)">Collapse</button>
+    </div>
+  </div>
+  <div class="sec-bd">
+    <div class="slbl" style="margin-bottom:6px">When are these tests needed?</div>
+    <div class="urgency-tabs" style="margin-bottom:12px">
+      <div class="ut" onclick="setUrg(this,'today')">Today → lab now</div>
+      <div class="ut" onclick="setUrg(this,'tomorrow')">Tomorrow → reception</div>
+      <div class="ut active" onclick="setUrg(this,'next')">Next visit · Nov 2026</div>
+    </div>
+    <div class="slbl" style="margin-bottom:6px">Quick panels — tap to select all tests in that panel at once</div>
+    <div class="panels-row">
+      <div class="panel-btn sel" onclick="this.classList.toggle('sel');toast(this.classList.contains('sel')?'Diabetes panel selected':'Diabetes panel removed')">
+        <div class="pb-name">🩸 Diabetes panel</div>
+        <div class="pb-tests">HbA1c · FBS · Post-meal · HOMA-IR</div>
+        <div class="pb-count">4 tests</div>
+      </div>
+      <div class="panel-btn sel" onclick="this.classList.toggle('sel');toast(this.classList.contains('sel')?'Lipid panel selected':'Lipid panel removed')">
+        <div class="pb-name">💛 Lipid panel</div>
+        <div class="pb-tests">Total cholesterol · LDL · HDL · TG</div>
+        <div class="pb-count">4 tests</div>
+      </div>
+      <div class="panel-btn sel" onclick="this.classList.toggle('sel');toast(this.classList.contains('sel')?'Kidney panel selected':'Kidney panel removed')">
+        <div class="pb-name">🫘 Kidney panel</div>
+        <div class="pb-tests">Creatinine · eGFR · UACR · Urine R/M</div>
+        <div class="pb-count">4 tests</div>
+      </div>
+      <div class="panel-btn" onclick="this.classList.toggle('sel');toast(this.classList.contains('sel')?'Full workup selected':'Full workup removed')">
+        <div class="pb-name">🩺 Full workup</div>
+        <div class="pb-tests">All above + CBC · LFT · Thyroid · Vitamins</div>
+        <div class="pb-count">18 tests</div>
+      </div>
+      <div class="panel-btn" onclick="this.classList.toggle('sel');toast(this.classList.contains('sel')?'Thyroid panel selected':'Thyroid removed')">
+        <div class="pb-name">🦋 Thyroid panel</div>
+        <div class="pb-tests">TSH · FT3 · FT4</div>
+        <div class="pb-count">3 tests</div>
+      </div>
+      <div class="panel-btn" onclick="this.classList.toggle('sel');toast(this.classList.contains('sel')?'Cardiac panel selected':'Cardiac removed')">
+        <div class="pb-name">❤️ Cardiac panel</div>
+        <div class="pb-tests">ECG · NT-proBNP · hs-CRP</div>
+        <div class="pb-count">3 tests</div>
+      </div>
+    </div>
+    <div class="slbl" style="margin-bottom:6px">Add individual tests</div>
+    <div class="tests-grid">
+      <div class="tc sel" onclick="this.classList.toggle('sel')"><div class="tc-name">HbA1c</div><div class="tc-sub">Glycated Hb</div></div>
+      <div class="tc sel" onclick="this.classList.toggle('sel')"><div class="tc-name">FBS</div><div class="tc-sub">Fasting glucose</div></div>
+      <div class="tc sel" onclick="this.classList.toggle('sel')"><div class="tc-name">Lipid panel</div><div class="tc-sub">LDL · HDL · TG</div></div>
+      <div class="tc sel" onclick="this.classList.toggle('sel')"><div class="tc-name">Creatinine / eGFR</div><div class="tc-sub">Kidney</div></div>
+      <div class="tc sel" onclick="this.classList.toggle('sel')"><div class="tc-name">UACR</div><div class="tc-sub">Albumin ratio</div></div>
+      <div class="tc sel" onclick="this.classList.toggle('sel')"><div class="tc-name">TSH</div><div class="tc-sub">Thyroid — fatigue</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">LFT</div><div class="tc-sub">Liver function</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">CBC</div><div class="tc-sub">Blood count</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">Vit D</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">Vit B12</div><div class="tc-sub">Metformin depletes</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">Fasting Insulin</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">ECG</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">Fundus</div><div class="tc-sub">Retinopathy</div></div>
+      <div class="tc" onclick="this.classList.toggle('sel')"><div class="tc-name">VPT / NCS</div><div class="tc-sub">Neuropathy</div></div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:9px 12px;font-size:11px;color:var(--ink2);display:flex;align-items:center;gap:10px;margin-top:2px">
+      <span>📋 <strong>7 tests selected</strong> for next visit · sent to reception + lab when next visit is confirmed · patient reminded on MHG</span>
+      <button class="btn btn-tl" style="margin-left:auto" onclick="toast('Tests confirmed · routing to lab')">Confirm →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ 5. MEDICINE CARD ══════ -->
+<div class="sec" id="s-medcard">
+  <div class="sec-hd">
+    <div class="sh-l">🗒 Medicine card — daily schedule
+      <span class="sh-sub">Gini medicines + external · auto-generated · actual times shown</span></div>
+    <div class="sh-r">
+      <button class="btn btn-ghost" onclick="toast('Medicine card sent to patient on WhatsApp + MHG')">Send to patient</button>
+      <button class="btn btn-ghost" onclick="toast('Medicine card printed')">Print</button>
+      <button class="col-btn" onclick="toggleSec(this)">Collapse</button>
+    </div>
+  </div>
+  <div class="sec-bd" style="padding:0">
+    <div class="med-card">
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🌅 Morning</div><div class="mc-ts">7:00 AM</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-ext">Pantoprazole 40mg <span class="ptag ptag-ext">Ext · Dr. Sharma</span><span class="pnote"> · 7:00 AM · before breakfast</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🍳 Before breakfast</div><div class="mc-ts">7:30 AM</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-l">Lipaglyn 4mg <span class="pnote">· OD · ⚠ low stock</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🥘 With breakfast</div><div class="mc-ts">8:00 AM</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-d">Cospiaq SM 25/100 <span class="pnote">· OD</span></div>
+          <div class="mc-pill mcp-b">Telma AM 40+5 <span class="pnote">· OD · ✗ out of stock</span></div>
+          <div class="mc-pill mcp-b">CONCOR AM 2.5/5 <span class="pnote">· OD</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🥘 With lunch</div><div class="mc-ts">1:30 PM</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-l" style="background:var(--grn-l);border-color:var(--grn-b);color:var(--grn)">Fenofibrate 145mg <span class="ptag ptag-new">NEW</span><span class="pnote"> · OD</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🍽 After dinner</div><div class="mc-ts">9:00 PM</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-ext">Aspirin 75mg <span class="ptag ptag-ext">Ext · Dr. Mehta</span><span class="pnote"> · cardiac protection</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🌙 At bedtime</div><div class="mc-ts">10:00 PM</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-l" style="background:var(--amb-l);border-color:var(--amb-b);color:var(--amb)">Atchol 40mg <span class="ptag ptag-ch">↑40mg</span><span class="pnote"> · OD</span></div>
+          <div class="mc-pill mcp-ext">Ramipril 5mg <span class="ptag ptag-ext">Ext · Dr. Gupta</span><span class="pnote"> · ⚠ check with Telma</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">📅 Fortnightly</div><div class="mc-ts">Every 15 days</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-s">Aktiv-D 60,000 IU <span class="pnote">· Vit D3</span></div>
+        </div>
+      </div>
+      <div class="mc-row">
+        <div class="mc-time"><div class="mc-tl">🔔 As needed</div><div class="mc-ts">SOS only</div></div>
+        <div class="mc-pills">
+          <div class="mc-pill mcp-p">Voveron gel <span class="pnote">· topical · pain</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="padding:8px 12px;font-size:10px;color:var(--ink3);border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px;background:var(--bg)">
+      <span>Medicines with <span style="background:var(--blu-l);color:var(--blu);font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px">Ext</span> tag are from other doctors — shown for patient reference, not dispensed by Gini pharmacy.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ CARE PLAN NOTES ══════ -->
+<div class="sec">
+  <div class="sec-hd">
+    <div class="sh-l">📝 Care plan notes <span class="sh-sub">— treatment · diet · lifestyle · next visit</span></div>
+    <div class="sh-r">
+      <button class="vbtn" style="font-size:10px;padding:4px 9px" onclick="toast('🎤 Dictating care plan…')">🎤 Dictate</button>
+      <button class="col-btn" onclick="toggleSec(this)">Collapse</button>
+    </div>
+  </div>
+  <div class="sec-bd">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div class="slbl" style="margin-bottom:5px">Treatment plan this visit</div>
+        <textarea style="width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-family:var(--fb);font-size:11px;color:var(--ink);background:var(--bg);resize:none;min-height:80px;outline:none;line-height:1.6" id="txPlan">1. Atchol 20→40mg — LDL 127, target <100
+2. Fenofibrate 145mg added — TG 368 (tripled)
+3. Lipaglyn low stock — reorder or switch
+4. Telma AM out of stock — switch to Telmikind AM
+5. TSH ordered — fatigue complaint</textarea>
+        <div class="slbl" style="margin-bottom:5px;margin-top:10px">Diet & lifestyle</div>
+        <textarea style="width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-family:var(--fb);font-size:11px;color:var(--ink);background:var(--bg);resize:none;min-height:70px;outline:none;line-height:1.6">TG critical: stop sugar, juice, white rice, maida, alcohol. 1800 kcal/day. 30 min walk 5×/week.</textarea>
+      </div>
+      <div>
+        <div class="slbl" style="margin-bottom:5px">Next visit</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px">
+          <span style="font-weight:600;color:var(--ink)">Date:</span>
+          <input style="border:1px solid var(--bd);border-radius:5px;padding:5px 8px;font-family:var(--fm);font-size:12px;color:var(--ink);background:var(--bg);outline:none;flex:1" type="date" value="2026-11-20">
+          <span style="font-size:10px;color:var(--ink3)">~3 months</span>
+        </div>
+        <div class="slbl" style="margin-bottom:5px">Goals for next visit</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;margin-bottom:10px">
+          <div style="background:var(--bg);border-radius:var(--r);border:1px solid var(--bd);padding:7px;text-align:center"><div style="font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink)">&lt;7.0%</div><div style="font-size:9px;color:var(--ink3);text-transform:uppercase;letter-spacing:.3px">HbA1c</div></div>
+          <div style="background:var(--bg);border-radius:var(--r);border:1px solid var(--bd);padding:7px;text-align:center"><div style="font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink)">&lt;130</div><div style="font-size:9px;color:var(--ink3);text-transform:uppercase;letter-spacing:.3px">FBS</div></div>
+          <div style="background:var(--bg);border-radius:var(--r);border:1px solid var(--bd);padding:7px;text-align:center"><div style="font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink)">&lt;150</div><div style="font-size:9px;color:var(--ink3);text-transform:uppercase;letter-spacing:.3px">TG mg/dL</div></div>
+          <div style="background:var(--bg);border-radius:var(--r);border:1px solid var(--bd);padding:7px;text-align:center"><div style="font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink)">&lt;130</div><div style="font-size:9px;color:var(--ink3);text-transform:uppercase;letter-spacing:.3px">BP</div></div>
+        </div>
+        <div class="slbl" style="margin-bottom:5px">Doctor's internal note</div>
+        <textarea style="width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-family:var(--fb);font-size:11px;color:var(--ink);background:var(--bg);resize:none;min-height:60px;outline:none;line-height:1.6" placeholder="Internal — Gini team only…">TG tripling unusual — ask about diet change or alcohol. Fatigue → check TSH. Ramipril + Telma dual RAAS — monitor K+.</textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FINALIZE -->
+<div class="finalize">
+  <div class="fin-t">
+    <div class="fin-title">Finalize & end visit</div>
+    <div class="fin-routes">
+      <span class="fr">💊 Pharmacy — Gini medicines only</span>
+      <span class="fr">📋 Pharmacy — counselling note in Hindi</span>
+      <span class="fr">📱 Patient MHG — full medicine card</span>
+      <span class="fr">🔬 Lab + Reception — 7 tests next visit</span>
+      <span class="fr warn">⚠ Telma AM out of stock — pharmacy warned</span>
+    </div>
+  </div>
+  <button class="fin-btn" onclick="toast('✓ Visit finalized · Pharmacy + Lab + Patient MHG all updated')">Finalize →</button>
+</div>
+
+</div><!-- /inner -->
+</div><!-- /body-scroll -->
+</div><!-- /screen -->
+
+<!-- Graph modal -->
+<div class="gmodal" id="gmod">
+  <div class="gbox">
+    <button class="gcls" onclick="document.getElementById('gmod').classList.remove('open')">✕</button>
+    <div style="font-size:15px;font-weight:700;margin-bottom:3px" id="gT">—</div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:14px" id="gS">—</div>
+    <svg class="gsvg" id="gSvg" viewBox="0 0 440 100" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink3);margin-top:4px" id="gD"></div>
+    <div style="margin-top:10px;font-size:11px;color:var(--ink3)" id="gN"></div>
+  </div>
+</div>
+
+<!-- Alternatives modal -->
+<div class="amodal" id="amod">
+  <div class="abox">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <div style="font-size:14px;font-weight:700" id="aT">—</div>
+      <button class="btn btn-ghost" style="padding:2px 8px" onclick="document.getElementById('amod').classList.remove('open')">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:12px" id="aS">—</div>
+    <div id="aL"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast-el"></div>
+
+<script>
+// Toast
+let _tt;
+function toast(m,ms=2800){const e=document.getElementById('toast-el');e.textContent=m;e.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>e.classList.remove('show'),ms)}
+
+// Section collapse
+function toggleSec(btn){const s=btn.closest('.sec');s.classList.toggle('collapsed');btn.textContent=s.classList.contains('collapsed')?'Expand':'Collapse'}
+
+// Quick nav jump
+function jumpTo(id,btn){
+  const el=document.getElementById(id);
+  const scroll=document.getElementById('bodyScroll');
+  if(el&&scroll){
+    const offset=el.offsetTop-10;
+    scroll.scrollTo({top:offset,behavior:'smooth'});
+  }
+  document.querySelectorAll('.qn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+}
+
+// Jump to medicine card (from external medicines table)
+function jumpToMedCard(){
+  const el=document.getElementById('s-medcard');
+  const scroll=document.getElementById('bodyScroll');
+  if(el&&scroll){scroll.scrollTo({top:el.offsetTop-10,behavior:'smooth'});}
+  document.querySelectorAll('.qn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.qn')[4].classList.add('active');
+  // Highlight the medicine card briefly
+  el.style.outline='3px solid var(--tl)';
+  setTimeout(()=>el.style.outline='',1500);
+}
+
+// Rx edit toggle
+function toggleEdit(id){
+  const row=document.getElementById(id);
+  const isOpen=row.classList.contains('open');
+  document.querySelectorAll('.rx-edit-tr').forEach(r=>r.classList.remove('open'));
+  if(!isOpen)row.classList.add('open');
+}
+
+// Lab tabs
+function switchTab(btn,id){
+  btn.closest('.lab-tabs').querySelectorAll('.lt').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.lab-panel').forEach(p=>p.classList.remove('active'));
+  const el=document.getElementById(id);if(el)el.classList.add('active');
+}
+
+// Add medicine
+function searchMed(val){document.getElementById('srList').classList.toggle('open',val.length>1)}
+function selectMed(name,detail,cat,stock){
+  document.getElementById('srList').classList.remove('open');
+  document.getElementById('medQ').value=name;
+  document.getElementById('selDisp').innerHTML=`<div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--ink)">${name}</div><div style="font-size:10px;color:var(--ink3)">${detail}</div></div><span style="font-size:11px;font-weight:600;color:var(--grn)">${stock}</span>`;
+  document.getElementById('af-for').value=cat;
+  document.getElementById('addForm').classList.add('open');
+}
+function addMed(){
+  const n=document.getElementById('medQ').value||'New medicine';
+  closeAddMed();
+  toast('✓ '+n+' added to prescription');
+}
+function closeAddMed(){
+  document.getElementById('addPanel').classList.remove('open');
+  document.getElementById('srList').classList.remove('open');
+  document.getElementById('addForm').classList.remove('open');
+  document.getElementById('medQ').value='';
+}
+
+// External form
+function toggleExtForm(){document.getElementById('extForm').classList.toggle('open')}
+
+// Test urgency
+function setUrg(btn,val){
+  btn.closest('.urgency-tabs').querySelectorAll('.ut').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const msgs={today:'Tests for today → reception + lab notified immediately',tomorrow:'Tests for tomorrow → reception notified',next:'Tests for next visit → patient reminded via MHG'};
+  toast(msgs[val]);
+}
+
+// Graph
+function openGraph(name,valStr,unit,target){
+  const vals=valStr.split(',').map(Number);
+  const mx=Math.max(...vals)*1.15,mn=Math.min(...vals)*0.85;
+  const W=440,H=80,P=28;
+  const x=i=>P+(i/(vals.length-1))*(W-2*P);
+  const y=v=>H-P-((v-mn)/(mx-mn))*(H-2*P);
+  const tv=Number((target.match(/[\d.]+/)||['9999'])[0]);
+  const isRed=vals[vals.length-1]>tv;
+  const col=isRed?'#dc2626':'#16a34a';
+  const ty=Math.max(P,Math.min(H-P,y(tv)));
+  const path=vals.map((v,i)=>(i===0?'M':'L')+x(i).toFixed(1)+','+y(v).toFixed(1)).join(' ');
+  document.getElementById('gSvg').innerHTML=`
+    <line x1="${P}" y1="${ty}" x2="${W-P}" y2="${ty}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4 2"/>
+    <text x="${W-P+4}" y="${ty+4}" font-size="9" fill="#94a3b8">target</text>
+    <path d="${path}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    ${vals.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${col}"/><text x="${x(i).toFixed(1)}" y="${(y(v)-9).toFixed(1)}" font-size="10" fill="${col}" text-anchor="middle" font-weight="600">${v}</text>`).join('')}
+  `;
+  const dates=['Nov 2024','May 2025','Nov 2025','May 2026'];
+  document.getElementById('gD').innerHTML=vals.map((_,i)=>`<span>${dates[i]||'V'+(i+1)}</span>`).join('');
+  document.getElementById('gT').textContent=name;
+  document.getElementById('gS').textContent=unit+' · Target '+target;
+  document.getElementById('gN').textContent=isRed?'⚠ Above target — review treatment and compliance':'✓ Within target range — continue current approach';
+  document.getElementById('gmod').classList.add('open');
+}
+document.getElementById('gmod').addEventListener('click',e=>{if(e.target.id==='gmod')e.target.classList.remove('open')});
+
+// Alternatives
+function openAlt(name,cls,alts){
+  document.getElementById('aT').textContent='Alternatives to '+name;
+  document.getElementById('aS').textContent='Same class ('+cls+') · stock at Gini pharmacy';
+  const arr=alts.split(' · ');
+  const stocks=[['✓ In stock · 42 tabs','₹8/tab'],['✓ In stock · 30 tabs','₹7/tab'],['✓ In stock · 28 tabs','₹9/tab']];
+  document.getElementById('aL').innerHTML=arr.map((a,i)=>`
+    <div class="alt-item" onclick="toast('✓ Switched to ${a}');document.getElementById('amod').classList.remove('open')">
+      <div style="flex:1"><div class="ai-n">${a}</div><div class="ai-d">Equivalent class · confirm dose with same strength</div></div>
+      <div style="text-align:right;flex-shrink:0"><div style="font-size:11px;font-weight:600;color:var(--grn)">${stocks[i][0]}</div><div style="font-size:9px;color:var(--ink3)">${stocks[i][1]}</div></div>
+    </div>`).join('');
+  document.getElementById('amod').classList.add('open');
+}
+document.getElementById('amod').addEventListener('click',e=>{if(e.target.id==='amod')e.target.classList.remove('open')});
+
+// Scroll spy — update active nav as user scrolls
+const sections=[{id:'s-overview',i:0},{id:'s-labs',i:1},{id:'s-rx',i:2},{id:'s-tests',i:3},{id:'s-medcard',i:4}];
+document.getElementById('bodyScroll').addEventListener('scroll',function(){
+  const st=this.scrollTop+60;
+  let cur=0;
+  sections.forEach(s=>{const el=document.getElementById(s.id);if(el&&el.offsetTop<=st)cur=s.i;});
+  document.querySelectorAll('.qn').forEach((b,i)=>b.classList.toggle('active',i===cur));
+});
+</script>
+</body>
+</html>

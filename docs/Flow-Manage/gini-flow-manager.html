@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gini Flow — Flow Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9;--white:#fff;--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--ink4:#94a3b8;
+  --bd:#e2e8f0;--bd2:#cbd5e1;--nv:#0f172a;
+  --red:#dc2626;--red-l:#fef2f2;--red-b:rgba(220,38,38,.14);
+  --amb:#d97706;--amb-l:#fffbeb;--amb-b:rgba(217,119,6,.14);
+  --grn:#16a34a;--grn-l:#f0fdf4;--grn-b:rgba(22,163,74,.14);
+  --blu:#2563eb;--blu-l:#eff6ff;--blu-b:rgba(37,99,235,.14);
+  --pu:#7c3aed;--pu-l:#f5f3ff;--pu-b:rgba(124,58,237,.14);
+  --tl:#0d9488;--tl-l:#f0fdfa;--tl-b:rgba(13,148,136,.14);
+  --fb:'Inter',sans-serif;--fm:'JetBrains Mono',monospace;--fd:'Instrument Serif',serif;
+  --sh:0 1px 2px rgba(0,0,0,.05),0 1px 3px rgba(0,0,0,.08);
+  --sh-md:0 4px 14px rgba(0,0,0,.1);
+  --r:8px;--r-lg:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fb);background:var(--bg);color:var(--ink);font-size:13px;line-height:1.5;display:flex;flex-direction:column}
+
+/* ── RAIL ── */
+.rail{background:var(--nv);height:44px;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0}
+.rl{font-family:var(--fd);font-size:15px;color:#fff;font-style:italic}
+.rsep{width:1px;height:14px;background:rgba(255,255,255,.15)}
+.rr{margin-left:auto;display:flex;gap:5px;align-items:center}
+.rbtn{padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.7);font-family:var(--fb)}
+.rbtn:hover{background:rgba(255,255,255,.1);color:#fff}
+.rbtn.act{background:rgba(255,255,255,.14);color:#fff}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ── STATS STRIP ── */
+.stats{display:flex;gap:7px;padding:11px 14px 0;flex-wrap:wrap;flex-shrink:0}
+.stat{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:7px 12px;display:flex;gap:9px;align-items:center;box-shadow:var(--sh)}
+.sv{font-size:19px;font-weight:600;font-family:var(--fm);line-height:1}
+.sl{font-size:10px;color:var(--ink3);font-weight:500;line-height:1.4}
+.ss{font-size:9px;color:var(--ink4)}
+.stat.dark{background:var(--nv);border-color:var(--nv)}
+.stat.dark .sl{color:rgba(255,255,255,.5)}.stat.dark .ss{color:rgba(255,255,255,.3)}
+
+/* ── BOTTLENECK BANNER ── */
+.bottleneck{margin:9px 14px 0;background:var(--red-l);border:1px solid var(--red-b);border-radius:var(--r-lg);padding:9px 13px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.bn-ico{font-size:18px}
+.bn-t{flex:1;font-size:12px;color:var(--red);line-height:1.5}
+.bn-t strong{font-weight:700}
+
+/* ── BOARD ── */
+.board-wrap{flex:1;overflow:hidden;display:flex;flex-direction:column;padding:10px 14px 0}
+.board{flex:1;display:flex;gap:8px;overflow-x:auto;padding-bottom:10px}
+.board::-webkit-scrollbar{height:5px}
+.board::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:3px}
+.col{min-width:212px;width:212px;flex-shrink:0;display:flex;flex-direction:column;background:#eef1f5;border-radius:var(--r-lg);border:1px solid var(--bd)}
+.col-hd{padding:8px 11px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--bd);flex-shrink:0}
+.col-name{font-size:11px;font-weight:700;color:var(--ink);flex:1}
+.col-count{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ink3);background:var(--white);border:1px solid var(--bd);border-radius:10px;padding:0 7px}
+.col-sla{font-size:9px;color:var(--ink4);padding:3px 11px 6px;flex-shrink:0}
+.col-sla strong{color:var(--ink3)}
+.col-body{flex:1;overflow-y:auto;padding:0 7px 8px;display:flex;flex-direction:column;gap:6px}
+.col-body::-webkit-scrollbar{width:3px}
+.col-body::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.col.hot{background:#fdf0ef;border-color:var(--red-b)}
+.col.hot .col-hd{border-bottom-color:var(--red-b)}
+
+/* ── PATIENT CARD ── */
+.pc{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:8px 9px;cursor:pointer;transition:all .12s;box-shadow:var(--sh)}
+.pc:hover{box-shadow:var(--sh-md);transform:translateY(-1px);border-color:var(--tl)}
+.pc-top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.pc-av{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0}
+.pc-name{font-size:11px;font-weight:700;color:var(--ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc-cat{font-size:11px}
+.pc-mid{font-size:9px;color:var(--ink3);margin-bottom:5px}
+.pc-bot{display:flex;align-items:center;gap:5px}
+/* Station timer chip */
+.tmr{font-family:var(--fm);font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;display:flex;align-items:center;gap:3px}
+.tmr-g{background:var(--grn-l);color:var(--grn)}
+.tmr-a{background:var(--amb-l);color:var(--amb)}
+.tmr-r{background:var(--red-l);color:var(--red)}
+.tot{font-family:var(--fm);font-size:9px;color:var(--ink4);margin-left:auto}
+.tot.over{color:var(--red);font-weight:600}
+/* Waiting-for note */
+.wait4{font-size:9px;color:var(--ink3);margin-top:4px;padding-top:4px;border-top:1px dashed var(--bd);display:flex;align-items:center;gap:4px}
+.wait4 .w-ico{font-size:10px}
+.wait4.blocked{color:var(--red);font-weight:600}
+
+/* ── STATION PERF FOOTER ── */
+.perf{background:var(--white);border-top:1px solid var(--bd);padding:8px 14px;display:flex;gap:6px;overflow-x:auto;flex-shrink:0;align-items:stretch}
+.perf::-webkit-scrollbar{height:0}
+.pf{min-width:118px;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:6px 9px;flex-shrink:0}
+.pf-name{font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.pf-val{font-family:var(--fm);font-size:13px;font-weight:600;line-height:1.2}
+.pf-val.g{color:var(--grn)}.pf-val.a{color:var(--amb)}.pf-val.r{color:var(--red)}
+.pf-sla{font-size:8px;color:var(--ink4)}
+.pf-bar{height:3px;background:var(--bd);border-radius:2px;margin-top:4px;overflow:hidden}
+.pf-fill{height:100%;border-radius:2px}
+
+/* ── SLA DRAWER ── */
+.drawer{position:fixed;top:0;right:-380px;width:380px;height:100vh;background:var(--white);box-shadow:-8px 0 30px rgba(0,0,0,.15);z-index:200;transition:right .25s;display:flex;flex-direction:column}
+.drawer.open{right:0}
+.dr-hd{background:var(--nv);padding:13px 16px;flex-shrink:0}
+.dr-title{font-size:14px;font-weight:700;color:#fff}
+.dr-sub{font-size:10px;color:rgba(255,255,255,.45);margin-top:2px}
+.dr-body{flex:1;overflow-y:auto;padding:14px 16px}
+.dr-body::-webkit-scrollbar{width:4px}
+.dr-body::-webkit-scrollbar-thumb{background:var(--bd2)}
+.sla-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd)}
+.sla-name{flex:1;font-size:12px;font-weight:600;color:var(--ink)}
+.sla-desc{font-size:9px;color:var(--ink3);margin-top:1px}
+.sla-inp{width:64px;border:1px solid var(--bd);border-radius:var(--r);padding:6px 8px;font-family:var(--fm);font-size:12px;text-align:center;color:var(--ink);outline:none}
+.sla-inp:focus{border-color:var(--tl)}
+.sla-unit{font-size:10px;color:var(--ink3)}
+.dr-foot{padding:12px 16px;border-top:1px solid var(--bd);display:flex;gap:7px;flex-shrink:0}
+.btn{padding:7px 13px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb)}
+.btn-tl{background:var(--tl);color:#fff;border-color:var(--tl)}.btn-tl:hover{opacity:.88}
+.btn-g{background:var(--white);color:var(--ink3);border-color:var(--bd)}
+
+/* ── TIMELINE MODAL ── */
+.tmodal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;display:none;align-items:center;justify-content:center}
+.tmodal.open{display:flex}
+.tbox{background:var(--white);border-radius:var(--r-lg);width:520px;max-height:86vh;box-shadow:0 20px 50px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:hidden}
+.tb-hd{background:var(--nv);padding:13px 17px;flex-shrink:0;display:flex;align-items:flex-start;gap:10px}
+.tb-name{font-family:var(--fd);font-size:17px;color:#fff;font-style:italic}
+.tb-meta{font-size:10px;color:rgba(255,255,255,.45);margin-top:2px}
+.tb-cls{margin-left:auto;background:rgba(255,255,255,.1);border:none;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:12px;color:rgba(255,255,255,.7)}
+.tb-body{flex:1;overflow-y:auto;padding:15px 17px}
+.tb-body::-webkit-scrollbar{width:4px}
+.tb-body::-webkit-scrollbar-thumb{background:var(--bd2)}
+/* Timeline */
+.tstep{display:flex;gap:11px;position:relative;padding-bottom:14px}
+.tstep:last-child{padding-bottom:0}
+.tstep::before{content:'';position:absolute;left:11px;top:24px;bottom:0;width:2px;background:var(--bd)}
+.tstep:last-child::before{display:none}
+.ts-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;z-index:1}
+.tsd-done{background:var(--grn-l);color:var(--grn);border:2px solid var(--grn)}
+.tsd-now{background:var(--tl);color:#fff;border:2px solid var(--tl)}
+.tsd-next{background:var(--bg);color:var(--ink4);border:2px solid var(--bd)}
+.ts-body{flex:1;padding-top:2px}
+.ts-name{font-size:12px;font-weight:700;color:var(--ink)}
+.ts-name.dim{color:var(--ink4);font-weight:500}
+.ts-time{font-family:var(--fm);font-size:10px;color:var(--ink3);margin-top:1px}
+.ts-dur{font-family:var(--fm);font-size:10px;font-weight:600;padding:1px 7px;border-radius:4px;display:inline-block;margin-top:3px}
+.tsd-g{background:var(--grn-l);color:var(--grn)}
+.tsd-a{background:var(--amb-l);color:var(--amb)}
+.tsd-r{background:var(--red-l);color:var(--red)}
+.ts-note{font-size:10px;color:var(--ink3);margin-top:3px}
+
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:var(--r-lg);font-size:12px;font-weight:500;z-index:999;box-shadow:var(--sh-md);display:none;white-space:nowrap;max-width:92vw}
+.toast.show{display:block}
+</style>
+</head>
+<body>
+
+<!-- RAIL -->
+<div class="rail">
+  <div class="rl">Gini Flow</div>
+  <div class="rsep"></div>
+  <span style="font-size:12px;font-weight:600;color:#fff">Flow Manager</span>
+  <span style="display:flex;align-items:center;gap:5px;font-size:10px;color:rgba(255,255,255,.5);margin-left:4px"><span class="live-dot"></span> Live · Thu 27 Aug 2026</span>
+  <div class="rr">
+    <button class="rbtn" onclick="toast('Day report: avg journey 74m · 3 over SLA · busiest 9-11 AM · bottleneck: Dr. Bhansali wait')">📊 Day report</button>
+    <button class="rbtn" onclick="document.getElementById('slaDrawer').classList.add('open')">⚙ Time budgets</button>
+    <button class="rbtn" onclick="toast('Role switcher — Reception · Vitals · MO/SD · Doctor · Lab · Pharmacy')">Switch role</button>
+    <span style="font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.35)" id="clk">--:--</span>
+  </div>
+</div>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat"><div class="sv">14</div><div><div class="sl">In building now</div><div class="ss">of 18 booked</div></div></div>
+  <div class="stat"><div class="sv" style="color:var(--grn)">8</div><div><div class="sl">Completed</div><div class="ss">avg 71 min</div></div></div>
+  <div class="stat"><div class="sv" style="color:var(--red)">3</div><div><div class="sl">Over time budget</div><div class="ss">need attention</div></div></div>
+  <div class="stat"><div class="sv" style="color:var(--amb)">2</div><div><div class="sl">Blocked</div><div class="ss">missing reports / payment</div></div></div>
+  <div class="stat dark">
+    <div class="sv" style="color:#fff">74<span style="font-size:12px;color:rgba(255,255,255,.4)">m</span></div>
+    <div><div class="sl">Avg journey today</div><div class="ss">target 90m · ✓ on track</div></div>
+  </div>
+  <div class="stat"><div class="sv" style="color:var(--tl)">92%</div><div><div class="sl">Within SLA</div><div class="ss">station transitions</div></div></div>
+</div>
+
+<!-- BOTTLENECK -->
+<div class="bottleneck">
+  <div class="bn-ico">🚨</div>
+  <div class="bn-t"><strong>Bottleneck: Waiting for Dr. Bhansali</strong> — 4 patients queued, avg wait <strong>22 min</strong> against 15 min budget. Longest: Isha Gambhir 41m. Suggest: SD closes green-category patients directly.</div>
+  <button class="rbtn" style="border-color:var(--red-b);color:var(--red);flex-shrink:0" onclick="toast('Alert sent to Dr. Bhansali + SD station')">Notify stations</button>
+</div>
+
+<!-- BOARD -->
+<div class="board-wrap">
+<div class="board">
+
+  <!-- CHECKED IN -->
+  <div class="col">
+    <div class="col-hd"><span>🏥</span><span class="col-name">Checked in</span><span class="col-count">2</span></div>
+    <div class="col-sla">Budget to vitals: <strong>10 min</strong></div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Nishant Puri','26M · P_51200 · Visit 19','blocked')">
+        <div class="pc-top"><div class="pc-av" style="background:#374151">NP</div><div class="pc-name">Nishant Puri</div><div class="pc-cat">🔵</div></div>
+        <div class="pc-mid">09:42 check-in · Visit 19</div>
+        <div class="pc-bot"><span class="tmr tmr-r">⏱ 34m</span><span class="tot over">34m total</span></div>
+        <div class="wait4 blocked"><span class="w-ico">🚫</span> Blocked — reports not uploaded</div>
+      </div>
+      <div class="pc" onclick="openTimeline('Harpreet Kaur','55F · P_88201 · Visit 3','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#1e3a5f">HK</div><div class="pc-name">Harpreet Kaur</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">10:31 check-in · Visit 3</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 4m</span><span class="tot">4m total</span></div>
+        <div class="wait4"><span class="w-ico">→</span> Waiting for vitals station</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VITALS -->
+  <div class="col">
+    <div class="col-hd"><span>🩺</span><span class="col-name">At vitals</span><span class="col-count">1</span></div>
+    <div class="col-sla">Budget: <strong>5 min</strong> at station</div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Rakesh Sharma','48M · P_67120 · Visit 8','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#14532d">RS</div><div class="pc-name">Rakesh Sharma</div><div class="pc-cat">✅</div></div>
+        <div class="pc-mid">BP + weight in progress</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 3m</span><span class="tot">18m total</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WITH SD/MO -->
+  <div class="col">
+    <div class="col-hd"><span>👨‍⚕️</span><span class="col-name">With SD / MO</span><span class="col-count">2</span></div>
+    <div class="col-sla">Budget: <strong>15 min</strong> at station</div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Anil Dhamija','60M · P_308530 · Visit 15','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#374151">AD</div><div class="pc-name">Anil Dhamija</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">Dr. Beant Sidhu · workup</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 9m</span><span class="tot">33m total</span></div>
+      </div>
+      <div class="pc" onclick="openTimeline('Sunita Devi','63F · P_23881 · Visit 11','warn')">
+        <div class="pc-top"><div class="pc-av" style="background:#7c2d12">SD</div><div class="pc-name">Sunita Devi</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">Dr. Beant Sidhu · plan drafting</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 13m</span><span class="tot">41m total</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WAITING FOR DOCTOR — HOT -->
+  <div class="col hot">
+    <div class="col-hd"><span>⏳</span><span class="col-name" style="color:var(--red)">Waiting — Dr. Bhansali</span><span class="col-count" style="color:var(--red);border-color:var(--red-b)">4</span></div>
+    <div class="col-sla" style="color:var(--red)">Budget: <strong>15 min</strong> · avg now 22m ⚠</div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Isha Gambhir','41F · P_42220 · Visit 5','over')">
+        <div class="pc-top"><div class="pc-av" style="background:#1e3a5f">IG</div><div class="pc-name">Isha Gambhir</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">Results ✓ · SD plan ready</div>
+        <div class="pc-bot"><span class="tmr tmr-r">⏱ 41m</span><span class="tot over">78m total</span></div>
+        <div class="wait4 blocked"><span class="w-ico">⚠</span> 26m over budget — longest wait</div>
+      </div>
+      <div class="pc" onclick="openTimeline('Deepak Khanna','61M · P_176559 · Visit 18','warn')">
+        <div class="pc-top"><div class="pc-av" style="background:#14532d">DK</div><div class="pc-name">Deepak Khanna</div><div class="pc-cat">✅</div></div>
+        <div class="pc-mid">Results ✓ · stable · green</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 14m</span><span class="tot">52m total</span></div>
+        <div class="wait4"><span class="w-ico">💡</span> Green category — SD could close</div>
+      </div>
+      <div class="pc" onclick="openTimeline('Promila Puri','33F · P_131520 · Visit 7','warn')">
+        <div class="pc-top"><div class="pc-av" style="background:#7f1d1d">PP</div><div class="pc-name">Promila Puri</div><div class="pc-cat">🔴</div></div>
+        <div class="pc-mid">HbA1c 12.6 · priority case</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 12m</span><span class="tot">47m total</span></div>
+      </div>
+      <div class="pc" onclick="openTimeline('Mohan Lal','69M · P_90233 · Visit 21','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#374151">ML</div><div class="pc-name">Mohan Lal</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">Results ✓ · SD done</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 6m</span><span class="tot">39m total</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WITH DR BHANSALI -->
+  <div class="col">
+    <div class="col-hd"><span>🧑‍⚕️</span><span class="col-name">With Dr. Bhansali</span><span class="col-count">2</span></div>
+    <div class="col-sla">Budget: <strong>20 min</strong> at station</div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Sandeep Kumar','50M · P_177562 · Visit 5','warn')">
+        <div class="pc-top"><div class="pc-av" style="background:#b45309">SK</div><div class="pc-name">Sandeep Kumar</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">TG 368 discussion · Rx editing</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 18m</span><span class="tot">64m total</span></div>
+      </div>
+      <div class="pc" onclick="openTimeline('Gurmail Singh Sandhu','71M · P_14207 · Visit 8','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#7f1d1d">GS</div><div class="pc-name">Gurmail Singh</div><div class="pc-cat">🔴</div></div>
+        <div class="pc-mid">eGFR 11 · nephro referral</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 8m</span><span class="tot">51m total</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PHARMACY -->
+  <div class="col">
+    <div class="col-hd"><span>💊</span><span class="col-name">At pharmacy</span><span class="col-count">2</span></div>
+    <div class="col-sla">Budget: <strong>10 min</strong> incl. counselling</div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Kamla Devi','58F · P_34450 · Visit 9','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#7c2d12">KD</div><div class="pc-name">Kamla Devi</div><div class="pc-cat">✅</div></div>
+        <div class="pc-mid">Dispensing · 5 medicines</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 4m</span><span class="tot">58m total</span></div>
+      </div>
+      <div class="pc" onclick="openTimeline('Baljit Singh','66M · P_71209 · Visit 14','warn')">
+        <div class="pc-top"><div class="pc-av" style="background:#374151">BS</div><div class="pc-name">Baljit Singh</div><div class="pc-cat">🟡</div></div>
+        <div class="pc-mid">Counselling · 1 med out of stock</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 9m</span><span class="tot">83m total</span></div>
+        <div class="wait4"><span class="w-ico">⚠</span> Stock substitution — Telmikind</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAB TRACK (parallel) -->
+  <div class="col">
+    <div class="col-hd"><span>🧪</span><span class="col-name">Lab track</span><span class="col-count">3</span></div>
+    <div class="col-sla">Sample→upload budget: <strong>45 min</strong></div>
+    <div class="col-body">
+      <div class="pc" onclick="openTimeline('Sandeep Kumar','Lab · 6 tests · today urgency','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#b45309">SK</div><div class="pc-name">Sandeep Kumar</div></div>
+        <div class="pc-mid">💰 Payment pending at reception</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 12m</span></div>
+        <div class="wait4 blocked"><span class="w-ico">💰</span> Waiting: reception payment</div>
+      </div>
+      <div class="pc" onclick="openTimeline('Isha Gambhir','Lab · 5 tests','ok')">
+        <div class="pc-top"><div class="pc-av" style="background:#1e3a5f">IG</div><div class="pc-name">Isha Gambhir</div></div>
+        <div class="pc-mid">⚙️ Processing in analyzer</div>
+        <div class="pc-bot"><span class="tmr tmr-g">⏱ 24m</span></div>
+      </div>
+      <div class="pc" onclick="openTimeline('Anil Dhamija','Lab · 4 tests','warn')">
+        <div class="pc-top"><div class="pc-av" style="background:#374151">AD</div><div class="pc-name">Anil Dhamija</div></div>
+        <div class="pc-mid">📤 Results ready — awaiting upload</div>
+        <div class="pc-bot"><span class="tmr tmr-a">⏱ 18m</span></div>
+        <div class="wait4"><span class="w-ico">📤</span> Upload pending 18m</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DONE -->
+  <div class="col">
+    <div class="col-hd"><span>✅</span><span class="col-name">Done today</span><span class="col-count">8</span></div>
+    <div class="col-sla">Avg journey: <strong>71 min</strong> ✓</div>
+    <div class="col-body">
+      <div class="pc" style="opacity:.6" onclick="openTimeline('Ravinder Grewal','62M · exited 09:04','done')">
+        <div class="pc-top"><div class="pc-av" style="background:#374151">RG</div><div class="pc-name">Ravinder Grewal</div><div class="pc-cat">✅</div></div>
+        <div class="pc-mid">Exited 09:04</div>
+        <div class="pc-bot"><span class="tmr tmr-g">64m total</span></div>
+      </div>
+      <div class="pc" style="opacity:.6" onclick="openTimeline('Jasbir Kaur','59F · exited 09:31','done')">
+        <div class="pc-top"><div class="pc-av" style="background:#7c2d12">JK</div><div class="pc-name">Jasbir Kaur</div><div class="pc-cat">✅</div></div>
+        <div class="pc-mid">Exited 09:31</div>
+        <div class="pc-bot"><span class="tmr tmr-g">69m total</span></div>
+      </div>
+      <div style="text-align:center;font-size:10px;color:var(--ink3);padding:5px">+ 6 more</div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- STATION PERFORMANCE FOOTER -->
+<div class="perf">
+  <div class="pf">
+    <div class="pf-name">Check-in → Vitals</div>
+    <div class="pf-val g">6m <span class="pf-sla">/ 10m budget</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:60%;background:var(--grn)"></div></div>
+  </div>
+  <div class="pf">
+    <div class="pf-name">Vitals station</div>
+    <div class="pf-val g">4m <span class="pf-sla">/ 5m</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:80%;background:var(--grn)"></div></div>
+  </div>
+  <div class="pf">
+    <div class="pf-name">SD / MO station</div>
+    <div class="pf-val g">12m <span class="pf-sla">/ 15m</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:80%;background:var(--grn)"></div></div>
+  </div>
+  <div class="pf">
+    <div class="pf-name">Wait for doctor</div>
+    <div class="pf-val r">22m <span class="pf-sla">/ 15m ⚠</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:100%;background:var(--red)"></div></div>
+  </div>
+  <div class="pf">
+    <div class="pf-name">Dr. Bhansali</div>
+    <div class="pf-val a">19m <span class="pf-sla">/ 20m</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:95%;background:var(--amb)"></div></div>
+  </div>
+  <div class="pf">
+    <div class="pf-name">Pharmacy</div>
+    <div class="pf-val g">7m <span class="pf-sla">/ 10m</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:70%;background:var(--grn)"></div></div>
+  </div>
+  <div class="pf">
+    <div class="pf-name">Lab sample→upload</div>
+    <div class="pf-val g">38m <span class="pf-sla">/ 45m</span></div>
+    <div class="pf-bar"><div class="pf-fill" style="width:84%;background:var(--grn)"></div></div>
+  </div>
+  <div class="pf" style="background:var(--nv);border-color:var(--nv)">
+    <div class="pf-name" style="color:rgba(255,255,255,.5)">Total journey</div>
+    <div class="pf-val" style="color:#fff">74m <span class="pf-sla" style="color:rgba(255,255,255,.35)">/ 90m ✓</span></div>
+    <div class="pf-bar" style="background:rgba(255,255,255,.15)"><div class="pf-fill" style="width:82%;background:var(--grn)"></div></div>
+  </div>
+</div>
+
+<!-- SLA DRAWER -->
+<div class="drawer" id="slaDrawer">
+  <div class="dr-hd">
+    <div class="dr-title">⚙ Time budgets (SLA)</div>
+    <div class="dr-sub">Set expected time per station — cards turn amber at 80%, red when over</div>
+  </div>
+  <div class="dr-body">
+    <div class="sla-row"><div><div class="sla-name">Check-in → Vitals</div><div class="sla-desc">Wait after check-in before vitals begin</div></div><input class="sla-inp" value="10"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Vitals station</div><div class="sla-desc">BP, weight, height entry time</div></div><input class="sla-inp" value="5"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Wait for SD / MO</div><div class="sla-desc">After vitals, before SD sees patient</div></div><input class="sla-inp" value="10"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">SD / MO station</div><div class="sla-desc">Workup + plan drafting</div></div><input class="sla-inp" value="15"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Wait for Dr. Bhansali</div><div class="sla-desc">After SD ready, before doctor sees</div></div><input class="sla-inp" value="15"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Dr. Bhansali station</div><div class="sla-desc">Consultation + prescription</div></div><input class="sla-inp" value="20"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Pharmacy</div><div class="sla-desc">Dispensing + counselling</div></div><input class="sla-inp" value="10"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Lab: sample → upload</div><div class="sla-desc">Parallel track · collection to report upload</div></div><input class="sla-inp" value="45"><span class="sla-unit">min</span></div>
+    <div class="sla-row"><div><div class="sla-name">Reception: payment clear</div><div class="sla-desc">Test order to payment received</div></div><input class="sla-inp" value="10"><span class="sla-unit">min</span></div>
+    <div class="sla-row" style="border-bottom:none"><div><div class="sla-name" style="color:var(--tl)">Total journey target</div><div class="sla-desc">Check-in to exit — the headline number</div></div><input class="sla-inp" value="90" style="border-color:var(--tl);font-weight:700"><span class="sla-unit">min</span></div>
+    <div style="background:var(--tl-l);border:1px solid var(--tl-b);border-radius:var(--r);padding:9px 11px;margin-top:12px;font-size:10px;color:var(--tl);line-height:1.6">
+      💡 Budgets can differ per patient category — red-category patients can get a longer doctor budget, green-category can be SD-closed with 0 doctor time. Configure per-category overrides in settings.
+    </div>
+  </div>
+  <div class="dr-foot">
+    <button class="btn btn-tl" onclick="document.getElementById('slaDrawer').classList.remove('open');toast('✓ Time budgets saved — all timers recalculated')">Save budgets</button>
+    <button class="btn btn-g" onclick="document.getElementById('slaDrawer').classList.remove('open')">Cancel</button>
+  </div>
+</div>
+
+<!-- TIMELINE MODAL -->
+<div class="tmodal" id="tmod">
+  <div class="tbox">
+    <div class="tb-hd">
+      <div>
+        <div class="tb-name" id="tm-name">Patient</div>
+        <div class="tb-meta" id="tm-meta">—</div>
+      </div>
+      <button class="tb-cls" onclick="document.getElementById('tmod').classList.remove('open')">✕</button>
+    </div>
+    <div class="tb-body" id="tm-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<script>
+let _tt;
+function toast(m,ms=3000){const e=document.getElementById('toastEl');e.textContent=m;e.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>e.classList.remove('show'),ms)}
+function tick(){const n=new Date();const e=document.getElementById('clk');if(e)e.textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')}
+setInterval(tick,1000);tick();
+
+// Timeline data per scenario type
+const timelines={
+  over:[
+    {s:'done',n:'Checked in',t:'09:12',d:'—',note:'Reception · appointment confirmed day before'},
+    {s:'done',n:'Vitals done',t:'09:19',d:'7m wait + 4m station',cls:'tsd-g'},
+    {s:'done',n:'With SD — Dr. Beant Sidhu',t:'09:31',d:'8m wait + 12m station',cls:'tsd-g',note:'Plan drafted · ready for Dr. Bhansali'},
+    {s:'done',n:'Lab results uploaded',t:'09:48',d:'Lab track: 36m ✓',cls:'tsd-g'},
+    {s:'now',n:'Waiting for Dr. Bhansali',t:'Since 09:51',d:'41m waiting — 26m OVER budget',cls:'tsd-r',note:'⚠ Longest wait in building. SD plan ready. Doctor has 2 patients ahead.'},
+    {s:'next',n:'Dr. Bhansali consultation',t:'—',d:'Budget 20m'},
+    {s:'next',n:'Pharmacy',t:'—',d:'Budget 10m'},
+    {s:'next',n:'Exit',t:'—',d:'Journey at 78m of 90m target'},
+  ],
+  warn:[
+    {s:'done',n:'Checked in',t:'09:38',d:'—'},
+    {s:'done',n:'Vitals done',t:'09:47',d:'5m wait + 4m station',cls:'tsd-g'},
+    {s:'done',n:'With SD',t:'09:58',d:'6m wait + 13m station',cls:'tsd-g'},
+    {s:'now',n:'Current station',t:'In progress',d:'Approaching budget',cls:'tsd-a',note:'Watch — nearing the time budget for this station'},
+    {s:'next',n:'Remaining steps',t:'—',d:'On track for 90m target'},
+  ],
+  ok:[
+    {s:'done',n:'Checked in',t:'10:02',d:'—'},
+    {s:'done',n:'Vitals done',t:'10:09',d:'4m wait + 3m station',cls:'tsd-g'},
+    {s:'now',n:'Current station',t:'In progress',d:'Well within budget',cls:'tsd-g'},
+    {s:'next',n:'Remaining steps',t:'—',d:'On track'},
+  ],
+  blocked:[
+    {s:'done',n:'Checked in',t:'09:42',d:'—',note:'Walk-in · reports not pre-uploaded'},
+    {s:'now',n:'Blocked — waiting for reports',t:'34m and counting',d:'34m blocked',cls:'tsd-r',note:'🚫 Cannot be categorised or seen without reports. Action: coordinator called patient to WhatsApp last lab reports · or send to Gini Lab for fresh tests.'},
+    {s:'next',n:'Vitals → SD → Doctor',t:'—',d:'Waiting on unblock'},
+  ],
+  done:[
+    {s:'done',n:'Checked in',t:'08:00',d:'—'},
+    {s:'done',n:'Vitals',t:'08:09',d:'6m + 3m',cls:'tsd-g'},
+    {s:'done',n:'SD workup',t:'08:24',d:'7m + 8m',cls:'tsd-g'},
+    {s:'done',n:'Dr. Bhansali',t:'08:41',d:'9m wait + 8m consult',cls:'tsd-g',note:'Green category · quick review'},
+    {s:'done',n:'Pharmacy + counselling',t:'08:56',d:'5m + 7m',cls:'tsd-g'},
+    {s:'done',n:'Exited',t:'09:04',d:'Total 64m of 90m ✓',cls:'tsd-g'},
+  ],
+};
+
+function openTimeline(name,meta,scenario){
+  document.getElementById('tm-name').textContent=name;
+  document.getElementById('tm-meta').textContent=meta;
+  const steps=timelines[scenario]||timelines.ok;
+  document.getElementById('tm-body').innerHTML=steps.map(st=>`
+    <div class="tstep">
+      <div class="ts-dot ${st.s==='done'?'tsd-done':st.s==='now'?'tsd-now':'tsd-next'}">${st.s==='done'?'✓':st.s==='now'?'●':'○'}</div>
+      <div class="ts-body">
+        <div class="ts-name ${st.s==='next'?'dim':''}">${st.n}</div>
+        <div class="ts-time">${st.t}</div>
+        ${st.d&&st.d!=='—'?`<span class="ts-dur ${st.cls||'tsd-g'}">${st.d}</span>`:''}
+        ${st.note?`<div class="ts-note">${st.note}</div>`:''}
+      </div>
+    </div>`).join('');
+  document.getElementById('tmod').classList.add('open');
+}
+document.getElementById('tmod').addEventListener('click',e=>{if(e.target.id==='tmod')e.target.classList.remove('open')});
+</script>
+</body>
+</html>

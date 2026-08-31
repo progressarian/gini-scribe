@@ -91,6 +91,7 @@ const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklis
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
+const GiniFlowManagerPage = lazyWithRetry(() => import("./pages/giniflow/FlowManagerPage"));
 const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
 const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
 const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
@@ -212,6 +213,8 @@ const router = createBrowserRouter([
               // Patient Flow Management
               { path: "/flow/checkin", element: lazyEl(FlowCheckinPage) },
               { path: "/flow/coordinator", element: lazyEl(FlowCoordinatorPage) },
+              // Gini Flow — the replacement floor board (docs/gini-flow/).
+              { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
               { path: "/flow/station", element: lazyEl(FlowStationPage) },

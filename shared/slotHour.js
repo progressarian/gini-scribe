@@ -9,7 +9,7 @@ const to24 = (h, min, ap) => {
   return hh + min / 60;
 };
 
-export const slotStartHour = (slot) => {
+const slotStartDecimal = (slot) => {
   const s = String(slot || "")
     .trim()
     .replace(/^\d+\.\s*/, "");
@@ -24,7 +24,7 @@ export const slotStartHour = (slot) => {
     const endAp = (ap2 || "").toLowerCase();
     if (startAp) {
       const start = to24(+h1, +(m1 || 0), startAp);
-      return Number.isFinite(start) ? Math.floor(start) : null;
+      return Number.isFinite(start) ? start : null;
     }
     if (endAp) {
       // Only the end carries AM/PM ("1-2PM", "11-12PM") — walk back from the
@@ -34,14 +34,32 @@ export const slotStartHour = (slot) => {
       const raw2 = +h2 + +(m2 || 0) / 60;
       const span = raw1 < raw2 ? raw2 - raw1 : raw2 + 12 - raw1;
       const start = end - span;
-      return start >= 0 && start < 24 ? Math.floor(start) : null;
+      return start >= 0 && start < 24 ? start : null;
     }
   }
 
   const single = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (!single) return null;
   const h = to24(+single[1], +(single[2] || 0), (single[3] || "").toLowerCase());
-  return h >= 0 && h < 24 ? Math.floor(h) : null;
+  return h >= 0 && h < 24 ? h : null;
+};
+
+// Start hour (0-23) of a slot label. Unchanged behaviour — the parser now keeps
+// minutes internally and this floors them away.
+export const slotStartHour = (slot) => {
+  const h = slotStartDecimal(slot);
+  return h === null ? null : Math.floor(h);
+};
+
+// The same start time as "HH:MM", for callers that need the minutes — writing a
+// slot into a TIME column, for one. Returns null when unparseable, so a caller
+// can store NULL rather than reject the row.
+export const slotStartTime = (slot) => {
+  const h = slotStartDecimal(slot);
+  if (h === null) return null;
+  const hh = Math.floor(h);
+  const mm = Math.round((h - hh) * 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
 
 // Start hour of an arrival window label ("2 PM to 3 PM") — the bucket key the

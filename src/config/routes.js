@@ -123,6 +123,9 @@ export const PAGE_CAPABILITIES = {
     Object.entries(STATION_CAPABILITY).map(([slug, cap]) => [`/flow/station/${slug}`, cap]),
   ),
   "/flow/reports": CAP.FLOW_REPORTS,
+  // Gini Flow. Its own capability, not FLOW_*, so the two boards can be granted
+  // independently while both run. See docs/gini-flow/00-OVERVIEW.md §2.4.
+  "/giniflow/manager": CAP.GINIFLOW_VIEW,
   "/flow/admin": CAP.ADMIN,
 };
 

@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gini Flow — Station Apps</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9;--white:#fff;--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--ink4:#94a3b8;
+  --bd:#e2e8f0;--bd2:#cbd5e1;--nv:#0f172a;
+  --red:#dc2626;--red-l:#fef2f2;--red-b:rgba(220,38,38,.14);
+  --amb:#d97706;--amb-l:#fffbeb;--amb-b:rgba(217,119,6,.14);
+  --grn:#16a34a;--grn-l:#f0fdf4;--grn-b:rgba(22,163,74,.14);
+  --blu:#2563eb;--blu-l:#eff6ff;--blu-b:rgba(37,99,235,.14);
+  --pu:#7c3aed;--pu-l:#f5f3ff;--pu-b:rgba(124,58,237,.14);
+  --tl:#0d9488;--tl-l:#f0fdfa;--tl-b:rgba(13,148,136,.14);
+  --fb:'Inter',sans-serif;--fm:'JetBrains Mono',monospace;--fd:'Instrument Serif',serif;
+  --sh:0 1px 2px rgba(0,0,0,.05),0 1px 3px rgba(0,0,0,.08);
+  --sh-md:0 4px 14px rgba(0,0,0,.1);
+  --r:8px;--r-lg:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fb);background:var(--bg);color:var(--ink);font-size:13px;line-height:1.5}
+
+/* Screens */
+.scr{display:none;height:100vh;flex-direction:column;overflow:hidden}
+.scr.on{display:flex}
+
+/* Top rail */
+.rail{background:var(--nv);height:44px;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0}
+.rl{font-family:var(--fd);font-size:15px;color:#fff;font-style:italic}
+.rsep{width:1px;height:14px;background:rgba(255,255,255,.15)}
+.rr{margin-left:auto;display:flex;gap:5px;align-items:center}
+.rbtn{padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.7);font-family:var(--fb)}
+.rbtn:hover{background:rgba(255,255,255,.1);color:#fff}
+.rbtn.grn{background:var(--grn);border-color:var(--grn);color:#fff}
+
+/* Shared */
+.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.b-red{background:var(--red-l);color:var(--red)}.b-amb{background:var(--amb-l);color:var(--amb)}
+.b-grn{background:var(--grn-l);color:var(--grn)}.b-tl{background:var(--tl-l);color:var(--tl)}
+.b-blu{background:var(--blu-l);color:var(--blu)}.b-pu{background:var(--pu-l);color:var(--pu)}
+.b-ink{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.btn{padding:5px 11px;border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--fb);transition:all .12s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.btn-g{background:var(--white);color:var(--ink3);border-color:var(--bd)}.btn-g:hover{color:var(--ink)}
+.btn-tl{background:var(--tl);color:#fff;border-color:var(--tl)}.btn-tl:hover{opacity:.88}
+.btn-grn{background:var(--grn);color:#fff;border-color:var(--grn)}.btn-grn:hover{opacity:.88}
+.btn-blu{background:var(--blu);color:#fff;border-color:var(--blu)}.btn-blu:hover{opacity:.88}
+.btn-pu{background:var(--pu);color:#fff;border-color:var(--pu)}.btn-pu:hover{opacity:.88}
+.btn-amb{background:var(--amb);color:#fff;border-color:var(--amb)}.btn-amb:hover{opacity:.88}
+.scroll{flex:1;overflow-y:auto}.scroll::-webkit-scrollbar{width:4px}.scroll::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.inner{padding:14px;display:flex;flex-direction:column;gap:10px;max-width:1000px;margin:0 auto}
+.sec{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);box-shadow:var(--sh);overflow:hidden}
+.sec-hd{padding:9px 13px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.sh-l{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ink)}
+.sh-sub{font-size:10px;color:var(--ink3);font-weight:400;margin-left:4px}
+.sh-r{display:flex;gap:5px;align-items:center}
+.sec-bd{padding:11px 13px}
+.slbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3)}
+.stats{display:flex;gap:7px;flex-wrap:wrap}
+.stat{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);padding:8px 13px;display:flex;gap:9px;align-items:center;box-shadow:var(--sh)}
+.sv{font-size:20px;font-weight:600;font-family:var(--fm);line-height:1}
+.sl{font-size:10px;color:var(--ink3);font-weight:500}
+.ss{font-size:9px;color:var(--ink4)}
+
+/* ══════════ LANDING ══════════ */
+#s-land .inner{justify-content:center;min-height:100%;flex-direction:column;gap:16px}
+.land-title{font-family:var(--fd);font-size:28px;font-style:italic;color:var(--ink);text-align:center}
+.land-sub{font-size:13px;color:var(--ink3);text-align:center}
+.role-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:600px;margin:0 auto;width:100%}
+.role-card{background:var(--white);border:1.5px solid var(--bd);border-radius:var(--r-lg);padding:20px;cursor:pointer;transition:all .15s;box-shadow:var(--sh)}
+.role-card:hover{box-shadow:var(--sh-md);transform:translateY(-2px)}
+.rc-ico{font-size:28px;margin-bottom:8px}
+.rc-name{font-size:14px;font-weight:700;color:var(--ink);margin-bottom:3px}
+.rc-desc{font-size:11px;color:var(--ink3);line-height:1.5}
+.rc-badge{margin-top:8px}
+
+/* ══════════ PATIENT ROW (shared) ══════════ */
+.pt-list{display:flex;flex-direction:column;gap:7px}
+.pt-card{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:10px 13px;display:flex;align-items:center;gap:11px;cursor:pointer;transition:all .12s;box-shadow:var(--sh)}
+.pt-card:hover{border-color:var(--tl);box-shadow:var(--sh-md);transform:translateY(-1px)}
+.pc-av{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.pc-body{flex:1;min-width:0}
+.pc-name{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:1px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.pc-meta{font-size:10px;color:var(--ink3)}
+.pc-tests{font-size:10px;color:var(--ink3);margin-top:2px}
+.pc-r{flex-shrink:0;text-align:right;min-width:110px}
+.pc-time{font-family:var(--fm);font-size:12px;font-weight:600;color:var(--ink2)}
+.pc-tlbl{font-size:9px;color:var(--ink4)}
+
+/* Status steps (lab flow) */
+.steps{display:flex;align-items:center;gap:4px;margin-top:4px;flex-wrap:wrap}
+.step{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.step-done{background:var(--grn-l);color:var(--grn)}
+.step-now{background:var(--tl-l);color:var(--tl)}
+.step-next{background:#f1f5f9;color:#94a3b8}
+.step-arr{font-size:8px;color:var(--ink4)}
+
+/* Status pills */
+.sp{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-block;white-space:nowrap}
+.sp-sample{background:var(--blu-l);color:var(--blu)}
+.sp-process{background:var(--pu-l);color:var(--pu)}
+.sp-ready{background:var(--tl-l);color:var(--tl)}
+.sp-done{background:var(--grn-l);color:var(--grn)}
+.sp-pay{background:var(--red-l);color:var(--red)}
+.sp-paid{background:var(--grn-l);color:var(--grn)}
+.sp-wait{background:#f1f5f9;color:#64748b}
+.sp-disp{background:var(--pu-l);color:var(--pu)}
+.sp-comp{background:var(--grn-l);color:var(--grn)}
+
+/* Section group label */
+.grp-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);padding:0 2px}
+
+/* Detail panel (right side or overlay) */
+.detail-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-end;justify-content:flex-end}
+.detail-overlay.open{display:flex}
+.detail-pane{background:var(--white);width:560px;height:100vh;flex-direction:column;display:flex;overflow:hidden;box-shadow:-8px 0 30px rgba(0,0,0,.15)}
+.dp-head{background:var(--nv);padding:12px 16px;flex-shrink:0}
+.dp-name{font-family:var(--fd);font-size:17px;color:#fff;font-style:italic;margin-bottom:2px}
+.dp-meta{font-size:10px;color:rgba(255,255,255,.45);line-height:1.6}
+.dp-scroll{flex:1;overflow-y:auto}.dp-scroll::-webkit-scrollbar{width:4px}.dp-scroll::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.dp-inner{padding:14px;display:flex;flex-direction:column;gap:12px}
+.dp-sec{background:var(--bg);border-radius:var(--r-lg);padding:11px 13px}
+.dp-sec-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);margin-bottom:8px}
+
+/* Lab upload area */
+.upload-area{border:2px dashed var(--bd2);border-radius:var(--r-lg);padding:20px;text-align:center;cursor:pointer;transition:all .15s;margin-bottom:10px}
+.upload-area:hover,.upload-area.drag{border-color:var(--tl);background:var(--tl-l)}
+.ua-ico{font-size:28px;margin-bottom:6px}
+.ua-t{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:3px}
+.ua-s{font-size:11px;color:var(--ink3)}
+
+/* Test row (lab) */
+.test-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);font-size:11px}
+.test-row:last-child{border:none}
+.tr-name{flex:1;font-weight:500;color:var(--ink2)}
+.tr-status{flex-shrink:0}
+
+/* ══════════ PHARMACY ══════════ */
+/* Medicine card (detailed — for pharmacy) */
+.mc-card{border:1px solid var(--bd);border-radius:var(--r-lg);overflow:hidden}
+.mc-row{display:flex;border-bottom:1px solid var(--bd)}
+.mc-row:last-child{border:none}
+.mc-time{min-width:120px;padding:10px 12px;background:var(--bg);border-right:1px solid var(--bd);flex-shrink:0}
+.mc-tl{font-size:10px;font-weight:700;color:var(--ink);margin-bottom:1px}
+.mc-ts{font-size:9px;color:var(--ink3)}
+.mc-meds{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:7px}
+.mc-med{display:flex;gap:9px;align-items:flex-start;padding:7px 9px;border-radius:var(--r);border:1px solid;transition:all .12s}
+.mm-gini{background:var(--tl-l);border-color:var(--tl-b)}
+.mm-ext{background:var(--blu-l);border-color:var(--blu-b);border-style:dashed}
+.mm-ico{font-size:16px;flex-shrink:0;margin-top:1px}
+.mm-body{flex:1}
+.mm-name{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mm-dose{font-family:var(--fm);font-size:10px;color:var(--ink3)}
+.mm-for{font-size:11px;color:var(--ink2);margin-top:2px}
+.mm-instr{font-size:10px;color:var(--ink3);margin-top:2px;line-height:1.5}
+.mm-instr-hi{font-size:10px;color:var(--tl);margin-top:1px;font-weight:500}
+.mm-dr{font-size:10px;font-weight:600;color:var(--blu);margin-top:2px}
+.mm-dr.gini{color:var(--tl)}
+.mm-ext-tag{font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;background:var(--blu);color:#fff;margin-left:3px}
+.mm-new-tag{font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;background:var(--grn);color:#fff}
+.mm-chg-tag{font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;background:var(--amb);color:#fff}
+.mm-r{flex-shrink:0;text-align:right}
+.mm-stock{font-size:10px;font-weight:600;color:var(--grn)}
+.mm-stock.low{color:var(--amb)}.mm-stock.out{color:var(--red)}
+.mm-qty{font-size:9px;color:var(--ink3)}
+.dispense-btn{font-size:10px;font-weight:700;padding:3px 9px;border-radius:4px;cursor:pointer;border:1px solid;font-family:var(--fb);margin-top:4px;transition:all .12s}
+.db-ok{background:var(--tl);color:#fff;border-color:var(--tl)}
+.db-done{background:var(--grn-l);color:var(--grn);border-color:var(--grn-b)}
+
+/* ══════════ RECEPTION ══════════ */
+.test-order-card{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:10px 13px;margin-bottom:7px;box-shadow:var(--sh)}
+.toc-head{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.toc-body{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.toc-test{font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px;background:var(--bg);border:1px solid var(--bd);color:var(--ink2)}
+.toc-foot{display:flex;gap:7px;align-items:center}
+
+/* ══════════ REFERRALS ══════════ */
+.ref-card{background:var(--white);border:1px solid var(--bd);border-radius:var(--r-lg);padding:11px 13px;margin-bottom:7px;box-shadow:var(--sh)}
+.rc-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px}
+.rc-body{flex:1}
+.rcn{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:2px}
+.rcs{font-size:11px;color:var(--ink3)}
+.rc-reason{font-size:11px;color:var(--ink2);background:var(--bg);border-radius:var(--r);padding:7px 9px;margin-bottom:8px;border-left:3px solid var(--tl);line-height:1.5}
+.rc-foot{display:flex;gap:6px;align-items:center}
+.ref-form{background:var(--bg);border-radius:var(--r-lg);border:2px dashed var(--bd2);padding:13px;display:none}
+.ref-form.open{display:block}
+.rf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:9px}
+.rff label{display:block;font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px}
+.rff input,.rff select,.rff textarea{width:100%;border:1px solid var(--bd);border-radius:var(--r);padding:6px 9px;font-family:var(--fb);font-size:12px;color:var(--ink);background:var(--white);outline:none;resize:none}
+.rff input:focus,.rff select:focus,.rff textarea:focus{border-color:var(--tl)}
+
+/* Toast */
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:var(--r-lg);font-size:12px;font-weight:500;z-index:999;box-shadow:var(--sh-md);display:none;white-space:nowrap;max-width:90vw;text-align:center}
+.toast.show{display:block}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════
+     LANDING — CHOOSE STATION
+══════════════════════════════ -->
+<div class="scr on" id="s-land">
+  <div class="rail">
+    <div class="rl">Gini Flow</div>
+    <div class="rsep"></div>
+    <span style="font-size:11px;color:rgba(255,255,255,.45)">Thu 27 Aug 2026 · OPD Day</span>
+    <div class="rr"><span style="font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.35)" id="clk">--:--</span></div>
+  </div>
+  <div class="scroll">
+    <div class="inner" style="min-height:calc(100vh - 44px);justify-content:center">
+      <div style="text-align:center">
+        <div class="land-title">Gini Flow Stations</div>
+        <div class="land-sub" style="margin-top:4px">Select your station to begin</div>
+      </div>
+      <div class="role-grid">
+        <div class="role-card" onclick="go('s-lab')" style="border-color:var(--tl-b)">
+          <div class="rc-ico">🧪</div>
+          <div class="rc-name">Lab Station</div>
+          <div class="rc-desc">Patient sample queue · mark collected · processing · upload results · triggers MO notification</div>
+          <div class="rc-badge"><span class="badge b-tl">6 pending</span> <span class="badge b-grn">4 uploaded</span></div>
+        </div>
+        <div class="role-card" onclick="go('s-pharmacy')" style="border-color:var(--pu-b)">
+          <div class="rc-ico">💊</div>
+          <div class="rc-name">Pharmacy Station</div>
+          <div class="rc-desc">Today's prescriptions · dispense medicines · full medicine card with timing and instructions</div>
+          <div class="rc-badge"><span class="badge b-pu">5 to dispense</span> <span class="badge b-grn">8 done</span></div>
+        </div>
+        <div class="role-card" onclick="go('s-reception')" style="border-color:var(--blu-b)">
+          <div class="rc-ico">🏥</div>
+          <div class="rc-name">Reception</div>
+          <div class="rc-desc">Test orders from MO · payment collection · trigger lab sample collection task</div>
+          <div class="rc-badge"><span class="badge b-red">3 payment pending</span> <span class="badge b-grn">7 cleared</span></div>
+        </div>
+        <div class="role-card" onclick="go('s-referrals')" style="border-color:var(--amb-b)">
+          <div class="rc-ico">↗</div>
+          <div class="rc-name">Referrals</div>
+          <div class="rc-desc">Today's external referrals · generate referral letters · track specialist follow-up</div>
+          <div class="rc-badge"><span class="badge b-amb">2 today</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     LAB STATION
+══════════════════════════════ -->
+<div class="scr" id="s-lab">
+  <div class="rail">
+    <div class="rl">Lab Station</div>
+    <div class="rsep"></div>
+    <span style="font-size:11px;color:rgba(255,255,255,.5)">Gini Lab · Thu 27 Aug 2026</span>
+    <div class="rr">
+      <button class="rbtn" onclick="go('s-land')">← Stations</button>
+    </div>
+  </div>
+  <div class="scroll">
+    <div class="inner">
+
+      <!-- Stats -->
+      <div class="stats">
+        <div class="stat"><div class="sv" style="color:var(--tl)">6</div><div><div class="sl">Sample pending</div><div class="ss">not yet collected</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--blu)">3</div><div><div class="sl">Collecting</div><div class="ss">sample taken</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--pu)">4</div><div><div class="sl">Processing</div><div class="ss">in analyzer</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--amb)">3</div><div><div class="sl">Ready to upload</div><div class="ss">results done</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--grn)">8</div><div><div class="sl">Uploaded</div><div class="ss">MO notified</div></div></div>
+      </div>
+
+      <!-- Workflow note -->
+      <div style="background:var(--tl-l);border:1px solid var(--tl-b);border-radius:var(--r-lg);padding:10px 13px;font-size:11px;color:var(--tl);display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">⚡</span>
+        <span><strong>Workflow:</strong> When you upload a report → the patient's status on the MO and SD dashboard changes to <strong>"Results ready"</strong> automatically. MO sees it in real time.</span>
+      </div>
+
+      <!-- SAMPLE PENDING -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">⏳ Sample pending — reception cleared payment, collect now</div>
+        <div class="pt-list">
+
+          <div class="pt-card" onclick="openLab('Sandeep Kumar','50M','P_177562','HbA1c · FBS · Lipid panel · Creatinine · UACR · TSH','sample-pending')">
+            <div class="pc-av" style="background:#b45309">SK</div>
+            <div class="pc-body">
+              <div class="pc-name">Sandeep Kumar <span class="badge b-ink" style="font-size:9px">P_177562</span></div>
+              <div class="pc-meta">50M · Ordered by Dr. Beant Sidhu · MO · 08:47</div>
+              <div class="pc-tests">🔬 HbA1c · FBS · Lipid panel · Creatinine · UACR · TSH · <strong>6 tests</strong></div>
+              <div class="steps">
+                <span class="step step-done">Payment ✓</span><span class="step-arr">›</span>
+                <span class="step step-now">Collect sample</span><span class="step-arr">›</span>
+                <span class="step step-next">Process</span><span class="step-arr">›</span>
+                <span class="step step-next">Upload</span>
+              </div>
+            </div>
+            <div class="pc-r">
+              <div class="sp sp-sample">Collect now</div>
+              <div class="pc-time" style="margin-top:4px">12m</div>
+              <div class="pc-tlbl">since order</div>
+            </div>
+          </div>
+
+          <div class="pt-card" onclick="openLab('Promila Puri','33F','P_131520','HbA1c · FBS · LFT · CBC · Vit D','sample-pending')">
+            <div class="pc-av" style="background:#7f1d1d">PP</div>
+            <div class="pc-body">
+              <div class="pc-name">Promila Puri <span class="badge b-ink" style="font-size:9px">P_131520</span></div>
+              <div class="pc-meta">33F · Ordered by Dr. Beant Sidhu · MO · 09:12</div>
+              <div class="pc-tests">🔬 HbA1c · FBS · LFT · CBC · Vit D · <strong>5 tests</strong></div>
+              <div class="steps">
+                <span class="step step-done">Payment ✓</span><span class="step-arr">›</span>
+                <span class="step step-now">Collect sample</span><span class="step-arr">›</span>
+                <span class="step step-next">Process</span><span class="step-arr">›</span>
+                <span class="step step-next">Upload</span>
+              </div>
+            </div>
+            <div class="pc-r">
+              <div class="sp sp-sample">Collect now</div>
+              <div class="pc-time" style="margin-top:4px">8m</div>
+              <div class="pc-tlbl">since order</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- PROCESSING -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">⚙️ Processing — samples in analyzer</div>
+        <div class="pt-list">
+          <div class="pt-card" onclick="openLab('Isha Gambhir','41F','P_42220','HbA1c · FBS · Lipid panel · Creatinine · UACR','processing')">
+            <div class="pc-av" style="background:#1e3a5f">IG</div>
+            <div class="pc-body">
+              <div class="pc-name">Isha Gambhir <span class="badge b-ink" style="font-size:9px">P_42220</span></div>
+              <div class="pc-meta">41F · Ordered 08:30 · Sample collected 08:52</div>
+              <div class="pc-tests">🔬 HbA1c · FBS · Lipid panel · Creatinine · UACR · <strong>5 tests</strong></div>
+              <div class="steps">
+                <span class="step step-done">Payment ✓</span><span class="step-arr">›</span>
+                <span class="step step-done">Collected ✓</span><span class="step-arr">›</span>
+                <span class="step step-now">Processing</span><span class="step-arr">›</span>
+                <span class="step step-next">Upload</span>
+              </div>
+            </div>
+            <div class="pc-r">
+              <div class="sp sp-process">Processing</div>
+              <div class="pc-time" style="margin-top:4px">24m</div>
+              <div class="pc-tlbl">in analyzer</div>
+            </div>
+          </div>
+          <div class="pt-card" onclick="openLab('Deepak Khanna','61M','P_176559','HbA1c · FBS · Creatinine','processing')">
+            <div class="pc-av" style="background:#14532d">DK</div>
+            <div class="pc-body">
+              <div class="pc-name">Deepak Khanna <span class="badge b-ink" style="font-size:9px">P_176559</span></div>
+              <div class="pc-meta">61M · Sample collected 09:05</div>
+              <div class="pc-tests">🔬 HbA1c · FBS · Creatinine · <strong>3 tests</strong></div>
+              <div class="steps">
+                <span class="step step-done">Payment ✓</span><span class="step-arr">›</span>
+                <span class="step step-done">Collected ✓</span><span class="step-arr">›</span>
+                <span class="step step-now">Processing</span><span class="step-arr">›</span>
+                <span class="step step-next">Upload</span>
+              </div>
+            </div>
+            <div class="pc-r">
+              <div class="sp sp-process">Processing</div>
+              <div class="pc-time" style="margin-top:4px">11m</div>
+              <div class="pc-tlbl">in analyzer</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- READY TO UPLOAD -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">✅ Results ready — upload now to notify MO</div>
+        <div class="pt-list">
+          <div class="pt-card" onclick="openLab('Anil Dhamija','60M','P_308530','HbA1c · Lipid panel · Creatinine · UACR','ready')">
+            <div class="pc-av" style="background:#374151">AD</div>
+            <div class="pc-body">
+              <div class="pc-name">Anil Dhamija <span class="badge b-ink" style="font-size:9px">P_308530</span></div>
+              <div class="pc-meta">60M · Results ready since 09:41 · Waiting for upload</div>
+              <div class="pc-tests">🔬 HbA1c · Lipid panel · Creatinine · UACR · <strong>4 tests done</strong></div>
+              <div class="steps">
+                <span class="step step-done">Payment ✓</span><span class="step-arr">›</span>
+                <span class="step step-done">Collected ✓</span><span class="step-arr">›</span>
+                <span class="step step-done">Results ✓</span><span class="step-arr">›</span>
+                <span class="step step-now">Upload report</span>
+              </div>
+            </div>
+            <div class="pc-r">
+              <div class="sp sp-ready">Upload now</div>
+              <div class="pc-time" style="margin-top:4px;color:var(--amb)">18m</div>
+              <div class="pc-tlbl">results waiting</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- UPLOADED -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">📤 Uploaded today — MO notified</div>
+        <div class="pt-list">
+          <div class="pt-card" style="opacity:.6" onclick="openLab('Ravinder Grewal','62M','P_54700','HbA1c · FBS · Creatinine','uploaded')">
+            <div class="pc-av" style="background:#374151">RG</div>
+            <div class="pc-body">
+              <div class="pc-name">Ravinder Grewal <span class="badge b-grn" style="font-size:9px">Uploaded 08:34</span></div>
+              <div class="pc-meta">62M · MO notified · Status updated to "Results ready"</div>
+              <div class="pc-tests">🔬 HbA1c · FBS · Creatinine · LFT · <strong>4 tests uploaded</strong></div>
+            </div>
+            <div class="pc-r"><div class="sp sp-done">✓ Done</div></div>
+          </div>
+          <div style="text-align:center;font-size:11px;color:var(--ink3);padding:8px">+ 7 more uploaded today</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     PHARMACY STATION
+══════════════════════════════ -->
+<div class="scr" id="s-pharmacy">
+  <div class="rail">
+    <div class="rl">Pharmacy Station</div>
+    <div class="rsep"></div>
+    <span style="font-size:11px;color:rgba(255,255,255,.5)">Thu 27 Aug 2026</span>
+    <div class="rr"><button class="rbtn" onclick="go('s-land')">← Stations</button></div>
+  </div>
+  <div class="scroll">
+    <div class="inner">
+      <div class="stats">
+        <div class="stat"><div class="sv" style="color:var(--pu)">5</div><div><div class="sl">To dispense</div><div class="ss">prescription ready</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--amb)">2</div><div><div class="sl">Stock warnings</div><div class="ss">low / out of stock</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--grn)">8</div><div><div class="sl">Dispensed</div><div class="ss">today</div></div></div>
+      </div>
+
+      <!-- To dispense -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">💊 To dispense — prescription finalized by doctor</div>
+        <div class="pt-list">
+          <div class="pt-card" onclick="openPharmacy()">
+            <div class="pc-av" style="background:#b45309">SK</div>
+            <div class="pc-body">
+              <div class="pc-name">Sandeep Kumar <span class="badge b-ink" style="font-size:9px">P_177562</span> <span class="badge b-amb" style="font-size:9px">⚠ 1 out of stock</span></div>
+              <div class="pc-meta">50M · Finalized 10:22 · Dr. Bhansali · 7 medicines</div>
+              <div class="pc-tests" style="margin-top:3px">💊 Cospiaq · Lipaglyn · Atchol 40 · CONCOR AM · Fenofibrate 145 <span style="color:var(--amb)">+1 low</span> <span style="color:var(--red)">+1 out of stock</span></div>
+            </div>
+            <div class="pc-r">
+              <div class="sp sp-disp">Dispense</div>
+              <div class="pc-time" style="margin-top:4px">2m</div>
+              <div class="pc-tlbl">since finalized</div>
+            </div>
+          </div>
+          <div class="pt-card" onclick="toast('Opening pharmacy view for Isha Gambhir')">
+            <div class="pc-av" style="background:#1e3a5f">IG</div>
+            <div class="pc-body">
+              <div class="pc-name">Isha Gambhir <span class="badge b-ink" style="font-size:9px">P_42220</span></div>
+              <div class="pc-meta">41F · Finalized 09:55 · Dr. Bhansali · 5 medicines</div>
+              <div class="pc-tests" style="margin-top:3px">💊 Metformin · Insulin Glargine · Amlodipine · Pantoprazole · Vit D</div>
+            </div>
+            <div class="pc-r"><div class="sp sp-disp">Dispense</div></div>
+          </div>
+          <div class="pt-card" onclick="toast('Opening pharmacy view for Deepak Khanna')">
+            <div class="pc-av" style="background:#14532d">DK</div>
+            <div class="pc-body">
+              <div class="pc-name">Deepak Khanna <span class="badge b-ink" style="font-size:9px">P_176559</span> <span class="badge b-grn" style="font-size:9px">All in stock</span></div>
+              <div class="pc-meta">61M · Finalized 10:08 · Dr. Bhansali · 4 medicines · Stable patient</div>
+            </div>
+            <div class="pc-r"><div class="sp sp-disp">Dispense</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dispensed -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">✅ Dispensed today</div>
+        <div class="pt-list">
+          <div class="pt-card" style="opacity:.55" onclick="toast('Ravinder Grewal — dispensed 08:41')">
+            <div class="pc-av" style="background:#374151">RG</div>
+            <div class="pc-body">
+              <div class="pc-name">Ravinder Grewal</div>
+              <div class="pc-meta">62M · Dispensed 08:41 · 6 medicines · Counselling done</div>
+            </div>
+            <div class="pc-r"><div class="sp sp-comp">✓ Done</div></div>
+          </div>
+          <div style="text-align:center;font-size:11px;color:var(--ink3);padding:8px">+ 7 more dispensed today</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     RECEPTION STATION
+══════════════════════════════ -->
+<div class="scr" id="s-reception">
+  <div class="rail">
+    <div class="rl">Reception</div>
+    <div class="rsep"></div>
+    <span style="font-size:11px;color:rgba(255,255,255,.5)">Thu 27 Aug 2026</span>
+    <div class="rr"><button class="rbtn" onclick="go('s-land')">← Stations</button></div>
+  </div>
+  <div class="scroll">
+    <div class="inner">
+      <div class="stats">
+        <div class="stat"><div class="sv" style="color:var(--red)">3</div><div><div class="sl">Payment pending</div><div class="ss">tests ordered today</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--tl)">4</div><div><div class="sl">Sample pending</div><div class="ss">payment done, lab waiting</div></div></div>
+        <div class="stat"><div class="sv" style="color:var(--grn)">7</div><div><div class="sl">Cleared</div><div class="ss">lab collecting</div></div></div>
+      </div>
+
+      <div style="background:var(--blu-l);border:1px solid var(--blu-b);border-radius:var(--r-lg);padding:10px 13px;font-size:11px;color:var(--blu);display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">⚡</span>
+        <span><strong>Workflow:</strong> MO orders tests → appears here with payment pending → you collect payment → triggers lab sample collection task automatically.</span>
+      </div>
+
+      <!-- Payment pending -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">🔴 Payment pending — collect and clear</div>
+
+        <div class="test-order-card">
+          <div class="toc-head">
+            <div class="pc-av" style="background:#b45309;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">SK</div>
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:700;color:var(--ink)">Sandeep Kumar <span class="badge b-ink" style="font-size:9px">P_177562</span></div>
+              <div style="font-size:10px;color:var(--ink3)">50M · Ordered by Dr. Beant Sidhu at 08:47 · Urgency: <strong>Today</strong></div>
+            </div>
+            <div class="sp sp-pay">⚠ Payment pending</div>
+          </div>
+          <div class="toc-body">
+            <span class="toc-test">HbA1c <span style="color:var(--ink3);font-size:9px">₹250</span></span>
+            <span class="toc-test">FBS <span style="color:var(--ink3);font-size:9px">₹80</span></span>
+            <span class="toc-test">Lipid panel <span style="color:var(--ink3);font-size:9px">₹350</span></span>
+            <span class="toc-test">Creatinine <span style="color:var(--ink3);font-size:9px">₹120</span></span>
+            <span class="toc-test">UACR <span style="color:var(--ink3);font-size:9px">₹200</span></span>
+            <span class="toc-test">TSH <span style="color:var(--ink3);font-size:9px">₹280</span></span>
+          </div>
+          <div style="background:var(--bg);border-radius:var(--r);padding:7px 9px;margin-bottom:8px;font-size:12px;display:flex;align-items:center;gap:10px">
+            <span style="font-weight:600;color:var(--ink)">Total: ₹1,280</span>
+            <span class="badge b-ink" style="font-size:9px">6 tests</span>
+            <span style="font-size:10px;color:var(--ink3)">Insurance: None</span>
+          </div>
+          <div class="toc-foot">
+            <button class="btn btn-grn" onclick="clearPayment(this,'Sandeep Kumar','Lab: collect Sandeep Kumar sample — 6 tests')">✓ Payment received — notify lab</button>
+            <button class="btn" style="background:var(--white);color:var(--blu);border-color:var(--blu-b)" onclick="toast('Insurance/cashless claim opened for Sandeep Kumar')">Insurance claim</button>
+            <span style="font-size:10px;color:var(--ink3);margin-left:auto">12 min ago</span>
+          </div>
+        </div>
+
+        <div class="test-order-card">
+          <div class="toc-head">
+            <div class="pc-av" style="background:#7f1d1d;width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">PP</div>
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:700;color:var(--ink)">Promila Puri <span class="badge b-ink" style="font-size:9px">P_131520</span></div>
+              <div style="font-size:10px;color:var(--ink3)">33F · Ordered by Dr. Beant Sidhu at 09:12 · Urgency: Today</div>
+            </div>
+            <div class="sp sp-pay">⚠ Payment pending</div>
+          </div>
+          <div class="toc-body">
+            <span class="toc-test">HbA1c <span style="color:var(--ink3);font-size:9px">₹250</span></span>
+            <span class="toc-test">FBS <span style="color:var(--ink3);font-size:9px">₹80</span></span>
+            <span class="toc-test">LFT <span style="color:var(--ink3);font-size:9px">₹350</span></span>
+            <span class="toc-test">CBC <span style="color:var(--ink3);font-size:9px">₹200</span></span>
+            <span class="toc-test">Vit D <span style="color:var(--ink3);font-size:9px">₹900</span></span>
+          </div>
+          <div style="background:var(--bg);border-radius:var(--r);padding:7px 9px;margin-bottom:8px;font-size:12px;display:flex;align-items:center;gap:10px">
+            <span style="font-weight:600;color:var(--ink)">Total: ₹1,780</span>
+            <span class="badge b-ink" style="font-size:9px">5 tests</span>
+          </div>
+          <div class="toc-foot">
+            <button class="btn btn-grn" onclick="clearPayment(this,'Promila Puri','Lab: collect Promila Puri sample — 5 tests')">✓ Payment received — notify lab</button>
+            <span style="font-size:10px;color:var(--ink3);margin-left:auto">8 min ago</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cleared -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:7px">✅ Cleared today — lab notified</div>
+        <div class="test-order-card" style="opacity:.55">
+          <div class="toc-head">
+            <div style="flex:1;font-size:12px;font-weight:700;color:var(--ink)">Isha Gambhir · <span style="font-weight:400;color:var(--ink3)">Paid ₹1,100 · Lab collecting</span></div>
+            <div class="sp sp-paid">✓ Cleared 08:55</div>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--ink3);padding:8px">+ 6 more cleared today</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     REFERRALS
+══════════════════════════════ -->
+<div class="scr" id="s-referrals">
+  <div class="rail">
+    <div class="rl">Referrals</div>
+    <div class="rsep"></div>
+    <span style="font-size:11px;color:rgba(255,255,255,.5)">Today's external referrals</span>
+    <div class="rr">
+      <button class="rbtn grn" onclick="toggleRefForm()">+ New referral</button>
+      <button class="rbtn" onclick="go('s-land')">← Stations</button>
+    </div>
+  </div>
+  <div class="scroll">
+    <div class="inner">
+
+      <!-- Add referral form -->
+      <div class="ref-form" id="refForm">
+        <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:10px">New referral</div>
+        <div class="rf-grid">
+          <div class="rff"><label>Patient</label><input placeholder="Search patient name or ID"></div>
+          <div class="rff"><label>Referred to (doctor name)</label><input placeholder="e.g. Dr. Suresh Gupta"></div>
+          <div class="rff"><label>Specialty</label><select><option>Nephrology</option><option>Cardiology</option><option>Ophthalmology</option><option>Gastroenterology</option><option>Neurology</option><option>Orthopaedics</option><option>Dermatology</option><option>Bariatric Surgery</option><option>Endocrinology</option><option>Other</option></select></div>
+        </div>
+        <div class="rf-grid">
+          <div class="rff"><label>Hospital / clinic</label><input placeholder="e.g. Max Hospital, Mohali"></div>
+          <div class="rff"><label>Urgency</label><select><option>Routine (within 2 weeks)</option><option>Soon (within 1 week)</option><option>Urgent (within 48 hrs)</option><option>Emergency</option></select></div>
+          <div class="rff"><label>Date</label><input type="date" value="2026-08-27"></div>
+        </div>
+        <div class="rff" style="margin-bottom:9px"><label>Reason for referral</label><textarea rows="3" placeholder="Clinical reason, relevant history, specific question for specialist…"></textarea></div>
+        <div class="rff" style="margin-bottom:10px"><label>Key investigations to share</label><input placeholder="e.g. HbA1c, UACR, eGFR, Retinopathy report from Oct 2025"></div>
+        <div style="display:flex;gap:7px">
+          <button class="btn btn-tl" onclick="toggleRefForm();toast('✓ Referral created · letter generated · patient notified')">Create referral + generate letter</button>
+          <button class="btn btn-g" onclick="toggleRefForm()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Today's referrals -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:8px">Today's referrals — 2</div>
+
+        <div class="ref-card">
+          <div class="rc-head">
+            <div style="font-size:22px">🫘</div>
+            <div class="rc-body">
+              <div class="rcn">Dr. Suresh Gupta — Nephrology</div>
+              <div class="rcs">Max Hospital, Mohali · Referred by Dr. Bhansali · Thu 27 Aug 2026</div>
+            </div>
+            <div><span class="badge b-red">Urgent</span></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <div style="flex:1">
+              <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Patient</div>
+              <div style="font-size:12px;font-weight:700;color:var(--ink)">Gurmail Singh Sandhu</div>
+              <div style="font-size:10px;color:var(--ink3)">71M · P_14207 · UACR 4643 · eGFR 11</div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Key investigations</div>
+              <div style="font-size:11px;color:var(--ink2)">UACR 4643 · eGFR 11 · Creatinine 4.2 · HbA1c 5.9%</div>
+            </div>
+          </div>
+          <div class="rc-reason">
+            <strong>Reason:</strong> Severely reduced kidney function — eGFR 11, critical. Diabetic nephropathy with UACR 4643. Urgent nephrology review for management strategy and possible RRT planning. Please advise on Ramipril continuation and BP target.
+          </div>
+          <div class="rc-foot">
+            <button class="btn btn-tl" onclick="toast('Referral letter PDF generated for Dr. Gupta')">📄 Referral letter</button>
+            <button class="btn btn-g" onclick="toast('Letter sent to Dr. Gupta via WhatsApp')">📱 Send to doctor</button>
+            <button class="btn btn-g" onclick="toast('Appointment booking opened')">📅 Book appointment</button>
+            <span class="badge b-grn" style="margin-left:auto">Letter generated</span>
+          </div>
+        </div>
+
+        <div class="ref-card">
+          <div class="rc-head">
+            <div style="font-size:22px">👁</div>
+            <div class="rc-body">
+              <div class="rcn">Ophthalmology — Fundus / Retinopathy</div>
+              <div class="rcs">Annual retinopathy screen · Referred by Dr. Bhansali · Thu 27 Aug 2026</div>
+            </div>
+            <div><span class="badge b-ink">Routine</span></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <div style="flex:1">
+              <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Patient</div>
+              <div style="font-size:12px;font-weight:700;color:var(--ink)">Sandeep Kumar</div>
+              <div style="font-size:10px;color:var(--ink3)">50M · P_177562 · Last fundus: Oct 2025</div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Key history</div>
+              <div style="font-size:11px;color:var(--ink2)">T2DM 12 yrs · Last fundus NO DRP · Annual screen due</div>
+            </div>
+          </div>
+          <div class="rc-reason">
+            <strong>Reason:</strong> Annual diabetic retinopathy screening. T2DM for 12 years. Previous fundus Oct 2025 — No Diabetic Retinopathy. Please repeat and advise.
+          </div>
+          <div class="rc-foot">
+            <button class="btn btn-tl" onclick="toast('Referral letter PDF generated')">📄 Referral letter</button>
+            <button class="btn btn-g" onclick="toast('Sent to patient on WhatsApp')">📱 Send to patient</button>
+            <button class="btn btn-g" onclick="toast('Appointment booked')">📅 Book appointment</button>
+            <span class="badge b-amb" style="margin-left:auto">Appointment pending</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Past referrals -->
+      <div>
+        <div class="grp-lbl" style="margin-bottom:8px">Past referrals — last 30 days</div>
+        <div class="ref-card" style="opacity:.6">
+          <div class="rc-head">
+            <div style="font-size:22px">❤️</div>
+            <div class="rc-body">
+              <div class="rcn">Dr. Rajiv Mehta — Cardiology · PGI Chandigarh</div>
+              <div class="rcs">Sandeep Kumar · Referred 4 Aug 2026 · Seen 12 Aug 2026 · Follow-up in 3 months</div>
+            </div>
+            <div><span class="badge b-grn">Completed</span></div>
+          </div>
+          <div class="rc-foot">
+            <button class="btn btn-g" onclick="toast('Cardiology report from Dr. Mehta opened')">View specialist report</button>
+            <button class="btn btn-g" onclick="toast('Aspirin 75mg added as external medicine from Dr. Mehta')">Add to medicines</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- LAB DETAIL PANE -->
+<div class="detail-overlay" id="labPane">
+  <div class="detail-pane">
+    <div class="dp-head">
+      <div class="dp-name" id="lp-name">Patient</div>
+      <div class="dp-meta" id="lp-meta">Tests ordered</div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="rbtn" onclick="closePane('labPane')">← Back</button>
+        <span id="lp-status-badge"></span>
+      </div>
+    </div>
+    <div class="dp-scroll">
+      <div class="dp-inner">
+        <!-- Tests ordered -->
+        <div class="dp-sec">
+          <div class="dp-sec-title">Tests ordered</div>
+          <div id="lp-tests"></div>
+        </div>
+        <!-- Status update -->
+        <div class="dp-sec" id="lp-action">
+          <div class="dp-sec-title">Update status</div>
+          <div id="lp-action-body"></div>
+        </div>
+        <!-- Upload report -->
+        <div class="dp-sec" id="lp-upload">
+          <div class="dp-sec-title">Upload report — triggers MO notification</div>
+          <div class="upload-area" onclick="handleUpload()" ondragover="this.classList.add('drag')" ondragleave="this.classList.remove('drag')">
+            <div class="ua-ico">📄</div>
+            <div class="ua-t">Tap to upload lab report PDF</div>
+            <div class="ua-s">PDF · JPG · PNG accepted · Max 10MB</div>
+          </div>
+          <div style="font-size:11px;color:var(--tl);font-weight:600;display:flex;align-items:center;gap:6px">
+            <span style="font-size:16px">⚡</span>
+            Uploading this report automatically changes this patient's status to <strong>"Results ready"</strong> on the MO and SD dashboards.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PHARMACY DETAIL PANE -->
+<div class="detail-overlay" id="pharmPane">
+  <div class="detail-pane" style="width:620px">
+    <div class="dp-head">
+      <div class="dp-name">Sandeep Kumar</div>
+      <div class="dp-meta">50M · P_177562 · Dr. Bhansali · Finalized 10:22 · 7 Gini medicines · 3 external medicines</div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="rbtn" onclick="closePane('pharmPane')">← Back</button>
+        <button class="rbtn grn" onclick="closePane('pharmPane');toast('✓ All dispensed · counselling note sent to patient on WhatsApp')">✓ Mark all dispensed</button>
+      </div>
+    </div>
+    <div class="dp-scroll">
+      <div class="dp-inner">
+
+        <!-- Counselling note -->
+        <div class="dp-sec" style="background:var(--tl-l);border:1px solid var(--tl-b)">
+          <div class="dp-sec-title" style="color:var(--tl)">Counselling note — read to patient</div>
+          <div style="font-size:12px;color:var(--ink);line-height:1.7;margin-bottom:8px">
+            <strong>आज की दवाइयाँ:</strong> आपकी दवाइयों में दो बदलाव हुए हैं — Atchol की dose बढ़ाई गई है (20mg से 40mg), और एक नई दवाई Fenofibrate 145mg शुरू की गई है जो आपके triglycerides (TG) को कम करने के लिए है। TG बहुत ज़्यादा बढ़ा हुआ है — खाने में sugar, juice, maida और शराब बिल्कुल बंद करें।
+          </div>
+          <div style="font-size:11px;color:var(--ink2);line-height:1.6;border-top:1px solid var(--tl-b);padding-top:8px">
+            <strong>In English:</strong> Two changes today — Atchol dose increased to 40mg, and Fenofibrate 145mg added for very high triglycerides. Strictly avoid sugar, juice, white rice, refined flour, and alcohol. Take Fenofibrate with lunch only.
+          </div>
+          <div style="margin-top:8px"><button class="btn btn-tl" style="font-size:10px" onclick="toast('Counselling note sent to patient on WhatsApp')">📱 Send to patient on WhatsApp</button></div>
+        </div>
+
+        <!-- Stock warnings -->
+        <div class="dp-sec" style="background:var(--amb-l);border:1px solid var(--amb-b)">
+          <div class="dp-sec-title" style="color:var(--amb)">⚠ Stock warnings for this prescription</div>
+          <div style="font-size:11px;color:var(--amb);line-height:1.7">
+            <div>• <strong>Lipaglyn 4mg</strong> — only 9 tabs left. Enough for ~9 days. Reorder urgently.</div>
+            <div>• <strong>Telma AM 40+5</strong> — out of stock (0 tabs). Doctor has been notified. Telmikind AM 40+5 in stock as alternative — confirm with patient.</div>
+          </div>
+        </div>
+
+        <!-- Full medicine card — detailed pharmacy view -->
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px">Medicine card — full instructions for patient</div>
+
+          <!-- 7:00 AM -->
+          <div class="mc-card" style="margin-bottom:10px">
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🌅 7:00 AM</div><div class="mc-ts">Morning · before breakfast</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-ext">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Pantoprazole 40mg <span class="mm-ext-tag">External</span></div>
+                    <div class="mm-dose">1 tablet · Oral</div>
+                    <div class="mm-for">🩺 For: Stomach protection (to prevent acidity and ulcers)</div>
+                    <div class="mm-instr">Take on empty stomach, 30 minutes before breakfast</div>
+                    <div class="mm-instr-hi">खाली पेट लें, नाश्ते से 30 मिनट पहले</div>
+                    <div class="mm-dr">Prescribed by: Dr. Anand Sharma — Gastroenterology, Fortis Chandigarh</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock" style="color:var(--ink3)">External</div><div class="mm-qty">Not dispensed by Gini</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🍳 7:30 AM</div><div class="mc-ts">Before breakfast</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-gini">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Lipaglyn 4mg</div>
+                    <div class="mm-dose">1 tablet · Oral</div>
+                    <div class="mm-for">🩺 For: High triglycerides (fats in blood) and fatty liver (MASLD)</div>
+                    <div class="mm-instr">Take on an empty stomach, 30 minutes before breakfast. Do not take with food.</div>
+                    <div class="mm-instr-hi">नाश्ते से 30 मिनट पहले खाली पेट लें। खाने के साथ नहीं लेना है।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock low">⚠ Low</div><div class="mm-qty">9 tabs left</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Dispensed';toast('Lipaglyn dispensed — 9 tabs')">Dispense</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🥘 8:00 AM</div><div class="mc-ts">With breakfast</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-gini" style="margin-bottom:6px">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Cospiaq SM 25/100/1000 mg</div>
+                    <div class="mm-dose">1 tablet · Oral · OD + SOS</div>
+                    <div class="mm-for">🩺 For: Diabetes — lowers blood sugar and improves insulin sensitivity</div>
+                    <div class="mm-instr">Always take with food. Never skip — take daily, not just on weekdays.</div>
+                    <div class="mm-instr-hi">हमेशा खाने के साथ लें। रोज़ लें — सिर्फ weekdays को नहीं।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock">✓ 84 tabs</div><div class="mm-qty">~1 month</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Dispensed';toast('Cospiaq dispensed')">Dispense</button></div>
+                </div>
+                <div class="mc-med mm-gini" style="margin-bottom:6px">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">CONCOR AM 2.5/5 mg</div>
+                    <div class="mm-dose">1 tablet · Oral · OD</div>
+                    <div class="mm-for">🩺 For: High blood pressure (BP 143/90 — target &lt;130/80)</div>
+                    <div class="mm-instr">Take every morning with or without food. Do not stop suddenly.</div>
+                    <div class="mm-instr-hi">हर सुबह लें। बिना डॉक्टर की सलाह के बंद न करें।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock">✓ 30 tabs</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Dispensed';toast('CONCOR AM dispensed')">Dispense</button></div>
+                </div>
+                <div class="mc-med" style="background:var(--red-l);border:1px solid var(--red-b);border-style:dashed">
+                  <div class="mm-ico">⚠️</div>
+                  <div class="mm-body">
+                    <div class="mm-name" style="color:var(--red)">Telma AM 40+5 mg <span style="font-size:9px;background:var(--red);color:#fff;padding:1px 5px;border-radius:3px;font-weight:700">Out of stock</span></div>
+                    <div class="mm-dose">1 tablet · OD · For: BP + Kidney protection</div>
+                    <div class="mm-for" style="color:var(--red)">Out of stock — Telmikind AM 40+5 available as equivalent</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock out">✗ Out</div><button class="dispense-btn" style="background:var(--amb);color:#fff;border-color:var(--amb);font-size:10px" onclick="this.textContent='✓ Telmikind given';this.style.background='var(--grn)';toast('Telmikind AM 40+5 dispensed as equivalent for Telma AM')">Use Telmikind AM</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🥘 1:30 PM</div><div class="mc-ts">With lunch · NEW</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-gini" style="background:var(--grn-l);border-color:var(--grn-b)">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Fenofibrate 145mg <span class="mm-new-tag">NEW this visit</span></div>
+                    <div class="mm-dose">1 tablet · Oral · OD</div>
+                    <div class="mm-for">🩺 For: Very high triglycerides (TG 368 — triple the normal level). This is a new medicine started today.</div>
+                    <div class="mm-instr">Take with lunch only. Do not take on empty stomach. Must be taken with food.</div>
+                    <div class="mm-instr-hi">दोपहर के खाने के साथ लें। खाली पेट नहीं लेना है।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock">✓ 45 tabs</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Dispensed';toast('Fenofibrate 145 dispensed')">Dispense</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🍽 9:00 PM</div><div class="mc-ts">After dinner</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-ext">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Aspirin 75mg <span class="mm-ext-tag">External</span></div>
+                    <div class="mm-dose">1 tablet · Oral</div>
+                    <div class="mm-for">🩺 For: Heart protection — thins the blood to prevent heart attack/stroke</div>
+                    <div class="mm-instr">Take after dinner with water. Do not take on empty stomach.</div>
+                    <div class="mm-instr-hi">रात के खाने के बाद पानी के साथ लें।</div>
+                    <div class="mm-dr">Prescribed by: Dr. Rajiv Mehta — Cardiology, PGI Chandigarh</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock" style="color:var(--ink3)">External</div><div class="mm-qty">Not dispensed by Gini</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🌙 10:00 PM</div><div class="mc-ts">At bedtime</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-gini" style="background:var(--amb-l);border-color:var(--amb-b);margin-bottom:6px">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Atchol 40mg <span class="mm-chg-tag">↑ Increased from 20mg</span></div>
+                    <div class="mm-dose">1 tablet · Oral · OD</div>
+                    <div class="mm-for">🩺 For: High LDL cholesterol (127 mg/dL — target &lt;100). Dose increased today.</div>
+                    <div class="mm-instr">Take at bedtime. Works best at night when the liver produces more cholesterol.</div>
+                    <div class="mm-instr-hi">रात को सोने से पहले लें। यह रात को ज़्यादा असरदार होती है।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock">✓ 60 tabs</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Dispensed';toast('Atchol 40mg dispensed')">Dispense</button></div>
+                </div>
+                <div class="mc-med mm-ext">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Ramipril 5mg <span class="mm-ext-tag">External</span></div>
+                    <div class="mm-dose">1 tablet · Oral</div>
+                    <div class="mm-for">🩺 For: Kidney protection and blood pressure (ACE inhibitor)</div>
+                    <div class="mm-instr">Take at bedtime. Do not stop without nephrologist approval.</div>
+                    <div class="mm-instr-hi">रात को सोने से पहले लें। Nephrologist की सलाह के बिना बंद न करें।</div>
+                    <div class="mm-dr">Prescribed by: Dr. Suresh Gupta — Nephrology, Max Hospital Mohali</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock" style="color:var(--ink3)">External</div><div class="mm-qty">Not dispensed by Gini</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">📅 Every 15 days</div><div class="mc-ts">Fortnightly</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-gini">
+                  <div class="mm-ico">💊</div>
+                  <div class="mm-body">
+                    <div class="mm-name">Aktiv-D 60,000 IU</div>
+                    <div class="mm-dose">1 sachet or capsule · Oral · Every 15 days</div>
+                    <div class="mm-for">🩺 For: Vitamin D deficiency — important for bones and immunity</div>
+                    <div class="mm-instr">Take with food every 15 days. Note the date on your calendar.</div>
+                    <div class="mm-instr-hi">15 दिन में एक बार, खाने के साथ लें। तारीख नोट कर लें।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock">✓ 4 caps</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Dispensed';toast('Aktiv-D dispensed')">Dispense</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mc-row">
+              <div class="mc-time"><div class="mc-tl">🔔 As needed</div><div class="mc-ts">SOS only</div></div>
+              <div class="mc-meds">
+                <div class="mc-med mm-gini" style="background:#f1f5f9;border-color:var(--bd)">
+                  <div class="mm-ico">🧴</div>
+                  <div class="mm-body">
+                    <div class="mm-name" style="color:var(--ink3)">Voveron gel</div>
+                    <div class="mm-dose">Topical · Apply as needed</div>
+                    <div class="mm-for">🩺 For: Joint or muscle pain — apply to the painful area only</div>
+                    <div class="mm-instr">Apply a thin layer to the painful area and gently rub in. Use only when needed.</div>
+                    <div class="mm-instr-hi">दर्द वाली जगह पर लगाएं, हल्के हाथ से मलें। जरूरत पर ही लगाएं।</div>
+                    <div class="mm-dr gini">Prescribed by: Dr. Anil Bhansali — Gini Health</div>
+                  </div>
+                  <div class="mm-r"><div class="mm-stock" style="color:var(--ink3)">In stock</div><button class="dispense-btn db-ok" onclick="this.className='dispense-btn db-done';this.textContent='✓ Given';toast('Voveron gel given')">Give</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:var(--bg);border-radius:var(--r);padding:9px 12px;font-size:10px;color:var(--ink3);border:1px solid var(--bd)">
+            Medicines marked <span style="background:var(--blu);color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px">External</span> are prescribed by other doctors. Not dispensed by Gini pharmacy — shown for patient reference only.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<script>
+// Navigation
+function go(id){
+  document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+}
+function closePane(id){document.getElementById(id).classList.remove('open')}
+
+// Toast
+let _tt;
+function toast(m,ms=2800){const e=document.getElementById('toastEl');e.textContent=m;e.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>e.classList.remove('show'),ms)}
+
+// Clock
+function tick(){const n=new Date();const e=document.getElementById('clk');if(e)e.textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')}
+setInterval(tick,1000);tick();
+
+// Open lab detail pane
+function openLab(name,meta,pid,tests,status){
+  document.getElementById('lp-name').textContent=name;
+  document.getElementById('lp-meta').textContent=meta+' · '+pid+' · Tests: '+tests;
+  const statusMap={
+    'sample-pending':['<span class="sp sp-sample">Collect sample</span>','<div style="display:flex;flex-direction:column;gap:8px"><p style="font-size:11px;color:var(--ink3);margin-bottom:4px">Mark that you have collected the sample from this patient.</p><button class="btn btn-tl" style="width:100%" onclick="closePane(\'labPane\');toast(\'✓ Sample collected for '+name+' — status updated to Processing\')">✓ Mark sample collected</button></div>'],
+    'processing':['<span class="sp sp-process">Processing</span>','<div style="display:flex;flex-direction:column;gap:8px"><p style="font-size:11px;color:var(--ink3);margin-bottom:4px">Mark results as done when analyzer completes.</p><button class="btn btn-pu" style="width:100%" onclick="closePane(\'labPane\');toast(\'✓ '+name+' results done — ready to upload\')">✓ Results done — ready to upload</button></div>'],
+    'ready':['<span class="sp sp-ready">Upload now</span>','<div style="font-size:11px;color:var(--ink3)">Upload the PDF report below to notify the MO instantly.</div>'],
+    'uploaded':['<span class="sp sp-done">✓ Uploaded</span>','<div style="font-size:11px;color:var(--grn)">✓ Report uploaded and MO has been notified. Patient status updated to "Results ready" on all dashboards.</div>'],
+  };
+  const [badge,action]=statusMap[status]||statusMap['ready'];
+  document.getElementById('lp-status-badge').innerHTML=badge;
+  document.getElementById('lp-action-body').innerHTML=action;
+  // Test rows
+  const testArr=tests.split(' · ');
+  document.getElementById('lp-tests').innerHTML=testArr.map(t=>`<div class="test-row"><div class="tr-name">${t}</div><div class="tr-status"><span class="badge b-ink" style="font-size:9px">Ordered</span></div></div>`).join('');
+  // Show/hide upload
+  document.getElementById('lp-upload').style.display=status==='ready'||status==='processing'?'block':'none';
+  document.getElementById('labPane').classList.add('open');
+}
+
+// Handle upload
+function handleUpload(){
+  closePane('labPane');
+  toast('✓ Report uploaded · MO dashboard updated: "Results ready" · SD notified');
+}
+
+// Open pharmacy pane
+function openPharmacy(){
+  document.getElementById('pharmPane').classList.add('open');
+}
+
+// Clear payment (reception)
+function clearPayment(btn,name,labTask){
+  btn.closest('.toc-foot').innerHTML=`<span class="sp sp-paid">✓ Payment cleared</span><span style="font-size:10px;color:var(--ink3);margin-left:8px">Lab notified — sample collection task created</span><span style="font-size:10px;color:var(--grn);font-weight:700;margin-left:auto">Task: ${labTask}</span>`;
+  toast('✓ Payment cleared for '+name+' · Lab task created: collect sample');
+}
+
+// Referral form
+function toggleRefForm(){document.getElementById('refForm').classList.toggle('open')}
+</script>
+</body>
+</html>

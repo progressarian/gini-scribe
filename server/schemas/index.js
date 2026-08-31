@@ -547,3 +547,34 @@ export const reassignSingleSchema = z.object({
   reason: optStr,
   trigger: optStr,
 });
+
+// ── Gini Flow (docs/gini-flow/) ─────────────────────────────────────────────
+// The board's date is optional and defaults to the IST today. It is validated
+// rather than pattern-matched in the route so a malformed value returns 400
+// instead of silently showing today's board under yesterday's heading.
+export const giniflowDateQuerySchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .refine((d) => !Number.isNaN(Date.parse(d)), "date is not a real date")
+    .optional(),
+});
+
+export const giniflowSearchQuerySchema = z.object({
+  q: z.string().trim().min(2, "search needs at least 2 characters").max(60),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .optional(),
+});
+
+export const giniflowSlaUpdateSchema = z.object({
+  budgets: z
+    .array(
+      z.object({
+        station: z.string().min(1),
+        budgetMinutes: z.number().int().positive().max(600),
+      }),
+    )
+    .min(1),
+});

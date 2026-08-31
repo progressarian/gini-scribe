@@ -24,9 +24,11 @@ npm run build          # vite build -> dist/
 npm run format          # prettier --write, run before committing
 npm run format:check
 
-# from server/ — the only scripted checks in the repo
-npm run smoke:doctors
-npm run smoke:med-collection
+# from server/ — the only scripted checks in the repo (all `node scripts/smoke-*.mjs`)
+npm run smoke:doctors        # also: med-collection, obt-dashboard, home-stats, panel-scope,
+npm run smoke:ghm-sheet      # analytics, and the ghm-* family (record, last-mo, calling,
+                             # call-statuses, categories, export-sheets)
+npm run analytics:report     # regenerate the outcomes report HTML (--snapshot to persist)
 
 # apply one migration (from server/)
 node migrations/_runOne.mjs migrations/<file>.sql
@@ -45,7 +47,7 @@ Three processes, one Postgres database:
 
 Routes are HTTP-only and delegate to `server/services/*` for domain logic (`healthray/`, `lab/`, `cron/`, `flow/`, `agent/` SQL-tool AI agent, `medication/`). Request bodies validate against `server/schemas/index.js` (Zod) via `middleware/validate.js`.
 
-**RBAC**: `shared/permissions.js` is the single source of truth, imported by both the frontend (`src/config/routes.js` → `RequireCapability`) and backend (`server/middleware/auth.js`). Adding a page or endpoint means updating capabilities on both sides. Note: `GRANT_ALL_CAPABILITIES` is currently `true` and short-circuits all capability checks — the matrix is maintained but not enforced yet.
+**RBAC**: `shared/permissions.js` is the single source of truth, imported by both the frontend (`src/config/routes.js` → `RequireCapability`) and backend (`server/middleware/auth.js`). Adding a page or endpoint means updating capabilities on both sides. `GRANT_ALL_CAPABILITIES` is now `false`, so the per-role matrix **is** enforced on both sides — a new page or endpoint is inaccessible until its capability is granted to the relevant roles. `shared/` also holds other client/server-shared vocabularies (`callStatuses`, `patientCategories`, `patientBlockReasons`, `patientLists`, `followUp`, `phone`, `slotHour`); import from there instead of redefining the strings.
 
 **Auth**: JWTs are doctor or patient kind (a `kind` claim), validated against `auth_sessions` for real revocation on logout/expiry. Accepted as `x-auth-token`, `Authorization: Bearer`, or `?token=` (query form so image/PDF URLs can self-authenticate). Public paths are listed explicitly in `server/middleware/auth.js`.
 
@@ -57,7 +59,11 @@ Routes are HTTP-only and delegate to `server/services/*` for domain logic (`heal
 
 **Database**: `server/schema.sql` is only the starting point — real schema is `schema.sql` + every dated file in `server/migrations/` applied in order. DATE columns parse as strings (configured in `config/db.js`) to avoid timezone off-by-one errors.
 
+**Client details**: every page is lazy-loaded through `lazyWithRetry` in `src/router.jsx`, which force-reloads once on a stale-chunk error after a deploy — keep new routes on that helper. `src/companion/` + `src/Companion.jsx` are a separate phone-shaped capture UI (document photos, appointment list) sharing the same auth and API. In dev, Vite proxies `/api` to `http://localhost:3001`; override with `VITE_DEV_API_URL`.
+
 **Env**: both API and worker load the repo-root `.env` (`server/loadEnv.js` resolves it relative to `server/`) — there is no `server/.env`. `VITE_*` vars are inlined into the browser bundle at build time.
+
+**Docs**: `docs/*_PLAN.md` are per-feature design docs written before each feature (flow stations, lab flow, OBT role, prescription flow, patient blocklist, MSG91 messaging…). Read the matching plan before changing that area; `docs/archive/` is superseded.
 
 ## Conventions
 

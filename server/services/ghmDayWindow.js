@@ -31,17 +31,38 @@ export const ownFu = (a) => `COALESCE(
 // re-planned the next visit at that later consultation. Shared by the day
 // window and the search view so the two cannot disagree about which date is
 // a patient's real next follow-up.
-export const isLatestFollowUpVisit = (a) => `${a}.appointment_date = (
+//
+// The MAX() alone was not enough: it only counts visits that CARRY a follow-up,
+// and a visit whose follow-up never made it into the row (HealthRay writes
+// followup_days at checkout, after the sync's note pass, and the cron only ever
+// revisits today) counts for nothing. The patient was seen, the old date is
+// dead, and the list still asked the team to ring them. Being seen again is
+// itself the supersede — whether or not the new visit's own follow-up was
+// captured — so a later seen/completed visit disqualifies this one outright.
+export const isLatestFollowUpVisit = (a) => `(${a}.appointment_date = (
   SELECT MAX(prev.appointment_date)
     FROM appointments prev
    WHERE prev.file_no = ${a}.file_no
      AND ${ownFu("prev")} IS NOT NULL
-)`;
+)
+AND NOT EXISTS (
+  SELECT 1 FROM appointments later
+   WHERE later.file_no = ${a}.file_no
+     AND later.appointment_date > ${a}.appointment_date
+     AND later.status IN ('seen', 'completed')
+))`;
 
 // Everyone the day's list covers: booked that date, asked for that date, or
 // due a follow-up on it. The two extra clauses keep one row per patient —
 // only their latest follow-up-bearing visit counts, and a patient who already
 // holds a booking that day is not also listed via their old visit.
+//
+// A rebooked patient stays on their follow-up day rather than being moved off
+// it: the day the doctor asked them back is the fact the callers are working
+// from, so hiding it would hide why they are on the list at all. The sheets
+// sync stamps preferred_date and booking_status onto that visit when it imports
+// an earlier booking, so the row carries both — the day it is due, and the day
+// the patient is actually coming.
 export const dayWindowWhere = (a = "a") => `WHERE (
     ${a}.appointment_date = $1 OR ${a}.preferred_date = $1 OR ${ownFu(a)} = $1
   )
@@ -79,3 +100,22 @@ export const callStatusToday = (a = "a") =>
   `CASE WHEN ${a}.call_date = ${IST_TODAY}
         THEN COALESCE(NULLIF(${a}.call_status, ''), 'pending')
         ELSE 'pending' END`;
+
+// The patient's nearest still-upcoming appointment on a DIFFERENT date than the
+// row being listed. A row reaches a day's list either as a booking on that date
+// or because its follow-up falls due then; only the second kind can hide a
+// booking the team already made — Rakesh's 3 Sep follow-up says nothing about
+// the 1 Sep slot he was given on the phone, so the callers ring him twice.
+// Computed only for the follow-up/preferred listings ($1 is the day being
+// viewed), and anchored to the Indian day so a booking earlier today still
+// counts. Cancellations on either column are not bookings.
+export const upcomingBookingElsewhere = (a = "a") => `CASE
+  WHEN ${a}.file_no IS NOT NULL AND ${a}.appointment_date IS DISTINCT FROM $1 THEN (
+    SELECT MIN(b.appointment_date)
+      FROM appointments b
+     WHERE b.file_no = ${a}.file_no
+       AND b.appointment_date <> ${a}.appointment_date
+       AND b.appointment_date >= ${IST_TODAY}
+       AND b.status NOT IN ('cancelled', 'no_show')
+       AND COALESCE(b.booking_status, '') <> 'cancelled'
+  ) END`;
